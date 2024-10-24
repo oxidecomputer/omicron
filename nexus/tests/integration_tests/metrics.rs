@@ -11,10 +11,11 @@ use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use dropshot::ResultsPage;
 use http::{Method, StatusCode};
+use nexus_test_utils::background::activate_background_task;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pool, create_disk, create_instance, create_project,
-    objects_list_page_authz, DiskTest,
+    object_create_error, objects_list_page_authz, DiskTest,
 };
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
@@ -288,6 +289,27 @@ pub async fn timeseries_query(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
     query: impl ToString,
 ) -> Vec<oxql_types::Table> {
+    execute_timeseries_query(cptestctx, "/v1/timeseries/query", query).await
+}
+
+pub async fn project_timeseries_query(
+    cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
+    project: &str,
+    query: impl ToString,
+) -> Vec<oxql_types::Table> {
+    execute_timeseries_query(
+        cptestctx,
+        &format!("/v1/timeseries/query/project/{}", project),
+        query,
+    )
+    .await
+}
+
+async fn execute_timeseries_query(
+    cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
+    endpoint: &str,
+    query: impl ToString,
+) -> Vec<oxql_types::Table> {
     // first, make sure the latest timeseries have been collected.
     cptestctx.oximeter.force_collect().await;
 
@@ -300,7 +322,7 @@ pub async fn timeseries_query(
         nexus_test_utils::http_testing::RequestBuilder::new(
             &cptestctx.external_client,
             http::Method::POST,
-            "/v1/timeseries/query",
+            endpoint,
         )
         .body(Some(&body)),
     )
@@ -525,6 +547,98 @@ async fn test_instance_watcher_metrics(
     assert_gte!(ts1_stopping, 1);
     assert_gte!(ts2_starting, 2);
     assert_gte!(ts2_running, 2);
+}
+
+#[nexus_test]
+async fn test_project_timeseries_query(
+    cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
+) {
+    let client = &cptestctx.external_client;
+
+    create_default_ip_pool(&client).await; // needed for instance create to work
+
+    // Create two projects
+    let p1 = create_project(&client, "project1").await;
+    let _p2 = create_project(&client, "project2").await;
+
+    // Create resources in each project
+    let i1 = create_instance(&client, "project1", "instance1").await;
+    let _i2 = create_instance(&client, "project2", "instance2").await;
+
+    let internal_client = &cptestctx.internal_client;
+
+    // get the instance metrics to show up
+    let _ =
+        activate_background_task(&internal_client, "instance_watcher").await;
+
+    // Query with no project specified
+    let q1 = "get virtual_machine:check";
+
+    let result = project_timeseries_query(&cptestctx, "project1", q1).await;
+    assert_eq!(result.len(), 1);
+    assert!(result[0].timeseries().len() > 0);
+
+    // also works with project ID
+    let result =
+        project_timeseries_query(&cptestctx, &p1.identity.id.to_string(), q1)
+            .await;
+    assert_eq!(result.len(), 1);
+    assert!(result[0].timeseries().len() > 0);
+
+    let result = project_timeseries_query(&cptestctx, "project2", q1).await;
+    assert_eq!(result.len(), 1);
+    assert!(result[0].timeseries().len() > 0);
+
+    // with project specified
+    let q2 = &format!("{} | filter project_id == \"{}\"", q1, p1.identity.id);
+
+    let result = project_timeseries_query(&cptestctx, "project1", q2).await;
+    assert_eq!(result.len(), 1);
+    assert!(result[0].timeseries().len() > 0);
+
+    let result = project_timeseries_query(&cptestctx, "project2", q2).await;
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].timeseries().len(), 0);
+
+    // with instance specified
+    let q3 = &format!("{} | filter instance_id == \"{}\"", q1, i1.identity.id);
+
+    // project containing instance gives me something
+    let result = project_timeseries_query(&cptestctx, "project1", q3).await;
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].timeseries().len(), 1);
+
+    // should be empty or error
+    let result = project_timeseries_query(&cptestctx, "project2", q3).await;
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].timeseries().len(), 0);
+
+    // expect error when querying a metric that has no project_id on it
+    let q4 = "get integration_target:integration_metric";
+    let url = "/v1/timeseries/query/project/project1";
+    let body = nexus_types::external_api::params::TimeseriesQuery {
+        query: q4.to_string(),
+    };
+    let result =
+        object_create_error(client, url, &body, StatusCode::BAD_REQUEST).await;
+    assert_eq!(result.error_code.unwrap(), "InvalidRequest");
+    // Notable that the error confirms that the metric exists and says what the
+    // fields are. This is helpful generally, but here it would be better if
+    // we could say something more like "you can't query this timeseries from
+    // this endpoint"
+    assert_eq!(result.message, "The filter expression contains identifiers that are not valid for its input timeseries. Invalid identifiers: [\"project_id\", \"silo_id\"], timeseries fields: {\"datum\", \"metric_name\", \"target_name\", \"timestamp\"}");
+
+    // nonexistent project
+    let url = "/v1/timeseries/query/project/nonexistent";
+    let body = nexus_types::external_api::params::TimeseriesQuery {
+        query: q4.to_string(),
+    };
+    let result =
+        object_create_error(client, url, &body, StatusCode::NOT_FOUND).await;
+    assert_eq!(result.message, "not found: project with name \"nonexistent\"");
+
+    // try a project in your silo that you can't read
+    // try a project in another silo
 }
 
 #[nexus_test]
