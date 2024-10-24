@@ -3629,8 +3629,7 @@ impl DataStore {
                 paginated(dsl::volume, dsl::id, &p.current_pagparams())
                     .select(Volume::as_select())
                     .get_results_async::<Volume>(conn)
-                    .await
-                    .unwrap();
+                    .await?;
 
             paginator = p.found_batch(&haystack, &|v| v.id());
 
@@ -3647,8 +3646,7 @@ impl DataStore {
                 paginated(dsl::region, dsl::id, &p.current_pagparams())
                     .select(Region::as_select())
                     .get_results_async::<Region>(conn)
-                    .await
-                    .unwrap();
+                    .await?;
 
             paginator = p.found_batch(&haystack, &|r| r.id());
 
@@ -3693,8 +3691,7 @@ impl DataStore {
             let maybe_region = DataStore::target_to_region(
                 conn, &sub_err, &target, false, // read-write
             )
-            .await
-            .unwrap();
+            .await?;
 
             let Some(_region) = maybe_region else {
                 return Err(Self::volume_invariant_violated(format!(
@@ -3723,8 +3720,7 @@ impl DataStore {
                     &sub_err,
                     read_only_target,
                 )
-                .await
-                .unwrap();
+                .await?;
 
             let Some(_usage) = maybe_usage else {
                 return Err(Self::volume_invariant_violated(format!(
