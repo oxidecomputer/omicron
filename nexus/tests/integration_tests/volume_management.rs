@@ -2211,38 +2211,38 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
             zpool0.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
-            String::from("[fd00:1122:3344:101:7]:19016"),
+            String::from("[fd00:1122:3344:101::7]:19016"),
         ),
         (
             zpool1.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
-            String::from("[fd00:1122:3344:102:7]:19016"),
+            String::from("[fd00:1122:3344:102::7]:19016"),
         ),
         (
             zpool2.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
-            String::from("[fd00:1122:3344:103:7]:19016"),
+            String::from("[fd00:1122:3344:103::7]:19016"),
         ),
         // second snapshot-create
         (
             zpool0.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
-            String::from("[fd00:1122:3344:101:7]:19016"), // duplicate!
+            String::from("[fd00:1122:3344:101::7]:19016"), // duplicate!
         ),
         (
             zpool3.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
-            String::from("[fd00:1122:3344:104:7]:19016"),
+            String::from("[fd00:1122:3344:104::7]:19016"),
         ),
         (
             zpool2.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
-            String::from("[fd00:1122:3344:103:7]:19017"),
+            String::from("[fd00:1122:3344:103::7]:19017"),
         ),
     ];
 
@@ -5380,25 +5380,25 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
             zpool0.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
-            String::from("[fd00:1122:3344:101:7]:19016"),
+            String::from("[fd00:1122:3344:101::7]:19016"),
         ),
         (
             zpool1.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
-            String::from("[fd00:1122:3344:102:7]:19016"),
+            String::from("[fd00:1122:3344:102::7]:19016"),
         ),
         (
             zpool2.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
-            String::from("[fd00:1122:3344:103:7]:19016"),
+            String::from("[fd00:1122:3344:103::7]:19016"),
         ),
         (
             zpool3.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
-            String::from("[fd00:1122:3344:104:7]:19016"),
+            String::from("[fd00:1122:3344:104::7]:19016"),
         ),
     ];
 
