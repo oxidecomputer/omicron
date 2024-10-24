@@ -28,6 +28,8 @@ use camino::Utf8PathBuf;
 use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
+use clap::builder::PossibleValue;
+use clap::builder::PossibleValuesParser;
 use clap::ArgAction;
 use clap::Args;
 use clap::Subcommand;
@@ -136,6 +138,7 @@ use std::fmt::Display;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
+use strum::VariantArray;
 use tabled::Tabled;
 use uuid::Uuid;
 
@@ -426,6 +429,21 @@ struct InstanceListArgs {
     /// Only show the running instances
     #[arg(short, long, action=ArgAction::SetTrue)]
     running: bool,
+
+    /// Only show instances in the provided state(s).
+    ///
+    /// By default, all instances are selected.
+    #[arg(
+        short,
+        long = "state",
+        conflicts_with = "running",
+        value_parser = PossibleValuesParser::new(
+            db::model::InstanceState::VARIANTS
+                .iter()
+                .map(|v| PossibleValue::new(v.label()))
+        ),
+    )]
+    states: Vec<db::model::InstanceState>,
 }
 
 #[derive(Debug, Args)]
@@ -900,13 +918,8 @@ impl DbArgs {
             DbCommands::Instance(InstanceArgs {
                 command: InstanceCommands::List(args),
             }) => {
-                cmd_db_instances(
-                    &opctx,
-                    &datastore,
-                    &self.fetch_opts,
-                    args.running,
-                )
-                .await
+                cmd_db_instances(&opctx, &datastore, &self.fetch_opts, args)
+                    .await
             }
             DbCommands::Instance(InstanceArgs {
                 command: InstanceCommands::Info(args),
@@ -919,7 +932,7 @@ impl DbArgs {
                     &opctx,
                     &datastore,
                     &self.fetch_opts,
-                    instances_options.running,
+                    instances_options,
                 )
                 .await
             }
@@ -3201,7 +3214,7 @@ async fn cmd_db_instances(
     opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
-    running: bool,
+    &InstanceListArgs { running, ref states }: &InstanceListArgs,
 ) -> Result<(), anyhow::Error> {
     use db::schema::instance::dsl;
     use db::schema::vmm::dsl as vmm_dsl;
@@ -3210,6 +3223,10 @@ async fn cmd_db_instances(
     let mut query = dsl::instance.into_boxed();
     if !fetch_opts.include_deleted {
         query = query.filter(dsl::time_deleted.is_null());
+    }
+
+    if !states.is_empty() {
+        query = query.filter(dsl::state.eq_any(states.clone()));
     }
 
     let instances: Vec<InstanceAndActiveVmm> = query
