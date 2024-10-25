@@ -243,6 +243,7 @@ impl DataStore {
                         NameOrId::Id(id) => bgp_config_dsl::bgp_config
                             .filter(bgp_config::id.eq(id))
                             .select(bgp_config::id)
+                            .filter(bgp_config::time_deleted.is_null())
                             .limit(1)
                             .first_async::<Uuid>(&conn)
                             .await
@@ -264,6 +265,7 @@ impl DataStore {
                         NameOrId::Name(name) =>
                             bgp_config_dsl::bgp_config
                             .filter(bgp_config::name.eq(name.to_string()))
+                            .filter(bgp_config::time_deleted.is_null())
                             .select(bgp_config::id)
                             .limit(1)
                             .first_async::<Uuid>(&conn)
@@ -285,14 +287,17 @@ impl DataStore {
                             }),
                     }?;
 
-                    let count =
-                        sps_bgp_peer_config_dsl::switch_port_settings_bgp_peer_config
-                        .filter(sps_bgp_peer_config::bgp_config_id.eq(id))
-                        .count()
-                        .execute_async(&conn)
+
+                    let in_use =
+                        diesel::dsl::select(diesel::dsl::exists(
+                            sps_bgp_peer_config_dsl::switch_port_settings_bgp_peer_config
+                                .filter(sps_bgp_peer_config::bgp_config_id.eq(id))
+                                .select(sps_bgp_peer_config::bgp_config_id)
+                        ))
+                        .get_result_async::<bool>(&conn)
                         .await?;
 
-                    if count > 0 {
+                    if in_use {
                         return Err(err.bail(Error::conflict("BGP Config is in use and cannot be deleted")));
                     }
 
@@ -444,7 +449,7 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    let name_or_id = sel.name_or_id.clone();
+                    let name_or_id = sel.announce_set.clone();
 
                     let announce_id: Uuid = match name_or_id {
                         NameOrId::Id(id) => announce_set_dsl::bgp_announce_set
@@ -700,7 +705,7 @@ impl DataStore {
         use db::schema::bgp_config::dsl as bgp_config_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let name_or_id = sel.name_or_id.clone();
+        let name_or_id = sel.announce_set.clone();
 
         let err = OptionalError::new();
         self.transaction_retry_wrapper("bgp_delete_announce_set")
@@ -760,13 +765,15 @@ impl DataStore {
                         }
                     }?;
 
-                    let count = bgp_config_dsl::bgp_config
-                        .filter(bgp_config::bgp_announce_set_id.eq(id))
-                        .count()
-                        .execute_async(&conn)
-                        .await?;
+                    let in_use = diesel::dsl::select(diesel::dsl::exists(
+                        bgp_config_dsl::bgp_config
+                            .filter(bgp_config::bgp_announce_set_id.eq(id))
+                            .filter(bgp_config::time_deleted.is_null()),
+                    ))
+                    .get_result_async::<bool>(&conn)
+                    .await?;
 
-                    if count > 0 {
+                    if in_use {
                         return Err(
                             err.bail(Error::conflict("announce set in use"))
                         );
@@ -987,5 +994,76 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
+    use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::api::external::Name;
+    use omicron_test_utils::dev;
+
+    #[tokio::test]
+    async fn test_delete_bgp_config_and_announce_set_by_name() {
+        let logctx = dev::test_setup_log(
+            "test_delete_bgp_config_and_announce_set_by_name",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let config_name: Name = "testconfig47".parse().unwrap();
+        let announce_name: Name = "testannounce47".parse().unwrap();
+
+        datastore
+            .bgp_create_announce_set(
+                &opctx,
+                &params::BgpAnnounceSetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: announce_name.clone(),
+                        description: String::from("a test announce set"),
+                    },
+                    announcement: Vec::default(),
+                },
+            )
+            .await
+            .expect("create bgp announce set");
+
+        datastore
+            .bgp_config_create(
+                &opctx,
+                &params::BgpConfigCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: config_name.clone(),
+                        description: String::from("a test config"),
+                    },
+                    asn: 47,
+                    bgp_announce_set_id: NameOrId::Name(announce_name.clone()),
+                    vrf: None,
+                    shaper: None,
+                    checker: None,
+                },
+            )
+            .await
+            .expect("create bgp config");
+
+        datastore
+            .bgp_config_delete(&opctx, &NameOrId::Name(config_name))
+            .await
+            .expect("delete bgp config by name");
+
+        datastore
+            .bgp_delete_announce_set(
+                &opctx,
+                &params::BgpAnnounceSetSelector {
+                    announce_set: NameOrId::Name(announce_name),
+                },
+            )
+            .await
+            .expect("delete announce set by name");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 }

@@ -9,7 +9,7 @@ use crate::db::error::{public_error_from_diesel, retryable, ErrorHandler};
 use crate::db::model::IncompleteNetworkInterface;
 use crate::db::pool::DbConnection;
 use crate::db::queries::next_item::DefaultShiftGenerator;
-use crate::db::queries::next_item::NextItem;
+use crate::db::queries::next_item::{NextItem, NextItemSelfJoined};
 use crate::db::schema::network_interface::dsl;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
@@ -33,7 +33,7 @@ use omicron_common::api::external;
 use omicron_common::api::external::MacAddr;
 use once_cell::sync::Lazy;
 use slog_error_chain::SlogInlineError;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv6Addr};
 use uuid::Uuid;
 
 // These are sentinel values and other constants used to verify the state of the
@@ -448,36 +448,6 @@ fn decode_database_error(
     }
 }
 
-// Helper to return the offset of the last valid/allocatable IP in a subnet.
-// Note that this is the offset from the _first available address_, not the
-// network address.
-fn last_address_offset(subnet: &IpNetwork) -> u32 {
-    // Generate last address in the range.
-    //
-    // NOTE: First subtraction is to convert from the subnet size to an
-    // offset, since `generate_series` is inclusive of the last value.
-    // Example: 256 -> 255.
-    let last_address_offset = match subnet {
-        IpNetwork::V4(network) => network.size() - 1,
-        IpNetwork::V6(network) => {
-            // TODO-robustness: IPv6 subnets are always /64s, so in theory we
-            // could require searching all ~2^64 items for the next address.
-            // That won't happen in practice, because there will be other limits
-            // on the number of IPs (such as MAC addresses, or just project
-            // accounting limits). However, we should update this to be the
-            // actual maximum size we expect or want to support, once we get a
-            // better sense of what that is.
-            u32::try_from(network.size() - 1).unwrap_or(u32::MAX - 1)
-        }
-    };
-
-    // This subtraction is because the last address in a subnet is
-    // explicitly reserved for Oxide use.
-    last_address_offset
-        .checked_sub(1 + NUM_INITIAL_RESERVED_IP_ADDRESSES as u32)
-        .unwrap_or_else(|| panic!("Unexpectedly small IP subnet: '{}'", subnet))
-}
-
 // Return the first available address in a subnet. This is not the network
 // address, since Oxide reserves the first few addresses.
 fn first_available_address(subnet: &IpNetwork) -> IpAddr {
@@ -489,12 +459,9 @@ fn first_available_address(subnet: &IpNetwork) -> IpAddr {
             })
             .into(),
         IpNetwork::V6(network) => {
-            // TODO-performance: This is unfortunate. `ipnetwork` implements a
-            // direct addition-based approach for IPv4 but not IPv6. This will
-            // loop, which, while it may not matter much, can be nearly
-            // trivially avoided by converting to u128, adding, and converting
-            // back. Given that these spaces can be _really_ big, that is
-            // probably worth doing.
+            // NOTE: This call to `nth()` will loop and call the `next()`
+            // implementation. That's inefficient, but the number of reserved
+            // addresses is very small, so it should not matter.
             network
                 .iter()
                 .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as _)
@@ -506,11 +473,41 @@ fn first_available_address(subnet: &IpNetwork) -> IpAddr {
     }
 }
 
+// Return the last available address in a subnet. This is not the broadcast
+// address, since that is reserved.
+fn last_available_address(subnet: &IpNetwork) -> IpAddr {
+    // NOTE: In both cases below, we subtract 2 from the network size. That's
+    // because we first subtract 1 to go from a size to an index, and then
+    // another 1 because the broadcast address isn't valid for an interface.
+    match subnet {
+        IpNetwork::V4(network) => network
+            .size()
+            .checked_sub(2)
+            .and_then(|n| network.nth(n))
+            .map(IpAddr::V4)
+            .unwrap_or_else(|| {
+                panic!("Unexpectedly small IPv4 subnetwork: '{}'", network);
+            }),
+        IpNetwork::V6(network) => {
+            // NOTE: The iterator implementation for `Ipv6Network` only
+            // implements the required `Iterator::next()` method. That means we
+            // get the default implementation of the `nth()` method, which will
+            // loop and call `next()`. That is ridiculously inefficient, so we
+            // manually compute the nth address through addition instead.
+            let base = u128::from(network.network());
+            let n = network.size().checked_sub(2).unwrap_or_else(|| {
+                panic!("Unexpectedly small IPv6 subnetwork: '{}'", network);
+            });
+            IpAddr::V6(Ipv6Addr::from(base + n))
+        }
+    }
+}
+
 /// The `NextIpv4Address` query is a `NextItem` query for choosing the next
 /// available IPv4 address for an interface.
 #[derive(Debug, Clone, Copy)]
 pub struct NextIpv4Address {
-    inner: NextItem<
+    inner: NextItemSelfJoined<
         db::schema::network_interface::table,
         IpNetwork,
         db::schema::network_interface::dsl::ip,
@@ -522,11 +519,9 @@ pub struct NextIpv4Address {
 impl NextIpv4Address {
     pub fn new(subnet: Ipv4Network, subnet_id: Uuid) -> Self {
         let subnet = IpNetwork::from(subnet);
-        let net = IpNetwork::from(first_available_address(&subnet));
-        let max_shift = i64::from(last_address_offset(&subnet));
-        let generator = DefaultShiftGenerator::new(net, max_shift, 0)
-            .expect("invalid min/max shift");
-        Self { inner: NextItem::new_scoped(generator, subnet_id) }
+        let min = IpNetwork::from(first_available_address(&subnet));
+        let max = IpNetwork::from(last_available_address(&subnet));
+        Self { inner: NextItemSelfJoined::new_scoped(subnet_id, min, max) }
     }
 }
 
@@ -607,7 +602,7 @@ impl QueryFragment<Pg> for NextNicSlot {
 /// a network interface.
 #[derive(Debug, Clone, Copy)]
 pub struct NextMacAddress {
-    inner: NextItem<
+    inner: NextItemSelfJoined<
         db::schema::network_interface::table,
         db::model::MacAddr,
         db::schema::network_interface::dsl::mac,
@@ -616,63 +611,19 @@ pub struct NextMacAddress {
     >,
 }
 
-// Helper to ensure we correctly compute the min/max shifts for a next MAC
-// query.
-#[derive(Copy, Clone, Debug)]
-struct NextMacShifts {
-    base: MacAddr,
-    min_shift: i64,
-    max_shift: i64,
-}
-
-impl NextMacShifts {
-    fn for_guest() -> Self {
-        let base = MacAddr::random_guest();
-        Self::shifts_for(base, MacAddr::MIN_GUEST_ADDR, MacAddr::MAX_GUEST_ADDR)
-    }
-
-    fn for_system() -> NextMacShifts {
-        let base = MacAddr::random_system();
-        Self::shifts_for(
-            base,
-            MacAddr::MIN_SYSTEM_ADDR,
-            MacAddr::MAX_SYSTEM_ADDR,
-        )
-    }
-
-    fn shifts_for(base: MacAddr, min: i64, max: i64) -> NextMacShifts {
-        let x = base.to_i64();
-
-        // The max shift is the distance to the last value. This min shift is
-        // always expressed as a negative number, giving the largest leftward
-        // shift, i.e., the distance to the first value.
-        let max_shift = max - x;
-        let min_shift = min - x;
-        Self { base, min_shift, max_shift }
-    }
-}
-
 impl NextMacAddress {
     pub fn new(vpc_id: Uuid, kind: NetworkInterfaceKind) -> Self {
-        let (base, max_shift, min_shift) = match kind {
+        let (min, max) = match kind {
             NetworkInterfaceKind::Instance | NetworkInterfaceKind::Probe => {
-                let NextMacShifts { base, min_shift, max_shift } =
-                    NextMacShifts::for_guest();
-                (base.into(), max_shift, min_shift)
+                (MacAddr::MIN_GUEST_ADDR, MacAddr::MAX_GUEST_ADDR)
             }
             NetworkInterfaceKind::Service => {
-                let NextMacShifts { base, min_shift, max_shift } =
-                    NextMacShifts::for_system();
-                (base.into(), max_shift, min_shift)
+                (MacAddr::MIN_SYSTEM_ADDR, MacAddr::MAX_SYSTEM_ADDR)
             }
         };
-        let generator = DefaultShiftGenerator::new(base, max_shift, min_shift)
-            .unwrap_or_else(|| {
-                panic!(
-                "invalid min shift ({min_shift}) or max_shift ({max_shift})"
-            )
-            });
-        Self { inner: NextItem::new_scoped(generator, vpc_id) }
+        let min = db::model::MacAddr(MacAddr::from_i64(min));
+        let max = db::model::MacAddr(MacAddr::from_i64(max));
+        Self { inner: NextItemSelfJoined::new_scoped(vpc_id, min, max) }
     }
 }
 
@@ -1840,13 +1791,13 @@ fn decode_delete_network_interface_database_error(
 #[cfg(test)]
 mod tests {
     use super::first_available_address;
-    use super::last_address_offset;
     use super::DeleteError;
     use super::InsertError;
     use super::MAX_NICS_PER_INSTANCE;
     use super::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use crate::authz;
     use crate::context::OpContext;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::DataStore;
     use crate::db::identity::Resource;
     use crate::db::lookup::LookupPath;
@@ -1857,11 +1808,10 @@ mod tests {
     use crate::db::model::NetworkInterface;
     use crate::db::model::Project;
     use crate::db::model::VpcSubnet;
-    use crate::db::queries::network_interface::NextMacShifts;
+    use crate::db::queries::network_interface::last_available_address;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use dropshot::test_util::LogContext;
     use model::NetworkInterfaceKind;
-    use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
     use nexus_types::external_api::params::InstanceCreate;
     use nexus_types::external_api::params::InstanceNetworkInterfaceAttachment;
@@ -1872,7 +1822,6 @@ mod tests {
     use omicron_common::api::external::InstanceCpuCount;
     use omicron_common::api::external::MacAddr;
     use omicron_test_utils::dev;
-    use omicron_test_utils::dev::db::CockroachInstance;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
     use oxnet::Ipv4Net;
@@ -1882,7 +1831,6 @@ mod tests {
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
-    use std::sync::Arc;
     use uuid::Uuid;
 
     // Add an instance. We'll use this to verify that the instance must be
@@ -1909,7 +1857,9 @@ mod tests {
             network_interfaces: InstanceNetworkInterfaceAttachment::None,
             external_ips: vec![],
             disks: vec![],
+            boot_disk: None,
             start: true,
+            auto_restart_policy: Default::default(),
         };
 
         let instance = Instance::new(instance_id, project_id, &params);
@@ -2012,9 +1962,7 @@ mod tests {
     // Context for testing network interface queries.
     struct TestContext {
         logctx: LogContext,
-        opctx: OpContext,
-        db: CockroachInstance,
-        db_datastore: Arc<DataStore>,
+        db: TestDatabase,
         project_id: Uuid,
         net1: Network,
         net2: Network,
@@ -2024,10 +1972,8 @@ mod tests {
         async fn new(test_name: &str, n_subnets: u8) -> Self {
             let logctx = dev::test_setup_log(test_name);
             let log = logctx.log.new(o!());
-            let db = test_setup_database(&log).await;
-            let (opctx, db_datastore) =
-                crate::db::datastore::test_utils::datastore_test(&logctx, &db)
-                    .await;
+            let db = TestDatabase::new_with_datastore(&log).await;
+            let (opctx, datastore) = (db.opctx(), db.datastore());
 
             let authz_silo = opctx.authn.silo_required().unwrap();
 
@@ -2042,11 +1988,11 @@ mod tests {
                 },
             );
             let (.., project) =
-                db_datastore.project_create(&opctx, project).await.unwrap();
+                datastore.project_create(&opctx, project).await.unwrap();
 
             use crate::db::schema::vpc_subnet::dsl::vpc_subnet;
             let conn =
-                db_datastore.pool_connection_authorized(&opctx).await.unwrap();
+                datastore.pool_connection_authorized(&opctx).await.unwrap();
             let net1 = Network::new(n_subnets);
             let net2 = Network::new(n_subnets);
             for subnet in net1.subnets.iter().chain(net2.subnets.iter()) {
@@ -2057,29 +2003,29 @@ mod tests {
                     .unwrap();
             }
             drop(conn);
-            Self {
-                logctx,
-                opctx,
-                db,
-                db_datastore,
-                project_id: project.id(),
-                net1,
-                net2,
-            }
+            Self { logctx, db, project_id: project.id(), net1, net2 }
         }
 
-        async fn success(mut self) {
-            self.db.cleanup().await.unwrap();
+        fn opctx(&self) -> &OpContext {
+            self.db.opctx()
+        }
+
+        fn datastore(&self) -> &DataStore {
+            self.db.datastore()
+        }
+
+        async fn success(self) {
+            self.db.terminate().await;
             self.logctx.cleanup_successful();
         }
 
         async fn create_stopped_instance(&self) -> Instance {
             instance_set_state(
-                &self.db_datastore,
+                self.datastore(),
                 create_instance(
-                    &self.opctx,
+                    self.opctx(),
                     self.project_id,
-                    &self.db_datastore,
+                    self.datastore(),
                 )
                 .await,
                 InstanceState::NoVmm,
@@ -2089,11 +2035,11 @@ mod tests {
 
         async fn create_running_instance(&self) -> Instance {
             instance_set_state(
-                &self.db_datastore,
+                self.datastore(),
                 create_instance(
-                    &self.opctx,
+                    self.opctx(),
                     self.project_id,
-                    &self.db_datastore,
+                    self.datastore(),
                 )
                 .await,
                 InstanceState::Vmm,
@@ -2126,17 +2072,17 @@ mod tests {
         )
         .unwrap();
         let inserted_interface = context
-            .db_datastore
-            .service_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .service_create_network_interface_raw(context.opctx(), interface)
             .await
             .expect("Failed to insert interface");
 
         // We should be able to delete twice, and be told that the first delete
         // modified the row and the second did not.
         let first_deleted = context
-            .db_datastore
+            .datastore()
             .service_delete_network_interface(
-                &context.opctx,
+                context.opctx(),
                 service_id,
                 inserted_interface.id(),
             )
@@ -2145,9 +2091,9 @@ mod tests {
         assert!(first_deleted, "first delete removed interface");
 
         let second_deleted = context
-            .db_datastore
+            .datastore()
             .service_delete_network_interface(
-                &context.opctx,
+                context.opctx(),
                 service_id,
                 inserted_interface.id(),
             )
@@ -2158,9 +2104,9 @@ mod tests {
         // Attempting to delete a nonexistent interface should fail.
         let bogus_id = Uuid::new_v4();
         let err = context
-            .db_datastore
+            .datastore()
             .service_delete_network_interface(
-                &context.opctx,
+                context.opctx(),
                 service_id,
                 bogus_id,
             )
@@ -2195,8 +2141,8 @@ mod tests {
             Some(requested_ip),
         )
         .unwrap();
-        let err = context.db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface.clone())
+        let err = context.datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface.clone())
             .await
             .expect_err("Should not be able to create an interface for a running instance");
         assert!(
@@ -2225,9 +2171,9 @@ mod tests {
         )
         .unwrap();
         let inserted_interface = context
-            .db_datastore
+            .datastore()
             .instance_create_network_interface_raw(
-                &context.opctx,
+                context.opctx(),
                 interface.clone(),
             )
             .await
@@ -2256,8 +2202,8 @@ mod tests {
             None,
         )
         .unwrap();
-        let err = context.db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface.clone())
+        let err = context.datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface.clone())
             .await
             .expect_err("Should not be able to insert an interface for an instance that doesn't exist");
         assert!(
@@ -2295,9 +2241,9 @@ mod tests {
             )
             .unwrap();
             let inserted_interface = context
-                .db_datastore
+                .datastore()
                 .instance_create_network_interface_raw(
-                    &context.opctx,
+                    context.opctx(),
                     interface.clone(),
                 )
                 .await
@@ -2339,8 +2285,8 @@ mod tests {
         )
         .unwrap();
         let inserted_interface = context
-            .db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
             .await
             .expect("Failed to insert interface");
 
@@ -2358,8 +2304,8 @@ mod tests {
         )
         .unwrap();
         let result = context
-            .db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
             .await;
         assert!(
             matches!(result, Err(InsertError::IpAddressNotAvailable(_))),
@@ -2395,8 +2341,8 @@ mod tests {
         )
         .unwrap();
         let inserted_interface = context
-            .db_datastore
-            .service_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .service_create_network_interface_raw(context.opctx(), interface)
             .await
             .expect("Failed to insert interface");
         assert_eq!(inserted_interface.mac.0, mac);
@@ -2435,8 +2381,11 @@ mod tests {
             )
             .unwrap();
             let inserted_interface = context
-                .db_datastore
-                .service_create_network_interface_raw(&context.opctx, interface)
+                .datastore()
+                .service_create_network_interface_raw(
+                    context.opctx(),
+                    interface,
+                )
                 .await
                 .expect("Failed to insert interface");
             assert_eq!(*inserted_interface.slot, slot);
@@ -2472,8 +2421,8 @@ mod tests {
         )
         .unwrap();
         let inserted_interface = context
-            .db_datastore
-            .service_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .service_create_network_interface_raw(context.opctx(), interface)
             .await
             .expect("Failed to insert interface");
         assert_eq!(inserted_interface.mac.0, mac);
@@ -2495,8 +2444,11 @@ mod tests {
         )
         .unwrap();
         let result = context
-            .db_datastore
-            .service_create_network_interface_raw(&context.opctx, new_interface)
+            .datastore()
+            .service_create_network_interface_raw(
+                context.opctx(),
+                new_interface,
+            )
             .await;
         assert!(
             matches!(result, Err(InsertError::MacAddressNotAvailable(_))),
@@ -2548,8 +2500,8 @@ mod tests {
         )
         .unwrap();
         let inserted_interface = context
-            .db_datastore
-            .service_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .service_create_network_interface_raw(context.opctx(), interface)
             .await
             .expect("Failed to insert interface");
         assert_eq!(*inserted_interface.slot, 0);
@@ -2569,8 +2521,11 @@ mod tests {
         )
         .unwrap();
         let result = context
-            .db_datastore
-            .service_create_network_interface_raw(&context.opctx, new_interface)
+            .datastore()
+            .service_create_network_interface_raw(
+                context.opctx(),
+                new_interface,
+            )
             .await;
         assert!(
             matches!(result, Err(InsertError::SlotNotAvailable(0))),
@@ -2597,9 +2552,9 @@ mod tests {
         )
         .unwrap();
         let _ = context
-            .db_datastore
+            .datastore()
             .instance_create_network_interface_raw(
-                &context.opctx,
+                context.opctx(),
                 interface.clone(),
             )
             .await
@@ -2616,8 +2571,8 @@ mod tests {
         )
         .unwrap();
         let result = context
-            .db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
             .await;
         assert!(
             matches!(
@@ -2647,8 +2602,8 @@ mod tests {
         )
         .unwrap();
         let _ = context
-            .db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
             .await
             .expect("Failed to insert interface");
         let interface = IncompleteNetworkInterface::new_instance(
@@ -2663,8 +2618,8 @@ mod tests {
         )
         .unwrap();
         let result = context
-            .db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
             .await;
         assert!(
             matches!(result, Err(InsertError::NonUniqueVpcSubnets)),
@@ -2691,16 +2646,16 @@ mod tests {
         )
         .unwrap();
         let _ = context
-            .db_datastore
+            .datastore()
             .instance_create_network_interface_raw(
-                &context.opctx,
+                context.opctx(),
                 interface.clone(),
             )
             .await
             .expect("Failed to insert interface");
         let result = context
-            .db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
             .await;
         assert!(
             matches!(
@@ -2733,8 +2688,8 @@ mod tests {
         )
         .unwrap();
         let _ = context
-            .db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
             .await
             .expect("Failed to insert interface");
         let expected_address = "172.30.0.5".parse().unwrap();
@@ -2751,9 +2706,9 @@ mod tests {
             )
             .unwrap();
             let result = context
-                .db_datastore
+                .datastore()
                 .instance_create_network_interface_raw(
-                    &context.opctx,
+                    context.opctx(),
                     interface,
                 )
                 .await;
@@ -2787,9 +2742,9 @@ mod tests {
             )
             .unwrap();
             let _ = context
-                .db_datastore
+                .datastore()
                 .instance_create_network_interface_raw(
-                    &context.opctx,
+                    context.opctx(),
                     interface,
                 )
                 .await
@@ -2798,9 +2753,9 @@ mod tests {
 
         // Next one should fail
         let instance = create_stopped_instance(
-            &context.opctx,
+            context.opctx(),
             context.project_id,
-            &context.db_datastore,
+            context.datastore(),
         )
         .await;
         let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
@@ -2816,12 +2771,13 @@ mod tests {
         )
         .unwrap();
         let result = context
-            .db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
             .await;
         assert!(
             matches!(result, Err(InsertError::NoAvailableIpAddresses)),
-            "Address exhaustion should be detected and handled"
+            "Address exhaustion should be detected and handled, found {:?}",
+            result,
         );
         context.success().await;
     }
@@ -2848,9 +2804,9 @@ mod tests {
             )
             .unwrap();
             let result = context
-                .db_datastore
+                .datastore()
                 .instance_create_network_interface_raw(
-                    &context.opctx,
+                    context.opctx(),
                     interface,
                 )
                 .await;
@@ -2916,9 +2872,9 @@ mod tests {
             )
             .unwrap();
             let inserted_interface = context
-                .db_datastore
+                .datastore()
                 .instance_create_network_interface_raw(
-                    &context.opctx,
+                    context.opctx(),
                     interface.clone(),
                 )
                 .await
@@ -2951,9 +2907,9 @@ mod tests {
         )
         .unwrap();
         let result = context
-            .db_datastore
+            .datastore()
             .instance_create_network_interface_raw(
-                &context.opctx,
+                context.opctx(),
                 interface.clone(),
             )
             .await
@@ -2961,24 +2917,6 @@ mod tests {
         assert!(matches!(result, InsertError::NoSlotsAvailable,));
 
         context.success().await;
-    }
-
-    #[test]
-    fn test_last_address_offset() {
-        let subnet = "172.30.0.0/28".parse().unwrap();
-        assert_eq!(
-            last_address_offset(&subnet),
-            // /28 = 2 ** 4 = 16 total addresses
-            // ... - 1 for converting from size to index = 15
-            // ... - 1 for reserved broadcast address = 14
-            // ... - 5 for reserved initial addresses = 9
-            9,
-        );
-        let subnet = "fd00::/64".parse().unwrap();
-        assert_eq!(
-            last_address_offset(&subnet),
-            u32::MAX - 1 - 1 - super::NUM_INITIAL_RESERVED_IP_ADDRESSES as u32,
-        );
     }
 
     #[test]
@@ -2996,35 +2934,16 @@ mod tests {
     }
 
     #[test]
-    fn test_next_mac_shifts_for_system() {
-        let NextMacShifts { base, min_shift, max_shift } =
-            NextMacShifts::for_system();
-        assert!(base.is_system());
-        assert!(
-            min_shift <= 0,
-            "expected min shift to be negative, found {min_shift}"
+    fn test_last_available_address() {
+        let subnet = "172.30.0.0/28".parse().unwrap();
+        assert_eq!(
+            last_available_address(&subnet),
+            "172.30.0.14".parse::<IpAddr>().unwrap(),
         );
-        assert!(max_shift >= 0, "found {max_shift}");
-        let x = base.to_i64();
-        assert_eq!(x + min_shift, MacAddr::MIN_SYSTEM_ADDR);
-        assert_eq!(x + max_shift, MacAddr::MAX_SYSTEM_ADDR);
-    }
-
-    #[test]
-    fn test_next_mac_shifts_for_guest() {
-        let NextMacShifts { base, min_shift, max_shift } =
-            NextMacShifts::for_guest();
-        assert!(base.is_guest());
-        assert!(
-            min_shift <= 0,
-            "expected min shift to be negative, found {min_shift}"
+        let subnet = "fd00::/64".parse().unwrap();
+        assert_eq!(
+            last_available_address(&subnet),
+            "fd00::ffff:ffff:ffff:fffe".parse::<IpAddr>().unwrap(),
         );
-        assert!(
-            max_shift >= 0,
-            "expected max shift to be positive, found {max_shift}"
-        );
-        let x = base.to_i64();
-        assert_eq!(x + min_shift, MacAddr::MIN_GUEST_ADDR);
-        assert_eq!(x + max_shift, MacAddr::MAX_GUEST_ADDR);
     }
 }

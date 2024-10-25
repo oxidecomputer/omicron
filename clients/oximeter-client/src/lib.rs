@@ -6,7 +6,20 @@
 
 //! Interface for API requests to an Oximeter metric collection server
 
-omicron_common::generate_logging_api!("../../openapi/oximeter.json");
+progenitor::generate_api!(
+    spec = "../../openapi/oximeter.json",
+    inner_type = slog::Logger,
+    pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
+        slog::debug!(log, "client request";
+            "method" => %request.method(),
+            "uri" => %request.url(),
+            "body" => ?&request.body(),
+        );
+    }),
+    post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
+        slog::debug!(log, "client response"; "result" => ?result);
+    }),
+);
 
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {
@@ -26,6 +39,7 @@ impl From<omicron_common::api::internal::nexus::ProducerKind>
     fn from(kind: omicron_common::api::internal::nexus::ProducerKind) -> Self {
         use omicron_common::api::internal::nexus;
         match kind {
+            nexus::ProducerKind::ManagementGateway => Self::ManagementGateway,
             nexus::ProducerKind::Service => Self::Service,
             nexus::ProducerKind::SledAgent => Self::SledAgent,
             nexus::ProducerKind::Instance => Self::Instance,

@@ -16,8 +16,10 @@ use std::process::Command;
 mod check_features;
 mod check_workspace_deps;
 mod clippy;
+mod common;
 #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
 mod external;
+mod live_tests;
 mod usdt;
 
 #[cfg(target_os = "illumos")]
@@ -49,6 +51,9 @@ enum Cmds {
     /// Utilities for working with CockroachDB databases.
     DbDev(external::External),
 
+    /// Show information about Progenitor-based APIs
+    LsApis(external::External),
+
     /// Check that all features are flagged correctly
     CheckFeatures(check_features::Args),
     /// Check that dependencies are not duplicated in any packages in the
@@ -58,6 +63,9 @@ enum Cmds {
     Clippy(clippy::ClippyArgs),
     /// Download binaries, OpenAPI specs, and other out-of-repo utilities.
     Download(external::External),
+
+    /// Create a bundle of live tests
+    LiveTests(live_tests::Args),
 
     /// Utilities for working with MGS.
     MgsDev(external::External),
@@ -127,6 +135,8 @@ fn main() -> Result<()> {
                 external.exec_bin("xtask-downloader")
             }
         }
+        Cmds::LiveTests(args) => live_tests::run_cmd(args),
+        Cmds::LsApis(external) => external.exec_bin("ls-apis"),
         Cmds::MgsDev(external) => external.exec_bin("mgs-dev"),
         Cmds::OmicronDev(external) => external.exec_bin("omicron-dev"),
         Cmds::Openapi(external) => external.exec_bin("openapi-manager"),

@@ -4,12 +4,21 @@ set -o errexit
 set -o pipefail
 set -o xtrace
 
+#
+# Set up our PATH for the test suite.
+#
+
+# shellcheck source=/dev/null
+source ./env.sh
+# shellcheck source=/dev/null
+source .github/buildomat/ci-env.sh
+
 target_os=$1
 
 # NOTE: This version should be in sync with the recommended version in
 # .config/nextest.toml. (Maybe build an automated way to pull the recommended
 # version in the future.)
-NEXTEST_VERSION='0.9.70'
+NEXTEST_VERSION='0.9.78'
 
 cargo --version
 rustc --version
@@ -27,13 +36,25 @@ OUTPUT_DIR='/work'
 echo "tests will store non-ephemeral output in $OUTPUT_DIR" >&2
 mkdir -p "$OUTPUT_DIR"
 
-#
-# Set up our PATH for the test suite.
-#
-source ./env.sh
+
 
 banner prerequisites
 ptime -m bash ./tools/install_builder_prerequisites.sh -y
+
+# Do some test runs of the `ls-apis` command.
+#
+# This may require cloning some dependent private repos.  We do this before the
+# main battery of tests because the GitHub tokens required for this only last
+# for an hour so we want to get this done early.
+#
+# (TODO: This makes the build timings we record inaccurate.)
+banner ls-apis
+(
+    source ./tools/include/force-git-over-https.sh;
+    ptime -m cargo xtask ls-apis apis &&
+        ptime -m cargo xtask ls-apis deployment-units &&
+        ptime -m cargo xtask ls-apis servers
+)
 
 #
 # We build with:
@@ -88,6 +109,13 @@ ptime -m timeout 2h cargo nextest run --profile ci --locked --verbose
 #
 banner doctest
 ptime -m timeout 1h cargo test --doc --locked --verbose --no-fail-fast
+
+# Build the live-tests.  This is only supported on illumos.
+# We also can't actually run them here.  See the README for more details.
+if [[ $target_os == "illumos" ]]; then
+    banner "live-test"
+    ptime -m cargo xtask live-tests
+fi
 
 # We expect the seed CRDB to be placed here, so we explicitly remove it so the
 # rmdir check below doesn't get triggered. Nextest doesn't have support for

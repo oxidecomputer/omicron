@@ -13,7 +13,8 @@
 #:  "%/pool/ext/*/crypt/debug/global/oxide-sled-agent:default.log.*",
 #:  "%/pool/ext/*/crypt/debug/oxz_*/oxide-*.log.*",
 #:  "%/pool/ext/*/crypt/debug/oxz_*/system-illumos-*.log.*",
-#:  "!/pool/ext/*/crypt/debug/oxz_propolis-server_*/*.log.*"
+#:  "!/pool/ext/*/crypt/debug/oxz_propolis-server_*/*.log.*",
+#:  "/tmp/kstat/*.kstat"
 #: ]
 #: skip_clone = true
 #:
@@ -31,6 +32,10 @@ set -o xtrace
 _exit_trap() {
 	local status=$?
 	set +o errexit
+
+	if [[ "x$OPTE_COMMIT" != "x" ]]; then
+		pfexec cp /tmp/opteadm /opt/oxide/opte/bin/opteadm
+	fi
 
 	#
 	# Stop cron in all zones (to stop logadm log rotation)
@@ -65,11 +70,15 @@ _exit_trap() {
 
 	PORTS=$(pfexec /opt/oxide/opte/bin/opteadm list-ports | tail +2 | awk '{ print $1; }')
 	for p in $PORTS; do
+		pfexec /opt/oxide/opte/bin/opteadm dump-uft -p $p
 		LAYERS=$(pfexec /opt/oxide/opte/bin/opteadm list-layers -p $p | tail +2 | awk '{ print $1; }')
 		for l in $LAYERS; do
 			pfexec /opt/oxide/opte/bin/opteadm dump-layer -p $p $l
 		done
 	done
+
+	mkdir -p /tmp/kstat
+	pfexec kstat -p xde: > /tmp/kstat/xde.kstat
 
 	pfexec zfs list
 	pfexec zpool list
@@ -88,9 +97,30 @@ _exit_trap() {
 
 	for z in $(zoneadm list -n | grep oxz_ntp); do
 		banner "${z/oxz_/}"
-		pfexec zlogin "$z" chronyc tracking
-		pfexec zlogin "$z" chronyc sources
+		pfexec zlogin "$z" chronyc -n tracking
+		pfexec zlogin "$z" chronyc -n sources -a
 		pfexec zlogin "$z" cat /etc/inet/chrony.conf
+		pfexec zlogin "$z" ping -sn oxide.computer 56 1
+		pfexec zlogin "$z" ping -sn 1.1.1.1 56 1
+		pfexec zlogin "$z" /usr/sbin/dig 0.pool.ntp.org @1.1.1.1
+		pfexec zlogin "$z" getent hosts time.cloudfare.com
+
+		# Attempt to get chrony to do some time sync from the CLI with
+		# messages being written to the terminal and with debugging
+		# enabled if the chrony package was built with that option.
+		# Since chronyd on the CLI needs to use the ports that the
+		# service will be using, stop it first (with -s to wait for it
+		# to exit).
+		pfexec /usr/sbin/svcadm -z "$z" disable -s oxide/ntp
+		# Run in dry-run one-shot mode (-Q)
+		pfexec zlogin "$z" /usr/sbin/chronyd -t 10 -ddQ
+		# Run in one-shot mode (-q) -- attempt to set the clock
+		pfexec zlogin "$z" /usr/sbin/chronyd -t 10 -ddq
+		# Run in one-shot mode (-q) but override the configuration
+		# to talk to an explicit external service. This command line is
+		# similar to that used by the pre-flight NTP checks.
+		pfexec zlogin "$z" /usr/sbin/chronyd -t 10 -ddq \
+		    "'pool time.cloudflare.com iburst maxdelay 0.1'"
 	done
 
 	pfexec zlogin sidecar_softnpu cat /var/log/softnpu.log
@@ -103,6 +133,20 @@ z_swadm () {
 	echo "== swadm $@"
 	pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm $@
 }
+
+# only set this if you want to override the version of opte/xde installed by the
+# install_opte.sh script
+OPTE_COMMIT="f3002b356da7d0e4ca15beb66a5566a92919baaa"
+if [[ "x$OPTE_COMMIT" != "x" ]]; then
+	curl  -sSfOL https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/module/$OPTE_COMMIT/xde
+	pfexec rem_drv xde || true
+	pfexec mv xde /kernel/drv/amd64/xde
+	pfexec add_drv xde || true
+	curl  -sSfOL https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/release/$OPTE_COMMIT/opteadm
+	chmod +x opteadm
+	cp opteadm /tmp/opteadm
+	pfexec mv opteadm /opt/oxide/opte/bin/opteadm
+fi
 
 #
 # XXX work around 14537 (UFS should not allow directories to be unlinked) which
@@ -149,6 +193,9 @@ pfexec chown build:build /opt/oxide/work
 cd /opt/oxide/work
 
 ptime -m tar xvzf /input/package/work/package.tar.gz
+
+# shellcheck source=/dev/null
+source .github/buildomat/ci-env.sh
 
 # Ask buildomat for the range of extra addresses that we're allowed to use, and
 # break them up into the ranges we need.
@@ -371,7 +418,11 @@ done
 
 /usr/oxide/oxide --resolve "$OXIDE_RESOLVE" --cacert "$E2E_TLS_CERT" \
 	project create --name images --description "some images"
-/usr/oxide/oxide --resolve "$OXIDE_RESOLVE" --cacert "$E2E_TLS_CERT" \
+# NOTE: Use a relatively large timeout on this call, to avoid #6771
+/usr/oxide/oxide \
+    --resolve "$OXIDE_RESOLVE" \
+    --cacert "$E2E_TLS_CERT" \
+    --timeout 60 \
 	disk import \
 	--path debian-11-genericcloud-amd64.raw \
 	--disk debian11-boot \

@@ -30,10 +30,9 @@
 //! Nexus' `cpapi_instances_put` internal API endpoint, when a Nexus'
 //! `instance-watcher` background task *pulls* instance states from sled-agents
 //! periodically, or as the return value of an API call from Nexus to a
-//! sled-agent. When a Nexus receives a new [`SledInstanceState`] from a
-//! sled-agent through any of these mechanisms, the Nexus will write any changed
-//! state to the `vmm` and/or `migration` tables directly on behalf of the
-//! sled-agent.
+//! sled-agent. When a Nexus receives a new [`SledVmmState`] from a sled-agent
+//! through any of these mechanisms, the Nexus will write any changed state to
+//! the `vmm` and/or `migration` tables directly on behalf of the sled-agent.
 //!
 //! Although Nexus is technically the party responsible for the database query
 //! that writes VMM and migration state updates received from sled-agent, it is
@@ -236,9 +235,9 @@
 //! updates is perhaps the simplest one: _avoiding unnecessary update sagas_.
 //! The `cpapi_instances_put` API endpoint and instance-watcher background tasks
 //! handle changes to VMM and migration states by calling the
-//! [`notify_instance_updated`] method, which writes the new states to the
-//! database and (potentially) starts an update saga. Naively, this method would
-//! *always* start an update saga, but remember that --- as we discussed
+//! [`process_vmm_update`] method, which writes the new states to the database
+//! and (potentially) starts an update saga. Naively, this method would *always*
+//! start an update saga, but remember that --- as we discussed
 //! [above](#background) --- many VMM/migration state changes don't actually
 //! require modifying the instance record. For example, if an instance's VMM
 //! transitions from [`VmmState::Starting`] to [`VmmState::Running`], that
@@ -251,10 +250,10 @@
 //! required.
 //!
 //! The second mechanism for ensuring updates are performed in a timely manner
-//! is what I'm calling _saga chaining_. When the final action in an
-//! instance-update saga writes back the instance record and releases the
-//! updater lock, it will then perform a second query to read the instance, VMM,
-//! and migration records. If the current state of the instance indicates that
+//! is what I'm calling _saga chaining_. After the instance-update saga writes
+//! back the instance record and releases the  updater lock, the saga's final
+//! action  will then perform a second query to read the instance, VMM, and
+//! migration records. If the current state of the instance indicates that
 //! another update saga is needed, then the completing saga will execute a new
 //! start saga as its final action.
 //!
@@ -271,7 +270,7 @@
 //! delayed. To improve the timeliness of update sagas, we will also explicitly
 //! activate the background task at any point where we know that an update saga
 //! *should* run but we were not able to run it. If an update saga cannot be
-//! started, whether by [`notify_instance_updated`], a `start-instance-update`
+//! started, whether by [`notify_vmm_updated`], a `start-instance-update`
 //! saga attempting to start its real saga, or an `instance-update` saga
 //! chaining into a new one as its last action, the `instance-watcher`
 //! background task is activated. Similarly, when a `start-instance-update` saga
@@ -326,7 +325,8 @@
 //!     crate::app::db::datastore::DataStore::instance_updater_inherit_lock
 //! [instance_updater_unlock]:
 //!     crate::app::db::datastore::DataStore::instance_updater_unlock
-//! [`notify_instance_updated`]: crate::app::Nexus::notify_instance_updated
+//! [`notify_vmm_updated`]: crate::app::Nexus::notify_vmm_updated
+//! [`process_vmm_update`]: crate::app::instance::process_vmm_update
 //!
 //! [dist-locking]:
 //!     https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html
@@ -361,8 +361,7 @@ use chrono::Utc;
 use nexus_db_queries::{authn, authz};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::nexus;
-use omicron_common::api::internal::nexus::SledInstanceState;
+use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -388,8 +387,8 @@ pub(crate) use self::start::{Params, SagaInstanceUpdate};
 mod destroyed;
 
 /// Returns `true` if an `instance-update` saga should be executed as a result
-/// of writing the provided [`SledInstanceState`] to the database with the
-/// provided [`VmmStateUpdateResult`].
+/// of writing the provided [`SledVmmState`] to the database with the provided
+/// [`VmmStateUpdateResult`].
 ///
 /// We determine this only after actually updating the database records,
 /// because we don't know whether a particular VMM or migration state is
@@ -407,18 +406,18 @@ mod destroyed;
 /// VMM/migration states.
 pub fn update_saga_needed(
     log: &slog::Logger,
-    instance_id: InstanceUuid,
-    state: &SledInstanceState,
+    propolis_id: PropolisUuid,
+    state: &SledVmmState,
     result: &VmmStateUpdateResult,
 ) -> bool {
     // Currently, an instance-update saga is required if (and only if):
     //
-    // - The instance's active VMM has transitioned to `Destroyed`. We don't
+    // - The instance's active VMM has transitioned to `Destroyed` or `Failed`. We don't
     //   actually know whether the VMM whose state was updated here was the
     //   active VMM or not, so we will always attempt to run an instance-update
-    //   saga if the VMM was `Destroyed`.
-    let vmm_needs_update = result.vmm_updated
-        && state.vmm_state.state == nexus::VmmState::Destroyed;
+    //   saga if the VMM was `Destroyed` (or `Failed`).
+    let vmm_needs_update =
+        result.vmm_updated && state.vmm_state.state.is_terminal();
     // - A migration in to this VMM has transitioned to a terminal state
     //   (`Failed` or `Completed`).
     let migrations = state.migrations();
@@ -443,8 +442,7 @@ pub fn update_saga_needed(
         debug!(log,
             "new VMM runtime state from sled agent requires an \
              instance-update saga";
-            "instance_id" => %instance_id,
-            "propolis_id" => %state.propolis_id,
+            "propolis_id" => %propolis_id,
             "vmm_needs_update" => vmm_needs_update,
             "migration_in_needs_update" => migration_in_needs_update,
             "migration_out_needs_update" => migration_out_needs_update,
@@ -515,12 +513,13 @@ impl UpdatesRequired {
         let instance_id = snapshot.instance.id();
 
         let mut update_required = false;
+        let mut active_vmm_failed = false;
         let mut network_config = None;
 
         // Has the active VMM been destroyed?
         let destroy_active_vmm =
             snapshot.active_vmm.as_ref().and_then(|active_vmm| {
-                if active_vmm.runtime.state == VmmState::Destroyed {
+                if active_vmm.runtime.state.is_terminal() {
                     let id = PropolisUuid::from_untyped_uuid(active_vmm.id);
                     // Unlink the active VMM ID. If the active VMM was destroyed
                     // because a migration out completed, the next block, which
@@ -528,6 +527,12 @@ impl UpdatesRequired {
                     // instead.
                     new_runtime.propolis_id = None;
                     update_required = true;
+
+                    // If the active VMM's state is `Failed`, move the
+                    // instance's new state to `Failed` rather than to `NoVmm`.
+                    if active_vmm.runtime.state == VmmState::Failed {
+                        active_vmm_failed = true;
+                    }
                     Some(id)
                 } else {
                     None
@@ -537,7 +542,9 @@ impl UpdatesRequired {
         // Okay, what about the target?
         let destroy_target_vmm =
             snapshot.target_vmm.as_ref().and_then(|target_vmm| {
-                if target_vmm.runtime.state == VmmState::Destroyed {
+                // XXX(eliza): AFAIK, target VMMs don't go to `Failed` until
+                // they become active, but...IDK. double-check that.
+                if target_vmm.runtime.state.is_terminal() {
                     // Unlink the target VMM ID.
                     new_runtime.dst_propolis_id = None;
                     update_required = true;
@@ -673,7 +680,11 @@ impl UpdatesRequired {
             // was any actual state change.
 
             // We no longer have a VMM.
-            new_runtime.nexus_state = InstanceState::NoVmm;
+            new_runtime.nexus_state = if active_vmm_failed {
+                InstanceState::Failed
+            } else {
+                InstanceState::NoVmm
+            };
             // If the active VMM was destroyed and the instance has not migrated
             // out of it, we must delete the instance's network configuration.
             //
@@ -793,6 +804,21 @@ declare_saga_actions! {
         + siu_commit_instance_updates
     }
 
+    // Check if the VMM or migration state has changed while the update saga was
+    // running and whether an additional update saga is now required. If one is
+    // required, try to start it.
+    //
+    // Unlike other actions, this step is optional and allowed to fail without
+    // unwinding the saga. We attempt to start a successor saga only as an
+    // optimization to improve the latency with which instance states are
+    // reconciled with VMM and migration states. If another update saga is
+    // required, it will always be started eventually by other mechanisms
+    // regardless of whether this action succeeds, and a failure here does not
+    // invalidate any of the other work performed by this saga.
+    CHAIN_SUCCESSOR_SAGA -> "chain_successor_saga" {
+        + siu_chain_successor_saga
+    }
+
 }
 
 // instance update saga: definition
@@ -894,6 +920,11 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
         if let Some(vmm_id) = params.update.destroy_target_vmm {
             append_destroyed_vmm_subsaga(vmm_id, "target")?;
         }
+
+        // Finally, check if any additional updates are required to reconcile
+        // the instance, VMM, and migration states, and attempt to start a new
+        // saga if needed.
+        builder.append(chain_successor_saga_action());
 
         Ok(builder.build()?)
     }
@@ -1168,24 +1199,129 @@ async fn siu_commit_instance_updates(
         nexus.vpc_needed_notify_sleds();
     }
 
-    // Check if the VMM or migration state has changed while the update saga was
-    // running and whether an additional update saga is now required. If one is
-    // required, try to start it.
+    Ok(())
+}
+
+/// Check if the VMM or migration state has changed while the update saga was
+/// running and whether an additional update saga is now required. If one is
+/// required, try to start it.
+///
+/// TODO(eliza): it would be nice if we didn't release the lock, determine
+/// the needed updates, and then start a new start-instance-update saga that
+/// re-locks the instance --- instead, perhaps we could keep the lock, and
+/// try to start a new "actual" instance update saga that inherits our lock.
+/// This way, we could also avoid computing updates required twice.
+/// But, I'm a bit sketched out by the implications of not committing update
+/// and dropping the lock in the same operation. This deserves more thought...
+async fn siu_chain_successor_saga(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let RealParams { serialized_authn, authz_instance, .. } =
+        sagactx.saga_params::<RealParams>()?;
+
+    let opctx =
+        crate::context::op_context_for_saga_action(&sagactx, &serialized_authn);
+    let log = osagactx.log();
+    let nexus = osagactx.nexus();
+
+    let instance_id = authz_instance.id();
+    // Note: unlike most other saga actions, we DO NOT return an error and
+    // unwind the update saga if this operation fails. The update saga has
+    // already committed the necessary changes to the instance record, so
+    // everything we needed to do here has already been done. Attempting to
+    // start a subsequent update saga if additional updates are required is only
+    // done as an optimization to ensure that updates are performed in a timely
+    // manner; the `instance-updater` background task will always eventually
+    // ensure that an instance's state is reconciled eventually.
     //
-    // TODO(eliza): it would be nice if we didn't release the lock, determine
-    // the needed updates, and then start a new start-instance-update saga that
-    // re-locks the instance --- instead, perhaps we could keep the lock, and
-    // try to start a new "actual" instance update saga that inherits our lock.
-    // This way, we could also avoid computing updates required twice.
-    // But, I'm a bit sketched out by the implications of not committing update
-    // and dropping the lock in the same operation. This deserves more thought...
-    if let Err(error) =
-        chain_update_saga(&sagactx, authz_instance, serialized_authn).await
-    {
-        // If starting the new update saga failed, DO NOT unwind this saga and
-        // undo all the work we've done successfully! Instead, just kick the
-        // instance-updater background task to try and start a new saga
-        // eventually, and log a warning.
+    // Therefore, we wrap the code that starts the successor saga in an `async`
+    // block to catch any errors it returns so that we can just log a warning
+    // and kick the instance-updater background task to try and start a new saga
+    // eventually.
+    let saga_started = async {
+        // Fetch the state from the database again to see if we should immediately
+        // run a new saga.
+        let new_state = osagactx
+            .datastore()
+            .instance_fetch_all(&opctx, &authz_instance)
+            .await
+            .context("failed to fetch latest snapshot for instance")?;
+
+        if let Some(update) = UpdatesRequired::for_instance(log, &new_state) {
+            debug!(
+                log,
+                "instance update: additional updates required, preparing a \
+                 successor update saga...";
+                "instance_id" => %instance_id,
+                "update.new_runtime_state" => ?update.new_runtime,
+                "update.network_config_update" => ?update.network_config,
+                "update.destroy_active_vmm" => ?update.destroy_active_vmm,
+                "update.destroy_target_vmm" => ?update.destroy_target_vmm,
+                "update.deprovision" => ?update.deprovision,
+            );
+            let saga_dag = SagaInstanceUpdate::prepare(&Params {
+                serialized_authn,
+                authz_instance,
+            })
+            .context("failed to build new update saga DAG")?;
+            let saga = osagactx
+                .nexus()
+                .sagas
+                .saga_prepare(saga_dag)
+                .await
+                .context("failed to prepare new update saga")?;
+            // N.B. that we don't wait for the successor update saga to *complete*
+            // here. We just want to make sure it starts.
+            saga.start()
+                .await
+                .context("failed to start successor update saga")?;
+            info!(
+                log,
+                "instance update: successor update saga started!";
+                "instance_id" => %instance_id,
+            );
+        } else {
+            // If the instance has transitioned to the `Failed` state and no
+            // additional update saga is required, check if the instance's
+            // auto-restart policy allows it to be automatically restarted. If
+            // it does, activate the instance-reincarnation background task to
+            // automatically restart it.
+            let karmic_state = new_state.instance.auto_restart.status(
+                &new_state.instance.runtime_state,
+                new_state.active_vmm.as_ref(),
+            );
+            if karmic_state.should_reincarnate() {
+                info!(
+                    log,
+                    "instance update: instance transitioned to Failed, \
+                     but can be automatically restarted; activating \
+                     reincarnation.";
+                    "instance_id" => %instance_id,
+                    "auto_restart_config" => ?new_state.instance.auto_restart,
+                    "runtime_state" => ?new_state.instance.runtime_state,
+                );
+                nexus.background_tasks.task_instance_reincarnation.activate();
+            } else {
+                debug!(
+                    log,
+                    "instance update: instance will not reincarnate";
+                    "instance_id" => %instance_id,
+                    "auto_restart_config" => ?new_state.instance.auto_restart,
+                    "needs_reincarnation" => karmic_state.needs_reincarnation,
+                    "karmic_state" => ?karmic_state.can_reincarnate,
+                )
+            }
+        }
+
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+
+    // If we were unable to start a successor saga (or determine whether we
+    // needed to do so), log a warning, and active the instance-updater
+    // background task in order to attempt to start a new saga again.
+    if let Err(error) = saga_started {
         warn!(
             log,
             "instance update: failed to start successor saga!";
@@ -1193,62 +1329,7 @@ async fn siu_commit_instance_updates(
             "error" => %error,
         );
         nexus.background_tasks.task_instance_updater.activate();
-    }
-
-    Ok(())
-}
-
-async fn chain_update_saga(
-    sagactx: &NexusActionContext,
-    authz_instance: authz::Instance,
-    serialized_authn: authn::saga::Serialized,
-) -> Result<(), anyhow::Error> {
-    let opctx =
-        crate::context::op_context_for_saga_action(sagactx, &serialized_authn);
-    let osagactx = sagactx.user_data();
-    let log = osagactx.log();
-
-    let instance_id = authz_instance.id();
-
-    // Fetch the state from the database again to see if we should immediately
-    // run a new saga.
-    let new_state = osagactx
-        .datastore()
-        .instance_fetch_all(&opctx, &authz_instance)
-        .await
-        .context("failed to fetch latest snapshot for instance")?;
-
-    if let Some(update) = UpdatesRequired::for_instance(log, &new_state) {
-        debug!(
-            log,
-            "instance update: additional updates required, preparing a \
-             successor update saga...";
-            "instance_id" => %instance_id,
-            "update.new_runtime_state" => ?update.new_runtime,
-            "update.network_config_update" => ?update.network_config,
-            "update.destroy_active_vmm" => ?update.destroy_active_vmm,
-            "update.destroy_target_vmm" => ?update.destroy_target_vmm,
-            "update.deprovision" => ?update.deprovision,
-        );
-        let saga_dag = SagaInstanceUpdate::prepare(&Params {
-            serialized_authn,
-            authz_instance,
-        })
-        .context("failed to build new update saga DAG")?;
-        let saga = osagactx
-            .nexus()
-            .sagas
-            .saga_prepare(saga_dag)
-            .await
-            .context("failed to prepare new update saga")?;
-        saga.start().await.context("failed to start successor update saga")?;
-        // N.B. that we don't wait for the successor update saga to *complete*
-        // here. We just want to make sure it starts.
-        info!(
-            log,
-            "instance update: successor update saga started!";
-            "instance_id" => %instance_id,
-        );
+        return Ok(());
     }
 
     Ok(())
@@ -1470,7 +1551,9 @@ mod test {
                     params::InstanceNetworkInterfaceAttachment::None,
                 external_ips: vec![],
                 disks: vec![],
+                boot_disk: None,
                 start: true,
+                auto_restart_policy: Default::default(),
             },
         )
         .await
@@ -1586,6 +1669,7 @@ mod test {
                     dst_propolis_id: None,
                     migration_id: None,
                     nexus_state: InstanceState::NoVmm,
+                    time_last_auto_restarted: None,
                 },
             )
             .await
@@ -2346,11 +2430,36 @@ mod test {
             let instance = create_instance(client).await;
             let instance_id =
                 InstanceUuid::from_untyped_uuid(instance.identity.id);
+            let log = &cptestctx.logctx.log;
+            info!(
+                &log,
+                "created test instance";
+                "instance_id" => %instance_id,
+                "instance" => ?instance
+            );
 
             // Poke the instance to get it into the Running state.
-            let state =
-                test_helpers::instance_fetch(cptestctx, instance_id).await;
+
+            info!(
+                &log,
+                "advancing test instance to Running...";
+                "instance_id" => %instance_id,
+            );
             test_helpers::instance_simulate(cptestctx, &instance_id).await;
+            let state = test_helpers::instance_wait_for_state(
+                cptestctx,
+                instance_id,
+                InstanceState::Vmm,
+            )
+            .await;
+
+            info!(
+                &log,
+                "simulated test instance";
+                "instance_id" => %instance_id,
+                "instance_state" => ?state.instance(),
+                "vmm_state" => ?state.vmm(),
+            );
 
             let vmm = state.vmm().as_ref().unwrap();
             let dst_sled_id =
@@ -2594,12 +2703,12 @@ mod test {
             assert_instance_unlocked(instance);
             assert_instance_record_is_consistent(instance);
 
-            let target_destroyed = self
+            let target_vmm_state = self
                 .outcome
                 .target
                 .as_ref()
-                .map(|(_, state)| state == &VmmState::Destroyed)
-                .unwrap_or(false);
+                .map(|&(_, state)| state)
+                .unwrap_or(VmmState::Migrating);
 
             if self.outcome.failed {
                 assert_eq!(
@@ -2611,11 +2720,11 @@ mod test {
                     "target VMM ID must be unset when a migration has failed"
                 );
             } else {
-                if dbg!(target_destroyed) {
+                if dbg!(target_vmm_state).is_terminal() {
                     assert_eq!(
                         active_vmm_id, None,
-                        "if the target VMM was destroyed, it should be unset, \
-                         even if a migration succeeded",
+                        "if the target VMM was {target_vmm_state}, it should \
+                         be unset, even if a migration succeeded",
                     );
                     assert_eq!(
                         instance_runtime.nexus_state,
@@ -2663,37 +2772,48 @@ mod test {
                 }
             }
 
-            let src_destroyed = self
+            let src_vmm_state = self
                 .outcome
                 .source
                 .as_ref()
-                .map(|(_, state)| state == &VmmState::Destroyed)
-                .unwrap_or(false);
+                .map(|&(_, state)| state)
+                .unwrap_or(VmmState::Migrating);
             assert_eq!(
                 self.src_resource_records_exist(cptestctx).await,
-                !src_destroyed,
-                "source VMM should exist if and only if the source hasn't been destroyed",
+                !dbg!(src_vmm_state).is_terminal(),
+                "source VMM resource records should exist if and only if the \
+                 source VMM is not in a terminal state (Destroyed/Failed)",
             );
 
             assert_eq!(
                 self.target_resource_records_exist(cptestctx).await,
-                !target_destroyed,
-                "target VMM should exist if and only if the target hasn't been destroyed",
+                !target_vmm_state.is_terminal(),
+                "source VMM resource records should exist if and only if the \
+                 source VMM is not in a terminal state (Destroyed/Failed)",
             );
 
-            // VThe instance has a VMM if (and only if):
-            let has_vmm = if self.outcome.failed {
+            fn expected_instance_state(vmm: VmmState) -> InstanceState {
+                match vmm {
+                    VmmState::Destroyed => InstanceState::NoVmm,
+                    VmmState::Failed => InstanceState::Failed,
+                    _ => InstanceState::Vmm,
+                }
+            }
+
+            // The instance has a VMM if (and only if):
+            let instance_state = if self.outcome.failed {
                 // If the migration failed, the instance should have a VMM if
                 // and only if the source VMM is still okay. It doesn't matter
                 // whether the target is still there or not, because we didn't
                 // migrate to it successfully.
-                !src_destroyed
+                expected_instance_state(src_vmm_state)
             } else {
                 // Otherwise, if the migration succeeded, the instance should be
                 // on the target VMM, and virtual provisioning records should
-                // exist as long as the
-                !target_destroyed
+                // exist as long as the target is okay.
+                expected_instance_state(target_vmm_state)
             };
+            let has_vmm = instance_state == InstanceState::Vmm;
 
             assert_eq!(
                 no_virtual_provisioning_resource_records_exist(cptestctx).await,
@@ -2711,8 +2831,6 @@ mod test {
                  as the instance has a VMM",
             );
 
-            let instance_state =
-                if has_vmm { InstanceState::Vmm } else { InstanceState::NoVmm };
             assert_eq!(instance_runtime.nexus_state, instance_state);
         }
 

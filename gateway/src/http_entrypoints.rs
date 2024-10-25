@@ -81,18 +81,22 @@ impl GatewayApi for GatewayImpl {
     ) -> Result<HttpResponseOk<SpState>, HttpError> {
         let apictx = rqctx.context();
         let sp_id = path.into_inner().sp.into();
-        let sp = apictx.mgmt_switch.sp(sp_id)?;
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
 
-        let state = sp.state().await.map_err(|err| {
-            SpCommsError::SpCommunicationFailed { sp: sp_id, err }
-        })?;
+            let state = sp.state().await.map_err(|err| {
+                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+            })?;
 
-        let rot_state = sp
-            .rot_state(gateway_messages::RotBootInfo::HIGHEST_KNOWN_VERSION)
-            .await;
+            let rot_state = sp
+                .rot_state(gateway_messages::RotBootInfo::HIGHEST_KNOWN_VERSION)
+                .await;
 
-        let final_state = sp_state_from_comms(state, rot_state);
-        Ok(HttpResponseOk(final_state))
+            let final_state = sp_state_from_comms(state, rot_state);
+
+            Ok(HttpResponseOk(final_state))
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn sp_startup_options_get(
@@ -100,15 +104,18 @@ impl GatewayApi for GatewayImpl {
         path: Path<PathSp>,
     ) -> Result<HttpResponseOk<HostStartupOptions>, HttpError> {
         let apictx = rqctx.context();
-        let mgmt_switch = &apictx.mgmt_switch;
-        let sp_id = path.into_inner().sp.into();
-        let sp = mgmt_switch.sp(sp_id)?;
+        let handler = async {
+            let mgmt_switch = &apictx.mgmt_switch;
+            let sp_id = path.into_inner().sp.into();
+            let sp = mgmt_switch.sp(sp_id)?;
 
-        let options = sp.get_startup_options().await.map_err(|err| {
-            SpCommsError::SpCommunicationFailed { sp: sp_id, err }
-        })?;
+            let options = sp.get_startup_options().await.map_err(|err| {
+                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+            })?;
 
-        Ok(HttpResponseOk(options.into()))
+            Ok(HttpResponseOk(options.into()))
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn sp_startup_options_set(
@@ -119,13 +126,16 @@ impl GatewayApi for GatewayImpl {
         let apictx = rqctx.context();
         let mgmt_switch = &apictx.mgmt_switch;
         let sp_id = path.into_inner().sp.into();
-        let sp = mgmt_switch.sp(sp_id)?;
+        let handler = async {
+            let sp = mgmt_switch.sp(sp_id)?;
 
-        sp.set_startup_options(body.into_inner().into()).await.map_err(
-            |err| SpCommsError::SpCommunicationFailed { sp: sp_id, err },
-        )?;
+            sp.set_startup_options(body.into_inner().into()).await.map_err(
+                |err| SpCommsError::SpCommunicationFailed { sp: sp_id, err },
+            )?;
 
-        Ok(HttpResponseUpdatedNoContent {})
+            Ok(HttpResponseUpdatedNoContent {})
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn sp_sensor_read_value(
@@ -135,12 +145,17 @@ impl GatewayApi for GatewayImpl {
         let apictx = rqctx.context();
         let PathSpSensorId { sp, sensor_id } = path.into_inner();
         let sp_id = sp.into();
-        let sp = apictx.mgmt_switch.sp(sp_id)?;
-        let value = sp.read_sensor_value(sensor_id).await.map_err(|err| {
-            SpCommsError::SpCommunicationFailed { sp: sp_id, err }
-        })?;
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let value =
+                sp.read_sensor_value(sensor_id).await.map_err(|err| {
+                    SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+                })?;
 
-        Ok(HttpResponseOk(value.into()))
+            Ok(HttpResponseOk(value.into()))
+        };
+
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn sp_component_list(
@@ -149,12 +164,15 @@ impl GatewayApi for GatewayImpl {
     ) -> Result<HttpResponseOk<SpComponentList>, HttpError> {
         let apictx = rqctx.context();
         let sp_id = path.into_inner().sp.into();
-        let sp = apictx.mgmt_switch.sp(sp_id)?;
-        let inventory = sp.inventory().await.map_err(|err| {
-            SpCommsError::SpCommunicationFailed { sp: sp_id, err }
-        })?;
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let inventory = sp.inventory().await.map_err(|err| {
+                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+            })?;
 
-        Ok(HttpResponseOk(sp_component_list_from_comms(inventory)))
+            Ok(HttpResponseOk(sp_component_list_from_comms(inventory)))
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn sp_component_get(
@@ -164,16 +182,21 @@ impl GatewayApi for GatewayImpl {
         let apictx = rqctx.context();
         let PathSpComponent { sp, component } = path.into_inner();
         let sp_id = sp.into();
-        let sp = apictx.mgmt_switch.sp(sp_id)?;
-        let component = component_from_str(&component)?;
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let component = component_from_str(&component)?;
 
-        let details = sp.component_details(component).await.map_err(|err| {
-            SpCommsError::SpCommunicationFailed { sp: sp_id, err }
-        })?;
+            let details =
+                sp.component_details(component).await.map_err(|err| {
+                    SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+                })?;
 
-        Ok(HttpResponseOk(
-            details.entries.into_iter().map(Into::into).collect(),
-        ))
+            Ok(HttpResponseOk(
+                details.entries.into_iter().map(Into::into).collect(),
+            ))
+        };
+
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     // Implementation notes:
@@ -194,70 +217,120 @@ impl GatewayApi for GatewayImpl {
         const CABOOSE_KEY_BOARD: [u8; 4] = *b"BORD";
         const CABOOSE_KEY_NAME: [u8; 4] = *b"NAME";
         const CABOOSE_KEY_VERSION: [u8; 4] = *b"VERS";
+        const CABOOSE_KEY_SIGN: [u8; 4] = *b"SIGN";
+        const CABOOSE_KEY_EPOC: [u8; 4] = *b"EPOC";
 
         let apictx = rqctx.context();
         let PathSpComponent { sp, component } = path.into_inner();
         let sp_id = sp.into();
-        let sp = apictx.mgmt_switch.sp(sp_id)?;
-        let ComponentCabooseSlot { firmware_slot } = query_params.into_inner();
-        let component = component_from_str(&component)?;
 
-        let from_utf8 = |key: &[u8], bytes| {
-            // This helper closure is only called with the ascii-printable [u8; 4]
-            // key constants we define above, so we can unwrap this conversion.
-            let key = str::from_utf8(key).unwrap();
-            String::from_utf8(bytes).map_err(|_| {
-                http_err_with_message(
-                    http::StatusCode::SERVICE_UNAVAILABLE,
-                    "InvalidCaboose",
-                    format!("non-utf8 data returned for caboose key {key}"),
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let ComponentCabooseSlot { firmware_slot } =
+                query_params.into_inner();
+            let component = component_from_str(&component)?;
+
+            let from_utf8 = |key: &[u8], bytes| {
+                // This helper closure is only called with the ascii-printable [u8; 4]
+                // key constants we define above, so we can unwrap this conversion.
+                let key = str::from_utf8(key).unwrap();
+                String::from_utf8(bytes).map_err(|_| {
+                    http_err_with_message(
+                        http::StatusCode::SERVICE_UNAVAILABLE,
+                        "InvalidCaboose",
+                        format!("non-utf8 data returned for caboose key {key}"),
+                    )
+                })
+            };
+
+            let git_commit =
+                sp.read_component_caboose(
+                    component,
+                    firmware_slot,
+                    CABOOSE_KEY_GIT_COMMIT,
                 )
-            })
+                .await
+                .map_err(|err| {
+                    SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+                })?;
+            let board =
+                sp.read_component_caboose(
+                    component,
+                    firmware_slot,
+                    CABOOSE_KEY_BOARD,
+                )
+                .await
+                .map_err(|err| {
+                    SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+                })?;
+            let name =
+                sp.read_component_caboose(
+                    component,
+                    firmware_slot,
+                    CABOOSE_KEY_NAME,
+                )
+                .await
+                .map_err(|err| {
+                    SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+                })?;
+            let version =
+                sp.read_component_caboose(
+                    component,
+                    firmware_slot,
+                    CABOOSE_KEY_VERSION,
+                )
+                .await
+                .map_err(|err| {
+                    SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+                })?;
+
+            let git_commit = from_utf8(&CABOOSE_KEY_GIT_COMMIT, git_commit)?;
+            let board = from_utf8(&CABOOSE_KEY_BOARD, board)?;
+            let name = from_utf8(&CABOOSE_KEY_NAME, name)?;
+            let version = from_utf8(&CABOOSE_KEY_VERSION, version)?;
+
+            // Not all images include the SIGN or EPOC in the caboose, if it's not present
+            // don't treat it as an error
+
+            let sign = match sp
+                .read_component_caboose(
+                    component,
+                    firmware_slot,
+                    CABOOSE_KEY_SIGN,
+                )
+                .await
+                .ok()
+            {
+                None => None,
+                Some(v) => Some(from_utf8(&CABOOSE_KEY_SIGN, v)?),
+            };
+
+            let epoch = match sp
+                .read_component_caboose(
+                    component,
+                    firmware_slot,
+                    CABOOSE_KEY_EPOC,
+                )
+                .await
+                .ok()
+            {
+                None => None,
+                Some(v) => Some(from_utf8(&CABOOSE_KEY_EPOC, v)?),
+            };
+
+            let caboose = SpComponentCaboose {
+                git_commit,
+                board,
+                name,
+                version,
+                sign,
+                epoch,
+            };
+
+            Ok(HttpResponseOk(caboose))
         };
 
-        let git_commit =
-            sp.read_component_caboose(
-                component,
-                firmware_slot,
-                CABOOSE_KEY_GIT_COMMIT,
-            )
-            .await
-            .map_err(|err| {
-                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
-            })?;
-        let board = sp
-            .read_component_caboose(component, firmware_slot, CABOOSE_KEY_BOARD)
-            .await
-            .map_err(|err| SpCommsError::SpCommunicationFailed {
-                sp: sp_id,
-                err,
-            })?;
-        let name = sp
-            .read_component_caboose(component, firmware_slot, CABOOSE_KEY_NAME)
-            .await
-            .map_err(|err| SpCommsError::SpCommunicationFailed {
-                sp: sp_id,
-                err,
-            })?;
-        let version =
-            sp.read_component_caboose(
-                component,
-                firmware_slot,
-                CABOOSE_KEY_VERSION,
-            )
-            .await
-            .map_err(|err| {
-                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
-            })?;
-
-        let git_commit = from_utf8(&CABOOSE_KEY_GIT_COMMIT, git_commit)?;
-        let board = from_utf8(&CABOOSE_KEY_BOARD, board)?;
-        let name = from_utf8(&CABOOSE_KEY_NAME, name)?;
-        let version = from_utf8(&CABOOSE_KEY_VERSION, version)?;
-
-        let caboose = SpComponentCaboose { git_commit, board, name, version };
-
-        Ok(HttpResponseOk(caboose))
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn sp_component_clear_status(
@@ -267,14 +340,18 @@ impl GatewayApi for GatewayImpl {
         let apictx = rqctx.context();
         let PathSpComponent { sp, component } = path.into_inner();
         let sp_id = sp.into();
-        let sp = apictx.mgmt_switch.sp(sp_id)?;
-        let component = component_from_str(&component)?;
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let component = component_from_str(&component)?;
 
-        sp.component_clear_status(component).await.map_err(|err| {
-            SpCommsError::SpCommunicationFailed { sp: sp_id, err }
-        })?;
+            sp.component_clear_status(component).await.map_err(|err| {
+                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+            })?;
 
-        Ok(HttpResponseUpdatedNoContent {})
+            Ok(HttpResponseUpdatedNoContent {})
+        };
+
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn sp_component_active_slot_get(
@@ -284,15 +361,18 @@ impl GatewayApi for GatewayImpl {
         let apictx = rqctx.context();
         let PathSpComponent { sp, component } = path.into_inner();
         let sp_id = sp.into();
-        let sp = apictx.mgmt_switch.sp(sp_id)?;
-        let component = component_from_str(&component)?;
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let component = component_from_str(&component)?;
 
-        let slot =
-            sp.component_active_slot(component).await.map_err(|err| {
-                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
-            })?;
+            let slot =
+                sp.component_active_slot(component).await.map_err(|err| {
+                    SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+                })?;
 
-        Ok(HttpResponseOk(SpComponentFirmwareSlot { slot }))
+            Ok(HttpResponseOk(SpComponentFirmwareSlot { slot }))
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn sp_component_active_slot_set(
@@ -304,16 +384,22 @@ impl GatewayApi for GatewayImpl {
         let apictx = rqctx.context();
         let PathSpComponent { sp, component } = path.into_inner();
         let sp_id = sp.into();
-        let sp = apictx.mgmt_switch.sp(sp_id)?;
-        let component = component_from_str(&component)?;
-        let slot = body.into_inner().slot;
-        let persist = query_params.into_inner().persist;
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let component = component_from_str(&component)?;
+            let slot = body.into_inner().slot;
+            let persist = query_params.into_inner().persist;
 
-        sp.set_component_active_slot(component, slot, persist).await.map_err(
-            |err| SpCommsError::SpCommunicationFailed { sp: sp_id, err },
-        )?;
+            sp.set_component_active_slot(component, slot, persist)
+                .await
+                .map_err(|err| SpCommsError::SpCommunicationFailed {
+                    sp: sp_id,
+                    err,
+                })?;
 
-        Ok(HttpResponseUpdatedNoContent {})
+            Ok(HttpResponseUpdatedNoContent {})
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn sp_component_serial_console_attach(
@@ -321,6 +407,10 @@ impl GatewayApi for GatewayImpl {
         path: Path<PathSpComponent>,
         websocket: WebsocketUpgrade,
     ) -> WebsocketEndpointResult {
+        // TODO(eliza): I'm not sure whether there's a way to make
+        // `oximeter_instruments`'s HTTP latency tracker work with websockets
+        // requests? It would be nice to get the latency and any error returned
+        // prior to actually returning the websocket stream...
         let apictx = rqctx.context();
         let PathSpComponent { sp, component } = path.into_inner();
         let sp_id = sp.into();
@@ -356,13 +446,15 @@ impl GatewayApi for GatewayImpl {
         // we don't use it at all to detach.
         let PathSpComponent { sp, component: _ } = path.into_inner();
         let sp_id = sp.into();
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            sp.serial_console_detach().await.map_err(|err| {
+                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+            })?;
 
-        let sp = apictx.mgmt_switch.sp(sp_id)?;
-        sp.serial_console_detach().await.map_err(|err| {
-            SpCommsError::SpCommunicationFailed { sp: sp_id, err }
-        })?;
-
-        Ok(HttpResponseUpdatedNoContent {})
+            Ok(HttpResponseUpdatedNoContent {})
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn sp_component_reset(
@@ -372,20 +464,23 @@ impl GatewayApi for GatewayImpl {
         let apictx = rqctx.context();
         let PathSpComponent { sp, component } = path.into_inner();
         let sp_id = sp.into();
-        let sp = apictx.mgmt_switch.sp(sp_id)?;
-        let component = component_from_str(&component)?;
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let component = component_from_str(&component)?;
 
-        sp.reset_component_prepare(component)
-            // We always want to run with the watchdog when resetting as
-            // disabling the watchdog should be considered a debug only feature
-            .and_then(|()| sp.reset_component_trigger(component, false))
-            .await
-            .map_err(|err| SpCommsError::SpCommunicationFailed {
-                sp: sp_id,
-                err,
-            })?;
+            sp.reset_component_prepare(component)
+                // We always want to run with the watchdog when resetting as
+                // disabling the watchdog should be considered a debug only feature
+                .and_then(|()| sp.reset_component_trigger(component, false))
+                .await
+                .map_err(|err| SpCommsError::SpCommunicationFailed {
+                    sp: sp_id,
+                    err,
+                })?;
 
-        Ok(HttpResponseUpdatedNoContent {})
+            Ok(HttpResponseUpdatedNoContent {})
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn sp_component_update(
@@ -398,19 +493,22 @@ impl GatewayApi for GatewayImpl {
 
         let PathSpComponent { sp, component } = path.into_inner();
         let sp_id = sp.into();
-        let sp = apictx.mgmt_switch.sp(sp_id)?;
-        let component = component_from_str(&component)?;
-        let ComponentUpdateIdSlot { id, firmware_slot } =
-            query_params.into_inner();
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let component = component_from_str(&component)?;
+            let ComponentUpdateIdSlot { id, firmware_slot } =
+                query_params.into_inner();
 
-        // TODO-performance: this makes a full copy of the uploaded data
-        let image = body.as_bytes().to_vec();
+            // TODO-performance: this makes a full copy of the uploaded data
+            let image = body.as_bytes().to_vec();
 
-        sp.start_update(component, id, firmware_slot, image)
-            .await
-            .map_err(|err| SpCommsError::UpdateFailed { sp: sp_id, err })?;
+            sp.start_update(component, id, firmware_slot, image)
+                .await
+                .map_err(|err| SpCommsError::UpdateFailed { sp: sp_id, err })?;
 
-        Ok(HttpResponseUpdatedNoContent {})
+            Ok(HttpResponseUpdatedNoContent {})
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn sp_component_update_status(
@@ -421,14 +519,17 @@ impl GatewayApi for GatewayImpl {
 
         let PathSpComponent { sp, component } = path.into_inner();
         let sp_id = sp.into();
-        let sp = apictx.mgmt_switch.sp(sp_id)?;
-        let component = component_from_str(&component)?;
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let component = component_from_str(&component)?;
 
-        let status = sp.update_status(component).await.map_err(|err| {
-            SpCommsError::SpCommunicationFailed { sp: sp_id, err }
-        })?;
+            let status = sp.update_status(component).await.map_err(|err| {
+                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+            })?;
 
-        Ok(HttpResponseOk(status.into()))
+            Ok(HttpResponseOk(status.into()))
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn sp_component_update_abort(
@@ -440,15 +541,18 @@ impl GatewayApi for GatewayImpl {
 
         let PathSpComponent { sp, component } = path.into_inner();
         let sp_id = sp.into();
-        let sp = apictx.mgmt_switch.sp(sp_id)?;
-        let component = component_from_str(&component)?;
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let component = component_from_str(&component)?;
 
-        let UpdateAbortBody { id } = body.into_inner();
-        sp.update_abort(component, id).await.map_err(|err| {
-            SpCommsError::SpCommunicationFailed { sp: sp_id, err }
-        })?;
+            let UpdateAbortBody { id } = body.into_inner();
+            sp.update_abort(component, id).await.map_err(|err| {
+                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+            })?;
 
-        Ok(HttpResponseUpdatedNoContent {})
+            Ok(HttpResponseUpdatedNoContent {})
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn sp_rot_cmpa_get(
@@ -459,24 +563,26 @@ impl GatewayApi for GatewayImpl {
 
         let PathSpComponent { sp, component } = path.into_inner();
         let sp_id = sp.into();
+        let handler = async {
+            // Ensure the caller knows they're asking for the RoT
+            if component_from_str(&component)? != SpComponent::ROT {
+                return Err(HttpError::for_bad_request(
+                    Some("RequestUnsupportedForComponent".to_string()),
+                    "Only the RoT has a CFPA".into(),
+                ));
+            }
 
-        // Ensure the caller knows they're asking for the RoT
-        if component_from_str(&component)? != SpComponent::ROT {
-            return Err(HttpError::for_bad_request(
-                Some("RequestUnsupportedForComponent".to_string()),
-                "Only the RoT has a CFPA".into(),
-            ));
-        }
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let data = sp.read_rot_cmpa().await.map_err(|err| {
+                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+            })?;
 
-        let sp = apictx.mgmt_switch.sp(sp_id)?;
-        let data = sp.read_rot_cmpa().await.map_err(|err| {
-            SpCommsError::SpCommunicationFailed { sp: sp_id, err }
-        })?;
+            let base64_data =
+                base64::engine::general_purpose::STANDARD.encode(data);
 
-        let base64_data =
-            base64::engine::general_purpose::STANDARD.encode(data);
-
-        Ok(HttpResponseOk(RotCmpa { base64_data }))
+            Ok(HttpResponseOk(RotCmpa { base64_data }))
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn sp_rot_cfpa_get(
@@ -490,29 +596,32 @@ impl GatewayApi for GatewayImpl {
         let GetCfpaParams { slot } = params.into_inner();
         let sp_id = sp.into();
 
-        // Ensure the caller knows they're asking for the RoT
-        if component_from_str(&component)? != SpComponent::ROT {
-            return Err(HttpError::for_bad_request(
-                Some("RequestUnsupportedForComponent".to_string()),
-                "Only the RoT has a CFPA".into(),
-            ));
-        }
+        let handler = async {
+            // Ensure the caller knows they're asking for the RoT
+            if component_from_str(&component)? != SpComponent::ROT {
+                return Err(HttpError::for_bad_request(
+                    Some("RequestUnsupportedForComponent".to_string()),
+                    "Only the RoT has a CFPA".into(),
+                ));
+            }
 
-        let sp = apictx.mgmt_switch.sp(sp_id)?;
-        let data = match slot {
-            RotCfpaSlot::Active => sp.read_rot_active_cfpa().await,
-            RotCfpaSlot::Inactive => sp.read_rot_inactive_cfpa().await,
-            RotCfpaSlot::Scratch => sp.read_rot_scratch_cfpa().await,
-        }
-        .map_err(|err| SpCommsError::SpCommunicationFailed {
-            sp: sp_id,
-            err,
-        })?;
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let data = match slot {
+                RotCfpaSlot::Active => sp.read_rot_active_cfpa().await,
+                RotCfpaSlot::Inactive => sp.read_rot_inactive_cfpa().await,
+                RotCfpaSlot::Scratch => sp.read_rot_scratch_cfpa().await,
+            }
+            .map_err(|err| {
+                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+            })?;
 
-        let base64_data =
-            base64::engine::general_purpose::STANDARD.encode(data);
+            let base64_data =
+                base64::engine::general_purpose::STANDARD.encode(data);
 
-        Ok(HttpResponseOk(RotCfpa { base64_data, slot }))
+            Ok(HttpResponseOk(RotCfpa { base64_data, slot }))
+        };
+
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn sp_rot_boot_info(
@@ -526,20 +635,24 @@ impl GatewayApi for GatewayImpl {
         let GetRotBootInfoParams { version } = params.into_inner();
         let sp_id = sp.into();
 
-        // Ensure the caller knows they're asking for the RoT
-        if component_from_str(&component)? != SpComponent::ROT {
-            return Err(HttpError::for_bad_request(
-                Some("RequestUnsupportedForComponent".to_string()),
-                "rot_boot_info only makes sent for a RoT".into(),
-            ));
-        }
+        let handler = async {
+            // Ensure the caller knows they're asking for the RoT
+            if component_from_str(&component)? != SpComponent::ROT {
+                return Err(HttpError::for_bad_request(
+                    Some("RequestUnsupportedForComponent".to_string()),
+                    "rot_boot_info only makes sent for a RoT".into(),
+                ));
+            }
 
-        let sp = apictx.mgmt_switch.sp(sp_id)?;
-        let state = sp.rot_state(version).await.map_err(|err| {
-            SpCommsError::SpCommunicationFailed { sp: sp_id, err }
-        })?;
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let state = sp.rot_state(version).await.map_err(|err| {
+                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+            })?;
 
-        Ok(HttpResponseOk(state.into()))
+            Ok(HttpResponseOk(state.into()))
+        };
+
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn ignition_list(
@@ -547,17 +660,19 @@ impl GatewayApi for GatewayImpl {
     ) -> Result<HttpResponseOk<Vec<SpIgnitionInfo>>, HttpError> {
         let apictx = rqctx.context();
         let mgmt_switch = &apictx.mgmt_switch;
+        let handler = async {
+            let out = mgmt_switch
+                .bulk_ignition_state()
+                .await?
+                .map(|(id, state)| SpIgnitionInfo {
+                    id: id.into(),
+                    details: state.into(),
+                })
+                .collect();
 
-        let out = mgmt_switch
-            .bulk_ignition_state()
-            .await?
-            .map(|(id, state)| SpIgnitionInfo {
-                id: id.into(),
-                details: state.into(),
-            })
-            .collect();
-
-        Ok(HttpResponseOk(out))
+            Ok(HttpResponseOk(out))
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn ignition_get(
@@ -568,19 +683,23 @@ impl GatewayApi for GatewayImpl {
         let mgmt_switch = &apictx.mgmt_switch;
 
         let sp_id = path.into_inner().sp.into();
-        let ignition_target = mgmt_switch.ignition_target(sp_id)?;
+        let handler = async {
+            let ignition_target = mgmt_switch.ignition_target(sp_id)?;
 
-        let state = mgmt_switch
-            .ignition_controller()
-            .ignition_state(ignition_target)
-            .await
-            .map_err(|err| SpCommsError::SpCommunicationFailed {
-                sp: sp_id,
-                err,
-            })?;
+            let state = mgmt_switch
+                .ignition_controller()
+                .ignition_state(ignition_target)
+                .await
+                .map_err(|err| SpCommsError::SpCommunicationFailed {
+                    sp: sp_id,
+                    err,
+                })?;
 
-        let info = SpIgnitionInfo { id: sp_id.into(), details: state.into() };
-        Ok(HttpResponseOk(info))
+            let info =
+                SpIgnitionInfo { id: sp_id.into(), details: state.into() };
+            Ok(HttpResponseOk(info))
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn ignition_command(
@@ -591,18 +710,22 @@ impl GatewayApi for GatewayImpl {
         let mgmt_switch = &apictx.mgmt_switch;
         let PathSpIgnitionCommand { sp, command } = path.into_inner();
         let sp_id = sp.into();
-        let ignition_target = mgmt_switch.ignition_target(sp_id)?;
 
-        mgmt_switch
-            .ignition_controller()
-            .ignition_command(ignition_target, command.into())
-            .await
-            .map_err(|err| SpCommsError::SpCommunicationFailed {
-                sp: sp_id,
-                err,
-            })?;
+        let handler = async {
+            let ignition_target = mgmt_switch.ignition_target(sp_id)?;
 
-        Ok(HttpResponseUpdatedNoContent {})
+            mgmt_switch
+                .ignition_controller()
+                .ignition_command(ignition_target, command.into())
+                .await
+                .map_err(|err| SpCommsError::SpCommunicationFailed {
+                    sp: sp_id,
+                    err,
+                })?;
+
+            Ok(HttpResponseUpdatedNoContent {})
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn sp_power_state_get(
@@ -611,13 +734,16 @@ impl GatewayApi for GatewayImpl {
     ) -> Result<HttpResponseOk<PowerState>, HttpError> {
         let apictx = rqctx.context();
         let sp_id = path.into_inner().sp.into();
-        let sp = apictx.mgmt_switch.sp(sp_id)?;
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
 
-        let power_state = sp.power_state().await.map_err(|err| {
-            SpCommsError::SpCommunicationFailed { sp: sp_id, err }
-        })?;
+            let power_state = sp.power_state().await.map_err(|err| {
+                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+            })?;
 
-        Ok(HttpResponseOk(power_state.into()))
+            Ok(HttpResponseOk(power_state.into()))
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn sp_power_state_set(
@@ -627,14 +753,17 @@ impl GatewayApi for GatewayImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
         let sp_id = path.into_inner().sp.into();
-        let sp = apictx.mgmt_switch.sp(sp_id)?;
-        let power_state = body.into_inner();
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let power_state = body.into_inner();
 
-        sp.set_power_state(power_state.into()).await.map_err(|err| {
-            SpCommsError::SpCommunicationFailed { sp: sp_id, err }
-        })?;
+            sp.set_power_state(power_state.into()).await.map_err(|err| {
+                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+            })?;
 
-        Ok(HttpResponseUpdatedNoContent {})
+            Ok(HttpResponseUpdatedNoContent {})
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn sp_installinator_image_id_set(
@@ -646,21 +775,23 @@ impl GatewayApi for GatewayImpl {
 
         let apictx = rqctx.context();
         let sp_id = path.into_inner().sp.into();
-        let sp = apictx.mgmt_switch.sp(sp_id)?;
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
 
-        let image_id = ipcc::InstallinatorImageId::from(body.into_inner());
+            let image_id = ipcc::InstallinatorImageId::from(body.into_inner());
 
-        sp.set_ipcc_key_lookup_value(
-            Key::InstallinatorImageId as u8,
-            image_id.serialize(),
-        )
-        .await
-        .map_err(|err| SpCommsError::SpCommunicationFailed {
-            sp: sp_id,
-            err,
-        })?;
+            sp.set_ipcc_key_lookup_value(
+                Key::InstallinatorImageId as u8,
+                image_id.serialize(),
+            )
+            .await
+            .map_err(|err| {
+                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+            })?;
 
-        Ok(HttpResponseUpdatedNoContent {})
+            Ok(HttpResponseUpdatedNoContent {})
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn sp_installinator_image_id_delete(
@@ -671,20 +802,22 @@ impl GatewayApi for GatewayImpl {
 
         let apictx = rqctx.context();
         let sp_id = path.into_inner().sp.into();
-        let sp = apictx.mgmt_switch.sp(sp_id)?;
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
 
-        // We clear the image ID by setting it to a 0-length vec.
-        sp.set_ipcc_key_lookup_value(
-            Key::InstallinatorImageId as u8,
-            Vec::new(),
-        )
-        .await
-        .map_err(|err| SpCommsError::SpCommunicationFailed {
-            sp: sp_id,
-            err,
-        })?;
+            // We clear the image ID by setting it to a 0-length vec.
+            sp.set_ipcc_key_lookup_value(
+                Key::InstallinatorImageId as u8,
+                Vec::new(),
+            )
+            .await
+            .map_err(|err| {
+                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+            })?;
 
-        Ok(HttpResponseUpdatedNoContent {})
+            Ok(HttpResponseUpdatedNoContent {})
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn sp_host_phase2_progress_get(
@@ -692,37 +825,41 @@ impl GatewayApi for GatewayImpl {
         path: Path<PathSp>,
     ) -> Result<HttpResponseOk<HostPhase2Progress>, HttpError> {
         let apictx = rqctx.context();
-        let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
 
-        let Some(progress) = sp.most_recent_host_phase2_request().await else {
-            return Ok(HttpResponseOk(HostPhase2Progress::None));
+            let Some(progress) = sp.most_recent_host_phase2_request().await
+            else {
+                return Ok(HttpResponseOk(HostPhase2Progress::None));
+            };
+
+            // Our `host_phase2_provider` is using an in-memory cache, so the only way
+            // we can fail to get the total size is if we no longer have the image that
+            // this SP most recently requested. We'll treat that as "no progress
+            // information", since it almost certainly means our progress info on this
+            // SP is very stale.
+            let Ok(total_size) =
+                apictx.host_phase2_provider.total_size(progress.hash).await
+            else {
+                return Ok(HttpResponseOk(HostPhase2Progress::None));
+            };
+
+            let image_id = HostPhase2RecoveryImageId {
+                sha256_hash: ArtifactHash(progress.hash),
+            };
+
+            // `progress` tells us the offset the SP requested and the amount of data we
+            // sent starting at that offset; report the end of that chunk to our caller.
+            let offset = progress.offset.saturating_add(progress.data_sent);
+
+            Ok(HttpResponseOk(HostPhase2Progress::Available {
+                image_id,
+                offset,
+                total_size,
+                age: progress.received.elapsed(),
+            }))
         };
-
-        // Our `host_phase2_provider` is using an in-memory cache, so the only way
-        // we can fail to get the total size is if we no longer have the image that
-        // this SP most recently requested. We'll treat that as "no progress
-        // information", since it almost certainly means our progress info on this
-        // SP is very stale.
-        let Ok(total_size) =
-            apictx.host_phase2_provider.total_size(progress.hash).await
-        else {
-            return Ok(HttpResponseOk(HostPhase2Progress::None));
-        };
-
-        let image_id = HostPhase2RecoveryImageId {
-            sha256_hash: ArtifactHash(progress.hash),
-        };
-
-        // `progress` tells us the offset the SP requested and the amount of data we
-        // sent starting at that offset; report the end of that chunk to our caller.
-        let offset = progress.offset.saturating_add(progress.data_sent);
-
-        Ok(HttpResponseOk(HostPhase2Progress::Available {
-            image_id,
-            offset,
-            total_size,
-            age: progress.received.elapsed(),
-        }))
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn sp_host_phase2_progress_delete(
@@ -730,11 +867,14 @@ impl GatewayApi for GatewayImpl {
         path: Path<PathSp>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
-        let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
 
-        sp.clear_most_recent_host_phase2_request().await;
+            sp.clear_most_recent_host_phase2_request().await;
 
-        Ok(HttpResponseUpdatedNoContent {})
+            Ok(HttpResponseUpdatedNoContent {})
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn recovery_host_phase2_upload(
@@ -742,44 +882,55 @@ impl GatewayApi for GatewayImpl {
         body: UntypedBody,
     ) -> Result<HttpResponseOk<HostPhase2RecoveryImageId>, HttpError> {
         let apictx = rqctx.context();
+        let handler = async {
+            // TODO: this makes a full copy of the host image, potentially unnecessarily
+            // if it's malformed.
+            let image = body.as_bytes().to_vec();
 
-        // TODO: this makes a full copy of the host image, potentially unnecessarily
-        // if it's malformed.
-        let image = body.as_bytes().to_vec();
+            let sha256_hash =
+                apictx.host_phase2_provider.insert(image).await.map_err(
+                    |err| {
+                        // Any cache-insertion failure indicates a malformed image; map them
+                        // to bad requests.
+                        HttpError::for_bad_request(
+                            Some("BadHostPhase2Image".to_string()),
+                            err.to_string(),
+                        )
+                    },
+                )?;
+            let sha256_hash = ArtifactHash(sha256_hash);
 
-        let sha256_hash =
-            apictx.host_phase2_provider.insert(image).await.map_err(|err| {
-                // Any cache-insertion failure indicates a malformed image; map them
-                // to bad requests.
-                HttpError::for_bad_request(
-                    Some("BadHostPhase2Image".to_string()),
-                    err.to_string(),
-                )
-            })?;
-        let sha256_hash = ArtifactHash(sha256_hash);
-
-        Ok(HttpResponseOk(HostPhase2RecoveryImageId { sha256_hash }))
+            Ok(HttpResponseOk(HostPhase2RecoveryImageId { sha256_hash }))
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn sp_local_switch_id(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SpIdentifier>, HttpError> {
         let apictx = rqctx.context();
+        let handler = async {
+            let id = apictx.mgmt_switch.local_switch()?;
 
-        let id = apictx.mgmt_switch.local_switch()?;
-
-        Ok(HttpResponseOk(id.into()))
+            Ok(HttpResponseOk(id.into()))
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
     async fn sp_all_ids(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<SpIdentifier>>, HttpError> {
         let apictx = rqctx.context();
+        let handler = async {
+            let all_ids = apictx
+                .mgmt_switch
+                .all_sps()?
+                .map(|(id, _)| id.into())
+                .collect();
 
-        let all_ids =
-            apictx.mgmt_switch.all_sps()?.map(|(id, _)| id.into()).collect();
-
-        Ok(HttpResponseOk(all_ids))
+            Ok(HttpResponseOk(all_ids))
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 }
 

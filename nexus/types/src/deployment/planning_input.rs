@@ -14,6 +14,8 @@ use crate::external_api::views::PhysicalDiskState;
 use crate::external_api::views::SledPolicy;
 use crate::external_api::views::SledProvisionPolicy;
 use crate::external_api::views::SledState;
+use chrono::DateTime;
+use chrono::Utc;
 use clap::ValueEnum;
 use ipnetwork::IpNetwork;
 use omicron_common::address::IpRange;
@@ -22,6 +24,7 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::SourceNatConfigError;
 use omicron_common::disk::DiskIdentity;
+use omicron_common::policy::SINGLE_NODE_CLICKHOUSE_REDUNDANCY;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -31,6 +34,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::error;
 use std::fmt;
 use strum::IntoEnumIterator;
 
@@ -65,6 +69,9 @@ pub struct PlanningInput {
     cockroachdb_settings: CockroachDbSettings,
 
     /// per-sled policy and resources
+    ///
+    /// This includes decommissioned sleds -- we always make callers pass in a
+    /// filter to ensure that they're working within the right subset of sleds.
     sleds: BTreeMap<SledUuid, SledDetails>,
 
     /// per-zone network resources
@@ -95,6 +102,14 @@ impl PlanningInput {
         self.policy.target_nexus_zone_count
     }
 
+    pub fn target_internal_dns_zone_count(&self) -> usize {
+        self.policy.target_internal_dns_zone_count
+    }
+
+    pub fn target_oximeter_zone_count(&self) -> usize {
+        self.policy.target_oximeter_zone_count
+    }
+
     pub fn target_cockroachdb_zone_count(&self) -> usize {
         self.policy.target_cockroachdb_zone_count
     }
@@ -105,8 +120,53 @@ impl PlanningInput {
         self.policy.target_cockroachdb_cluster_version
     }
 
+    pub fn target_crucible_pantry_zone_count(&self) -> usize {
+        self.policy.target_crucible_pantry_zone_count
+    }
+
+    pub fn target_clickhouse_zone_count(&self) -> usize {
+        match self.policy.clickhouse_policy.as_ref().map(|policy| &policy.mode)
+        {
+            Some(&ClickhouseMode::ClusterOnly { .. }) => 0,
+            Some(&ClickhouseMode::SingleNodeOnly)
+            | Some(&ClickhouseMode::Both { .. })
+            | None => SINGLE_NODE_CLICKHOUSE_REDUNDANCY,
+        }
+    }
+
+    pub fn target_clickhouse_server_zone_count(&self) -> usize {
+        self.policy
+            .clickhouse_policy
+            .as_ref()
+            .map(|policy| usize::from(policy.mode.target_servers()))
+            .unwrap_or(0)
+    }
+
+    pub fn target_clickhouse_keeper_zone_count(&self) -> usize {
+        self.policy
+            .clickhouse_policy
+            .as_ref()
+            .map(|policy| usize::from(policy.mode.target_keepers()))
+            .unwrap_or(0)
+    }
+
     pub fn service_ip_pool_ranges(&self) -> &[IpRange] {
         &self.policy.service_ip_pool_ranges
+    }
+
+    pub fn clickhouse_cluster_enabled(&self) -> bool {
+        let Some(clickhouse_policy) = &self.policy.clickhouse_policy else {
+            return false;
+        };
+        clickhouse_policy.mode.cluster_enabled()
+    }
+
+    pub fn clickhouse_single_node_enabled(&self) -> bool {
+        let Some(clickhouse_policy) = &self.policy.clickhouse_policy else {
+            // If there is no policy we assume single-node is enabled.
+            return true;
+        };
+        clickhouse_policy.mode.single_node_enabled()
     }
 
     pub fn all_sleds(
@@ -135,12 +195,34 @@ impl PlanningInput {
             .map(|(sled_id, details)| (sled_id, &details.resources))
     }
 
-    pub fn sled_policy(&self, sled_id: &SledUuid) -> Option<SledPolicy> {
-        self.sleds.get(sled_id).map(|details| details.policy)
-    }
-
-    pub fn sled_resources(&self, sled_id: &SledUuid) -> Option<&SledResources> {
-        self.sleds.get(sled_id).map(|details| &details.resources)
+    /// Look up a sled in the planning input, returning an error if it is
+    /// missing or filtered out.
+    ///
+    /// This accepts a [`SledFilter`] to ensure that callers are working within
+    /// the right subset of sleds.
+    pub fn sled_lookup(
+        &self,
+        filter: SledFilter,
+        sled_id: SledUuid,
+    ) -> Result<&SledDetails, SledLookupError> {
+        match self.sleds.get(&sled_id) {
+            Some(details) => {
+                if filter
+                    .matches_policy_and_state(details.policy, details.state)
+                {
+                    Ok(details)
+                } else {
+                    Err(SledLookupError {
+                        sled_id,
+                        kind: SledLookupErrorKind::Filtered { filter },
+                    })
+                }
+            }
+            None => Err(SledLookupError {
+                sled_id,
+                kind: SledLookupErrorKind::Missing,
+            }),
+        }
     }
 
     pub fn network_resources(&self) -> &OmicronZoneNetworkResources {
@@ -161,6 +243,64 @@ impl PlanningInput {
             network_resources: self.network_resources,
         }
     }
+}
+
+/// Error type for sled lookups in a [`PlanningInput`].
+///
+/// If looking up a sled in a [`PlanningInput`] fails, it can be either a
+/// missing sled, or a sled that was filtered out by the provided filter. This
+/// error type distinguishes between those two cases.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SledLookupError {
+    sled_id: SledUuid,
+    kind: SledLookupErrorKind,
+}
+
+impl SledLookupError {
+    /// Returns the ID of the sled that was looked up.
+    pub fn sled_id(&self) -> SledUuid {
+        self.sled_id
+    }
+
+    /// Returns the kind of error that occurred during the lookup.
+    pub fn kind(&self) -> SledLookupErrorKind {
+        self.kind
+    }
+}
+
+impl fmt::Display for SledLookupError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.kind {
+            SledLookupErrorKind::Filtered { filter } => {
+                write!(
+                    f,
+                    "sled {} was filtered out by the {:?} filter",
+                    self.sled_id, filter
+                )
+            }
+            SledLookupErrorKind::Missing => {
+                write!(
+                    f,
+                    "sled {} was not found in the planning input",
+                    self.sled_id
+                )
+            }
+        }
+    }
+}
+
+impl error::Error for SledLookupError {}
+
+/// The error kind for a sled lookup.
+///
+/// Returned by [`SledLookupError::kind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SledLookupErrorKind {
+    /// The sled was filtered out by the provided filter.
+    Filtered { filter: SledFilter },
+
+    /// The sled was not found in the planning input.
+    Missing,
 }
 
 /// Describes the current values for any CockroachDB settings that we care
@@ -517,6 +657,11 @@ pub enum SledFilter {
     // ---
     // Prefer to keep this list in alphabetical order.
     // ---
+    /// All sleds in the system, regardless of policy or state.
+    ///
+    /// This returns both commissioned and decommissioned sleds. Use with care.
+    All,
+
     /// All sleds that are currently part of the control plane cluster.
     ///
     /// Intentionally omits decommissioned sleds, but is otherwise the filter to
@@ -595,6 +740,7 @@ impl SledPolicy {
             SledPolicy::InService {
                 provision_policy: SledProvisionPolicy::Provisionable,
             } => match filter {
+                SledFilter::All => true,
                 SledFilter::Commissioned => true,
                 SledFilter::Decommissioned => false,
                 SledFilter::Discretionary => true,
@@ -607,6 +753,7 @@ impl SledPolicy {
             SledPolicy::InService {
                 provision_policy: SledProvisionPolicy::NonProvisionable,
             } => match filter {
+                SledFilter::All => true,
                 SledFilter::Commissioned => true,
                 SledFilter::Decommissioned => false,
                 SledFilter::Discretionary => false,
@@ -617,6 +764,7 @@ impl SledPolicy {
                 SledFilter::VpcFirewall => true,
             },
             SledPolicy::Expunged => match filter {
+                SledFilter::All => true,
                 SledFilter::Commissioned => true,
                 SledFilter::Decommissioned => true,
                 SledFilter::Discretionary => false,
@@ -649,6 +797,7 @@ impl SledState {
         // See `SledFilter::matches` above for some notes.
         match self {
             SledState::Active => match filter {
+                SledFilter::All => true,
                 SledFilter::Commissioned => true,
                 SledFilter::Decommissioned => false,
                 SledFilter::Discretionary => true,
@@ -659,6 +808,7 @@ impl SledState {
                 SledFilter::VpcFirewall => true,
             },
             SledState::Decommissioned => match filter {
+                SledFilter::All => true,
                 SledFilter::Commissioned => false,
                 SledFilter::Decommissioned => true,
                 SledFilter::Discretionary => false,
@@ -709,8 +859,20 @@ pub struct Policy {
     /// desired total number of deployed Nexus zones
     pub target_nexus_zone_count: usize,
 
+    /// desired total number of internal DNS zones.
+    /// Must be <= [`omicron_common::policy::INTERNAL_DNS_REDUNDANCY`]; we
+    /// expect it to be exactly equal in general (i.e., we should be running an
+    /// internal DNS server on each of the expected reserved addresses).
+    pub target_internal_dns_zone_count: usize,
+
+    /// desired total number of deployed Oximeter zones
+    pub target_oximeter_zone_count: usize,
+
     /// desired total number of deployed CockroachDB zones
     pub target_cockroachdb_zone_count: usize,
+
+    /// desired total number of deployed CruciblePantry zones
+    pub target_crucible_pantry_zone_count: usize,
 
     /// desired CockroachDB `cluster.preserve_downgrade_option` setting.
     /// at present this is hardcoded based on the version of CockroachDB we
@@ -725,14 +887,59 @@ pub struct Policy {
     pub clickhouse_policy: Option<ClickhousePolicy>,
 }
 
-/// Policy for replicated clickhouse setups
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ClickhousePolicy {
-    /// Desired number of clickhouse servers
-    pub target_servers: usize,
+    pub version: u32,
+    pub mode: ClickhouseMode,
+    pub time_created: DateTime<Utc>,
+}
 
-    /// Desired number of clickhouse keepers
-    pub target_keepers: usize,
+/// How to deploy clickhouse nodes
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+pub enum ClickhouseMode {
+    SingleNodeOnly,
+    ClusterOnly { target_servers: u8, target_keepers: u8 },
+    Both { target_servers: u8, target_keepers: u8 },
+}
+
+impl ClickhouseMode {
+    pub fn cluster_enabled(&self) -> bool {
+        match self {
+            ClickhouseMode::SingleNodeOnly => false,
+            ClickhouseMode::ClusterOnly { .. }
+            | ClickhouseMode::Both { .. } => true,
+        }
+    }
+
+    pub fn single_node_enabled(&self) -> bool {
+        match self {
+            ClickhouseMode::ClusterOnly { .. } => false,
+            ClickhouseMode::SingleNodeOnly | ClickhouseMode::Both { .. } => {
+                true
+            }
+        }
+    }
+
+    pub fn target_servers(&self) -> u8 {
+        match self {
+            ClickhouseMode::SingleNodeOnly => 0,
+            ClickhouseMode::ClusterOnly { target_servers, .. } => {
+                *target_servers
+            }
+            ClickhouseMode::Both { target_servers, .. } => *target_servers,
+        }
+    }
+
+    pub fn target_keepers(&self) -> u8 {
+        match self {
+            ClickhouseMode::SingleNodeOnly => 0,
+            ClickhouseMode::ClusterOnly { target_keepers, .. } => {
+                *target_keepers
+            }
+            ClickhouseMode::Both { target_keepers, .. } => *target_keepers,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -782,9 +989,12 @@ impl PlanningInputBuilder {
                 service_ip_pool_ranges: Vec::new(),
                 target_boundary_ntp_zone_count: 0,
                 target_nexus_zone_count: 0,
+                target_internal_dns_zone_count: 0,
+                target_oximeter_zone_count: 0,
                 target_cockroachdb_zone_count: 0,
                 target_cockroachdb_cluster_version:
                     CockroachDbClusterVersion::POLICY,
+                target_crucible_pantry_zone_count: 0,
                 clickhouse_policy: None,
             },
             internal_dns_version: Generation::new(),

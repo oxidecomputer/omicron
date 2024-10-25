@@ -3,15 +3,13 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::Context;
-use clickward::{
-    BasePorts, Deployment, DeploymentConfig, KeeperClient, KeeperError,
-    KeeperId,
-};
+use clickward::{BasePorts, Deployment, DeploymentConfig, KeeperId};
 use dropshot::test_util::log_prefix_for_test;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::test_setup_log;
 use oximeter_db::{Client, DbWrite, OxqlResult, Sample, TestDbWrite};
-use slog::{debug, info, Logger};
+use oximeter_test_utils::wait_for_keepers;
+use slog::{info, Logger};
 use std::collections::BTreeSet;
 use std::default::Default;
 use std::time::Duration;
@@ -65,7 +63,8 @@ async fn test_schemas_disjoint() -> anyhow::Result<()> {
     deployment.deploy().context("failed to deploy")?;
 
     let client1 = Client::new_with_request_timeout(
-        deployment.http_addr(1.into())?,
+        deployment.http_addr(1.into()),
+        deployment.native_addr(1.into()),
         log,
         request_timeout,
     );
@@ -160,12 +159,14 @@ async fn test_cluster() -> anyhow::Result<()> {
     deployment.deploy().context("failed to deploy")?;
 
     let client1 = Client::new_with_request_timeout(
-        deployment.http_addr(1.into())?,
+        deployment.http_addr(1.into()),
+        deployment.native_addr(1.into()),
         log,
         request_timeout,
     );
     let client2 = Client::new_with_request_timeout(
-        deployment.http_addr(2.into())?,
+        deployment.http_addr(2.into()),
+        deployment.native_addr(2.into()),
         log,
         request_timeout,
     );
@@ -230,7 +231,8 @@ async fn test_cluster() -> anyhow::Result<()> {
     // Add a 3rd clickhouse server and wait for it to come up
     deployment.add_server().expect("failed to launch a 3rd clickhouse server");
     let client3 = Client::new_with_request_timeout(
-        deployment.http_addr(3.into())?,
+        deployment.http_addr(3.into()),
+        deployment.native_addr(3.into()),
         log,
         request_timeout,
     );
@@ -297,19 +299,20 @@ async fn test_cluster() -> anyhow::Result<()> {
         .expect("failed to get samples from client1");
 
     // We still have a quorum (2 of 3 keepers), so we should be able to insert
+    // Removing a node may require a new leader election which would require
+    // some polling, so we go ahead and do that.
     let samples = oximeter_test_utils::generate_test_samples(
         input.n_projects,
         input.n_instances,
         input.n_cpus,
         input.n_samples,
     );
-    client3
-        .insert_samples(&samples)
+    wait_for_insert(log, &client3, &samples)
         .await
         .expect("failed to insert samples at server3");
     wait_for_num_points(&log, &client2, samples.len() * 3)
         .await
-        .expect("failed to get samples from client1");
+        .expect("failed to get samples from client2");
 
     // Stop another keeper
     deployment.stop_keeper(1.into()).expect("failed to stop keeper 1");
@@ -330,7 +333,8 @@ async fn test_cluster() -> anyhow::Result<()> {
     // few hundred milliseconds. To shorten the length of our test, we create a
     // new client with a shorter timeout.
     let client1_short_timeout = Client::new_with_request_timeout(
-        deployment.http_addr(1.into())?,
+        deployment.http_addr(1.into()),
+        deployment.native_addr(1.into()),
         log,
         Duration::from_secs(2),
     );
@@ -355,7 +359,9 @@ async fn test_cluster() -> anyhow::Result<()> {
         input.n_cpus,
         input.n_samples,
     );
-    client1.insert_samples(&samples).await.expect("failed to insert samples");
+    wait_for_insert(log, &client1, &samples)
+        .await
+        .expect("failed to insert samples at server1");
     wait_for_num_points(&log, &client2, samples.len() * 4)
         .await
         .expect("failed to get samples from client1");
@@ -375,7 +381,9 @@ async fn test_cluster() -> anyhow::Result<()> {
         input.n_cpus,
         input.n_samples,
     );
-    client1.insert_samples(&samples).await.expect("failed to insert samples");
+    wait_for_insert(log, &client1, &samples)
+        .await
+        .expect("failed to insert samples at server1");
     wait_for_num_points(&log, &client2, samples.len() * 5)
         .await
         .expect("failed to get samples from client1");
@@ -447,60 +455,7 @@ async fn wait_for_num_points(
     Ok(())
 }
 
-/// Wait for all keeper servers to be capable of handling commands
-async fn wait_for_keepers(
-    log: &Logger,
-    deployment: &Deployment,
-    ids: Vec<KeeperId>,
-) -> anyhow::Result<()> {
-    let mut keepers = vec![];
-    for id in &ids {
-        keepers.push(KeeperClient::new(deployment.keeper_addr(*id)?));
-    }
-
-    poll::wait_for_condition(
-        || async {
-            let mut done = true;
-            for keeper in &keepers {
-                match keeper.config().await {
-                    Ok(config) => {
-                        // The node isn't really up yet
-                        if config.len() != keepers.len() {
-                            done = false;
-                            debug!(log, "Keeper config not set";
-                                "addr" => keeper.addr(),
-                                "expected" => keepers.len(),
-                                "got" => config.len()
-                            );
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        done = false;
-                        debug!(log, "Keeper connection error: {}", e;
-                            "addr" => keeper.addr()
-                        );
-                        break;
-                    }
-                }
-            }
-            if !done {
-                Err(poll::CondCheckError::<KeeperError>::NotYet)
-            } else {
-                Ok(())
-            }
-        },
-        &Duration::from_millis(1),
-        &Duration::from_secs(30),
-    )
-    .await
-    .with_context(|| format!("failed to contact all keepers: {ids:?}"))?;
-
-    info!(log, "Keepers ready: {ids:?}");
-    Ok(())
-}
-
-/// Try to ping the server until it is responds.
+/// Try to ping the server until it responds.
 async fn wait_for_ping(log: &Logger, client: &Client) -> anyhow::Result<()> {
     poll::wait_for_condition(
         || async {
@@ -509,13 +464,40 @@ async fn wait_for_ping(log: &Logger, client: &Client) -> anyhow::Result<()> {
                 .await
                 .map_err(|_| poll::CondCheckError::<oximeter_db::Error>::NotYet)
         },
-        &Duration::from_millis(1),
-        &Duration::from_secs(10),
+        &Duration::from_millis(100),
+        &Duration::from_secs(30),
     )
     .await
     .with_context(|| {
         format!("failed to ping clickhouse server: {}", client.url())
     })?;
     info!(log, "Clickhouse server ready: {}", client.url());
+    Ok(())
+}
+
+/// Wait for insert to succeed after messing with keeper configuration
+async fn wait_for_insert(
+    log: &Logger,
+    client: &Client,
+    samples: &[Sample],
+) -> anyhow::Result<()> {
+    poll::wait_for_condition(
+        || async {
+            client
+                .insert_samples(&samples)
+                .await
+                .map_err(|_| poll::CondCheckError::<oximeter_db::Error>::NotYet)
+        },
+        &Duration::from_millis(1000),
+        &Duration::from_secs(60),
+    )
+    .await
+    .with_context(|| {
+        format!(
+            "failed to insert samples at clickhouse server: {}",
+            client.url()
+        )
+    })?;
+    info!(log, "inserted samples at clickhouse server: {}", client.url());
     Ok(())
 }

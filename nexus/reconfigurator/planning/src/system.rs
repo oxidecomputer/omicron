@@ -13,7 +13,9 @@ use nexus_inventory::CollectionBuilder;
 use nexus_sled_agent_shared::inventory::Baseboard;
 use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
+use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::SledRole;
+use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::PlanningInputBuilder;
@@ -39,9 +41,8 @@ use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
+use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
-use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use std::collections::BTreeMap;
@@ -81,11 +82,15 @@ pub struct SystemDescription {
     available_scrimlet_slots: BTreeSet<u16>,
     target_boundary_ntp_zone_count: usize,
     target_nexus_zone_count: usize,
+    target_internal_dns_zone_count: usize,
+    target_oximeter_zone_count: usize,
     target_cockroachdb_zone_count: usize,
     target_cockroachdb_cluster_version: CockroachDbClusterVersion,
+    target_crucible_pantry_zone_count: usize,
     service_ip_pool_ranges: Vec<IpRange>,
     internal_dns_version: Generation,
     external_dns_version: Generation,
+    clickhouse_policy: Option<ClickhousePolicy>,
 }
 
 impl SystemDescription {
@@ -130,13 +135,16 @@ impl SystemDescription {
 
         // Policy defaults
         let target_nexus_zone_count = NEXUS_REDUNDANCY;
+        let target_internal_dns_zone_count = INTERNAL_DNS_REDUNDANCY;
 
         // TODO-cleanup These are wrong, but we don't currently set up any
-        // boundary NTP or CRDB nodes in our fake system, so this prevents
-        // downstream test issues with the planner thinking our system is out of
-        // date from the gate.
+        // of these zones in our fake system, so this prevents downstream test
+        // issues with the planner thinking our system is out of date from the
+        // gate.
         let target_boundary_ntp_zone_count = 0;
         let target_cockroachdb_zone_count = 0;
+        let target_oximeter_zone_count = 0;
+        let target_crucible_pantry_zone_count = 0;
 
         let target_cockroachdb_cluster_version =
             CockroachDbClusterVersion::POLICY;
@@ -156,11 +164,15 @@ impl SystemDescription {
             available_scrimlet_slots,
             target_boundary_ntp_zone_count,
             target_nexus_zone_count,
+            target_internal_dns_zone_count,
+            target_oximeter_zone_count,
             target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version,
+            target_crucible_pantry_zone_count,
             service_ip_pool_ranges,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
+            clickhouse_policy: None,
         }
     }
 
@@ -198,11 +210,45 @@ impl SystemDescription {
         self
     }
 
+    pub fn get_target_nexus_zone_count(&self) -> usize {
+        self.target_nexus_zone_count
+    }
+
+    pub fn target_crucible_pantry_zone_count(
+        &mut self,
+        count: usize,
+    ) -> &mut Self {
+        self.target_crucible_pantry_zone_count = count;
+        self
+    }
+
+    pub fn get_target_crucible_pantry_zone_count(&self) -> usize {
+        self.target_crucible_pantry_zone_count
+    }
+
+    pub fn target_internal_dns_zone_count(
+        &mut self,
+        count: usize,
+    ) -> &mut Self {
+        self.target_internal_dns_zone_count = count;
+        self
+    }
+
+    pub fn get_target_internal_dns_zone_count(&self) -> usize {
+        self.target_internal_dns_zone_count
+    }
+
     pub fn service_ip_pool_ranges(
         &mut self,
         ranges: Vec<IpRange>,
     ) -> &mut Self {
         self.service_ip_pool_ranges = ranges;
+        self
+    }
+
+    /// Set the clickhouse policy
+    pub fn clickhouse_policy(&mut self, policy: ClickhousePolicy) -> &mut Self {
+        self.clickhouse_policy = Some(policy);
         self
     }
 
@@ -249,6 +295,7 @@ impl SystemDescription {
             sled.unique,
             sled.hardware,
             hardware_slot,
+            sled.omicron_zones,
             sled.npools,
         );
         self.sleds.insert(sled_id, sled);
@@ -256,11 +303,16 @@ impl SystemDescription {
     }
 
     /// Add a sled to the system based on information that came from the
-    /// database of an existing system
+    /// database of an existing system.
+    ///
+    /// Note that `sled_policy` and `sled_state` are currently not checked for
+    /// internal consistency! This is to permit testing of the Planner with
+    /// invalid inputs.
     pub fn sled_full(
         &mut self,
         sled_id: SledUuid,
         sled_policy: SledPolicy,
+        sled_state: SledState,
         sled_resources: SledResources,
         inventory_sp: Option<SledHwInventory<'_>>,
         inventory_sled_agent: &nexus_types::inventory::SledAgent,
@@ -275,11 +327,40 @@ impl SystemDescription {
             Sled::new_full(
                 sled_id,
                 sled_policy,
+                sled_state,
                 sled_resources,
                 inventory_sp,
                 inventory_sled_agent,
             ),
         );
+        Ok(self)
+    }
+
+    /// Return true if the system has any sleds in it.
+    pub fn has_sleds(&self) -> bool {
+        !self.sleds.is_empty()
+    }
+
+    /// Set Omicron zones for a sled.
+    ///
+    /// The zones will be reported in the collection generated by
+    /// [`Self::to_collection_builder`].
+    ///
+    /// Returns an error if the sled is not found.
+    ///
+    /// # Notes
+    ///
+    /// It is okay to call `sled_set_omicron_zones` in ways that wouldn't
+    /// happen in production, such as to test illegal states.
+    pub fn sled_set_omicron_zones(
+        &mut self,
+        sled_id: SledUuid,
+        omicron_zones: OmicronZonesConfig,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
+            format!("attempted to access sled {} not found in system", sled_id)
+        })?;
+        sled.inventory_sled_agent.omicron_zones = omicron_zones;
         Ok(self)
     }
 
@@ -325,10 +406,14 @@ impl SystemDescription {
             service_ip_pool_ranges: self.service_ip_pool_ranges.clone(),
             target_boundary_ntp_zone_count: self.target_boundary_ntp_zone_count,
             target_nexus_zone_count: self.target_nexus_zone_count,
+            target_internal_dns_zone_count: self.target_internal_dns_zone_count,
+            target_oximeter_zone_count: self.target_oximeter_zone_count,
             target_cockroachdb_zone_count: self.target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version: self
                 .target_cockroachdb_cluster_version,
-            clickhouse_policy: None,
+            target_crucible_pantry_zone_count: self
+                .target_crucible_pantry_zone_count,
+            clickhouse_policy: self.clickhouse_policy.clone(),
         };
         let mut builder = PlanningInputBuilder::new(
             policy,
@@ -340,11 +425,8 @@ impl SystemDescription {
         for sled in self.sleds.values() {
             let sled_details = SledDetails {
                 policy: sled.policy,
-                state: SledState::Active,
-                resources: SledResources {
-                    zpools: sled.zpools.clone(),
-                    subnet: sled.sled_subnet,
-                },
+                state: sled.state,
+                resources: sled.resources.clone(),
             };
             builder.add_sled(sled.sled_id, sled_details)?;
         }
@@ -368,10 +450,16 @@ pub struct SledBuilder {
     hardware: SledHardware,
     hardware_slot: Option<u16>,
     sled_role: SledRole,
+    omicron_zones: OmicronZonesConfig,
     npools: u8,
 }
 
 impl SledBuilder {
+    /// The default number of U.2 (external) pools for a sled.
+    ///
+    /// The default is `10` based on the typical value for a Gimlet.
+    pub const DEFAULT_NPOOLS: u8 = 10;
+
     /// Begin describing a sled to be added to a `SystemDescription`
     pub fn new() -> Self {
         SledBuilder {
@@ -380,7 +468,12 @@ impl SledBuilder {
             hardware: SledHardware::Gimlet,
             hardware_slot: None,
             sled_role: SledRole::Gimlet,
-            npools: 10,
+            omicron_zones: OmicronZonesConfig {
+                // The initial generation is the one with no zones.
+                generation: OmicronZonesConfig::INITIAL_GENERATION,
+                zones: Vec::new(),
+            },
+            npools: Self::DEFAULT_NPOOLS,
         }
     }
 
@@ -406,7 +499,7 @@ impl SledBuilder {
 
     /// Set the number of U.2 (external) pools this sled should have
     ///
-    /// Default is currently `10` based on the typical value for a Gimlet
+    /// The default is [`Self::DEFAULT_NPOOLS`].
     pub fn npools(mut self, npools: u8) -> Self {
         self.npools = npools;
         self
@@ -451,15 +544,16 @@ pub struct SledHwInventory<'a> {
 #[derive(Clone, Debug)]
 struct Sled {
     sled_id: SledUuid,
-    sled_subnet: Ipv6Subnet<SLED_PREFIX>,
     inventory_sp: Option<(u16, SpState)>,
     inventory_sled_agent: Inventory,
-    zpools: BTreeMap<ZpoolUuid, SledDisk>,
     policy: SledPolicy,
+    state: SledState,
+    resources: SledResources,
 }
 
 impl Sled {
     /// Create a `Sled` using faked-up information based on a `SledBuilder`
+    #[allow(clippy::too_many_arguments)]
     fn new_simulated(
         sled_id: SledUuid,
         sled_subnet: Ipv6Subnet<SLED_PREFIX>,
@@ -467,6 +561,7 @@ impl Sled {
         unique: Option<String>,
         hardware: SledHardware,
         hardware_slot: u16,
+        omicron_zones: OmicronZonesConfig,
         nzpools: u8,
     ) -> Sled {
         use typed_rng::TypedUuidRng;
@@ -478,6 +573,10 @@ impl Sled {
             "SystemSimultatedSled",
             (sled_id, "ZpoolUuid"),
         );
+        let mut physical_disk_rng = TypedUuidRng::from_seed(
+            "SystemSimulatedSled",
+            (sled_id, "PhysicalDiskUuid"),
+        );
         let zpools: BTreeMap<_, _> = (0..nzpools)
             .map(|_| {
                 let zpool = ZpoolUuid::from(zpool_rng.next());
@@ -487,7 +586,7 @@ impl Sled {
                         serial: format!("serial-{zpool}"),
                         model: String::from("fake-model"),
                     },
-                    disk_id: PhysicalDiskUuid::new_v4(),
+                    disk_id: physical_disk_rng.next(),
                     policy: PhysicalDiskPolicy::InService,
                     state: PhysicalDiskState::Active,
                 };
@@ -546,9 +645,10 @@ impl Sled {
                 reservoir_size: ByteCount::from(1024),
                 sled_role,
                 sled_agent_address,
-                sled_id: sled_id.into_untyped_uuid(),
+                sled_id,
                 usable_hardware_threads: 10,
                 usable_physical_ram: ByteCount::from(1024 * 1024),
+                omicron_zones,
                 // Populate disks, appearing like a real device.
                 disks: zpools
                     .values()
@@ -557,23 +657,31 @@ impl Sled {
                         identity: d.disk_identity.clone(),
                         variant: DiskVariant::U2,
                         slot: i64::try_from(i).unwrap(),
+                        active_firmware_slot: 1,
+                        next_active_firmware_slot: None,
+                        number_of_firmware_slots: 1,
+                        slot1_is_read_only: true,
+                        slot_firmware_versions: vec![Some(
+                            "SIMUL1".to_string(),
+                        )],
                     })
                     .collect(),
-                // Zpools won't necessarily show up until our first request
-                // to provision storage, so we omit them.
+                // Zpools & Datasets won't necessarily show up until our first
+                // request to provision storage, so we omit them.
                 zpools: vec![],
+                datasets: vec![],
             }
         };
 
         Sled {
             sled_id,
-            sled_subnet,
             inventory_sp,
             inventory_sled_agent,
-            zpools,
             policy: SledPolicy::InService {
                 provision_policy: SledProvisionPolicy::Provisionable,
             },
+            state: SledState::Active,
+            resources: SledResources { subnet: sled_subnet, zpools },
         }
     }
 
@@ -582,6 +690,7 @@ impl Sled {
     fn new_full(
         sled_id: SledUuid,
         sled_policy: SledPolicy,
+        sled_state: SledState,
         sled_resources: SledResources,
         inventory_sp: Option<SledHwInventory<'_>>,
         inv_sled_agent: &nexus_types::inventory::SledAgent,
@@ -692,20 +801,22 @@ impl Sled {
             reservoir_size: inv_sled_agent.reservoir_size,
             sled_role: inv_sled_agent.sled_role,
             sled_agent_address: inv_sled_agent.sled_agent_address,
-            sled_id: sled_id.into_untyped_uuid(),
+            sled_id,
             usable_hardware_threads: inv_sled_agent.usable_hardware_threads,
             usable_physical_ram: inv_sled_agent.usable_physical_ram,
+            omicron_zones: inv_sled_agent.omicron_zones.clone(),
             disks: vec![],
             zpools: vec![],
+            datasets: vec![],
         };
 
         Sled {
             sled_id,
-            sled_subnet: sled_resources.subnet,
-            zpools: sled_resources.zpools.into_iter().collect(),
             inventory_sp,
             inventory_sled_agent,
             policy: sled_policy,
+            state: sled_state,
+            resources: sled_resources,
         }
     }
 

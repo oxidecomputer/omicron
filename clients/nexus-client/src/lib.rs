@@ -30,7 +30,12 @@ progenitor::generate_api!(
         // (e.g., diff'ing) that's implemented on our local type.
         Blueprint = nexus_types::deployment::Blueprint,
         Certificate = omicron_common::api::internal::nexus::Certificate,
+        ClickhouseMode = nexus_types::deployment::ClickhouseMode,
+        ClickhousePolicy = nexus_types::deployment::ClickhousePolicy,
         DatasetKind = omicron_common::api::internal::shared::DatasetKind,
+        DnsConfigParams = nexus_types::internal_api::params::DnsConfigParams,
+        DnsConfigZone = nexus_types::internal_api::params::DnsConfigZone,
+        DnsRecord = nexus_types::internal_api::params::DnsRecord,
         Generation = omicron_common::api::external::Generation,
         ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
         MacAddr = omicron_common::api::external::MacAddr,
@@ -41,6 +46,7 @@ progenitor::generate_api!(
         OmicronPhysicalDiskConfig = nexus_types::disk::OmicronPhysicalDiskConfig,
         OmicronPhysicalDisksConfig = nexus_types::disk::OmicronPhysicalDisksConfig,
         RecoverySiloConfig = nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
+        Srv = nexus_types::internal_api::params::Srv,
         TypedUuidForCollectionKind = omicron_uuid_kinds::CollectionUuid,
         TypedUuidForDemoSagaKind = omicron_uuid_kinds::DemoSagaUuid,
         TypedUuidForDownstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::DownstairsKind>,
@@ -131,14 +137,11 @@ impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
     }
 }
 
-impl From<omicron_common::api::internal::nexus::SledInstanceState>
-    for types::SledInstanceState
+impl From<omicron_common::api::internal::nexus::SledVmmState>
+    for types::SledVmmState
 {
-    fn from(
-        s: omicron_common::api::internal::nexus::SledInstanceState,
-    ) -> Self {
+    fn from(s: omicron_common::api::internal::nexus::SledVmmState) -> Self {
         Self {
-            propolis_id: s.propolis_id,
             vmm_state: s.vmm_state.into(),
             migration_in: s.migration_in.map(Into::into),
             migration_out: s.migration_out.map(Into::into),
@@ -213,6 +216,7 @@ impl From<omicron_common::api::internal::nexus::ProducerKind>
     fn from(kind: omicron_common::api::internal::nexus::ProducerKind) -> Self {
         use omicron_common::api::internal::nexus::ProducerKind;
         match kind {
+            ProducerKind::ManagementGateway => Self::ManagementGateway,
             ProducerKind::SledAgent => Self::SledAgent,
             ProducerKind::Service => Self::Service,
             ProducerKind::Instance => Self::Instance,
@@ -390,6 +394,9 @@ impl From<types::ProducerKind>
     fn from(kind: types::ProducerKind) -> Self {
         use omicron_common::api::internal::nexus::ProducerKind;
         match kind {
+            types::ProducerKind::ManagementGateway => {
+                ProducerKind::ManagementGateway
+            }
             types::ProducerKind::SledAgent => ProducerKind::SledAgent,
             types::ProducerKind::Instance => ProducerKind::Instance,
             types::ProducerKind::Service => ProducerKind::Service,

@@ -1,0 +1,48 @@
+
+<clickhouse>
+
+    <logger>
+        <level>trace</level>
+        <log>./log/clickhouse-keeper.log</log>
+        <errorlog>./log/clickhouse-keeper.err.log</errorlog>
+        <size>100M</size>
+        <count>1</count>
+    </logger>
+
+    <listen_host>ff::8</listen_host>
+    <path>./</path>
+    <keeper_server>
+        <enable_reconfiguration>false</enable_reconfiguration>
+        <tcp_port>9181</tcp_port>
+        <server_id>1</server_id>
+        <log_storage_path>./coordination/log</log_storage_path>
+        <snapshot_storage_path>./coordination/snapshots</snapshot_storage_path>
+        <coordination_settings>
+            <operation_timeout_ms>10000</operation_timeout_ms>
+            <session_timeout_ms>30000</session_timeout_ms>
+            <raft_logs_level>trace</raft_logs_level>
+        </coordination_settings>
+        <raft_configuration>
+
+            <server>
+                <id>1</id>
+                <hostname>ff::1</hostname>
+                <port>9234</port>
+            </server>
+            
+            <server>
+                <id>2</id>
+                <hostname>127.0.0.1</hostname>
+                <port>9234</port>
+            </server>
+            
+            <server>
+                <id>3</id>
+                <hostname>ohai.com</hostname>
+                <port>9234</port>
+            </server>
+            
+        </raft_configuration>
+    </keeper_server>
+
+</clickhouse>

@@ -16,6 +16,7 @@ use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::AsyncSimpleConnection;
+use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
 use diesel::expression::SelectableHelper;
 use diesel::sql_types::Nullable;
 use diesel::BoolExpressionMethods;
@@ -36,8 +37,11 @@ use nexus_db_model::HwPowerStateEnum;
 use nexus_db_model::HwRotSlot;
 use nexus_db_model::HwRotSlotEnum;
 use nexus_db_model::InvCaboose;
+use nexus_db_model::InvClickhouseKeeperMembership;
 use nexus_db_model::InvCollection;
 use nexus_db_model::InvCollectionError;
+use nexus_db_model::InvDataset;
+use nexus_db_model::InvNvmeDiskFirmware;
 use nexus_db_model::InvOmicronZone;
 use nexus_db_model::InvOmicronZoneNic;
 use nexus_db_model::InvPhysicalDisk;
@@ -58,8 +62,10 @@ use nexus_db_model::SqlU16;
 use nexus_db_model::SqlU32;
 use nexus_db_model::SwCaboose;
 use nexus_db_model::SwRotPage;
+use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::PhysicalDiskFirmware;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
@@ -134,6 +140,55 @@ impl DataStore {
                 ))
             })
             .collect::<Result<Vec<_>, Error>>()?;
+
+        // Pull disk firmware out of sled agents
+        let mut nvme_disk_firmware = Vec::new();
+        for (sled_id, sled_agent) in &collection.sled_agents {
+            for disk in &sled_agent.disks {
+                match &disk.firmware {
+                    PhysicalDiskFirmware::Unknown => (),
+                    PhysicalDiskFirmware::Nvme(firmware) => nvme_disk_firmware
+                        .push(
+                            InvNvmeDiskFirmware::new(
+                                collection_id,
+                                *sled_id,
+                                disk.slot,
+                                firmware,
+                            )
+                            .map_err(|e| {
+                                Error::internal_error(&e.to_string())
+                            })?,
+                        ),
+                }
+            }
+        }
+
+        // Pull Omicron zone-related metadata out of all sled agents.
+        //
+        // TODO: InvSledOmicronZones is a vestigial table kept for backwards
+        // compatibility -- the only unique data within it (the generation
+        // number) can be moved into `InvSledAgent` in the future. See
+        // oxidecomputer/omicron#6770.
+        let sled_omicron_zones = collection
+            .sled_agents
+            .values()
+            .map(|sled_agent| {
+                InvSledOmicronZones::new(collection_id, sled_agent)
+            })
+            .collect::<Vec<_>>();
+
+        // Pull Omicron zones out of all sled agents.
+        let omicron_zones: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|(sled_id, sled_agent)| {
+                sled_agent.omicron_zones.zones.iter().map(|zone| {
+                    InvOmicronZone::new(collection_id, *sled_id, zone)
+                        .map_err(|e| Error::internal_error(&e.to_string()))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
         // Pull disks out of all sled agents
         let disks: Vec<_> = collection
             .sled_agents
@@ -157,6 +212,17 @@ impl DataStore {
             })
             .collect();
 
+        // Pull datasets out of all sled agents
+        let datasets: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|(sled_id, sled_agent)| {
+                sled_agent.datasets.iter().map(|dataset| {
+                    InvDataset::new(collection_id, *sled_id, dataset)
+                })
+            })
+            .collect();
+
         // Partition the sled agents into those with an associated baseboard id
         // and those without one.  We handle these pretty differently.
         let (sled_agents_baseboards, sled_agents_no_baseboards): (
@@ -175,30 +241,11 @@ impl DataStore {
             })
             .collect::<Result<Vec<_>, Error>>()?;
 
-        let sled_omicron_zones = collection
-            .omicron_zones
-            .values()
-            .map(|found| InvSledOmicronZones::new(collection_id, found))
-            .collect::<Vec<_>>();
-        let omicron_zones = collection
-            .omicron_zones
-            .values()
-            .flat_map(|found| {
-                found.zones.zones.iter().map(|found_zone| {
-                    InvOmicronZone::new(
-                        collection_id,
-                        found.sled_id,
-                        found_zone,
-                    )
-                    .map_err(|e| Error::internal_error(&e.to_string()))
-                })
-            })
-            .collect::<Result<Vec<_>, Error>>()?;
         let omicron_zone_nics = collection
-            .omicron_zones
+            .sled_agents
             .values()
-            .flat_map(|found| {
-                found.zones.zones.iter().filter_map(|found_zone| {
+            .flat_map(|sled_agent| {
+                sled_agent.omicron_zones.zones.iter().filter_map(|found_zone| {
                     InvOmicronZoneNic::new(collection_id, found_zone)
                         .with_context(|| format!("zone {:?}", found_zone.id))
                         .map_err(|e| Error::internal_error(&format!("{:#}", e)))
@@ -206,6 +253,17 @@ impl DataStore {
                 })
             })
             .collect::<Result<Vec<InvOmicronZoneNic>, _>>()?;
+
+        let mut inv_clickhouse_keeper_memberships = Vec::new();
+        for membership in &collection.clickhouse_keeper_cluster_membership {
+            inv_clickhouse_keeper_memberships.push(
+                InvClickhouseKeeperMembership::new(
+                    collection_id,
+                    membership.clone(),
+                )
+                .map_err(|e| Error::internal_error(&e.to_string()))?,
+            );
+        }
 
         // This implementation inserts all records associated with the
         // collection in one transaction.  This is primarily for simplicity.  It
@@ -726,6 +784,27 @@ impl DataStore {
                 }
             }
 
+            // Insert rows for all the physical disk firmware we found.
+            {
+                use db::schema::inv_nvme_disk_firmware::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut nvme_disk_firmware = nvme_disk_firmware.into_iter();
+                loop {
+                    let some_disk_firmware = nvme_disk_firmware
+                        .by_ref()
+                        .take(batch_size)
+                        .collect::<Vec<_>>();
+                    if some_disk_firmware.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_nvme_disk_firmware)
+                        .values(some_disk_firmware)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
             // Insert rows for all the zpools we found.
             {
                 use db::schema::inv_zpool::dsl;
@@ -740,6 +819,25 @@ impl DataStore {
                     }
                     let _ = diesel::insert_into(dsl::inv_zpool)
                         .values(some_zpools)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // Insert rows for all the datasets we found.
+            {
+                use db::schema::inv_dataset::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut datasets = datasets.into_iter();
+                loop {
+                    let some_datasets =
+                        datasets.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_datasets.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_dataset)
+                        .values(some_datasets)
                         .execute_async(&conn)
                         .await?;
                 }
@@ -874,6 +972,15 @@ impl DataStore {
                         .values(omicron_zone_nics)
                         .execute_async(&conn)
                         .await?;
+            }
+
+            // Insert the clickhouse keeper memberships we've received
+            {
+                use db::schema::inv_clickhouse_keeper_membership::dsl;
+                diesel::insert_into(dsl::inv_clickhouse_keeper_membership)
+                    .values(inv_clickhouse_keeper_memberships)
+                    .execute_async(&conn)
+                    .await?;
             }
 
             // Finally, insert the list of errors.
@@ -1136,12 +1243,15 @@ impl DataStore {
             ncabooses,
             nrot_pages,
             nsled_agents,
+            ndatasets,
             nphysical_disks,
+            nnvme_disk_disk_firmware,
             nsled_agent_zones,
             nzones,
             nnics,
             nzpools,
             nerrors,
+            nclickhouse_keeper_membership,
         ) = conn
             .transaction_async(|conn| async move {
                 // Remove the record describing the collection itself.
@@ -1210,11 +1320,33 @@ impl DataStore {
                         .await?
                     };
 
+                // Remove rows for datasets
+                let ndatasets =
+                    {
+                        use db::schema::inv_dataset::dsl;
+                        diesel::delete(dsl::inv_dataset.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+
                 // Remove rows for physical disks found.
                 let nphysical_disks =
                     {
                         use db::schema::inv_physical_disk::dsl;
                         diesel::delete(dsl::inv_physical_disk.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                // Remove rows for NVMe physical disk firmware found.
+                let nnvme_disk_firwmare =
+                    {
+                        use db::schema::inv_nvme_disk_firmware::dsl;
+                        diesel::delete(dsl::inv_nvme_disk_firmware.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
                         .execute_async(&conn)
@@ -1273,6 +1405,18 @@ impl DataStore {
                         .await?
                     };
 
+                // Remove rows for clickhouse keeper membership
+                let nclickhouse_keeper_membership = {
+                    use db::schema::inv_clickhouse_keeper_membership::dsl;
+                    diesel::delete(
+                        dsl::inv_clickhouse_keeper_membership.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
                 Ok((
                     ncollections,
                     nsps,
@@ -1280,12 +1424,15 @@ impl DataStore {
                     ncabooses,
                     nrot_pages,
                     nsled_agents,
+                    ndatasets,
                     nphysical_disks,
+                    nnvme_disk_firwmare,
                     nsled_agent_zones,
                     nzones,
                     nnics,
                     nzpools,
                     nerrors,
+                    nclickhouse_keeper_membership,
                 ))
             })
             .await
@@ -1304,12 +1451,15 @@ impl DataStore {
             "ncabooses" => ncabooses,
             "nrot_pages" => nrot_pages,
             "nsled_agents" => nsled_agents,
+            "ndatasets" => ndatasets,
             "nphysical_disks" => nphysical_disks,
+            "nnvme_disk_firmware" => nnvme_disk_disk_firmware,
             "nsled_agent_zones" => nsled_agent_zones,
             "nzones" => nzones,
             "nnics" => nnics,
             "nzpools" => nzpools,
             "nerrors" => nerrors,
+            "nclickhouse_keeper_membership" => nclickhouse_keeper_membership
         );
 
         Ok(())
@@ -1533,15 +1683,57 @@ impl DataStore {
             rows
         };
 
+        // Mapping of "Sled ID" -> "Mapping of physical slot -> disk firmware"
+        let disk_firmware: BTreeMap<
+            SledUuid,
+            BTreeMap<i64, nexus_types::inventory::PhysicalDiskFirmware>,
+        > = {
+            use db::schema::inv_nvme_disk_firmware::dsl;
+
+            let mut disk_firmware = BTreeMap::<
+                SledUuid,
+                BTreeMap<i64, nexus_types::inventory::PhysicalDiskFirmware>,
+            >::new();
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    dsl::inv_nvme_disk_firmware,
+                    (dsl::sled_id, dsl::slot),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvNvmeDiskFirmware::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator =
+                    p.found_batch(&batch, &|row| (row.sled_id(), row.slot()));
+                for firmware in batch {
+                    disk_firmware
+                        .entry(firmware.sled_id().into())
+                        .or_default()
+                        .insert(
+                            firmware.slot(),
+                            nexus_types::inventory::PhysicalDiskFirmware::from(
+                                firmware,
+                            ),
+                        );
+                }
+            }
+            disk_firmware
+        };
+
         // Mapping of "Sled ID" -> "All disks reported by that sled"
         let physical_disks: BTreeMap<
-            Uuid,
+            SledUuid,
             Vec<nexus_types::inventory::PhysicalDisk>,
         > = {
             use db::schema::inv_physical_disk::dsl;
 
             let mut disks = BTreeMap::<
-                Uuid,
+                SledUuid,
                 Vec<nexus_types::inventory::PhysicalDisk>,
             >::new();
             let mut paginator = Paginator::new(batch_size);
@@ -1561,10 +1753,24 @@ impl DataStore {
                 paginator =
                     p.found_batch(&batch, &|row| (row.sled_id, row.slot));
                 for disk in batch {
-                    disks
-                        .entry(disk.sled_id.into_untyped_uuid())
-                        .or_default()
-                        .push(disk.into());
+                    let sled_id = disk.sled_id.into();
+                    let firmware = disk_firmware
+                        .get(&sled_id)
+                        .and_then(|lookup| lookup.get(&disk.slot))
+                        .unwrap_or(&nexus_types::inventory::PhysicalDiskFirmware::Unknown);
+
+                    disks.entry(sled_id).or_default().push(
+                        nexus_types::inventory::PhysicalDisk {
+                            identity: omicron_common::disk::DiskIdentity {
+                                vendor: disk.vendor,
+                                model: disk.model,
+                                serial: disk.serial,
+                            },
+                            variant: disk.variant.into(),
+                            slot: disk.slot,
+                            firmware: firmware.clone(),
+                        },
+                    );
                 }
             }
             disks
@@ -1599,6 +1805,39 @@ impl DataStore {
                 }
             }
             zpools
+        };
+
+        // Mapping of "Sled ID" -> "All datasets reported by that sled"
+        let datasets: BTreeMap<Uuid, Vec<nexus_types::inventory::Dataset>> = {
+            use db::schema::inv_dataset::dsl;
+
+            let mut datasets =
+                BTreeMap::<Uuid, Vec<nexus_types::inventory::Dataset>>::new();
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    dsl::inv_dataset,
+                    (dsl::sled_id, dsl::name),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvDataset::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| {
+                    (row.sled_id, row.name.clone())
+                });
+                for dataset in batch {
+                    datasets
+                        .entry(dataset.sled_id.into_untyped_uuid())
+                        .or_default()
+                        .push(dataset.into());
+                }
+            }
+            datasets
         };
 
         // Collect the unique baseboard ids referenced by SPs, RoTs, and Sled
@@ -1668,52 +1907,6 @@ impl DataStore {
                     })
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
-        let sled_agents: BTreeMap<_, _> = sled_agent_rows
-            .into_iter()
-            .map(|s: InvSledAgent| {
-                let sled_id = SledUuid::from(s.sled_id);
-                let baseboard_id = s
-                    .hw_baseboard_id
-                    .map(|id| {
-                        baseboards_by_id.get(&id).cloned().ok_or_else(|| {
-                            Error::internal_error(
-                                "missing baseboard that we should have fetched",
-                            )
-                        })
-                    })
-                    .transpose()?;
-                let sled_agent = nexus_types::inventory::SledAgent {
-                    time_collected: s.time_collected,
-                    source: s.source,
-                    sled_id,
-                    baseboard_id,
-                    sled_agent_address: std::net::SocketAddrV6::new(
-                        std::net::Ipv6Addr::from(s.sled_agent_ip),
-                        u16::from(s.sled_agent_port),
-                        0,
-                        0,
-                    ),
-                    sled_role: s.sled_role.into(),
-                    usable_hardware_threads: u32::from(
-                        s.usable_hardware_threads,
-                    ),
-                    usable_physical_ram: s.usable_physical_ram.into(),
-                    reservoir_size: s.reservoir_size.into(),
-                    disks: physical_disks
-                        .get(sled_id.as_untyped_uuid())
-                        .map(|disks| disks.to_vec())
-                        .unwrap_or_default(),
-                    zpools: zpools
-                        .get(sled_id.as_untyped_uuid())
-                        .map(|zpools| zpools.to_vec())
-                        .unwrap_or_default(),
-                };
-                Ok((sled_id, sled_agent))
-            })
-            .collect::<Result<
-                BTreeMap<SledUuid, nexus_types::inventory::SledAgent>,
-                Error,
-            >>()?;
 
         // Fetch records of cabooses found.
         let inv_caboose_rows = {
@@ -1955,7 +2148,10 @@ impl DataStore {
                 zones.extend(batch.into_iter().map(|sled_zones_config| {
                     (
                         sled_zones_config.sled_id.into(),
-                        sled_zones_config.into_uninit_zones_found(),
+                        OmicronZonesConfig {
+                            generation: sled_zones_config.generation.into(),
+                            zones: Vec::new(),
+                        },
                     )
                 }))
             }
@@ -2063,14 +2259,127 @@ impl DataStore {
                 .map_err(|e| {
                     Error::internal_error(&format!("{:#}", e.to_string()))
                 })?;
-            map.zones.zones.push(zone);
+            map.zones.push(zone);
         }
+
+        // Now load the clickhouse keeper cluster memberships
+        let clickhouse_keeper_cluster_membership = {
+            use db::schema::inv_clickhouse_keeper_membership::dsl;
+            let mut memberships = BTreeSet::new();
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::inv_clickhouse_keeper_membership,
+                    dsl::queried_keeper_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvClickhouseKeeperMembership::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| row.queried_keeper_id);
+                for membership in batch.into_iter() {
+                    memberships.insert(
+                        ClickhouseKeeperClusterMembership::try_from(membership)
+                            .map_err(|e| {
+                                Error::internal_error(&format!("{e:#}",))
+                            })?,
+                    );
+                }
+            }
+            memberships
+        };
 
         bail_unless!(
             omicron_zone_nics.is_empty(),
             "found extra Omicron zone NICs: {:?}",
             omicron_zone_nics.keys()
         );
+
+        // Finally, build up the sled-agent map using the sled agent and
+        // omicron zone rows. A for loop is easier to understand than into_iter
+        // + filter_map + return Result + collect.
+        let mut sled_agents = BTreeMap::new();
+        for s in sled_agent_rows {
+            let sled_id = SledUuid::from(s.sled_id);
+            let baseboard_id = s
+                .hw_baseboard_id
+                .map(|id| {
+                    baseboards_by_id.get(&id).cloned().ok_or_else(|| {
+                        Error::internal_error(
+                            "missing baseboard that we should have fetched",
+                        )
+                    })
+                })
+                .transpose()?;
+
+            // Look up the Omicron zones.
+            //
+            // Older versions of Nexus fetched the Omicron zones in a separate
+            // request from the other sled agent data. The database model stil
+            // accounts for the possibility that for a given (collection, sled)
+            // pair, one of those queries succeeded while the other failed. But
+            // this has since been changed to fetch all the data in a single
+            // query, which means that newer collections will either have both
+            // sets of data or neither of them.
+            //
+            // If it _is_ the case that one of the pieces of data is missing,
+            // log that as a warning and drop the sled from the collection.
+            // This should only happen for old collections, and only in the
+            // unlikely case that exactly one of the two related requests
+            // failed.
+            //
+            // TODO: Update the database model to reflect the new reality
+            // (oxidecomputer/omicron#6770).
+            let Some(omicron_zones) = omicron_zones.remove(&sled_id) else {
+                warn!(
+                    self.log,
+                    "no sled Omicron zone data present -- assuming that collection was done
+                     by an old Nexus version and dropping sled from it";
+                    "collection" => %id,
+                    "sled_id" => %sled_id,
+                );
+                continue;
+            };
+
+            let sled_agent = nexus_types::inventory::SledAgent {
+                time_collected: s.time_collected,
+                source: s.source,
+                sled_id,
+                baseboard_id,
+                sled_agent_address: std::net::SocketAddrV6::new(
+                    std::net::Ipv6Addr::from(s.sled_agent_ip),
+                    u16::from(s.sled_agent_port),
+                    0,
+                    0,
+                ),
+                sled_role: s.sled_role.into(),
+                usable_hardware_threads: u32::from(s.usable_hardware_threads),
+                usable_physical_ram: s.usable_physical_ram.into(),
+                reservoir_size: s.reservoir_size.into(),
+                omicron_zones,
+                // For disks, zpools, and datasets, the map for a sled ID is
+                // only populated if there is at least one disk/zpool/dataset
+                // for that sled. The `unwrap_or_default` calls cover the case
+                // where there are no disks/zpools/datasets for a sled.
+                disks: physical_disks
+                    .get(&sled_id)
+                    .map(|disks| disks.to_vec())
+                    .unwrap_or_default(),
+                zpools: zpools
+                    .get(sled_id.as_untyped_uuid())
+                    .map(|zpools| zpools.to_vec())
+                    .unwrap_or_default(),
+                datasets: datasets
+                    .get(sled_id.as_untyped_uuid())
+                    .map(|datasets| datasets.to_vec())
+                    .unwrap_or_default(),
+            };
+            sled_agents.insert(sled_id, sled_agent);
+        }
 
         Ok(Collection {
             id,
@@ -2086,7 +2395,7 @@ impl DataStore {
             cabooses_found,
             rot_pages_found,
             sled_agents,
-            omicron_zones,
+            clickhouse_keeper_cluster_membership,
         })
     }
 }
@@ -2135,10 +2444,12 @@ impl DataStoreInventoryTest for DataStore {
 #[cfg(test)]
 mod test {
     use crate::db::datastore::inventory::DataStoreInventoryTest;
-    use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::DataStoreConnection;
+    use crate::db::raw_query_builder::{QueryBuilder, TrustedStr};
     use crate::db::schema;
-    use anyhow::Context;
+    use crate::db::DataStore;
+    use anyhow::{bail, Context};
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
@@ -2146,7 +2457,6 @@ mod test {
     use gateway_client::types::SpType;
     use nexus_inventory::examples::representative;
     use nexus_inventory::examples::Representative;
-    use nexus_test_utils::db::test_setup_database;
     use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::CabooseWhich;
@@ -2164,7 +2474,7 @@ mod test {
     }
 
     impl CollectionCounts {
-        async fn new(conn: &DataStoreConnection<'_>) -> anyhow::Result<Self> {
+        async fn new(conn: &DataStoreConnection) -> anyhow::Result<Self> {
             conn.transaction_async(|conn| async move {
                 conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
                     .await
@@ -2200,8 +2510,8 @@ mod test {
     #[tokio::test]
     async fn test_find_hw_baseboard_id_missing_returns_not_found() {
         let logctx = dev::test_setup_log("inventory_insert");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let baseboard_id = BaseboardId {
             serial_number: "some-serial".into(),
             part_number: "some-part".into(),
@@ -2211,7 +2521,7 @@ mod test {
             .await
             .unwrap_err();
         assert!(matches!(err, Error::ObjectNotFound { .. }));
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2221,8 +2531,8 @@ mod test {
     async fn test_inventory_insert() {
         // Setup
         let logctx = dev::test_setup_log("inventory_insert");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create an empty collection and write it to the database.
         let builder = nexus_inventory::CollectionBuilder::new("test");
@@ -2660,6 +2970,12 @@ mod test {
                 .await
                 .unwrap();
             assert_eq!(0, count);
+            let count = schema::inv_dataset::dsl::inv_dataset
+                .select(diesel::dsl::count_star())
+                .first_async::<i64>(&conn)
+                .await
+                .unwrap();
+            assert_eq!(0, count);
             let count = schema::inv_physical_disk::dsl::inv_physical_disk
                 .select(diesel::dsl::count_star())
                 .first_async::<i64>(&conn)
@@ -2698,7 +3014,153 @@ mod test {
         assert_ne!(coll_counts.rot_pages, 0);
 
         // Clean up.
-        db.cleanup().await.unwrap();
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    enum AllInvTables {
+        AreEmpty,
+        ArePopulated,
+    }
+
+    async fn check_all_inv_tables(
+        datastore: &DataStore,
+        status: AllInvTables,
+    ) -> anyhow::Result<()> {
+        let conn = datastore
+            .pool_connection_for_tests()
+            .await
+            .context("Failed to get datastore connection")?;
+        let tables: Vec<String> = QueryBuilder::new().sql(
+            "SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'inv\\_%'"
+            )
+            .query::<diesel::sql_types::Text>()
+            .load_async(&*conn)
+            .await
+            .context("Failed to query information_schema for tables")?;
+
+        // Sanity-check, if this breaks, break loudly.
+        // We expect to see all the "inv_..." tables here, even ones that
+        // haven't been written yet.
+        if tables.is_empty() {
+            bail!("Tables missing from information_schema query");
+        }
+
+        conn.transaction_async(|conn| async move {
+            // We need this to call "COUNT(*)" below.
+            conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
+                .await
+                .context("Failed to allow full table scans")?;
+
+            for table in tables {
+                let count: i64 = QueryBuilder::new().sql(
+                        // We're scraping the table names dynamically here, so we
+                        // don't know them ahead of time. However, this is also a
+                        // test, so this usage is pretty benign.
+                        TrustedStr::i_take_responsibility_for_validating_this_string(
+                            format!("SELECT COUNT(*) FROM {table}")
+                        )
+                    )
+                    .query::<diesel::sql_types::Int8>()
+                    .get_result_async(&conn)
+                    .await
+                    .with_context(|| format!("Couldn't SELECT COUNT(*) from table {table}"))?;
+
+                match status {
+                    AllInvTables::AreEmpty => {
+                        if count != 0 {
+                            bail!("Found deleted row(s) from table: {table}");
+                        }
+                    },
+                    AllInvTables::ArePopulated => {
+                        if count == 0 {
+                            bail!("Found table without entries: {table}");
+                        }
+                    },
+
+                }
+            }
+            Ok::<(), anyhow::Error>(())
+        })
+        .await?;
+
+        Ok(())
+    }
+
+    /// Creates a representative collection, deletes it, and walks through
+    /// tables to ensure that the subcomponents of the inventory have been
+    /// deleted.
+    ///
+    /// NOTE: This test depends on the naming convention "inv_" prefix name
+    /// to identify pieces of the inventory.
+    #[tokio::test]
+    async fn test_inventory_deletion() {
+        // Setup
+        let logctx = dev::test_setup_log("inventory_deletion");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a representative collection and write it to the database.
+        let Representative { builder, .. } = representative();
+        let collection = builder.build();
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("failed to insert collection");
+
+        // Read all "inv_" tables and ensure that they are populated.
+        check_all_inv_tables(&datastore, AllInvTables::ArePopulated)
+            .await
+            .expect("All inv_... tables should be populated by representative collection");
+
+        // Delete that collection we just added
+        datastore
+            .inventory_delete_collection(&opctx, collection.id)
+            .await
+            .expect("failed to prune collections");
+        assert_eq!(
+            datastore
+                .inventory_collections()
+                .await
+                .unwrap()
+                .iter()
+                .map(|c| c.id.into())
+                .collect::<Vec<CollectionUuid>>(),
+            &[]
+        );
+
+        // Read all "inv_" tables and ensure that they're empty
+        check_all_inv_tables(&datastore, AllInvTables::AreEmpty).await.expect(
+            "All inv_... tables should be deleted alongside collection",
+        );
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_representative_collection_populates_database() {
+        // Setup
+        let logctx = dev::test_setup_log("inventory_deletion");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a representative collection and write it to the database.
+        let Representative { builder, .. } = representative();
+        let collection = builder.build();
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("failed to insert collection");
+
+        // Read all "inv_" tables and ensure that they are populated.
+        check_all_inv_tables(&datastore, AllInvTables::ArePopulated)
+            .await
+            .expect("All inv_... tables should be populated by representative collection");
+
+        // Clean up.
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

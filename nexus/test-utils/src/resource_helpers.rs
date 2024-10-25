@@ -22,6 +22,9 @@ use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::views;
 use nexus_types::external_api::views::Certificate;
 use nexus_types::external_api::views::FloatingIp;
+use nexus_types::external_api::views::InternetGateway;
+use nexus_types::external_api::views::InternetGatewayIpAddress;
+use nexus_types::external_api::views::InternetGatewayIpPool;
 use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
 use nexus_types::external_api::views::User;
@@ -34,7 +37,9 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::InstanceAutoRestartPolicy;
 use omicron_common::api::external::InstanceCpuCount;
+use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
@@ -432,6 +437,28 @@ pub async fn create_disk(
     .await
 }
 
+pub async fn create_disk_from_snapshot(
+    client: &ClientTestContext,
+    project_name: &str,
+    disk_name: &str,
+    snapshot_id: Uuid,
+) -> Disk {
+    let url = format!("/v1/disks?project={}", project_name);
+    object_create(
+        client,
+        &url,
+        &params::DiskCreate {
+            identity: IdentityMetadataCreateParams {
+                name: disk_name.parse().unwrap(),
+                description: String::from("sells rainsticks"),
+            },
+            disk_source: params::DiskSource::Snapshot { snapshot_id },
+            size: ByteCount::from_gibibytes_u32(1),
+        },
+    )
+    .await
+}
+
 pub async fn create_snapshot(
     client: &ClientTestContext,
     project_name: &str,
@@ -481,11 +508,14 @@ pub async fn create_instance(
         // External IPs=
         Vec::<params::ExternalIpCreate>::new(),
         true,
+        Default::default(),
     )
     .await
 }
 
 /// Creates an instance with attached resources.
+// I know, Clippy. I don't like it either...
+#[allow(clippy::too_many_arguments)]
 pub async fn create_instance_with(
     client: &ClientTestContext,
     project_name: &str,
@@ -494,8 +524,10 @@ pub async fn create_instance_with(
     disks: Vec<params::InstanceDiskAttachment>,
     external_ips: Vec<params::ExternalIpCreate>,
     start: bool,
+    auto_restart_policy: Option<InstanceAutoRestartPolicy>,
 ) -> Instance {
     let url = format!("/v1/instances?project={}", project_name);
+
     object_create(
         client,
         &url,
@@ -514,7 +546,9 @@ pub async fn create_instance_with(
             network_interfaces: nics.clone(),
             external_ips,
             disks,
+            boot_disk: None,
             start,
+            auto_restart_policy,
         },
     )
     .await
@@ -712,6 +746,160 @@ pub async fn create_route_with_error(
     .unwrap()
 }
 
+pub async fn create_internet_gateway(
+    client: &ClientTestContext,
+    project_name: &str,
+    vpc_name: &str,
+    internet_gateway_name: &str,
+) -> InternetGateway {
+    NexusRequest::objects_post(
+        &client,
+        format!(
+            "/v1/internet-gateways?project={}&vpc={}",
+            &project_name, &vpc_name
+        )
+        .as_str(),
+        &params::VpcRouterCreate {
+            identity: IdentityMetadataCreateParams {
+                name: internet_gateway_name.parse().unwrap(),
+                description: String::from("internet gateway description"),
+            },
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap()
+}
+
+pub async fn delete_internet_gateway(
+    client: &ClientTestContext,
+    project_name: &str,
+    vpc_name: &str,
+    internet_gateway_name: &str,
+    cascade: bool,
+) {
+    NexusRequest::object_delete(
+        &client,
+        format!(
+            "/v1/internet-gateways/{}?project={}&vpc={}&cascade={}",
+            &internet_gateway_name, &project_name, &vpc_name, cascade
+        )
+        .as_str(),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
+pub async fn attach_ip_pool_to_igw(
+    client: &ClientTestContext,
+    project_name: &str,
+    vpc_name: &str,
+    igw_name: &str,
+    ip_pool_name: &str,
+    attachment_name: &str,
+) -> InternetGatewayIpPool {
+    let url = format!(
+        "/v1/internet-gateway-ip-pools?project={}&vpc={}&gateway={}",
+        project_name, vpc_name, igw_name,
+    );
+
+    let ip_pool: Name = ip_pool_name.parse().unwrap();
+    NexusRequest::objects_post(
+        &client,
+        url.as_str(),
+        &params::InternetGatewayIpPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: attachment_name.parse().unwrap(),
+                description: String::from("attached pool descriptoion"),
+            },
+            ip_pool: NameOrId::Name(ip_pool),
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap()
+}
+
+pub async fn detach_ip_pool_from_igw(
+    client: &ClientTestContext,
+    project_name: &str,
+    vpc_name: &str,
+    igw_name: &str,
+    ip_pool_name: &str,
+    cascade: bool,
+) {
+    let url = format!(
+        "/v1/internet-gateway-ip-pools/{}?project={}&vpc={}&gateway={}&cascade={}",
+        ip_pool_name, project_name, vpc_name, igw_name, cascade,
+    );
+
+    NexusRequest::object_delete(&client, url.as_str())
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+}
+
+pub async fn attach_ip_address_to_igw(
+    client: &ClientTestContext,
+    project_name: &str,
+    vpc_name: &str,
+    igw_name: &str,
+    address: IpAddr,
+    attachment_name: &str,
+) -> InternetGatewayIpAddress {
+    let url = format!(
+        "/v1/internet-gateway-ip-addresses?project={}&vpc={}&gateway={}",
+        project_name, vpc_name, igw_name,
+    );
+
+    NexusRequest::objects_post(
+        &client,
+        url.as_str(),
+        &params::InternetGatewayIpAddressCreate {
+            identity: IdentityMetadataCreateParams {
+                name: attachment_name.parse().unwrap(),
+                description: String::from("attached pool descriptoion"),
+            },
+            address,
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap()
+}
+
+pub async fn detach_ip_address_from_igw(
+    client: &ClientTestContext,
+    project_name: &str,
+    vpc_name: &str,
+    igw_name: &str,
+    attachment_name: &str,
+    cascade: bool,
+) {
+    let url = format!(
+        "/v1/internet-gateway-ip-addresses/{}?project={}&vpc={}&gateway={}&cascade={}",
+        attachment_name, project_name, vpc_name, igw_name, cascade
+    );
+
+    NexusRequest::object_delete(&client, url.as_str())
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+}
+
 pub async fn assert_ip_pool_utilization(
     client: &ClientTestContext,
     pool_name: &str,
@@ -853,7 +1041,7 @@ impl<'a, N: NexusServer> DiskTestBuilder<'a, N> {
         Self {
             cptestctx,
             sled_agents: WhichSledAgents::Specific(
-                SledUuid::from_untyped_uuid(cptestctx.sled_agent.sled_agent.id),
+                cptestctx.sled_agent.sled_agent.id,
             ),
             zpool_count: DiskTest::<'a, N>::DEFAULT_ZPOOL_COUNT,
         }
@@ -957,7 +1145,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
             }
             WhichSledAgents::All => cptestctx
                 .all_sled_agents()
-                .map(|agent| SledUuid::from_untyped_uuid(agent.sled_agent.id))
+                .map(|agent| agent.sled_agent.id)
                 .collect(),
         };
 
@@ -995,7 +1183,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         sleds
             .into_iter()
             .find_map(|server| {
-                if server.sled_agent.id == sled_id.into_untyped_uuid() {
+                if server.sled_agent.id == sled_id {
                     Some(server.sled_agent.clone())
                 } else {
                     None
@@ -1059,7 +1247,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         let sled_agent = sleds
             .into_iter()
             .find_map(|server| {
-                if server.sled_agent.id == sled_id.into_untyped_uuid() {
+                if server.sled_agent.id == sled_id {
                     Some(server.sled_agent.clone())
                 } else {
                     None
@@ -1214,6 +1402,10 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     }
 
     /// Returns true if all Crucible resources were cleaned up, false otherwise.
+    ///
+    /// Note: be careful performing this test when also peforming physical disk
+    /// expungement, as Nexus will consider resources on those physical disks
+    /// gone and will not attempt to clean them up!
     pub async fn crucible_resources_deleted(&self) -> bool {
         for (sled_id, state) in &self.sleds {
             for zpool in &state.zpools {
@@ -1230,5 +1422,18 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         }
 
         true
+    }
+
+    /// Drop all of a zpool's resources
+    ///
+    /// Call this before checking `crucible_resources_deleted` if the test has
+    /// also performed a physical disk policy change to "expunged". Nexus will
+    /// _not_ clean up crucible resources on an expunged disk (due to the "gone"
+    /// check that it performs), but it's useful for tests to be able to assert
+    /// all crucible resources are cleaned up.
+    pub async fn remove_zpool(&mut self, zpool_id: Uuid) {
+        for sled in self.sleds.values_mut() {
+            sled.zpools.retain(|zpool| *zpool.id.as_untyped_uuid() != zpool_id);
+        }
     }
 }

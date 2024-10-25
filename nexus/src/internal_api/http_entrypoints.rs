@@ -7,6 +7,7 @@
 use super::params::{OximeterInfo, RackInitializationRequest};
 use crate::context::ApiContext;
 use dropshot::ApiDescription;
+use dropshot::Body;
 use dropshot::FreeformBody;
 use dropshot::HttpError;
 use dropshot::HttpResponseCreated;
@@ -18,12 +19,12 @@ use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
-use hyper::Body;
 use nexus_internal_api::*;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
+use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::external_api::params::PhysicalDiskPath;
 use nexus_types::external_api::params::SledSelector;
 use nexus_types::external_api::params::UninitializedSledId;
@@ -52,7 +53,7 @@ use omicron_common::api::internal::nexus::ProducerRegistrationResponse;
 use omicron_common::api::internal::nexus::RepairFinishInfo;
 use omicron_common::api::internal::nexus::RepairProgress;
 use omicron_common::api::internal::nexus::RepairStartInfo;
-use omicron_common::api::internal::nexus::SledInstanceState;
+use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -81,8 +82,10 @@ impl NexusInternalApi for NexusInternalApiImpl {
         let path = path_params.into_inner();
         let sled_id = &path.sled_id;
         let handler = async {
-            let (.., sled) =
-                nexus.sled_lookup(&opctx, sled_id)?.fetch().await?;
+            let (.., sled) = nexus
+                .sled_lookup(&opctx, &sled_id.into_untyped_uuid())?
+                .fetch()
+                .await?;
             Ok(HttpResponseOk(sled.into()))
         };
         apictx
@@ -103,7 +106,9 @@ impl NexusInternalApi for NexusInternalApiImpl {
         let info = sled_info.into_inner();
         let sled_id = &path.sled_id;
         let handler = async {
-            nexus.upsert_sled(&opctx, *sled_id, info).await?;
+            nexus
+                .upsert_sled(&opctx, sled_id.into_untyped_uuid(), info)
+                .await?;
             Ok(HttpResponseUpdatedNoContent())
         };
         apictx
@@ -122,7 +127,12 @@ impl NexusInternalApi for NexusInternalApiImpl {
         let path = path_params.into_inner();
         let sled_id = &path.sled_id;
         let handler = async {
-            nexus.sled_request_firewall_rules(&opctx, *sled_id).await?;
+            nexus
+                .sled_request_firewall_rules(
+                    &opctx,
+                    sled_id.into_untyped_uuid(),
+                )
+                .await?;
             Ok(HttpResponseUpdatedNoContent())
         };
         apictx
@@ -168,8 +178,8 @@ impl NexusInternalApi for NexusInternalApiImpl {
 
     async fn cpapi_instances_put(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
-        new_runtime_state: TypedBody<SledInstanceState>,
+        path_params: Path<VmmPathParam>,
+        new_runtime_state: TypedBody<SledVmmState>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = &rqctx.context().context;
         let nexus = &apictx.nexus;
@@ -178,11 +188,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let handler = async {
             nexus
-                .notify_instance_updated(
-                    &opctx,
-                    InstanceUuid::from_untyped_uuid(path.instance_id),
-                    &new_state,
-                )
+                .notify_vmm_updated(&opctx, path.propolis_id, &new_state)
                 .await?;
             Ok(HttpResponseUpdatedNoContent())
         };
@@ -928,6 +934,53 @@ impl NexusInternalApi for NexusInternalApiImpl {
                     .probe_list_for_sled(&opctx, &pagparams, path.sled)
                     .await?,
             ))
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn clickhouse_policy_get(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ClickhousePolicy>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            let nexus = &apictx.nexus;
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            match nexus.datastore().clickhouse_policy_get_latest(&opctx).await?
+            {
+                Some(policy) => Ok(HttpResponseOk(policy)),
+                None => Err(HttpError::for_not_found(
+                    None,
+                    "No clickhouse policy in database".into(),
+                )),
+            }
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn clickhouse_policy_set(
+        rqctx: RequestContext<Self::Context>,
+        policy: TypedBody<ClickhousePolicy>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            nexus
+                .datastore()
+                .clickhouse_policy_insert_latest_version(
+                    &opctx,
+                    &policy.into_inner(),
+                )
+                .await?;
+            Ok(HttpResponseUpdatedNoContent())
         };
         apictx
             .internal_latencies

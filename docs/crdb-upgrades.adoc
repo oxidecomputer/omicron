@@ -64,7 +64,7 @@ a tick, but they must occur in that order.)
   of CockroachDB versions:
 +
 ....
-EXPECTORATE=overwrite cargo nextest run -p omicron-nexus -- integration_tests::commands::test_nexus_openapi_internal
+cargo xtask openapi generate
 ....
 . Run the full test suite, which should catch any unexpected SQL
   compatibility issues between releases and help validate that your

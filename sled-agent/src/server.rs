@@ -10,12 +10,12 @@ use super::sled_agent::SledAgent;
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::nexus::make_nexus_client;
 use crate::services::ServiceManager;
-use internal_dns::resolver::Resolver;
+use internal_dns_resolver::Resolver;
+use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use uuid::Uuid;
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
 /// server wired up to the sled agent
@@ -29,7 +29,7 @@ impl Server {
         self.http_server.local_addr()
     }
 
-    pub fn id(&self) -> Uuid {
+    pub fn id(&self) -> SledUuid {
         self.http_server.app_private().id()
     }
 

@@ -32,12 +32,13 @@ use illumos_utils::dladm;
 use illumos_utils::zfs;
 use illumos_utils::zone;
 use illumos_utils::zone::Zones;
-use internal_dns::resolver::Resolver;
+use internal_dns_resolver::Resolver;
 use omicron_common::address::{Ipv6Subnet, AZ_PREFIX};
 use omicron_common::ledger;
 use omicron_common::ledger::Ledger;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_ddm_admin_client::DdmError;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackInitUuid;
 use sled_agent_types::rack_init::RackInitializeRequest;
 use sled_agent_types::sled::StartSledAgentRequest;
@@ -211,6 +212,7 @@ impl Server {
             rss_access,
             updates: config.updates.clone(),
             sled_reset_tx,
+            sprockets: config.sprockets.clone(),
         };
         let bootstrap_http_server = start_dropshot_server(bootstrap_context)?;
 
@@ -230,6 +232,7 @@ impl Server {
                 0,
             ),
             sled_init_tx,
+            config.sprockets.clone(),
             &base_log,
         )
         .await
@@ -412,7 +415,7 @@ async fn start_sled_agent(
         addr.into(),
         dns_servers,
         request.body.rack_id,
-        request.body.id,
+        request.body.id.into_untyped_uuid(),
     );
 
     // Server does not exist, initialize it.
@@ -555,7 +558,7 @@ impl Inner {
     ) {
         match &mut self.state {
             SledAgentState::Bootstrapping(sled_agent_started_tx) => {
-                let request_id = request.body.id;
+                let request_id = request.body.id.into_untyped_uuid();
 
                 // Extract from options to satisfy the borrow checker.
                 // It is not possible for `start_sled_agent` to be cancelled
@@ -608,7 +611,10 @@ impl Inner {
                         initial, request
                     ))
                 } else {
-                    Ok(SledAgentResponse { id: server.id() })
+                    Ok(SledAgentResponse {
+                        // TODO-cleanup use typed UUIDs everywhere
+                        id: server.id().into_untyped_uuid(),
+                    })
                 };
 
                 _ = response_tx.send(response);
@@ -717,6 +723,7 @@ mod tests {
     use super::*;
     use omicron_common::address::Ipv6Subnet;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::SledUuid;
     use sled_agent_types::sled::StartSledAgentRequestBody;
     use std::net::Ipv6Addr;
     use uuid::Uuid;
@@ -731,7 +738,7 @@ mod tests {
             generation: 0,
             schema_version: 1,
             body: StartSledAgentRequestBody {
-                id: Uuid::new_v4(),
+                id: SledUuid::new_v4(),
                 rack_id: Uuid::new_v4(),
                 use_trust_quorum: false,
                 is_lrtq_learner: false,

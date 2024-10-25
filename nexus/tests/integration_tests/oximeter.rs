@@ -9,7 +9,6 @@ use nexus_test_interface::NexusServer;
 use nexus_test_utils_macros::nexus_test;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oximeter_db::DbWrite;
-use std::net;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -43,7 +42,7 @@ async fn test_oximeter_database_records(context: &ControlPlaneTestContext) {
     // Kind of silly, but let's wait until the producer is actually registered
     // with Oximeter.
     let producer_id = nexus_test_utils::PRODUCER_UUID.parse().unwrap();
-    wait_for_producer(&context.oximeter, &producer_id).await;
+    wait_for_producer(&context.oximeter, producer_id).await;
 
     // Verify that the producer lives in the DB.
     let results = conn
@@ -118,14 +117,13 @@ async fn test_oximeter_reregistration() {
         row.get::<&str, chrono::DateTime<chrono::Utc>>("time_modified");
 
     // ClickHouse client for verifying collection.
-    let ch_address = net::SocketAddrV6::new(
-        "::1".parse().unwrap(),
-        context.clickhouse.port(),
-        0,
-        0,
+    let ch_address = context.clickhouse.http_address().into();
+    let native_address = context.clickhouse.native_address().into();
+    let client = oximeter_db::Client::new(
+        ch_address,
+        native_address,
+        &context.logctx.log,
     );
-    let client =
-        oximeter_db::Client::new(ch_address.into(), &context.logctx.log);
     client
         .init_single_node_db()
         .await
@@ -308,7 +306,8 @@ async fn test_oximeter_reregistration() {
     context.oximeter = nexus_test_utils::start_oximeter(
         context.logctx.log.new(o!("component" => "oximeter")),
         context.server.get_http_server_internal_address().await,
-        context.clickhouse.port(),
+        context.clickhouse.http_address().port(),
+        context.clickhouse.native_address().port(),
         oximeter_id,
     )
     .await

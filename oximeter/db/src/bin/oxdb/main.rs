@@ -10,6 +10,7 @@
 use anyhow::{bail, Context};
 use chrono::{DateTime, Utc};
 use clap::{Args, Parser};
+use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use oximeter::{
     types::{Cumulative, Sample},
     Metric, Target,
@@ -59,9 +60,13 @@ struct OxDb {
     #[clap(short, long, default_value = "::1")]
     address: IpAddr,
 
-    /// Port on which to connect to the database
+    /// Port on which to connect to the database using the HTTP interface.
     #[clap(short, long, default_value = "8123", action)]
     port: u16,
+
+    /// Port on which to connect to the database using the native TCP interface.
+    #[clap(short, long, default_value_t = CLICKHOUSE_TCP_PORT)]
+    native_port: u16,
 
     /// Logging level
     #[clap(short, long, default_value = "info", value_parser = level_from_str)]
@@ -153,6 +158,10 @@ enum Subcommand {
         #[clap(flatten)]
         opts: oximeter_db::shells::oxql::ShellOptions,
     },
+
+    /// Start a native SQL shell to a ClickHouse server.
+    #[cfg(feature = "native-sql-shell")]
+    NativeSql,
 }
 
 fn describe_data() {
@@ -210,12 +219,13 @@ async fn insert_samples(
 
 async fn populate(
     address: IpAddr,
-    port: u16,
+    http_port: u16,
+    native_port: u16,
     log: Logger,
     args: PopulateArgs,
 ) -> Result<(), anyhow::Error> {
     info!(log, "populating Oximeter database");
-    let client = make_client(address, port, &log).await?;
+    let client = make_client(address, http_port, native_port, &log).await?;
     let n_timeseries = args.n_projects * args.n_instances * args.n_cpus;
     debug!(
         log,
@@ -264,23 +274,26 @@ async fn populate(
 
 async fn wipe_single_node_db(
     address: IpAddr,
-    port: u16,
+    http_port: u16,
+    native_port: u16,
     log: Logger,
 ) -> Result<(), anyhow::Error> {
-    let client = make_client(address, port, &log).await?;
+    let client = make_client(address, http_port, native_port, &log).await?;
     client.wipe_single_node_db().await.context("Failed to wipe database")
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn query(
     address: IpAddr,
-    port: u16,
+    http_port: u16,
+    native_port: u16,
     log: Logger,
     timeseries_name: String,
     filters: Vec<String>,
     start: Option<query::Timestamp>,
     end: Option<query::Timestamp>,
 ) -> Result<(), anyhow::Error> {
-    let client = make_client(address, port, &log).await?;
+    let client = make_client(address, http_port, native_port, &log).await?;
     let filters = filters.iter().map(|s| s.as_str()).collect::<Vec<_>>();
     let timeseries = client
         .select_timeseries_with(
@@ -312,10 +325,18 @@ async fn main() -> anyhow::Result<()> {
     match args.cmd {
         Subcommand::Describe => describe_data(),
         Subcommand::Populate { populate_args } => {
-            populate(args.address, args.port, log, populate_args).await?
+            populate(
+                args.address,
+                args.port,
+                args.native_port,
+                log,
+                populate_args,
+            )
+            .await?
         }
         Subcommand::Wipe => {
-            wipe_single_node_db(args.address, args.port, log).await?
+            wipe_single_node_db(args.address, args.port, args.native_port, log)
+                .await?
         }
         Subcommand::Query {
             timeseries_name,
@@ -338,6 +359,7 @@ async fn main() -> anyhow::Result<()> {
             query(
                 args.address,
                 args.port,
+                args.native_port,
                 log,
                 timeseries_name,
                 filters,
@@ -348,12 +370,29 @@ async fn main() -> anyhow::Result<()> {
         }
         #[cfg(feature = "sql")]
         Subcommand::Sql { opts } => {
-            oximeter_db::shells::sql::shell(args.address, args.port, log, opts)
-                .await?
+            oximeter_db::shells::sql::shell(
+                args.address,
+                args.port,
+                args.native_port,
+                log,
+                opts,
+            )
+            .await?
         }
         #[cfg(feature = "oxql")]
         Subcommand::Oxql { opts } => {
-            oximeter_db::shells::oxql::shell(args.address, args.port, log, opts)
+            oximeter_db::shells::oxql::shell(
+                args.address,
+                args.port,
+                args.native_port,
+                log,
+                opts,
+            )
+            .await?
+        }
+        #[cfg(feature = "native-sql-shell")]
+        Subcommand::NativeSql => {
+            oximeter_db::shells::native::shell(args.address, args.native_port)
                 .await?
         }
     }

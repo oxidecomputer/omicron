@@ -11,11 +11,13 @@ use std::error::Error;
 use std::io;
 use std::sync::Arc;
 
+mod clickhouse_cli;
 mod clickward;
 mod config;
 mod context;
 mod http_entrypoints;
 
+pub use clickhouse_cli::ClickhouseCli;
 pub use clickward::Clickward;
 pub use config::Config;
 
@@ -31,15 +33,17 @@ pub enum StartError {
 
 pub type Server = dropshot::HttpServer<Arc<ServerContext>>;
 
-/// Start the dropshot server
-pub async fn start_server(
+/// Start the dropshot server for `clickhouse-admin-server` which
+/// manages clickhouse replica servers.
+pub async fn start_server_admin_server(
     clickward: Clickward,
+    clickhouse_cli: ClickhouseCli,
     server_config: Config,
 ) -> Result<Server, StartError> {
     let (drain, registration) = slog_dtrace::with_drain(
         server_config
             .log
-            .to_logger("clickhouse-admin")
+            .to_logger("clickhouse-admin-server")
             .map_err(StartError::InitializeLogger)?,
     );
     let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
@@ -56,11 +60,55 @@ pub async fn start_server(
 
     let context = ServerContext::new(
         clickward,
+        clickhouse_cli
+            .with_log(log.new(slog::o!("component" => "ClickhouseCli"))),
         log.new(slog::o!("component" => "ServerContext")),
     );
     let http_server_starter = dropshot::HttpServerStarter::new(
         &server_config.dropshot,
-        http_entrypoints::api(),
+        http_entrypoints::clickhouse_admin_server_api(),
+        Arc::new(context),
+        &log.new(slog::o!("component" => "dropshot")),
+    )
+    .map_err(StartError::InitializeHttpServer)?;
+
+    Ok(http_server_starter.start())
+}
+
+/// Start the dropshot server for `clickhouse-admin-server` which
+/// manages clickhouse replica servers.
+pub async fn start_keeper_admin_server(
+    clickward: Clickward,
+    clickhouse_cli: ClickhouseCli,
+    server_config: Config,
+) -> Result<Server, StartError> {
+    let (drain, registration) = slog_dtrace::with_drain(
+        server_config
+            .log
+            .to_logger("clickhouse-admin-keeper")
+            .map_err(StartError::InitializeLogger)?,
+    );
+    let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
+    match registration {
+        ProbeRegistration::Success => {
+            debug!(log, "registered DTrace probes");
+        }
+        ProbeRegistration::Failed(err) => {
+            let err = StartError::RegisterDtraceProbes(err);
+            error!(log, "failed to register DTrace probes"; &err);
+            return Err(err);
+        }
+    }
+
+    let context = ServerContext::new(
+        clickward,
+        clickhouse_cli
+            .with_log(log.new(slog::o!("component" => "ClickhouseCli"))),
+        log.new(slog::o!("component" => "ServerContext")),
+    );
+    let http_server_starter = dropshot::HttpServerStarter::new(
+        &server_config.dropshot,
+        http_entrypoints::clickhouse_admin_keeper_api(),
         Arc::new(context),
         &log.new(slog::o!("component" => "dropshot")),
     )

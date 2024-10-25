@@ -309,6 +309,32 @@ async fn srrd_drive_region_replacement_check(
         &params.serialized_authn,
     );
 
+    // It doesn't make sense to perform any of this saga if the volume was soft
+    // or hard deleted: for example, this happens if the higher level resource
+    // like the disk was deleted. Volume deletion potentially results in the
+    // clean-up of Crucible resources, so it wouldn't even be valid to attempt
+    // to drive forward any type of live repair or reconciliation.
+    //
+    // Setting Done here will cause this saga to transition the replacement
+    // request to ReplacementDone.
+
+    let volume_deleted = osagactx
+        .datastore()
+        .volume_deleted(params.request.volume_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    if volume_deleted {
+        info!(
+            log,
+            "volume was soft or hard deleted!";
+            "region replacement id" => %params.request.id,
+            "volume id" => %params.request.volume_id,
+        );
+
+        return Ok(DriveCheck::Done);
+    }
+
     let last_request_step = osagactx
         .datastore()
         .current_region_replacement_request_step(&opctx, params.request.id)
@@ -577,26 +603,17 @@ async fn check_from_previous_propolis_step(
                 Ok(DriveCheck::LastStepStillRunning)
             }
 
-            VmmState::Starting => {
-                // This state is unexpected, considering Nexus previously sent a
-                // target replacement request to this propolis!
+            // These states are unexpected, considering Nexus previously sent a
+            // target replacement request to this propolis!
+            VmmState::Starting | VmmState::Creating
+            // This state is unexpected because we should have already
+            // returned `DriveCheck::Wait` above.
+            | VmmState::Migrating => {
 
                 return Err(ActionError::action_failed(format!(
-                    "vmm {} propolis is Starting",
-                    step_vmm_id,
+                    "vmm {step_vmm_id} propolis is {state}",
                 )));
             }
-
-            VmmState::Migrating => {
-                // This state is unexpected because we should have already
-                // returned `DriveCheck::Wait` above.
-
-                return Err(ActionError::action_failed(format!(
-                    "vmm {} propolis is Migrating!",
-                    step_vmm_id,
-                )));
-            }
-
             VmmState::Stopping
             | VmmState::Stopped
             | VmmState::Failed
@@ -923,7 +940,8 @@ async fn srrd_drive_region_replacement_prepare(
                             | VmmState::Migrating
                             | VmmState::Failed
                             | VmmState::Destroyed
-                            | VmmState::SagaUnwound => {
+                            | VmmState::SagaUnwound
+                            | VmmState::Creating => {
                                 // Propolis server is not ok to receive volume
                                 // replacement requests, bail out
                                 return Err(ActionError::action_failed(format!(
@@ -1016,11 +1034,6 @@ async fn srrd_drive_region_replacement_prepare(
                     "region replacement id" => %params.request.id,
                     "disk id" => ?disk.id(),
                 );
-
-                // XXX: internal-dns does not randomize the order of addresses
-                // in its responses: if the first Pantry in the list of
-                // addresses returned by DNS isn't responding, the drive saga
-                // will still continually try to use it.
 
                 let pantry_address = get_pantry_address(nexus).await?;
 

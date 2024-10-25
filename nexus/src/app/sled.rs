@@ -12,7 +12,6 @@ use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
-use nexus_db_queries::db::model::DatasetKind;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
@@ -23,6 +22,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::internal::shared::DatasetKind;
 use omicron_uuid_kinds::{GenericUuid, SledUuid};
 use sled_agent_client::Client as SledAgentClient;
 use std::net::SocketAddrV6;
@@ -102,7 +102,19 @@ impl super::Nexus {
         let sled_lookup = self.sled_lookup(opctx, &sled_id)?;
         let (authz_sled,) =
             sled_lookup.lookup_for(authz::Action::Modify).await?;
-        self.db_datastore.sled_set_policy_to_expunged(opctx, &authz_sled).await
+        let prev_policy = self
+            .db_datastore
+            .sled_set_policy_to_expunged(opctx, &authz_sled)
+            .await?;
+
+        // The instance-watcher background task is responsible for marking any
+        // VMMs running on `Expunged` sleds as `Failed`, so that their instances
+        // can transition to `Failed` and be deleted or restarted. Let's go
+        // ahead and activate it now so that those instances don't need to wait
+        // for the next periodic activation before they can be cleaned up.
+        self.background_tasks.task_instance_watcher.activate();
+
+        Ok(prev_policy)
     }
 
     pub(crate) async fn sled_request_firewall_rules(
@@ -292,13 +304,12 @@ impl super::Nexus {
 
     // Datasets (contained within zpools)
 
-    /// Upserts a dataset into the database, updating it if it already exists.
-    pub(crate) async fn upsert_dataset(
+    /// Upserts a crucible dataset into the database, updating it if it already exists.
+    pub(crate) async fn upsert_crucible_dataset(
         &self,
         id: Uuid,
         zpool_id: Uuid,
         address: SocketAddrV6,
-        kind: DatasetKind,
     ) -> Result<(), Error> {
         info!(
             self.log,
@@ -307,6 +318,7 @@ impl super::Nexus {
             "dataset_id" => id.to_string(),
             "address" => address.to_string()
         );
+        let kind = DatasetKind::Crucible;
         let dataset =
             db::model::Dataset::new(id, zpool_id, Some(address), kind);
         self.db_datastore.dataset_upsert(dataset).await?;

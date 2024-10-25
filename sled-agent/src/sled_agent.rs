@@ -32,37 +32,37 @@ use illumos_utils::opte::PortManager;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zone::ZONE_PREFIX;
 use nexus_sled_agent_shared::inventory::{
-    Inventory, InventoryDisk, InventoryZpool, OmicronZonesConfig, SledRole,
+    Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
+    OmicronZonesConfig, SledRole,
 };
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
-use omicron_common::api::internal::nexus::{
-    SledInstanceState, VmmRuntimeState,
-};
+use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::api::internal::shared::{
-    HostPortConfig, RackNetworkConfig, ResolvedVpcFirewallRule,
-    ResolvedVpcRouteSet, ResolvedVpcRouteState, SledIdentifiers,
-    VirtualNetworkInterfaceHost,
+    ExternalIpGatewayMap, HostPortConfig, RackNetworkConfig,
+    ResolvedVpcFirewallRule, ResolvedVpcRouteSet, ResolvedVpcRouteState,
+    SledIdentifiers, VirtualNetworkInterfaceHost,
 };
 use omicron_common::api::{
-    internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
-    internal::nexus::UpdateArtifactId,
+    internal::nexus::DiskRuntimeState, internal::nexus::UpdateArtifactId,
 };
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
-use omicron_common::disk::{DisksManagementResult, OmicronPhysicalDisksConfig};
+use omicron_common::disk::{
+    DatasetsConfig, DatasetsManagementResult, DisksManagementResult,
+    OmicronPhysicalDisksConfig,
+};
 use omicron_ddm_admin_client::Client as DdmAdminClient;
-use omicron_uuid_kinds::{InstanceUuid, PropolisUuid};
+use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid};
 use sled_agent_api::Zpool;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::instance::{
-    InstanceExternalIpBody, InstanceHardware, InstanceMetadata,
-    InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse,
+    InstanceEnsureBody, InstanceExternalIpBody, VmmPutStateResponse,
+    VmmStateRequested, VmmUnregisterResponse,
 };
 use sled_agent_types::sled::{BaseboardId, StartSledAgentRequest};
 use sled_agent_types::time_sync::TimeSync;
@@ -73,10 +73,12 @@ use sled_agent_types::zone_bundle::{
 use sled_hardware::{underlay, HardwareManager};
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_hardware_types::Baseboard;
+use sled_storage::dataset::{CRYPT_DATASET, ZONE_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
+use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeMap;
-use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -143,7 +145,7 @@ pub enum Error {
     Hardware(String),
 
     #[error("Error resolving DNS name: {0}")]
-    ResolveError(#[from] internal_dns::resolver::ResolveError),
+    ResolveError(#[from] internal_dns_resolver::ResolveError),
 
     #[error(transparent)]
     ZpoolList(#[from] illumos_utils::zpool::ListError),
@@ -227,7 +229,7 @@ impl From<Error> for dropshot::HttpError {
                 }
             }
             Error::Instance(
-                e @ crate::instance_manager::Error::NoSuchInstance(_),
+                e @ crate::instance_manager::Error::NoSuchVmm(_),
             ) => HttpError::for_not_found(
                 Some(NO_SUCH_INSTANCE.to_string()),
                 e.to_string(),
@@ -292,7 +294,7 @@ impl From<InventoryError> for dropshot::HttpError {
 /// Contains both a connection to the Nexus, as well as managed instances.
 struct SledAgentInner {
     // ID of the Sled
-    id: Uuid,
+    id: SledUuid,
 
     // Subnet of the Sled's underlay.
     //
@@ -364,6 +366,7 @@ impl SledAgentInner {
 pub struct SledAgent {
     inner: Arc<SledAgentInner>,
     log: Logger,
+    sprockets: SprocketsConfig,
 }
 
 impl SledAgent {
@@ -442,7 +445,7 @@ impl SledAgent {
         let baseboard = long_running_task_handles.hardware_manager.baseboard();
         let identifiers = SledIdentifiers {
             rack_id: request.body.rack_id,
-            sled_id: request.body.id,
+            sled_id: request.body.id.into_untyped_uuid(),
             model: baseboard.model().to_string(),
             revision: baseboard.revision(),
             serial: baseboard.identifier().to_string(),
@@ -495,7 +498,7 @@ impl SledAgent {
         let updates = UpdateManager::new(update_config);
 
         let svc_config = services::Config::new(
-            request.body.id,
+            request.body.id.into_untyped_uuid(),
             config.sidecar_revision.clone(),
         );
 
@@ -570,7 +573,7 @@ impl SledAgent {
         });
 
         let probes = ProbeManager::new(
-            request.body.id,
+            request.body.id.into_untyped_uuid(),
             nexus_client.clone(),
             etherstub.clone(),
             storage_manager.clone(),
@@ -603,6 +606,7 @@ impl SledAgent {
                 boot_disk_os_writer: BootDiskOsWriter::new(&parent_log),
             }),
             log: log.clone(),
+            sprockets: config.sprockets.clone(),
         };
 
         sled_agent.inner.probes.run().await;
@@ -674,7 +678,7 @@ impl SledAgent {
         (self.inner.switch_zone_ip(), self.inner.rack_network_config.as_ref())
     }
 
-    pub fn id(&self) -> Uuid {
+    pub fn id(&self) -> SledUuid {
         self.inner.id
     }
 
@@ -684,6 +688,10 @@ impl SledAgent {
 
     pub fn start_request(&self) -> &StartSledAgentRequest {
         &self.inner.start_request
+    }
+
+    pub fn sprockets(&self) -> SprocketsConfig {
+        self.sprockets.clone()
     }
 
     /// Requests firewall rules from Nexus.
@@ -811,6 +819,29 @@ impl SledAgent {
         self.inner.zone_bundler.cleanup().await.map_err(Error::from)
     }
 
+    pub async fn datasets_config_list(&self) -> Result<DatasetsConfig, Error> {
+        Ok(self.storage().datasets_config_list().await?)
+    }
+
+    pub async fn datasets_ensure(
+        &self,
+        config: DatasetsConfig,
+    ) -> Result<DatasetsManagementResult, Error> {
+        info!(self.log, "datasets ensure");
+        let datasets_result = self.storage().datasets_ensure(config).await?;
+        info!(self.log, "datasets ensure: Updated storage");
+
+        // TODO(https://github.com/oxidecomputer/omicron/issues/6177):
+        // At the moment, we don't actually remove any datasets -- this function
+        // just adds new datasets.
+        //
+        // Once we start removing old datasets, we should probably ensure that
+        // they are not longer in-use before returning (similar to
+        // omicron_physical_disks_ensure).
+
+        Ok(datasets_result)
+    }
+
     /// Requests the set of physical disks currently managed by the Sled Agent.
     ///
     /// This should be contrasted by the set of disks in the inventory, which
@@ -886,20 +917,13 @@ impl SledAgent {
         Ok(disk_result)
     }
 
-    /// List the Omicron zone configuration that's currently running
-    pub async fn omicron_zones_list(
-        &self,
-    ) -> Result<OmicronZonesConfig, Error> {
-        Ok(self.inner.services.omicron_zones_list().await?)
-    }
-
     /// Ensures that the specific set of Omicron zones are running as configured
     /// (and that no other zones are running)
     pub async fn omicron_zones_ensure(
         &self,
         requested_zones: OmicronZonesConfig,
     ) -> Result<(), Error> {
-        // TODO:
+        // TODO(https://github.com/oxidecomputer/omicron/issues/6043):
         // - If these are the set of filesystems, we should also consider
         // removing the ones which are not listed here.
         // - It's probably worth sending a bulk request to the storage system,
@@ -910,7 +934,7 @@ impl SledAgent {
             };
 
             // First, ensure the dataset exists
-            let dataset_id = zone.id;
+            let dataset_id = zone.id.into_untyped_uuid();
             self.inner
                 .storage
                 .upsert_filesystem(dataset_id, dataset_name)
@@ -956,29 +980,14 @@ impl SledAgent {
     /// Idempotently ensures that a given instance is registered with this sled,
     /// i.e., that it can be addressed by future calls to
     /// [`Self::instance_ensure_state`].
-    #[allow(clippy::too_many_arguments)]
     pub async fn instance_ensure_registered(
         &self,
-        instance_id: InstanceUuid,
         propolis_id: PropolisUuid,
-        hardware: InstanceHardware,
-        instance_runtime: InstanceRuntimeState,
-        vmm_runtime: VmmRuntimeState,
-        propolis_addr: SocketAddr,
-        metadata: InstanceMetadata,
-    ) -> Result<SledInstanceState, Error> {
+        instance: InstanceEnsureBody,
+    ) -> Result<SledVmmState, Error> {
         self.inner
             .instances
-            .ensure_registered(
-                instance_id,
-                propolis_id,
-                hardware,
-                instance_runtime,
-                vmm_runtime,
-                propolis_addr,
-                self.sled_identifiers(),
-                metadata,
-            )
+            .ensure_registered(propolis_id, instance, self.sled_identifiers())
             .await
             .map_err(|e| Error::Instance(e))
     }
@@ -990,11 +999,11 @@ impl SledAgent {
     /// rudely terminates the instance.
     pub async fn instance_ensure_unregistered(
         &self,
-        instance_id: InstanceUuid,
-    ) -> Result<InstanceUnregisterResponse, Error> {
+        propolis_id: PropolisUuid,
+    ) -> Result<VmmUnregisterResponse, Error> {
         self.inner
             .instances
-            .ensure_unregistered(instance_id)
+            .ensure_unregistered(propolis_id)
             .await
             .map_err(|e| Error::Instance(e))
     }
@@ -1003,12 +1012,12 @@ impl SledAgent {
     /// state.
     pub async fn instance_ensure_state(
         &self,
-        instance_id: InstanceUuid,
-        target: InstanceStateRequested,
-    ) -> Result<InstancePutStateResponse, Error> {
+        propolis_id: PropolisUuid,
+        target: VmmStateRequested,
+    ) -> Result<VmmPutStateResponse, Error> {
         self.inner
             .instances
-            .ensure_state(instance_id, target)
+            .ensure_state(propolis_id, target)
             .await
             .map_err(|e| Error::Instance(e))
     }
@@ -1020,12 +1029,12 @@ impl SledAgent {
     /// does not match the current ephemeral IP.
     pub async fn instance_put_external_ip(
         &self,
-        instance_id: InstanceUuid,
+        propolis_id: PropolisUuid,
         external_ip: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
         self.inner
             .instances
-            .add_external_ip(instance_id, external_ip)
+            .add_external_ip(propolis_id, external_ip)
             .await
             .map_err(|e| Error::Instance(e))
     }
@@ -1034,12 +1043,12 @@ impl SledAgent {
     /// specified external IP address in either its ephemeral or floating IP set.
     pub async fn instance_delete_external_ip(
         &self,
-        instance_id: InstanceUuid,
+        propolis_id: PropolisUuid,
         external_ip: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
         self.inner
             .instances
-            .delete_external_ip(instance_id, external_ip)
+            .delete_external_ip(propolis_id, external_ip)
             .await
             .map_err(|e| Error::Instance(e))
     }
@@ -1047,11 +1056,11 @@ impl SledAgent {
     /// Returns the state of the instance with the provided ID.
     pub async fn instance_get_state(
         &self,
-        instance_id: InstanceUuid,
-    ) -> Result<SledInstanceState, Error> {
+        propolis_id: PropolisUuid,
+    ) -> Result<SledVmmState, Error> {
         self.inner
             .instances
-            .get_instance_state(instance_id)
+            .get_instance_state(propolis_id)
             .await
             .map_err(|e| Error::Instance(e))
     }
@@ -1082,19 +1091,15 @@ impl SledAgent {
     }
 
     /// Issue a snapshot request for a Crucible disk attached to an instance
-    pub async fn instance_issue_disk_snapshot_request(
+    pub async fn vmm_issue_disk_snapshot_request(
         &self,
-        instance_id: InstanceUuid,
+        propolis_id: PropolisUuid,
         disk_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
         self.inner
             .instances
-            .instance_issue_disk_snapshot_request(
-                instance_id,
-                disk_id,
-                snapshot_id,
-            )
+            .issue_disk_snapshot_request(propolis_id, disk_id, snapshot_id)
             .await
             .map_err(Error::from)
     }
@@ -1167,6 +1172,42 @@ impl SledAgent {
         self.inner.port_manager.vpc_routes_ensure(routes).map_err(Error::from)
     }
 
+    pub async fn set_eip_gateways(
+        &self,
+        mappings: ExternalIpGatewayMap,
+    ) -> Result<(), Error> {
+        info!(
+            self.log,
+            "IGW mapping received";
+            "values" => ?mappings
+        );
+        let changed = self.inner.port_manager.set_eip_gateways(mappings);
+
+        // TODO(kyle)
+        // There is a substantial downside to this approach, which is that
+        // we can currently only do correct Internet Gateway association for
+        // *Instances* -- sled agent does not remember the ExtIPs associated
+        // with Services or with Probes.
+        //
+        // In practice, services should not have more than one IGW. Not having
+        // identical source IP selection for Probes is a little sad, though.
+        // OPTE will follow the old (single-IGW) behaviour when no mappings
+        // are installed.
+        //
+        // My gut feeling is that the correct place for External IPs to
+        // live is on each NetworkInterface, which makes it far simpler for
+        // nexus to administer and add/remove IPs on *all* classes of port
+        // via RPW. This is how we would make this correct in general.
+        // My understanding is that NetworkInterface's schema makes its way into
+        // the ledger, and I'm not comfortable redoing that this close to a release.
+        if changed {
+            self.inner.instances.refresh_external_ips().await?;
+            info!(self.log, "IGW mapping changed; external IPs refreshed");
+        }
+
+        Ok(())
+    }
+
     pub(crate) fn storage(&self) -> &StorageHandle {
         &self.inner.storage
     }
@@ -1188,7 +1229,7 @@ impl SledAgent {
         let baseboard = self.inner.hardware.baseboard();
         SledIdentifiers {
             rack_id: self.inner.start_request.body.rack_id,
-            sled_id: self.inner.id,
+            sled_id: self.inner.id.into_untyped_uuid(),
             model: baseboard.model().to_string(),
             revision: baseboard.revision(),
             serial: baseboard.identifier().to_string(),
@@ -1214,12 +1255,21 @@ impl SledAgent {
 
         let mut disks = vec![];
         let mut zpools = vec![];
-        let all_disks = self.storage().get_latest_disks().await;
-        for (identity, variant, slot, _firmware) in all_disks.iter_all() {
+        let mut datasets = vec![];
+        let (all_disks, omicron_zones) = tokio::join!(
+            self.storage().get_latest_disks(),
+            self.inner.services.omicron_zones_list()
+        );
+        for (identity, variant, slot, firmware) in all_disks.iter_all() {
             disks.push(InventoryDisk {
                 identity: identity.clone(),
                 variant,
                 slot,
+                active_firmware_slot: firmware.active_slot(),
+                next_active_firmware_slot: firmware.next_active_slot(),
+                number_of_firmware_slots: firmware.number_of_slots(),
+                slot1_is_read_only: firmware.slot1_read_only(),
+                slot_firmware_versions: firmware.slots().to_vec(),
             });
         }
         for zpool in all_disks.all_u2_zpools() {
@@ -1242,6 +1292,47 @@ impl SledAgent {
                 id: zpool.id(),
                 total_size: ByteCount::try_from(info.size())?,
             });
+
+            // We do care about the total space usage within zpools, but mapping
+            // the layering back to "datasets we care about" is a little
+            // awkward.
+            //
+            // We could query for all datasets within a pool, but the sled agent
+            // doesn't really care about the children of datasets that it
+            // allocates. As an example: Sled Agent might provision a "crucible"
+            // dataset, but how region allocation occurs within that dataset
+            // is a detail for Crucible to care about, not the Sled Agent.
+            //
+            // To balance this effort, we ask for information about datasets
+            // that the Sled Agent is directly resopnsible for managing.
+            let datasets_of_interest = [
+                // We care about the zpool itself, and all direct children.
+                zpool.to_string(),
+                // Likewise, we care about the encrypted dataset, and all
+                // direct children.
+                format!("{zpool}/{CRYPT_DATASET}"),
+                // The zone dataset gives us additional context on "what zones
+                // have datasets provisioned".
+                format!("{zpool}/{ZONE_DATASET}"),
+            ];
+            let inv_props =
+                match illumos_utils::zfs::Zfs::get_dataset_properties(
+                    datasets_of_interest.as_slice(),
+                ) {
+                    Ok(props) => props
+                        .into_iter()
+                        .map(|prop| InventoryDataset::from(prop)),
+                    Err(err) => {
+                        warn!(
+                            self.log,
+                            "Failed to access dataset info within zpool";
+                            "zpool" => %zpool,
+                            "err" => %err
+                        );
+                        continue;
+                    }
+                };
+            datasets.extend(inv_props);
         }
 
         Ok(Inventory {
@@ -1252,8 +1343,10 @@ impl SledAgent {
             usable_hardware_threads,
             usable_physical_ram: ByteCount::try_from(usable_physical_ram)?,
             reservoir_size,
+            omicron_zones,
             disks,
             zpools,
+            datasets,
         })
     }
 }
@@ -1280,6 +1373,7 @@ pub enum AddSledError {
 /// Add a sled to an initialized rack.
 pub async fn sled_add(
     log: Logger,
+    sprockets_config: SprocketsConfig,
     sled_id: BaseboardId,
     request: StartSledAgentRequest,
 ) -> Result<(), AddSledError> {
@@ -1339,6 +1433,7 @@ pub async fn sled_add(
         SocketAddrV6::new(bootstrap_addr, BOOTSTRAP_AGENT_RACK_INIT_PORT, 0, 0);
     let client = crate::bootstrap::client::Client::new(
         bootstrap_addr,
+        sprockets_config,
         log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
     );
 

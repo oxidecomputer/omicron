@@ -29,11 +29,20 @@ use std::sync::Arc;
 pub struct RegionSnapshotReplacementDetector {
     datastore: Arc<DataStore>,
     sagas: Arc<dyn StartSaga>,
+    disabled: bool,
 }
 
 impl RegionSnapshotReplacementDetector {
+    #[allow(dead_code)]
     pub fn new(datastore: Arc<DataStore>, sagas: Arc<dyn StartSaga>) -> Self {
-        RegionSnapshotReplacementDetector { datastore, sagas }
+        RegionSnapshotReplacementDetector { datastore, sagas, disabled: false }
+    }
+
+    pub fn disabled(
+        datastore: Arc<DataStore>,
+        sagas: Arc<dyn StartSaga>,
+    ) -> Self {
+        RegionSnapshotReplacementDetector { datastore, sagas, disabled: true }
     }
 
     async fn send_start_request(
@@ -49,7 +58,10 @@ impl RegionSnapshotReplacementDetector {
         };
 
         let saga_dag = SagaRegionSnapshotReplacementStart::prepare(&params)?;
-        self.sagas.saga_start(saga_dag).await
+        // We only care that the saga was started, and don't wish to wait for it
+        // to complete, so use `StartSaga::saga_start`, rather than `saga_run`.
+        self.sagas.saga_start(saga_dag).await?;
+        Ok(())
     }
 
     /// Find region snapshots on expunged physical disks and create region
@@ -233,6 +245,10 @@ impl BackgroundTask for RegionSnapshotReplacementDetector {
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
             let mut status = RegionSnapshotReplacementStartStatus::default();
+
+            if self.disabled {
+                return json!(status);
+            }
 
             self.create_requests_for_region_snapshots_on_expunged_disks(
                 opctx,

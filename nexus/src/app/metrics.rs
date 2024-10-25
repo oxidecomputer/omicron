@@ -4,7 +4,6 @@
 
 //! Metrics
 
-use crate::external_api::http_entrypoints::SystemMetricName;
 use crate::external_api::params::ResourceMetrics;
 use dropshot::PaginationParams;
 use nexus_db_queries::authz;
@@ -12,10 +11,10 @@ use nexus_db_queries::{
     context::OpContext,
     db::{fixed_data::FLEET_ID, lookup},
 };
+use nexus_external_api::TimeseriesSchemaPaginationParams;
+use nexus_types::external_api::params::SystemMetricName;
 use omicron_common::api::external::{Error, InternalContext};
-use oximeter_db::{
-    Measurement, TimeseriesSchema, TimeseriesSchemaPaginationParams,
-};
+use oximeter_db::{Measurement, TimeseriesSchema};
 use std::num::NonZeroU32;
 
 impl super::Nexus {
@@ -113,14 +112,6 @@ impl super::Nexus {
         // resources they have access to.
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.timeseries_client
-            .get()
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "Cannot access timeseries DB: {}",
-                    e
-                ))
-            })?
             .timeseries_schema_list(&pagination.page, limit)
             .await
             .map_err(|e| match e {
@@ -146,14 +137,6 @@ impl super::Nexus {
         // resources they have access to.
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.timeseries_client
-            .get()
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "Cannot access timeseries DB: {}",
-                    e
-                ))
-            })?
             .oxql_query(query)
             .await
             .map(|result| {

@@ -14,6 +14,9 @@
 // lots of related issues and discussion.
 extern crate self as oximeter;
 
+use anyhow::Context;
+use clickward::{Deployment, KeeperClient, KeeperError, KeeperId};
+use omicron_test_utils::dev::poll;
 use oximeter_macro_impl::{Metric, Target};
 use oximeter_types::histogram;
 use oximeter_types::histogram::{Histogram, Record};
@@ -22,6 +25,8 @@ use oximeter_types::types::{
     Cumulative, Datum, DatumType, FieldType, FieldValue, Measurement, Sample,
 };
 use oximeter_types::{Metric, Target};
+use slog::{debug, info, Logger};
+use std::time::Duration;
 use uuid::Uuid;
 
 #[derive(Target)]
@@ -125,6 +130,59 @@ pub fn generate_test_samples(
         }
     }
     samples
+}
+
+/// Wait for all keeper servers to be capable of handling commands
+pub async fn wait_for_keepers(
+    log: &Logger,
+    deployment: &Deployment,
+    ids: Vec<KeeperId>,
+) -> anyhow::Result<()> {
+    let mut keepers = vec![];
+    for id in &ids {
+        keepers.push(KeeperClient::new(deployment.keeper_addr(*id)?));
+    }
+
+    poll::wait_for_condition(
+        || async {
+            let mut done = true;
+            for keeper in &keepers {
+                match keeper.config().await {
+                    Ok(config) => {
+                        // The node isn't really up yet
+                        if config.len() != keepers.len() {
+                            done = false;
+                            debug!(log, "Keeper config not set";
+                                "addr" => keeper.addr(),
+                                "expected" => keepers.len(),
+                                "got" => config.len()
+                            );
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        done = false;
+                        debug!(log, "Keeper connection error: {}", e;
+                            "addr" => keeper.addr()
+                        );
+                        break;
+                    }
+                }
+            }
+            if !done {
+                Err(poll::CondCheckError::<KeeperError>::NotYet)
+            } else {
+                Ok(())
+            }
+        },
+        &Duration::from_millis(1),
+        &Duration::from_secs(30),
+    )
+    .await
+    .with_context(|| format!("failed to contact all keepers: {ids:?}"))?;
+
+    info!(log, "Keepers ready: {ids:?}");
+    Ok(())
 }
 
 #[cfg(test)]

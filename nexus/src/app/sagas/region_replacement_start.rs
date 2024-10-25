@@ -49,6 +49,7 @@ use super::{
     ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
     ACTION_GENERATE_ID,
 };
+use crate::app::db::datastore::VolumeReplaceResult;
 use crate::app::sagas::common_storage::find_only_new_region;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::RegionAllocationStrategy;
@@ -535,7 +536,7 @@ async fn srrs_replace_region_in_volume(
     // `volume_replace_region` will swap the old region for the new region,
     // assigning the old region to the new volume id for later (attempted)
     // deletion. After this is done, repair or reconciliation needs to occur.
-    osagactx
+    let volume_replace_region_result = osagactx
         .datastore()
         .volume_replace_region(
             /* target */
@@ -554,7 +555,30 @@ async fn srrs_replace_region_in_volume(
         .await
         .map_err(ActionError::action_failed)?;
 
-    Ok(())
+    debug!(log, "replacement returned {:?}", volume_replace_region_result);
+
+    match volume_replace_region_result {
+        VolumeReplaceResult::AlreadyHappened | VolumeReplaceResult::Done => {
+            // The replacement was done either by this run of this saga node, or
+            // a previous one (and this is a rerun). This can only be returned
+            // if the transaction occurred on the non-deleted volume so proceed
+            // with the rest of the saga (to properly clean up allocated
+            // resources).
+
+            Ok(())
+        }
+
+        VolumeReplaceResult::ExistingVolumeDeleted => {
+            // Unwind the saga here to clean up the resources allocated during
+            // this saga. The associated background task will transition this
+            // request's state to Completed.
+
+            Err(ActionError::action_failed(Error::conflict(format!(
+                "existing volume {} deleted",
+                old_volume_id
+            ))))
+        }
+    }
 }
 
 async fn srrs_replace_region_in_volume_undo(
@@ -610,7 +634,12 @@ async fn srrs_replace_region_in_volume_undo(
 
     // Note: volume ID is not swapped! The fake volume hasn't been created yet,
     // and we have to target the original volume id.
-    osagactx
+    //
+    // It's ok if this function returns ExistingVolumeDeleted here: we don't
+    // want to throw an error and cause the saga to be stuck unwinding, as this
+    // would hold the lock on the replacement request.
+
+    let volume_replace_region_result = osagactx
         .datastore()
         .volume_replace_region(
             /* target */
@@ -627,6 +656,12 @@ async fn srrs_replace_region_in_volume_undo(
             },
         )
         .await?;
+
+    info!(
+        log,
+        "undo: volume_replace_region returned {:?}",
+        volume_replace_region_result,
+    );
 
     Ok(())
 }
@@ -747,7 +782,6 @@ pub(crate) mod test {
     };
     use chrono::Utc;
     use nexus_db_model::Dataset;
-    use nexus_db_model::DatasetKind;
     use nexus_db_model::Region;
     use nexus_db_model::RegionReplacement;
     use nexus_db_model::RegionReplacementState;
@@ -758,6 +792,7 @@ pub(crate) mod test {
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::identity::Asset;
+    use omicron_common::api::internal::shared::DatasetKind;
     use sled_agent_client::types::VolumeConstructionRequest;
     use uuid::Uuid;
 

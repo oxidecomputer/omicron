@@ -15,16 +15,24 @@ async-trait.workspace = true
 bcs.workspace = true
 camino.workspace = true
 chrono.workspace = true
+chrono-tz.workspace = true
 clap.workspace = true
 clickward.workspace = true
+debug-ignore.workspace = true
 dropshot.workspace = true
 futures.workspace = true
+gethostname.workspace = true
 highway.workspace = true
+iana-time-zone.workspace = true
+indexmap.workspace = true
+libc.workspace = true
+nom.workspace = true
 num.workspace = true
 omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
 oximeter.workspace = true
 oxql-types.workspace = true
+qorb.workspace = true
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -33,6 +41,7 @@ slog-async.workspace = true
 slog-dtrace.workspace = true
 slog-term.workspace = true
 thiserror.workspace = true
+tokio-util.workspace = true
 usdt.workspace = true
 uuid.workspace = true
 
@@ -44,7 +53,7 @@ features = [ "serde" ]
 workspace = true
 optional = true
 
-[dependencies.indexmap]
+[dependencies.display-error-chain]
 workspace = true
 optional = true
 
@@ -86,8 +95,8 @@ features = [ "rt-multi-thread", "macros" ]
 
 [dev-dependencies]
 camino-tempfile.workspace = true
+criterion = { workspace = true, features = [ "async_tokio" ] }
 expectorate.workspace = true
-indexmap.workspace = true
 itertools.workspace = true
 omicron-test-utils.workspace = true
 oximeter-test-utils.workspace = true
@@ -98,9 +107,8 @@ strum.workspace = true
 tempfile.workspace = true
 
 [features]
-default = [ "oxql", "sql" ]
+default = [ "native-sql-shell", "oxql", "sql" ]
 sql = [
-    "dep:indexmap",
     "dep:reedline",
     "dep:rustyline",
     "dep:sqlformat",
@@ -113,7 +121,20 @@ oxql = [
     "dep:reedline",
     "dep:tabled",
 ]
+native-sql-shell = [
+    "dep:crossterm",
+    "dep:display-error-chain",
+    "dep:reedline",
+    "dep:rustyline",
+    "dep:sqlformat",
+    "dep:sqlparser",
+    "dep:tabled"
+]
 
 [[bin]]
 name = "oxdb"
 doc = false
+
+[[bench]]
+name = "protocol"
+harness = false

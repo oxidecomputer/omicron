@@ -2,18 +2,18 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use clickhouse_admin_api::ClickhouseAddress;
+use clickhouse_admin_types::{
+    KeeperConfig, KeeperSettings, ReplicaConfig, ServerSettings,
+};
 use dropshot::HttpError;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
-use std::io;
-use std::net::SocketAddrV6;
 
 #[derive(Debug, thiserror::Error, SlogInlineError)]
 pub enum ClickwardError {
-    #[error("clickward failure")]
+    #[error("clickward XML generation failure")]
     Failure {
         #[source]
-        err: io::Error,
+        err: anyhow::Error,
     },
 }
 
@@ -34,18 +34,32 @@ impl From<ClickwardError> for HttpError {
 }
 
 #[derive(Debug)]
-pub struct Clickward {
-    clickhouse_address: SocketAddrV6,
-}
+pub struct Clickward {}
 
 impl Clickward {
-    pub fn new(clickhouse_address: SocketAddrV6) -> Self {
-        Self { clickhouse_address }
+    pub fn new() -> Self {
+        Self {}
     }
 
-    pub fn clickhouse_address(
+    pub fn generate_server_config(
         &self,
-    ) -> Result<ClickhouseAddress, ClickwardError> {
-        Ok(ClickhouseAddress { clickhouse_address: self.clickhouse_address })
+        settings: ServerSettings,
+    ) -> Result<ReplicaConfig, ClickwardError> {
+        let replica_config = settings
+            .generate_xml_file()
+            .map_err(|e| ClickwardError::Failure { err: e })?;
+
+        Ok(replica_config)
+    }
+
+    pub fn generate_keeper_config(
+        &self,
+        settings: KeeperSettings,
+    ) -> Result<KeeperConfig, ClickwardError> {
+        let keeper_config = settings
+            .generate_xml_file()
+            .map_err(|e| ClickwardError::Failure { err: e })?;
+
+        Ok(keeper_config)
     }
 }

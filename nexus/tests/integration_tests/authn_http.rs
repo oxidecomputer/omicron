@@ -9,9 +9,9 @@
 // such invalid requests.
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use chrono::{DateTime, Duration, Utc};
 use dropshot::endpoint;
-use dropshot::test_util::read_json;
 use dropshot::test_util::LogContext;
 use dropshot::test_util::TestContext;
 use dropshot::ApiDescription;
@@ -26,7 +26,7 @@ use nexus_db_queries::authn::external::spoof::SPOOF_SCHEME_NAME;
 use nexus_db_queries::authn::external::AuthenticatorContext;
 use nexus_db_queries::authn::external::HttpAuthnScheme;
 use nexus_db_queries::authn::external::SiloUserSilo;
-use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO_ID;
+use nexus_types::silo::DEFAULT_SILO_ID;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use uuid::Uuid;
@@ -229,6 +229,7 @@ async fn whoami_request(
     testctx: &TestContext<WhoamiServerState>,
 ) -> Result<WhoamiResponse, (http::StatusCode, HttpErrorResponseBody)> {
     let client_testctx = &testctx.client_testctx;
+
     let mut builder = hyper::Request::builder()
         .method(http::method::Method::GET)
         .uri(client_testctx.url("/whoami"));
@@ -243,21 +244,27 @@ async fn whoami_request(
     }
 
     let request = builder
-        .body(hyper::Body::empty())
+        .body(Bytes::new())
         .expect("attempted to construct invalid request");
 
-    let mut response = hyper::Client::new()
-        .request(request)
+    let response = reqwest::Client::new()
+        .execute(request.try_into().expect("request conversion failed"))
         .await
         .expect("failed to make request");
-    if response.status() == http::StatusCode::OK {
-        let whoami: WhoamiResponse = read_json(&mut response).await;
-        info!(&testctx.log, "whoami response"; "whoami" => ?whoami);
-        Ok(whoami)
-    } else {
-        let error_body: HttpErrorResponseBody = read_json(&mut response).await;
-        info!(&testctx.log, "whoami error"; "error" => ?error_body);
-        Err((response.status(), error_body))
+
+    match response.status() {
+        reqwest::StatusCode::OK => {
+            let whoami = response.json().await.expect("deserialization failed");
+            info!(&testctx.log, "whoami response"; "whoami" => ?whoami);
+            Ok(whoami)
+        }
+
+        status => {
+            let error_body: HttpErrorResponseBody =
+                response.json().await.expect("deserialization failed");
+            info!(&testctx.log, "whoami error"; "error" => ?error_body);
+            Err((status, error_body))
+        }
     }
 }
 
@@ -335,7 +342,7 @@ impl SiloUserSilo for WhoamiServerState {
             silo_user_id.to_string(),
             "7f927c86-3371-4295-c34a-e3246a4b9c02"
         );
-        Ok(*DEFAULT_SILO_ID)
+        Ok(DEFAULT_SILO_ID)
     }
 }
 

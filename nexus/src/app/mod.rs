@@ -8,14 +8,13 @@ use self::external_endpoints::NexusCertResolver;
 use self::saga::SagaExecutor;
 use crate::app::background::BackgroundTasksData;
 use crate::app::background::SagaRecoveryHelpers;
-use crate::app::oximeter::LazyTimeseriesClient;
 use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
 use crate::DropshotServer;
 use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
-use internal_dns::ServiceName;
+use internal_dns_types::names::ServiceName;
 use nexus_config::NexusConfig;
 use nexus_config::RegionAllocationStrategy;
 use nexus_config::Tunables;
@@ -25,14 +24,19 @@ use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::SwitchLocation;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter_producer::Server as ProducerServer;
+use sagas::common_storage::make_pantry_connection_pool;
+use sagas::common_storage::PooledPantryClient;
 use slog::Logger;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
@@ -59,6 +63,7 @@ mod iam;
 mod image;
 mod instance;
 mod instance_network;
+mod internet_gateway;
 mod ip_pool;
 mod metrics;
 mod network_interface;
@@ -120,7 +125,7 @@ pub const MAX_SSH_KEYS_PER_INSTANCE: u32 = 100;
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
     /// uuid for this nexus instance.
-    id: Uuid,
+    id: OmicronZoneUuid,
 
     /// uuid for this rack
     rack_id: Uuid,
@@ -161,7 +166,7 @@ pub struct Nexus {
     reqwest_client: reqwest::Client,
 
     /// Client to the timeseries database.
-    timeseries_client: LazyTimeseriesClient,
+    timeseries_client: oximeter_db::Client,
 
     /// Contents of the trusted root role for the TUF repository.
     #[allow(dead_code)]
@@ -184,8 +189,11 @@ pub struct Nexus {
     // Nexus to not all fail.
     samael_max_issue_delay: std::sync::Mutex<Option<chrono::Duration>>,
 
+    /// Conection pool for Crucible pantries
+    pantry_connection_pool: qorb::pool::Pool<PooledPantryClient>,
+
     /// DNS resolver for internal services
-    internal_resolver: internal_dns::resolver::Resolver,
+    internal_resolver: internal_dns_resolver::Resolver,
 
     /// DNS resolver Nexus uses to resolve an external host
     external_resolver: Arc<external_dns::Resolver>,
@@ -211,17 +219,20 @@ pub struct Nexus {
 
 impl Nexus {
     /// Create a new Nexus instance for the given rack id `rack_id`
+    ///
+    /// If this function fails, the pool remains unterminated.
     // TODO-polish revisit rack metadata
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn new_with_id(
         rack_id: Uuid,
         log: Logger,
-        resolver: internal_dns::resolver::Resolver,
-        pool: db::Pool,
+        resolver: internal_dns_resolver::Resolver,
+        qorb_resolver: internal_dns_resolver::QorbResolver,
+        pool: Arc<db::Pool>,
         producer_registry: &ProducerRegistry,
         config: &NexusConfig,
         authz: Arc<authz::Authz>,
     ) -> Result<Arc<Nexus>, String> {
-        let pool = Arc::new(pool);
         let all_versions = config
             .pkg
             .schema
@@ -230,8 +241,13 @@ impl Nexus {
             .transpose()
             .map_err(|error| format!("{error:#}"))?;
         let db_datastore = Arc::new(
-            db::DataStore::new(&log, Arc::clone(&pool), all_versions.as_ref())
-                .await?,
+            db::DataStore::new_with_timeout(
+                &log,
+                Arc::clone(&pool),
+                all_versions.as_ref(),
+                config.pkg.tunables.load_timeout,
+            )
+            .await?,
         );
         db_datastore.register_producers(producer_registry);
 
@@ -394,16 +410,24 @@ impl Nexus {
             .build()
             .map_err(|e| e.to_string())?;
 
-        // Connect to clickhouse - but do so lazily.
-        // Clickhouse may not be executing when Nexus starts.
-        let timeseries_client = if let Some(address) =
-            &config.pkg.timeseries_db.address
-        {
-            // If an address was provided, use it instead of DNS.
-            LazyTimeseriesClient::new_from_address(log.clone(), *address)
-        } else {
-            LazyTimeseriesClient::new_from_dns(log.clone(), resolver.clone())
-        };
+        // Client to the ClickHouse database.
+        let timeseries_client =
+            if let Some(http_address) = &config.pkg.timeseries_db.address {
+                let native_address =
+                    SocketAddr::new(http_address.ip(), CLICKHOUSE_TCP_PORT);
+                oximeter_db::Client::new(*http_address, native_address, &log)
+            } else {
+                // TODO-cleanup: Remove this when we remove the HTTP client.
+                let http_resolver =
+                    qorb_resolver.for_service(ServiceName::Clickhouse);
+                let native_resolver =
+                    qorb_resolver.for_service(ServiceName::ClickhouseNative);
+                oximeter_db::Client::new_with_pool(
+                    http_resolver,
+                    native_resolver,
+                    &log,
+                )
+            };
 
         // TODO-cleanup We may want to make the populator a first-class
         // background task.
@@ -471,6 +495,7 @@ impl Nexus {
                     as Arc<dyn nexus_auth::storage::Storage>,
             ),
             samael_max_issue_delay: std::sync::Mutex::new(None),
+            pantry_connection_pool: make_pantry_connection_pool(&qorb_resolver),
             internal_resolver: resolver.clone(),
             external_resolver,
             external_dns_servers: config
@@ -552,8 +577,8 @@ impl Nexus {
     }
 
     /// Return the ID for this Nexus instance.
-    pub fn id(&self) -> &Uuid {
-        &self.id
+    pub fn id(&self) -> OmicronZoneUuid {
+        self.id
     }
 
     /// Return the rack ID for this Nexus instance.
@@ -637,30 +662,63 @@ impl Nexus {
         self.producer_server.lock().unwrap().replace(producer_server);
     }
 
+    /// Fully terminates Nexus.
+    ///
+    /// Closes all running servers and the connection to the datastore.
+    pub(crate) async fn terminate(&self) -> Result<(), String> {
+        let mut res = Ok(());
+        res = res.and(self.close_servers().await);
+        self.datastore().terminate().await;
+        res
+    }
+
+    /// Terminates all servers.
+    ///
+    /// This function also waits for the servers to shut down.
     pub(crate) async fn close_servers(&self) -> Result<(), String> {
         // NOTE: All these take the lock and swap out of the option immediately,
         // because they are synchronous mutexes, which cannot be held across the
         // await point these `close()` methods expose.
         let external_server = self.external_server.lock().unwrap().take();
+        let mut res = Ok(());
+
+        let extend_err =
+            |mut res: &mut Result<(), String>, mut new: Result<(), String>| {
+                match (&mut res, &mut new) {
+                    (Err(s), Err(new_err)) => {
+                        s.push_str(&format!(", {new_err}"))
+                    }
+                    (Ok(()), Err(_)) => *res = new,
+                    (_, Ok(())) => (),
+                }
+            };
+
         if let Some(server) = external_server {
-            server.close().await?;
+            extend_err(&mut res, server.close().await);
         }
         let techport_external_server =
             self.techport_external_server.lock().unwrap().take();
         if let Some(server) = techport_external_server {
-            server.close().await?;
+            extend_err(&mut res, server.close().await);
         }
         let internal_server = self.internal_server.lock().unwrap().take();
         if let Some(server) = internal_server {
-            server.close().await?;
+            extend_err(&mut res, server.close().await);
         }
         let producer_server = self.producer_server.lock().unwrap().take();
         if let Some(server) = producer_server {
-            server.close().await.map_err(|e| e.to_string())?;
+            extend_err(
+                &mut res,
+                server.close().await.map_err(|e| e.to_string()),
+            );
         }
-        Ok(())
+        res
     }
 
+    /// Awaits termination without triggering it.
+    ///
+    /// To trigger termination, see:
+    /// - [`Self::close_servers`] or [`Self::terminate`]
     pub(crate) async fn wait_for_shutdown(&self) -> Result<(), String> {
         // The internal server is the last server to be closed.
         //
@@ -930,8 +988,14 @@ impl Nexus {
         *mid
     }
 
-    pub fn resolver(&self) -> &internal_dns::resolver::Resolver {
+    pub fn resolver(&self) -> &internal_dns_resolver::Resolver {
         &self.internal_resolver
+    }
+
+    pub(crate) fn pantry_connection_pool(
+        &self,
+    ) -> &qorb::pool::Pool<PooledPantryClient> {
+        &self.pantry_connection_pool
     }
 
     pub(crate) async fn dpd_clients(
@@ -991,7 +1055,7 @@ pub enum Unimpl {
 }
 
 pub(crate) async fn dpd_clients(
-    resolver: &internal_dns::resolver::Resolver,
+    resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
 ) -> Result<HashMap<SwitchLocation, dpd_client::Client>, String> {
     let mappings = switch_zone_address_mappings(resolver, log).await?;
@@ -1018,7 +1082,7 @@ pub(crate) async fn dpd_clients(
 }
 
 async fn switch_zone_address_mappings(
-    resolver: &internal_dns::resolver::Resolver,
+    resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
 ) -> Result<HashMap<SwitchLocation, Ipv6Addr>, String> {
     let switch_zone_addresses = match resolver

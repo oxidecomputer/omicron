@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 ///
 /// This must be updated when you change the database schema.  Refer to
 /// schema/crdb/README.adoc in the root of this repository for details.
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(91, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(111, 0, 0);
 
 /// List of all past database schema versions, in *reverse* order
 ///
@@ -29,7 +29,27 @@ static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(91, "refactor-network-apis"),
+        KnownVersion::new(111, "refactor-network-apis"),
+        KnownVersion::new(110, "clickhouse-policy"),
+        KnownVersion::new(109, "inv-clickhouse-keeper-membership"),
+        KnownVersion::new(108, "internet-gateway"),
+        KnownVersion::new(107, "add-instance-boot-disk"),
+        KnownVersion::new(106, "dataset-kinds-update"),
+        KnownVersion::new(105, "inventory-nvme-firmware"),
+        KnownVersion::new(104, "lookup-bgp-config-indexes"),
+        KnownVersion::new(103, "lookup-instances-by-state-index"),
+        KnownVersion::new(102, "add-instance-auto-restart-cooldown"),
+        KnownVersion::new(101, "auto-restart-policy-v2"),
+        KnownVersion::new(100, "add-instance-last-auto-restarted-timestamp"),
+        KnownVersion::new(99, "blueprint-add-clickhouse-tables"),
+        KnownVersion::new(98, "oximeter-add-time-expunged"),
+        KnownVersion::new(97, "lookup-region-snapshot-by-region-id"),
+        KnownVersion::new(96, "inv-dataset"),
+        KnownVersion::new(95, "turn-boot-on-fault-into-auto-restart"),
+        KnownVersion::new(94, "put-back-creating-vmm-state"),
+        KnownVersion::new(93, "dataset-kinds-zone-and-debug"),
+        KnownVersion::new(92, "lldp-link-config-nullable"),
+        KnownVersion::new(91, "add-management-gateway-producer-kind"),
         KnownVersion::new(90, "lookup-bgp-config-by-asn"),
         KnownVersion::new(89, "collapse_lldp_settings"),
         KnownVersion::new(88, "route-local-pref"),

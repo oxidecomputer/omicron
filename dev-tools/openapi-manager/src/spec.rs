@@ -13,6 +13,7 @@ use openapi_manager_types::{ValidationBackend, ValidationContext};
 use openapiv3::OpenAPI;
 
 /// All APIs managed by openapi-manager.
+// TODO The metadata here overlaps with metadata in api-manifest.toml.
 pub fn all_apis() -> Vec<ApiSpec> {
     vec![
         ApiSpec {
@@ -26,14 +27,25 @@ pub fn all_apis() -> Vec<ApiSpec> {
             extra_validation: None,
         },
         ApiSpec {
-            title: "ClickHouse Cluster Admin API",
+            title: "ClickHouse Cluster Admin Keeper API",
             version: "0.0.1",
             description: "API for interacting with the Oxide \
-                control plane's ClickHouse cluster",
+                control plane's ClickHouse cluster keepers",
             boundary: ApiBoundary::Internal,
             api_description:
-                clickhouse_admin_api::clickhouse_admin_api_mod::stub_api_description,
-            filename: "clickhouse-admin.json",
+                clickhouse_admin_api::clickhouse_admin_keeper_api_mod::stub_api_description,
+            filename: "clickhouse-admin-keeper.json",
+            extra_validation: None,
+        },
+        ApiSpec {
+            title: "ClickHouse Cluster Admin Server API",
+            version: "0.0.1",
+            description: "API for interacting with the Oxide \
+                control plane's ClickHouse cluster replica servers",
+            boundary: ApiBoundary::Internal,
+            api_description:
+                clickhouse_admin_api::clickhouse_admin_server_api_mod::stub_api_description,
+            filename: "clickhouse-admin-server.json",
             extra_validation: None,
         },
         ApiSpec {
@@ -78,6 +90,16 @@ pub fn all_apis() -> Vec<ApiSpec> {
                 installinator_api::installinator_api_mod::stub_api_description,
             filename: "installinator.json",
             extra_validation: None,
+        },
+        ApiSpec {
+            title: "Oxide Region API",
+            version: "20241204.0",
+            description: "API for interacting with the Oxide control plane",
+            boundary: ApiBoundary::External,
+            api_description:
+                nexus_external_api::nexus_external_api_mod::stub_api_description,
+            filename: "nexus.json",
+            extra_validation: Some(nexus_external_api::validate_api),
         },
         ApiSpec {
             title: "Nexus internal API",

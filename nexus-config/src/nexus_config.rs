@@ -14,6 +14,7 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::api::internal::shared::SwitchLocation;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -150,7 +151,7 @@ pub enum InternalDns {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub struct DeploymentConfig {
     /// Uuid of the Nexus instance
-    pub id: Uuid,
+    pub id: OmicronZoneUuid,
     /// Uuid of the Rack where Nexus is executing.
     pub rack_id: Uuid,
     /// Port on which the "techport external" dropshot server should listen.
@@ -269,6 +270,7 @@ pub struct MgdConfig {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 struct UnvalidatedTunables {
     max_vpc_ipv4_subnet_prefix: u8,
+    load_timeout: Option<std::time::Duration>,
 }
 
 /// Tunable configuration parameters, intended for use in test environments or
@@ -281,6 +283,11 @@ pub struct Tunables {
     /// Note that this is the maximum _prefix_ size, which sets the minimum size
     /// of the subnet.
     pub max_vpc_ipv4_subnet_prefix: u8,
+
+    /// How long should we attempt to loop until the schema matches?
+    ///
+    /// If "None", nexus loops forever during initialization.
+    pub load_timeout: Option<std::time::Duration>,
 }
 
 // Convert from the unvalidated tunables, verifying each parameter as needed.
@@ -291,6 +298,7 @@ impl TryFrom<UnvalidatedTunables> for Tunables {
         Tunables::validate_ipv4_prefix(unvalidated.max_vpc_ipv4_subnet_prefix)?;
         Ok(Tunables {
             max_vpc_ipv4_subnet_prefix: unvalidated.max_vpc_ipv4_subnet_prefix,
+            load_timeout: unvalidated.load_timeout,
         })
     }
 }
@@ -340,7 +348,10 @@ pub const MAX_VPC_IPV4_SUBNET_PREFIX: u8 = 26;
 
 impl Default for Tunables {
     fn default() -> Self {
-        Tunables { max_vpc_ipv4_subnet_prefix: MAX_VPC_IPV4_SUBNET_PREFIX }
+        Tunables {
+            max_vpc_ipv4_subnet_prefix: MAX_VPC_IPV4_SUBNET_PREFIX,
+            load_timeout: None,
+        }
     }
 }
 
@@ -381,6 +392,8 @@ pub struct BackgroundTaskConfig {
     pub instance_watcher: InstanceWatcherConfig,
     /// configuration for instance updater task
     pub instance_updater: InstanceUpdaterConfig,
+    /// configuration for instance reincarnation task
+    pub instance_reincarnation: InstanceReincarnationConfig,
     /// configuration for service VPC firewall propagation task
     pub service_firewall_propagation: ServiceFirewallPropagationConfig,
     /// configuration for v2p mapping propagation task
@@ -396,6 +409,11 @@ pub struct BackgroundTaskConfig {
     /// configuration for region snapshot replacement garbage collection
     pub region_snapshot_replacement_garbage_collection:
         RegionSnapshotReplacementGarbageCollectionConfig,
+    /// configuration for region snapshot replacement step task
+    pub region_snapshot_replacement_step: RegionSnapshotReplacementStepConfig,
+    /// configuration for region snapshot replacement finisher task
+    pub region_snapshot_replacement_finish:
+        RegionSnapshotReplacementFinishConfig,
 }
 
 #[serde_as]
@@ -586,6 +604,23 @@ pub struct InstanceUpdaterConfig {
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct InstanceReincarnationConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// disable background checks for instances in need of updates.
+    ///
+    /// This is an emergency lever for support / operations. It should only be
+    /// necessary if something has gone extremely wrong.
+    ///
+    /// Default: Off
+    #[serde(default)]
+    pub disable: bool,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ServiceFirewallPropagationConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
@@ -643,6 +678,22 @@ pub struct RegionSnapshotReplacementStartConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RegionSnapshotReplacementGarbageCollectionConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RegionSnapshotReplacementStepConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RegionSnapshotReplacementFinishConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
@@ -890,6 +941,7 @@ mod test {
             instance_watcher.period_secs = 30
             instance_updater.period_secs = 30
             instance_updater.disable = false
+            instance_reincarnation.period_secs = 67
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
             abandoned_vmm_reaper.period_secs = 60
@@ -897,6 +949,8 @@ mod test {
             lookup_region_port.period_secs = 60
             region_snapshot_replacement_start.period_secs = 30
             region_snapshot_replacement_garbage_collection.period_secs = 30
+            region_snapshot_replacement_step.period_secs = 30
+            region_snapshot_replacement_finish.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -959,7 +1013,10 @@ mod test {
                         trusted_root: Utf8PathBuf::from("/path/to/root.json"),
                     }),
                     schema: None,
-                    tunables: Tunables { max_vpc_ipv4_subnet_prefix: 27 },
+                    tunables: Tunables {
+                        max_vpc_ipv4_subnet_prefix: 27,
+                        load_timeout: None
+                    },
                     dendrite: HashMap::from([(
                         SwitchLocation::Switch0,
                         DpdConfig {
@@ -1043,6 +1100,10 @@ mod test {
                             period_secs: Duration::from_secs(30),
                             disable: false,
                         },
+                        instance_reincarnation: InstanceReincarnationConfig {
+                            period_secs: Duration::from_secs(67),
+                            disable: false,
+                        },
                         service_firewall_propagation:
                             ServiceFirewallPropagationConfig {
                                 period_secs: Duration::from_secs(300),
@@ -1065,6 +1126,14 @@ mod test {
                             },
                         region_snapshot_replacement_garbage_collection:
                             RegionSnapshotReplacementGarbageCollectionConfig {
+                                period_secs: Duration::from_secs(30),
+                            },
+                        region_snapshot_replacement_step:
+                            RegionSnapshotReplacementStepConfig {
+                                period_secs: Duration::from_secs(30),
+                            },
+                        region_snapshot_replacement_finish:
+                            RegionSnapshotReplacementFinishConfig {
                                 period_secs: Duration::from_secs(30),
                             },
                     },
@@ -1138,6 +1207,7 @@ mod test {
             region_replacement_driver.period_secs = 30
             instance_watcher.period_secs = 30
             instance_updater.period_secs = 30
+            instance_reincarnation.period_secs = 67
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
             abandoned_vmm_reaper.period_secs = 60
@@ -1145,6 +1215,8 @@ mod test {
             lookup_region_port.period_secs = 60
             region_snapshot_replacement_start.period_secs = 30
             region_snapshot_replacement_garbage_collection.period_secs = 30
+            region_snapshot_replacement_step.period_secs = 30
+            region_snapshot_replacement_finish.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             "##,

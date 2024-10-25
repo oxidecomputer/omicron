@@ -1,0 +1,41 @@
+<clickhouse>
+    <logger>
+        <level>trace</level>
+        <console>true</console>
+        <log>/var/tmp/clickhouse-server.log</log>
+        <errorlog>/var/tmp/clickhouse-server.errlog</errorlog>
+    </logger>
+
+    <query_log>
+        <database>system</database>
+        <table>query_log</table>
+        <engine>Engine = MergeTree ORDER BY event_time TTL event_date + INTERVAL 7 DAY</engine>
+        <flush_interval_milliseconds>10000</flush_interval_milliseconds>
+    </query_log>
+
+    <mlock_executable>true</mlock_executable>
+
+    <tcp_port>9000</tcp_port>
+
+    <users>
+        <default>
+            <password/>
+
+            <networks>
+                <ip>::/0</ip>
+            </networks>
+
+            <profile>default</profile>
+            <quota>default</quota>
+            <access_management>1</access_management>
+        </default>
+    </users>
+
+    <profiles>
+        <default/>
+    </profiles>
+
+    <quotas>
+        <default/>
+    </quotas>
+</clickhouse>

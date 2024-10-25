@@ -1,0 +1,80 @@
+Bootstrap Agent (client: bootstrap-agent-client)
+    consumed by: omicron-sled-agent (omicron/sled-agent)
+    consumed by: wicketd (omicron/wicketd)
+
+Clickhouse Cluster Admin for Keepers (client: clickhouse-admin-keeper-client)
+    consumed by: omicron-nexus (omicron/nexus)
+
+Clickhouse Cluster Admin for Servers (client: clickhouse-admin-server-client)
+    consumed by: omicron-nexus (omicron/nexus)
+
+CockroachDB Cluster Admin (client: cockroach-admin-client)
+    consumed by: omicron-nexus (omicron/nexus)
+
+Crucible Agent (client: crucible-agent-client)
+    consumed by: omicron-nexus (omicron/nexus)
+
+Crucible Control (for testing only) (client: crucible-control-client)
+
+Crucible Pantry (client: crucible-pantry-client)
+    consumed by: omicron-nexus (omicron/nexus)
+
+Maghemite DDM Admin (client: ddm-admin-client)
+    consumed by: installinator (omicron/installinator)
+    consumed by: mgd (maghemite/mgd)
+    consumed by: omicron-sled-agent (omicron/sled-agent)
+    consumed by: wicketd (omicron/wicketd)
+
+DNS Server (client: dns-service-client)
+    consumed by: omicron-nexus (omicron/nexus)
+    consumed by: omicron-sled-agent (omicron/sled-agent)
+
+Dendrite DPD (client: dpd-client)
+    consumed by: ddmd (maghemite/ddmd)
+    consumed by: mgd (maghemite/mgd)
+    consumed by: omicron-nexus (omicron/nexus)
+    consumed by: omicron-sled-agent (omicron/sled-agent)
+    consumed by: tfportd (dendrite/tfportd)
+    consumed by: wicketd (omicron/wicketd)
+
+Downstairs Controller (debugging only) (client: dsc-client)
+
+Management Gateway Service (client: gateway-client)
+    consumed by: dpd (dendrite/dpd)
+    consumed by: omicron-nexus (omicron/nexus)
+    consumed by: omicron-sled-agent (omicron/sled-agent)
+    consumed by: wicketd (omicron/wicketd)
+
+Wicketd Installinator (client: installinator-client)
+    consumed by: installinator (omicron/installinator)
+
+Maghemite MG Admin (client: mg-admin-client)
+    consumed by: omicron-nexus (omicron/nexus)
+    consumed by: omicron-sled-agent (omicron/sled-agent)
+
+Nexus Internal API (client: nexus-client)
+    consumed by: dpd (dendrite/dpd)
+    consumed by: omicron-nexus (omicron/nexus)
+    consumed by: omicron-sled-agent (omicron/sled-agent)
+    consumed by: oximeter-collector (omicron/oximeter/collector)
+    consumed by: propolis-server (propolis/bin/propolis-server)
+
+External API (client: oxide-client)
+
+Oximeter (client: oximeter-client)
+    consumed by: omicron-nexus (omicron/nexus)
+
+Propolis (client: propolis-client)
+    consumed by: omicron-nexus (omicron/nexus)
+    consumed by: omicron-sled-agent (omicron/sled-agent)
+
+Crucible Repair (client: repair-client)
+    consumed by: crucible-downstairs (crucible/downstairs)
+
+Sled Agent (client: sled-agent-client)
+    consumed by: dpd (dendrite/dpd)
+    consumed by: omicron-nexus (omicron/nexus)
+    consumed by: omicron-sled-agent (omicron/sled-agent)
+
+Wicketd (client: wicketd-client)
+

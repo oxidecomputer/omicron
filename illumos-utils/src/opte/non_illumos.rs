@@ -26,6 +26,9 @@ pub enum Error {
 
     #[error("Can't attach new ephemeral IP {0}, currently have {1}")]
     ImplicitEphemeralIpDetach(IpAddr, IpAddr),
+
+    #[error("No matching NIC found for port {0} at slot {1}.")]
+    NoNicforPort(String, u32),
 }
 
 pub fn initialize_xde_driver(

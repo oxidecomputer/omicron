@@ -153,6 +153,55 @@
         }
       }
     },
+    "/clickhouse/policy": {
+      "get": {
+        "summary": "Get the current clickhouse policy",
+        "operationId": "clickhouse_policy_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClickhousePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Set the new clickhouse policy",
+        "operationId": "clickhouse_policy_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClickhousePolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stop-request": {
       "post": {
         "summary": "An Upstairs will update this endpoint if a Downstairs client task is",
@@ -746,44 +795,6 @@
         }
       }
     },
-    "/instances/{instance_id}": {
-      "put": {
-        "summary": "Report updated state for an instance.",
-        "operationId": "cpapi_instances_put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SledInstanceState"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/instances/{instance_id}/migrate": {
       "post": {
         "operationId": "instance_migrate",
@@ -1243,8 +1254,7 @@
             "name": "sled_id",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/TypedUuidForSledKind"
             }
           }
         ],
@@ -1276,8 +1286,7 @@
             "name": "sled_id",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/TypedUuidForSledKind"
             }
           }
         ],
@@ -1315,8 +1324,7 @@
             "name": "sled_id",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/TypedUuidForSledKind"
             }
           }
         ],
@@ -1460,6 +1468,43 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/vmms/{propolis_id}": {
+      "put": {
+        "summary": "Report updated state for a VMM.",
+        "operationId": "cpapi_instances_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SledVmmState"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1876,6 +1921,15 @@
               "$ref": "#/components/schemas/BlueprintZonesConfig"
             }
           },
+          "clickhouse_cluster_config": {
+            "nullable": true,
+            "description": "Allocation of Clickhouse Servers and Keepers for replicated clickhouse setups. This is set to `None` if replicated clickhouse is not in use.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ClickhouseClusterConfig"
+              }
+            ]
+          },
           "cockroachdb_fingerprint": {
             "description": "CockroachDB state fingerprint when this blueprint was created",
             "type": "string"
@@ -2095,6 +2149,7 @@
           },
           "filesystem_pool": {
             "nullable": true,
+            "description": "zpool used for the zone's (transient) root filesystem",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ZpoolName"
@@ -2413,23 +2468,6 @@
               "address": {
                 "type": "string"
               },
-              "dns_servers": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "format": "ip"
-                }
-              },
-              "domain": {
-                "nullable": true,
-                "type": "string"
-              },
-              "ntp_servers": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -2439,8 +2477,6 @@
             },
             "required": [
               "address",
-              "dns_servers",
-              "ntp_servers",
               "type"
             ]
           },
@@ -2559,6 +2595,183 @@
         "required": [
           "cert",
           "key"
+        ]
+      },
+      "ClickhouseClusterConfig": {
+        "description": "Global configuration for all clickhouse servers (replicas) and keepers",
+        "type": "object",
+        "properties": {
+          "cluster_name": {
+            "description": "An arbitrary name for the Clickhouse cluster shared by all nodes",
+            "type": "string"
+          },
+          "cluster_secret": {
+            "description": "An arbitrary string shared by all nodes used at runtime to determine whether nodes are part of the same cluster.",
+            "type": "string"
+          },
+          "generation": {
+            "description": "The last update to the clickhouse cluster configuration\n\nThis is used by `clickhouse-admin` in the clickhouse server and keeper zones to discard old configurations.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
+          "highest_seen_keeper_leader_committed_log_index": {
+            "description": "This is used as a marker to tell if the raft configuration in a new inventory collection is newer than the last collection. This serves as a surrogate for the log index of the last committed configuration, which clickhouse keeper doesn't expose.\n\nThis is necesssary because during inventory collection we poll multiple keeper nodes, and each returns their local knowledge of the configuration. But we may reach different nodes in different attempts, and some nodes in a following attempt may reflect stale configuration. Due to timing, we can always query old information. That is just normal polling. However, we never want to use old configuration if we have already seen and acted on newer configuration.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "keepers": {
+            "description": "The desired state of the clickhouse keeper cluster\n\nWe decouple deployment of zones that should contain clickhouse keeper processes from actually starting or stopping those processes, adding or removing them to/from the keeper cluster, and reconfiguring other keeper and clickhouse server nodes to reflect the new configuration.\n\nAs part of this decoupling, we keep track of the intended zone deployment in the blueprint, but that is not enough to track the desired state of the keeper cluster. We are only allowed to add or remove one keeper node at a time, and therefore we must track the desired state of the keeper cluster which may change multiple times until the keepers in the cluster match the deployed zones. An example may help:\n\n1. We start with 3 keeper nodes in 3 deployed keeper zones and need to add two to reach our desired policy of 5 keepers 2. The planner adds 2 new keeper zones to the blueprint 3. The planner will also add **one** new keeper to the `keepers` field below that matches one of the deployed zones. 4. The executor will start the new keeper process that was added to the `keepers` field, attempt to add it to the keeper cluster by pushing configuration updates to the other keepers, and then updating the clickhouse server configurations to know about the new keeper. 5. If the keeper is successfully added, as reflected in inventory, then steps 3 and 4 above will be repeated for the next keeper process. 6. If the keeper is not successfully added by the executor it will continue to retry indefinitely. 7. If the zone is expunged while the planner has it as part of its desired state in `keepers`, and the executor is trying to add it, the keeper will be removed from `keepers` in the next blueprint. If it has been added to the actual cluster by an executor in the meantime it will be removed on the next iteration of an executor.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/KeeperId"
+            }
+          },
+          "max_used_keeper_id": {
+            "description": "Clickhouse Keeper IDs must be unique and are handed out monotonically. Keep track of the last used one.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/KeeperId"
+              }
+            ]
+          },
+          "max_used_server_id": {
+            "description": "Clickhouse Server IDs must be unique and are handed out monotonically. Keep track of the last used one.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ServerId"
+              }
+            ]
+          },
+          "servers": {
+            "description": "The desired state of clickhouse server processes on the rack\n\nClickhouse servers do not have the same limitations as keepers and can be deployed all at once.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ServerId"
+            }
+          }
+        },
+        "required": [
+          "cluster_name",
+          "cluster_secret",
+          "generation",
+          "highest_seen_keeper_leader_committed_log_index",
+          "keepers",
+          "max_used_keeper_id",
+          "max_used_server_id",
+          "servers"
+        ]
+      },
+      "ClickhouseMode": {
+        "description": "How to deploy clickhouse nodes",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "single_node_only"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cluster_only"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "target_keepers": {
+                    "type": "integer",
+                    "format": "uint8",
+                    "minimum": 0
+                  },
+                  "target_servers": {
+                    "type": "integer",
+                    "format": "uint8",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "target_keepers",
+                  "target_servers"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "both"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "target_keepers": {
+                    "type": "integer",
+                    "format": "uint8",
+                    "minimum": 0
+                  },
+                  "target_servers": {
+                    "type": "integer",
+                    "format": "uint8",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "target_keepers",
+                  "target_servers"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
+      "ClickhousePolicy": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/ClickhouseMode"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "mode",
+          "time_created",
+          "version"
         ]
       },
       "CockroachDbClusterVersion": {
@@ -2712,39 +2925,8 @@
         ]
       },
       "DatasetKind": {
-        "description": "Describes the purpose of the dataset.",
-        "oneOf": [
-          {
-            "type": "string",
-            "enum": [
-              "crucible",
-              "cockroach",
-              "external_dns",
-              "internal_dns"
-            ]
-          },
-          {
-            "description": "Used for single-node clickhouse deployments",
-            "type": "string",
-            "enum": [
-              "clickhouse"
-            ]
-          },
-          {
-            "description": "Used for replicated clickhouse deployments",
-            "type": "string",
-            "enum": [
-              "clickhouse_keeper"
-            ]
-          },
-          {
-            "description": "Used for replicated clickhouse deployments",
-            "type": "string",
-            "enum": [
-              "clickhouse_server"
-            ]
-          }
-        ]
+        "description": "The kind of dataset. See the `DatasetKind` enum in omicron-common for possible values.",
+        "type": "string"
       },
       "DatasetPutRequest": {
         "description": "Describes a dataset within a pool.",
@@ -3038,13 +3220,10 @@
         ]
       },
       "DnsConfigParams": {
-        "description": "DnsConfigParams\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"generation\", \"time_created\", \"zones\" ], \"properties\": { \"generation\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"time_created\": { \"type\": \"string\", \"format\": \"date-time\" }, \"zones\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/DnsConfigZone\" } } } } ``` </details>",
         "type": "object",
         "properties": {
           "generation": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
+            "$ref": "#/components/schemas/Generation"
           },
           "time_created": {
             "type": "string",
@@ -3064,7 +3243,6 @@
         ]
       },
       "DnsConfigZone": {
-        "description": "DnsConfigZone\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"records\", \"zone_name\" ], \"properties\": { \"records\": { \"type\": \"object\", \"additionalProperties\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/DnsRecord\" } } }, \"zone_name\": { \"type\": \"string\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "records": {
@@ -3086,7 +3264,6 @@
         ]
       },
       "DnsRecord": {
-        "description": "DnsRecord\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"data\", \"type\" ], \"properties\": { \"data\": { \"type\": \"string\", \"format\": \"ipv4\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"A\" ] } } }, { \"type\": \"object\", \"required\": [ \"data\", \"type\" ], \"properties\": { \"data\": { \"type\": \"string\", \"format\": \"ipv6\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"AAAA\" ] } } }, { \"type\": \"object\", \"required\": [ \"data\", \"type\" ], \"properties\": { \"data\": { \"$ref\": \"#/components/schemas/Srv\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"SRV\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -3348,6 +3525,31 @@
         "description": "View of an Instance",
         "type": "object",
         "properties": {
+          "auto_restart_cooldown_expiration": {
+            "nullable": true,
+            "description": "The time at which the auto-restart cooldown period for this instance completes, permitting it to be automatically restarted again. If the instance enters the `Failed` state, it will not be restarted until after this time.\n\nIf this is not present, then either the instance has never been automatically restarted, or the cooldown period has already expired, allowing the instance to be restarted immediately if it fails.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "auto_restart_enabled": {
+            "description": "`true` if this instance's auto-restart policy will permit the control plane to automatically restart it if it enters the `Failed` state.",
+            "type": "boolean"
+          },
+          "auto_restart_policy": {
+            "nullable": true,
+            "description": "The auto-restart policy configured for this instance, or `None` if no explicit policy is configured.\n\nIf this is not present, then this instance uses the default auto-restart policy, which may or may not allow it to be restarted. The `auto_restart_enabled` field indicates whether the instance will be automatically restarted.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceAutoRestartPolicy"
+              }
+            ]
+          },
+          "boot_disk_id": {
+            "nullable": true,
+            "description": "the ID of the disk used to boot this Instance, if a specific one is assigned.",
+            "type": "string",
+            "format": "uuid"
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
@@ -3398,6 +3600,12 @@
             "type": "string",
             "format": "date-time"
           },
+          "time_last_auto_restarted": {
+            "nullable": true,
+            "description": "The timestamp of the most recent time this instance was automatically restarted by the control plane.\n\nIf this is not present, then this instance has not been automatically restarted.",
+            "type": "string",
+            "format": "date-time"
+          },
           "time_modified": {
             "description": "timestamp when this resource was last modified",
             "type": "string",
@@ -3409,6 +3617,7 @@
           }
         },
         "required": [
+          "auto_restart_enabled",
           "description",
           "hostname",
           "id",
@@ -3420,6 +3629,25 @@
           "time_created",
           "time_modified",
           "time_run_state_updated"
+        ]
+      },
+      "InstanceAutoRestartPolicy": {
+        "description": "A policy determining when an instance should be automatically restarted by the control plane.",
+        "oneOf": [
+          {
+            "description": "The instance should not be automatically restarted by the control plane if it fails.",
+            "type": "string",
+            "enum": [
+              "never"
+            ]
+          },
+          {
+            "description": "If this instance is running and unexpectedly fails (e.g. due to a host software crash or unexpected host reboot), the control plane will make a best-effort attempt to restart it. The control plane may choose not to restart the instance to preserve the overall availability of the system.",
+            "type": "string",
+            "enum": [
+              "best_effort"
+            ]
+          }
         ]
       },
       "InstanceCpuCount": {
@@ -3668,6 +3896,12 @@
           "first",
           "last"
         ]
+      },
+      "KeeperId": {
+        "description": "A unique ID for a ClickHouse Keeper",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
       },
       "LastResult": {
         "oneOf": [
@@ -4443,6 +4677,13 @@
             "enum": [
               "instance"
             ]
+          },
+          {
+            "description": "The producer is a management gateway service.",
+            "type": "string",
+            "enum": [
+              "management_gateway"
+            ]
           }
         ]
       },
@@ -4735,18 +4976,18 @@
               }
             ]
           },
-          "local_pref": {
-            "nullable": true,
-            "description": "The local preference associated with this route.",
-            "default": null,
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
           "nexthop": {
             "description": "The nexthop/gateway address.",
             "type": "string",
             "format": "ip"
+          },
+          "rib_priority": {
+            "nullable": true,
+            "description": "The RIB priority (i.e. Admin Distance) associated with this route.",
+            "default": null,
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
           },
           "vlan_id": {
             "nullable": true,
@@ -4974,6 +5215,12 @@
           }
         ]
       },
+      "ServerId": {
+        "description": "A unique ID for a Clickhouse Server",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
       "SledAgentInfo": {
         "description": "Sent by a sled agent to Nexus to inform about resources",
         "type": "object",
@@ -5053,50 +5300,6 @@
         },
         "required": [
           "id"
-        ]
-      },
-      "SledInstanceState": {
-        "description": "A wrapper type containing a sled's total knowledge of the state of a specific VMM and the instance it incarnates.",
-        "type": "object",
-        "properties": {
-          "migration_in": {
-            "nullable": true,
-            "description": "The current state of any inbound migration to this VMM.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/MigrationRuntimeState"
-              }
-            ]
-          },
-          "migration_out": {
-            "nullable": true,
-            "description": "The state of any outbound migration from this VMM.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/MigrationRuntimeState"
-              }
-            ]
-          },
-          "propolis_id": {
-            "description": "The ID of the VMM whose state is being reported.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
-              }
-            ]
-          },
-          "vmm_state": {
-            "description": "The most recent state of the sled's VMM process.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/VmmRuntimeState"
-              }
-            ]
-          }
-        },
-        "required": [
-          "propolis_id",
-          "vmm_state"
         ]
       },
       "SledPolicy": {
@@ -5213,6 +5416,41 @@
           }
         ]
       },
+      "SledVmmState": {
+        "description": "A wrapper type containing a sled's total knowledge of the state of a VMM.",
+        "type": "object",
+        "properties": {
+          "migration_in": {
+            "nullable": true,
+            "description": "The current state of any inbound migration to this VMM.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MigrationRuntimeState"
+              }
+            ]
+          },
+          "migration_out": {
+            "nullable": true,
+            "description": "The state of any outbound migration from this VMM.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MigrationRuntimeState"
+              }
+            ]
+          },
+          "vmm_state": {
+            "description": "The most recent state of the sled's VMM process.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VmmRuntimeState"
+              }
+            ]
+          }
+        },
+        "required": [
+          "vmm_state"
+        ]
+      },
       "SourceNatConfig": {
         "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
         "type": "object",
@@ -5242,7 +5480,6 @@
         ]
       },
       "Srv": {
-        "description": "Srv\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"port\", \"prio\", \"target\", \"weight\" ], \"properties\": { \"port\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 }, \"prio\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 }, \"target\": { \"type\": \"string\" }, \"weight\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 } } } ``` </details>",
         "type": "object",
         "properties": {
           "port": {
@@ -5322,10 +5559,6 @@
         "format": "uuid"
       },
       "TypedUuidForOmicronZoneKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForPropolisKind": {
         "type": "string",
         "format": "uuid"
       },
@@ -5590,6 +5823,10 @@
             ]
           }
         ]
+      },
+      "TypedUuidForPropolisKind": {
+        "type": "string",
+        "format": "uuid"
       }
     },
     "responses": {

@@ -10,6 +10,7 @@ camino.workspace = true
 chrono.workspace = true
 clap.workspace = true
 clickhouse-admin-api.workspace = true
+clickhouse-admin-types.workspace = true
 dropshot.workspace = true
 http.workspace = true
 illumos-utils.workspace = true
@@ -29,9 +30,13 @@ toml.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+clickward.workspace = true
+dropshot.workspace = true
 expectorate.workspace = true
 nexus-test-utils.workspace = true
 omicron-test-utils.workspace = true
+oximeter-db.workspace = true
+oximeter-test-utils.workspace = true
 openapi-lint.workspace = true
 openapiv3.workspace = true
 serde_json.workspace = true

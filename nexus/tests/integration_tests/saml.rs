@@ -1310,7 +1310,7 @@ async fn test_post_saml_response_with_relay_state(
             + chrono::Duration::seconds(60),
     );
 
-    let result = NexusRequest::new(
+    let result_with_relay_state = NexusRequest::new(
         RequestBuilder::new(
             client,
             Method::POST,
@@ -1341,9 +1341,37 @@ async fn test_post_saml_response_with_relay_state(
     .await
     .expect("expected success");
 
-    assert!(result.headers["Location"]
+    assert!(result_with_relay_state.headers["Location"]
         .to_str()
         .unwrap()
         .to_string()
         .ends_with("/some/actual/nexus/url"));
+
+    let result_with_invalid_relay_state = NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            &format!(
+                "/login/{}/saml/some-totally-real-saml-provider",
+                SILO_NAME
+            ),
+        )
+        .raw_body(Some(
+            serde_urlencoded::to_string(SamlLoginPost {
+                saml_response: base64::engine::general_purpose::STANDARD
+                    .encode(SAML_RESPONSE),
+                relay_state: Some("some-idp-set-value".to_string()),
+            })
+            .unwrap(),
+        ))
+        .expect_status(Some(StatusCode::SEE_OTHER)),
+    )
+    .execute()
+    .await
+    .expect("expected success");
+
+    assert_eq!(
+        result_with_invalid_relay_state.headers["Location"].to_str().unwrap(),
+        "/"
+    );
 }

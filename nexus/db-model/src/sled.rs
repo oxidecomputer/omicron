@@ -11,11 +11,13 @@ use crate::sled_policy::DbSledPolicy;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_sled_agent_shared::inventory::SledRole;
+use nexus_types::deployment::execution;
 use nexus_types::{
     external_api::{shared, views},
     identity::Asset,
     internal_api::params,
 };
+use omicron_uuid_kinds::{GenericUuid, SledUuid};
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
@@ -43,6 +45,7 @@ pub struct SledSystemHardware {
 /// Database representation of a Sled.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
 #[diesel(table_name = sled)]
+// TODO-cleanup: use #[asset(uuid_kind = SledKind)]
 pub struct Sled {
     #[diesel(embed)]
     pub identity: SledIdentity,
@@ -136,6 +139,20 @@ impl From<Sled> for views::Sled {
             usable_hardware_threads: sled.usable_hardware_threads.0,
             usable_physical_ram: *sled.usable_physical_ram,
         }
+    }
+}
+
+impl From<Sled> for execution::Sled {
+    fn from(sled: Sled) -> Self {
+        Self::new(
+            SledUuid::from_untyped_uuid(sled.id()),
+            sled.address(),
+            if sled.is_scrimlet {
+                SledRole::Scrimlet
+            } else {
+                SledRole::Gimlet
+            },
+        )
     }
 }
 

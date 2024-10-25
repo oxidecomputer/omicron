@@ -285,10 +285,29 @@ fn draw_rack_reset_popup(
                 "Rack Reset (DESTRUCTIVE!)",
                 style::header(true),
             )]);
-            let body = Text::from(vec![Line::from(vec![Span::styled(
+            let mut body = Text::from(vec![Line::from(vec![Span::styled(
                 "Would you like to reset the rack to an uninitialized state?",
                 style::plain_text(),
             )])]);
+            // One might see this warning and ask "why is this feature even
+            // here, then?" We do eventually want "rack reset" to work as a
+            // sort of factory reset, and the current implementation is a good
+            // starting point, so there's no sense in removing it (this is
+            // certainly not the only feature currently in this state).
+            //
+            // The warning is intended to remove the speed bump where someone
+            // has to find out the hard way that this doesn't work, without
+            // removing the speed bump where we're reminded of the feature that
+            // doesn't work yet.
+            body.lines.push(Line::from(""));
+            body.lines.push(Line::from(vec![
+                Span::styled("WARNING: ", style::warning()),
+                Span::styled(
+                    "This does not work yet and will leave the rack \
+                     in an unknown state (see omicron#3820)",
+                    style::plain_text(),
+                ),
+            ]));
             let buttons =
                 vec![ButtonText::new("Yes", "Y"), ButtonText::new("No", "N")];
 
@@ -412,11 +431,21 @@ fn draw_rack_status_details_popup(
                 style::plain_text(),
             )]));
         }
-        Ok(RackOperationStatus::Initializing { id }) => {
+        Ok(RackOperationStatus::Initializing { id, step }) => {
             body.lines.push(Line::from(vec![
                 status,
                 Span::styled("Initializing", style::plain_text()),
             ]));
+            let max = step.max_step();
+            let index = step.index();
+            body.lines.push(Line::from(vec![Span::styled(
+                format!("Current step: {}/{}", index, max),
+                style::plain_text(),
+            )]));
+            body.lines.push(Line::from(vec![Span::styled(
+                format!("Current operation: {:?}", step),
+                style::plain_text(),
+            )]));
             body.lines.push(Line::from(vec![Span::styled(
                 format!("Current operation ID: {}", id),
                 style::plain_text(),
@@ -613,8 +642,11 @@ fn rss_config_text<'a>(
         Ok(RackOperationStatus::Initialized { .. }) => {
             Span::styled("Initialized", ok_style)
         }
-        Ok(RackOperationStatus::Initializing { .. }) => {
-            Span::styled("Initializing", warn_style)
+        Ok(RackOperationStatus::Initializing { step, .. }) => {
+            let max = step.max_step();
+            let index = step.index();
+            let msg = format!("Initializing: Step {}/{}", index, max);
+            Span::styled(msg, warn_style)
         }
         Ok(RackOperationStatus::Resetting { .. }) => {
             Span::styled("Resetting", warn_style)
@@ -772,34 +804,39 @@ fn rss_config_text<'a>(
                 ],
             ];
 
-            let routes = routes.iter().map(|r| {
-                let RouteConfig { destination, nexthop, vlan_id, local_pref } =
-                    r;
+            let routes =
+                routes.iter().map(|r| {
+                    let RouteConfig {
+                        destination,
+                        nexthop,
+                        vlan_id,
+                        rib_priority,
+                    } = r;
 
-                let mut items = vec![
-                    Span::styled("  • Route         : ", label_style),
-                    Span::styled(
-                        format!("{} -> {}", destination, nexthop),
-                        ok_style,
-                    ),
-                ];
-                if let Some(vlan_id) = vlan_id {
-                    items.extend([
-                        Span::styled(" (vlan_id=", label_style),
-                        Span::styled(vlan_id.to_string(), ok_style),
-                        Span::styled(")", label_style),
-                    ]);
-                }
-                if let Some(local_pref) = local_pref {
-                    items.extend([
-                        Span::styled(" (local_pref=", label_style),
-                        Span::styled(local_pref.to_string(), ok_style),
-                        Span::styled(")", label_style),
-                    ]);
-                }
+                    let mut items = vec![
+                        Span::styled("  • Route         : ", label_style),
+                        Span::styled(
+                            format!("{} -> {}", destination, nexthop),
+                            ok_style,
+                        ),
+                    ];
+                    if let Some(vlan_id) = vlan_id {
+                        items.extend([
+                            Span::styled(" (vlan_id=", label_style),
+                            Span::styled(vlan_id.to_string(), ok_style),
+                            Span::styled(")", label_style),
+                        ]);
+                    }
+                    if let Some(rib_priority) = rib_priority {
+                        items.extend([
+                            Span::styled(" (rib_priority=", label_style),
+                            Span::styled(rib_priority.to_string(), ok_style),
+                            Span::styled(")", label_style),
+                        ]);
+                    }
 
-                items
-            });
+                    items
+                });
 
             let addresses = addresses.iter().map(|a| {
                 let mut items = vec![

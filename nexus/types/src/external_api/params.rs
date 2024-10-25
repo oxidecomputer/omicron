@@ -8,14 +8,17 @@
 use crate::external_api::shared;
 use base64::Engine;
 use chrono::{DateTime, Utc};
+use http::Uri;
 use omicron_common::api::external::{
     AddressLotKind, AllowedSourceIps, BfdMode, BgpPeerCombined, ByteCount,
     Hostname, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    InstanceCpuCount, LinkFec, LinkSpeed, Name, NameOrId, PaginationOrder,
-    RouteDestination, RouteTarget, SemverVersion, SwitchLocation, UserId,
+    InstanceAutoRestartPolicy, InstanceCpuCount, LinkFec, LinkSpeed, Name,
+    NameOrId, PaginationOrder, RouteDestination, RouteTarget, SemverVersion,
+    SwitchLocation, UserId,
 };
 use omicron_common::disk::DiskVariant;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
+use parse_display::Display;
 use schemars::JsonSchema;
 use serde::{
     de::{self, Visitor},
@@ -73,6 +76,7 @@ path_param!(VpcPath, vpc, "VPC");
 path_param!(SubnetPath, subnet, "subnet");
 path_param!(RouterPath, router, "router");
 path_param!(RoutePath, route, "route");
+path_param!(InternetGatewayPath, gateway, "gateway");
 path_param!(FloatingIpPath, floating_ip, "floating IP");
 path_param!(DiskPath, disk, "disk");
 path_param!(SnapshotPath, snapshot, "snapshot");
@@ -80,14 +84,17 @@ path_param!(ImagePath, image, "image");
 path_param!(SiloPath, silo, "silo");
 path_param!(ProviderPath, provider, "SAML identity provider");
 path_param!(IpPoolPath, pool, "IP pool");
+path_param!(IpAddressPath, address, "IP address");
 path_param!(SshKeyPath, ssh_key, "SSH key");
 path_param!(AddressLotPath, address_lot, "address lot");
 path_param!(ProbePath, probe, "probe");
+path_param!(CertificatePath, certificate, "certificate");
 
 id_path_param!(GroupPath, group_id, "group");
 
 // TODO: The hardware resources should be represented by its UUID or a hardware
 // ID that can be used to deterministically generate the UUID.
+id_path_param!(RackPath, rack_id, "rack");
 id_path_param!(SledPath, sled_id, "sled");
 id_path_param!(SwitchPath, switch_id, "switch");
 id_path_param!(PhysicalDiskPath, disk_id, "physical disk");
@@ -139,6 +146,13 @@ impl From<Name> for SiloSelector {
 pub struct OptionalSiloSelector {
     /// Name or ID of the silo
     pub silo: Option<NameOrId>,
+}
+
+/// Path parameters for Silo User requests
+#[derive(Deserialize, JsonSchema)]
+pub struct UserParam {
+    /// The user's internal ID
+    pub user_id: Uuid,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -246,6 +260,17 @@ pub struct OptionalVpcSelector {
     pub vpc: Option<NameOrId>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct InternetGatewayDeleteSelector {
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC
+    pub vpc: Option<NameOrId>,
+    /// Also delete routes targeting this gateway.
+    #[serde(default)]
+    pub cascade: bool,
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct SubnetSelector {
     /// Name or ID of the project, only required if `vpc` is provided as a `Name`
@@ -286,6 +311,65 @@ pub struct RouteSelector {
     pub router: Option<NameOrId>,
     /// Name or ID of the route
     pub route: NameOrId,
+}
+
+// Internet gateways
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct InternetGatewaySelector {
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC, only required if `gateway` is provided as a `Name`
+    pub vpc: Option<NameOrId>,
+    /// Name or ID of the internet gateway
+    pub gateway: NameOrId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct OptionalInternetGatewaySelector {
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC, only required if `gateway` is provided as a `Name`
+    pub vpc: Option<NameOrId>,
+    /// Name or ID of the internet gateway
+    pub gateway: Option<NameOrId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct DeleteInternetGatewayElementSelector {
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC, only required if `gateway` is provided as a `Name`
+    pub vpc: Option<NameOrId>,
+    /// Name or ID of the internet gateway
+    pub gateway: Option<NameOrId>,
+    /// Also delete routes targeting this gateway element.
+    #[serde(default)]
+    pub cascade: bool,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct InternetGatewayIpPoolSelector {
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC, only required if `gateway` is provided as a `Name`
+    pub vpc: Option<NameOrId>,
+    /// Name or ID of the gateway, only required if `pool` is provided as a `Name`
+    pub gateway: Option<NameOrId>,
+    /// Name or ID of the pool
+    pub pool: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct InternetGatewayIpAddressSelector {
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC, only required if `gateway` is provided as a `Name`
+    pub vpc: Option<NameOrId>,
+    /// Name or ID of the gateway, only required if `address` is provided as a `Name`
+    pub gateway: Option<NameOrId>,
+    /// Name or ID of the address
+    pub address: NameOrId,
 }
 
 // Silos
@@ -934,6 +1018,16 @@ pub enum InstanceDiskAttachment {
     Attach(InstanceDiskAttach),
 }
 
+impl InstanceDiskAttachment {
+    /// Get the name of the disk described by this attachment.
+    pub fn name(&self) -> Name {
+        match self {
+            Self::Create(create) => create.identity.name.clone(),
+            Self::Attach(InstanceDiskAttach { name }) => name.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceDiskAttach {
     /// A disk name to attach
@@ -976,8 +1070,11 @@ pub enum ExternalIpDetach {
 pub struct InstanceCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+    /// The number of vCPUs to be allocated to the instance
     pub ncpus: InstanceCpuCount,
+    /// The amount of RAM (in bytes) to be allocated to the instance
     pub memory: ByteCount,
+    /// The hostname to be assigned to the instance
     pub hostname: Hostname,
 
     /// User data for instance initialization systems (such as cloud-init).
@@ -1010,6 +1107,22 @@ pub struct InstanceCreate {
     #[serde(default)]
     pub disks: Vec<InstanceDiskAttachment>,
 
+    /// The disk this instance should boot into. This disk can either be
+    /// attached if it already exists, or created, if it should be a new disk.
+    ///
+    /// It is strongly recommended to either provide a boot disk at instance
+    /// creation, or update the instance after creation to set a boot disk.
+    ///
+    /// An instance without an explicit boot disk can be booted: the options are
+    /// as managed by UEFI, and as controlled by the guest OS, but with some
+    /// risk.  If this instance later has a disk attached or detached, it is
+    /// possible that boot options can end up reordered, with the intended boot
+    /// disk moved after the EFI shell in boot priority. This may result in an
+    /// instance that only boots to the EFI shell until the desired disk is set
+    /// as an explicit boot disk and the instance rebooted.
+    #[serde(default)]
+    pub boot_disk: Option<InstanceDiskAttachment>,
+
     /// An allowlist of SSH public keys to be transferred to the instance via
     /// cloud-init during instance creation.
     ///
@@ -1021,6 +1134,28 @@ pub struct InstanceCreate {
     /// Should this instance be started upon creation; true by default.
     #[serde(default = "bool_true")]
     pub start: bool,
+
+    /// The auto-restart policy for this instance.
+    ///
+    /// This indicates whether the instance should be automatically restarted by
+    /// the control plane on failure. If this is `null`, no auto-restart policy
+    /// has been configured for this instance by the user.
+    #[serde(default)]
+    pub auto_restart_policy: Option<InstanceAutoRestartPolicy>,
+}
+
+/// Parameters of an `Instance` that can be reconfigured after creation.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceUpdate {
+    /// Name or ID of the disk the instance should be instructed to boot from.
+    ///
+    /// If not provided, unset the instance's boot disk.
+    pub boot_disk: Option<NameOrId>,
+
+    /// The auto-restart policy for this instance.
+    ///
+    /// If not provided, unset the instance's auto-restart policy.
+    pub auto_restart_policy: Option<InstanceAutoRestartPolicy>,
 }
 
 #[inline]
@@ -1239,7 +1374,48 @@ pub struct RouterRouteUpdate {
     pub destination: RouteDestination,
 }
 
+// INTERNET GATEWAYS
+
+/// Create-time parameters for an `InternetGateway`
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGatewayCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGatewayIpPoolCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub ip_pool: NameOrId,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGatewayIpAddressCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub address: IpAddr,
+}
+
 // DISKS
+
+#[derive(Display, Serialize, Deserialize, JsonSchema)]
+#[display(style = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum DiskMetricName {
+    Activated,
+    Flush,
+    Read,
+    ReadBytes,
+    Write,
+    WriteBytes,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct DiskMetricsPath {
+    pub disk: NameOrId,
+    pub metric: DiskMetricName,
+}
 
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 #[serde(try_from = "u32")] // invoke the try_from validation routine below
@@ -1333,12 +1509,12 @@ pub enum DiskSource {
 /// Create-time parameters for a `Disk`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DiskCreate {
-    /// common identifying metadata
+    /// The common identifying metadata for the disk
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    /// initial source for this disk
+    /// The initial source for this disk
     pub disk_source: DiskSource,
-    /// total size of the Disk in bytes
+    /// The total size of the Disk (in bytes)
     pub size: ByteCount,
 }
 
@@ -1417,6 +1593,23 @@ pub struct LoopbackAddressCreate {
     /// Address is an anycast address.
     /// This allows the address to be assigned to multiple locations simultaneously.
     pub anycast: bool,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct LoopbackAddressPath {
+    /// The rack to use when selecting the loopback address.
+    pub rack_id: Uuid,
+
+    /// The switch location to use when selecting the loopback address.
+    pub switch_location: Name,
+
+    /// The IP address and subnet mask to use when selecting the loopback
+    /// address.
+    pub address: IpAddr,
+
+    /// The IP address and subnet mask to use when selecting the loopback
+    /// address.
+    pub subnet_mask: u8,
 }
 
 /// Parameters for creating a port settings group.
@@ -1617,7 +1810,7 @@ pub struct Route {
 
     /// Local preference for route. Higher preference indicates precedence
     /// within and across protocols.
-    pub local_pref: Option<u32>,
+    pub rib_priority: Option<u8>,
 }
 
 /// A network route to to add to or remove from an interface.
@@ -1637,7 +1830,7 @@ pub struct RouteAddRemove {
 
     /// Local preference for route. Higher preference indicates precedence
     /// within and across protocols.
-    pub local_pref: Option<u32>,
+    pub rib_priority: Option<u8>,
 }
 
 /// A prefix allowed to be imported or exported by a bgp peer
@@ -1673,13 +1866,6 @@ pub struct BgpConfigSelector {
     pub bgp_config: NameOrId,
 }
 
-/// List BGP configs with an optional name or id.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct BgpConfigListSelector {
-    /// A name or id to use when selecting BGP config.
-    pub name_or_id: Option<NameOrId>,
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct BgpPeerConfig {
     pub peers: Vec<BgpPeerCombined>,
@@ -1695,32 +1881,18 @@ pub struct BgpAnnounceSetCreate {
     pub announcement: Vec<BgpAnnouncementCreate>,
 }
 
-/// Optionally select a BGP announce set by a name or id.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct OptionalBgpAnnounceSetSelector {
-    /// A name or id to use when s electing BGP port settings
-    pub name_or_id: Option<NameOrId>,
-}
-
-/// Optionally select a BGP Peer by a name or id.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct OptionalBgpPeerSelector {
-    /// A name or id to use when filtering or paginating bgp peers
-    pub name_or_id: Option<NameOrId>,
-}
-
 /// Select a BGP announce set by a name or id.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct BgpAnnounceSetSelector {
-    /// A name or id to use when selecting BGP port settings
-    pub name_or_id: NameOrId,
+    /// Name or ID of the announce set
+    pub announce_set: NameOrId,
 }
 
 /// List BGP announce set with an optional name or id.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct BgpAnnounceListSelector {
-    /// A name or id to use when selecting BGP config.
-    pub name_or_id: Option<NameOrId>,
+    /// Name or ID of the announce set
+    pub announce_set: Option<NameOrId>,
 }
 
 /// Selector used for querying imported BGP routes.
@@ -2023,6 +2195,20 @@ pub struct SshKeyCreate {
 
 // METRICS
 
+#[derive(Display, Deserialize, JsonSchema)]
+#[display(style = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum SystemMetricName {
+    VirtualDiskSpaceProvisioned,
+    CpusProvisioned,
+    RamProvisioned,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SystemMetricsPathParam {
+    pub metric_name: SystemMetricName,
+}
+
 /// Query parameters common to resource metrics endpoints.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ResourceMetrics {
@@ -2083,4 +2269,99 @@ pub struct TimeseriesQuery {
 pub struct AllowListUpdate {
     /// The new list of allowed source IPs.
     pub allowed_ips: AllowedSourceIps,
+}
+
+// Roles
+
+// Roles have their own pagination scheme because they do not use the usual "id"
+// or "name" types.  For more, see the comment in dbinit.sql.
+#[derive(Deserialize, JsonSchema, Serialize)]
+pub struct RolePage {
+    pub last_seen: String,
+}
+
+/// Path parameters for global (system) role requests
+#[derive(Deserialize, JsonSchema)]
+pub struct RolePath {
+    /// The built-in role's unique name.
+    pub role_name: String,
+}
+
+// Console API
+
+#[derive(Deserialize, JsonSchema)]
+pub struct RestPathParam {
+    pub path: Vec<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct LoginToProviderPathParam {
+    pub silo_name: Name,
+    pub provider_name: Name,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct LoginUrlQuery {
+    pub redirect_uri: Option<RelativeUri>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct LoginPath {
+    pub silo_name: Name,
+}
+
+/// This is meant as a security feature. We want to ensure we never redirect to
+/// a URI on a different host.
+#[derive(Serialize, Deserialize, Debug, JsonSchema, Clone, Display)]
+#[serde(try_from = "String")]
+#[display("{0}")]
+pub struct RelativeUri(String);
+
+impl FromStr for RelativeUri {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::try_from(s.to_string())
+    }
+}
+
+impl TryFrom<Uri> for RelativeUri {
+    type Error = String;
+
+    fn try_from(uri: Uri) -> Result<Self, Self::Error> {
+        if uri.host().is_none() && uri.scheme().is_none() {
+            Ok(Self(uri.to_string()))
+        } else {
+            Err(format!("\"{}\" is not a relative URI", uri))
+        }
+    }
+}
+
+impl TryFrom<String> for RelativeUri {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse::<Uri>()
+            .map_err(|_| format!("\"{}\" is not a relative URI", s))
+            .and_then(|uri| Self::try_from(uri))
+    }
+}
+
+// Device auth
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct DeviceAuthRequest {
+    pub client_id: Uuid,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct DeviceAuthVerify {
+    pub user_code: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct DeviceAccessTokenRequest {
+    pub grant_type: String,
+    pub device_code: String,
+    pub client_id: Uuid,
 }

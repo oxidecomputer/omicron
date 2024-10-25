@@ -1,0 +1,449 @@
+# Describes all the Dropshot/OpenAPI/Progenitor APIs in the system
+#
+# See README.adoc in this package for details.
+#
+# TODO It would be nice to collect a bunch of this information from the same
+# sources that drive the actual build process (e.g., package-manifest.toml).
+# For non-Omicron components, the deployment units (zone images and tarballs
+# that get unpacked into the switch zone or global zone) come from buildomat
+# jobs on other repositories.  In at least some components those come from those
+# components' package-manifest.toml files, which we probably have available, so
+# we could still incorporate that information.
+#
+# TODO The following items from package-manifest.toml are currently ignored
+# because they are assumed not to contain servers or clients that we care about:
+#
+# - faux_mgs
+# - crucible_dtrace
+# - mg-ddm
+#
+# The following were at one point included here, but do not appear to contain
+# Progenitor clients or APIs, so they're left out to avoid needing to create and
+# process clones of these repos:
+#
+# - lldp
+# - pumpkind
+# - thundermuffin
+#
+# If we do wind up processing package-manifest.toml, we may want to maintain an
+# explicit list of items that we ignore so that we can fail when something is
+# neither included nor ignored so that we can be sure we're not missing
+# anything.
+#
+# TODO The metadata here overlaps with metadata hardcoded in `openapi-manager`.
+
+################################################################################
+# Ignored non-client packages
+#
+# These are packages that may be flagged as clients because they directly depend
+# on Progenitor, but which are not really clients.
+#
+# These are cases that cannot be easily handled by the evaluation rules later in
+# this file because they need to be processed earlier.
+################################################################################
+
+ignored_non_clients = [
+    # omicron-common depends on progenitor so that it can define some generic
+    # error handling and a generic macro for defining clients.  omicron-common
+    # itself is not a progenitor-based client.
+    "omicron-common",
+
+    # propolis-mock-server uses Progenitor to generate types that are
+    # compatible with the real Propolis server.  It doesn't actually use the
+    # client and we don't really care about it for these purposes anyway.
+    "propolis-mock-server",
+]
+
+################################################################################
+# Deployment Units
+#
+# A deployment unit is a set of Rust packages that are always deployed together.
+# This is particularly relevant for upgrade because we'll want to construct a
+# DAG describing the order in which we update components.  It's possible that we
+# could have a DAG among the Rust packages that get deployed but there may
+# still be cycles within the deployment unit dependency graph.
+################################################################################
+
+# The host OS includes Sled Agent, Propolis, and all the components that get
+# bundled into the switch zone.
+[[deployment_units]]
+label = "Host OS"
+packages = [
+    "omicron-sled-agent",
+    "propolis-server",
+    # switch zone
+    "ddmd",
+    "dpd",
+    "mgd",
+    "omicron-gateway",
+    "tfportd",
+    "wicketd",
+]
+
+# Installinator gets packaged into its own host OS image.
+[[deployment_units]]
+label = "Installinator"
+packages = [ "installinator" ]
+
+# The rest of these get bundled by standard control plane zone images.
+
+[[deployment_units]]
+label = "Crucible"
+packages = [ "crucible-agent", "crucible-downstairs" ]
+
+[[deployment_units]]
+label = "Crucible Pantry"
+packages = [ "crucible-pantry" ]
+
+[[deployment_units]]
+label = "Cockroach Admin"
+packages = [ "omicron-cockroach-admin" ]
+
+[[deployment_units]]
+label = "Clickhouse Admin"
+packages = [ "omicron-clickhouse-admin" ]
+
+[[deployment_units]]
+label = "DNS Server"
+packages = [ "dns-server" ]
+
+[[deployment_units]]
+label = "Nexus"
+packages = [ "omicron-nexus" ]
+
+[[deployment_units]]
+label = "Oximeter"
+packages = [ "oximeter-collector" ]
+
+
+################################################################################
+# APIs
+#
+# Each API includes:
+#
+# `client_package_name`: the name of the Rust package that's a
+# Progenitor-based client for this API.  This is used as a primary key for the
+# API.
+#
+# `label`: a human-readable name for this API
+#
+# `server_package_name`: the package that contains the Dropshot API definition.
+#
+# [`notes`]: optional free-form human-readable summary documentation about this
+# API
+################################################################################
+
+[[apis]]
+client_package_name = "bootstrap-agent-client"
+label = "Bootstrap Agent"
+server_package_name = "bootstrap-agent-api"
+
+[[apis]]
+client_package_name = "clickhouse-admin-keeper-client"
+label = "Clickhouse Cluster Admin for Keepers"
+server_package_name = "clickhouse-admin-api"
+notes = """
+This is the server running inside multi-node Clickhouse keeper zones that's \
+responsible for local configuration and monitoring.
+"""
+
+[[apis]]
+client_package_name = "clickhouse-admin-server-client"
+label = "Clickhouse Cluster Admin for Servers"
+server_package_name = "clickhouse-admin-api"
+notes = """
+This is the server running inside multi-node Clickhouse server zones that's \
+responsible for local configuration and monitoring.
+"""
+
+[[apis]]
+client_package_name = "cockroach-admin-client"
+label = "CockroachDB Cluster Admin"
+server_package_name = "cockroach-admin-api"
+notes = """
+This is the server running inside CockroachDB zones that performs \
+configuration and monitoring that requires the `cockroach` CLI.
+"""
+
+[[apis]]
+client_package_name = "crucible-agent-client"
+label = "Crucible Agent"
+server_package_name = "crucible-agent"
+
+[[apis]]
+client_package_name = "repair-client"
+label = "Crucible Repair"
+server_package_name = "crucible-downstairs"
+notes = """
+The repair service offered by a crucible-downstairs supports both repairing \
+one downstairs from another, and making a clone of a read-only downstairs \
+when creating a new region in the crucible agent.
+"""
+
+[[apis]]
+client_package_name = "crucible-pantry-client"
+label = "Crucible Pantry"
+server_package_name = "crucible-pantry"
+
+[[apis]]
+client_package_name = "ddm-admin-client"
+label = "Maghemite DDM Admin"
+server_package_name = "ddmd"
+notes = """
+The `ddmd` server runs in each sled GZ and each switch zone. These daemons \
+provide an interface for advertising network prefixes, and observing what \
+prefixes have been received from other DDM daemons in the rack. Sled agent \
+uses this interface to announce bootstrap and underlay network prefixes, as \
+well as learn about routes to other sleds and services in the rack. This \
+interface is required in early-networking before a rack is fully up with Nexus \
+running. Nexus does not consume this interface today, but will for \
+observability APIs in the future.
+"""
+
+[[apis]]
+client_package_name = "dns-service-client"
+label = "DNS Server"
+server_package_name = "dns-server-api"
+
+[[apis]]
+client_package_name = "dpd-client"
+label = "Dendrite DPD"
+server_package_name = "dpd"
+notes = """
+Dendrite's data plane daemon (`dpd`) is the interface to configure and manage \
+the rack switches. It's consumed by sled-agent to get the rack off the \
+ground. The dpd API is also used by nexus as operators make changes to the \
+rack external network configuration, these changes are synchronized by nexus \
+to `dpd`. The `dpd` API is a auto-generated from it's OpenAPI specification \
+and exists as a client library within omicron. This is because the Dendrite \
+repo is not currently open source.
+"""
+
+[[apis]]
+client_package_name = "gateway-client"
+label = "Management Gateway Service"
+server_package_name = "gateway-api"
+notes = "Wicketd is deployed in a unit with MGS so we can ignore that one."
+
+[[apis]]
+client_package_name = "installinator-client"
+label = "Wicketd Installinator"
+server_package_name = "installinator-api"
+
+[[apis]]
+client_package_name = "mg-admin-client"
+label = "Maghemite MG Admin"
+server_package_name = "mgd"
+notes = """
+The `mgd` daemon runs in each switch zone. This daemon is responsible for all \
+external route management for a switch. It provides interfaces for static \
+route management, BGP configuration and BFD configuration. This interface is \
+consumed by both nexus and sled agent, since we need external connectivity to \
+bring the rack up.
+"""
+
+[[apis]]
+client_package_name = "nexus-client"
+label = "Nexus Internal API"
+server_package_name = "nexus-internal-api"
+
+[[apis]]
+client_package_name = "oxide-client"
+label = "External API"
+server_package_name = "nexus-external-api"
+notes = "Special case, since we don't fully control all clients"
+
+[[apis]]
+client_package_name = "oximeter-client"
+label = "Oximeter"
+server_package_name = "oximeter-api"
+notes = """
+Shared types for this interface are in `omicron-common`. The producer makes \
+requests to Nexus, and receives them from `oximeter-collector`. \
+`oximeter-collector` makes requests to Nexus and the producer, and receives \
+them from Nexus (for periodic renewals). Nexus receives requests from both, \
+and makes the periodic renewal requests to `oximeter-collector`.
+"""
+
+[[apis]]
+client_package_name = "propolis-client"
+label = "Propolis"
+server_package_name = "propolis-server"
+notes = """
+Sled Agent is deployed in a unit with Propolis so we can ignore that one.
+"""
+
+[[apis]]
+client_package_name = "sled-agent-client"
+label = "Sled Agent"
+server_package_name = "sled-agent-api"
+
+[[apis]]
+client_package_name = "wicketd-client"
+label = "Wicketd"
+server_package_name = "wicketd-api"
+notes = """
+wicketd-client is only used by wicket, which is deployed in a unit with wicketd.
+"""
+
+[[apis]]
+client_package_name = "crucible-control-client"
+label = "Crucible Control (for testing only)"
+server_package_name = "crucible"
+notes = """
+Exposed by Crucible upstairs for debugging via the `cmon` debugging tool.
+"""
+
+[[apis]]
+client_package_name = "dsc-client"
+label = "Downstairs Controller (debugging only)"
+server_package_name = "dsc"
+notes = """
+`dsc` is a control program for spinning up and controlling instances of Crucible
+downstairs for testing.  You can use the same program to control a running `dsc`
+instance.  It's also used by `crutest` for testing.
+"""
+
+################################################################################
+# Dependency filter rules
+#
+# These rules are used to postprocess the API dependencies that are inferred
+# from the Cargo dependencies.  Each rule has properties:
+#
+# * `ancestor`: a Rust package name
+# * `client`: the name of a Rust package that's a Progenitor-based API client
+# * `evaluation`: a developer-maintained flag for this dependency
+# * `note`: a human-readable explanation for the evaluation
+#
+# This tool works by assembling a list of _possible_ API dependencies based on
+# Cargo package dependencies and then applying these rules to filter some out.
+# A rule matches a possible API dependency on `client` if the Cargo package
+# dependency path goes through `ancestor`.  For example: omicron-sled-agent
+# depends on omicron-common, which depends on mg-admin-client.  This causes the
+# tool to initially think that omicron-sled-agent uses the MGD Admin API.  A
+# rule with `client = mg-admin-client` and `ancestor = omicron-common` would
+# filter this out.
+#
+# See the README for more details, including what the different evaluations mean.
+################################################################################
+
+#
+# There are no DAG dependencies yet because we've only started evaluating which
+# edges should be in that graph.
+#
+
+#
+# Non-DAG dependencies.  See above for details.
+#
+[[dependency_filter_rules]]
+ancestor = "oximeter-producer"
+client = "nexus-client"
+evaluation = "non-dag"
+note = """
+All Oximeter producers are Nexus clients.  This is a good candidate for a
+non-DAG dependency because the API is small and stable and the reverse
+directions are often not.
+"""
+
+#
+# "Not-deployed" dependencies.  See above for details.
+#
+# TODO All things being equal, it would be better to separate these programs
+# into their own packages that are separate from the package that *is* deployed.
+# Then we wouldn't need these rules.  As it is, these rules rely on manual
+# vetting that the dependency _is_ only in the dev/test program.  If things ever
+# changed (e.g., if one of these grew a real dependency on the same API), we'd
+# miss it in this tooling.
+#
+
+[[dependency_filter_rules]]
+ancestor = "oximeter-collector"
+client = "oximeter-client"
+evaluation = "not-deployed"
+note = """
+Oximeter provides a standalone collector that is not used in deployed systems.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "wicketd"
+client = "wicketd-client"
+evaluation = "not-deployed"
+note = """
+Wicketd provides a function to refresh the server's config.  This could probably
+move into the client package instead.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "dns-server"
+client = "dns-service-client"
+evaluation = "not-deployed"
+note = """
+DNS server depends on itself only to provide TransientServer, which is not a
+deployed component.
+"""
+
+#
+# "Bogus" dependencies.  See above for details.
+#
+# In most of these cases, some crate is using a client crate for its types, not
+# its client.  In these cases, if the component has a real dependency on that
+# other API, then it will need some other dependency on the client and that will
+# show up as a non-bogus dependency.
+#
+# TODO It would be nice to remove the need for all of these to avoid accidental
+# future false negatives.
+#
+
+[[dependency_filter_rules]]
+ancestor = "omicron-common"
+client = "mg-admin-client"
+evaluation = "bogus"
+note = """
+omicron_common depends on mg-admin-client solely to impl some `From`
+conversions.  That makes it look like just about everything depends on
+mg-admin-client, which isn't true.  It'd be nice to remove this.  Most clients
+put those conversions into the client rather than omicron_common.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "nexus-types"
+client = "gateway-client"
+evaluation = "bogus"
+note = """
+nexus-types depends on gateway-client for defining some types.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "nexus-types"
+client = "dns-service-client"
+evaluation = "bogus"
+note = """
+Past versions of nexus-types that are still referenced in the dependency tree
+depended on dns-service-client for defining some types.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "nexus-types"
+client = "sled-agent-client"
+evaluation = "bogus"
+note = """
+Past versions of nexus-types that are still referenced in the dependency tree
+depended on sled-agent-client for defining some types.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "sled-agent-types"
+client = "propolis-client"
+evaluation = "bogus"
+note = """
+sled-agent-types uses propolis-client for types only.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "omicron-sled-agent"
+client = "crucible-agent-client"
+evaluation = "bogus"
+note = """
+Sled Agent uses the Crucible Agent client types only, and only in the simulated
+sled agent.
+"""

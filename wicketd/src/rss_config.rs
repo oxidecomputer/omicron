@@ -26,6 +26,7 @@ use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::SwitchLocation;
 use once_cell::sync::Lazy;
 use sled_hardware_types::Baseboard;
+use slog::debug;
 use slog::warn;
 use std::collections::btree_map;
 use std::collections::BTreeMap;
@@ -115,6 +116,7 @@ impl CurrentRssConfig {
         &mut self,
         inventory: &RackV1Inventory,
         bootstrap_peers: &BootstrapPeers,
+        log: &slog::Logger,
     ) {
         let bootstrap_sleds = bootstrap_peers.sleds();
 
@@ -126,7 +128,15 @@ impl CurrentRssConfig {
                     return None;
                 }
 
-                let state = sp.state.as_ref()?;
+                let Some(state) = sp.state.as_ref() else {
+                    debug!(
+                        log,
+                        "in update_with_inventory_and_bootstrap_peers, \
+                         filtering out SP with no state";
+                        "sp" => ?sp,
+                    );
+                    return None;
+                };
                 let baseboard = Baseboard::new_gimlet(
                     state.serial_number.clone(),
                     state.model.clone(),
@@ -706,7 +716,7 @@ fn build_port_config(
                 destination: r.destination,
                 nexthop: r.nexthop,
                 vlan_id: r.vlan_id,
-                local_pref: r.local_pref,
+                rib_priority: r.rib_priority,
             })
             .collect(),
         addresses: config

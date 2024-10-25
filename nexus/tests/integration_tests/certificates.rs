@@ -4,12 +4,13 @@
 
 //! Integration tests for operating on certificates
 
+use display_error_chain::ErrorChainExt;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use futures::TryStreamExt;
 use http::method::Method;
 use http::StatusCode;
-use internal_dns::names::DNS_ZONE_EXTERNAL_TESTING;
+use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::load_test_config;
@@ -599,11 +600,7 @@ async fn test_silo_certificates() {
         );
     if let oxide_client::Error::CommunicationError(error) = error {
         assert!(error.is_connect());
-        assert!(
-            error.to_string().contains("invalid peer certificate")
-                || error.to_string().contains("self-signed certificate")
-                || error.to_string().contains("self signed certificate")
-        );
+        assert!(error.chain().to_string().contains("self-signed certificate"));
     } else {
         panic!(
             "unexpected error connecting with wrong certificate: {:#}",
@@ -622,11 +619,7 @@ async fn test_silo_certificates() {
         );
     if let oxide_client::Error::CommunicationError(error) = error {
         assert!(error.is_connect());
-        assert!(
-            error.to_string().contains("invalid peer certificate")
-                || error.to_string().contains("self-signed certificate")
-                || error.to_string().contains("self signed certificate")
-        );
+        assert!(error.chain().to_string().contains("self-signed certificate"));
     } else {
         panic!(
             "unexpected error connecting with wrong certificate: {:#}",

@@ -162,6 +162,9 @@ impl Client {
         schema: &TimeseriesSchema,
         preds: &filter::Filter,
     ) -> Result<Option<String>, Error> {
+        // Potentially negate the predicate.
+        let maybe_not = if preds.negated { "NOT " } else { "" };
+
         // Walk the set of predicates, keeping those which apply to this schema.
         match &preds.expr {
             filter::FilterExpr::Simple(inner) => {
@@ -183,7 +186,7 @@ impl Client {
                         field_schema.field_type,
                     )));
                 }
-                Ok(Some(inner.as_db_safe_string()))
+                Ok(Some(format!("{}{}", maybe_not, inner.as_db_safe_string())))
             }
             filter::FilterExpr::Compound(inner) => {
                 let left_pred =
@@ -192,7 +195,8 @@ impl Client {
                     Self::rewrite_predicate_for_fields(schema, &inner.right)?;
                 let out = match (left_pred, right_pred) {
                     (Some(left), Some(right)) => Some(format!(
-                        "{}({left}, {right})",
+                        "{}{}({left}, {right})",
+                        maybe_not,
                         inner.op.as_db_function_name()
                     )),
                     (Some(single), None) | (None, Some(single)) => Some(single),
@@ -209,6 +213,9 @@ impl Client {
         schema: &TimeseriesSchema,
         preds: &oxql::ast::table_ops::filter::Filter,
     ) -> Result<Option<String>, Error> {
+        // Potentially negate the predicate.
+        let maybe_not = if preds.negated { "NOT " } else { "" };
+
         // Walk the set of predicates, keeping those which apply to this schema.
         match &preds.expr {
             filter::FilterExpr::Simple(inner) => {
@@ -220,7 +227,11 @@ impl Client {
                         inner.value,
                         oxql::ast::literal::Literal::Timestamp(_)
                     ) {
-                        return Ok(Some(inner.as_db_safe_string()));
+                        return Ok(Some(format!(
+                            "{}{}",
+                            maybe_not,
+                            inner.as_db_safe_string()
+                        )));
                     }
                     return Err(Error::from(anyhow::anyhow!(
                         "Literal cannot be compared with a timestamp"
@@ -242,7 +253,11 @@ impl Client {
                         inner.value,
                         oxql::ast::literal::Literal::Timestamp(_)
                     ) {
-                        return Ok(Some(inner.as_db_safe_string()));
+                        return Ok(Some(format!(
+                            "{}{}",
+                            maybe_not,
+                            inner.as_db_safe_string()
+                        )));
                     }
                     return Err(Error::from(anyhow::anyhow!(
                         "Literal cannot be compared with a timestamp"
@@ -264,7 +279,8 @@ impl Client {
                 )?;
                 let out = match (left_pred, right_pred) {
                     (Some(left), Some(right)) => Some(format!(
-                        "{}({left}, {right})",
+                        "{}{}({left}, {right})",
+                        maybe_not,
                         inner.op.as_db_function_name()
                     )),
                     (Some(single), None) | (None, Some(single)) => Some(single),
@@ -1110,16 +1126,20 @@ fn update_total_rows_and_check(
 mod tests {
     use super::ConsistentKeyGroup;
     use crate::client::oxql::chunk_consistent_key_groups_impl;
-    use crate::{Client, DbWrite};
+    use crate::oxql::ast::grammar::query_parser;
+    use crate::{Client, DbWrite, DATABASE_TIMESTAMP_FORMAT};
     use crate::{Metric, Target};
-    use chrono::{DateTime, Utc};
+    use chrono::{DateTime, NaiveDate, Utc};
     use dropshot::test_util::LogContext;
-    use omicron_test_utils::dev::clickhouse::ClickHouseInstance;
+    use omicron_test_utils::dev::clickhouse::ClickHouseDeployment;
     use omicron_test_utils::dev::test_setup_log;
     use oximeter::{types::Cumulative, FieldValue};
-    use oximeter::{DatumType, Sample};
+    use oximeter::{
+        AuthzScope, DatumType, FieldSchema, FieldSource, FieldType, Sample,
+        TimeseriesSchema, Units,
+    };
     use oxql_types::{point::Points, Table, Timeseries};
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::time::Duration;
 
     #[derive(
@@ -1148,7 +1168,7 @@ mod tests {
 
     struct TestContext {
         logctx: LogContext,
-        clickhouse: ClickHouseInstance,
+        clickhouse: ClickHouseDeployment,
         client: Client,
         test_data: TestData,
     }
@@ -1236,10 +1256,14 @@ mod tests {
 
     async fn setup_oxql_test(name: &str) -> TestContext {
         let logctx = test_setup_log(name);
-        let db = ClickHouseInstance::new_single_node(&logctx, 0)
+        let db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let client = Client::new(db.address, &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         client
             .init_single_node_db()
             .await
@@ -1647,5 +1671,63 @@ mod tests {
         );
 
         ctx.cleanup_successful().await;
+    }
+
+    fn test_schema() -> TimeseriesSchema {
+        TimeseriesSchema {
+            timeseries_name: "foo:bar".parse().unwrap(),
+            description: Default::default(),
+            field_schema: BTreeSet::from([FieldSchema {
+                name: String::from("f0"),
+                field_type: FieldType::U32,
+                source: FieldSource::Target,
+                description: String::new(),
+            }]),
+            datum_type: DatumType::U64,
+            version: 1.try_into().unwrap(),
+            authz_scope: AuthzScope::Fleet,
+            units: Units::None,
+            created: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn correctly_negate_field_predicate_expression() {
+        let logctx =
+            test_setup_log("correctly_negate_field_predicate_expression");
+        let schema = test_schema();
+        let filt = query_parser::filter("filter !(f0 == 0)").unwrap();
+        let rewritten = Client::rewrite_predicate_for_fields(&schema, &filt)
+            .unwrap()
+            .expect("Should have rewritten the field predicate");
+        assert_eq!(rewritten, "NOT equals(f0, 0)");
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn correctly_negate_timestamp_predicate_expression() {
+        let logctx =
+            test_setup_log("correctly_negate_field_predicate_expression");
+        let schema = test_schema();
+        let now = NaiveDate::from_ymd_opt(2024, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc();
+        let now_str = "2024-01-01";
+        let filter_str = format!("filter !(timestamp > @{})", now_str);
+        let filt = query_parser::filter(&filter_str).unwrap();
+        let rewritten =
+            Client::rewrite_predicate_for_measurements(&schema, &filt)
+                .unwrap()
+                .expect("Should have rewritten the timestamp predicate");
+        assert_eq!(
+            rewritten,
+            format!(
+                "NOT greater(timestamp, '{}')",
+                now.format(DATABASE_TIMESTAMP_FORMAT)
+            )
+        );
+        logctx.cleanup_successful();
     }
 }

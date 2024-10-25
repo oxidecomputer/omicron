@@ -67,6 +67,7 @@ progenitor::generate_api!(
         RotSlot = wicket_common::inventory::RotSlot,
         RotState = wicket_common::inventory::RotState,
         RouteConfig = omicron_common::api::internal::shared::RouteConfig,
+        RssStep = sled_agent_types::rack_ops::RssStep,
         SpComponentCaboose = wicket_common::inventory::SpComponentCaboose,
         SpComponentInfo = wicket_common::inventory::SpComponentInfo,
         SpIdentifier = wicket_common::inventory::SpIdentifier,

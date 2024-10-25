@@ -34,26 +34,6 @@ pub mod zpool_name;
 
 pub use update::hex_schema;
 
-#[macro_export]
-macro_rules! generate_logging_api {
-    ($path:literal) => {
-        progenitor::generate_api!(
-            spec = $path,
-            inner_type = slog::Logger,
-            pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-                slog::debug!(log, "client request";
-                    "method" => %request.method(),
-                    "uri" => %request.url(),
-                    "body" => ?&request.body(),
-                );
-            }),
-            post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-                slog::debug!(log, "client response"; "result" => ?result);
-            }),
-        );
-    };
-}
-
 /// A type that allows adding file and line numbers to log messages
 /// automatically. It should be instantiated at the root logger of each
 /// executable that desires this functionality, as in the following example.
@@ -117,4 +97,28 @@ where
 
 async fn never_bail() -> Result<bool, Error> {
     Ok(false)
+}
+
+/// A wrapper struct that does nothing other than elide the inner value from
+/// [`std::fmt::Debug`] output.
+///
+/// We define this within Omicron instead of using one of the many available
+/// crates that do the same thing because it's trivial to do so, and we want the
+/// flexibility to add traits to this type without needing to wait on upstream
+/// to add an optional dependency.
+///
+/// If you want to use this for secrets, consider that it might not do
+/// everything you expect (it does not zeroize memory on drop, nor get in the
+/// way of you removing the inner value from this wrapper struct).
+#[derive(
+    Clone, Copy, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct NoDebug<T>(pub T);
+
+impl<T> std::fmt::Debug for NoDebug<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "..")
+    }
 }

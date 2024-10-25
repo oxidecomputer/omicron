@@ -19,7 +19,7 @@ use wicketd_client::types::{
     GetLocationResponse, IgnitionCommand, StartUpdateParams,
 };
 
-use crate::events::EventReportMap;
+use crate::events::{ArtifactData, EventReportMap};
 use crate::keymap::ShowPopupCmd;
 use crate::state::ComponentId;
 use crate::{Cmd, Event};
@@ -451,7 +451,10 @@ impl WicketdManager {
                         let artifacts = rsp
                             .artifacts
                             .into_iter()
-                            .map(|artifact| artifact.artifact_id)
+                            .map(|artifact| ArtifactData {
+                                id: artifact.artifact_id,
+                                sign: artifact.sign,
+                            })
                             .collect();
                         let system_version = rsp.system_version;
                         let event_reports: EventReportMap = rsp.event_reports;

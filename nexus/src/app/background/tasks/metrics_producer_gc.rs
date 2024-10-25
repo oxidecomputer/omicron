@@ -116,10 +116,9 @@ mod tests {
     use httptest::Expectation;
     use nexus_db_model::OximeterInfo;
     use nexus_db_queries::context::OpContext;
-    use nexus_db_queries::db::model::ProducerEndpoint;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::identity::Asset;
     use nexus_types::internal_api::params;
+    use omicron_common::api::external::DataPageParams;
     use omicron_common::api::internal::nexus;
     use omicron_common::api::internal::nexus::ProducerRegistrationResponse;
     use serde_json::json;
@@ -158,17 +157,24 @@ mod tests {
             datastore.clone(),
         );
 
-        let mut collector = httptest::Server::run();
-
-        // Insert an Oximeter collector
-        let collector_info = OximeterInfo::new(&params::OximeterInfo {
-            collector_id: Uuid::new_v4(),
-            address: collector.addr(),
-        });
-        datastore
-            .oximeter_create(&opctx, &collector_info)
+        // Producer <-> collector assignment is random. We're going to create a
+        // mock collector below then insert a producer, and we want to guarantee
+        // the producer is assigned to the mock collector. To do so, we need to
+        // expunge the "real" collector set up by `nexus_test`. We'll phrase
+        // this as a loop to match the datastore methods and in case nexus_test
+        // ever starts multiple collectors.
+        for oximeter_info in datastore
+            .oximeter_list(&opctx, &DataPageParams::max_page())
             .await
-            .expect("failed to insert collector");
+            .expect("listed oximeters")
+        {
+            datastore
+                .oximeter_expunge(&opctx, oximeter_info.id)
+                .await
+                .expect("expunged oximeter");
+        }
+
+        let mut collector = httptest::Server::run();
 
         // There are several producers which automatically register themselves
         // during tests, from Nexus and the simulated sled-agent for example. We
@@ -184,18 +190,25 @@ mod tests {
                 .respond_with(status_code(201).body(body)),
         );
 
-        // Insert a producer.
-        let producer = ProducerEndpoint::new(
-            &nexus::ProducerEndpoint {
-                id: Uuid::new_v4(),
-                kind: nexus::ProducerKind::Service,
-                address: "[::1]:0".parse().unwrap(), // unused
-                interval: Duration::from_secs(0),    // unused
-            },
-            collector_info.id,
-        );
+        // Insert an Oximeter collector
+        let collector_info = OximeterInfo::new(&params::OximeterInfo {
+            collector_id: Uuid::new_v4(),
+            address: collector.addr(),
+        });
         datastore
-            .producer_endpoint_create(&opctx, &producer)
+            .oximeter_create(&opctx, &collector_info)
+            .await
+            .expect("failed to insert collector");
+
+        // Insert a producer.
+        let producer = nexus::ProducerEndpoint {
+            id: Uuid::new_v4(),
+            kind: nexus::ProducerKind::Service,
+            address: "[::1]:0".parse().unwrap(), // unused
+            interval: Duration::from_secs(0),    // unused
+        };
+        datastore
+            .producer_endpoint_upsert_and_assign(&opctx, &producer)
             .await
             .expect("failed to insert producer");
 
@@ -215,7 +228,7 @@ mod tests {
         // ago, which should result in it being pruned.
         set_time_modified(
             &datastore,
-            producer.id(),
+            producer.id,
             Utc::now() - chrono::TimeDelta::hours(2),
         )
         .await;
@@ -224,7 +237,7 @@ mod tests {
         collector.expect(
             Expectation::matching(request::method_path(
                 "DELETE",
-                format!("/producers/{}", producer.id()),
+                format!("/producers/{}", producer.id),
             ))
             .respond_with(status_code(204)),
         );
@@ -235,7 +248,7 @@ mod tests {
         assert!(value.contains_key("expiration"));
         assert_eq!(
             *value.get("pruned").expect("missing `pruned`"),
-            json!([producer.id()])
+            json!([producer.id])
         );
 
         collector.verify_and_clear();

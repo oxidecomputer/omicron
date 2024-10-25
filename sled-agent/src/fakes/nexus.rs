@@ -7,21 +7,20 @@
 //! This must be an exact subset of the Nexus internal interface
 //! to operate correctly.
 
+use dropshot::Body;
 use dropshot::{
     endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path, RequestContext, TypedBody,
 };
-use hyper::Body;
-use internal_dns::ServiceName;
+use internal_dns_types::config::DnsConfigBuilder;
+use internal_dns_types::names::ServiceName;
 use nexus_client::types::SledAgentInfo;
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::nexus::{
-    SledInstanceState, UpdateArtifactId,
-};
-use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_common::api::internal::nexus::{SledVmmState, UpdateArtifactId};
+use omicron_uuid_kinds::{OmicronZoneUuid, PropolisUuid, SledUuid};
 use schemars::JsonSchema;
 use serde::Deserialize;
-use uuid::Uuid;
+use sled_agent_api::VmmPathParam;
 
 /// Implements a fake Nexus.
 ///
@@ -36,13 +35,16 @@ pub trait FakeNexusServer: Send + Sync {
         Err(Error::internal_error("Not implemented"))
     }
 
-    fn sled_agent_get(&self, _sled_id: Uuid) -> Result<SledAgentInfo, Error> {
+    fn sled_agent_get(
+        &self,
+        _sled_id: SledUuid,
+    ) -> Result<SledAgentInfo, Error> {
         Err(Error::internal_error("Not implemented"))
     }
 
     fn sled_agent_put(
         &self,
-        _sled_id: Uuid,
+        _sled_id: SledUuid,
         _info: SledAgentInfo,
     ) -> Result<(), Error> {
         Err(Error::internal_error("Not implemented"))
@@ -50,8 +52,8 @@ pub trait FakeNexusServer: Send + Sync {
 
     fn cpapi_instances_put(
         &self,
-        _instance_id: Uuid,
-        _new_runtime_state: SledInstanceState,
+        _propolis_id: PropolisUuid,
+        _new_runtime_state: SledVmmState,
     ) -> Result<(), Error> {
         Err(Error::internal_error("Not implemented"))
     }
@@ -82,7 +84,7 @@ async fn cpapi_artifact_download(
 /// Path parameters for Sled Agent requests (internal API)
 #[derive(Deserialize, JsonSchema)]
 struct SledAgentPathParam {
-    sled_id: Uuid,
+    sled_id: SledUuid,
 }
 
 /// Return information about the given sled agent
@@ -118,22 +120,18 @@ async fn sled_agent_put(
     Ok(HttpResponseUpdatedNoContent())
 }
 
-#[derive(Deserialize, JsonSchema)]
-struct InstancePathParam {
-    instance_id: Uuid,
-}
 #[endpoint {
     method = PUT,
-    path = "/instances/{instance_id}",
+    path = "/vmms/{propolis_id}",
 }]
 async fn cpapi_instances_put(
     request_context: RequestContext<ServerContext>,
-    path_params: Path<InstancePathParam>,
-    new_runtime_state: TypedBody<SledInstanceState>,
+    path_params: Path<VmmPathParam>,
+    new_runtime_state: TypedBody<SledVmmState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let context = request_context.context();
     context.cpapi_instances_put(
-        path_params.into_inner().instance_id,
+        path_params.into_inner().propolis_id,
         new_runtime_state.into_inner(),
     )?;
     Ok(HttpResponseUpdatedNoContent())
@@ -171,7 +169,7 @@ pub async fn start_dns_server(
     nexus: &dropshot::HttpServer<ServerContext>,
 ) -> dns_server::TransientServer {
     let dns = dns_server::TransientServer::new(log).await.unwrap();
-    let mut dns_config_builder = internal_dns::DnsConfigBuilder::new();
+    let mut dns_config_builder = DnsConfigBuilder::new();
 
     let nexus_addr = match nexus.local_addr() {
         std::net::SocketAddr::V6(addr) => addr,

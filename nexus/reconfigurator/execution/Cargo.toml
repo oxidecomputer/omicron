@@ -11,11 +11,16 @@ omicron-rpaths.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+camino.workspace = true
+clickhouse-admin-keeper-client.workspace = true
+clickhouse-admin-server-client.workspace = true
+clickhouse-admin-types.workspace = true
 cockroach-admin-client.workspace = true
-dns-service-client.workspace = true
 chrono.workspace = true
 futures.workspace = true
-internal-dns.workspace = true
+internal-dns-resolver.workspace = true
+internal-dns-types.workspace = true
+newtype-uuid.workspace = true
 nexus-config.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
@@ -29,6 +34,8 @@ reqwest.workspace = true
 sled-agent-client.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
+tokio.workspace = true
+update-engine.workspace = true
 uuid.workspace = true
 
 # See omicron-rpaths for more about the "pq-sys" dependency.  This is needed
@@ -51,4 +58,3 @@ nexus-test-utils.workspace = true
 nexus-test-utils-macros.workspace = true
 omicron-nexus.workspace = true
 omicron-test-utils.workspace = true
-tokio.workspace = true

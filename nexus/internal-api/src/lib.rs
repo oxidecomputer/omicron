@@ -12,6 +12,7 @@ use dropshot::{
 use nexus_types::{
     deployment::{
         Blueprint, BlueprintMetadata, BlueprintTarget, BlueprintTargetSet,
+        ClickhousePolicy,
     },
     external_api::{
         params::{PhysicalDiskPath, SledSelector, UninitializedSledId},
@@ -33,14 +34,14 @@ use omicron_common::{
             DiskRuntimeState, DownstairsClientStopRequest,
             DownstairsClientStopped, ProducerEndpoint,
             ProducerRegistrationResponse, RepairFinishInfo, RepairProgress,
-            RepairStartInfo, SledInstanceState,
+            RepairStartInfo, SledVmmState,
         },
     },
     update::ArtifactId,
 };
 use omicron_uuid_kinds::{
-    DemoSagaUuid, DownstairsKind, SledUuid, TypedUuid, UpstairsKind,
-    UpstairsRepairKind,
+    DemoSagaUuid, DownstairsKind, PropolisUuid, SledUuid, TypedUuid,
+    UpstairsKind, UpstairsRepairKind,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -108,15 +109,15 @@ pub trait NexusInternalApi {
         body: TypedBody<SwitchPutRequest>,
     ) -> Result<HttpResponseOk<SwitchPutResponse>, HttpError>;
 
-    /// Report updated state for an instance.
+    /// Report updated state for a VMM.
     #[endpoint {
         method = PUT,
-        path = "/instances/{instance_id}",
+        path = "/vmms/{propolis_id}",
     }]
     async fn cpapi_instances_put(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
-        new_runtime_state: TypedBody<SledInstanceState>,
+        path_params: Path<VmmPathParam>,
+        new_runtime_state: TypedBody<SledVmmState>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
@@ -530,12 +531,31 @@ pub trait NexusInternalApi {
         path_params: Path<ProbePathParam>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<Vec<ProbeInfo>>, HttpError>;
+
+    /// Get the current clickhouse policy
+    #[endpoint {
+     method = GET,
+     path = "/clickhouse/policy"
+     }]
+    async fn clickhouse_policy_get(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ClickhousePolicy>, HttpError>;
+
+    /// Set the new clickhouse policy
+    #[endpoint {
+        method = POST,
+        path = "/clickhouse/policy"
+    }]
+    async fn clickhouse_policy_set(
+        rqctx: RequestContext<Self::Context>,
+        policy: TypedBody<ClickhousePolicy>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 }
 
 /// Path parameters for Sled Agent requests (internal API)
 #[derive(Deserialize, JsonSchema)]
 pub struct SledAgentPathParam {
-    pub sled_id: Uuid,
+    pub sled_id: SledUuid,
 }
 
 /// Path parameters for Disk requests (internal API)
@@ -566,6 +586,12 @@ pub struct SwitchPathParam {
 #[derive(Deserialize, JsonSchema)]
 pub struct InstancePathParam {
     pub instance_id: Uuid,
+}
+
+/// Path parameters for VMM requests (internal API)
+#[derive(Deserialize, JsonSchema)]
+pub struct VmmPathParam {
+    pub propolis_id: PropolisUuid,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]

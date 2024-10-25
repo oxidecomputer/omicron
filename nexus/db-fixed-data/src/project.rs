@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use nexus_db_model as model;
-use nexus_types::external_api::params;
+use nexus_types::{external_api::params, silo::INTERNAL_SILO_ID};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use once_cell::sync::Lazy;
 
@@ -21,7 +21,7 @@ pub static SERVICES_PROJECT_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
 pub static SERVICES_PROJECT: Lazy<model::Project> = Lazy::new(|| {
     model::Project::new_with_id(
         *SERVICES_PROJECT_ID,
-        *super::silo::INTERNAL_SILO_ID,
+        INTERNAL_SILO_ID,
         params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: SERVICES_DB_NAME.parse().unwrap(),

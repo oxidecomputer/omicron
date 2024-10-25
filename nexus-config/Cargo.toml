@@ -11,6 +11,7 @@ anyhow.workspace = true
 camino.workspace = true
 dropshot.workspace = true
 omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 schemars.workspace = true
 serde.workspace = true

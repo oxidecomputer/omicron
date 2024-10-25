@@ -22,6 +22,7 @@ use futures::FutureExt;
 use nexus_db_model::RegionReplacement;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_types::internal_api::background::RegionReplacementStatus;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TypedUuid;
 use serde_json::json;
@@ -50,7 +51,10 @@ impl RegionReplacementDetector {
         };
 
         let saga_dag = SagaRegionReplacementStart::prepare(&params)?;
-        self.sagas.saga_start(saga_dag).await
+        // We only care that the saga was started, and don't wish to wait for it
+        // to complete, so use `StartSaga::saga_start`, rather than `saga_run`.
+        self.sagas.saga_start(saga_dag).await?;
+        Ok(())
     }
 }
 
@@ -62,8 +66,7 @@ impl BackgroundTask for RegionReplacementDetector {
         async {
             let log = &opctx.log;
 
-            let mut ok = 0;
-            let mut err = 0;
+            let mut status = RegionReplacementStatus::default();
 
             // Find regions on expunged physical disks
             let regions_to_be_replaced = match self
@@ -74,16 +77,13 @@ impl BackgroundTask for RegionReplacementDetector {
                 Ok(regions) => regions,
 
                 Err(e) => {
-                    error!(
-                        &log,
+                    let s = format!(
                         "find_regions_on_expunged_physical_disks failed: {e}"
                     );
-                    err += 1;
+                    error!(&log, "{s}");
+                    status.errors.push(s);
 
-                    return json!({
-                        "region_replacement_started_ok": ok,
-                        "region_replacement_started_err": err,
-                    });
+                    return json!(status);
                 }
             };
 
@@ -101,12 +101,14 @@ impl BackgroundTask for RegionReplacementDetector {
                     Ok(v) => v,
 
                     Err(e) => {
-                        error!(
-                            &log,
+                        let s = format!(
                             "error looking for existing region replacement \
                              requests for {}: {e}",
                             region.id(),
                         );
+                        error!(&log, "{s}");
+
+                        status.errors.push(s);
                         continue;
                     }
                 };
@@ -120,23 +122,27 @@ impl BackgroundTask for RegionReplacementDetector {
                         .await
                     {
                         Ok(request_id) => {
-                            info!(
-                                &log,
+                            let s = format!(
                                 "added region replacement request \
                                  {request_id} for {} volume {}",
                                 region.id(),
                                 region.volume_id(),
                             );
+                            info!(&log, "{s}");
+
+                            status.requests_created_ok.push(s);
                         }
 
                         Err(e) => {
-                            error!(
-                                &log,
+                            let s = format!(
                                 "error adding region replacement request for \
                                  region {} volume id {}: {e}",
                                 region.id(),
                                 region.volume_id(),
                             );
+                            error!(&log, "{s}");
+
+                            status.errors.push(s);
                             continue;
                         }
                     }
@@ -145,46 +151,129 @@ impl BackgroundTask for RegionReplacementDetector {
 
             // Next, for each region replacement request in state "Requested",
             // run the start saga.
-            match self.datastore.get_requested_region_replacements(opctx).await
+            let requests = match self
+                .datastore
+                .get_requested_region_replacements(opctx)
+                .await
             {
-                Ok(requests) => {
-                    for request in requests {
-                        let result = self
-                            .send_start_request(
-                                authn::saga::Serialized::for_opctx(opctx),
-                                request,
-                            )
-                            .await;
-
-                        match result {
-                            Ok(()) => {
-                                ok += 1;
-                            }
-
-                            Err(e) => {
-                                error!(
-                                    &log,
-                                    "sending region replacement start request \
-                                     failed: {e}",
-                                );
-                                err += 1;
-                            }
-                        };
-                    }
-                }
+                Ok(requests) => requests,
 
                 Err(e) => {
-                    error!(
-                        &log,
+                    let s = format!(
                         "query for region replacement requests failed: {e}",
                     );
+                    error!(&log, "{s}");
+
+                    status.errors.push(s);
+                    return json!(status);
+                }
+            };
+
+            for request in requests {
+                // If the replacement request is in the `requested` state and
+                // the request's volume was soft-deleted or hard-deleted, avoid
+                // sending the start request and instead transition the request
+                // to completed
+
+                let volume_deleted = match self
+                    .datastore
+                    .volume_deleted(request.volume_id)
+                    .await
+                {
+                    Ok(volume_deleted) => volume_deleted,
+
+                    Err(e) => {
+                        let s = format!(
+                            "error checking if volume id {} was deleted: {e}",
+                            request.volume_id,
+                        );
+                        error!(&log, "{s}");
+
+                        status.errors.push(s);
+                        continue;
+                    }
+                };
+
+                let request_id = request.id;
+
+                if volume_deleted {
+                    // Volume was soft or hard deleted, so proceed with clean
+                    // up, which if this is in state Requested there won't be
+                    // any additional associated state, so transition the record
+                    // to Completed.
+
+                    info!(
+                        &log,
+                        "request {} volume {} was soft or hard deleted!",
+                        request_id,
+                        request.volume_id,
+                    );
+
+                    let result = self
+                        .datastore
+                        .set_region_replacement_complete_from_requested(
+                            opctx, request,
+                        )
+                        .await;
+
+                    match result {
+                        Ok(()) => {
+                            let s = format!(
+                                "request {} transitioned from requested to \
+                                complete",
+                                request_id,
+                            );
+
+                            info!(&log, "{s}");
+                            status.requests_completed_ok.push(s);
+                        }
+
+                        Err(e) => {
+                            let s = format!(
+                                "error transitioning {} from requested to \
+                                complete: {e}",
+                                request_id,
+                            );
+
+                            error!(&log, "{s}");
+                            status.errors.push(s);
+                        }
+                    }
+
+                    continue;
+                }
+
+                let result = self
+                    .send_start_request(
+                        authn::saga::Serialized::for_opctx(opctx),
+                        request,
+                    )
+                    .await;
+
+                match result {
+                    Ok(()) => {
+                        let s = format!(
+                            "region replacement start invoked ok \
+                            for {request_id}"
+                        );
+                        info!(&log, "{s}");
+
+                        status.start_invoked_ok.push(s);
+                    }
+
+                    Err(e) => {
+                        let s = format!(
+                            "sending region replacement start request \
+                            failed: {e}",
+                        );
+                        error!(&log, "{s}");
+
+                        status.errors.push(s);
+                    }
                 }
             }
 
-            json!({
-                "region_replacement_started_ok": ok,
-                "region_replacement_started_err": err,
-            })
+            json!(status)
         }
         .boxed()
     }
@@ -195,7 +284,10 @@ mod test {
     use super::*;
     use crate::app::background::init::test::NoopStartSaga;
     use nexus_db_model::RegionReplacement;
+    use nexus_db_model::Volume;
     use nexus_test_utils_macros::nexus_test;
+    use sled_agent_client::types::CrucibleOpts;
+    use sled_agent_client::types::VolumeConstructionRequest;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -218,32 +310,67 @@ mod test {
 
         // Noop test
         let result = task.activate(&opctx).await;
-        assert_eq!(
-            result,
-            json!({
-                "region_replacement_started_ok": 0,
-                "region_replacement_started_err": 0,
-            })
-        );
+        assert_eq!(result, json!(RegionReplacementStatus::default()));
 
         // Add a region replacement request for a fake region
-        let request = RegionReplacement::new(Uuid::new_v4(), Uuid::new_v4());
+        let volume_id = Uuid::new_v4();
+        let request = RegionReplacement::new(Uuid::new_v4(), volume_id);
+        let request_id = request.id;
 
         datastore
             .insert_region_replacement_request(&opctx, request)
             .await
             .unwrap();
 
+        let volume_construction_request = VolumeConstructionRequest::Volume {
+            id: volume_id,
+            block_size: 0,
+            sub_volumes: vec![VolumeConstructionRequest::Region {
+                block_size: 0,
+                blocks_per_extent: 0,
+                extent_count: 0,
+                gen: 0,
+                opts: CrucibleOpts {
+                    id: volume_id,
+                    target: vec![
+                        // if you put something here, you'll need a synthetic
+                        // dataset record
+                    ],
+                    lossy: false,
+                    flush_timeout: None,
+                    key: None,
+                    cert_pem: None,
+                    key_pem: None,
+                    root_cert_pem: None,
+                    control: None,
+                    read_only: false,
+                },
+            }],
+            read_only_parent: None,
+        };
+
+        let volume_data =
+            serde_json::to_string(&volume_construction_request).unwrap();
+
+        let volume = Volume::new(volume_id, volume_data);
+
+        datastore.volume_create(volume).await.unwrap();
+
         // Activate the task - it should pick that up and try to run the region
         // replacement start saga
-        let result = task.activate(&opctx).await;
+        let result: RegionReplacementStatus =
+            serde_json::from_value(task.activate(&opctx).await).unwrap();
+
+        eprintln!("{:?}", result);
+
         assert_eq!(
-            result,
-            json!({
-                "region_replacement_started_ok": 1,
-                "region_replacement_started_err": 0,
-            })
+            result.start_invoked_ok,
+            vec![format!(
+                "region replacement start invoked ok for {request_id}"
+            )]
         );
+        assert!(result.requests_created_ok.is_empty());
+        assert!(result.errors.is_empty());
 
         assert_eq!(starter.count_reset(), 1);
     }

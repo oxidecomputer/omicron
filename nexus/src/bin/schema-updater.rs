@@ -70,15 +70,15 @@ async fn main() -> anyhow::Result<()> {
     let drain = LevelFilter::new(drain, args.log_level).fuse();
     let log = Logger::root(drain, slog::o!("unit" => "schema_updater"));
 
-    let crdb_cfg = db::Config { url: args.url };
-    let pool = Arc::new(db::Pool::new(&log, &crdb_cfg));
     let schema_config = SchemaConfig { schema_dir: args.schema_directory };
     let all_versions = AllSchemaVersions::load(&schema_config.schema_dir)?;
 
+    let crdb_cfg = db::Config { url: args.url };
+    let pool = Arc::new(db::Pool::new_single_host(&log, &crdb_cfg));
+
     // We use the unchecked constructor of the datastore because we
     // don't want to block on someone else applying an upgrade.
-    let datastore =
-        DataStore::new_unchecked(log.clone(), pool).map_err(|e| anyhow!(e))?;
+    let datastore = DataStore::new_unchecked(log.clone(), pool);
 
     match args.cmd {
         Cmd::List => {
@@ -112,5 +112,6 @@ async fn main() -> anyhow::Result<()> {
             println!("Upgrade to {version} complete");
         }
     }
+    datastore.terminate().await;
     Ok(())
 }

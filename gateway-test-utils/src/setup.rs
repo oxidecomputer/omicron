@@ -8,6 +8,7 @@ use camino::Utf8Path;
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
 use gateway_messages::SpPort;
+pub use omicron_gateway::metrics::MetricsConfig;
 use omicron_gateway::MgsArguments;
 use omicron_gateway::SpType;
 use omicron_gateway::SwitchPortConfig;
@@ -33,6 +34,7 @@ pub struct GatewayTestContext {
     pub server: omicron_gateway::Server,
     pub simrack: SimRack,
     pub logctx: LogContext,
+    pub gateway_id: Uuid,
 }
 
 impl GatewayTestContext {
@@ -48,13 +50,18 @@ pub fn load_test_config() -> (omicron_gateway::Config, sp_sim::Config) {
     let manifest_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"));
     let server_config_file_path = manifest_dir.join("configs/config.test.toml");
     let server_config =
-        omicron_gateway::Config::from_file(&server_config_file_path)
-            .expect("failed to load config.test.toml");
+        match omicron_gateway::Config::from_file(&server_config_file_path) {
+            Ok(config) => config,
+            Err(e) => panic!("failed to load MGS config: {e}"),
+        };
 
     let sp_sim_config_file_path =
         manifest_dir.join("configs/sp_sim_config.test.toml");
-    let sp_sim_config = sp_sim::Config::from_file(&sp_sim_config_file_path)
-        .expect("failed to load sp_sim_config.test.toml");
+    let sp_sim_config =
+        match sp_sim::Config::from_file(&sp_sim_config_file_path) {
+            Ok(config) => config,
+            Err(e) => panic!("failed to load SP simulator config: {e}"),
+        };
     (server_config, sp_sim_config)
 }
 
@@ -143,8 +150,8 @@ pub async fn test_setup_with_config(
 
     // Start gateway server
     let rack_id = Some(Uuid::parse_str(RACK_UUID).unwrap());
-
-    let args = MgsArguments { id: Uuid::new_v4(), addresses, rack_id };
+    let gateway_id = Uuid::new_v4();
+    let args = MgsArguments { id: gateway_id, addresses, rack_id };
     let server = omicron_gateway::Server::start(
         server_config.clone(),
         args,
@@ -190,7 +197,11 @@ pub async fn test_setup_with_config(
             future::ready(result)
         },
         &Duration::from_millis(100),
-        &Duration::from_secs(1),
+        // This seems like a pretty long time to wait for MGS to discover the
+        // simulated SPs, but we've seen tests fail due to timeouts here in the
+        // past, so we may as well be generous:
+        // https://github.com/oxidecomputer/omicron/issues/6877
+        &Duration::from_secs(30),
     )
     .await
     .unwrap();
@@ -206,5 +217,5 @@ pub async fn test_setup_with_config(
         log.new(o!("component" => "client test context")),
     );
 
-    GatewayTestContext { client, server, simrack, logctx }
+    GatewayTestContext { client, server, simrack, logctx, gateway_id }
 }

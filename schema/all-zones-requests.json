@@ -241,7 +241,7 @@
       ],
       "properties": {
         "filesystem_pool": {
-          "description": "The pool on which we'll place this zone's filesystem.\n\nNote that this is transient -- the sled agent is permitted to destroy the zone's dataset on this pool each time the zone is initialized.",
+          "description": "The pool on which we'll place this zone's root filesystem.\n\nNote that the root filesystem is transient -- the sled agent is permitted to destroy this dataset each time the zone is initialized.",
           "anyOf": [
             {
               "$ref": "#/definitions/ZpoolName"
@@ -252,8 +252,7 @@
           ]
         },
         "id": {
-          "type": "string",
-          "format": "uuid"
+          "$ref": "#/definitions/TypedUuidForOmicronZoneKind"
         },
         "underlay_address": {
           "type": "string",
@@ -563,32 +562,11 @@
           "type": "object",
           "required": [
             "address",
-            "dns_servers",
-            "ntp_servers",
             "type"
           ],
           "properties": {
             "address": {
               "type": "string"
-            },
-            "dns_servers": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "format": "ip"
-              }
-            },
-            "domain": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "ntp_servers": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
             },
             "type": {
               "type": "string",
@@ -693,6 +671,10 @@
           "minimum": 0.0
         }
       }
+    },
+    "TypedUuidForOmicronZoneKind": {
+      "type": "string",
+      "format": "uuid"
     },
     "Vni": {
       "description": "A Geneve Virtual Network Identifier",

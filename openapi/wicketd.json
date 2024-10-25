@@ -1661,6 +1661,15 @@
             "items": {
               "$ref": "#/components/schemas/ArtifactHashId"
             }
+          },
+          "sign": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            }
           }
         },
         "required": [
@@ -2680,7 +2689,7 @@
         ]
       },
       "RackOperationStatus": {
-        "description": "Current status of any rack-level operation being performed by this bootstrap agent.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Current status of any rack-level operation being performed by this bootstrap agent.\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initializing\" ] } } }, { \"description\": \"`id` will be none if the rack was already initialized on startup.\", \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"id\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" } ] }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialized\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"message\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" }, \"message\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialization_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialization_panicked\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"resetting\" ] } } }, { \"description\": \"`reset_id` will be None if the rack is in an uninitialized-on-startup, or Some if it is in an uninitialized state due to a reset operation completing.\", \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"reset_id\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" } ] }, \"status\": { \"type\": \"string\", \"enum\": [ \"uninitialized\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"message\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" }, \"message\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"reset_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"reset_panicked\" ] } } } ] } ``` </details>",
+        "description": "Current status of any rack-level operation being performed by this bootstrap agent.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Current status of any rack-level operation being performed by this bootstrap agent.\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"id\", \"status\", \"step\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initializing\" ] }, \"step\": { \"$ref\": \"#/components/schemas/RssStep\" } } }, { \"description\": \"`id` will be none if the rack was already initialized on startup.\", \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"id\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" } ] }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialized\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"message\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" }, \"message\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialization_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialization_panicked\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"resetting\" ] } } }, { \"description\": \"`reset_id` will be None if the rack is in an uninitialized-on-startup, or Some if it is in an uninitialized state due to a reset operation completing.\", \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"reset_id\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" } ] }, \"status\": { \"type\": \"string\", \"enum\": [ \"uninitialized\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"message\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" }, \"message\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"reset_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"reset_panicked\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -2693,11 +2702,15 @@
                 "enum": [
                   "initializing"
                 ]
+              },
+              "step": {
+                "$ref": "#/components/schemas/RssStep"
               }
             },
             "required": [
               "id",
-              "status"
+              "status",
+              "step"
             ]
           },
           {
@@ -3123,18 +3136,18 @@
               }
             ]
           },
-          "local_pref": {
-            "nullable": true,
-            "description": "The local preference associated with this route.",
-            "default": null,
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
           "nexthop": {
             "description": "The nexthop/gateway address.",
             "type": "string",
             "format": "ip"
+          },
+          "rib_priority": {
+            "nullable": true,
+            "description": "The RIB priority (i.e. Admin Distance) associated with this route.",
+            "default": null,
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
           },
           "vlan_id": {
             "nullable": true,
@@ -3148,6 +3161,235 @@
         "required": [
           "destination",
           "nexthop"
+        ]
+      },
+      "RssStep": {
+        "description": "Steps we go through during initial rack setup. Keep this list in order that they happen.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Steps we go through during initial rack setup. Keep this list in order that they happen.\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"requested\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"starting\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"load_existing_plan\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"create_sled_plan\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"init_trust_quorum\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"network_config_update\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"sled_init\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"ensure_storage\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"init_dns\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"configure_dns\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"init_ntp\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"wait_for_time_sync\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"wait_for_database\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"cluster_init\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"zones_init\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"nexus_handoff\" ] } } } ] } ``` </details>",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "requested"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "starting"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "load_existing_plan"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "create_sled_plan"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "init_trust_quorum"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "network_config_update"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "sled_init"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ensure_storage"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "init_dns"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "configure_dns"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "init_ntp"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "wait_for_time_sync"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "wait_for_database"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "cluster_init"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "zones_init"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "nexus_handoff"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          }
         ]
       },
       "SemverVersion": {
@@ -3180,16 +3422,24 @@
         ]
       },
       "SpComponentCaboose": {
-        "description": "SpComponentCaboose\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"board\", \"git_commit\", \"name\", \"version\" ], \"properties\": { \"board\": { \"type\": \"string\" }, \"git_commit\": { \"type\": \"string\" }, \"name\": { \"type\": \"string\" }, \"version\": { \"type\": \"string\" } } } ``` </details>",
+        "description": "SpComponentCaboose\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"board\", \"git_commit\", \"name\", \"version\" ], \"properties\": { \"board\": { \"type\": \"string\" }, \"epoch\": { \"type\": [ \"string\", \"null\" ] }, \"git_commit\": { \"type\": \"string\" }, \"name\": { \"type\": \"string\" }, \"sign\": { \"type\": [ \"string\", \"null\" ] }, \"version\": { \"type\": \"string\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "board": {
+            "type": "string"
+          },
+          "epoch": {
+            "nullable": true,
             "type": "string"
           },
           "git_commit": {
             "type": "string"
           },
           "name": {
+            "type": "string"
+          },
+          "sign": {
+            "nullable": true,
             "type": "string"
           },
           "version": {

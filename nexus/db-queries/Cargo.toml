@@ -14,14 +14,16 @@ omicron-rpaths.workspace = true
 anyhow.workspace = true
 async-bb8-diesel.workspace = true
 async-trait.workspace = true
-bb8.workspace = true
 camino.workspace = true
 chrono.workspace = true
+clickhouse-admin-types.workspace = true
 const_format.workspace = true
 diesel.workspace = true
 diesel-dtrace.workspace = true
 dropshot.workspace = true
 futures.workspace = true
+internal-dns-resolver.workspace = true
+internal-dns-types.workspace = true
 ipnetwork.workspace = true
 macaddr.workspace = true
 once_cell.workspace = true
@@ -29,6 +31,7 @@ oxnet.workspace = true
 paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
+qorb = { workspace = true, features = [ "qtop" ] }
 rand.workspace = true
 ref-cast.workspace = true
 schemars.workspace = true
@@ -45,8 +48,9 @@ strum.workspace = true
 swrite.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
-uuid.workspace = true
+url.workspace = true
 usdt.workspace = true
+uuid.workspace = true
 
 db-macros.workspace = true
 nexus-auth.workspace = true
@@ -75,7 +79,7 @@ expectorate.workspace = true
 hyper-rustls.workspace = true
 gateway-client.workspace = true
 illumos-utils.workspace = true
-internal-dns.workspace = true
+internal-dns-resolver.workspace = true
 itertools.workspace = true
 nexus-inventory.workspace = true
 nexus-reconfigurator-planning.workspace = true

@@ -10,15 +10,13 @@ use std::{
 };
 
 use omicron_common::api::internal::{
-    nexus::{
-        InstanceProperties, InstanceRuntimeState, SledInstanceState,
-        VmmRuntimeState,
-    },
+    nexus::{InstanceProperties, SledVmmState, VmmRuntimeState},
     shared::{
         DhcpConfig, NetworkInterface, ResolvedVpcFirewallRule, SourceNatConfig,
     },
 };
-use omicron_uuid_kinds::PropolisUuid;
+use omicron_common::NoDebug;
+use omicron_uuid_kinds::InstanceUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -31,16 +29,16 @@ pub struct InstanceEnsureBody {
     /// state this sled agent should store for this incarnation of the instance.
     pub hardware: InstanceHardware,
 
-    /// The instance runtime state for the instance being registered.
-    pub instance_runtime: InstanceRuntimeState,
-
     /// The initial VMM runtime state for the VMM being registered.
     pub vmm_runtime: VmmRuntimeState,
 
-    /// The ID of the VMM being registered. This may not be the active VMM ID in
-    /// the instance runtime state (e.g. if the new VMM is going to be a
-    /// migration target).
-    pub propolis_id: PropolisUuid,
+    /// The ID of the instance for which this VMM is being created.
+    pub instance_id: InstanceUuid,
+
+    /// The ID of the migration in to this VMM, if this VMM is being
+    /// ensured is part of a migration in. If this is `None`, the VMM is not
+    /// being created due to a migration.
+    pub migration_id: Option<Uuid>,
 
     /// The address at which this VMM should serve a Propolis server API.
     pub propolis_addr: SocketAddr,
@@ -63,7 +61,8 @@ pub struct InstanceHardware {
     pub dhcp_config: DhcpConfig,
     // TODO: replace `propolis_client::*` with locally-modeled request type
     pub disks: Vec<propolis_client::types::DiskRequest>,
-    pub cloud_init_bytes: Option<String>,
+    pub boot_settings: Option<propolis_client::types::BootSettings>,
+    pub cloud_init_bytes: Option<NoDebug<String>>,
 }
 
 /// Metadata used to track statistics about an instance.
@@ -80,19 +79,19 @@ pub struct InstanceMetadata {
 /// The body of a request to move a previously-ensured instance into a specific
 /// runtime state.
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub struct InstancePutStateBody {
+pub struct VmmPutStateBody {
     /// The state into which the instance should be driven.
-    pub state: InstanceStateRequested,
+    pub state: VmmStateRequested,
 }
 
 /// The response sent from a request to move an instance into a specific runtime
 /// state.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct InstancePutStateResponse {
+pub struct VmmPutStateResponse {
     /// The current runtime state of the instance after handling the request to
     /// change its state. If the instance's state did not change, this field is
     /// `None`.
-    pub updated_runtime: Option<SledInstanceState>,
+    pub updated_runtime: Option<SledVmmState>,
 }
 
 /// Requestable running state of an Instance.
@@ -100,7 +99,7 @@ pub struct InstancePutStateResponse {
 /// A subset of [`omicron_common::api::external::InstanceState`].
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "type", content = "value")]
-pub enum InstanceStateRequested {
+pub enum VmmStateRequested {
     /// Run this instance by migrating in from a previous running incarnation of
     /// the instance.
     MigrationTarget(InstanceMigrationTargetParams),
@@ -113,40 +112,40 @@ pub enum InstanceStateRequested {
     Reboot,
 }
 
-impl fmt::Display for InstanceStateRequested {
+impl fmt::Display for VmmStateRequested {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.label())
     }
 }
 
-impl InstanceStateRequested {
+impl VmmStateRequested {
     fn label(&self) -> &str {
         match self {
-            InstanceStateRequested::MigrationTarget(_) => "migrating in",
-            InstanceStateRequested::Running => "running",
-            InstanceStateRequested::Stopped => "stopped",
-            InstanceStateRequested::Reboot => "reboot",
+            VmmStateRequested::MigrationTarget(_) => "migrating in",
+            VmmStateRequested::Running => "running",
+            VmmStateRequested::Stopped => "stopped",
+            VmmStateRequested::Reboot => "reboot",
         }
     }
 
     /// Returns true if the state represents a stopped Instance.
     pub fn is_stopped(&self) -> bool {
         match self {
-            InstanceStateRequested::MigrationTarget(_) => false,
-            InstanceStateRequested::Running => false,
-            InstanceStateRequested::Stopped => true,
-            InstanceStateRequested::Reboot => false,
+            VmmStateRequested::MigrationTarget(_) => false,
+            VmmStateRequested::Running => false,
+            VmmStateRequested::Stopped => true,
+            VmmStateRequested::Reboot => false,
         }
     }
 }
 
 /// The response sent from a request to unregister an instance.
 #[derive(Serialize, Deserialize, JsonSchema)]
-pub struct InstanceUnregisterResponse {
+pub struct VmmUnregisterResponse {
     /// The current state of the instance after handling the request to
     /// unregister it. If the instance's state did not change, this field is
     /// `None`.
-    pub updated_runtime: Option<SledInstanceState>,
+    pub updated_runtime: Option<SledVmmState>,
 }
 
 /// Parameters used when directing Propolis to initialize itself via live

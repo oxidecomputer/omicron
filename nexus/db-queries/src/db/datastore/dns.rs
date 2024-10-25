@@ -282,21 +282,13 @@ impl DataStore {
             }
         }
 
-        let generation =
-            u64::try_from(i64::from(&version.version.0)).map_err(|e| {
-                Error::internal_error(&format!(
-                    "unsupported generation number: {:#}",
-                    e
-                ))
-            })?;
-
         debug!(log, "read DNS config";
             "version" => i64::from(&version.version.0),
             "nzones" => zones.len()
         );
 
         Ok(DnsConfigParams {
-            generation,
+            generation: version.version.0,
             time_created: version.time_created,
             zones,
         })
@@ -737,7 +729,7 @@ impl DataStoreDnsTest for DataStore {
 
 #[cfg(test)]
 mod test {
-    use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::DnsVersionUpdateBuilder;
     use crate::db::DataStore;
     use crate::db::TransactionError;
@@ -752,7 +744,6 @@ mod test {
     use nexus_db_model::DnsZone;
     use nexus_db_model::Generation;
     use nexus_db_model::InitialDnsGroup;
-    use nexus_test_utils::db::test_setup_database;
     use nexus_types::internal_api::params::DnsRecord;
     use nexus_types::internal_api::params::Srv;
     use omicron_common::api::external::Error;
@@ -766,8 +757,8 @@ mod test {
     #[tokio::test]
     async fn test_read_dns_config_uninitialized() {
         let logctx = dev::test_setup_log("test_read_dns_config_uninitialized");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // If we attempt to load the config when literally nothing related to
         // DNS has been initialized, we will get an InternalError because we
@@ -816,7 +807,7 @@ mod test {
             .await
             .expect("failed to read DNS config");
         println!("found config: {:?}", dns_config);
-        assert_eq!(dns_config.generation, 1);
+        assert_eq!(u64::from(dns_config.generation), 1);
         // A round-trip through the database reduces the precision of the
         // "time_created" value.
         assert_eq!(
@@ -842,7 +833,7 @@ mod test {
                     version for DNS group External, found 0"
         );
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -850,8 +841,8 @@ mod test {
     #[tokio::test]
     async fn test_read_dns_config_basic() {
         let logctx = dev::test_setup_log("test_read_dns_config_basic");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create exactly one zone with no names in it.
         // This will not show up in the read config.
@@ -876,7 +867,7 @@ mod test {
             .await
             .expect("failed to read DNS config");
         println!("found config: {:?}", dns_config);
-        assert_eq!(dns_config.generation, 1);
+        assert_eq!(u64::from(dns_config.generation), 1);
         assert!(dns_config.time_created >= before);
         assert!(dns_config.time_created <= after);
         assert_eq!(dns_config.zones.len(), 0);
@@ -916,7 +907,7 @@ mod test {
             .await
             .expect("failed to read DNS config");
         println!("found config: {:?}", dns_config);
-        assert_eq!(dns_config.generation, 1);
+        assert_eq!(u64::from(dns_config.generation), 1);
         assert!(dns_config.time_created >= before);
         assert!(dns_config.time_created <= after);
         assert_eq!(dns_config.zones.len(), 1);
@@ -948,7 +939,7 @@ mod test {
             .expect("failed to read DNS config with batch size 1");
         assert_eq!(dns_config_batch_1, dns_config);
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -956,8 +947,8 @@ mod test {
     #[tokio::test]
     async fn test_read_dns_config_complex() {
         let logctx = dev::test_setup_log("test_read_dns_config_complex");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let batch_size = NonZeroU32::new(10).unwrap();
         let now = Utc::now();
         let log = &logctx.log;
@@ -1216,7 +1207,7 @@ mod test {
             .await
             .unwrap();
         println!("dns_config_v1: {:?}", dns_config_v1);
-        assert_eq!(dns_config_v1.generation, 1);
+        assert_eq!(u64::from(dns_config_v1.generation), 1);
         assert_eq!(dns_config_v1.zones.len(), 2);
         assert_eq!(dns_config_v1.zones[0].zone_name, "z1.foo");
         assert_eq!(
@@ -1238,7 +1229,7 @@ mod test {
             .await
             .unwrap();
         println!("dns_config_v2: {:?}", dns_config_v2);
-        assert_eq!(dns_config_v2.generation, 2);
+        assert_eq!(u64::from(dns_config_v2.generation), 2);
         assert_eq!(dns_config_v2.zones.len(), 3);
         assert_eq!(dns_config_v2.zones[0].zone_name, "z1.foo");
         assert_eq!(
@@ -1271,7 +1262,7 @@ mod test {
             .await
             .unwrap();
         println!("dns_config_v3: {:?}", dns_config_v3);
-        assert_eq!(dns_config_v3.generation, 3);
+        assert_eq!(u64::from(dns_config_v3.generation), 3);
         assert_eq!(dns_config_v3.zones.len(), 2);
         assert_eq!(dns_config_v3.zones[0].zone_name, "z2.foo");
         assert_eq!(
@@ -1301,7 +1292,7 @@ mod test {
             .await
             .unwrap();
         println!("internal dns_config_v1: {:?}", internal_dns_config_v1);
-        assert_eq!(internal_dns_config_v1.generation, 1);
+        assert_eq!(u64::from(internal_dns_config_v1.generation), 1);
         assert_eq!(internal_dns_config_v1.zones.len(), 0);
 
         // Verify internal version 2.
@@ -1310,7 +1301,7 @@ mod test {
             .await
             .unwrap();
         println!("internal dns_config_v2: {:?}", internal_dns_config_v2);
-        assert_eq!(internal_dns_config_v2.generation, 2);
+        assert_eq!(u64::from(internal_dns_config_v2.generation), 2);
         assert_eq!(internal_dns_config_v2.zones.len(), 1);
         assert_eq!(internal_dns_config_v2.zones[0].zone_name, "z1.foo");
         assert_eq!(
@@ -1318,7 +1309,7 @@ mod test {
             HashMap::from([("n1".to_string(), records_r2.clone())])
         );
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1326,8 +1317,8 @@ mod test {
     #[tokio::test]
     async fn test_dns_uniqueness() {
         let logctx = dev::test_setup_log("test_dns_uniqueness");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (_opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
         let now = Utc::now();
 
         // There cannot be two DNS zones in the same group with the same name.
@@ -1423,7 +1414,7 @@ mod test {
                 .contains("duplicate key value violates unique constraint"));
         }
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1499,8 +1490,8 @@ mod test {
     #[tokio::test]
     async fn test_dns_update_incremental() {
         let logctx = dev::test_setup_log("test_dns_update_incremental");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let now = Utc::now();
 
         // Create three DNS zones for testing:
@@ -1574,7 +1565,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::External)
             .await
             .unwrap();
-        assert_eq!(dns_config.generation, 1);
+        assert_eq!(u64::from(dns_config.generation), 1);
         assert_eq!(dns_config.zones.len(), 0);
 
         // Add a few DNS names.
@@ -1605,7 +1596,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::External)
             .await
             .unwrap();
-        assert_eq!(dns_config.generation, 2);
+        assert_eq!(u64::from(dns_config.generation), 2);
         assert_eq!(dns_config.zones.len(), 2);
         assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
         assert_eq!(
@@ -1640,7 +1631,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::External)
             .await
             .unwrap();
-        assert_eq!(dns_config.generation, 3);
+        assert_eq!(u64::from(dns_config.generation), 3);
         assert_eq!(dns_config.zones.len(), 2);
         assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
         assert_eq!(
@@ -1673,7 +1664,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::External)
             .await
             .unwrap();
-        assert_eq!(dns_config.generation, 4);
+        assert_eq!(u64::from(dns_config.generation), 4);
         assert_eq!(dns_config.zones.len(), 2);
         assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
         assert_eq!(
@@ -1703,7 +1694,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::External)
             .await
             .unwrap();
-        assert_eq!(dns_config.generation, 5);
+        assert_eq!(u64::from(dns_config.generation), 5);
         assert_eq!(dns_config.zones.len(), 2);
         assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
         assert_eq!(
@@ -1780,7 +1771,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::External)
             .await
             .unwrap();
-        assert_eq!(dns_config.generation, 6);
+        assert_eq!(u64::from(dns_config.generation), 6);
         assert_eq!(dns_config.zones.len(), 2);
         assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
         assert_eq!(
@@ -1793,7 +1784,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::Internal)
             .await
             .unwrap();
-        assert_eq!(dns_config.generation, 2);
+        assert_eq!(u64::from(dns_config.generation), 2);
         assert_eq!(dns_config.zones.len(), 1);
         assert_eq!(dns_config.zones[0].zone_name, "oxide3.test");
         assert_eq!(
@@ -1830,7 +1821,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::External)
             .await
             .unwrap();
-        assert_eq!(dns_config.generation, 6);
+        assert_eq!(u64::from(dns_config.generation), 6);
 
         // Failure case: cannot add a name that already exists.
         {
@@ -1860,7 +1851,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::External)
             .await
             .unwrap();
-        assert_eq!(dns_config.generation, 6);
+        assert_eq!(u64::from(dns_config.generation), 6);
         assert_eq!(dns_config.zones.len(), 2);
         assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
         assert_eq!(
@@ -1870,15 +1861,15 @@ mod test {
         assert_eq!(dns_config.zones[1].zone_name, "oxide2.test");
         assert_eq!(dns_config.zones[0].records, dns_config.zones[1].records,);
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_dns_update_from_version() {
         let logctx = dev::test_setup_log("test_dns_update_from_version");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // The guts of `dns_update_from_version()` are shared with
         // `dns_update_incremental()`.  The main cases worth testing here are
@@ -1958,7 +1949,7 @@ mod test {
             .await
             .expect("failed to read config");
         let gen2 = nexus_db_model::Generation(gen1.next());
-        assert_eq!(u64::from(*gen2), config.generation);
+        assert_eq!(gen2.0, config.generation);
         assert_eq!(1, config.zones.len());
         let records = &config.zones[0].records;
         assert!(records.contains_key("nelson"));
@@ -1975,7 +1966,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::Internal)
             .await
             .expect("failed to read config");
-        assert_eq!(u64::from(gen2.next()), config.generation);
+        assert_eq!(gen2.next(), config.generation);
         assert_eq!(1, config.zones.len());
         let records = &config.zones[0].records;
         assert!(records.contains_key("nelson"));
@@ -1983,7 +1974,7 @@ mod test {
         assert!(!records.contains_key("krabappel"));
         assert!(records.contains_key("hoover"));
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

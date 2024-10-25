@@ -479,17 +479,15 @@ where
 mod test {
     use super::*;
     use crate::db::collection_attach::DatastoreAttachTarget;
-    use crate::db::{self, identity::Resource as IdentityResource};
-    use async_bb8_diesel::{
-        AsyncRunQueryDsl, AsyncSimpleConnection, ConnectionManager,
-    };
+    use crate::db::datastore::pub_test_utils::TestDatabase;
+    use crate::db::identity::Resource as IdentityResource;
+    use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use chrono::Utc;
     use db_macros::Resource;
     use diesel::expression_methods::ExpressionMethods;
     use diesel::pg::Pg;
     use diesel::QueryDsl;
     use diesel::SelectableHelper;
-    use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
     use omicron_test_utils::dev;
     use uuid::Uuid;
@@ -519,8 +517,8 @@ mod test {
 
     async fn setup_db(
         pool: &crate::db::Pool,
-    ) -> bb8::PooledConnection<ConnectionManager<DbConnection>> {
-        let connection = pool.pool().get().await.unwrap();
+    ) -> crate::db::datastore::DataStoreConnection {
+        let connection = pool.claim().await.unwrap();
         (*connection)
             .batch_execute_async(
                 "CREATE SCHEMA IF NOT EXISTS test_schema; \
@@ -776,11 +774,9 @@ mod test {
     async fn test_detach_missing_collection_fails() {
         let logctx =
             dev::test_setup_log("test_detach_missing_collection_fails");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
-
-        let conn = setup_db(&pool).await;
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = setup_db(pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let _resource_id = uuid::Uuid::new_v4();
@@ -798,7 +794,7 @@ mod test {
 
         assert!(matches!(detach, Err(DetachManyError::CollectionNotFound)));
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -806,11 +802,9 @@ mod test {
     async fn test_detach_missing_resource_succeeds() {
         let logctx =
             dev::test_setup_log("test_detach_missing_resource_succeeds");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
-
-        let conn = setup_db(&pool).await;
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = setup_db(pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let _resource_id = uuid::Uuid::new_v4();
@@ -840,18 +834,16 @@ mod test {
             get_collection(collection_id, &conn).await
         );
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_detach_once() {
         let logctx = dev::test_setup_log("test_detach_once");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
-
-        let conn = setup_db(&pool).await;
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = setup_db(pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
@@ -883,18 +875,16 @@ mod test {
             get_collection(collection_id, &conn).await
         );
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_detach_once_synchronous() {
         let logctx = dev::test_setup_log("test_detach_once_synchronous");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
-
-        let conn = setup_db(&pool).await;
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = setup_db(pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
@@ -928,18 +918,16 @@ mod test {
             get_collection(collection_id, &conn).await
         );
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_detach_while_already_detached() {
         let logctx = dev::test_setup_log("test_detach_while_already_detached");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
-
-        let conn = setup_db(&pool).await;
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = setup_db(pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
 
@@ -984,18 +972,16 @@ mod test {
             "... and again!"
         );
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_detach_filter_collection() {
         let logctx = dev::test_setup_log("test_detach_filter_collection");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
-
-        let conn = setup_db(&pool).await;
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = setup_db(pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
 
@@ -1035,18 +1021,16 @@ mod test {
             _ => panic!("Unexpected error: {:?}", err),
         };
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_detach_deleted_resource() {
         let logctx = dev::test_setup_log("test_detach_deleted_resource");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
-
-        let conn = setup_db(&pool).await;
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = setup_db(pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
@@ -1093,18 +1077,16 @@ mod test {
             &collection_id,
         );
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_detach_many() {
         let logctx = dev::test_setup_log("test_detach_many");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
-
-        let conn = setup_db(&pool).await;
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = setup_db(pool).await;
 
         // Create the collection and some resources.
         let collection_id1 = uuid::Uuid::new_v4();
@@ -1168,7 +1150,7 @@ mod test {
             &collection_id2
         );
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

@@ -20,6 +20,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help (see more with '--help')
 
 Connection Options:
@@ -55,6 +56,12 @@ Options:
           
           [env: LOG_LEVEL=]
           [default: warn]
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
 
   -h, --help
           Print help (see a summary with '-h')
@@ -116,7 +123,8 @@ Commands:
   region-snapshot-replacement  Query for information about region snapshot replacements, optionally
                                manually triggering one
   sleds                        Print information about sleds
-  instances                    Print information about customer instances
+  instance                     Print information about customer instances
+  instances                    Alias to `omdb instance list`
   network                      Print information about the network
   migrations                   Print information about migrations
   snapshots                    Print information about snapshots
@@ -126,6 +134,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -162,7 +171,8 @@ Commands:
   region-snapshot-replacement  Query for information about region snapshot replacements, optionally
                                manually triggering one
   sleds                        Print information about sleds
-  instances                    Print information about customer instances
+  instance                     Print information about customer instances
+  instances                    Alias to `omdb instance list`
   network                      Print information about the network
   migrations                   Print information about migrations
   snapshots                    Print information about snapshots
@@ -172,6 +182,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -207,6 +218,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -240,6 +252,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -296,6 +309,7 @@ Options:
           Show sleds that match the given filter
 
           Possible values:
+          - all:                    All sleds in the system, regardless of policy or state
           - commissioned:           All sleds that are currently part of the control plane cluster
           - decommissioned:         All sleds that were previously part of the control plane cluster
             but have been decommissioned
@@ -312,6 +326,12 @@ Options:
           
           [env: LOG_LEVEL=]
           [default: warn]
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
 
   -h, --help
           Print help (see a summary with '-h')
@@ -358,6 +378,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -391,6 +412,7 @@ Commands:
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
       --verbose                Print out raw data structures from the data store
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -424,6 +446,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -444,14 +467,16 @@ Debug a specific Nexus instance
 Usage: omdb nexus [OPTIONS] <COMMAND>
 
 Commands:
-  background-tasks  print information about background tasks
-  blueprints        interact with blueprints
-  sagas             view sagas, create and complete demo sagas
-  sleds             interact with sleds
-  help              Print this message or the help of the given subcommand(s)
+  background-tasks   print information about background tasks
+  blueprints         interact with blueprints
+  clickhouse-policy  Interact with clickhouse policy
+  sagas              view sagas, create and complete demo sagas
+  sleds              interact with sleds
+  help               Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -473,14 +498,16 @@ print information about background tasks
 Usage: omdb nexus background-tasks [OPTIONS] <COMMAND>
 
 Commands:
-  doc       Show documentation about background tasks
-  list      Print a summary of the status of all background tasks
-  show      Print human-readable summary of the status of each background task
-  activate  Activate one or more background tasks
-  help      Print this message or the help of the given subcommand(s)
+  doc           Show documentation about background tasks
+  list          Print a summary of the status of all background tasks
+  show          Print human-readable summary of the status of each background task
+  print-report  Print an event report for a background task if available
+  activate      Activate one or more background tasks
+  help          Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -512,6 +539,12 @@ Options:
           
           [env: LOG_LEVEL=]
           [default: warn]
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
 
   -h, --help
           Print help (see a summary with '-h')
@@ -553,6 +586,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -581,6 +615,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -619,6 +654,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -642,11 +678,13 @@ Usage: omdb sled-agent [OPTIONS] <COMMAND>
 Commands:
   zones      print information about zones
   zpools     print information about zpools
+  datasets   print information about datasets
   bootstore  print information about the local bootstore node
   help       Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -672,6 +710,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -697,6 +736,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -720,6 +760,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -743,12 +784,16 @@ Usage: omdb oxql [OPTIONS]
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
       --summaries              Print summaries of each SQL query run against the database
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
       --elapsed                Print the total elapsed query duration
   -h, --help                   Print help
 
 Connection Options:
       --clickhouse-url <CLICKHOUSE_URL>
           URL of the ClickHouse server to connect to [env: OMDB_CLICKHOUSE_URL=]
+      --clickhouse-native-url <CLICKHOUSE_NATIVE_URL>
+          URL of the ClickHouse server to connect to for the native protcol [env:
+          OMDB_CLICKHOUSE_NATIVE_URL=]
       --dns-server <DNS_SERVER>
           [env: OMDB_DNS_SERVER=]
 
@@ -767,7 +812,7 @@ error: unexpected argument '--summarizes' found
 
   tip: a similar argument exists: '--summaries'
 
-Usage: omdb oxql <--clickhouse-url <CLICKHOUSE_URL>|--summaries|--elapsed>
+Usage: omdb oxql <--clickhouse-url <CLICKHOUSE_URL>|--clickhouse-native-url <CLICKHOUSE_NATIVE_URL>|--summaries|--elapsed>
 
 For more information, try '--help'.
 =============================================

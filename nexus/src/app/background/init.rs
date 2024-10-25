@@ -98,6 +98,7 @@ use super::tasks::dns_config;
 use super::tasks::dns_propagation;
 use super::tasks::dns_servers;
 use super::tasks::external_endpoints;
+use super::tasks::instance_reincarnation;
 use super::tasks::instance_updater;
 use super::tasks::instance_watcher;
 use super::tasks::inventory_collection;
@@ -108,8 +109,10 @@ use super::tasks::phantom_disks;
 use super::tasks::physical_disk_adoption;
 use super::tasks::region_replacement;
 use super::tasks::region_replacement_driver;
+use super::tasks::region_snapshot_replacement_finish::*;
 use super::tasks::region_snapshot_replacement_garbage_collect::*;
 use super::tasks::region_snapshot_replacement_start::*;
+use super::tasks::region_snapshot_replacement_step::*;
 use super::tasks::saga_recovery;
 use super::tasks::service_firewall_rules;
 use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
@@ -126,6 +129,7 @@ use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -158,6 +162,7 @@ pub struct BackgroundTasks {
     pub task_region_replacement_driver: Activator,
     pub task_instance_watcher: Activator,
     pub task_instance_updater: Activator,
+    pub task_instance_reincarnation: Activator,
     pub task_service_firewall_propagation: Activator,
     pub task_abandoned_vmm_reaper: Activator,
     pub task_vpc_route_manager: Activator,
@@ -165,6 +170,8 @@ pub struct BackgroundTasks {
     pub task_lookup_region_port: Activator,
     pub task_region_snapshot_replacement_start: Activator,
     pub task_region_snapshot_replacement_garbage_collection: Activator,
+    pub task_region_snapshot_replacement_step: Activator,
+    pub task_region_snapshot_replacement_finish: Activator,
 
     // Handles to activate background tasks that do not get used by Nexus
     // at-large.  These background tasks are implementation details as far as
@@ -241,6 +248,7 @@ impl BackgroundTasksInitializer {
             task_region_replacement_driver: Activator::new(),
             task_instance_watcher: Activator::new(),
             task_instance_updater: Activator::new(),
+            task_instance_reincarnation: Activator::new(),
             task_service_firewall_propagation: Activator::new(),
             task_abandoned_vmm_reaper: Activator::new(),
             task_vpc_route_manager: Activator::new(),
@@ -249,6 +257,8 @@ impl BackgroundTasksInitializer {
             task_region_snapshot_replacement_start: Activator::new(),
             task_region_snapshot_replacement_garbage_collection: Activator::new(
             ),
+            task_region_snapshot_replacement_step: Activator::new(),
+            task_region_snapshot_replacement_finish: Activator::new(),
 
             task_internal_dns_propagation: Activator::new(),
             task_external_dns_propagation: Activator::new(),
@@ -305,6 +315,7 @@ impl BackgroundTasksInitializer {
             task_region_replacement_driver,
             task_instance_watcher,
             task_instance_updater,
+            task_instance_reincarnation,
             task_service_firewall_propagation,
             task_abandoned_vmm_reaper,
             task_vpc_route_manager,
@@ -312,6 +323,8 @@ impl BackgroundTasksInitializer {
             task_lookup_region_port,
             task_region_snapshot_replacement_start,
             task_region_snapshot_replacement_garbage_collection,
+            task_region_snapshot_replacement_step,
+            task_region_snapshot_replacement_finish,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -661,6 +674,27 @@ impl BackgroundTasksInitializer {
             });
         }
 
+        // Background task: schedule restart sagas for failed instances that can
+        // be automatically restarted.
+        {
+            let reincarnator =
+                instance_reincarnation::InstanceReincarnation::new(
+                    datastore.clone(),
+                    sagas.clone(),
+                    config.instance_reincarnation.disable,
+                );
+            driver.register(TaskDefinition {
+                name: "instance_reincarnation",
+                description: "schedules start sagas for failed instances that \
+                    can be automatically restarted",
+                period: config.instance_reincarnation.period_secs,
+                task_impl: Box::new(reincarnator),
+                opctx: opctx.child(BTreeMap::new()),
+                watchers: vec![],
+                activator: task_instance_reincarnation,
+            });
+        }
+
         // Background task: service firewall rule propagation
         driver.register(TaskDefinition {
             name: "service_firewall_rule_propagation",
@@ -711,7 +745,7 @@ impl BackgroundTasksInitializer {
         {
             let task_impl = Box::new(saga_recovery::SagaRecovery::new(
                 datastore.clone(),
-                nexus_db_model::SecId(args.nexus_id),
+                nexus_db_model::SecId::from(args.nexus_id),
                 args.saga_recovery,
             ));
 
@@ -744,7 +778,8 @@ impl BackgroundTasksInitializer {
                 "detect if region snapshots need replacement and begin the \
                 process",
             period: config.region_snapshot_replacement_start.period_secs,
-            task_impl: Box::new(RegionSnapshotReplacementDetector::new(
+            // XXX temporarily disabled, see oxidecomputer/omicron#6353
+            task_impl: Box::new(RegionSnapshotReplacementDetector::disabled(
                 datastore.clone(),
                 sagas.clone(),
             )),
@@ -760,13 +795,49 @@ impl BackgroundTasksInitializer {
             period: config
                 .region_snapshot_replacement_garbage_collection
                 .period_secs,
-            task_impl: Box::new(RegionSnapshotReplacementGarbageCollect::new(
-                datastore,
-                sagas.clone(),
-            )),
+            // XXX temporarily disabled, see oxidecomputer/omicron#6353
+            task_impl: Box::new(
+                RegionSnapshotReplacementGarbageCollect::disabled(
+                    datastore.clone(),
+                    sagas.clone(),
+                ),
+            ),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_region_snapshot_replacement_garbage_collection,
+        });
+
+        driver.register(TaskDefinition {
+            name: "region_snapshot_replacement_step",
+            description:
+                "detect what volumes were affected by a region snapshot \
+                replacement, and run the step saga for them",
+            period: config.region_snapshot_replacement_step.period_secs,
+            // XXX temporarily disabled, see oxidecomputer/omicron#6353
+            task_impl: Box::new(
+                RegionSnapshotReplacementFindAffected::disabled(
+                    datastore.clone(),
+                    sagas.clone(),
+                ),
+            ),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_region_snapshot_replacement_step,
+        });
+
+        driver.register(TaskDefinition {
+            name: "region_snapshot_replacement_finish",
+            description:
+                "complete a region snapshot replacement if all the steps are \
+                done",
+            period: config.region_snapshot_replacement_finish.period_secs,
+            // XXX temporarily disabled, see oxidecomputer/omicron#6353
+            task_impl: Box::new(
+                RegionSnapshotReplacementFinishDetector::disabled(datastore),
+            ),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_region_snapshot_replacement_finish,
         });
 
         driver
@@ -783,10 +854,10 @@ pub struct BackgroundTasksData {
     /// rack identifier
     pub rack_id: Uuid,
     /// nexus identifier
-    pub nexus_id: Uuid,
+    pub nexus_id: OmicronZoneUuid,
     /// internal DNS DNS resolver, used when tasks need to contact other
     /// internal services
-    pub resolver: internal_dns::resolver::Resolver,
+    pub resolver: internal_dns_resolver::Resolver,
     /// handle to saga subsystem for starting sagas
     pub saga_starter: Arc<dyn StartSaga>,
     /// Oximeter producer registry (for metrics)
@@ -803,7 +874,7 @@ fn init_dns(
     opctx: &OpContext,
     datastore: Arc<DataStore>,
     dns_group: DnsGroup,
-    resolver: internal_dns::resolver::Resolver,
+    resolver: internal_dns_resolver::Resolver,
     config: &DnsTasksConfig,
     task_config: &Activator,
     task_servers: &Activator,
@@ -874,21 +945,27 @@ fn init_dns(
 
 #[cfg(test)]
 pub mod test {
+    use crate::app::saga::SagaCompletionFuture;
     use crate::app::saga::StartSaga;
     use dropshot::HandlerTaskMode;
     use futures::FutureExt;
+    use internal_dns_types::names::ServiceName;
     use nexus_db_model::DnsGroup;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
     use nexus_db_queries::db::DataStore;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::internal_api::params as nexus_params;
+    use nexus_types::internal_api::params::DnsRecord;
+    use omicron_common::api::external::Error;
+    use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::poll;
     use std::net::SocketAddr;
     use std::sync::atomic::AtomicU64;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
     use tempfile::TempDir;
+    use uuid::Uuid;
 
     /// Used by various tests of tasks that kick off sagas
     pub(crate) struct NoopStartSaga {
@@ -909,12 +986,32 @@ pub mod test {
         fn saga_start(
             &self,
             _: steno::SagaDag,
+        ) -> futures::prelude::future::BoxFuture<'_, Result<steno::SagaId, Error>>
+        {
+            let _ = self.count.fetch_add(1, Ordering::SeqCst);
+            async {
+                // We've not actually started a real saga, so just make
+                // something up.
+                Ok(steno::SagaId(Uuid::new_v4()))
+            }
+            .boxed()
+        }
+
+        fn saga_run(
+            &self,
+            _: steno::SagaDag,
         ) -> futures::prelude::future::BoxFuture<
             '_,
-            Result<(), omicron_common::api::external::Error>,
+            Result<(steno::SagaId, SagaCompletionFuture), Error>,
         > {
             let _ = self.count.fetch_add(1, Ordering::SeqCst);
-            async { Ok(()) }.boxed()
+            async {
+                let id = steno::SagaId(Uuid::new_v4());
+                // No-op sagas complete immediately.
+                let completed = async { Ok(()) }.boxed();
+                Ok((id, completed))
+            }
+            .boxed()
         }
     }
 
@@ -961,10 +1058,9 @@ pub mod test {
             .dns_config_get()
             .await
             .expect("failed to get initial DNS server config");
-        assert_eq!(config.generation, 1);
+        assert_eq!(config.generation, Generation::from_u32(1));
 
-        let internal_dns_srv_name =
-            internal_dns::ServiceName::InternalDns.dns_name();
+        let internal_dns_srv_name = ServiceName::InternalDns.dns_name();
 
         let initial_srv_record = {
             let zone =
@@ -973,7 +1069,7 @@ pub mod test {
                 panic!("zone must have a record for {internal_dns_srv_name}")
             };
             match record.get(0) {
-                Some(dns_service_client::types::DnsRecord::Srv(srv)) => srv,
+                Some(DnsRecord::Srv(srv)) => srv,
                 record => panic!(
                     "expected a SRV record for {internal_dns_srv_name}, found \
                      {record:?}"
@@ -1072,7 +1168,7 @@ pub mod test {
             &cptestctx.logctx.log,
             "initial",
             initial_dns_dropshot_server.local_addr(),
-            2,
+            Generation::from_u32(2),
         )
         .await;
 
@@ -1085,7 +1181,7 @@ pub mod test {
             &cptestctx.logctx.log,
             "new",
             new_dns_dropshot_server.local_addr(),
-            2,
+            Generation::from_u32(2),
         )
         .await;
 
@@ -1103,7 +1199,7 @@ pub mod test {
             &cptestctx.logctx.log,
             "initial",
             initial_dns_dropshot_server.local_addr(),
-            3,
+            Generation::from_u32(3),
         )
         .await;
 
@@ -1111,7 +1207,7 @@ pub mod test {
             &cptestctx.logctx.log,
             "new",
             new_dns_dropshot_server.local_addr(),
-            3,
+            Generation::from_u32(3),
         )
         .await;
     }
@@ -1121,7 +1217,7 @@ pub mod test {
         log: &slog::Logger,
         label: &str,
         addr: SocketAddr,
-        generation: u64,
+        generation: Generation,
     ) {
         println!(
             "waiting for propagation of generation {generation} to {label} \

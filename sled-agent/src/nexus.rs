@@ -4,10 +4,11 @@
 
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskVariant;
+use omicron_uuid_kinds::SledUuid;
 
 use crate::vmm_reservoir::VmmReservoirManagerHandle;
-use internal_dns::resolver::Resolver;
-use internal_dns::ServiceName;
+use internal_dns_resolver::Resolver;
+use internal_dns_types::names::ServiceName;
 use nexus_client::types::SledAgentInfo;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use sled_hardware::HardwareManager;
@@ -16,7 +17,6 @@ use std::net::SocketAddrV6;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, oneshot, Notify};
 use tokio::time::{interval, Duration, MissedTickBehavior};
-use uuid::Uuid;
 
 // Re-export the nexus_client::Client crate. (Use a type alias to be more
 // rust-analyzer friendly.)
@@ -45,50 +45,6 @@ pub(crate) fn make_nexus_client_with_port(
         client,
         log.new(o!("component" => "NexusClient")),
     )
-}
-
-pub fn d2n_params(
-    params: &dns_service_client::types::DnsConfigParams,
-) -> nexus_client::types::DnsConfigParams {
-    nexus_client::types::DnsConfigParams {
-        generation: params.generation,
-        time_created: params.time_created,
-        zones: params.zones.iter().map(d2n_zone).collect(),
-    }
-}
-
-fn d2n_zone(
-    zone: &dns_service_client::types::DnsConfigZone,
-) -> nexus_client::types::DnsConfigZone {
-    nexus_client::types::DnsConfigZone {
-        zone_name: zone.zone_name.clone(),
-        records: zone
-            .records
-            .iter()
-            .map(|(n, r)| (n.clone(), r.iter().map(d2n_record).collect()))
-            .collect(),
-    }
-}
-
-fn d2n_record(
-    record: &dns_service_client::types::DnsRecord,
-) -> nexus_client::types::DnsRecord {
-    match record {
-        dns_service_client::types::DnsRecord::A(addr) => {
-            nexus_client::types::DnsRecord::A(*addr)
-        }
-        dns_service_client::types::DnsRecord::Aaaa(addr) => {
-            nexus_client::types::DnsRecord::Aaaa(*addr)
-        }
-        dns_service_client::types::DnsRecord::Srv(srv) => {
-            nexus_client::types::DnsRecord::Srv(nexus_client::types::Srv {
-                port: srv.port,
-                prio: srv.prio,
-                target: srv.target.clone(),
-                weight: srv.weight,
-            })
-        }
-    }
 }
 
 // Although it is a bit awkward to define these conversions here, it frees us
@@ -206,7 +162,7 @@ type GetSledAgentInfo = Box<dyn Fn(Generation) -> SledAgentInfo + Send>;
 // A mechanism owned by the `NexusNotifierTask` that allows it to access
 // enough information to send a `SledAgentInfo` to Nexus.
 pub struct NexusNotifierInput {
-    pub sled_id: Uuid,
+    pub sled_id: SledUuid,
     pub sled_address: SocketAddrV6,
     pub nexus_client: NexusClient,
     pub hardware: HardwareManager,
@@ -244,7 +200,7 @@ type NexusRsp = (
 ///     contains `decommissioned = true`, then we stop dead in our tracks and no
 ///     longer send requests to nexus.
 pub struct NexusNotifierTask {
-    sled_id: Uuid,
+    sled_id: SledUuid,
     nexus_client: NexusClient,
     get_sled_agent_info: GetSledAgentInfo,
 
@@ -349,7 +305,7 @@ impl NexusNotifierTask {
 
     #[cfg(test)]
     pub fn new_for_test(
-        sled_id: Uuid,
+        sled_id: SledUuid,
         nexus_client: NexusClient,
         get_sled_agent_info: GetSledAgentInfo,
         log: &Logger,
@@ -593,6 +549,7 @@ mod test {
     use omicron_test_utils::dev::poll::{
         wait_for_condition as wait_for, CondCheckError,
     };
+    use omicron_uuid_kinds::GenericUuid;
 
     use super::*;
     use omicron_common::api::external::{
@@ -617,7 +574,7 @@ mod test {
     impl FakeNexusServer for NexusServer {
         fn sled_agent_get(
             &self,
-            sled_id: Uuid,
+            sled_id: SledUuid,
         ) -> Result<SledAgentInfo, Error> {
             // Always disable any errors after the first time. This simplifies
             // testing due to lack of races.
@@ -631,14 +588,14 @@ mod test {
             self.fake_crdb.info.lock().unwrap().clone().ok_or(
                 Error::ObjectNotFound {
                     type_name: ResourceType::Sled,
-                    lookup_type: LookupType::ById(sled_id),
+                    lookup_type: LookupType::ById(sled_id.into_untyped_uuid()),
                 },
             )
         }
 
         fn sled_agent_put(
             &self,
-            _sled_id: Uuid,
+            _sled_id: SledUuid,
             info: SledAgentInfo,
         ) -> Result<(), Error> {
             // Always disable any errors after the first time. This simplifies
@@ -664,7 +621,7 @@ mod test {
         let log = &logctx.log;
         let sa_address = "::1".to_string();
         let fake_crdb = FakeCrdb::default();
-        let sled_id = Uuid::new_v4();
+        let sled_id = SledUuid::new_v4();
         let get_error = Arc::new(AtomicBool::new(false));
         let put_error = Arc::new(AtomicBool::new(false));
 

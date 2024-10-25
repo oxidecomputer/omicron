@@ -7,19 +7,14 @@
 use crate::external_api::params::ResourceMetrics;
 use crate::internal_api::params::OximeterInfo;
 use dropshot::PaginationParams;
-use internal_dns::resolver::{ResolveError, Resolver};
-use internal_dns::ServiceName;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
-use omicron_common::address::CLICKHOUSE_PORT;
-use omicron_common::api::external::Error;
-use omicron_common::api::external::{DataPageParams, ListResultVec};
+use omicron_common::api::external::{DataPageParams, Error, ListResultVec};
 use omicron_common::api::internal::nexus::{self, ProducerEndpoint};
 use oximeter_client::Client as OximeterClient;
 use oximeter_db::query::Timestamp;
 use oximeter_db::Measurement;
-use slog::Logger;
 use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
@@ -31,47 +26,6 @@ use uuid::Uuid;
 /// Producers are expected to renew their registration lease periodically, at
 /// some interval of this overall duration.
 pub const PRODUCER_LEASE_DURATION: Duration = Duration::from_secs(10 * 60);
-
-/// A client which knows how to connect to Clickhouse, but does so
-/// only when a request is actually made.
-///
-/// This allows callers to set up the mechanism of connection (by address
-/// or DNS) separately from actually making that connection. This
-/// is particularly useful in situations where configurations are parsed
-/// prior to Clickhouse existing.
-pub struct LazyTimeseriesClient {
-    log: Logger,
-    source: ClientSource,
-}
-
-enum ClientSource {
-    FromDns { resolver: Resolver },
-    FromIp { address: SocketAddr },
-}
-
-impl LazyTimeseriesClient {
-    pub fn new_from_dns(log: Logger, resolver: Resolver) -> Self {
-        Self { log, source: ClientSource::FromDns { resolver } }
-    }
-
-    pub fn new_from_address(log: Logger, address: SocketAddr) -> Self {
-        Self { log, source: ClientSource::FromIp { address } }
-    }
-
-    pub(crate) async fn get(
-        &self,
-    ) -> Result<oximeter_db::Client, ResolveError> {
-        let address = match &self.source {
-            ClientSource::FromIp { address } => *address,
-            ClientSource::FromDns { resolver } => SocketAddr::new(
-                resolver.lookup_ip(ServiceName::Clickhouse).await?,
-                CLICKHOUSE_PORT,
-            ),
-        };
-
-        Ok(oximeter_db::Client::new(address, &self.log))
-    }
-}
 
 impl super::Nexus {
     /// Insert a new record of an Oximeter collector server.
@@ -113,9 +67,18 @@ impl super::Nexus {
         opctx: &OpContext,
         producer_info: nexus::ProducerEndpoint,
     ) -> Result<(), Error> {
-        let (collector, id) = self.next_collector(opctx).await?;
-        let db_info = db::model::ProducerEndpoint::new(&producer_info, id);
-        self.db_datastore.producer_endpoint_create(opctx, &db_info).await?;
+        let collector_info = self
+            .db_datastore
+            .producer_endpoint_upsert_and_assign(opctx, &producer_info)
+            .await?;
+
+        let address = SocketAddr::from((
+            collector_info.ip.ip(),
+            collector_info.port.try_into().unwrap(),
+        ));
+        let collector =
+            build_oximeter_client(&self.log, &collector_info.id, address);
+
         collector
             .producers_post(&oximeter_client::types::ProducerEndpoint::from(
                 &producer_info,
@@ -125,9 +88,10 @@ impl super::Nexus {
         info!(
             self.log,
             "assigned collector to new producer";
-            "producer_id" => ?producer_info.id,
-            "collector_id" => ?id,
+            "producer_id" => %producer_info.id,
+            "collector_id" => %collector_info.id,
         );
+
         Ok(())
     }
 
@@ -182,14 +146,6 @@ impl super::Nexus {
 
         let timeseries_list = self
             .timeseries_client
-            .get()
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "Cannot access timeseries DB: {}",
-                    e
-                ))
-            })?
             .select_timeseries_with(
                 timeseries_name,
                 criteria,
@@ -238,27 +194,6 @@ impl super::Nexus {
             },
         )
         .unwrap())
-    }
-
-    // Return an oximeter collector to assign a newly-registered producer
-    async fn next_collector(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<(OximeterClient, Uuid), Error> {
-        // TODO-robustness Replace with a real load-balancing strategy.
-        let page_params = DataPageParams {
-            marker: None,
-            direction: dropshot::PaginationOrder::Ascending,
-            limit: std::num::NonZeroU32::new(1).unwrap(),
-        };
-        let oxs = self.db_datastore.oximeter_list(opctx, &page_params).await?;
-        let info = oxs.first().ok_or_else(|| Error::ServiceUnavailable {
-            internal_message: String::from("no oximeter collectors available"),
-        })?;
-        let address =
-            SocketAddr::from((info.ip.ip(), info.port.try_into().unwrap()));
-        let id = info.id;
-        Ok((build_oximeter_client(&self.log, &id, address), id))
     }
 }
 

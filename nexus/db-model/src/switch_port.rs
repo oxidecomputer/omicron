@@ -383,7 +383,7 @@ impl Into<external::SwitchPortConfig> for SwitchPortConfig {
 #[diesel(table_name = switch_port_settings_link_config)]
 pub struct SwitchPortLinkConfig {
     pub port_settings_id: Uuid,
-    pub lldp_link_config_id: Uuid,
+    pub lldp_link_config_id: Option<Uuid>,
     pub link_name: String,
     pub mtu: SqlU16,
     pub fec: SwitchLinkFec,
@@ -403,7 +403,7 @@ impl SwitchPortLinkConfig {
     ) -> Self {
         Self {
             port_settings_id,
-            lldp_link_config_id,
+            lldp_link_config_id: Some(lldp_link_config_id),
             link_name,
             fec,
             speed,
@@ -561,7 +561,8 @@ pub struct SwitchPortRouteConfig {
     pub dst: IpNetwork,
     pub gw: IpNetwork,
     pub vid: Option<SqlU16>,
-    pub local_pref: Option<SqlU32>,
+    #[diesel(column_name = local_pref)]
+    pub rib_priority: Option<SqlU8>,
 }
 
 impl SwitchPortRouteConfig {
@@ -571,9 +572,9 @@ impl SwitchPortRouteConfig {
         dst: IpNetwork,
         gw: IpNetwork,
         vid: Option<SqlU16>,
-        local_pref: Option<SqlU32>,
+        rib_priority: Option<SqlU8>,
     ) -> Self {
-        Self { port_settings_id, interface_name, dst, gw, vid, local_pref }
+        Self { port_settings_id, interface_name, dst, gw, vid, rib_priority }
     }
 }
 
@@ -585,7 +586,7 @@ impl Into<external::SwitchPortRouteConfig> for SwitchPortRouteConfig {
             dst: self.dst.into(),
             gw: self.gw.into(),
             vlan_id: self.vid.map(Into::into),
-            local_pref: self.local_pref.map(Into::into),
+            rib_priority: self.rib_priority.map(Into::into),
         }
     }
 }
@@ -746,8 +747,8 @@ impl SwitchPortBgpPeerConfig {
             interface_name,
             addr: p.addr.into(),
             hold_time: p.hold_time.into(),
-            idle_hold_time: p.delay_open.into(),
-            delay_open: p.connect_retry.into(),
+            idle_hold_time: p.idle_hold_time.into(),
+            delay_open: p.delay_open.into(),
             connect_retry: p.connect_retry.into(),
             keepalive: p.keepalive.into(),
             remote_asn: p.remote_asn.map(|x| x.into()),

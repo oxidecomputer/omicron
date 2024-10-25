@@ -5,6 +5,7 @@
 //! Common objects used for configuration
 
 use std::fmt;
+use std::net::SocketAddr;
 use std::ops::Deref;
 use std::str::FromStr;
 
@@ -31,6 +32,29 @@ pub struct PostgresConfigWithUrl {
 impl PostgresConfigWithUrl {
     pub fn url(&self) -> String {
         self.url_raw.clone()
+    }
+
+    /// Accesses the first ip / port pair within the URL.
+    ///
+    /// # Panics
+    ///
+    /// This method makes the assumption that the hostname has at least one
+    /// "host IP / port" pair which can be extracted. If the supplied URL
+    /// does not have such a pair, this function will panic.
+    // Yes, panicking in the above scenario sucks. But this type is already
+    // pretty ubiquitous within Omicron, and integration with the qorb
+    // connection pooling library requires access to database by SocketAddr.
+    pub fn address(&self) -> SocketAddr {
+        let tokio_postgres::config::Host::Tcp(host) =
+            &self.config.get_hosts()[0]
+        else {
+            panic!("Non-TCP hostname");
+        };
+        let ip: std::net::IpAddr =
+            host.parse().expect("Failed to parse host as IP address");
+
+        let port = self.config.get_ports()[0];
+        SocketAddr::new(ip, port)
     }
 }
 

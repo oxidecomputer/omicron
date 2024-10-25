@@ -6,32 +6,45 @@
 //! database
 
 use crate::inventory::ZoneType;
-use crate::omicron_zone_config::{OmicronZone, OmicronZoneNic};
+use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::schema::{
-    blueprint, bp_omicron_physical_disk, bp_omicron_zone, bp_omicron_zone_nic,
-    bp_sled_omicron_physical_disks, bp_sled_omicron_zones, bp_sled_state,
-    bp_target,
+    blueprint, bp_clickhouse_cluster_config,
+    bp_clickhouse_keeper_zone_id_to_node_id,
+    bp_clickhouse_server_zone_id_to_node_id, bp_omicron_physical_disk,
+    bp_omicron_zone, bp_omicron_zone_nic, bp_sled_omicron_physical_disks,
+    bp_sled_omicron_zones, bp_sled_state, bp_target,
 };
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
     impl_enum_type, ipv6, Generation, MacAddr, Name, SledState, SqlU16, SqlU32,
     SqlU8,
 };
+use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Utc};
+use clickhouse_admin_types::{KeeperId, ServerId};
 use ipnetwork::IpNetwork;
-use nexus_types::deployment::BlueprintPhysicalDiskConfig;
-use nexus_types::deployment::BlueprintPhysicalDisksConfig;
+use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
+use nexus_types::deployment::{
+    blueprint_zone_type, BlueprintPhysicalDisksConfig, ClickhouseClusterConfig,
+};
+use nexus_types::deployment::{BlueprintPhysicalDiskConfig, BlueprintZoneType};
+use nexus_types::deployment::{
+    OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
+    OmicronZoneExternalSnatIp,
+};
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::DiskIdentity;
-use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::SledUuid;
-use omicron_uuid_kinds::ZpoolUuid;
-use omicron_uuid_kinds::{ExternalIpKind, SledKind, ZpoolKind};
+use omicron_common::zpool_name::ZpoolName;
+use omicron_uuid_kinds::{
+    ExternalIpKind, ExternalIpUuid, GenericUuid, OmicronZoneKind,
+    OmicronZoneUuid, SledKind, SledUuid, ZpoolKind, ZpoolUuid,
+};
+use std::net::{IpAddr, SocketAddrV6};
 use uuid::Uuid;
 
 /// See [`nexus_types::deployment::Blueprint`].
@@ -225,7 +238,7 @@ impl BpSledOmicronZones {
 pub struct BpOmicronZone {
     pub blueprint_id: Uuid,
     pub sled_id: DbTypedUuid<SledKind>,
-    pub id: Uuid,
+    pub id: DbTypedUuid<OmicronZoneKind>,
     pub underlay_address: ipv6::Ipv6Addr,
     pub zone_type: ZoneType,
     pub primary_service_ip: ipv6::Ipv6Addr,
@@ -256,82 +269,418 @@ impl BpOmicronZone {
         blueprint_id: Uuid,
         sled_id: SledUuid,
         blueprint_zone: &BlueprintZoneConfig,
-    ) -> Result<Self, anyhow::Error> {
+    ) -> anyhow::Result<Self> {
         let external_ip_id = blueprint_zone
             .zone_type
             .external_networking()
-            .map(|(ip, _)| ip.id());
-        let zone = OmicronZone::new(
-            sled_id,
-            blueprint_zone.id.into_untyped_uuid(),
-            blueprint_zone.underlay_address,
-            blueprint_zone.filesystem_pool.as_ref().map(|pool| pool.id()),
-            &blueprint_zone.zone_type.clone().into(),
-            external_ip_id,
-        )?;
-        Ok(Self {
+            .map(|(ip, _)| ip.id().into());
+
+        // Create a dummy record to start, then fill in the rest
+        let mut bp_omicron_zone = BpOmicronZone {
+            // Fill in the known fields that don't require inspecting
+            // `blueprint_zone.zone_type`
             blueprint_id,
-            sled_id: zone.sled_id.into(),
-            id: zone.id,
-            underlay_address: zone.underlay_address,
-            zone_type: zone.zone_type,
-            primary_service_ip: zone.primary_service_ip,
-            primary_service_port: zone.primary_service_port,
-            second_service_ip: zone.second_service_ip,
-            second_service_port: zone.second_service_port,
-            dataset_zpool_name: zone.dataset_zpool_name,
-            bp_nic_id: zone.nic_id,
-            dns_gz_address: zone.dns_gz_address,
-            dns_gz_address_index: zone.dns_gz_address_index,
-            ntp_ntp_servers: zone.ntp_ntp_servers,
-            ntp_dns_servers: zone.ntp_dns_servers,
-            ntp_domain: zone.ntp_domain,
-            nexus_external_tls: zone.nexus_external_tls,
-            nexus_external_dns_servers: zone.nexus_external_dns_servers,
-            snat_ip: zone.snat_ip,
-            snat_first_port: zone.snat_first_port,
-            snat_last_port: zone.snat_last_port,
-            disposition: to_db_bp_zone_disposition(blueprint_zone.disposition),
-            external_ip_id: zone.external_ip_id.map(From::from),
+            sled_id: sled_id.into(),
+            id: blueprint_zone.id.into(),
+            underlay_address: blueprint_zone.underlay_address.into(),
+            external_ip_id,
             filesystem_pool: blueprint_zone
                 .filesystem_pool
                 .as_ref()
                 .map(|pool| pool.id().into()),
-        })
+            disposition: to_db_bp_zone_disposition(blueprint_zone.disposition),
+            zone_type: blueprint_zone.zone_type.kind().into(),
+
+            // Set the remainder of the fields to a default
+            primary_service_ip: "::1"
+                .parse::<std::net::Ipv6Addr>()
+                .unwrap()
+                .into(),
+            primary_service_port: 0.into(),
+            second_service_ip: None,
+            second_service_port: None,
+            dataset_zpool_name: None,
+            bp_nic_id: None,
+            dns_gz_address: None,
+            dns_gz_address_index: None,
+            ntp_ntp_servers: None,
+            ntp_dns_servers: None,
+            ntp_domain: None,
+            nexus_external_tls: None,
+            nexus_external_dns_servers: None,
+            snat_ip: None,
+            snat_first_port: None,
+            snat_last_port: None,
+        };
+
+        match &blueprint_zone.zone_type {
+            BlueprintZoneType::BoundaryNtp(
+                blueprint_zone_type::BoundaryNtp {
+                    address,
+                    ntp_servers,
+                    dns_servers,
+                    domain,
+                    nic,
+                    external_ip,
+                },
+            ) => {
+                // Set the common fields
+                bp_omicron_zone.set_primary_service_ip_and_port(address);
+
+                // Set the zone specific fields
+                let snat_cfg = external_ip.snat_cfg;
+                let (first_port, last_port) = snat_cfg.port_range_raw();
+                bp_omicron_zone.ntp_ntp_servers = Some(ntp_servers.clone());
+                bp_omicron_zone.ntp_dns_servers = Some(
+                    dns_servers
+                        .into_iter()
+                        .cloned()
+                        .map(IpNetwork::from)
+                        .collect(),
+                );
+                bp_omicron_zone.ntp_domain.clone_from(domain);
+                bp_omicron_zone.snat_ip = Some(IpNetwork::from(snat_cfg.ip));
+                bp_omicron_zone.snat_first_port =
+                    Some(SqlU16::from(first_port));
+                bp_omicron_zone.snat_last_port = Some(SqlU16::from(last_port));
+                bp_omicron_zone.bp_nic_id = Some(nic.id);
+            }
+            BlueprintZoneType::Clickhouse(
+                blueprint_zone_type::Clickhouse { address, dataset },
+            ) => {
+                // Set the common fields
+                bp_omicron_zone.set_primary_service_ip_and_port(address);
+                bp_omicron_zone.set_zpool_name(dataset);
+            }
+            BlueprintZoneType::ClickhouseKeeper(
+                blueprint_zone_type::ClickhouseKeeper { address, dataset },
+            ) => {
+                // Set the common fields
+                bp_omicron_zone.set_primary_service_ip_and_port(address);
+                bp_omicron_zone.set_zpool_name(dataset);
+            }
+            BlueprintZoneType::ClickhouseServer(
+                blueprint_zone_type::ClickhouseServer { address, dataset },
+            ) => {
+                // Set the common fields
+                bp_omicron_zone.set_primary_service_ip_and_port(address);
+                bp_omicron_zone.set_zpool_name(dataset);
+            }
+            BlueprintZoneType::CockroachDb(
+                blueprint_zone_type::CockroachDb { address, dataset },
+            ) => {
+                // Set the common fields
+                bp_omicron_zone.set_primary_service_ip_and_port(address);
+                bp_omicron_zone.set_zpool_name(dataset);
+            }
+            BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
+                address,
+                dataset,
+            }) => {
+                // Set the common fields
+                bp_omicron_zone.set_primary_service_ip_and_port(address);
+                bp_omicron_zone.set_zpool_name(dataset);
+            }
+            BlueprintZoneType::CruciblePantry(
+                blueprint_zone_type::CruciblePantry { address },
+            ) => {
+                // Set the common fields
+                bp_omicron_zone.set_primary_service_ip_and_port(address);
+            }
+            BlueprintZoneType::ExternalDns(
+                blueprint_zone_type::ExternalDns {
+                    dataset,
+                    http_address,
+                    dns_address,
+                    nic,
+                },
+            ) => {
+                // Set the common fields
+                bp_omicron_zone.set_primary_service_ip_and_port(http_address);
+                bp_omicron_zone.set_zpool_name(dataset);
+
+                // Set the zone specific fields
+                bp_omicron_zone.bp_nic_id = Some(nic.id);
+                bp_omicron_zone.second_service_ip =
+                    Some(IpNetwork::from(dns_address.addr.ip()));
+                bp_omicron_zone.second_service_port =
+                    Some(SqlU16::from(dns_address.addr.port()));
+            }
+            BlueprintZoneType::InternalDns(
+                blueprint_zone_type::InternalDns {
+                    dataset,
+                    http_address,
+                    dns_address,
+                    gz_address,
+                    gz_address_index,
+                },
+            ) => {
+                // Set the common fields
+                bp_omicron_zone.set_primary_service_ip_and_port(http_address);
+                bp_omicron_zone.set_zpool_name(dataset);
+
+                // Set the zone specific fields
+                bp_omicron_zone.second_service_ip =
+                    Some(IpNetwork::from(IpAddr::V6(*dns_address.ip())));
+                bp_omicron_zone.second_service_port =
+                    Some(SqlU16::from(dns_address.port()));
+
+                bp_omicron_zone.dns_gz_address =
+                    Some(ipv6::Ipv6Addr::from(gz_address));
+                bp_omicron_zone.dns_gz_address_index =
+                    Some(SqlU32::from(*gz_address_index));
+            }
+            BlueprintZoneType::InternalNtp(
+                blueprint_zone_type::InternalNtp { address },
+            ) => {
+                // Set the common fields
+                bp_omicron_zone.set_primary_service_ip_and_port(address);
+            }
+            BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                internal_address,
+                external_ip,
+                nic,
+                external_tls,
+                external_dns_servers,
+            }) => {
+                // Set the common fields
+                bp_omicron_zone
+                    .set_primary_service_ip_and_port(internal_address);
+
+                // Set the zone specific fields
+                bp_omicron_zone.bp_nic_id = Some(nic.id);
+                bp_omicron_zone.second_service_ip =
+                    Some(IpNetwork::from(external_ip.ip));
+                bp_omicron_zone.nexus_external_tls = Some(*external_tls);
+                bp_omicron_zone.nexus_external_dns_servers = Some(
+                    external_dns_servers
+                        .iter()
+                        .cloned()
+                        .map(IpNetwork::from)
+                        .collect(),
+                );
+            }
+            BlueprintZoneType::Oximeter(blueprint_zone_type::Oximeter {
+                address,
+            }) => {
+                // Set the common fields
+                bp_omicron_zone.set_primary_service_ip_and_port(address);
+            }
+        }
+
+        Ok(bp_omicron_zone)
+    }
+
+    fn set_primary_service_ip_and_port(&mut self, address: &SocketAddrV6) {
+        let (primary_service_ip, primary_service_port) =
+            (ipv6::Ipv6Addr::from(*address.ip()), SqlU16::from(address.port()));
+        self.primary_service_ip = primary_service_ip;
+        self.primary_service_port = primary_service_port;
+    }
+
+    fn set_zpool_name(&mut self, dataset: &OmicronZoneDataset) {
+        self.dataset_zpool_name = Some(dataset.pool_name.to_string());
+    }
+    /// Convert an external ip from a `BpOmicronZone` to a `BlueprintZoneType`
+    /// representation.
+    fn external_ip_to_blueprint_zone_type(
+        external_ip: Option<DbTypedUuid<ExternalIpKind>>,
+    ) -> anyhow::Result<ExternalIpUuid> {
+        external_ip
+            .map(Into::into)
+            .ok_or_else(|| anyhow!("expected an external IP ID"))
     }
 
     pub fn into_blueprint_zone_config(
         self,
         nic_row: Option<BpOmicronZoneNic>,
-    ) -> Result<BlueprintZoneConfig, anyhow::Error> {
-        let zone = OmicronZone {
-            sled_id: self.sled_id.into(),
-            id: self.id,
-            underlay_address: self.underlay_address,
-            filesystem_pool: self.filesystem_pool.map(|id| id.into()),
-            zone_type: self.zone_type,
-            primary_service_ip: self.primary_service_ip,
-            primary_service_port: self.primary_service_port,
-            second_service_ip: self.second_service_ip,
-            second_service_port: self.second_service_port,
-            dataset_zpool_name: self.dataset_zpool_name,
-            nic_id: self.bp_nic_id,
-            dns_gz_address: self.dns_gz_address,
-            dns_gz_address_index: self.dns_gz_address_index,
-            ntp_ntp_servers: self.ntp_ntp_servers,
-            ntp_dns_servers: self.ntp_dns_servers,
-            ntp_domain: self.ntp_domain,
-            nexus_external_tls: self.nexus_external_tls,
-            nexus_external_dns_servers: self.nexus_external_dns_servers,
-            snat_ip: self.snat_ip,
-            snat_first_port: self.snat_first_port,
-            snat_last_port: self.snat_last_port,
-            external_ip_id: self.external_ip_id.map(From::from),
+    ) -> anyhow::Result<BlueprintZoneConfig> {
+        // Build up a set of common fields for our `BlueprintZoneType`s
+        //
+        // Some of these are results that we only evaluate when used, because
+        // not all zone types use all common fields.
+        let primary_address = SocketAddrV6::new(
+            self.primary_service_ip.into(),
+            *self.primary_service_port,
+            0,
+            0,
+        );
+        let dataset =
+            omicron_zone_config::dataset_zpool_name_to_omicron_zone_dataset(
+                self.dataset_zpool_name,
+            );
+
+        // There is a nested result here. If there is a caller error (the outer
+        // Result) we immediately return. We check the inner result later, but
+        // only if some code path tries to use `nic` and it's not present.
+        let nic = omicron_zone_config::nic_row_to_network_interface(
+            self.id.into(),
+            self.bp_nic_id,
+            nic_row.map(Into::into),
+        )?;
+
+        let external_ip_id =
+            Self::external_ip_to_blueprint_zone_type(self.external_ip_id);
+
+        let dns_address =
+            omicron_zone_config::secondary_ip_and_port_to_dns_address(
+                self.second_service_ip,
+                self.second_service_port,
+            );
+
+        let ntp_dns_servers =
+            omicron_zone_config::ntp_dns_servers_to_omicron_internal(
+                self.ntp_dns_servers,
+            );
+
+        let ntp_servers = omicron_zone_config::ntp_servers_to_omicron_internal(
+            self.ntp_ntp_servers,
+        );
+
+        let zone_type = match self.zone_type {
+            ZoneType::BoundaryNtp => {
+                let snat_cfg = match (
+                    self.snat_ip,
+                    self.snat_first_port,
+                    self.snat_last_port,
+                ) {
+                    (Some(ip), Some(first_port), Some(last_port)) => {
+                        nexus_types::inventory::SourceNatConfig::new(
+                            ip.ip(),
+                            *first_port,
+                            *last_port,
+                        )
+                        .context("bad SNAT config for boundary NTP")?
+                    }
+                    _ => bail!(
+                        "expected non-NULL snat properties, \
+                         found at least one NULL"
+                    ),
+                };
+                BlueprintZoneType::BoundaryNtp(
+                    blueprint_zone_type::BoundaryNtp {
+                        address: primary_address,
+                        ntp_servers: ntp_servers?,
+                        dns_servers: ntp_dns_servers?,
+                        domain: self.ntp_domain,
+                        nic: nic?,
+                        external_ip: OmicronZoneExternalSnatIp {
+                            id: external_ip_id?,
+                            snat_cfg,
+                        },
+                    },
+                )
+            }
+            ZoneType::Clickhouse => {
+                BlueprintZoneType::Clickhouse(blueprint_zone_type::Clickhouse {
+                    address: primary_address,
+                    dataset: dataset?,
+                })
+            }
+            ZoneType::ClickhouseKeeper => BlueprintZoneType::ClickhouseKeeper(
+                blueprint_zone_type::ClickhouseKeeper {
+                    address: primary_address,
+                    dataset: dataset?,
+                },
+            ),
+            ZoneType::ClickhouseServer => BlueprintZoneType::ClickhouseServer(
+                blueprint_zone_type::ClickhouseServer {
+                    address: primary_address,
+                    dataset: dataset?,
+                },
+            ),
+
+            ZoneType::CockroachDb => BlueprintZoneType::CockroachDb(
+                blueprint_zone_type::CockroachDb {
+                    address: primary_address,
+                    dataset: dataset?,
+                },
+            ),
+            ZoneType::Crucible => {
+                BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
+                    address: primary_address,
+                    dataset: dataset?,
+                })
+            }
+            ZoneType::CruciblePantry => BlueprintZoneType::CruciblePantry(
+                blueprint_zone_type::CruciblePantry {
+                    address: primary_address,
+                },
+            ),
+            ZoneType::ExternalDns => BlueprintZoneType::ExternalDns(
+                blueprint_zone_type::ExternalDns {
+                    dataset: dataset?,
+                    http_address: primary_address,
+                    dns_address: OmicronZoneExternalFloatingAddr {
+                        id: external_ip_id?,
+                        addr: dns_address?,
+                    },
+                    nic: nic?,
+                },
+            ),
+            ZoneType::InternalDns => BlueprintZoneType::InternalDns(
+                blueprint_zone_type::InternalDns {
+                    dataset: dataset?,
+                    http_address: primary_address,
+                    dns_address: omicron_zone_config::to_internal_dns_address(
+                        dns_address?,
+                    )?,
+                    gz_address: self
+                        .dns_gz_address
+                        .map(Into::into)
+                        .ok_or_else(|| {
+                            anyhow!("expected dns_gz_address, found none")
+                        })?,
+                    gz_address_index: *self.dns_gz_address_index.ok_or_else(
+                        || anyhow!("expected dns_gz_address_index, found none"),
+                    )?,
+                },
+            ),
+            ZoneType::InternalNtp => BlueprintZoneType::InternalNtp(
+                blueprint_zone_type::InternalNtp { address: primary_address },
+            ),
+            ZoneType::Nexus => {
+                BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                    internal_address: primary_address,
+                    external_ip: OmicronZoneExternalFloatingIp {
+                        id: external_ip_id?,
+                        ip: self
+                            .second_service_ip
+                            .ok_or_else(|| {
+                                anyhow!("expected second service IP")
+                            })?
+                            .ip(),
+                    },
+                    nic: nic?,
+                    external_tls: self
+                        .nexus_external_tls
+                        .ok_or_else(|| anyhow!("expected 'external_tls'"))?,
+                    external_dns_servers: self
+                        .nexus_external_dns_servers
+                        .ok_or_else(|| {
+                            anyhow!("expected 'external_dns_servers'")
+                        })?
+                        .into_iter()
+                        .map(|i| i.ip())
+                        .collect(),
+                })
+            }
+            ZoneType::Oximeter => {
+                BlueprintZoneType::Oximeter(blueprint_zone_type::Oximeter {
+                    address: primary_address,
+                })
+            }
         };
-        zone.into_blueprint_zone_config(
-            self.disposition.into(),
-            nic_row.map(OmicronZoneNic::from),
-        )
+
+        Ok(BlueprintZoneConfig {
+            disposition: self.disposition.into(),
+            id: self.id.into(),
+            underlay_address: self.underlay_address.into(),
+            filesystem_pool: self
+                .filesystem_pool
+                .map(|id| ZpoolName::new_external(id.into())),
+            zone_type,
+        })
     }
 }
 
@@ -394,21 +743,6 @@ pub struct BpOmicronZoneNic {
     slot: SqlU8,
 }
 
-impl From<BpOmicronZoneNic> for OmicronZoneNic {
-    fn from(value: BpOmicronZoneNic) -> Self {
-        OmicronZoneNic {
-            id: value.id,
-            name: value.name,
-            ip: value.ip,
-            mac: value.mac,
-            subnet: value.subnet,
-            vni: value.vni,
-            is_primary: value.is_primary,
-            slot: value.slot,
-        }
-    }
-}
-
 impl BpOmicronZoneNic {
     pub fn new(
         blueprint_id: Uuid,
@@ -417,7 +751,7 @@ impl BpOmicronZoneNic {
         let Some((_, nic)) = zone.zone_type.external_networking() else {
             return Ok(None);
         };
-        let nic = OmicronZoneNic::new(zone.id.into_untyped_uuid(), nic)?;
+        let nic = OmicronZoneNic::new(zone.id, nic)?;
         Ok(Some(Self {
             blueprint_id,
             id: nic.id,
@@ -433,10 +767,117 @@ impl BpOmicronZoneNic {
 
     pub fn into_network_interface_for_zone(
         self,
-        zone_id: Uuid,
+        zone_id: OmicronZoneUuid,
     ) -> Result<NetworkInterface, anyhow::Error> {
         let zone_nic = OmicronZoneNic::from(self);
         zone_nic.into_network_interface_for_zone(zone_id)
+    }
+}
+
+impl From<BpOmicronZoneNic> for OmicronZoneNic {
+    fn from(value: BpOmicronZoneNic) -> Self {
+        OmicronZoneNic {
+            id: value.id,
+            name: value.name,
+            ip: value.ip,
+            mac: value.mac,
+            subnet: value.subnet,
+            vni: value.vni,
+            is_primary: value.is_primary,
+            slot: value.slot,
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_clickhouse_cluster_config)]
+pub struct BpClickhouseClusterConfig {
+    pub blueprint_id: Uuid,
+    pub generation: Generation,
+    pub max_used_server_id: i64,
+    pub max_used_keeper_id: i64,
+    pub cluster_name: String,
+    pub cluster_secret: String,
+    pub highest_seen_keeper_leader_committed_log_index: i64,
+}
+
+impl BpClickhouseClusterConfig {
+    pub fn new(
+        blueprint_id: Uuid,
+        config: &ClickhouseClusterConfig,
+    ) -> anyhow::Result<BpClickhouseClusterConfig> {
+        Ok(BpClickhouseClusterConfig {
+            blueprint_id,
+            generation: Generation(config.generation),
+            max_used_server_id: config
+                .max_used_server_id
+                .0
+                .try_into()
+                .context("more than 2^63 clickhouse server IDs in use")?,
+            max_used_keeper_id: config
+                .max_used_keeper_id
+                .0
+                .try_into()
+                .context("more than 2^63 clickhouse keeper IDs in use")?,
+            cluster_name: config.cluster_name.clone(),
+            cluster_secret: config.cluster_secret.clone(),
+            highest_seen_keeper_leader_committed_log_index: config
+                .highest_seen_keeper_leader_committed_log_index
+                .try_into()
+                .context(
+                    "more than 2^63 clickhouse keeper log indexes in use",
+                )?,
+        })
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_clickhouse_keeper_zone_id_to_node_id)]
+pub struct BpClickhouseKeeperZoneIdToNodeId {
+    pub blueprint_id: Uuid,
+    pub omicron_zone_id: DbTypedUuid<OmicronZoneKind>,
+    pub keeper_id: i64,
+}
+
+impl BpClickhouseKeeperZoneIdToNodeId {
+    pub fn new(
+        blueprint_id: Uuid,
+        omicron_zone_id: OmicronZoneUuid,
+        keeper_id: KeeperId,
+    ) -> anyhow::Result<BpClickhouseKeeperZoneIdToNodeId> {
+        Ok(BpClickhouseKeeperZoneIdToNodeId {
+            blueprint_id,
+            omicron_zone_id: omicron_zone_id.into(),
+            keeper_id: keeper_id
+                .0
+                .try_into()
+                .context("more than 2^63 IDs in use")?,
+        })
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_clickhouse_server_zone_id_to_node_id)]
+pub struct BpClickhouseServerZoneIdToNodeId {
+    pub blueprint_id: Uuid,
+    pub omicron_zone_id: DbTypedUuid<OmicronZoneKind>,
+    pub server_id: i64,
+}
+
+impl BpClickhouseServerZoneIdToNodeId {
+    pub fn new(
+        blueprint_id: Uuid,
+        omicron_zone_id: OmicronZoneUuid,
+        server_id: ServerId,
+    ) -> anyhow::Result<BpClickhouseServerZoneIdToNodeId> {
+        Ok(BpClickhouseServerZoneIdToNodeId {
+            blueprint_id,
+            omicron_zone_id: omicron_zone_id.into(),
+            server_id: server_id
+                .0
+                .try_into()
+                .context("more than 2^63 IDs in use")?,
+        })
     }
 }
 

@@ -5,6 +5,8 @@
 //! Example collections used for testing
 
 use crate::CollectionBuilder;
+use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
+use clickhouse_admin_types::KeeperId;
 use gateway_client::types::PowerState;
 use gateway_client::types::RotSlot;
 use gateway_client::types::RotState;
@@ -13,6 +15,7 @@ use gateway_client::types::SpState;
 use gateway_client::types::SpType;
 use nexus_sled_agent_shared::inventory::Baseboard;
 use nexus_sled_agent_shared::inventory::Inventory;
+use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
@@ -22,8 +25,8 @@ use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskVariant;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
@@ -274,11 +277,30 @@ pub fn representative() -> Representative {
 
     // We deliberately provide no RoT pages for sled2.
 
+    // Report a representative set of Omicron zones, used in the sled-agent
+    // constructors below.
+    //
+    // We've hand-selected a minimal set of files to cover each type of zone.
+    // These files were constructed by:
+    //
+    // (1) copying the "omicron zones" ledgers from the sleds in a working
+    //     Omicron deployment
+    // (2) pretty-printing each one with `json --in-place --file FILENAME`
+    // (3) adjusting the format slightly with
+    //         `jq '{ generation: .omicron_generation, zones: .zones }'`
+    let sled14_data = include_str!("../example-data/madrid-sled14.json");
+    let sled16_data = include_str!("../example-data/madrid-sled16.json");
+    let sled17_data = include_str!("../example-data/madrid-sled17.json");
+    let sled14: OmicronZonesConfig = serde_json::from_str(sled14_data).unwrap();
+    let sled16: OmicronZonesConfig = serde_json::from_str(sled16_data).unwrap();
+    let sled17: OmicronZonesConfig = serde_json::from_str(sled17_data).unwrap();
+
     // Report some sled agents.
     //
     // This first one will match "sled1_bb"'s baseboard information.
     let sled_agent_id_basic =
         "c5aec1df-b897-49e4-8085-ccd975f9b529".parse().unwrap();
+
     // Add some disks to this first sled.
     let disks = vec![
         // Let's say we have one manufacturer for our M.2...
@@ -290,6 +312,11 @@ pub fn representative() -> Representative {
             },
             variant: DiskVariant::M2,
             slot: 0,
+            active_firmware_slot: 1,
+            next_active_firmware_slot: None,
+            number_of_firmware_slots: 1,
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![Some("EXAMP1".to_string())],
         },
         // ... and a couple different vendors for our U.2s
         InventoryDisk {
@@ -300,6 +327,11 @@ pub fn representative() -> Representative {
             },
             variant: DiskVariant::U2,
             slot: 1,
+            active_firmware_slot: 1,
+            next_active_firmware_slot: None,
+            number_of_firmware_slots: 1,
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![Some("EXAMP1".to_string())],
         },
         InventoryDisk {
             identity: omicron_common::disk::DiskIdentity {
@@ -309,6 +341,11 @@ pub fn representative() -> Representative {
             },
             variant: DiskVariant::U2,
             slot: 2,
+            active_firmware_slot: 1,
+            next_active_firmware_slot: None,
+            number_of_firmware_slots: 1,
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![Some("EXAMP1".to_string())],
         },
         InventoryDisk {
             identity: omicron_common::disk::DiskIdentity {
@@ -318,9 +355,26 @@ pub fn representative() -> Representative {
             },
             variant: DiskVariant::U2,
             slot: 3,
+            active_firmware_slot: 1,
+            next_active_firmware_slot: None,
+            number_of_firmware_slots: 1,
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![Some("EXAMP1".to_string())],
         },
     ];
-    let zpools = vec![];
+    let zpools = vec![InventoryZpool {
+        id: "283f5475-2606-4e83-b001-9a025dbcb8a0".parse().unwrap(),
+        total_size: ByteCount::from(4096),
+    }];
+    let datasets = vec![InventoryDataset {
+        id: Some("afc00483-0d7b-4181-87d5-0def937d3cd7".parse().unwrap()),
+        name: "mydataset".to_string(),
+        available: ByteCount::from(1024),
+        used: ByteCount::from(0),
+        quota: None,
+        reservation: None,
+        compression: "lz4".to_string(),
+    }];
 
     builder
         .found_sled_inventory(
@@ -333,8 +387,10 @@ pub fn representative() -> Representative {
                     revision: 0,
                 },
                 SledRole::Gimlet,
+                sled14,
                 disks,
                 zpools,
+                datasets,
             ),
         )
         .unwrap();
@@ -359,6 +415,8 @@ pub fn representative() -> Representative {
                     revision: 0,
                 },
                 SledRole::Scrimlet,
+                sled16,
+                vec![],
                 vec![],
                 vec![],
             ),
@@ -380,6 +438,8 @@ pub fn representative() -> Representative {
                     model: String::from("fellofftruck"),
                 },
                 SledRole::Gimlet,
+                sled17,
+                vec![],
                 vec![],
                 vec![],
             ),
@@ -399,41 +459,26 @@ pub fn representative() -> Representative {
                 sled_agent_id_unknown,
                 Baseboard::Unknown,
                 SledRole::Gimlet,
+                // We only have omicron zones for three sleds so use empty zone
+                // info here.
+                OmicronZonesConfig {
+                    generation: Generation::new(),
+                    zones: Vec::new(),
+                },
+                vec![],
                 vec![],
                 vec![],
             ),
         )
         .unwrap();
 
-    // Report a representative set of Omicron zones.
-    //
-    // We've hand-selected a minimal set of files to cover each type of zone.
-    // These files were constructed by:
-    //
-    // (1) copying the "omicron zones" ledgers from the sleds in a working
-    //     Omicron deployment
-    // (2) pretty-printing each one with `json --in-place --file FILENAME`
-    // (3) adjusting the format slightly with
-    //         `jq '{ generation: .omicron_generation, zones: .zones }'`
-    let sled14_data = include_str!("../example-data/madrid-sled14.json");
-    let sled16_data = include_str!("../example-data/madrid-sled16.json");
-    let sled17_data = include_str!("../example-data/madrid-sled17.json");
-    let sled14: OmicronZonesConfig = serde_json::from_str(sled14_data).unwrap();
-    let sled16: OmicronZonesConfig = serde_json::from_str(sled16_data).unwrap();
-    let sled17: OmicronZonesConfig = serde_json::from_str(sled17_data).unwrap();
-
-    let sled14_id = "7612d745-d978-41c8-8ee0-84564debe1d2".parse().unwrap();
-    builder
-        .found_sled_omicron_zones("fake sled 14 agent", sled14_id, sled14)
-        .unwrap();
-    let sled16_id = "af56cb43-3422-4f76-85bf-3f229db5f39c".parse().unwrap();
-    builder
-        .found_sled_omicron_zones("fake sled 15 agent", sled16_id, sled16)
-        .unwrap();
-    let sled17_id = "6eb2a0d9-285d-4e03-afa1-090e4656314b".parse().unwrap();
-    builder
-        .found_sled_omicron_zones("fake sled 15 agent", sled17_id, sled17)
-        .unwrap();
+    builder.found_clickhouse_keeper_cluster_membership(
+        ClickhouseKeeperClusterMembership {
+            queried_keeper: KeeperId(1),
+            leader_committed_log_index: 1000,
+            raft_config: [KeeperId(1)].into_iter().collect(),
+        },
+    );
 
     Representative {
         builder,
@@ -495,6 +540,8 @@ pub fn caboose(unique: &str) -> SpComponentCaboose {
         git_commit: format!("git_commit_{}", unique),
         name: format!("name_{}", unique),
         version: format!("version_{}", unique),
+        sign: None,
+        epoch: None,
     }
 }
 
@@ -509,18 +556,22 @@ pub fn sled_agent(
     sled_id: SledUuid,
     baseboard: Baseboard,
     sled_role: SledRole,
+    omicron_zones: OmicronZonesConfig,
     disks: Vec<InventoryDisk>,
     zpools: Vec<InventoryZpool>,
+    datasets: Vec<InventoryDataset>,
 ) -> Inventory {
     Inventory {
         baseboard,
         reservoir_size: ByteCount::from(1024),
         sled_role,
         sled_agent_address: "[::1]:56792".parse().unwrap(),
-        sled_id: sled_id.into_untyped_uuid(),
+        sled_id,
         usable_hardware_threads: 10,
         usable_physical_ram: ByteCount::from(1024 * 1024),
+        omicron_zones,
         disks,
         zpools,
+        datasets,
     }
 }

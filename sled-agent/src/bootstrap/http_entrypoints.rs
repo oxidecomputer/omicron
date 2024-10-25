@@ -29,6 +29,7 @@ use sled_agent_types::rack_ops::RackOperationStatus;
 use sled_hardware_types::Baseboard;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
+use sprockets_tls::keys::SprocketsConfig;
 use std::net::Ipv6Addr;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{mpsc, oneshot};
@@ -43,6 +44,7 @@ pub(crate) struct BootstrapServerContext {
     pub(crate) updates: ConfigUpdates,
     pub(crate) sled_reset_tx:
         mpsc::Sender<oneshot::Sender<Result<(), BootstrapError>>>,
+    pub(crate) sprockets: SprocketsConfig,
 }
 
 impl BootstrapServerContext {
@@ -52,6 +54,7 @@ impl BootstrapServerContext {
     ) -> Result<RackInitUuid, RssAccessError> {
         self.rss_access.start_initializing(
             &self.base_log,
+            self.sprockets.clone(),
             self.global_zone_bootstrap_ip,
             &self.storage_manager,
             &self.bootstore_node_handle,
@@ -116,7 +119,11 @@ impl BootstrapAgentApi for BootstrapAgentImpl {
         let ctx = rqctx.context();
         let id = ctx
             .rss_access
-            .start_reset(&ctx.base_log, ctx.global_zone_bootstrap_ip)
+            .start_reset(
+                &ctx.base_log,
+                ctx.sprockets.clone(),
+                ctx.global_zone_bootstrap_ip,
+            )
             .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
         Ok(HttpResponseOk(id))
     }

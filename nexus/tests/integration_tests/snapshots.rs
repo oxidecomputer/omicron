@@ -139,11 +139,13 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
             ssh_public_keys: Some(Vec::new()),
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::None,
-            disks: vec![params::InstanceDiskAttachment::Attach(
+            boot_disk: Some(params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach { name: base_disk_name.clone() },
-            )],
+            )),
+            disks: Vec::new(),
             external_ips: vec![],
             start: true,
+            auto_restart_policy: Default::default(),
         },
     )
     .await;
@@ -342,11 +344,13 @@ async fn test_snapshot_stopped_instance(cptestctx: &ControlPlaneTestContext) {
             ssh_public_keys: Some(Vec::new()),
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::None,
-            disks: vec![params::InstanceDiskAttachment::Attach(
+            boot_disk: Some(params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach { name: base_disk_name.clone() },
-            )],
+            )),
+            disks: Vec::new(),
             external_ips: vec![],
             start: false,
+            auto_restart_policy: Default::default(),
         },
     )
     .await;
@@ -1384,33 +1388,21 @@ async fn test_multiple_deletes_not_sent(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 
     // Continue pretending that each saga is executing concurrently: call
-    // `decrease_crucible_resource_count_and_soft_delete_volume` back to back.
-    // Make sure that each saga is deleting a unique set of resources, else they
-    // will be sending identical DELETE calls to Crucible agents. This is ok
-    // because the agents are idempotent, but if someone issues a DELETE for a
-    // read-only downstairs (called a "running snapshot") when the snapshot was
-    // deleted, they'll see a 404, which will cause the saga to fail.
+    // `soft_delete_volume` back to back.  Make sure that each saga is deleting
+    // a unique set of resources, else they will be sending identical DELETE
+    // calls to Crucible agents. This is ok because the agents are idempotent,
+    // but if someone issues a DELETE for a read-only downstairs (called a
+    // "running snapshot") when the snapshot was deleted, they'll see a 404,
+    // which will cause the saga to fail.
 
-    let resources_1 = datastore
-        .decrease_crucible_resource_count_and_soft_delete_volume(
-            db_snapshot_1.volume_id,
-        )
-        .await
-        .unwrap();
+    let resources_1 =
+        datastore.soft_delete_volume(db_snapshot_1.volume_id).await.unwrap();
 
-    let resources_2 = datastore
-        .decrease_crucible_resource_count_and_soft_delete_volume(
-            db_snapshot_2.volume_id,
-        )
-        .await
-        .unwrap();
+    let resources_2 =
+        datastore.soft_delete_volume(db_snapshot_2.volume_id).await.unwrap();
 
-    let resources_3 = datastore
-        .decrease_crucible_resource_count_and_soft_delete_volume(
-            db_snapshot_3.volume_id,
-        )
-        .await
-        .unwrap();
+    let resources_3 =
+        datastore.soft_delete_volume(db_snapshot_3.volume_id).await.unwrap();
 
     let resources_1_datasets_and_regions =
         datastore.regions_to_delete(&resources_1).await.unwrap();

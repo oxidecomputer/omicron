@@ -4,9 +4,10 @@
 
 //! Types for representing the hardware/software inventory in the database
 
-use crate::omicron_zone_config::{OmicronZone, OmicronZoneNic};
+use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::schema::{
-    hw_baseboard_id, inv_caboose, inv_collection, inv_collection_error,
+    hw_baseboard_id, inv_caboose, inv_clickhouse_keeper_membership,
+    inv_collection, inv_collection_error, inv_dataset, inv_nvme_disk_firmware,
     inv_omicron_zone, inv_omicron_zone_nic, inv_physical_disk,
     inv_root_of_trust, inv_root_of_trust_page, inv_service_processor,
     inv_sled_agent, inv_sled_omicron_zones, inv_zpool, sw_caboose,
@@ -18,9 +19,10 @@ use crate::{
     impl_enum_type, ipv6, ByteCount, Generation, MacAddr, Name, ServiceKind,
     SqlU16, SqlU32, SqlU8,
 };
-use anyhow::anyhow;
+use anyhow::{anyhow, bail, Context, Result};
 use chrono::DateTime;
 use chrono::Utc;
+use clickhouse_admin_types::{ClickhouseKeeperClusterMembership, KeeperId};
 use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
 use diesel::expression::AsExpression;
@@ -28,20 +30,25 @@ use diesel::pg::Pg;
 use diesel::serialize::ToSql;
 use diesel::{serialize, sql_types};
 use ipnetwork::IpNetwork;
-use nexus_sled_agent_shared::inventory::{
-    OmicronZoneConfig, OmicronZonesConfig,
-};
+use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
+use nexus_sled_agent_shared::inventory::{OmicronZoneConfig, OmicronZoneType};
 use nexus_types::inventory::{
-    BaseboardId, Caboose, Collection, PowerState, RotPage, RotSlot,
+    BaseboardId, Caboose, Collection, NvmeFirmware, PowerState, RotPage,
+    RotSlot,
 };
 use omicron_common::api::internal::shared::NetworkInterface;
-use omicron_uuid_kinds::CollectionKind;
-use omicron_uuid_kinds::CollectionUuid;
+use omicron_common::zpool_name::ZpoolName;
+use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolKind;
 use omicron_uuid_kinds::ZpoolUuid;
+use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind};
+use omicron_uuid_kinds::{CollectionUuid, OmicronZoneUuid};
+use std::collections::BTreeSet;
+use std::net::{IpAddr, SocketAddrV6};
+use thiserror::Error;
 use uuid::Uuid;
 
 // See [`nexus_types::inventory::PowerState`].
@@ -881,17 +888,204 @@ impl InvPhysicalDisk {
     }
 }
 
-impl From<InvPhysicalDisk> for nexus_types::inventory::PhysicalDisk {
-    fn from(disk: InvPhysicalDisk) -> Self {
-        Self {
-            identity: omicron_common::disk::DiskIdentity {
-                vendor: disk.vendor,
-                serial: disk.serial,
-                model: disk.model,
-            },
-            variant: disk.variant.into(),
-            slot: disk.slot,
+#[derive(Clone, Debug, Error)]
+pub enum InvNvmeDiskFirmwareError {
+    #[error("active slot must be between 1 and 7, found `{0}`")]
+    InvalidActiveSlot(u8),
+    #[error("next active slot must be between 1 and 7, found `{0}`")]
+    InvalidNextActiveSlot(u8),
+    #[error("number of slots must be between 1 and 7, found `{0}`")]
+    InvalidNumberOfSlots(u8),
+    #[error("`{slots}` slots should match `{len}` firmware version entries")]
+    SlotFirmwareVersionsLengthMismatch { slots: u8, len: usize },
+    #[error("firmware version string `{0}` contains non ascii characters")]
+    FirmwareVersionNotAscii(String),
+    #[error("firmware version string `{0}` must be 8 bytes or less")]
+    FirmwareVersionTooLong(String),
+    #[error("active firmware at slot `{0}` maps to empty slot")]
+    InvalidActiveSlotFirmware(u8),
+    #[error("next active firmware at slot `{0}` maps to empty slot")]
+    InvalidNextActiveSlotFirmware(u8),
+}
+
+/// See [`nexus_types::inventory::PhysicalDiskFirmware::Nvme`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_nvme_disk_firmware)]
+pub struct InvNvmeDiskFirmware {
+    inv_collection_id: DbTypedUuid<CollectionKind>,
+    sled_id: DbTypedUuid<SledKind>,
+    slot: i64,
+    active_slot: SqlU8,
+    next_active_slot: Option<SqlU8>,
+    number_of_slots: SqlU8,
+    slot1_is_read_only: bool,
+    slot_firmware_versions: Vec<Option<String>>,
+}
+
+impl InvNvmeDiskFirmware {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        sled_slot: i64,
+        firmware: &NvmeFirmware,
+    ) -> Result<Self, InvNvmeDiskFirmwareError> {
+        // NB: We first validate that the data given to us from an NVMe disk
+        // actually makes sense. For the purposes of testing we ensure that
+        // number of slots is validated first before any other field.
+
+        // Valid NVMe slots are between 1 and 7.
+        let valid_slot = 1..=7;
+        if !valid_slot.contains(&firmware.number_of_slots) {
+            return Err(InvNvmeDiskFirmwareError::InvalidNumberOfSlots(
+                firmware.number_of_slots,
+            ));
         }
+        if usize::from(firmware.number_of_slots)
+            != firmware.slot_firmware_versions.len()
+        {
+            return Err(
+                InvNvmeDiskFirmwareError::SlotFirmwareVersionsLengthMismatch {
+                    slots: firmware.number_of_slots,
+                    len: firmware.slot_firmware_versions.len(),
+                },
+            );
+        }
+        if !valid_slot.contains(&firmware.active_slot) {
+            return Err(InvNvmeDiskFirmwareError::InvalidActiveSlot(
+                firmware.active_slot,
+            ));
+        }
+        // active_slot maps to a populated version
+        let Some(Some(_fw_string)) = firmware
+            .slot_firmware_versions
+            .get(usize::from(firmware.active_slot) - 1)
+        else {
+            return Err(InvNvmeDiskFirmwareError::InvalidActiveSlotFirmware(
+                firmware.active_slot,
+            ));
+        };
+        if let Some(next_active_slot) = firmware.next_active_slot {
+            if !valid_slot.contains(&next_active_slot) {
+                return Err(InvNvmeDiskFirmwareError::InvalidNextActiveSlot(
+                    next_active_slot,
+                ));
+            }
+
+            // next_active_slot maps to a populated version
+            let Some(Some(_fw_string)) = firmware
+                .slot_firmware_versions
+                .get(usize::from(next_active_slot) - 1)
+            else {
+                return Err(
+                    InvNvmeDiskFirmwareError::InvalidNextActiveSlotFirmware(
+                        next_active_slot,
+                    ),
+                );
+            };
+        }
+        // slot fw strings must be a max of 8 bytes and must be ascii characters
+        for fw_string in firmware.slot_firmware_versions.iter().flatten() {
+            if !fw_string.is_ascii() {
+                return Err(InvNvmeDiskFirmwareError::FirmwareVersionNotAscii(
+                    fw_string.clone(),
+                ));
+            }
+            if fw_string.len() > 8 {
+                return Err(InvNvmeDiskFirmwareError::FirmwareVersionTooLong(
+                    fw_string.clone(),
+                ));
+            }
+        }
+
+        Ok(Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            slot: sled_slot,
+            active_slot: firmware.active_slot.into(),
+            next_active_slot: firmware.next_active_slot.map(|nas| nas.into()),
+            number_of_slots: firmware.number_of_slots.into(),
+            slot1_is_read_only: firmware.slot1_is_read_only,
+            slot_firmware_versions: firmware.slot_firmware_versions.clone(),
+        })
+    }
+
+    /// Attempt to read the current firmware version.
+    pub fn current_version(&self) -> Option<&str> {
+        match self.active_slot.0 {
+            // be paranoid that we have a value within the NVMe spec
+            slot @ 1..=7 => self
+                .slot_firmware_versions
+                .get(usize::from(slot) - 1)
+                .and_then(|v| v.as_deref()),
+            _ => None,
+        }
+    }
+
+    /// Attempt to read the staged firmware version that will be active upon
+    /// next device reset.
+    pub fn next_version(&self) -> Option<&str> {
+        match self.next_active_slot {
+            // be paranoid that we have a value within the NVMe spec
+            Some(slot) if slot.0 <= 7 && slot.0 >= 1 => self
+                .slot_firmware_versions
+                .get(usize::from(slot.0) - 1)
+                .and_then(|v| v.as_deref()),
+            _ => None,
+        }
+    }
+
+    pub fn inv_collection_id(&self) -> DbTypedUuid<CollectionKind> {
+        self.inv_collection_id
+    }
+
+    pub fn sled_id(&self) -> DbTypedUuid<SledKind> {
+        self.sled_id
+    }
+
+    pub fn slot(&self) -> i64 {
+        self.slot
+    }
+
+    pub fn number_of_slots(&self) -> SqlU8 {
+        self.number_of_slots
+    }
+
+    pub fn active_slot(&self) -> SqlU8 {
+        self.active_slot
+    }
+
+    pub fn next_active_slot(&self) -> Option<SqlU8> {
+        self.next_active_slot
+    }
+
+    pub fn slot1_is_read_only(&self) -> bool {
+        self.slot1_is_read_only
+    }
+
+    pub fn slot_firmware_versions(&self) -> &[Option<String>] {
+        &self.slot_firmware_versions
+    }
+}
+
+impl From<InvNvmeDiskFirmware>
+    for nexus_types::inventory::PhysicalDiskFirmware
+{
+    fn from(
+        nvme_firmware: InvNvmeDiskFirmware,
+    ) -> nexus_types::inventory::PhysicalDiskFirmware {
+        use nexus_types::inventory as nexus_inventory;
+
+        nexus_inventory::PhysicalDiskFirmware::Nvme(
+            nexus_inventory::NvmeFirmware {
+                active_slot: nvme_firmware.active_slot.0,
+                next_active_slot: nvme_firmware
+                    .next_active_slot
+                    .map(|nas| nas.0),
+                number_of_slots: nvme_firmware.number_of_slots.0,
+                slot1_is_read_only: nvme_firmware.slot1_is_read_only,
+                slot_firmware_versions: nvme_firmware.slot_firmware_versions,
+            },
+        )
     }
 }
 
@@ -932,7 +1126,61 @@ impl From<InvZpool> for nexus_types::inventory::Zpool {
     }
 }
 
-/// See [`nexus_types::inventory::OmicronZonesFound`].
+/// See [`nexus_types::inventory::Dataset`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_dataset)]
+pub struct InvDataset {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub id: Option<DbTypedUuid<DatasetKind>>,
+    pub name: String,
+    pub available: ByteCount,
+    pub used: ByteCount,
+    pub quota: Option<ByteCount>,
+    pub reservation: Option<ByteCount>,
+    pub compression: String,
+}
+
+impl InvDataset {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        dataset: &nexus_types::inventory::Dataset,
+    ) -> Self {
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+
+            id: dataset.id.map(|id| id.into()),
+            name: dataset.name.clone(),
+            available: dataset.available.into(),
+            used: dataset.used.into(),
+            quota: dataset.quota.map(|q| q.into()),
+            reservation: dataset.reservation.map(|r| r.into()),
+            compression: dataset.compression.clone(),
+        }
+    }
+}
+
+impl From<InvDataset> for nexus_types::inventory::Dataset {
+    fn from(dataset: InvDataset) -> Self {
+        Self {
+            id: dataset.id.map(|id| id.0),
+            name: dataset.name,
+            available: *dataset.available,
+            used: *dataset.used,
+            quota: dataset.quota.map(|q| *q),
+            reservation: dataset.reservation.map(|r| *r),
+            compression: dataset.compression,
+        }
+    }
+}
+
+/// Information about a sled's Omicron zones, part of
+/// [`nexus_types::inventory::SledAgent`].
+///
+/// TODO: This table is vestigial and can be combined with `InvSledAgent`. See
+/// [issue #6770](https://github.com/oxidecomputer/omicron/issues/6770).
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_sled_omicron_zones)]
 pub struct InvSledOmicronZones {
@@ -946,28 +1194,14 @@ pub struct InvSledOmicronZones {
 impl InvSledOmicronZones {
     pub fn new(
         inv_collection_id: CollectionUuid,
-        zones_found: &nexus_types::inventory::OmicronZonesFound,
+        sled_agent: &nexus_types::inventory::SledAgent,
     ) -> InvSledOmicronZones {
         InvSledOmicronZones {
             inv_collection_id: inv_collection_id.into(),
-            time_collected: zones_found.time_collected,
-            source: zones_found.source.clone(),
-            sled_id: zones_found.sled_id.into(),
-            generation: Generation(zones_found.zones.generation),
-        }
-    }
-
-    pub fn into_uninit_zones_found(
-        self,
-    ) -> nexus_types::inventory::OmicronZonesFound {
-        nexus_types::inventory::OmicronZonesFound {
-            time_collected: self.time_collected,
-            source: self.source,
-            sled_id: self.sled_id.into(),
-            zones: OmicronZonesConfig {
-                generation: *self.generation,
-                zones: Vec::new(),
-            },
+            time_collected: sled_agent.time_collected,
+            source: sled_agent.source.clone(),
+            sled_id: sled_agent.sled_id.into(),
+            generation: Generation(sled_agent.omicron_zones.generation),
         }
     }
 }
@@ -1062,7 +1296,7 @@ impl From<nexus_sled_agent_shared::inventory::ZoneKind> for ZoneType {
 pub struct InvOmicronZone {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub sled_id: DbTypedUuid<SledKind>,
-    pub id: Uuid,
+    pub id: DbTypedUuid<OmicronZoneKind>,
     pub underlay_address: ipv6::Ipv6Addr,
     pub zone_type: ZoneType,
     pub primary_service_ip: ipv6::Ipv6Addr,
@@ -1090,73 +1324,336 @@ impl InvOmicronZone {
         sled_id: SledUuid,
         zone: &OmicronZoneConfig,
     ) -> Result<InvOmicronZone, anyhow::Error> {
-        // Inventory zones do not know the external IP ID.
-        let external_ip_id = None;
-        let zone = OmicronZone::new(
-            sled_id,
-            zone.id,
-            zone.underlay_address,
-            zone.filesystem_pool.as_ref().map(|pool| pool.id()),
-            &zone.zone_type,
-            external_ip_id,
-        )?;
-        Ok(Self {
+        // Create a dummy record to start, then fill in the rest
+        // according to the zone type
+        let mut inv_omicron_zone = InvOmicronZone {
+            // Fill in the known fields that don't require inspecting
+            // `zone.zone_type`
             inv_collection_id: inv_collection_id.into(),
-            sled_id: zone.sled_id.into(),
-            id: zone.id,
-            underlay_address: zone.underlay_address,
-            zone_type: zone.zone_type,
-            primary_service_ip: zone.primary_service_ip,
-            primary_service_port: zone.primary_service_port,
-            second_service_ip: zone.second_service_ip,
-            second_service_port: zone.second_service_port,
-            dataset_zpool_name: zone.dataset_zpool_name,
-            nic_id: zone.nic_id,
-            dns_gz_address: zone.dns_gz_address,
-            dns_gz_address_index: zone.dns_gz_address_index,
-            ntp_ntp_servers: zone.ntp_ntp_servers,
-            ntp_dns_servers: zone.ntp_dns_servers,
-            ntp_domain: zone.ntp_domain,
-            nexus_external_tls: zone.nexus_external_tls,
-            nexus_external_dns_servers: zone.nexus_external_dns_servers,
-            snat_ip: zone.snat_ip,
-            snat_first_port: zone.snat_first_port,
-            snat_last_port: zone.snat_last_port,
-            filesystem_pool: zone.filesystem_pool.map(|id| id.into()),
-        })
+            sled_id: sled_id.into(),
+            id: zone.id.into(),
+            underlay_address: zone.underlay_address.into(),
+            filesystem_pool: zone
+                .filesystem_pool
+                .as_ref()
+                .map(|pool| pool.id().into()),
+            zone_type: zone.zone_type.kind().into(),
+
+            // Set the remainder of the fields to a default
+            primary_service_ip: "::1"
+                .parse::<std::net::Ipv6Addr>()
+                .unwrap()
+                .into(),
+            primary_service_port: 0.into(),
+            second_service_ip: None,
+            second_service_port: None,
+            dataset_zpool_name: None,
+            nic_id: None,
+            dns_gz_address: None,
+            dns_gz_address_index: None,
+            ntp_ntp_servers: None,
+            ntp_dns_servers: None,
+            ntp_domain: None,
+            nexus_external_tls: None,
+            nexus_external_dns_servers: None,
+            snat_ip: None,
+            snat_first_port: None,
+            snat_last_port: None,
+        };
+
+        match &zone.zone_type {
+            OmicronZoneType::BoundaryNtp {
+                address,
+                ntp_servers,
+                dns_servers,
+                domain,
+                nic,
+                snat_cfg,
+            } => {
+                // Set the common fields
+                inv_omicron_zone.set_primary_service_ip_and_port(address);
+
+                // Set the zone specific fields
+                let (first_port, last_port) = snat_cfg.port_range_raw();
+                inv_omicron_zone.ntp_ntp_servers = Some(ntp_servers.clone());
+                inv_omicron_zone.ntp_dns_servers = Some(
+                    dns_servers
+                        .into_iter()
+                        .cloned()
+                        .map(IpNetwork::from)
+                        .collect(),
+                );
+                inv_omicron_zone.ntp_domain.clone_from(domain);
+                inv_omicron_zone.snat_ip = Some(IpNetwork::from(snat_cfg.ip));
+                inv_omicron_zone.snat_first_port =
+                    Some(SqlU16::from(first_port));
+                inv_omicron_zone.snat_last_port = Some(SqlU16::from(last_port));
+                inv_omicron_zone.nic_id = Some(nic.id);
+            }
+            OmicronZoneType::Clickhouse { address, dataset } => {
+                // Set the common fields
+                inv_omicron_zone.set_primary_service_ip_and_port(address);
+                inv_omicron_zone.set_zpool_name(dataset);
+            }
+            OmicronZoneType::ClickhouseKeeper { address, dataset } => {
+                // Set the common fields
+                inv_omicron_zone.set_primary_service_ip_and_port(address);
+                inv_omicron_zone.set_zpool_name(dataset);
+            }
+            OmicronZoneType::ClickhouseServer { address, dataset } => {
+                // Set the common fields
+                inv_omicron_zone.set_primary_service_ip_and_port(address);
+                inv_omicron_zone.set_zpool_name(dataset);
+            }
+            OmicronZoneType::CockroachDb { address, dataset } => {
+                // Set the common fields
+                inv_omicron_zone.set_primary_service_ip_and_port(address);
+                inv_omicron_zone.set_zpool_name(dataset);
+            }
+            OmicronZoneType::Crucible { address, dataset } => {
+                // Set the common fields
+                inv_omicron_zone.set_primary_service_ip_and_port(address);
+                inv_omicron_zone.set_zpool_name(dataset);
+            }
+            OmicronZoneType::CruciblePantry { address } => {
+                // Set the common fields
+                inv_omicron_zone.set_primary_service_ip_and_port(address);
+            }
+            OmicronZoneType::ExternalDns {
+                dataset,
+                http_address,
+                dns_address,
+                nic,
+            } => {
+                // Set the common fields
+                inv_omicron_zone.set_primary_service_ip_and_port(http_address);
+                inv_omicron_zone.set_zpool_name(dataset);
+
+                // Set the zone specific fields
+                inv_omicron_zone.nic_id = Some(nic.id);
+                inv_omicron_zone.second_service_ip =
+                    Some(IpNetwork::from(dns_address.ip()));
+                inv_omicron_zone.second_service_port =
+                    Some(SqlU16::from(dns_address.port()));
+            }
+            OmicronZoneType::InternalDns {
+                dataset,
+                http_address,
+                dns_address,
+                gz_address,
+                gz_address_index,
+            } => {
+                // Set the common fields
+                inv_omicron_zone.set_primary_service_ip_and_port(http_address);
+                inv_omicron_zone.set_zpool_name(dataset);
+
+                // Set the zone specific fields
+                inv_omicron_zone.second_service_ip =
+                    Some(IpNetwork::from(IpAddr::V6(*dns_address.ip())));
+                inv_omicron_zone.second_service_port =
+                    Some(SqlU16::from(dns_address.port()));
+
+                inv_omicron_zone.dns_gz_address =
+                    Some(ipv6::Ipv6Addr::from(gz_address));
+                inv_omicron_zone.dns_gz_address_index =
+                    Some(SqlU32::from(*gz_address_index));
+            }
+            OmicronZoneType::InternalNtp { address } => {
+                // Set the common fields
+                inv_omicron_zone.set_primary_service_ip_and_port(address);
+            }
+            OmicronZoneType::Nexus {
+                internal_address,
+                external_ip,
+                nic,
+                external_tls,
+                external_dns_servers,
+            } => {
+                // Set the common fields
+                inv_omicron_zone
+                    .set_primary_service_ip_and_port(internal_address);
+
+                // Set the zone specific fields
+                inv_omicron_zone.nic_id = Some(nic.id);
+                inv_omicron_zone.second_service_ip =
+                    Some(IpNetwork::from(*external_ip));
+                inv_omicron_zone.nexus_external_tls = Some(*external_tls);
+                inv_omicron_zone.nexus_external_dns_servers = Some(
+                    external_dns_servers
+                        .iter()
+                        .cloned()
+                        .map(IpNetwork::from)
+                        .collect(),
+                );
+            }
+            OmicronZoneType::Oximeter { address } => {
+                // Set the common fields
+                inv_omicron_zone.set_primary_service_ip_and_port(address);
+            }
+        }
+
+        Ok(inv_omicron_zone)
+    }
+
+    fn set_primary_service_ip_and_port(&mut self, address: &SocketAddrV6) {
+        let (primary_service_ip, primary_service_port) =
+            (ipv6::Ipv6Addr::from(*address.ip()), SqlU16::from(address.port()));
+        self.primary_service_ip = primary_service_ip;
+        self.primary_service_port = primary_service_port;
+    }
+
+    fn set_zpool_name(&mut self, dataset: &OmicronZoneDataset) {
+        self.dataset_zpool_name = Some(dataset.pool_name.to_string());
     }
 
     pub fn into_omicron_zone_config(
         self,
         nic_row: Option<InvOmicronZoneNic>,
     ) -> Result<OmicronZoneConfig, anyhow::Error> {
-        let zone = OmicronZone {
-            sled_id: self.sled_id.into(),
-            id: self.id,
-            underlay_address: self.underlay_address,
-            filesystem_pool: self.filesystem_pool.map(|id| id.into()),
-            zone_type: self.zone_type,
-            primary_service_ip: self.primary_service_ip,
-            primary_service_port: self.primary_service_port,
-            second_service_ip: self.second_service_ip,
-            second_service_port: self.second_service_port,
-            dataset_zpool_name: self.dataset_zpool_name,
-            nic_id: self.nic_id,
-            dns_gz_address: self.dns_gz_address,
-            dns_gz_address_index: self.dns_gz_address_index,
-            ntp_ntp_servers: self.ntp_ntp_servers,
-            ntp_dns_servers: self.ntp_dns_servers,
-            ntp_domain: self.ntp_domain,
-            nexus_external_tls: self.nexus_external_tls,
-            nexus_external_dns_servers: self.nexus_external_dns_servers,
-            snat_ip: self.snat_ip,
-            snat_first_port: self.snat_first_port,
-            snat_last_port: self.snat_last_port,
-            // Inventory zones don't know an external IP ID, and Omicron zone
-            // configs don't need it.
-            external_ip_id: None,
+        // Build up a set of common fields for our `OmicronZoneType`s
+        //
+        // Some of these are results that we only evaluate when used, because
+        // not all zone types use all common fields.
+        let primary_address = SocketAddrV6::new(
+            self.primary_service_ip.into(),
+            *self.primary_service_port,
+            0,
+            0,
+        );
+
+        let dataset =
+            omicron_zone_config::dataset_zpool_name_to_omicron_zone_dataset(
+                self.dataset_zpool_name,
+            );
+
+        // There is a nested result here. If there is a caller error (the outer
+        // Result) we immediately return. We check the inner result later, but
+        // only if some code path tries to use `nic` and it's not present.
+        let nic = omicron_zone_config::nic_row_to_network_interface(
+            self.id.into(),
+            self.nic_id,
+            nic_row.map(Into::into),
+        )?;
+
+        let dns_address =
+            omicron_zone_config::secondary_ip_and_port_to_dns_address(
+                self.second_service_ip,
+                self.second_service_port,
+            );
+
+        let ntp_dns_servers =
+            omicron_zone_config::ntp_dns_servers_to_omicron_internal(
+                self.ntp_dns_servers,
+            );
+
+        let ntp_servers = omicron_zone_config::ntp_servers_to_omicron_internal(
+            self.ntp_ntp_servers,
+        );
+
+        let zone_type = match self.zone_type {
+            ZoneType::BoundaryNtp => {
+                let snat_cfg = match (
+                    self.snat_ip,
+                    self.snat_first_port,
+                    self.snat_last_port,
+                ) {
+                    (Some(ip), Some(first_port), Some(last_port)) => {
+                        nexus_types::inventory::SourceNatConfig::new(
+                            ip.ip(),
+                            *first_port,
+                            *last_port,
+                        )
+                        .context("bad SNAT config for boundary NTP")?
+                    }
+                    _ => bail!(
+                        "expected non-NULL snat properties, \
+                         found at least one NULL"
+                    ),
+                };
+                OmicronZoneType::BoundaryNtp {
+                    address: primary_address,
+                    ntp_servers: ntp_servers?,
+                    dns_servers: ntp_dns_servers?,
+                    domain: self.ntp_domain,
+                    nic: nic?,
+                    snat_cfg,
+                }
+            }
+            ZoneType::Clickhouse => OmicronZoneType::Clickhouse {
+                address: primary_address,
+                dataset: dataset?,
+            },
+            ZoneType::ClickhouseKeeper => OmicronZoneType::ClickhouseKeeper {
+                address: primary_address,
+                dataset: dataset?,
+            },
+            ZoneType::ClickhouseServer => OmicronZoneType::ClickhouseServer {
+                address: primary_address,
+                dataset: dataset?,
+            },
+            ZoneType::CockroachDb => OmicronZoneType::CockroachDb {
+                address: primary_address,
+                dataset: dataset?,
+            },
+            ZoneType::Crucible => OmicronZoneType::Crucible {
+                address: primary_address,
+                dataset: dataset?,
+            },
+            ZoneType::CruciblePantry => {
+                OmicronZoneType::CruciblePantry { address: primary_address }
+            }
+            ZoneType::ExternalDns => OmicronZoneType::ExternalDns {
+                dataset: dataset?,
+                http_address: primary_address,
+                dns_address: dns_address?,
+                nic: nic?,
+            },
+            ZoneType::InternalDns => OmicronZoneType::InternalDns {
+                dataset: dataset?,
+                http_address: primary_address,
+                dns_address: omicron_zone_config::to_internal_dns_address(
+                    dns_address?,
+                )?,
+                gz_address: self.dns_gz_address.map(Into::into).ok_or_else(
+                    || anyhow!("expected dns_gz_address, found none"),
+                )?,
+                gz_address_index: *self.dns_gz_address_index.ok_or_else(
+                    || anyhow!("expected dns_gz_address_index, found none"),
+                )?,
+            },
+            ZoneType::InternalNtp => {
+                OmicronZoneType::InternalNtp { address: primary_address }
+            }
+            ZoneType::Nexus => OmicronZoneType::Nexus {
+                internal_address: primary_address,
+                external_ip: self
+                    .second_service_ip
+                    .ok_or_else(|| anyhow!("expected second service IP"))?
+                    .ip(),
+                nic: nic?,
+                external_tls: self
+                    .nexus_external_tls
+                    .ok_or_else(|| anyhow!("expected 'external_tls'"))?,
+                external_dns_servers: self
+                    .nexus_external_dns_servers
+                    .ok_or_else(|| anyhow!("expected 'external_dns_servers'"))?
+                    .into_iter()
+                    .map(|i| i.ip())
+                    .collect(),
+            },
+            ZoneType::Oximeter => {
+                OmicronZoneType::Oximeter { address: primary_address }
+            }
         };
-        zone.into_omicron_zone_config(nic_row.map(OmicronZoneNic::from))
+
+        Ok(OmicronZoneConfig {
+            id: self.id.into(),
+            underlay_address: self.underlay_address.into(),
+            filesystem_pool: self
+                .filesystem_pool
+                .map(|id| ZpoolName::new_external(id.into())),
+            zone_type,
+        })
     }
 }
 
@@ -1213,9 +1710,286 @@ impl InvOmicronZoneNic {
 
     pub fn into_network_interface_for_zone(
         self,
-        zone_id: Uuid,
+        zone_id: OmicronZoneUuid,
     ) -> Result<NetworkInterface, anyhow::Error> {
         let zone_nic = OmicronZoneNic::from(self);
         zone_nic.into_network_interface_for_zone(zone_id)
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_clickhouse_keeper_membership)]
+pub struct InvClickhouseKeeperMembership {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub queried_keeper_id: i64,
+    pub leader_committed_log_index: i64,
+    pub raft_config: Vec<i64>,
+}
+
+impl TryFrom<InvClickhouseKeeperMembership>
+    for ClickhouseKeeperClusterMembership
+{
+    type Error = anyhow::Error;
+
+    fn try_from(value: InvClickhouseKeeperMembership) -> anyhow::Result<Self> {
+        let err_msg = "clickhouse keeper ID is negative";
+        let mut raft_config = BTreeSet::new();
+        // We are not worried about duplicates here, as each
+        // `clickhouse-admin-keeper` reports about its local, unique keeper.
+        // This uniqueness is guaranteed by the blueprint generation mechanism.
+        for id in value.raft_config {
+            raft_config.insert(KeeperId(id.try_into().context(err_msg)?));
+        }
+        Ok(ClickhouseKeeperClusterMembership {
+            queried_keeper: KeeperId(
+                value.queried_keeper_id.try_into().context(err_msg)?,
+            ),
+            leader_committed_log_index: value
+                .leader_committed_log_index
+                .try_into()
+                .context("log index is negative")?,
+            raft_config,
+        })
+    }
+}
+
+impl InvClickhouseKeeperMembership {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        membership: ClickhouseKeeperClusterMembership,
+    ) -> anyhow::Result<InvClickhouseKeeperMembership> {
+        let err_msg = "clickhouse keeper ID > 2^63";
+        let mut raft_config = Vec::with_capacity(membership.raft_config.len());
+        for id in membership.raft_config {
+            raft_config.push(id.0.try_into().context(err_msg)?);
+        }
+        Ok(InvClickhouseKeeperMembership {
+            inv_collection_id: inv_collection_id.into(),
+            queried_keeper_id: membership
+                .queried_keeper
+                .0
+                .try_into()
+                .context(err_msg)?,
+            leader_committed_log_index: membership
+                .leader_committed_log_index
+                .try_into()
+                .context("log index > 2^63")?,
+            raft_config,
+        })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use nexus_types::inventory::NvmeFirmware;
+    use omicron_uuid_kinds::{CollectionKind, SledUuid, TypedUuid};
+
+    use crate::{typed_uuid, InvNvmeDiskFirmware, InvNvmeDiskFirmwareError};
+
+    #[test]
+    fn test_inv_nvme_disk_firmware() {
+        let inv_collection_id: TypedUuid<CollectionKind> =
+            typed_uuid::DbTypedUuid(TypedUuid::new_v4()).into();
+        let sled_id: SledUuid = TypedUuid::new_v4();
+        let slot = 1;
+
+        // NB: We are testing these error cases with only one value that
+        // is out of spec so that we don't have to worry about what order
+        // `InvNvmeDiskFirmware::new` is validating fields in.  The only test
+        // dependent on position is the number of slots test, but that is always
+        // processed first in the implementation
+
+        // Invalid active slot
+        for i in [0u8, 8] {
+            let firmware = &NvmeFirmware {
+                active_slot: i,
+                next_active_slot: None,
+                number_of_slots: 1,
+                slot1_is_read_only: true,
+                slot_firmware_versions: vec![Some("firmware".to_string())],
+            };
+            let err = InvNvmeDiskFirmware::new(
+                inv_collection_id,
+                sled_id,
+                slot,
+                firmware,
+            )
+            .unwrap_err();
+            assert!(matches!(
+                err,
+                InvNvmeDiskFirmwareError::InvalidActiveSlot(_)
+            ));
+        }
+
+        // Invalid next active slot
+        for i in [0u8, 8] {
+            let firmware = &NvmeFirmware {
+                active_slot: 1,
+                next_active_slot: Some(i),
+                number_of_slots: 2,
+                slot1_is_read_only: true,
+                slot_firmware_versions: vec![
+                    Some("firmware".to_string()),
+                    Some("firmware".to_string()),
+                ],
+            };
+            let err = InvNvmeDiskFirmware::new(
+                inv_collection_id,
+                sled_id,
+                slot,
+                firmware,
+            )
+            .unwrap_err();
+            assert!(matches!(
+                err,
+                InvNvmeDiskFirmwareError::InvalidNextActiveSlot(_)
+            ));
+        }
+
+        // Invalid number of slots
+        for i in [0u8, 8] {
+            let firmware = &NvmeFirmware {
+                active_slot: i,
+                next_active_slot: None,
+                number_of_slots: i,
+                slot1_is_read_only: true,
+                slot_firmware_versions: vec![
+                    Some("firmware".to_string());
+                    i as usize
+                ],
+            };
+            let err = InvNvmeDiskFirmware::new(
+                inv_collection_id,
+                sled_id,
+                slot,
+                firmware,
+            )
+            .unwrap_err();
+            assert!(matches!(
+                err,
+                InvNvmeDiskFirmwareError::InvalidNumberOfSlots(_)
+            ));
+        }
+
+        // Mismatch between number of slots and firmware versions
+        let firmware = &NvmeFirmware {
+            active_slot: 1,
+            next_active_slot: None,
+            number_of_slots: 2,
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![Some("firmware".to_string())],
+        };
+        let err = InvNvmeDiskFirmware::new(
+            inv_collection_id,
+            sled_id,
+            slot,
+            firmware,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            InvNvmeDiskFirmwareError::SlotFirmwareVersionsLengthMismatch { .. }
+        ));
+
+        // Firmware version string contains non ascii characters
+        let firmware = &NvmeFirmware {
+            active_slot: 1,
+            next_active_slot: None,
+            number_of_slots: 1,
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![Some("💾".to_string())],
+        };
+        let err = InvNvmeDiskFirmware::new(
+            inv_collection_id,
+            sled_id,
+            slot,
+            firmware,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            InvNvmeDiskFirmwareError::FirmwareVersionNotAscii(_)
+        ));
+
+        // Firmware version string is too long
+        let firmware = &NvmeFirmware {
+            active_slot: 1,
+            next_active_slot: None,
+            number_of_slots: 1,
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![Some(
+                "somereallylongstring".to_string(),
+            )],
+        };
+        let err = InvNvmeDiskFirmware::new(
+            inv_collection_id,
+            sled_id,
+            slot,
+            firmware,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            InvNvmeDiskFirmwareError::FirmwareVersionTooLong(_)
+        ));
+
+        // Active firmware version slot is in the vec but is empty
+        let firmware = &NvmeFirmware {
+            active_slot: 1,
+            next_active_slot: None,
+            number_of_slots: 1,
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![None],
+        };
+        let err = InvNvmeDiskFirmware::new(
+            inv_collection_id,
+            sled_id,
+            slot,
+            firmware,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            InvNvmeDiskFirmwareError::InvalidActiveSlotFirmware(_)
+        ));
+
+        // Next active firmware version slot is in the vec but is empty
+        let firmware = &NvmeFirmware {
+            active_slot: 1,
+            next_active_slot: Some(2),
+            number_of_slots: 2,
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![Some("1234".to_string()), None],
+        };
+        let err = InvNvmeDiskFirmware::new(
+            inv_collection_id,
+            sled_id,
+            slot,
+            firmware,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            InvNvmeDiskFirmwareError::InvalidNextActiveSlotFirmware(_)
+        ));
+
+        // Actually construct a valid value
+        let firmware = &NvmeFirmware {
+            active_slot: 1,
+            next_active_slot: Some(2),
+            number_of_slots: 2,
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![
+                Some("1234".to_string()),
+                Some("4567".to_string()),
+            ],
+        };
+        assert!(InvNvmeDiskFirmware::new(
+            inv_collection_id,
+            sled_id,
+            slot,
+            firmware,
+        )
+        .is_ok())
     }
 }

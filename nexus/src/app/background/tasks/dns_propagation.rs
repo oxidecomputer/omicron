@@ -7,11 +7,11 @@
 use super::dns_servers::DnsServersList;
 use crate::app::background::BackgroundTask;
 use anyhow::Context;
-use dns_service_client::types::DnsConfigParams;
 use futures::future::BoxFuture;
 use futures::stream;
 use futures::FutureExt;
 use futures::StreamExt;
+use internal_dns_types::config::DnsConfigParams;
 use nexus_db_queries::context::OpContext;
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -86,7 +86,7 @@ impl BackgroundTask for DnsPropagator {
             // Set up a logger for this activation that includes metadata about
             // the current generation and servers.
             let log = opctx.log.new(o!(
-                "generation" => dns_config.generation,
+                "generation" => u64::from(dns_config.generation),
                 "servers" => format!("{:?}", dns_servers),
             ));
 
@@ -180,12 +180,13 @@ mod test {
     use super::DnsPropagator;
     use crate::app::background::tasks::dns_servers::DnsServersList;
     use crate::app::background::BackgroundTask;
-    use dns_service_client::types::DnsConfigParams;
     use httptest::matchers::request;
     use httptest::responders::status_code;
     use httptest::Expectation;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::internal_api::params::DnsConfigParams;
+    use omicron_common::api::external::Generation;
     use serde::Deserialize;
     use serde_json::json;
     use std::collections::BTreeMap;
@@ -208,7 +209,7 @@ mod test {
         let mut task = DnsPropagator::new(config_rx, servers_rx, 3);
 
         let dns_config = DnsConfigParams {
-            generation: 1,
+            generation: Generation::from_u32(1),
             time_created: chrono::Utc::now(),
             zones: vec![],
         };

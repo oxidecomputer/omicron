@@ -1,0 +1,297 @@
+API operations found with tag "disks"
+OPERATION ID                             METHOD   URL PATH
+disk_bulk_write_import                   POST     /v1/disks/{disk}/bulk-write
+disk_bulk_write_import_start             POST     /v1/disks/{disk}/bulk-write-start
+disk_bulk_write_import_stop              POST     /v1/disks/{disk}/bulk-write-stop
+disk_create                              POST     /v1/disks
+disk_delete                              DELETE   /v1/disks/{disk}
+disk_finalize_import                     POST     /v1/disks/{disk}/finalize
+disk_list                                GET      /v1/disks
+disk_metrics_list                        GET      /v1/disks/{disk}/metrics/{metric}
+disk_view                                GET      /v1/disks/{disk}
+
+API operations found with tag "floating-ips"
+OPERATION ID                             METHOD   URL PATH
+floating_ip_attach                       POST     /v1/floating-ips/{floating_ip}/attach
+floating_ip_create                       POST     /v1/floating-ips
+floating_ip_delete                       DELETE   /v1/floating-ips/{floating_ip}
+floating_ip_detach                       POST     /v1/floating-ips/{floating_ip}/detach
+floating_ip_list                         GET      /v1/floating-ips
+floating_ip_update                       PUT      /v1/floating-ips/{floating_ip}
+floating_ip_view                         GET      /v1/floating-ips/{floating_ip}
+
+API operations found with tag "hidden"
+OPERATION ID                             METHOD   URL PATH
+device_access_token                      POST     /device/token
+device_auth_confirm                      POST     /device/confirm
+device_auth_request                      POST     /device/auth
+logout                                   POST     /v1/logout
+probe_create                             POST     /experimental/v1/probes
+probe_delete                             DELETE   /experimental/v1/probes/{probe}
+probe_list                               GET      /experimental/v1/probes
+probe_view                               GET      /experimental/v1/probes/{probe}
+
+API operations found with tag "images"
+OPERATION ID                             METHOD   URL PATH
+image_create                             POST     /v1/images
+image_delete                             DELETE   /v1/images/{image}
+image_demote                             POST     /v1/images/{image}/demote
+image_list                               GET      /v1/images
+image_promote                            POST     /v1/images/{image}/promote
+image_view                               GET      /v1/images/{image}
+
+API operations found with tag "instances"
+OPERATION ID                             METHOD   URL PATH
+instance_create                          POST     /v1/instances
+instance_delete                          DELETE   /v1/instances/{instance}
+instance_disk_attach                     POST     /v1/instances/{instance}/disks/attach
+instance_disk_detach                     POST     /v1/instances/{instance}/disks/detach
+instance_disk_list                       GET      /v1/instances/{instance}/disks
+instance_ephemeral_ip_attach             POST     /v1/instances/{instance}/external-ips/ephemeral
+instance_ephemeral_ip_detach             DELETE   /v1/instances/{instance}/external-ips/ephemeral
+instance_external_ip_list                GET      /v1/instances/{instance}/external-ips
+instance_list                            GET      /v1/instances
+instance_network_interface_create        POST     /v1/network-interfaces
+instance_network_interface_delete        DELETE   /v1/network-interfaces/{interface}
+instance_network_interface_list          GET      /v1/network-interfaces
+instance_network_interface_update        PUT      /v1/network-interfaces/{interface}
+instance_network_interface_view          GET      /v1/network-interfaces/{interface}
+instance_reboot                          POST     /v1/instances/{instance}/reboot
+instance_serial_console                  GET      /v1/instances/{instance}/serial-console
+instance_serial_console_stream           GET      /v1/instances/{instance}/serial-console/stream
+instance_ssh_public_key_list             GET      /v1/instances/{instance}/ssh-public-keys
+instance_start                           POST     /v1/instances/{instance}/start
+instance_stop                            POST     /v1/instances/{instance}/stop
+instance_update                          PUT      /v1/instances/{instance}
+instance_view                            GET      /v1/instances/{instance}
+
+API operations found with tag "login"
+OPERATION ID                             METHOD   URL PATH
+login_local                              POST     /v1/login/{silo_name}/local
+login_saml                               POST     /login/{silo_name}/saml/{provider_name}
+
+API operations found with tag "metrics"
+OPERATION ID                             METHOD   URL PATH
+silo_metric                              GET      /v1/metrics/{metric_name}
+timeseries_query                         POST     /v1/timeseries/query
+timeseries_schema_list                   GET      /v1/timeseries/schema
+
+API operations found with tag "policy"
+OPERATION ID                             METHOD   URL PATH
+system_policy_update                     PUT      /v1/system/policy
+system_policy_view                       GET      /v1/system/policy
+
+API operations found with tag "projects"
+OPERATION ID                             METHOD   URL PATH
+project_create                           POST     /v1/projects
+project_delete                           DELETE   /v1/projects/{project}
+project_ip_pool_list                     GET      /v1/ip-pools
+project_ip_pool_view                     GET      /v1/ip-pools/{pool}
+project_list                             GET      /v1/projects
+project_policy_update                    PUT      /v1/projects/{project}/policy
+project_policy_view                      GET      /v1/projects/{project}/policy
+project_update                           PUT      /v1/projects/{project}
+project_view                             GET      /v1/projects/{project}
+
+API operations found with tag "roles"
+OPERATION ID                             METHOD   URL PATH
+role_list                                GET      /v1/system/roles
+role_view                                GET      /v1/system/roles/{role_name}
+
+API operations found with tag "session"
+OPERATION ID                             METHOD   URL PATH
+current_user_groups                      GET      /v1/me/groups
+current_user_ssh_key_create              POST     /v1/me/ssh-keys
+current_user_ssh_key_delete              DELETE   /v1/me/ssh-keys/{ssh_key}
+current_user_ssh_key_list                GET      /v1/me/ssh-keys
+current_user_ssh_key_view                GET      /v1/me/ssh-keys/{ssh_key}
+current_user_view                        GET      /v1/me
+
+API operations found with tag "silos"
+OPERATION ID                             METHOD   URL PATH
+certificate_create                       POST     /v1/certificates
+certificate_delete                       DELETE   /v1/certificates/{certificate}
+certificate_list                         GET      /v1/certificates
+certificate_view                         GET      /v1/certificates/{certificate}
+group_list                               GET      /v1/groups
+group_view                               GET      /v1/groups/{group_id}
+policy_update                            PUT      /v1/policy
+policy_view                              GET      /v1/policy
+user_list                                GET      /v1/users
+utilization_view                         GET      /v1/utilization
+
+API operations found with tag "snapshots"
+OPERATION ID                             METHOD   URL PATH
+snapshot_create                          POST     /v1/snapshots
+snapshot_delete                          DELETE   /v1/snapshots/{snapshot}
+snapshot_list                            GET      /v1/snapshots
+snapshot_view                            GET      /v1/snapshots/{snapshot}
+
+API operations found with tag "system/hardware"
+OPERATION ID                             METHOD   URL PATH
+networking_switch_port_active_configuration_clear DELETE   /v1/system/hardware/racks/{rack_id}/switch/{switch}/switch-port/{port}/configuration
+networking_switch_port_active_configuration_set PUT      /v1/system/hardware/racks/{rack_id}/switch/{switch}/switch-port/{port}/configuration
+networking_switch_port_active_configuration_view GET      /v1/system/hardware/racks/{rack_id}/switch/{switch}/switch-port/{port}/configuration
+networking_switch_port_apply_settings    POST     /v1/system/hardware/switch-port/{port}/settings
+networking_switch_port_clear_settings    DELETE   /v1/system/hardware/switch-port/{port}/settings
+networking_switch_port_list              GET      /v1/system/hardware/switch-port
+networking_switch_port_status            GET      /v1/system/hardware/switch-port/{port}/status
+physical_disk_list                       GET      /v1/system/hardware/disks
+physical_disk_view                       GET      /v1/system/hardware/disks/{disk_id}
+rack_list                                GET      /v1/system/hardware/racks
+rack_view                                GET      /v1/system/hardware/racks/{rack_id}
+sled_add                                 POST     /v1/system/hardware/sleds
+sled_instance_list                       GET      /v1/system/hardware/sleds/{sled_id}/instances
+sled_list                                GET      /v1/system/hardware/sleds
+sled_list_uninitialized                  GET      /v1/system/hardware/sleds-uninitialized
+sled_physical_disk_list                  GET      /v1/system/hardware/sleds/{sled_id}/disks
+sled_set_provision_policy                PUT      /v1/system/hardware/sleds/{sled_id}/provision-policy
+sled_view                                GET      /v1/system/hardware/sleds/{sled_id}
+switch_list                              GET      /v1/system/hardware/switches
+switch_view                              GET      /v1/system/hardware/switches/{switch_id}
+
+API operations found with tag "system/ip-pools"
+OPERATION ID                             METHOD   URL PATH
+ip_pool_create                           POST     /v1/system/ip-pools
+ip_pool_delete                           DELETE   /v1/system/ip-pools/{pool}
+ip_pool_list                             GET      /v1/system/ip-pools
+ip_pool_range_add                        POST     /v1/system/ip-pools/{pool}/ranges/add
+ip_pool_range_list                       GET      /v1/system/ip-pools/{pool}/ranges
+ip_pool_range_remove                     POST     /v1/system/ip-pools/{pool}/ranges/remove
+ip_pool_service_range_add                POST     /v1/system/ip-pools-service/ranges/add
+ip_pool_service_range_list               GET      /v1/system/ip-pools-service/ranges
+ip_pool_service_range_remove             POST     /v1/system/ip-pools-service/ranges/remove
+ip_pool_service_view                     GET      /v1/system/ip-pools-service
+ip_pool_silo_link                        POST     /v1/system/ip-pools/{pool}/silos
+ip_pool_silo_list                        GET      /v1/system/ip-pools/{pool}/silos
+ip_pool_silo_unlink                      DELETE   /v1/system/ip-pools/{pool}/silos/{silo}
+ip_pool_silo_update                      PUT      /v1/system/ip-pools/{pool}/silos/{silo}
+ip_pool_update                           PUT      /v1/system/ip-pools/{pool}
+ip_pool_utilization_view                 GET      /v1/system/ip-pools/{pool}/utilization
+ip_pool_view                             GET      /v1/system/ip-pools/{pool}
+
+API operations found with tag "system/metrics"
+OPERATION ID                             METHOD   URL PATH
+system_metric                            GET      /v1/system/metrics/{metric_name}
+
+API operations found with tag "system/networking"
+OPERATION ID                             METHOD   URL PATH
+networking_address_lot_block_add         POST     /v1/system/networking/address-lot/{address_lot}/blocks/add
+networking_address_lot_block_list        GET      /v1/system/networking/address-lot/{address_lot}/blocks
+networking_address_lot_block_remove      POST     /v1/system/networking/address-lot/{address_lot}/blocks/remove
+networking_address_lot_create            POST     /v1/system/networking/address-lot
+networking_address_lot_delete            DELETE   /v1/system/networking/address-lot/{address_lot}
+networking_address_lot_list              GET      /v1/system/networking/address-lot
+networking_allow_list_update             PUT      /v1/system/networking/allow-list
+networking_allow_list_view               GET      /v1/system/networking/allow-list
+networking_bfd_disable                   POST     /v1/system/networking/bfd-disable
+networking_bfd_enable                    POST     /v1/system/networking/bfd-enable
+networking_bfd_status                    GET      /v1/system/networking/bfd-status
+networking_bgp_announce_set_delete       DELETE   /v1/system/networking/bgp-announce-set/{announce_set}
+networking_bgp_announce_set_list         GET      /v1/system/networking/bgp-announce-set
+networking_bgp_announce_set_update       PUT      /v1/system/networking/bgp-announce-set
+networking_bgp_announcement_list         GET      /v1/system/networking/bgp-announce-set/{announce_set}/announcement
+networking_bgp_config_create             POST     /v1/system/networking/bgp
+networking_bgp_config_delete             DELETE   /v1/system/networking/bgp/{bgp_config}
+networking_bgp_config_list               GET      /v1/system/networking/bgp
+networking_bgp_exported                  GET      /v1/system/networking/bgp-exported
+networking_bgp_imported_routes_ipv4      GET      /v1/system/networking/bgp-routes-ipv4
+networking_bgp_message_history           GET      /v1/system/networking/bgp-message-history
+networking_bgp_status                    GET      /v1/system/networking/bgp-status
+networking_loopback_address_create       POST     /v1/system/networking/loopback-address
+networking_loopback_address_delete       DELETE   /v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}
+networking_loopback_address_list         GET      /v1/system/networking/loopback-address
+networking_switch_port_configuration_address_add POST     /v1/system/networking/switch-port-configuration/{configuration}/address/add
+networking_switch_port_configuration_address_list GET      /v1/system/networking/switch-port-configuration/{configuration}/address
+networking_switch_port_configuration_address_remove POST     /v1/system/networking/switch-port-configuration/{configuration}/address/remove
+networking_switch_port_configuration_bgp_peer_add POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/add
+networking_switch_port_configuration_bgp_peer_allow_export_add POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-export/add
+networking_switch_port_configuration_bgp_peer_allow_export_list GET      /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-export
+networking_switch_port_configuration_bgp_peer_allow_export_remove POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-export/remove
+networking_switch_port_configuration_bgp_peer_allow_import_add POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-import/add
+networking_switch_port_configuration_bgp_peer_allow_import_list GET      /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-import
+networking_switch_port_configuration_bgp_peer_allow_import_remove POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-import/remove
+networking_switch_port_configuration_bgp_peer_community_add POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/community/add
+networking_switch_port_configuration_bgp_peer_community_list GET      /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/community
+networking_switch_port_configuration_bgp_peer_community_remove POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/community/remove
+networking_switch_port_configuration_bgp_peer_list GET      /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer
+networking_switch_port_configuration_bgp_peer_remove POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/remove
+networking_switch_port_configuration_create POST     /v1/system/networking/switch-port-configuration
+networking_switch_port_configuration_delete DELETE   /v1/system/networking/switch-port-configuration/{configuration}
+networking_switch_port_configuration_geometry_set POST     /v1/system/networking/switch-port-configuration/{configuration}/geometry
+networking_switch_port_configuration_geometry_view GET      /v1/system/networking/switch-port-configuration/{configuration}/geometry
+networking_switch_port_configuration_link_create POST     /v1/system/networking/switch-port-configuration/{configuration}/link
+networking_switch_port_configuration_link_delete DELETE   /v1/system/networking/switch-port-configuration/{configuration}/link/{link}
+networking_switch_port_configuration_link_list GET      /v1/system/networking/switch-port-configuration/{configuration}/link
+networking_switch_port_configuration_link_view GET      /v1/system/networking/switch-port-configuration/{configuration}/link/{link}
+networking_switch_port_configuration_list GET      /v1/system/networking/switch-port-configuration
+networking_switch_port_configuration_route_add POST     /v1/system/networking/switch-port-configuration/{configuration}/route/add
+networking_switch_port_configuration_route_list GET      /v1/system/networking/switch-port-configuration/{configuration}/route
+networking_switch_port_configuration_route_remove POST     /v1/system/networking/switch-port-configuration/{configuration}/route/remove
+networking_switch_port_configuration_view GET      /v1/system/networking/switch-port-configuration/{configuration}
+
+API operations found with tag "system/silos"
+OPERATION ID                             METHOD   URL PATH
+local_idp_user_create                    POST     /v1/system/identity-providers/local/users
+local_idp_user_delete                    DELETE   /v1/system/identity-providers/local/users/{user_id}
+local_idp_user_set_password              POST     /v1/system/identity-providers/local/users/{user_id}/set-password
+saml_identity_provider_create            POST     /v1/system/identity-providers/saml
+saml_identity_provider_view              GET      /v1/system/identity-providers/saml/{provider}
+silo_create                              POST     /v1/system/silos
+silo_delete                              DELETE   /v1/system/silos/{silo}
+silo_identity_provider_list              GET      /v1/system/identity-providers
+silo_ip_pool_list                        GET      /v1/system/silos/{silo}/ip-pools
+silo_list                                GET      /v1/system/silos
+silo_policy_update                       PUT      /v1/system/silos/{silo}/policy
+silo_policy_view                         GET      /v1/system/silos/{silo}/policy
+silo_quotas_update                       PUT      /v1/system/silos/{silo}/quotas
+silo_quotas_view                         GET      /v1/system/silos/{silo}/quotas
+silo_user_list                           GET      /v1/system/users
+silo_user_view                           GET      /v1/system/users/{user_id}
+silo_utilization_list                    GET      /v1/system/utilization/silos
+silo_utilization_view                    GET      /v1/system/utilization/silos/{silo}
+silo_view                                GET      /v1/system/silos/{silo}
+system_quotas_list                       GET      /v1/system/silo-quotas
+user_builtin_list                        GET      /v1/system/users-builtin
+user_builtin_view                        GET      /v1/system/users-builtin/{user}
+
+API operations found with tag "system/status"
+OPERATION ID                             METHOD   URL PATH
+ping                                     GET      /v1/ping
+
+API operations found with tag "vpcs"
+OPERATION ID                             METHOD   URL PATH
+internet_gateway_create                  POST     /v1/internet-gateways
+internet_gateway_delete                  DELETE   /v1/internet-gateways/{gateway}
+internet_gateway_ip_address_create       POST     /v1/internet-gateway-ip-addresses
+internet_gateway_ip_address_delete       DELETE   /v1/internet-gateway-ip-addresses/{address}
+internet_gateway_ip_address_list         GET      /v1/internet-gateway-ip-addresses
+internet_gateway_ip_pool_create          POST     /v1/internet-gateway-ip-pools
+internet_gateway_ip_pool_delete          DELETE   /v1/internet-gateway-ip-pools/{pool}
+internet_gateway_ip_pool_list            GET      /v1/internet-gateway-ip-pools
+internet_gateway_list                    GET      /v1/internet-gateways
+internet_gateway_view                    GET      /v1/internet-gateways/{gateway}
+vpc_create                               POST     /v1/vpcs
+vpc_delete                               DELETE   /v1/vpcs/{vpc}
+vpc_firewall_rules_update                PUT      /v1/vpc-firewall-rules
+vpc_firewall_rules_view                  GET      /v1/vpc-firewall-rules
+vpc_list                                 GET      /v1/vpcs
+vpc_router_create                        POST     /v1/vpc-routers
+vpc_router_delete                        DELETE   /v1/vpc-routers/{router}
+vpc_router_list                          GET      /v1/vpc-routers
+vpc_router_route_create                  POST     /v1/vpc-router-routes
+vpc_router_route_delete                  DELETE   /v1/vpc-router-routes/{route}
+vpc_router_route_list                    GET      /v1/vpc-router-routes
+vpc_router_route_update                  PUT      /v1/vpc-router-routes/{route}
+vpc_router_route_view                    GET      /v1/vpc-router-routes/{route}
+vpc_router_update                        PUT      /v1/vpc-routers/{router}
+vpc_router_view                          GET      /v1/vpc-routers/{router}
+vpc_subnet_create                        POST     /v1/vpc-subnets
+vpc_subnet_delete                        DELETE   /v1/vpc-subnets/{subnet}
+vpc_subnet_list                          GET      /v1/vpc-subnets
+vpc_subnet_list_network_interfaces       GET      /v1/vpc-subnets/{subnet}/network-interfaces
+vpc_subnet_update                        PUT      /v1/vpc-subnets/{subnet}
+vpc_subnet_view                          GET      /v1/vpc-subnets/{subnet}
+vpc_update                               PUT      /v1/vpcs/{vpc}
+vpc_view                                 GET      /v1/vpcs/{vpc}
+

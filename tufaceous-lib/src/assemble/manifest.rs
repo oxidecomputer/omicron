@@ -93,12 +93,9 @@ impl ArtifactManifest {
                         ArtifactSource::File(base_dir.join(path))
                     }
                     DeserializedArtifactSource::Fake { size } => {
-                        let fake_data = FakeDataAttributes::new(
-                            &data.name,
-                            kind,
-                            &data.version,
-                        )
-                        .make_data(size as usize);
+                        let fake_data =
+                            FakeDataAttributes::new(kind, &data.version)
+                                .make_data(size as usize);
                         ArtifactSource::Memory(fake_data.into())
                     }
                     DeserializedArtifactSource::CompositeHost {
@@ -128,19 +125,11 @@ impl ArtifactManifest {
                             mtime_source,
                         )?;
                         phase_1.with_entry(
-                            FakeDataAttributes::new(
-                                "fake-phase-1",
-                                kind,
-                                &data.version,
-                            ),
+                            FakeDataAttributes::new(kind, &data.version),
                             |entry| builder.append_phase_1(entry),
                         )?;
                         phase_2.with_entry(
-                            FakeDataAttributes::new(
-                                "fake-phase-2",
-                                kind,
-                                &data.version,
-                            ),
+                            FakeDataAttributes::new(kind, &data.version),
                             |entry| builder.append_phase_2(entry),
                         )?;
                         ArtifactSource::Memory(builder.finish()?.into())
@@ -173,19 +162,11 @@ impl ArtifactManifest {
                             mtime_source,
                         )?;
                         archive_a.with_entry(
-                            FakeDataAttributes::new(
-                                "fake-rot-archive-a",
-                                kind,
-                                &data.version,
-                            ),
+                            FakeDataAttributes::new(kind, &data.version),
                             |entry| builder.append_archive_a(entry),
                         )?;
                         archive_b.with_entry(
-                            FakeDataAttributes::new(
-                                "fake-rot-archive-b",
-                                kind,
-                                &data.version,
-                            ),
+                            FakeDataAttributes::new(kind, &data.version),
                             |entry| builder.append_archive_b(entry),
                         )?;
                         ArtifactSource::Memory(builder.finish()?.into())
@@ -261,18 +242,13 @@ impl ArtifactManifest {
 
 #[derive(Debug)]
 struct FakeDataAttributes<'a> {
-    name: &'a str,
     kind: KnownArtifactKind,
     version: &'a SemverVersion,
 }
 
 impl<'a> FakeDataAttributes<'a> {
-    fn new(
-        name: &'a str,
-        kind: KnownArtifactKind,
-        version: &'a SemverVersion,
-    ) -> Self {
-        Self { name, kind, version }
+    fn new(kind: KnownArtifactKind, version: &'a SemverVersion) -> Self {
+        Self { kind, version }
     }
 
     fn make_data(&self, size: usize) -> Vec<u8> {
@@ -297,11 +273,16 @@ impl<'a> FakeDataAttributes<'a> {
             KnownArtifactKind::SwitchRot => "SimRot",
         };
 
+        // For our purposes sign = board represents what we want for the RoT
+        // and we don't care about the sign value for the SP
+        // We now have an assumption that board == name for our production
+        // images
         let caboose = CabooseBuilder::default()
             .git_commit("this-is-fake-data")
             .board(board)
             .version(self.version.to_string())
-            .name(self.name)
+            .name(board)
+            .sign(board)
             .build();
 
         let mut builder = HubrisArchiveBuilder::with_fake_image();

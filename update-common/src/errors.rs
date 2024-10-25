@@ -111,9 +111,20 @@ pub enum RepositoryError {
         #[source]
         error: Box<hubtools::Error>,
     },
-
+    #[error("error reading name from hubris caboose of {id:?}")]
+    ReadHubrisCabooseName {
+        id: ArtifactId,
+        #[source]
+        error: hubtools::CabooseError,
+    },
     #[error("error reading board from hubris caboose of {id:?}")]
     ReadHubrisCabooseBoard {
+        id: ArtifactId,
+        #[source]
+        error: hubtools::CabooseError,
+    },
+    #[error("error reading sign from hubris caboose of {id:?}")]
+    ReadHubrisCabooseSign {
         id: ArtifactId,
         #[source]
         error: hubtools::CabooseError,
@@ -123,6 +134,9 @@ pub enum RepositoryError {
         "error reading board from hubris caboose of {0:?}: non-utf8 value"
     )]
     ReadHubrisCabooseBoardUtf8(ArtifactId),
+
+    #[error("error reading name from hubris caboose of {0:?}: non-utf8 value")]
+    ReadHubrisCabooseNameUtf8(ArtifactId),
 
     #[error("missing artifact of kind `{0:?}`")]
     MissingArtifactKind(KnownArtifactKind),
@@ -135,11 +149,24 @@ pub enum RepositoryError {
         v1: SemverVersion,
         v2: SemverVersion,
     },
-
+    #[error("Caboose mismatch between A {a:?} and B {b:?}")]
+    CabooseMismatch { a: String, b: String },
+    #[error(
+        "muliple boards present for artifact of kind `{kind:?}`: {b1}, {b2}"
+    )]
+    MultipleBoardsPresent { kind: KnownArtifactKind, b1: String, b2: String },
     #[error(
         "duplicate hash entries found in artifacts.json for kind `{}`, hash `{}`", .0.kind, .0.hash
     )]
     DuplicateHashEntry(ArtifactHashId),
+    #[error("error creating reader stream")]
+    CreateReaderStream(#[source] anyhow::Error),
+    #[error("error reading extracted archive kind {}, hash {}", .artifact.kind, .artifact.hash)]
+    ReadExtractedArchive {
+        artifact: ArtifactHashId,
+        #[source]
+        error: std::io::Error,
+    },
 }
 
 impl RepositoryError {
@@ -153,7 +180,9 @@ impl RepositoryError {
             | RepositoryError::TempFileCreate(_)
             | RepositoryError::TempFileWrite(_)
             | RepositoryError::TempFileFlush(_)
-            | RepositoryError::NamedTempFileCreate { .. } => {
+            | RepositoryError::NamedTempFileCreate { .. }
+            | RepositoryError::ReadExtractedArchive { .. }
+            | RepositoryError::CreateReaderStream { .. } => {
                 HttpError::for_unavail(None, message)
             }
 
@@ -176,8 +205,13 @@ impl RepositoryError {
             | RepositoryError::ParsingHubrisArchive { .. }
             | RepositoryError::ReadHubrisCaboose { .. }
             | RepositoryError::ReadHubrisCabooseBoard { .. }
+            | RepositoryError::ReadHubrisCabooseName { .. }
+            | RepositoryError::ReadHubrisCabooseSign { .. }
             | RepositoryError::ReadHubrisCabooseBoardUtf8(_)
-            | RepositoryError::MultipleVersionsPresent { .. } => {
+            | RepositoryError::ReadHubrisCabooseNameUtf8(_)
+            | RepositoryError::MultipleVersionsPresent { .. }
+            | RepositoryError::MultipleBoardsPresent { .. }
+            | RepositoryError::CabooseMismatch { .. } => {
                 HttpError::for_bad_request(None, message)
             }
 

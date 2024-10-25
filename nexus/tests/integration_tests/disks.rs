@@ -17,7 +17,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::RegionAllocationFor;
 use nexus_db_queries::db::datastore::RegionAllocationParameters;
 use nexus_db_queries::db::datastore::REGION_REDUNDANCY_THRESHOLD;
-use nexus_db_queries::db::fixed_data::{silo::DEFAULT_SILO_ID, FLEET_ID};
+use nexus_db_queries::db::fixed_data::FLEET_ID;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::Collection;
@@ -33,6 +33,7 @@ use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
+use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
@@ -188,12 +189,13 @@ async fn set_instance_state(
 }
 
 async fn instance_simulate(nexus: &Arc<Nexus>, id: &InstanceUuid) {
-    let sa = nexus
-        .instance_sled_by_id(id)
+    let info = nexus
+        .active_instance_info(id, None)
         .await
         .unwrap()
         .expect("instance must be on a sled to simulate a state change");
-    sa.instance_finish_transition(id.into_untyped_uuid()).await;
+
+    info.sled_client.vmm_finish_transition(info.propolis_id).await;
 }
 
 #[nexus_test]
@@ -1107,7 +1109,7 @@ async fn test_disk_virtual_provisioning_collection(
         0
     );
     let virtual_provisioning_collection = datastore
-        .virtual_provisioning_collection_get(&opctx, *DEFAULT_SILO_ID)
+        .virtual_provisioning_collection_get(&opctx, DEFAULT_SILO_ID)
         .await
         .unwrap();
     assert_eq!(
@@ -1171,7 +1173,7 @@ async fn test_disk_virtual_provisioning_collection(
         0
     );
     let virtual_provisioning_collection = datastore
-        .virtual_provisioning_collection_get(&opctx, *DEFAULT_SILO_ID)
+        .virtual_provisioning_collection_get(&opctx, DEFAULT_SILO_ID)
         .await
         .unwrap();
     assert_eq!(
@@ -1228,7 +1230,7 @@ async fn test_disk_virtual_provisioning_collection(
         disk_size
     );
     let virtual_provisioning_collection = datastore
-        .virtual_provisioning_collection_get(&opctx, *DEFAULT_SILO_ID)
+        .virtual_provisioning_collection_get(&opctx, DEFAULT_SILO_ID)
         .await
         .unwrap();
     assert_eq!(
@@ -1266,7 +1268,7 @@ async fn test_disk_virtual_provisioning_collection(
         0
     );
     let virtual_provisioning_collection = datastore
-        .virtual_provisioning_collection_get(&opctx, *DEFAULT_SILO_ID)
+        .virtual_provisioning_collection_get(&opctx, DEFAULT_SILO_ID)
         .await
         .unwrap();
     assert_eq!(
@@ -1785,6 +1787,7 @@ async fn create_instance_with_disk(client: &ClientTestContext) {
         )],
         Vec::<params::ExternalIpCreate>::new(),
         true,
+        Default::default(),
     )
     .await;
 }

@@ -11,7 +11,6 @@ use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use dropshot::ResultsPage;
 use http::{Method, StatusCode};
-use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO_ID;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pool, create_disk, create_instance, create_project,
@@ -20,11 +19,15 @@ use nexus_test_utils::resource_helpers::{
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::views::OxqlQueryResult;
+use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use oximeter::types::Datum;
+use oximeter::types::FieldValue;
 use oximeter::types::Measurement;
 use oximeter::TimeseriesSchema;
+use std::borrow::Borrow;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 pub async fn query_for_metrics(
@@ -187,7 +190,7 @@ async fn test_metrics(
 
     // silo metrics start out zero
     assert_system_metrics(&cptestctx, None, 0, 0, 0).await;
-    assert_system_metrics(&cptestctx, Some(*DEFAULT_SILO_ID), 0, 0, 0).await;
+    assert_system_metrics(&cptestctx, Some(DEFAULT_SILO_ID), 0, 0, 0).await;
     assert_silo_metrics(&cptestctx, None, 0, 0, 0).await;
 
     let project1_id = create_project(&client, "p-1").await.identity.id;
@@ -203,7 +206,7 @@ async fn test_metrics(
         "/v1/metrics/cpus_provisioned?start_time={:?}&end_time={:?}&order=descending&limit=1&project={}",
         cptestctx.start_time,
         Utc::now(),
-        *DEFAULT_SILO_ID,
+        DEFAULT_SILO_ID,
     );
     assert_404(&cptestctx, &bad_silo_metrics_url).await;
     let bad_system_metrics_url = format!(
@@ -219,15 +222,14 @@ async fn test_metrics(
     assert_silo_metrics(&cptestctx, Some(project1_id), 0, 4, GIB).await;
     assert_silo_metrics(&cptestctx, None, 0, 4, GIB).await;
     assert_system_metrics(&cptestctx, None, 0, 4, GIB).await;
-    assert_system_metrics(&cptestctx, Some(*DEFAULT_SILO_ID), 0, 4, GIB).await;
+    assert_system_metrics(&cptestctx, Some(DEFAULT_SILO_ID), 0, 4, GIB).await;
 
     // create disk in project 1
     create_disk(&client, "p-1", "d-1").await;
     assert_silo_metrics(&cptestctx, Some(project1_id), GIB, 4, GIB).await;
     assert_silo_metrics(&cptestctx, None, GIB, 4, GIB).await;
     assert_system_metrics(&cptestctx, None, GIB, 4, GIB).await;
-    assert_system_metrics(&cptestctx, Some(*DEFAULT_SILO_ID), GIB, 4, GIB)
-        .await;
+    assert_system_metrics(&cptestctx, Some(DEFAULT_SILO_ID), GIB, 4, GIB).await;
 
     // project 2 metrics still empty
     assert_silo_metrics(&cptestctx, Some(project2_id), 0, 0, 0).await;
@@ -242,7 +244,7 @@ async fn test_metrics(
     assert_system_metrics(&cptestctx, None, 2 * GIB, 8, 2 * GIB).await;
     assert_system_metrics(
         &cptestctx,
-        Some(*DEFAULT_SILO_ID),
+        Some(DEFAULT_SILO_ID),
         2 * GIB,
         8,
         2 * GIB,
@@ -344,7 +346,6 @@ async fn test_instance_watcher_metrics(
             );
         }};
     }
-    use oximeter::types::FieldValue;
     const INSTANCE_ID_FIELD: &str = "instance_id";
     const STATE_FIELD: &str = "state";
     const STATE_STARTING: &str = "starting";
@@ -357,75 +358,12 @@ async fn test_instance_watcher_metrics(
     let nexus = &cptestctx.server.server_context().nexus;
     let oximeter = &cptestctx.oximeter;
 
-    // TODO(eliza): consider factoring this out to a generic
-    // `activate_background_task` function in `nexus-test-utils` eventually?
     let activate_instance_watcher = || async {
-        use nexus_client::types::BackgroundTask;
-        use nexus_client::types::CurrentStatus;
-        use nexus_client::types::CurrentStatusRunning;
-        use nexus_client::types::LastResult;
-        use nexus_client::types::LastResultCompleted;
+        use nexus_test_utils::background::activate_background_task;
 
-        fn most_recent_start_time(
-            task: &BackgroundTask,
-        ) -> Option<chrono::DateTime<chrono::Utc>> {
-            match task.current {
-                CurrentStatus::Idle => match task.last {
-                    LastResult::Completed(LastResultCompleted {
-                        start_time,
-                        ..
-                    }) => Some(start_time),
-                    LastResult::NeverCompleted => None,
-                },
-                CurrentStatus::Running(CurrentStatusRunning {
-                    start_time,
-                    ..
-                }) => Some(start_time),
-            }
-        }
+        let _ = activate_background_task(&internal_client, "instance_watcher")
+            .await;
 
-        eprintln!("\n --- activating instance watcher ---\n");
-        let task = NexusRequest::object_get(
-            internal_client,
-            "/bgtasks/view/instance_watcher",
-        )
-        .execute_and_parse_unwrap::<BackgroundTask>()
-        .await;
-        let last_start = most_recent_start_time(&task);
-
-        internal_client
-            .make_request(
-                http::Method::POST,
-                "/bgtasks/activate",
-                Some(serde_json::json!({
-                    "bgtask_names": vec![String::from("instance_watcher")]
-                })),
-                http::StatusCode::NO_CONTENT,
-            )
-            .await
-            .unwrap();
-        // Wait for the instance watcher task to finish
-        wait_for_condition(
-            || async {
-                let task = NexusRequest::object_get(
-                    internal_client,
-                    "/bgtasks/view/instance_watcher",
-                )
-                .execute_and_parse_unwrap::<BackgroundTask>()
-                .await;
-                if matches!(&task.current, CurrentStatus::Idle)
-                    && most_recent_start_time(&task) > last_start
-                {
-                    Ok(())
-                } else {
-                    Err(CondCheckError::<()>::NotYet)
-                }
-            },
-            &Duration::from_millis(500),
-            &Duration::from_secs(60),
-        )
-        .await
-        .unwrap();
         // Make sure that the latest metrics have been collected.
         oximeter.force_collect().await;
     };
@@ -589,13 +527,262 @@ async fn test_instance_watcher_metrics(
     assert_gte!(ts2_running, 2);
 }
 
+#[nexus_test]
+async fn test_mgs_metrics(
+    cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
+) {
+    // Make a MGS
+    let (mut mgs_config, sp_sim_config) =
+        gateway_test_utils::setup::load_test_config();
+    let mgs = {
+        // munge the already-parsed MGS config file to point it at the test
+        // Nexus' address.
+        mgs_config.metrics = Some(gateway_test_utils::setup::MetricsConfig {
+            disabled: false,
+            dev_bind_loopback: true,
+            dev_nexus_address: Some(cptestctx.internal_client.bind_address),
+        });
+        gateway_test_utils::setup::test_setup_with_config(
+            "test_mgs_metrics",
+            gateway_messages::SpPort::One,
+            mgs_config,
+            &sp_sim_config,
+            None,
+        )
+        .await
+    };
+
+    // Let's look at all the simulated SP components in the config file which
+    // have sensor readings, so we can assert that there are timeseries for all
+    // of them.
+    let all_sp_configs = {
+        let gimlet_configs =
+            sp_sim_config.simulated_sps.gimlet.iter().map(|g| &g.common);
+        let sidecar_configs =
+            sp_sim_config.simulated_sps.sidecar.iter().map(|s| &s.common);
+        gimlet_configs.chain(sidecar_configs)
+    };
+    // XXX(eliza): yes, this code is repetitive. We could probably make it a
+    // little elss ugly with nested hash maps, but like...I already wrote it, so
+    // you don't have to. :)
+    //
+    // TODO(eliza): presently, we just expect that the number of timeseries for
+    // each serial number and sensor type lines up. If we wanted to be *really*
+    // fancy, we could also assert that all the component IDs, component kinds,
+    // and measurement values line up with the config. But, honestly, it's
+    // pretty unlikely that a bug in MGS' sensor metrics subsystem would mess
+    // that up --- the most important thing is just to make sure that the sensor
+    // data is *present*, as that should catch most regressions.
+    let mut temp_sensors = HashMap::new();
+    let mut current_sensors = HashMap::new();
+    let mut voltage_sensors = HashMap::new();
+    let mut power_sensors = HashMap::new();
+    let mut input_voltage_sensors = HashMap::new();
+    let mut input_current_sensors = HashMap::new();
+    let mut fan_speed_sensors = HashMap::new();
+    let mut cpu_tctl_sensors = HashMap::new();
+    for sp in all_sp_configs {
+        let mut temp = 0;
+        let mut current = 0;
+        let mut voltage = 0;
+        let mut input_voltage = 0;
+        let mut input_current = 0;
+        let mut power = 0;
+        let mut speed = 0;
+        let mut cpu_tctl = 0;
+        for component in &sp.components {
+            for sensor in &component.sensors {
+                use gateway_messages::measurement::MeasurementKind as Kind;
+                match sensor.def.kind {
+                    Kind::Temperature => {
+                        // Currently, Tctl measurements are reported as a
+                        // "temperature" measurement, but are tracked by a
+                        // different metric, as they are not actually a
+                        // measurement of physical degrees Celsius.
+                        if component.device == "sbtsi"
+                            && sensor.def.name == "CPU"
+                        {
+                            cpu_tctl += 1
+                        } else {
+                            temp += 1;
+                        }
+                    }
+                    Kind::Current => current += 1,
+                    Kind::Voltage => voltage += 1,
+                    Kind::InputVoltage => input_voltage += 1,
+                    Kind::InputCurrent => input_current += 1,
+                    Kind::Speed => speed += 1,
+                    Kind::Power => power += 1,
+                }
+            }
+        }
+        temp_sensors.insert(sp.serial_number.clone(), temp);
+        current_sensors.insert(sp.serial_number.clone(), current);
+        voltage_sensors.insert(sp.serial_number.clone(), voltage);
+        input_voltage_sensors.insert(sp.serial_number.clone(), input_voltage);
+        input_current_sensors.insert(sp.serial_number.clone(), input_current);
+        fan_speed_sensors.insert(sp.serial_number.clone(), speed);
+        power_sensors.insert(sp.serial_number.clone(), power);
+        cpu_tctl_sensors.insert(sp.serial_number.clone(), cpu_tctl);
+    }
+
+    async fn check_all_timeseries_present(
+        cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
+        name: &str,
+        expected: HashMap<String, usize>,
+    ) {
+        let metric_name = format!("hardware_component:{name}");
+        eprintln!("\n=== checking timeseries for {metric_name} ===\n");
+
+        if expected.values().all(|&v| v == 0) {
+            eprintln!(
+                "-> SP sim config contains no {name} sensors, skipping it"
+            );
+            return;
+        }
+
+        let query = format!("get {metric_name}");
+
+        // MGS polls SP sensor data once every second. It's possible that, when
+        // we triggered Oximeter to collect samples from MGS, it may not have
+        // run a poll yet, so retry this a few times to avoid a flaky failure if
+        // no simulated SPs have been polled yet.
+        //
+        // We really don't need to wait that long to know that the sensor
+        // metrics will never be present. This could probably be shorter
+        // than 30 seconds, but I want to be fairly generous to make sure
+        // there are no flaky failures even when things take way longer than
+        // expected...
+        const MAX_RETRY_DURATION: Duration = Duration::from_secs(30);
+        let result = wait_for_condition(
+            || async {
+                match check_inner(cptestctx, &metric_name, &query, &expected).await {
+                    Ok(_) => Ok(()),
+                    Err(e) => {
+                        eprintln!("{e}; will try again to ensure all samples are collected");
+                        Err(CondCheckError::<()>::NotYet)
+                    }
+                }
+            },
+            &Duration::from_secs(1),
+            &MAX_RETRY_DURATION,
+        )
+        .await;
+        if result.is_err() {
+            panic!(
+                "failed to find expected timeseries when running OxQL query \
+                 {query:?} within {MAX_RETRY_DURATION:?}"
+            )
+        };
+
+        // Note that *some* of these checks panic if they fail, but others call
+        // `anyhow::ensure!`. This is because, if we don't see all the expected
+        // timeseries, it's possible that this is because some sensor polls
+        // haven't completed yet, so we'll retry those checks a few times. On
+        // the other hand, if we see malformed timeseries, or timeseries that we
+        // don't expect to exist, that means something has gone wrong, and we
+        // will fail the test immediately.
+        async fn check_inner(
+            cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
+            name: &str,
+            query: &str,
+            expected: &HashMap<String, usize>,
+        ) -> anyhow::Result<()> {
+            cptestctx.oximeter.force_collect().await;
+            let table = timeseries_query(&cptestctx, &query)
+                .await
+                .into_iter()
+                .find(|t| t.name() == name)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("failed to find table for {query}")
+                })?;
+
+            let mut found = expected
+                .keys()
+                .map(|serial| (serial.clone(), 0))
+                .collect::<HashMap<_, usize>>();
+            for timeseries in table.timeseries() {
+                let fields = &timeseries.fields;
+                let n_points = timeseries.points.len();
+                anyhow::ensure!(
+                    n_points > 0,
+                    "{name} timeseries {fields:?} should have points"
+                );
+                let serial_str: &str = match timeseries.fields.get("chassis_serial")
+            {
+                Some(FieldValue::String(s)) => s.borrow(),
+                Some(x) => panic!(
+                    "{name} `chassis_serial` field should be a string, but got: {x:?}"
+                ),
+                None => {
+                    panic!("{name} timeseries should have a `chassis_serial` field")
+                }
+            };
+                if let Some(count) = found.get_mut(serial_str) {
+                    *count += 1;
+                } else {
+                    panic!(
+                        "{name} timeseries had an unexpected chassis serial \
+                        number {serial_str:?} (not in the config file)",
+                    );
+                }
+            }
+
+            eprintln!("-> {name}: found timeseries: {found:#?}");
+            anyhow::ensure!(
+                &found == expected,
+                "number of {name} timeseries didn't match expected in {table:#?}",
+            );
+            eprintln!("-> okay, looks good!");
+            Ok(())
+        }
+    }
+
+    // Wait until the MGS registers as a producer with Oximeter.
+    wait_for_producer(&cptestctx.oximeter, mgs.gateway_id).await;
+
+    check_all_timeseries_present(&cptestctx, "temperature", temp_sensors).await;
+    check_all_timeseries_present(&cptestctx, "voltage", voltage_sensors).await;
+    check_all_timeseries_present(&cptestctx, "current", current_sensors).await;
+    check_all_timeseries_present(&cptestctx, "power", power_sensors).await;
+    check_all_timeseries_present(
+        &cptestctx,
+        "input_voltage",
+        input_voltage_sensors,
+    )
+    .await;
+    check_all_timeseries_present(
+        &cptestctx,
+        "input_current",
+        input_current_sensors,
+    )
+    .await;
+    check_all_timeseries_present(&cptestctx, "fan_speed", fan_speed_sensors)
+        .await;
+    check_all_timeseries_present(&cptestctx, "amd_cpu_tctl", cpu_tctl_sensors)
+        .await;
+
+    // Because the `ControlPlaneTestContext` isn't managing the MGS we made for
+    // this test, we are responsible for removing its logs.
+    mgs.logctx.cleanup_successful();
+}
+
 /// Wait until a producer is registered with Oximeter.
 ///
 /// This blocks until the producer is registered, for up to 60s. It panics if
 /// the retry loop hits a permanent error.
-pub async fn wait_for_producer(
+pub async fn wait_for_producer<G: GenericUuid>(
     oximeter: &oximeter_collector::Oximeter,
-    producer_id: &Uuid,
+    producer_id: G,
+) {
+    wait_for_producer_impl(oximeter, producer_id.into_untyped_uuid()).await;
+}
+
+// This function is outlined from wait_for_producer to avoid unnecessary
+// monomorphization.
+async fn wait_for_producer_impl(
+    oximeter: &oximeter_collector::Oximeter,
+    producer_id: Uuid,
 ) {
     wait_for_condition(
         || async {
@@ -603,7 +790,7 @@ pub async fn wait_for_producer(
                 .list_producers(None, usize::MAX)
                 .await
                 .iter()
-                .any(|p| &p.id == producer_id)
+                .any(|p| p.id == producer_id)
             {
                 Ok(())
             } else {

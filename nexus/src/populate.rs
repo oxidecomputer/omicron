@@ -380,7 +380,7 @@ mod test {
         let logctx = dev::test_setup_log("test_populator");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
+        let pool = Arc::new(db::Pool::new_single_host(&logctx.log, &cfg));
         let datastore = Arc::new(
             db::DataStore::new(&logctx.log, pool, None).await.unwrap(),
         );
@@ -421,20 +421,15 @@ mod test {
                 )
             })
             .unwrap();
+        datastore.terminate().await;
 
-        // Test again with the database offline.  In principle we could do this
-        // immediately without creating a new pool and datastore.  However, the
-        // pool's default behavior is to wait 30 seconds for a connection, which
-        // makes this test take a long time.  (See the note in
-        // nexus/src/db/pool.rs about this.)  So let's create a pool with an
-        // arbitrarily short timeout now.  (We wouldn't want to do this above
-        // because we do want to wait a bit when we expect things to work, in
-        // case the test system is busy.)
+        // Test again with the database offline. In principle we could do this
+        // immediately without creating a new pool and datastore.
         //
-        // Anyway, if we try again with a broken database, we should get a
+        // If we try again with a broken database, we should get a
         // ServiceUnavailable error, which indicates a transient failure.
         let pool =
-            Arc::new(db::Pool::new_failfast_for_tests(&logctx.log, &cfg));
+            Arc::new(db::Pool::new_single_host_failfast(&logctx.log, &cfg));
         // We need to create the datastore before tearing down the database, as
         // it verifies the schema version of the DB while booting.
         let datastore = Arc::new(
@@ -466,6 +461,7 @@ mod test {
             ),
         };
         info!(&log, "populator {:?} done", p);
+        datastore.terminate().await;
         logctx.cleanup_successful();
     }
 }

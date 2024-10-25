@@ -11,9 +11,7 @@ use authn::external::token::HttpAuthnToken;
 use authn::external::HttpAuthnScheme;
 use camino::Utf8PathBuf;
 use chrono::Duration;
-use internal_dns::ServiceName;
 use nexus_config::NexusConfig;
-use nexus_config::PostgresConfigWithUrl;
 use nexus_config::SchemeName;
 use nexus_db_queries::authn::external::session_cookie::SessionStore;
 use nexus_db_queries::authn::ConsoleSessionWithSiloId;
@@ -21,11 +19,11 @@ use nexus_db_queries::context::{OpContext, OpKind};
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::{authn, authz, db};
 use omicron_common::address::{Ipv6Subnet, AZ_PREFIX};
+use omicron_uuid_kinds::GenericUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
 use std::env;
-use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -147,20 +145,23 @@ impl ServerContext {
         let create_tracker = |name: &str| {
             let target = HttpService {
                 name: name.to_string().into(),
-                id: config.deployment.id,
+                id: config.deployment.id.into_untyped_uuid(),
             };
-            const START_LATENCY_DECADE: i16 = -6;
-            const END_LATENCY_DECADE: i16 = 3;
-            LatencyTracker::with_latency_decades(
+            // Start at 1 microsecond == 1e3 nanoseconds.
+            const LATENCY_START_POWER: u16 = 3;
+            // End at 1000s == (1e9 * 1e3) == 1e12 nanoseconds.
+            const LATENCY_END_POWER: u16 = 12;
+            LatencyTracker::with_log_linear_bins(
                 target,
-                START_LATENCY_DECADE,
-                END_LATENCY_DECADE,
+                LATENCY_START_POWER,
+                LATENCY_END_POWER,
             )
             .unwrap()
         };
         let internal_latencies = create_tracker("nexus-internal");
         let external_latencies = create_tracker("nexus-external");
-        let producer_registry = ProducerRegistry::with_id(config.deployment.id);
+        let producer_registry =
+            ProducerRegistry::with_id(config.deployment.id.into_untyped_uuid());
         producer_registry
             .register_producer(internal_latencies.clone())
             .unwrap();
@@ -209,8 +210,9 @@ impl ServerContext {
         // like console index.html. leaving that out for now so we don't break
         // nexus in dev for everyone
 
-        // Set up DNS Client
-        let resolver = match config.deployment.internal_dns {
+        // Set up DNS Client (both traditional and qorb-based, until we've moved
+        // every consumer over to qorb)
+        let (resolver, qorb_resolver) = match config.deployment.internal_dns {
             nexus_config::InternalDns::FromSubnet { subnet } => {
                 let az_subnet =
                     Ipv6Subnet::<AZ_PREFIX>::new(subnet.net().addr());
@@ -219,11 +221,21 @@ impl ServerContext {
                     "Setting up resolver using DNS servers for subnet: {:?}",
                     az_subnet
                 );
-                internal_dns::resolver::Resolver::new_from_subnet(
-                    log.new(o!("component" => "DnsResolver")),
-                    az_subnet,
-                )
-                .map_err(|e| format!("Failed to create DNS resolver: {}", e))?
+                let resolver =
+                    internal_dns_resolver::Resolver::new_from_subnet(
+                        log.new(o!("component" => "DnsResolver")),
+                        az_subnet,
+                    )
+                    .map_err(|e| {
+                        format!("Failed to create DNS resolver: {}", e)
+                    })?;
+                let qorb_resolver = internal_dns_resolver::QorbResolver::new(
+                    internal_dns_resolver::Resolver::servers_from_subnet(
+                        az_subnet,
+                    ),
+                );
+
+                (resolver, qorb_resolver)
             }
             nexus_config::InternalDns::FromAddress { address } => {
                 info!(
@@ -231,66 +243,62 @@ impl ServerContext {
                     "Setting up resolver using DNS address: {:?}", address
                 );
 
-                internal_dns::resolver::Resolver::new_from_addrs(
+                let resolver = internal_dns_resolver::Resolver::new_from_addrs(
                     log.new(o!("component" => "DnsResolver")),
                     &[address],
                 )
-                .map_err(|e| format!("Failed to create DNS resolver: {}", e))?
+                .map_err(|e| format!("Failed to create DNS resolver: {}", e))?;
+                let qorb_resolver =
+                    internal_dns_resolver::QorbResolver::new(vec![address]);
+
+                (resolver, qorb_resolver)
             }
         };
 
-        // Set up DB pool
-        let url = match &config.deployment.database {
-            nexus_config::Database::FromUrl { url } => url.clone(),
+        // Once this database pool is created, it spawns workers which will
+        // be continually attempting to access database backends.
+        //
+        // It must be explicitly terminated, so be cautious about returning
+        // results beyond this point.
+        let pool = match &config.deployment.database {
+            nexus_config::Database::FromUrl { url } => {
+                info!(
+                    log, "Setting up qorb database pool from a single host";
+                    "url" => #?url,
+                );
+                db::Pool::new_single_host(
+                    &log,
+                    &db::Config { url: url.clone() },
+                )
+            }
             nexus_config::Database::FromDns => {
-                info!(log, "Accessing DB url from DNS");
-                // It's been requested but unfortunately not supported to
-                // directly connect using SRV based lookup.
-                // TODO-robustness: the set of cockroachdb hosts we'll use will
-                // be fixed to whatever we got back from DNS at Nexus start.
-                // This means a new cockroachdb instance won't picked up until
-                // Nexus restarts.
-                let addrs = loop {
-                    match resolver
-                        .lookup_all_socket_v6(ServiceName::Cockroach)
-                        .await
-                    {
-                        Ok(addrs) => break addrs,
-                        Err(e) => {
-                            warn!(
-                                log,
-                                "Failed to lookup cockroach addresses: {e}"
-                            );
-                            tokio::time::sleep(std::time::Duration::from_secs(
-                                1,
-                            ))
-                            .await;
-                        }
-                    }
-                };
-                let addrs_str = addrs
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(",");
-                info!(log, "DB addresses: {}", addrs_str);
-                PostgresConfigWithUrl::from_str(&format!(
-                    "postgresql://root@{addrs_str}/omicron?sslmode=disable",
-                ))
-                .map_err(|e| format!("Cannot parse Postgres URL: {}", e))?
+                info!(
+                    log, "Setting up qorb database pool from DNS";
+                    "dns_addrs" => ?qorb_resolver.bootstrap_dns_ips(),
+                );
+                db::Pool::new(&log, &qorb_resolver)
             }
         };
-        let pool = db::Pool::new(&log, &db::Config { url });
-        let nexus = Nexus::new_with_id(
+
+        let pool = Arc::new(pool);
+        let nexus = match Nexus::new_with_id(
             rack_id,
             log.new(o!("component" => "nexus")),
             resolver,
-            pool,
+            qorb_resolver,
+            pool.clone(),
             &producer_registry,
             config,
             Arc::clone(&authz),
         )
-        .await?;
+        .await
+        {
+            Ok(nexus) => nexus,
+            Err(err) => {
+                pool.terminate().await;
+                return Err(err);
+            }
+        };
 
         Ok(Arc::new(ServerContext {
             nexus,

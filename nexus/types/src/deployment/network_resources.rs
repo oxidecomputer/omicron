@@ -42,7 +42,7 @@ use thiserror::Error;
 ///
 /// So we use two separate maps for now. But a single map is always a
 /// possibility in the future, if required.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OmicronZoneNetworkResources {
     /// external IPs allocated to Omicron zones
     omicron_zone_external_ips: TriMap<OmicronZoneExternalIpEntry>,
@@ -57,6 +57,11 @@ impl OmicronZoneNetworkResources {
             omicron_zone_external_ips: TriMap::new(),
             omicron_zone_nics: TriMap::new(),
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.omicron_zone_external_ips.is_empty()
+            && self.omicron_zone_nics.is_empty()
     }
 
     pub fn omicron_zone_external_ips(
@@ -142,7 +147,7 @@ impl OmicronZoneNetworkResources {
 }
 
 /// External IP variants possible for Omicron-managed zones.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OmicronZoneExternalIp {
     Floating(OmicronZoneExternalFloatingIp),
     Snat(OmicronZoneExternalSnatIp),
@@ -194,7 +199,7 @@ pub enum OmicronZoneExternalIpKey {
 /// necessary for blueprint planning, and requires that the zone have a single
 /// IP.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+    Debug, Clone, Copy, Hash, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
 )]
 pub struct OmicronZoneExternalFloatingIp {
     pub id: ExternalIpUuid,
@@ -222,7 +227,7 @@ impl OmicronZoneExternalFloatingAddr {
 /// necessary for blueprint planning, and requires that the zone have a single
 /// IP.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+    Debug, Clone, Copy, Hash, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
 )]
 pub struct OmicronZoneExternalSnatIp {
     pub id: ExternalIpUuid,
@@ -233,7 +238,7 @@ pub struct OmicronZoneExternalSnatIp {
 ///
 /// This is a slimmer `nexus_db_model::ServiceNetworkInterface` that only stores
 /// the fields necessary for blueprint planning.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OmicronZoneNic {
     pub id: VnicUuid,
     pub mac: MacAddr,
@@ -245,7 +250,7 @@ pub struct OmicronZoneNic {
 /// A pair of an Omicron zone ID and an external IP.
 ///
 /// Part of [`OmicronZoneNetworkResources`].
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct OmicronZoneExternalIpEntry {
     pub zone_id: OmicronZoneUuid,
     pub ip: OmicronZoneExternalIp,
@@ -276,7 +281,7 @@ impl TriMapEntry for OmicronZoneExternalIpEntry {
 /// A pair of an Omicron zone ID and a network interface.
 ///
 /// Part of [`OmicronZoneNetworkResources`].
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct OmicronZoneNicEntry {
     pub zone_id: OmicronZoneUuid,
     pub nic: OmicronZoneNic,

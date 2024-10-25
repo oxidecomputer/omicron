@@ -162,7 +162,9 @@ async fn test_project_deletion_with_instance(
                 params::InstanceNetworkInterfaceAttachment::None,
             external_ips: vec![],
             disks: vec![],
+            boot_disk: None,
             start: false,
+            auto_restart_policy: Default::default(),
         },
     )
     .await;

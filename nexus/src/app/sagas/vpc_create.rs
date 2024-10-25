@@ -8,15 +8,13 @@ use super::NexusSaga;
 use super::ACTION_GENERATE_ID;
 use crate::app::sagas::declare_saga_actions;
 use crate::external_api::params;
+use nexus_db_model::InternetGatewayIpPool;
 use nexus_db_queries::db::queries::vpc_subnet::InsertVpcSubnetError;
 use nexus_db_queries::{authn, authz, db};
 use nexus_defaults as defaults;
 use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::LookupType;
-use omicron_common::api::external::RouteDestination;
-use omicron_common::api::external::RouteTarget;
-use omicron_common::api::external::RouterRouteKind;
 use oxnet::IpNet;
 use serde::Deserialize;
 use serde::Serialize;
@@ -44,6 +42,10 @@ declare_saga_actions! {
     VPC_CREATE_ROUTER -> "router" {
         + svc_create_router
         - svc_create_router_undo
+    }
+    VPC_CREATE_GATEWAY -> "gateway" {
+        + svc_create_gateway
+        - svc_create_gateway_undo
     }
     VPC_CREATE_V4_ROUTE -> "route4" {
         + svc_create_v4_route
@@ -98,12 +100,18 @@ pub fn create_dag(
         "GenerateDefaultSubnetId",
         ACTION_GENERATE_ID.as_ref(),
     ));
+    builder.append(Node::action(
+        "default_internet_gateway_id",
+        "GenerateDefaultInternetGatewayId",
+        ACTION_GENERATE_ID.as_ref(),
+    ));
     builder.append(vpc_create_vpc_action());
     builder.append(vpc_create_router_action());
     builder.append(vpc_create_v4_route_action());
     builder.append(vpc_create_v6_route_action());
     builder.append(vpc_create_subnet_action());
     builder.append(vpc_update_firewall_action());
+    builder.append(vpc_create_gateway_action());
     builder.append(vpc_notify_sleds_action());
 
     Ok(builder.build()?)
@@ -200,7 +208,7 @@ async fn svc_create_router(
             identity: IdentityMetadataCreateParams {
                 name: "system".parse().unwrap(),
                 description: "Routes are automatically added to this \
-                    router as vpc subnets are created"
+                    router as VPC subnets are created"
                     .into(),
             },
         },
@@ -280,14 +288,16 @@ async fn svc_create_route(
     let route = db::model::RouterRoute::new(
         route_id,
         system_router_id,
-        RouterRouteKind::Default,
+        external::RouterRouteKind::Default,
         params::RouterRouteCreate {
             identity: IdentityMetadataCreateParams {
                 name: name.parse().unwrap(),
                 description: "The default route of a vpc".to_string(),
             },
-            target: RouteTarget::InternetGateway("outbound".parse().unwrap()),
-            destination: RouteDestination::IpNet(default_net),
+            target: external::RouteTarget::InternetGateway(
+                "default".parse().unwrap(),
+            ),
+            destination: external::RouteDestination::IpNet(default_net),
         },
     );
 
@@ -460,6 +470,93 @@ async fn svc_update_firewall_undo(
     Ok(())
 }
 
+async fn svc_create_gateway(
+    sagactx: NexusActionContext,
+) -> Result<authz::InternetGateway, ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    let vpc_id = sagactx.lookup::<Uuid>("vpc_id")?;
+    let default_igw_id =
+        sagactx.lookup::<Uuid>("default_internet_gateway_id")?;
+    let (authz_vpc, _) =
+        sagactx.lookup::<(authz::Vpc, db::model::Vpc)>("vpc")?;
+
+    let igw = db::model::InternetGateway::new(
+        default_igw_id,
+        vpc_id,
+        params::InternetGatewayCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "default".parse().unwrap(),
+                description: "Automatically created default VPC gateway".into(),
+            },
+        },
+    );
+
+    let (authz_igw, _) = osagactx
+        .datastore()
+        .vpc_create_internet_gateway(&opctx, &authz_vpc, igw)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    match osagactx.datastore().ip_pools_fetch_default(&opctx).await {
+        Ok((authz_ip_pool, _db_ip_pool)) => {
+            // Attach the default IP pool to the default gateway.
+            // Failure of this saga takes out the gateway with a cascading delete and
+            // thus this ip pool.
+            osagactx
+                .datastore()
+                .internet_gateway_attach_ip_pool(
+                    &opctx,
+                    &authz_igw,
+                    InternetGatewayIpPool::new(
+                        Uuid::new_v4(),
+                        authz_ip_pool.id(),
+                        authz_igw.id(),
+                        IdentityMetadataCreateParams {
+                            name: "default".parse().unwrap(),
+                            description:
+                                "Automatically attached default IP pool".into(),
+                        },
+                    ),
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+        }
+        Err(e) => {
+            warn!(
+                opctx.log,
+                "Default ip pool lookup failed: {e}. \
+                Default gateway has no ip pool association",
+            );
+        }
+    };
+
+    Ok(authz_igw)
+}
+
+async fn svc_create_gateway_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    let vpc_id = sagactx.lookup::<Uuid>("vpc_id")?;
+    let authz_igw = sagactx.lookup::<authz::InternetGateway>("gateway")?;
+
+    osagactx
+        .datastore()
+        .vpc_delete_internet_gateway(&opctx, &authz_igw, vpc_id, true)
+        .await?;
+    Ok(())
+}
+
 async fn svc_notify_sleds(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
@@ -493,6 +590,7 @@ pub(crate) mod test {
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
     };
     use dropshot::test_util::ClientTestContext;
+    use nexus_db_queries::db::fixed_data::vpc::SERVICES_INTERNET_GATEWAY_ID;
     use nexus_db_queries::{
         authn::saga::Serialized, authz, context::OpContext,
         db::datastore::DataStore, db::fixed_data::vpc::SERVICES_VPC_ID,
@@ -623,6 +721,25 @@ pub(crate) mod test {
             .await
             .expect("Failed to delete system router");
 
+        // Default gateway
+        let (.., authz_vpc, authz_igw, _igw) =
+            LookupPath::new(&opctx, &datastore)
+                .project_id(project_id)
+                .vpc_name(&default_name.clone().into())
+                .internet_gateway_name(&default_name.clone().into())
+                .fetch()
+                .await
+                .expect("Failed to fetch default gateway");
+        datastore
+            .vpc_delete_internet_gateway(
+                &opctx,
+                &authz_igw,
+                authz_vpc.id(),
+                true,
+            )
+            .await
+            .expect("Failed to delete default gateway");
+
         // Default VPC & Firewall Rules
         let (.., authz_vpc, vpc) = LookupPath::new(&opctx, &datastore)
             .project_id(project_id)
@@ -645,6 +762,8 @@ pub(crate) mod test {
         assert!(no_routers_exist(datastore).await);
         assert!(no_routes_exist(datastore).await);
         assert!(no_subnets_exist(datastore).await);
+        assert!(no_gateways_exist(datastore).await);
+        assert!(no_gateway_links_exist(datastore).await);
         assert!(no_firewall_rules_exist(datastore).await);
     }
 
@@ -686,6 +805,49 @@ pub(crate) mod test {
             .unwrap()
             .map(|router| {
                 eprintln!("Router exists: {router:?}");
+            })
+            .is_none()
+    }
+
+    async fn no_gateways_exist(datastore: &DataStore) -> bool {
+        use nexus_db_queries::db::model::InternetGateway;
+        use nexus_db_queries::db::schema::internet_gateway::dsl;
+
+        dsl::internet_gateway
+            .filter(dsl::time_deleted.is_null())
+            // ignore built-in services VPC
+            .filter(dsl::vpc_id.ne(*SERVICES_VPC_ID))
+            .select(InternetGateway::as_select())
+            .first_async::<InternetGateway>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .optional()
+            .unwrap()
+            .map(|igw| {
+                eprintln!("Internet gateway exists: {igw:?}");
+            })
+            .is_none()
+    }
+
+    async fn no_gateway_links_exist(datastore: &DataStore) -> bool {
+        use nexus_db_queries::db::model::InternetGatewayIpPool;
+        use nexus_db_queries::db::schema::internet_gateway_ip_pool::dsl;
+
+        dsl::internet_gateway_ip_pool
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::internet_gateway_id.ne(*SERVICES_INTERNET_GATEWAY_ID))
+            .select(InternetGatewayIpPool::as_select())
+            .first_async::<InternetGatewayIpPool>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .optional()
+            .unwrap()
+            .map(|igw_ip_pool| {
+                eprintln!(
+                    "Internet gateway ip pool links exists: {igw_ip_pool:?}"
+                );
             })
             .is_none()
     }

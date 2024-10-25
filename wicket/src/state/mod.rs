@@ -17,7 +17,7 @@ pub use inventory::{
 pub use rack::{KnightRiderMode, RackState};
 pub use status::ServiceStatus;
 pub use update::{
-    parse_event_report_map, update_component_title,
+    parse_event_report_map, update_component_title, ArtifactVersions,
     CreateClearUpdateStateOptions, CreateStartUpdateOptions, RackUpdateState,
     UpdateItemState,
 };

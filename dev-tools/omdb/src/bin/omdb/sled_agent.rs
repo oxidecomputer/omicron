@@ -38,6 +38,10 @@ enum SledAgentCommands {
     #[clap(subcommand)]
     Zpools(ZpoolCommands),
 
+    /// print information about datasets
+    #[clap(subcommand)]
+    Datasets(DatasetCommands),
+
     /// print information about the local bootstore node
     #[clap(subcommand)]
     Bootstore(BootstoreCommands),
@@ -52,6 +56,16 @@ enum ZoneCommands {
 #[derive(Debug, Subcommand)]
 enum ZpoolCommands {
     /// Print list of all zpools managed by the sled agent
+    List,
+}
+
+#[derive(Debug, Subcommand)]
+enum DatasetCommands {
+    /// Print list of all datasets the sled agent is configured to manage
+    ///
+    /// Note that the set of actual datasets on the sled may be distinct,
+    /// use the `omdb db inventory collections show` command to see the latest
+    /// set of datasets collected from sleds.
     List,
 }
 
@@ -85,6 +99,9 @@ impl SledAgentArgs {
             }
             SledAgentCommands::Zpools(ZpoolCommands::List) => {
                 cmd_zpools_list(&client).await
+            }
+            SledAgentCommands::Datasets(DatasetCommands::List) => {
+                cmd_datasets_list(&client).await
             }
             SledAgentCommands::Bootstore(BootstoreCommands::Status) => {
                 cmd_bootstore_status(&client).await
@@ -125,6 +142,26 @@ async fn cmd_zpools_list(
     }
     for zpool in &zpools {
         println!("    {:?}", zpool);
+    }
+
+    Ok(())
+}
+
+/// Runs `omdb sled-agent datasets list`
+async fn cmd_datasets_list(
+    client: &sled_agent_client::Client,
+) -> Result<(), anyhow::Error> {
+    let response = client.datasets_get().await.context("listing datasets")?;
+    let response = response.into_inner();
+
+    println!("dataset configuration @ generation {}:", response.generation);
+    let datasets = response.datasets;
+
+    if datasets.is_empty() {
+        println!("    <none>");
+    }
+    for dataset in &datasets {
+        println!("    {:?}", dataset);
     }
 
     Ok(())

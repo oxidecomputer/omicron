@@ -13,21 +13,42 @@ pub const BOUNDARY_NTP_REDUNDANCY: usize = 2;
 /// Reconfigurator (to know whether to add new Nexus zones)
 pub const NEXUS_REDUNDANCY: usize = 3;
 
+// The amount of redundancy for Oximeter services.
+///
+/// This is used by both RSS (to distribute the initial set of services) and the
+/// Reconfigurator (to know whether to add new Oximeter zones)
+pub const OXIMETER_REDUNDANCY: usize = 1;
+
 /// The amount of redundancy for CockroachDb services.
 ///
 /// This is used by both RSS (to distribute the initial set of services) and the
 /// Reconfigurator (to know whether to add new crdb zones)
 pub const COCKROACHDB_REDUNDANCY: usize = 5;
 
+/// The amount of redundancy for Crucible Pantry services.
+///
+/// This is used by both RSS (to distribute the initial set of services) and the
+/// Reconfigurator (to know whether to add new pantry zones)
+pub const CRUCIBLE_PANTRY_REDUNDANCY: usize = 3;
+
 /// The amount of redundancy for internal DNS servers.
 ///
-/// Must be less than or equal to MAX_DNS_REDUNDANCY.
-pub const DNS_REDUNDANCY: usize = 3;
+/// Must be less than or equal to RESERVED_INTERNAL_DNS_REDUNDANCY.
+pub const INTERNAL_DNS_REDUNDANCY: usize = 3;
 
-/// The maximum amount of redundancy for DNS servers.
+/// The potential number of internal DNS servers we hold reserved for future
+/// growth.
 ///
-/// This determines the number of addresses which are reserved for DNS servers.
-pub const MAX_DNS_REDUNDANCY: usize = 5;
+/// Any consumers interacting with "the number of internal DNS servers" (e.g.,
+/// to construct a DNS client) should operate in terms of
+/// [`INTERNAL_DNS_REDUNDANCY`]. This constant should only be used to reserve
+/// space where we could increase `INTERNAL_DNS_REDUNDANCY` up to at most this
+/// value.
+pub const RESERVED_INTERNAL_DNS_REDUNDANCY: usize = 5;
+
+/// The amount of redundancy for single-node ClickHouse servers
+/// (*not* replicated aka multi-node clusters).
+pub const SINGLE_NODE_CLICKHOUSE_REDUNDANCY: usize = 1;
 
 /// The amount of redundancy for clickhouse servers
 ///

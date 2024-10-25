@@ -20,6 +20,9 @@ device = "fake-tmp-sensor"
 description = "FAKE temperature sensor 1"
 capabilities = 0x2
 presence = "Present"
+sensors = [
+    {name = "Southwest", kind = "Temperature", last_data.value = 41.7890625, last_data.timestamp = 1234 },
+]
 
 [[simulated_sps.sidecar.components]]
 id = "dev-1"
@@ -27,6 +30,9 @@ device = "fake-tmp-sensor"
 description = "FAKE temperature sensor 2"
 capabilities = 0x2
 presence = "Failed"
+sensors = [
+    { name = "South", kind = "Temperature", last_error.value = "DeviceError", last_error.timestamp = 1234 },
+]
 
 [[simulated_sps.sidecar]]
 multicast_addr = "::1"
@@ -56,6 +62,93 @@ device = "fake-tmp-sensor"
 description = "FAKE temperature sensor"
 capabilities = 0x2
 presence = "Failed"
+sensors = [
+    { name = "Southwest", kind = "Temperature", last_error.value = "DeviceError", last_error.timestamp = 1234 },
+]
+[[simulated_sps.gimlet.components]]
+id = "dev-1"
+device = "tmp117"
+description = "FAKE temperature sensor"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "South", kind = "Temperature", last_data.value = 42.5625, last_data.timestamp = 1234 },
+]
+
+[[simulated_sps.gimlet.components]]
+id = "dev-2"
+device = "tmp117"
+description = "FAKE Southeast temperature sensor"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "Southeast", kind = "Temperature", last_data.value = 41.570313, last_data.timestamp = 1234 },
+]
+
+[[simulated_sps.gimlet.components]]
+id = "dev-6"
+device = "at24csw080"
+description = "FAKE U.2 Sharkfin A VPD"
+capabilities = 0x0
+presence = "Present"
+
+[[simulated_sps.gimlet.components]]
+id = "dev-7"
+device = "max5970"
+description = "FAKE U.2 Sharkfin A hot swap controller"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "V12_U2A_A0", kind = "Current", last_data.value = 0.45898438, last_data.timestamp = 1234 },
+    { name = "V3P3_U2A_A0", kind = "Current", last_data.value = 0.024414063, last_data.timestamp = 1234 },
+    { name = "V12_U2A_A0", kind = "Voltage", last_data.value = 12.03125, last_data.timestamp = 1234 },
+    { name = "V3P3_U2A_A0", kind = "Voltage", last_data.value = 3.328125, last_data.timestamp = 1234 },
+]
+
+[[simulated_sps.gimlet.components]]
+id = "dev-8"
+device = "nvme_bmc"
+description = "FAKE U.2 A NVMe Basic Management Command"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "U2_N0", kind = "Temperature", last_data.value = 56.0, last_data.timestamp = 1234 },
+]
+[[simulated_sps.gimlet.components]]
+id = "dev-39"
+device = "tmp451"
+description = "FAKE T6 temperature sensor"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "t6", kind = "Temperature", last_data.value = 70.625, last_data.timestamp = 1234 },
+]
+
+[[simulated_sps.gimlet.components]]
+id = "dev-46"
+device = "sbtsi"
+description = "CPU temperature sensor"
+capabilities = 2
+presence = "Present"
+sensors = [
+    { name = "CPU", kind = "Temperature", last_data.value = 64.5, last_data.timestamp = 1234 },
+]
+
+[[simulated_sps.gimlet.components]]
+id = "dev-53"
+device = "max31790"
+description = "FAKE Fan controller"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "Southeast", kind = "Speed", last_data.value = 2607.0, last_data.timestamp = 1234 },
+    { name = "Northeast", kind = "Speed", last_data.value = 2476.0, last_data.timestamp = 1234 },
+    { name = "South", kind = "Speed", last_data.value = 2553.0, last_data.timestamp = 1234 },
+    { name = "North", kind = "Speed", last_data.value = 2265.0, last_data.timestamp = 1234 },
+    { name = "Southwest", kind = "Speed", last_data.value = 2649.0, last_data.timestamp = 1234 },
+    { name = "Northwest", kind = "Speed", last_data.value = 2275.0, last_data.timestamp = 1234 },
+]
+
 
 [[simulated_sps.gimlet]]
 multicast_addr = "::1"
@@ -71,6 +164,101 @@ description = "FAKE host cpu"
 capabilities = 0
 presence = "Present"
 serial_console = "[::1]:0"
+
+
+[[simulated_sps.gimlet.components]]
+id = "dev-0"
+device = "tmp117"
+description = "FAKE temperature sensor"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "Southwest", kind = "Temperature", last_data.value = 41.3629, last_data.timestamp = 1234 },
+]
+[[simulated_sps.gimlet.components]]
+id = "dev-1"
+device = "tmp117"
+description = "FAKE temperature sensor"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "South", kind = "Temperature", last_data.value = 42.5625, last_data.timestamp = 1234 },
+]
+
+[[simulated_sps.gimlet.components]]
+id = "dev-2"
+device = "tmp117"
+description = "FAKE Southeast temperature sensor"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "Southeast", kind = "Temperature", last_data.value = 41.570313, last_data.timestamp = 1234 },
+]
+
+[[simulated_sps.gimlet.components]]
+id = "dev-6"
+device = "at24csw080"
+description = "FAKE U.2 Sharkfin A VPD"
+capabilities = 0x0
+presence = "Present"
+
+[[simulated_sps.gimlet.components]]
+id = "dev-7"
+device = "max5970"
+description = "FAKE U.2 Sharkfin A hot swap controller"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "V12_U2A_A0", kind = "Current", last_data.value = 0.41893438, last_data.timestamp = 1234 },
+    { name = "V3P3_U2A_A0", kind = "Current", last_data.value = 0.025614603, last_data.timestamp = 1234 },
+    { name = "V12_U2A_A0", kind = "Voltage", last_data.value = 12.02914, last_data.timestamp = 1234 },
+    { name = "V3P3_U2A_A0", kind = "Voltage", last_data.value = 3.2618, last_data.timestamp = 1234 },
+]
+
+[[simulated_sps.gimlet.components]]
+id = "dev-8"
+device = "nvme_bmc"
+description = "FAKE U.2 A NVMe Basic Management Command"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "U2_N0", kind = "Temperature", last_data.value = 56.0, last_data.timestamp = 1234 },
+]
+[[simulated_sps.gimlet.components]]
+id = "dev-39"
+device = "tmp451"
+description = "FAKE T6 temperature sensor"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "t6", kind = "Temperature", last_data.value = 70.625, last_data.timestamp = 1234 },
+]
+
+[[simulated_sps.gimlet.components]]
+id = "dev-46"
+device = "sbtsi"
+description = "CPU temperature sensor"
+capabilities = 2
+presence = "Present"
+sensors = [
+    { name = "CPU", kind = "Temperature", last_data.value = 62.6, last_data.timestamp = 1234 },
+]
+
+[[simulated_sps.gimlet.components]]
+id = "dev-53"
+device = "max31790"
+description = "FAKE Fan controller"
+capabilities = 0x2
+presence = "Present"
+sensors = [
+    { name = "Southeast", kind = "Speed", last_data.value = 2510.0, last_data.timestamp = 1234 },
+    { name = "Northeast", kind = "Speed", last_data.value = 2390.0, last_data.timestamp = 1234 },
+    { name = "South", kind = "Speed", last_data.value = 2467.0, last_data.timestamp = 1234 },
+    { name = "North", kind = "Speed", last_data.value = 2195.0, last_data.timestamp = 1234 },
+    { name = "Southwest", kind = "Speed", last_data.value = 2680.0, last_data.timestamp = 1234 },
+    { name = "Northwest", kind = "Speed", last_data.value = 2212.0, last_data.timestamp = 1234 },
+]
+
 
 #
 # NOTE: for the test suite, the [log] section is ignored; sp-sim logs are rolled

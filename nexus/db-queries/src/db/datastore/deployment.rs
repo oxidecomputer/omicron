@@ -20,6 +20,7 @@ use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
+use clickhouse_admin_types::{KeeperId, ServerId};
 use diesel::expression::SelectableHelper;
 use diesel::pg::Pg;
 use diesel::query_builder::AstPass;
@@ -36,6 +37,9 @@ use diesel::OptionalExtension;
 use diesel::QueryDsl;
 use diesel::RunQueryDsl;
 use nexus_db_model::Blueprint as DbBlueprint;
+use nexus_db_model::BpClickhouseClusterConfig;
+use nexus_db_model::BpClickhouseKeeperZoneIdToNodeId;
+use nexus_db_model::BpClickhouseServerZoneIdToNodeId;
 use nexus_db_model::BpOmicronPhysicalDisk;
 use nexus_db_model::BpOmicronZone;
 use nexus_db_model::BpOmicronZoneNic;
@@ -49,6 +53,7 @@ use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZonesConfig;
+use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::external_api::views::SledState;
 use omicron_common::api::external::DataPageParams;
@@ -58,6 +63,7 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -180,6 +186,42 @@ impl DataStore {
             })
             .collect::<Result<Vec<BpOmicronZoneNic>, _>>()?;
 
+        let clickhouse_tables: Option<(_, _, _)> = if let Some(config) =
+            &blueprint.clickhouse_cluster_config
+        {
+            let mut keepers = vec![];
+            for (zone_id, keeper_id) in &config.keepers {
+                let keeper = BpClickhouseKeeperZoneIdToNodeId::new(
+                    blueprint_id,
+                    *zone_id,
+                    *keeper_id,
+                )
+                .with_context(|| format!("zone {zone_id}, keeper {keeper_id}"))
+                .map_err(|e| Error::internal_error(&format!("{:#}", e)))?;
+                keepers.push(keeper)
+            }
+
+            let mut servers = vec![];
+            for (zone_id, server_id) in &config.servers {
+                let server = BpClickhouseServerZoneIdToNodeId::new(
+                    blueprint_id,
+                    *zone_id,
+                    *server_id,
+                )
+                .with_context(|| format!("zone {zone_id}, server {server_id}"))
+                .map_err(|e| Error::internal_error(&format!("{:#}", e)))?;
+                servers.push(server);
+            }
+
+            let cluster_config =
+                BpClickhouseClusterConfig::new(blueprint_id, config)
+                    .map_err(|e| Error::internal_error(&format!("{:#}", e)))?;
+
+            Some((cluster_config, keepers, servers))
+        } else {
+            None
+        };
+
         // This implementation inserts all records associated with the
         // blueprint in one transaction.  This is required: we don't want
         // any planner or executor to see a half-inserted blueprint, nor do we
@@ -258,7 +300,33 @@ impl DataStore {
                         .await?;
             }
 
+            // Insert all clickhouse cluster related tables if necessary
+            if let Some((clickhouse_cluster_config, keepers, servers)) = clickhouse_tables {
+                {
+                    use db::schema::bp_clickhouse_cluster_config::dsl;
+                    let _ = diesel::insert_into(dsl::bp_clickhouse_cluster_config)
+                    .values(clickhouse_cluster_config)
+                    .execute_async(&conn)
+                    .await?;
+                }
+                {
+                    use db::schema::bp_clickhouse_keeper_zone_id_to_node_id::dsl;
+                    let _ = diesel::insert_into(dsl::bp_clickhouse_keeper_zone_id_to_node_id)
+                    .values(keepers)
+                    .execute_async(&conn)
+                    .await?;
+                }
+                {
+                    use db::schema::bp_clickhouse_server_zone_id_to_node_id::dsl;
+                    let _ = diesel::insert_into(dsl::bp_clickhouse_server_zone_id_to_node_id)
+                    .values(servers)
+                    .execute_async(&conn)
+                    .await?;
+                }
+            }
+
             Ok(())
+
         })
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -622,6 +690,156 @@ impl DataStore {
             disks_config.disks.sort_unstable_by_key(|d| d.id);
         }
 
+        // Load our `ClickhouseClusterConfig` if it exists
+        let clickhouse_cluster_config: Option<ClickhouseClusterConfig> = {
+            use db::schema::bp_clickhouse_cluster_config::dsl;
+
+            let res = dsl::bp_clickhouse_cluster_config
+                .filter(dsl::blueprint_id.eq(blueprint_id))
+                .select(BpClickhouseClusterConfig::as_select())
+                .get_result_async(&*conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            match res {
+                None => None,
+                Some(bp_config) => {
+                    // Load our clickhouse keeper configs for the given blueprint
+                    let keepers: BTreeMap<OmicronZoneUuid, KeeperId> = {
+                        use db::schema::bp_clickhouse_keeper_zone_id_to_node_id::dsl;
+                        let mut keepers = BTreeMap::new();
+                        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+                        while let Some(p) = paginator.next() {
+                            let batch = paginated(
+                                dsl::bp_clickhouse_keeper_zone_id_to_node_id,
+                                dsl::omicron_zone_id,
+                                &p.current_pagparams(),
+                            )
+                            .filter(dsl::blueprint_id.eq(blueprint_id))
+                            .select(
+                                BpClickhouseKeeperZoneIdToNodeId::as_select(),
+                            )
+                            .load_async(&*conn)
+                            .await
+                            .map_err(|e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Server,
+                                )
+                            })?;
+
+                            paginator =
+                                p.found_batch(&batch, &|k| k.omicron_zone_id);
+
+                            for k in batch {
+                                let keeper_id = KeeperId(
+                                    u64::try_from(k.keeper_id).map_err(
+                                        |_| {
+                                            Error::internal_error(&format!(
+                                                "keeper id is negative: {}",
+                                                k.keeper_id
+                                            ))
+                                        },
+                                    )?,
+                                );
+                                keepers.insert(
+                                    k.omicron_zone_id.into(),
+                                    keeper_id,
+                                );
+                            }
+                        }
+                        keepers
+                    };
+
+                    // Load our clickhouse server configs for the given blueprint
+                    let servers: BTreeMap<OmicronZoneUuid, ServerId> = {
+                        use db::schema::bp_clickhouse_server_zone_id_to_node_id::dsl;
+                        let mut servers = BTreeMap::new();
+                        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+                        while let Some(p) = paginator.next() {
+                            let batch = paginated(
+                                dsl::bp_clickhouse_server_zone_id_to_node_id,
+                                dsl::omicron_zone_id,
+                                &p.current_pagparams(),
+                            )
+                            .filter(dsl::blueprint_id.eq(blueprint_id))
+                            .select(
+                                BpClickhouseServerZoneIdToNodeId::as_select(),
+                            )
+                            .load_async(&*conn)
+                            .await
+                            .map_err(|e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Server,
+                                )
+                            })?;
+
+                            paginator =
+                                p.found_batch(&batch, &|s| s.omicron_zone_id);
+
+                            for s in batch {
+                                let server_id = ServerId(
+                                    u64::try_from(s.server_id).map_err(
+                                        |_| {
+                                            Error::internal_error(&format!(
+                                                "server id is negative: {}",
+                                                s.server_id
+                                            ))
+                                        },
+                                    )?,
+                                );
+                                servers.insert(
+                                    s.omicron_zone_id.into(),
+                                    server_id,
+                                );
+                            }
+                        }
+                        servers
+                    };
+
+                    Some(ClickhouseClusterConfig {
+                        generation: bp_config.generation.into(),
+                        max_used_server_id: ServerId(
+                            u64::try_from(bp_config.max_used_server_id)
+                                .map_err(|_| {
+                                    Error::internal_error(&format!(
+                                        "max server id is negative: {}",
+                                        bp_config.max_used_server_id
+                                    ))
+                                })?,
+                        ),
+                        max_used_keeper_id: KeeperId(
+                            u64::try_from(bp_config.max_used_keeper_id)
+                                .map_err(|_| {
+                                    Error::internal_error(&format!(
+                                        "max keeper id is negative: {}",
+                                        bp_config.max_used_keeper_id
+                                    ))
+                                })?,
+                        ),
+                        cluster_name: bp_config.cluster_name,
+                        cluster_secret: bp_config.cluster_secret,
+                        highest_seen_keeper_leader_committed_log_index:
+                            u64::try_from(
+                                bp_config.highest_seen_keeper_leader_committed_log_index,
+                            )
+                            .map_err(|_| {
+                                Error::internal_error(&format!(
+                                    "max server id is negative: {}",
+                                    bp_config.highest_seen_keeper_leader_committed_log_index
+                                ))
+                            })?,
+                        keepers,
+                        servers,
+                    })
+                }
+            }
+        };
+
         Ok(Blueprint {
             id: blueprint_id,
             blueprint_zones,
@@ -632,6 +850,7 @@ impl DataStore {
             external_dns_version,
             cockroachdb_fingerprint,
             cockroachdb_setting_preserve_downgrade,
+            clickhouse_cluster_config,
             time_created,
             creator,
             comment,
@@ -663,16 +882,15 @@ impl DataStore {
             nsled_agent_zones,
             nzones,
             nnics,
+            nclickhouse_cluster_configs,
+            nclickhouse_keepers,
+            nclickhouse_servers,
         ) = conn
             .transaction_async(|conn| async move {
                 // Ensure that blueprint we're about to delete is not the
                 // current target.
-                let current_target = self
-                    .blueprint_current_target_only(
-                        &conn,
-                        SelectFlavor::Standard,
-                    )
-                    .await?;
+                let current_target =
+                    self.blueprint_current_target_only(&conn).await?;
                 if current_target.target_id == blueprint_id {
                     return Err(TransactionError::CustomError(
                         Error::conflict(format!(
@@ -763,6 +981,34 @@ impl DataStore {
                     .await?
                 };
 
+                let nclickhouse_cluster_configs = {
+                    use db::schema::bp_clickhouse_cluster_config::dsl;
+                    diesel::delete(
+                        dsl::bp_clickhouse_cluster_config
+                            .filter(dsl::blueprint_id.eq(blueprint_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
+                let nclickhouse_keepers = {
+                    use db::schema::bp_clickhouse_keeper_zone_id_to_node_id::dsl;
+                    diesel::delete(dsl::bp_clickhouse_keeper_zone_id_to_node_id
+                            .filter(dsl::blueprint_id.eq(blueprint_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
+                let nclickhouse_servers = {
+                    use db::schema::bp_clickhouse_server_zone_id_to_node_id::dsl;
+                    diesel::delete(dsl::bp_clickhouse_server_zone_id_to_node_id
+                            .filter(dsl::blueprint_id.eq(blueprint_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
                 Ok((
                     nblueprints,
                     nsled_states,
@@ -771,6 +1017,9 @@ impl DataStore {
                     nsled_agent_zones,
                     nzones,
                     nnics,
+                    nclickhouse_cluster_configs,
+                    nclickhouse_keepers,
+                    nclickhouse_servers,
                 ))
             })
             .await
@@ -790,6 +1039,9 @@ impl DataStore {
             "nsled_agent_zones" => nsled_agent_zones,
             "nzones" => nzones,
             "nnics" => nnics,
+            "nclickhouse_cluster_configs" => nclickhouse_cluster_configs,
+            "nclickhouse_keepers" => nclickhouse_keepers,
+            "nclickhouse_servers" => nclickhouse_servers
         );
 
         Ok(())
@@ -813,9 +1065,7 @@ impl DataStore {
             opctx,
             blueprint,
             #[cfg(test)]
-            None,
-            #[cfg(test)]
-            None,
+            tests::NetworkResourceControlFlow::default(),
         )
         .await
     }
@@ -826,21 +1076,16 @@ impl DataStore {
     //
     // 1. Check that `blueprint` is the current target blueprint
     // 2. Set `target_check_done` is set to true (the test can wait on this)
-    // 3. Run remainder of transaction to allocate/deallocate resources
-    // 4. Wait until `return_on_completion` is set to true
+    // 3. Wait until `should_write_data` is set to true (the test can wait on this).
+    // 4. Run remainder of transaction to allocate/deallocate resources
     // 5. Return
     //
-    // If either of these arguments are `None`, steps 2 or 4 will be skipped.
+    // If any of the test-only control flow parameters are "None", they are skipped.
     async fn blueprint_ensure_external_networking_resources_impl(
         &self,
         opctx: &OpContext,
         blueprint: &Blueprint,
-        #[cfg(test)] target_check_done: Option<
-            std::sync::Arc<std::sync::atomic::AtomicBool>,
-        >,
-        #[cfg(test)] return_on_completion: Option<
-            std::sync::Arc<std::sync::atomic::AtomicBool>,
-        >,
+        #[cfg(test)] test_control_flow: tests::NetworkResourceControlFlow,
     ) -> Result<(), Error> {
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -851,17 +1096,14 @@ impl DataStore {
         .transaction(&conn, |conn| {
             let err = err.clone();
             #[cfg(test)]
-            let target_check_done = target_check_done.clone();
+            let target_check_done = test_control_flow.target_check_done.clone();
             #[cfg(test)]
-            let return_on_completion = return_on_completion.clone();
+            let should_write_data = test_control_flow.should_write_data.clone();
 
             async move {
                 // Bail out if `blueprint` isn't the current target.
                 let current_target = self
-                    .blueprint_current_target_only(
-                        &conn,
-                        SelectFlavor::ForUpdate,
-                    )
+                    .blueprint_current_target_only(&conn)
                     .await
                     .map_err(|e| err.bail(e))?;
                 if current_target.target_id != blueprint.id {
@@ -878,6 +1120,18 @@ impl DataStore {
                     use std::sync::atomic::Ordering;
                     if let Some(gate) = target_check_done {
                         gate.store(true, Ordering::SeqCst);
+                    }
+                }
+                // See the comment on this method; this lets us wait until our
+                // test caller is ready for us to write data.
+                #[cfg(test)]
+                {
+                    use std::sync::atomic::Ordering;
+                    use std::time::Duration;
+                    if let Some(gate) = should_write_data {
+                        while !gate.load(Ordering::SeqCst) {
+                            tokio::time::sleep(Duration::from_millis(50)).await;
+                        }
                     }
                 }
 
@@ -909,19 +1163,6 @@ impl DataStore {
                 )
                 .await
                 .map_err(|e| err.bail(e))?;
-
-                // See the comment on this method; this lets us wait until our
-                // test caller is ready for us to return.
-                #[cfg(test)]
-                {
-                    use std::sync::atomic::Ordering;
-                    use std::time::Duration;
-                    if let Some(gate) = return_on_completion {
-                        while !gate.load(Ordering::SeqCst) {
-                            tokio::time::sleep(Duration::from_millis(50)).await;
-                        }
-                    }
-                }
 
                 Ok(())
             }
@@ -1079,9 +1320,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let target = self
-            .blueprint_current_target_only(&conn, SelectFlavor::Standard)
-            .await?;
+        let target = self.blueprint_current_target_only(&conn).await?;
 
         // The blueprint for the current target cannot be deleted while it is
         // the current target, but it's possible someone else (a) made a new
@@ -1102,7 +1341,7 @@ impl DataStore {
     ) -> Result<BlueprintTarget, Error> {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.blueprint_current_target_only(&conn, SelectFlavor::Standard).await
+        self.blueprint_current_target_only(&conn).await
     }
 
     // Helper to fetch the current blueprint target (without fetching the entire
@@ -1112,26 +1351,13 @@ impl DataStore {
     async fn blueprint_current_target_only(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        select_flavor: SelectFlavor,
     ) -> Result<BlueprintTarget, Error> {
         use db::schema::bp_target::dsl;
 
-        let query_result = match select_flavor {
-            SelectFlavor::ForUpdate => {
-                dsl::bp_target
-                    .order_by(dsl::version.desc())
-                    .for_update()
-                    .first_async::<BpTarget>(conn)
-                    .await
-            }
-            SelectFlavor::Standard => {
-                dsl::bp_target
-                    .order_by(dsl::version.desc())
-                    .first_async::<BpTarget>(conn)
-                    .await
-            }
-        };
-        let current_target = query_result
+        let current_target = dsl::bp_target
+            .order_by(dsl::version.desc())
+            .first_async::<BpTarget>(conn)
+            .await
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
@@ -1146,14 +1372,6 @@ impl DataStore {
 
         Ok(current_target.into())
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-enum SelectFlavor {
-    /// A normal `SELECT`.
-    Standard,
-    /// Acquire a database-level write lock via `SELECT ... FOR UPDATE`.
-    ForUpdate,
 }
 
 // Helper to create an `authz::Blueprint` for a specific blueprint ID
@@ -1511,15 +1729,22 @@ impl RunQueryDsl<DbConnection> for InsertTargetQuery {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::datastore::test_utils::datastore_test;
+
+    use crate::db::datastore::pub_test_utils::TestDatabase;
+    use crate::db::raw_query_builder::QueryBuilder;
     use nexus_inventory::now_db_precision;
+    use nexus_inventory::CollectionBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::Ensure;
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::example;
-    use nexus_test_utils::db::test_setup_database;
+    use nexus_types::deployment::blueprint_zone_type;
+    use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneFilter;
+    use nexus_types::deployment::BlueprintZoneType;
+    use nexus_types::deployment::BlueprintZonesConfig;
+    use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::PlanningInput;
     use nexus_types::deployment::PlanningInputBuilder;
     use nexus_types::deployment::SledDetails;
@@ -1530,21 +1755,34 @@ mod tests {
     use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::inventory::Collection;
+    use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
+    use omicron_common::api::external::MacAddr;
+    use omicron_common::api::external::Name;
+    use omicron_common::api::external::Vni;
+    use omicron_common::api::internal::shared::NetworkInterface;
+    use omicron_common::api::internal::shared::NetworkInterfaceKind;
     use omicron_common::disk::DiskIdentity;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::poll::wait_for_condition;
     use omicron_test_utils::dev::poll::CondCheckError;
+    use omicron_uuid_kinds::ExternalIpUuid;
+    use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use once_cell::sync::Lazy;
+    use oxnet::IpNet;
     use pretty_assertions::assert_eq;
     use rand::thread_rng;
     use rand::Rng;
     use slog::Logger;
     use std::mem;
+    use std::net::IpAddr;
+    use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
+    use std::net::SocketAddrV6;
+    use std::str::FromStr;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
@@ -1552,6 +1790,12 @@ mod tests {
 
     static EMPTY_PLANNING_INPUT: Lazy<PlanningInput> =
         Lazy::new(|| PlanningInputBuilder::empty_input());
+
+    #[derive(Default)]
+    pub struct NetworkResourceControlFlow {
+        pub target_check_done: Option<Arc<AtomicBool>>,
+        pub should_write_data: Option<Arc<AtomicBool>>,
+    }
 
     // This is a not-super-future-maintainer-friendly helper to check that all
     // the subtables related to blueprints have been pruned of a specific
@@ -1624,7 +1868,7 @@ mod tests {
     ) -> (Collection, PlanningInput, Blueprint) {
         // We'll start with an example system.
         let (mut base_collection, planning_input, mut blueprint) =
-            example(log, test_name, 3);
+            example(log, test_name);
 
         // Take a more thorough collection representative (includes SPs,
         // etc.)...
@@ -1636,10 +1880,6 @@ mod tests {
         mem::swap(
             &mut collection.sled_agents,
             &mut base_collection.sled_agents,
-        );
-        mem::swap(
-            &mut collection.omicron_zones,
-            &mut base_collection.omicron_zones,
         );
 
         // Treat this blueprint as the initial blueprint for the system.
@@ -1665,8 +1905,8 @@ mod tests {
     async fn test_empty_blueprint() {
         // Setup
         let logctx = dev::test_setup_log("test_empty_blueprint");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create an empty blueprint from it
         let blueprint1 = BlueprintBuilder::build_empty_with_sleds(
@@ -1715,7 +1955,7 @@ mod tests {
         // on other tests to check blueprint deletion.
 
         // Clean up.
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1724,8 +1964,8 @@ mod tests {
         const TEST_NAME: &str = "test_representative_blueprint";
         // Setup
         let logctx = dev::test_setup_log(TEST_NAME);
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a cohesive representative collection/policy/blueprint
         let (collection, planning_input, blueprint1) =
@@ -1754,7 +1994,7 @@ mod tests {
         );
         assert_eq!(
             blueprint1.blueprint_zones.len(),
-            collection.omicron_zones.len()
+            collection.sled_agents.len()
         );
         assert_eq!(
             blueprint1.all_omicron_zones(BlueprintZoneFilter::All).count(),
@@ -1807,14 +2047,18 @@ mod tests {
             builder.set_external_dns_version(new_external_dns_version);
             builder.build()
         };
-        let new_sled_zpools =
-            &planning_input.sled_resources(&new_sled_id).unwrap().zpools;
+        let new_sled_zpools = &planning_input
+            .sled_lookup(SledFilter::Commissioned, new_sled_id)
+            .unwrap()
+            .resources
+            .zpools;
 
         // Create a builder for a child blueprint.
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
             &planning_input,
+            &collection,
             "test",
         )
         .expect("failed to create builder");
@@ -1825,9 +2069,9 @@ mod tests {
                 .sled_ensure_disks(
                     new_sled_id,
                     &planning_input
-                        .sled_resources(&new_sled_id)
+                        .sled_lookup(SledFilter::Commissioned, new_sled_id)
                         .unwrap()
-                        .clone(),
+                        .resources,
                 )
                 .unwrap(),
             EnsureMultiple::Changed { added: 4, removed: 0 }
@@ -1946,7 +2190,7 @@ mod tests {
         );
 
         // Clean up.
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1954,8 +2198,8 @@ mod tests {
     async fn test_set_target() {
         // Setup
         let logctx = dev::test_setup_log("test_set_target");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Trying to insert a target that doesn't reference a blueprint should
         // fail with a relevant error message.
@@ -1987,6 +2231,9 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("no target blueprint set"));
 
+        // Create an initial empty collection
+        let collection = CollectionBuilder::new("test").build();
+
         // Create three blueprints:
         // * `blueprint1` has no parent
         // * `blueprint2` and `blueprint3` both have `blueprint1` as parent
@@ -1998,6 +2245,7 @@ mod tests {
             &logctx.log,
             &blueprint1,
             &EMPTY_PLANNING_INPUT,
+            &collection,
             "test2",
         )
         .expect("failed to create builder")
@@ -2006,6 +2254,7 @@ mod tests {
             &logctx.log,
             &blueprint1,
             &EMPTY_PLANNING_INPUT,
+            &collection,
             "test3",
         )
         .expect("failed to create builder")
@@ -2105,6 +2354,7 @@ mod tests {
             &logctx.log,
             &blueprint3,
             &EMPTY_PLANNING_INPUT,
+            &collection,
             "test3",
         )
         .expect("failed to create builder")
@@ -2126,7 +2376,7 @@ mod tests {
         );
 
         // Clean up.
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2134,8 +2384,11 @@ mod tests {
     async fn test_set_target_enabled() {
         // Setup
         let logctx = dev::test_setup_log("test_set_target_enabled");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create an initial empty collection
+        let collection = CollectionBuilder::new("test").build();
 
         // Create an initial blueprint and a child.
         let blueprint1 = BlueprintBuilder::build_empty_with_sleds(
@@ -2146,6 +2399,7 @@ mod tests {
             &logctx.log,
             &blueprint1,
             &EMPTY_PLANNING_INPUT,
+            &collection,
             "test2",
         )
         .expect("failed to create builder")
@@ -2235,7 +2489,124 @@ mod tests {
         }
 
         // Clean up.
-        db.cleanup().await.unwrap();
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    async fn create_blueprint_with_external_ip(
+        datastore: &DataStore,
+        opctx: &OpContext,
+    ) -> Blueprint {
+        // Create an initial blueprint and a child.
+        let sled_id = SledUuid::new_v4();
+        let mut blueprint = BlueprintBuilder::build_empty_with_sleds(
+            [sled_id].into_iter(),
+            "test1",
+        );
+
+        // To observe realistic database behavior, we need the invocation of
+        // "blueprint_ensure_external_networking_resources" to actually write something
+        // back to the database.
+        //
+        // While this is *mostly* made-up blueprint contents, the part that matters
+        // is that it's provisioning a zone (Nexus) which does have resources
+        // to be allocated.
+        let ip_range = IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(10, 0, 0, 10),
+        ))
+        .unwrap();
+        let (service_ip_pool, _) = datastore
+            .ip_pools_service_lookup(&opctx)
+            .await
+            .expect("lookup service ip pool");
+        datastore
+            .ip_pool_add_range(&opctx, &service_ip_pool, &ip_range)
+            .await
+            .expect("add range to service ip pool");
+        let zone_id = OmicronZoneUuid::new_v4();
+        blueprint.blueprint_zones.insert(
+            sled_id,
+            BlueprintZonesConfig {
+                generation: omicron_common::api::external::Generation::new(),
+                zones: vec![BlueprintZoneConfig {
+                    disposition: BlueprintZoneDisposition::InService,
+                    id: zone_id,
+                    underlay_address: Ipv6Addr::LOCALHOST,
+                    filesystem_pool: None,
+                    zone_type: BlueprintZoneType::Nexus(
+                        blueprint_zone_type::Nexus {
+                            internal_address: SocketAddrV6::new(
+                                Ipv6Addr::LOCALHOST,
+                                0,
+                                0,
+                                0,
+                            ),
+                            external_ip: OmicronZoneExternalFloatingIp {
+                                id: ExternalIpUuid::new_v4(),
+                                ip: "10.0.0.1".parse().unwrap(),
+                            },
+                            nic: NetworkInterface {
+                                id: Uuid::new_v4(),
+                                kind: NetworkInterfaceKind::Service {
+                                    id: *zone_id.as_untyped_uuid(),
+                                },
+                                name: Name::from_str("mynic").unwrap(),
+                                ip: "fd77:e9d2:9cd9:2::8".parse().unwrap(),
+                                mac: MacAddr::random_system(),
+                                subnet: IpNet::host_net(IpAddr::V6(
+                                    Ipv6Addr::LOCALHOST,
+                                )),
+                                vni: Vni::random(),
+                                primary: true,
+                                slot: 1,
+                                transit_ips: vec![],
+                            },
+                            external_tls: false,
+                            external_dns_servers: vec![],
+                        },
+                    ),
+                }],
+            },
+        );
+
+        blueprint
+    }
+
+    #[tokio::test]
+    async fn test_ensure_external_networking_works_with_good_target() {
+        // Setup
+        let logctx = dev::test_setup_log(
+            "test_ensure_external_networking_works_with_good_target",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let blueprint =
+            create_blueprint_with_external_ip(&datastore, &opctx).await;
+        datastore.blueprint_insert(&opctx, &blueprint).await.unwrap();
+
+        let bp_target = BlueprintTarget {
+            target_id: blueprint.id,
+            enabled: true,
+            time_made_target: now_db_precision(),
+        };
+
+        datastore
+            .blueprint_target_set_current(&opctx, bp_target)
+            .await
+            .unwrap();
+        datastore
+            .blueprint_ensure_external_networking_resources_impl(
+                &opctx,
+                &blueprint,
+                NetworkResourceControlFlow::default(),
+            )
+            .await
+            .expect("Should be able to allocate external network resources");
+
+        // Clean up.
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2245,18 +2616,19 @@ mod tests {
         let logctx = dev::test_setup_log(
             "test_ensure_external_networking_bails_on_bad_target",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // Create an initial blueprint and a child.
-        let blueprint1 = BlueprintBuilder::build_empty_with_sleds(
-            std::iter::empty(),
-            "test1",
-        );
+        // Create an initial empty collection
+        let collection = CollectionBuilder::new("test").build();
+
+        let blueprint1 =
+            create_blueprint_with_external_ip(&datastore, &opctx).await;
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
             &EMPTY_PLANNING_INPUT,
+            &collection,
             "test2",
         )
         .expect("failed to create builder")
@@ -2283,41 +2655,26 @@ mod tests {
             .await
             .unwrap();
 
-        // Attempting to ensure the (empty) resources for bp1 should succeed.
-        datastore
-            .blueprint_ensure_external_networking_resources(&opctx, &blueprint1)
-            .await
-            .expect("ensured networking resources for empty blueprint 1");
-
-        // Attempting to ensure the (empty) resources for bp2 should fail,
-        // because it isn't the target blueprint.
-        let err = datastore
-            .blueprint_ensure_external_networking_resources(&opctx, &blueprint2)
-            .await
-            .expect_err("failed because blueprint 2 isn't the target");
-        assert!(
-            err.to_string().contains("is not the current target blueprint"),
-            "unexpected error: {err}"
-        );
-
         // Create flags to control method execution.
         let target_check_done = Arc::new(AtomicBool::new(false));
-        let return_on_completion = Arc::new(AtomicBool::new(false));
+        let should_write_data = Arc::new(AtomicBool::new(false));
 
         // Spawn a task to execute our method.
-        let mut ensure_resources_task = tokio::spawn({
+        let ensure_resources_task = tokio::spawn({
             let datastore = datastore.clone();
             let opctx =
                 OpContext::for_tests(logctx.log.clone(), datastore.clone());
             let target_check_done = target_check_done.clone();
-            let return_on_completion = return_on_completion.clone();
+            let should_write_data = should_write_data.clone();
             async move {
                 datastore
                     .blueprint_ensure_external_networking_resources_impl(
                         &opctx,
                         &blueprint1,
-                        Some(target_check_done),
-                        Some(return_on_completion),
+                        NetworkResourceControlFlow {
+                            target_check_done: Some(target_check_done),
+                            should_write_data: Some(should_write_data),
+                        },
                     )
                     .await
             }
@@ -2339,96 +2696,122 @@ mod tests {
         .await
         .expect("`target_check_done` not set to true");
 
-        // Spawn another task that tries to read the current target. This should
-        // block at the database level due to the `SELECT ... FOR UPDATE` inside
-        // `blueprint_ensure_external_networking_resources`.
-        let mut current_target_task = tokio::spawn({
-            let datastore = datastore.clone();
-            let opctx =
-                OpContext::for_tests(logctx.log.clone(), datastore.clone());
-            async move {
-                datastore
-                    .blueprint_target_get_current(&opctx)
-                    .await
-                    .expect("read current target")
-            }
-        });
-
-        // Spawn another task that tries to set the current target. This should
-        // block at the database level due to the `SELECT ... FOR UPDATE` inside
-        // `blueprint_ensure_external_networking_resources`.
-        let mut update_target_task = tokio::spawn({
-            let datastore = datastore.clone();
-            let opctx =
-                OpContext::for_tests(logctx.log.clone(), datastore.clone());
-            async move {
-                datastore.blueprint_target_set_current(&opctx, bp2_target).await
-            }
-        });
-
-        // None of our spawned tasks should be able to make progress:
-        // `ensure_resources_task` is waiting for us to set
-        // `return_on_completion` to true, and the other two should be
-        // queued by Cockroach, because
-        // `blueprint_ensure_external_networking_resources` should have
-        // performed a `SELECT ... FOR UPDATE` on the current target, forcing
-        // the query that wants to change it to wait until the transaction
-        // completes.
+        // While the "Ensure resources" task is still mid-transaction:
         //
-        // We'll somewhat haphazardly test this by trying to wait for any
-        // task to finish, and succeeding on a timeout of a few seconds. This
-        // could spuriously succeed if we're executing on a very overloaded
-        // system where we hit the timeout even though one of the tasks is
-        // actually making progress, but hopefully will fail often enough if
-        // we've gotten this wrong.
-        tokio::select! {
-            result = &mut ensure_resources_task => {
-                panic!(
-                    "unexpected completion of \
-                     `blueprint_ensure_external_networking_resources`: \
-                     {result:?}",
-                );
-            }
-            result = &mut update_target_task => {
-                panic!(
-                    "unexpected completion of \
-                     `blueprint_target_set_current`: {result:?}",
-                );
-            }
-            result = &mut current_target_task => {
-                panic!(
-                    "unexpected completion of \
-                     `blueprint_target_get_current`: {result:?}",
-                );
-            }
-            _ = tokio::time::sleep(Duration::from_secs(5)) => (),
-        }
-
-        // Release `ensure_resources_task` to finish.
-        return_on_completion.store(true, Ordering::SeqCst);
-
-        tokio::time::timeout(Duration::from_secs(10), ensure_resources_task)
+        // - Update the target
+        // - Read the data which "Ensure resources" is attempting to write
+        datastore
+            .blueprint_target_set_current(&opctx, bp2_target)
             .await
-            .expect(
-                "time out waiting for \
+            .unwrap();
+
+        let conn = datastore
+            .pool_connection_authorized(&opctx)
+            .await
+            .expect("failed to get connection");
+
+        // NOTE: Performing this "SELECT" is a necessary step for our test, even
+        // though we don't actually care about the result.
+        //
+        // If we don't perform this read, it is possible for CockroachDB to
+        // logically order the "Ensure Resources" task before the blueprint
+        // target changes.
+        //
+        // More on this in the block comment below.
+        let _external_ips = QueryBuilder::new()
+            .sql("SELECT id FROM omicron.public.external_ip WHERE time_deleted IS NULL")
+            .query::<diesel::sql_types::Uuid>()
+            .load_async::<uuid::Uuid>(&*conn)
+            .await
+            .expect("SELECT external IPs");
+
+        // == WHAT ORDERING DO WE EXPECT?
+        //
+        // We expect to have the following reads/writes:
+        //
+        // | Ensure Resources | Unit test |
+        // | -----------------|-----------|
+        // | BEGIN            |           |
+        // | R(target)        |           |
+        // |                  | W(target) |
+        // |                  | R(data)   |
+        // | W(data)          |           |
+        // | COMMIT           |           |
+        //
+        // With this ordering, and an eye on "Read-Write", "Write-Read", and
+        // "Write-Write" conflicts:
+        //
+        // - (R->W) "Ensure Resources" must be ordered before "Unit test", because of access to
+        // "target".
+        // - (R->W) "Unit test" must be ordered before "Ensure Resources", because of
+        // access to "data".
+        //
+        // This creates a circular dependency, and therefore means "Ensure Resources"
+        // cannot commit. We expect that this ordering will force CockroachDB
+        // to retry the "Ensure Resources" transaction, which will cause it to
+        // see the new target:
+        //
+        // | Ensure Resources | Unit Test |
+        // | -----------------|-----------|
+        // |                  | W(target) |
+        // |                  | R(data)   |
+        // | BEGIN            |           |
+        // | R(target)        |           |
+        //
+        // This should cause it to abort the current transaction, as the target no longer matches.
+        //
+        // == WHY ARE WE DOING THIS?
+        //
+        // Although CockroachDB's transactions provide serializability, they
+        // do not preserve "strict serializability". This means that, as long as we don't violate
+        // transaction conflict ordering (aka, the "Read-Write", "Write-Read", and "Write-Write"
+        // relationships used earlier), transactions can be re-ordered independently of when
+        // they completed in "real time".
+        //
+        // Although we may want to test the following application-level invariant:
+        //
+        // > If the target blueprint changes while we're updating network resources, the
+        // transaction should abort.
+        //
+        // We actually need to reframe this statement in terms of concurrency control:
+        //
+        // > If a transaction attempts to read the current blueprint and update network resources,
+        // and concurrently the blueprint changes, the transaction should fail if any other
+        // operations have concurrently attempted to read or write network resources.
+        //
+        // This statement is a bit more elaborate, but it more accurately describes what Cockroach
+        // is doing: if the "Ensure Resources" operation COULD have completed before another
+        // transaction (e.g., one updating the blueprint target), it is acceptable for the
+        // transactions to be logically re-ordered in a different way than they completed in
+        // real-time.
+
+        should_write_data.store(true, Ordering::SeqCst);
+
+        // After setting `should_write_data`, `ensure_resources_task` will finish.
+        //
+        // We expect that it will keep running, but before COMMIT-ing successfully,
+        // it should be forced to retry.
+
+        let err = tokio::time::timeout(
+            Duration::from_secs(10),
+            ensure_resources_task,
+        )
+        .await
+        .expect(
+            "time out waiting for \
                 `blueprint_ensure_external_networking_resources`",
-            )
-            .expect("panic in `blueprint_ensure_external_networking_resources")
-            .expect("ensured networking resources for empty blueprint 2");
+        )
+        .expect("panic in `blueprint_ensure_external_networking_resources")
+        .expect_err("Should have failed to ensure resources")
+        .to_string();
 
-        // Our other tasks should now also complete.
-        tokio::time::timeout(Duration::from_secs(10), update_target_task)
-            .await
-            .expect("time out waiting for `blueprint_target_set_current`")
-            .expect("panic in `blueprint_target_set_current")
-            .expect("updated target to blueprint 2");
-        tokio::time::timeout(Duration::from_secs(10), current_target_task)
-            .await
-            .expect("time out waiting for `blueprint_target_get_current`")
-            .expect("panic in `blueprint_target_get_current");
+        assert!(
+            err.contains("is not the current target blueprint"),
+            "Error: {err}",
+        );
 
         // Clean up.
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 

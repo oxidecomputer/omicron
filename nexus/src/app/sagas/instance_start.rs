@@ -32,6 +32,25 @@ pub(crate) struct Params {
     /// Authentication context to use to fetch the instance's current state from
     /// the database.
     pub serialized_authn: authn::saga::Serialized,
+
+    /// Why is this instance being started?
+    pub reason: Reason,
+}
+
+/// Reasons an instance may be started.
+///
+/// Currently, this is primarily used to determine whether the instance's
+/// auto-restart timestamp must be updated. It's also included in log messages
+/// in the start saga.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub(crate) enum Reason {
+    /// The instance was automatically started upon being created.
+    AutoStart,
+    /// The instance was started by a user action.
+    User,
+    /// The instance has failed and is being automatically restarted by the
+    /// control plane.
+    AutoRestart,
 }
 
 declare_saga_actions! {
@@ -92,6 +111,12 @@ declare_saga_actions! {
         + sis_ensure_running
     }
 }
+
+/// Node name for looking up the VMM record once it has been registered with the
+/// sled-agent by `sis_ensure_registered`. This is necessary as registering the
+/// VMM transitions it from the `Creating` state to the `Starting` state,
+/// changing its generation.
+const REGISTERED_VMM_RECORD: &'static str = "ensure_registered";
 
 #[derive(Debug)]
 pub(crate) struct SagaInstanceStart;
@@ -194,7 +219,6 @@ async fn sis_create_vmm_record(
         propolis_id,
         sled_id,
         propolis_ip,
-        nexus_db_model::VmmInitialState::Starting,
     )
     .await
 }
@@ -209,13 +233,48 @@ async fn sis_destroy_vmm_record(
         &params.serialized_authn,
     );
 
-    let vmm = sagactx.lookup::<db::model::Vmm>("vmm_record")?;
-    super::instance_common::unwind_vmm_record(
-        osagactx.datastore(),
-        &opctx,
-        &vmm,
-    )
-    .await
+    let db_instance = params.db_instance;
+    let propolis_id = sagactx.lookup::<PropolisUuid>("propolis_id")?;
+    info!(
+        osagactx.log(),
+        "destroying vmm record for start saga unwind";
+        "instance_id" => %db_instance.id(),
+        "propolis_id" => %propolis_id,
+        "start_reason" => ?params.reason,
+    );
+
+    osagactx.datastore().vmm_mark_saga_unwound(&opctx, &propolis_id).await?;
+
+    // Now that the VMM record has been marked as `SagaUnwound`, the instance
+    // may be permitted to reincarnate. If it is, activate the instance
+    // reincarnation background task to help it along.
+    let karmic_status =
+        db_instance.auto_restart.can_reincarnate(db_instance.runtime());
+    if karmic_status == db::model::Reincarnatability::WillReincarnate {
+        info!(
+            osagactx.log(),
+            "start saga unwound; instance may reincarnate";
+            "instance_id" => %db_instance.id(),
+            "auto_restart_config" => ?db_instance.auto_restart,
+            "start_reason" => ?params.reason,
+        );
+        osagactx
+            .nexus()
+            .background_tasks
+            .task_instance_reincarnation
+            .activate();
+    } else {
+        debug!(
+            osagactx.log(),
+            "start saga unwound; but instance will not reincarnate";
+            "instance_id" => %db_instance.id(),
+            "auto_restart_config" => ?db_instance.auto_restart,
+            "start_reason" => ?params.reason,
+            "karmic_status" => ?karmic_status,
+        );
+    }
+
+    Ok(())
 }
 
 async fn sis_move_to_starting(
@@ -228,7 +287,8 @@ async fn sis_move_to_starting(
     let propolis_id = sagactx.lookup::<PropolisUuid>("propolis_id")?;
     info!(osagactx.log(), "moving instance to Starting state via saga";
           "instance_id" => %instance_id,
-          "propolis_id" => %propolis_id);
+          "propolis_id" => %propolis_id,
+          "start_reason" => ?params.reason);
 
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
@@ -259,7 +319,8 @@ async fn sis_move_to_starting(
         // proceed.
         Some(vmm) if vmm.id == propolis_id.into_untyped_uuid() => {
             info!(osagactx.log(), "start saga: Propolis ID already set";
-                  "instance_id" => %instance_id);
+                  "instance_id" => %instance_id,
+                  "start_reason" => ?params.reason);
 
             return Ok(db_instance.clone());
         }
@@ -288,12 +349,21 @@ async fn sis_move_to_starting(
         None => {}
     }
 
-    let new_runtime = db::model::InstanceRuntimeState {
-        nexus_state: db::model::InstanceState::Vmm,
-        propolis_id: Some(propolis_id.into_untyped_uuid()),
-        time_updated: Utc::now(),
-        gen: db_instance.runtime().gen.next().into(),
-        ..db_instance.runtime_state
+    let new_runtime = {
+        // If we are performing an automated restart of a Failed instance,
+        // remember to update the timestamp.
+        let time_last_auto_restarted = if params.reason == Reason::AutoRestart {
+            Some(Utc::now())
+        } else {
+            db_instance.runtime().time_last_auto_restarted
+        };
+        db::model::InstanceRuntimeState {
+            nexus_state: db::model::InstanceState::Vmm,
+            propolis_id: Some(propolis_id.into_untyped_uuid()),
+            r#gen: db_instance.runtime().r#gen.next().into(),
+            time_last_auto_restarted,
+            ..db_instance.runtime_state
+        }
     };
 
     // Bail if another actor managed to update the instance's state in
@@ -411,7 +481,8 @@ async fn sis_dpd_ensure(
     let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
 
     info!(osagactx.log(), "start saga: ensuring instance dpd configuration";
-          "instance_id" => %instance_id);
+          "instance_id" => %instance_id,
+          "start_reason" => ?params.reason);
 
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
@@ -450,7 +521,8 @@ async fn sis_dpd_ensure_undo(
     );
 
     info!(log, "start saga: undoing dpd configuration";
-          "instance_id" => %instance_id);
+          "instance_id" => %instance_id,
+          "start_reason" => ?params.reason);
 
     let (.., authz_instance) = LookupPath::new(&opctx, &osagactx.datastore())
         .instance_id(instance_id)
@@ -486,7 +558,7 @@ async fn sis_v2p_ensure_undo(
 
 async fn sis_ensure_registered(
     sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
+) -> Result<db::model::Vmm, ActionError> {
     let params = sagactx.saga_params::<Params>()?;
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
@@ -502,7 +574,8 @@ async fn sis_ensure_registered(
 
     info!(osagactx.log(), "start saga: ensuring instance is registered on sled";
           "instance_id" => %instance_id,
-          "sled_id" => %sled_id);
+          "sled_id" => %sled_id,
+          "start_reason" => ?params.reason);
 
     let (authz_silo, authz_project, authz_instance) =
         LookupPath::new(&opctx, &osagactx.datastore())
@@ -526,9 +599,30 @@ async fn sis_ensure_registered(
             InstanceRegisterReason::Start { vmm_id: propolis_id },
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(|err| match err {
+            InstanceStateChangeError::SledAgent(inner) => {
+                info!(osagactx.log(),
+                      "start saga: sled agent failed to register instance";
+                      "instance_id" => %instance_id,
+                      "sled_id" =>  %sled_id,
+                      "error" => ?inner,
+                      "start_reason" => ?params.reason);
 
-    Ok(())
+                // Don't set the instance to Failed in this case. Instead, allow
+                // the saga to unwind and restore the instance to the Stopped
+                // state (matching what would happen if there were a failure
+                // prior to this point).
+                ActionError::action_failed(Error::from(inner))
+            }
+            InstanceStateChangeError::Other(inner) => {
+                info!(osagactx.log(),
+                      "start saga: internal error registering instance";
+                      "instance_id" => %instance_id,
+                      "error" => ?inner,
+                      "start_reason" => ?params.reason);
+                ActionError::action_failed(inner)
+            }
+        })
 }
 
 async fn sis_ensure_registered_undo(
@@ -538,7 +632,9 @@ async fn sis_ensure_registered_undo(
     let params = sagactx.saga_params::<Params>()?;
     let datastore = osagactx.datastore();
     let instance_id = InstanceUuid::from_untyped_uuid(params.db_instance.id());
+    let propolis_id = sagactx.lookup::<PropolisUuid>("propolis_id")?;
     let sled_id = sagactx.lookup::<SledUuid>("sled_id")?;
+    let db_vmm = sagactx.lookup::<db::model::Vmm>(REGISTERED_VMM_RECORD)?;
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &params.serialized_authn,
@@ -546,11 +642,13 @@ async fn sis_ensure_registered_undo(
 
     info!(osagactx.log(), "start saga: unregistering instance from sled";
           "instance_id" => %instance_id,
-          "sled_id" => %sled_id);
+          "propolis_id" => %propolis_id,
+          "sled_id" => %sled_id,
+          "start_reason" => ?params.reason);
 
     // Fetch the latest record so that this callee can drive the instance into
     // a Failed state if the unregister call fails.
-    let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance, _) = LookupPath::new(&opctx, &datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .fetch()
         .await
@@ -563,12 +661,13 @@ async fn sis_ensure_registered_undo(
     // returned.
     if let Err(e) = osagactx
         .nexus()
-        .instance_ensure_unregistered(&opctx, &authz_instance, &sled_id)
+        .instance_ensure_unregistered(&propolis_id, &sled_id)
         .await
     {
         error!(osagactx.log(),
                "start saga: failed to unregister instance from sled";
                "instance_id" => %instance_id,
+               "start_reason" => ?params.reason,
                "error" => ?e);
 
         // If the failure came from talking to sled agent, and the error code
@@ -591,26 +690,22 @@ async fn sis_ensure_registered_undo(
         // be a bit of a stretch. See the definition of `instance_unhealthy` for
         // more details.
         match e {
-            InstanceStateChangeError::SledAgent(inner)
-                if inner.instance_unhealthy() =>
-            {
+            InstanceStateChangeError::SledAgent(inner) if inner.vmm_gone() => {
                 error!(osagactx.log(),
                        "start saga: failing instance after unregister failure";
                        "instance_id" => %instance_id,
+                       "start_reason" => ?params.reason,
                        "error" => ?inner);
 
                 if let Err(set_failed_error) = osagactx
                     .nexus()
-                    .mark_instance_failed(
-                        &instance_id,
-                        db_instance.runtime(),
-                        &inner,
-                    )
+                    .mark_vmm_failed(&opctx, authz_instance, &db_vmm, &inner)
                     .await
                 {
                     error!(osagactx.log(),
                            "start saga: failed to mark instance as failed";
                            "instance_id" => %instance_id,
+                           "start_reason" => ?params.reason,
                            "error" => ?set_failed_error);
 
                     Err(set_failed_error.into())
@@ -621,7 +716,8 @@ async fn sis_ensure_registered_undo(
             InstanceStateChangeError::SledAgent(_) => {
                 info!(osagactx.log(),
                        "start saga: instance already unregistered from sled";
-                       "instance_id" => %instance_id);
+                       "instance_id" => %instance_id,
+                       "start_reason" => ?params.reason);
 
                 Ok(())
             }
@@ -629,6 +725,7 @@ async fn sis_ensure_registered_undo(
                 error!(osagactx.log(),
                        "start saga: internal error unregistering instance";
                        "instance_id" => %instance_id,
+                       "start_reason" => ?params.reason,
                        "error" => ?inner);
 
                 Err(inner.into())
@@ -644,7 +741,6 @@ async fn sis_ensure_running(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let datastore = osagactx.datastore();
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &params.serialized_authn,
@@ -652,24 +748,18 @@ async fn sis_ensure_running(
 
     let db_instance =
         sagactx.lookup::<db::model::Instance>("started_record")?;
-    let db_vmm = sagactx.lookup::<db::model::Vmm>("vmm_record")?;
+    let db_vmm = sagactx.lookup::<db::model::Vmm>(REGISTERED_VMM_RECORD)?;
     let instance_id = InstanceUuid::from_untyped_uuid(params.db_instance.id());
     let sled_id = sagactx.lookup::<SledUuid>("sled_id")?;
     info!(osagactx.log(), "start saga: ensuring instance is running";
           "instance_id" => %instance_id,
-          "sled_id" => %sled_id);
-
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
-        .instance_id(instance_id.into_untyped_uuid())
-        .lookup_for(authz::Action::Modify)
-        .await
-        .map_err(ActionError::action_failed)?;
+          "sled_id" => %sled_id,
+          "start_reason" => ?params.reason);
 
     match osagactx
         .nexus()
         .instance_request_state(
             &opctx,
-            &authz_instance,
             &db_instance,
             &Some(db_vmm),
             crate::app::instance::InstanceStateChangeRequest::Run,
@@ -682,6 +772,7 @@ async fn sis_ensure_running(
                   "start saga: sled agent failed to set instance to running";
                   "instance_id" => %instance_id,
                   "sled_id" =>  %sled_id,
+                  "start_reason" => ?params.reason,
                   "error" => ?inner);
 
             // Don't set the instance to Failed in this case. Instead, allow
@@ -694,6 +785,7 @@ async fn sis_ensure_running(
             info!(osagactx.log(),
                   "start saga: internal error changing instance state";
                   "instance_id" => %instance_id,
+                  "start_reason" => ?params.reason,
                   "error" => ?inner);
 
             Err(ActionError::action_failed(inner))
@@ -751,7 +843,9 @@ mod test {
                     params::InstanceNetworkInterfaceAttachment::None,
                 external_ips: vec![],
                 disks: vec![],
+                boot_disk: None,
                 start: false,
+                auto_restart_policy: Default::default(),
             },
         )
         .await
@@ -775,6 +869,7 @@ mod test {
         let params = Params {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
             db_instance,
+            reason: Reason::User,
         };
 
         nexus
@@ -825,7 +920,8 @@ mod test {
                         Params {
                             serialized_authn:
                                 authn::saga::Serialized::for_opctx(&opctx),
-                                db_instance,
+                            db_instance,
+                            reason: Reason::User,
                         }
                     }
                 })
@@ -872,6 +968,7 @@ mod test {
         let params = Params {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
             db_instance,
+            reason: Reason::User,
         };
 
         let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
@@ -912,6 +1009,7 @@ mod test {
         let params = Params {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
             db_instance,
+            reason: Reason::User,
         };
 
         let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();

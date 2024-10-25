@@ -57,17 +57,16 @@ use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zpool::{PathInPool, ZpoolName};
 use illumos_utils::{execute, PFEXEC};
-use internal_dns::names::BOUNDARY_NTP_DNS_NAME;
-use internal_dns::names::DNS_ZONE;
-use internal_dns::resolver::Resolver;
+use internal_dns_resolver::Resolver;
+use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
+use internal_dns_types::names::DNS_ZONE;
 use itertools::Itertools;
 use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
 use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig, ZoneKind,
 };
-use omicron_common::address::CLICKHOUSE_ADMIN_PORT;
-use omicron_common::address::CLICKHOUSE_KEEPER_PORT;
-use omicron_common::address::CLICKHOUSE_PORT;
+use omicron_common::address::CLICKHOUSE_HTTP_PORT;
+use omicron_common::address::CLICKHOUSE_KEEPER_TCP_PORT;
 use omicron_common::address::COCKROACH_PORT;
 use omicron_common::address::CRUCIBLE_PANTRY_PORT;
 use omicron_common::address::CRUCIBLE_PORT;
@@ -80,6 +79,9 @@ use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
+use omicron_common::address::{
+    get_internal_dns_server_addresses, CLICKHOUSE_ADMIN_PORT,
+};
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::address::{AZ_PREFIX, OXIMETER_PORT};
 use omicron_common::address::{BOOTSTRAP_ARTIFACT_PORT, COCKROACH_ADMIN_PORT};
@@ -90,8 +92,10 @@ use omicron_common::api::internal::shared::{
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
+use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
+use omicron_uuid_kinds::GenericUuid;
 use once_cell::sync::OnceCell;
 use rand::prelude::SliceRandom;
 use sled_agent_types::{
@@ -103,9 +107,7 @@ use sled_hardware::underlay;
 use sled_hardware::SledMode;
 use sled_hardware_types::Baseboard;
 use sled_storage::config::MountConfig;
-use sled_storage::dataset::{
-    DatasetName, DatasetType, CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET,
-};
+use sled_storage::dataset::{CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -128,6 +130,12 @@ use illumos_utils::zone::Zones;
 const IPV6_UNSPECIFIED: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
 
 const COCKROACH: &str = "/opt/oxide/cockroachdb/bin/cockroach";
+
+const CLICKHOUSE_SERVER_BINARY: &str =
+    "/opt/oxide//opt/oxide/clickhouse_server/clickhouse";
+const CLICKHOUSE_KEEPER_BINARY: &str =
+    "/opt/oxide//opt/oxide/clickhouse_keeper/clickhouse";
+const CLICKHOUSE_BINARY: &str = "/opt/oxide//opt/oxide/clickhouse/clickhouse";
 
 pub const SWITCH_ZONE_BASEBOARD_FILE: &str = "/opt/oxide/baseboard.json";
 
@@ -259,7 +267,7 @@ pub enum Error {
     ExecutionError(#[from] illumos_utils::ExecutionError),
 
     #[error("Error resolving DNS name: {0}")]
-    ResolveError(#[from] internal_dns::resolver::ResolveError),
+    ResolveError(#[from] internal_dns_resolver::ResolveError),
 
     #[error("Serde error: {0}")]
     SerdeError(#[from] serde_json::Error),
@@ -912,7 +920,10 @@ impl ServiceManager {
         rack_network_config: Option<RackNetworkConfig>,
         metrics_queue: MetricsRequestQueue,
     ) -> Result<(), Error> {
-        info!(&self.inner.log, "sled agent started"; "underlay_address" => underlay_address.to_string());
+        info!(
+            &self.inner.log, "sled agent started";
+            "underlay_address" => underlay_address.to_string(),
+        );
         self.inner
             .sled_info
             .set(SledAgentInfo {
@@ -953,6 +964,26 @@ impl ServiceManager {
     /// Returns the sled's configured mode.
     pub fn sled_mode(&self) -> SledMode {
         self.inner.sled_mode
+    }
+
+    /// Returns the sled's identifier
+    fn sled_id(&self) -> Uuid {
+        self.inner
+            .sled_info
+            .get()
+            .expect("sled agent not started")
+            .config
+            .sled_id
+    }
+
+    /// Returns the metrics queue for the sled agent if it is running.
+    fn maybe_metrics_queue(&self) -> Option<&MetricsRequestQueue> {
+        self.inner.sled_info.get().map(|info| &info.metrics_queue)
+    }
+
+    /// Returns the metrics queue for the sled agent.
+    fn metrics_queue(&self) -> &MetricsRequestQueue {
+        &self.maybe_metrics_queue().expect("Sled agent should have started")
     }
 
     // Advertise the /64 prefix of `address`, unless we already have.
@@ -1304,40 +1335,27 @@ impl ServiceManager {
     async fn dns_install(
         info: &SledAgentInfo,
         ip_addrs: Option<Vec<IpAddr>>,
-        domain: &Option<String>,
+        domain: Option<&str>,
     ) -> Result<ServiceBuilder, Error> {
-        // We want to configure the dns/install SMF service inside the
-        // zone with the list of DNS nameservers.  This will cause
-        // /etc/resolv.conf to be populated inside the zone.  To do
-        // this, we need the full list of nameservers.  Fortunately, the
-        // nameservers provide a DNS name for the full list of
-        // nameservers.
+        // We want to configure the dns/install SMF service inside the zone with
+        // the list of DNS nameservers. This will cause /etc/resolv.conf to be
+        // populated inside the zone. We will populate it with the small number
+        // of fixed DNS addresses that should always exist. If clients want to
+        // expand to a wider range of DNS servers, they can bootstrap from the
+        // fixed addresses by looking up additional internal DNS servers from
+        // those addresses.
         //
-        // Note that when we configure the dns/install service, we're
-        // supplying values for an existing property group on the SMF
-        // *service*.  We're not creating a new property group, nor are
-        // we configuring a property group on the instance.
-
-        // Users may decide to provide specific addresses to set as
-        // nameservers, or this information can be retrieved from
-        // from SledAgentInfo.
-        let nameservers = match ip_addrs {
-            None => {
-                let addrs = info
-                    .resolver
-                    .lookup_all_ipv6(internal_dns::ServiceName::InternalDns)
-                    .await?;
-
-                let mut servers: Vec<IpAddr> = vec![];
-                for a in addrs {
-                    let ip = IpAddr::V6(a);
-                    servers.push(ip);
-                }
-
-                servers
-            }
-            Some(servers) => servers,
-        };
+        // Note that when we configure the dns/install service, we're supplying
+        // values for an existing property group on the SMF *service*.  We're
+        // not creating a new property group, nor are we configuring a property
+        // group on the instance.
+        //
+        // Callers may decide to provide specific addresses to set as
+        // nameservers; e.g., boundary NTP zones need to specify upstream DNS
+        // servers to resolve customer-provided NTP server names.
+        let nameservers = ip_addrs.unwrap_or_else(|| {
+            get_internal_dns_server_addresses(info.underlay_address)
+        });
 
         let mut dns_config_builder = PropertyGroupBuilder::new("install_props");
         for ns_addr in &nameservers {
@@ -1503,7 +1521,8 @@ impl ServiceManager {
             Some(dir) => ZoneBuilderFactory::fake(Some(dir)).builder(),
         };
         if let Some(uuid) = unique_name {
-            zone_builder = zone_builder.with_unique_name(uuid);
+            zone_builder =
+                zone_builder.with_unique_name(uuid.into_untyped_uuid());
         }
         if let Some(vnic) = bootstrap_vnic {
             zone_builder = zone_builder.with_bootstrap_vnic(vnic);
@@ -1550,7 +1569,7 @@ impl ServiceManager {
                 };
 
                 let listen_addr = *underlay_address;
-                let listen_port = &CLICKHOUSE_PORT.to_string();
+                let listen_port = &CLICKHOUSE_HTTP_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
                     Some(&info.underlay_address),
@@ -1558,7 +1577,7 @@ impl ServiceManager {
                     &[listen_addr],
                 )?;
 
-                let dns_service = Self::dns_install(info, None, &None).await?;
+                let dns_service = Self::dns_install(info, None, None).await?;
 
                 let config = PropertyGroupBuilder::new("config")
                     .add_property(
@@ -1574,24 +1593,27 @@ impl ServiceManager {
                             .add_property_group(config),
                     );
 
-                let ch_address =
-                    SocketAddr::new(IpAddr::V6(listen_addr), CLICKHOUSE_PORT)
-                        .to_string();
-
                 let admin_address = SocketAddr::new(
                     IpAddr::V6(listen_addr),
                     CLICKHOUSE_ADMIN_PORT,
                 )
                 .to_string();
 
+                let ch_address = SocketAddr::new(
+                    IpAddr::V6(listen_addr),
+                    CLICKHOUSE_HTTP_PORT,
+                )
+                .to_string();
+
                 let clickhouse_admin_config =
                     PropertyGroupBuilder::new("config")
+                        .add_property("http_address", "astring", admin_address)
+                        .add_property("ch_address", "astring", ch_address)
                         .add_property(
-                            "clickhouse_address",
+                            "ch_binary",
                             "astring",
-                            ch_address,
-                        )
-                        .add_property("http_address", "astring", admin_address);
+                            CLICKHOUSE_BINARY,
+                        );
                 let clickhouse_admin_service =
                     ServiceBuilder::new("oxide/clickhouse-admin").add_instance(
                         ServiceInstanceBuilder::new("default")
@@ -1628,7 +1650,6 @@ impl ServiceManager {
                 };
 
                 let listen_addr = *underlay_address;
-                let listen_port = CLICKHOUSE_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
                     Some(&info.underlay_address),
@@ -1636,26 +1657,13 @@ impl ServiceManager {
                     &[listen_addr],
                 )?;
 
-                let dns_service = Self::dns_install(info, None, &None).await?;
+                let dns_service = Self::dns_install(info, None, None).await?;
 
-                let config = PropertyGroupBuilder::new("config")
-                    .add_property(
-                        "listen_addr",
-                        "astring",
-                        listen_addr.to_string(),
-                    )
-                    .add_property("listen_port", "astring", listen_port)
-                    .add_property("store", "astring", "/data");
-                let clickhouse_server_service =
+                let disabled_clickhouse_server_service =
                     ServiceBuilder::new("oxide/clickhouse_server")
                         .add_instance(
-                            ServiceInstanceBuilder::new("default")
-                                .add_property_group(config),
+                            ServiceInstanceBuilder::new("default").disable(),
                         );
-
-                let ch_address =
-                    SocketAddr::new(IpAddr::V6(listen_addr), CLICKHOUSE_PORT)
-                        .to_string();
 
                 let admin_address = SocketAddr::new(
                     IpAddr::V6(listen_addr),
@@ -1663,14 +1671,21 @@ impl ServiceManager {
                 )
                 .to_string();
 
+                let ch_address = SocketAddr::new(
+                    IpAddr::V6(listen_addr),
+                    CLICKHOUSE_HTTP_PORT,
+                )
+                .to_string();
+
                 let clickhouse_admin_config =
                     PropertyGroupBuilder::new("config")
+                        .add_property("http_address", "astring", admin_address)
+                        .add_property("ch_address", "astring", ch_address)
                         .add_property(
-                            "clickhouse_address",
+                            "ch_binary",
                             "astring",
-                            ch_address,
-                        )
-                        .add_property("http_address", "astring", admin_address);
+                            CLICKHOUSE_SERVER_BINARY,
+                        );
                 let clickhouse_admin_service =
                     ServiceBuilder::new("oxide/clickhouse-admin").add_instance(
                         ServiceInstanceBuilder::new("default")
@@ -1680,7 +1695,7 @@ impl ServiceManager {
                 let profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
                     .add_service(disabled_ssh_service)
-                    .add_service(clickhouse_server_service)
+                    .add_service(disabled_clickhouse_server_service)
                     .add_service(dns_service)
                     .add_service(enabled_dns_client_service)
                     .add_service(clickhouse_admin_service);
@@ -1710,7 +1725,6 @@ impl ServiceManager {
                 };
 
                 let listen_addr = *underlay_address;
-                let listen_port = &CLICKHOUSE_KEEPER_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
                     Some(&info.underlay_address),
@@ -1718,26 +1732,13 @@ impl ServiceManager {
                     &[listen_addr],
                 )?;
 
-                let dns_service = Self::dns_install(info, None, &None).await?;
+                let dns_service = Self::dns_install(info, None, None).await?;
 
-                let config = PropertyGroupBuilder::new("config")
-                    .add_property(
-                        "listen_addr",
-                        "astring",
-                        listen_addr.to_string(),
-                    )
-                    .add_property("listen_port", "astring", listen_port)
-                    .add_property("store", "astring", "/data");
-                let clickhouse_keeper_service =
+                let disaled_clickhouse_keeper_service =
                     ServiceBuilder::new("oxide/clickhouse_keeper")
                         .add_instance(
-                            ServiceInstanceBuilder::new("default")
-                                .add_property_group(config),
+                            ServiceInstanceBuilder::new("default").disable(),
                         );
-
-                let ch_address =
-                    SocketAddr::new(IpAddr::V6(listen_addr), CLICKHOUSE_PORT)
-                        .to_string();
 
                 let admin_address = SocketAddr::new(
                     IpAddr::V6(listen_addr),
@@ -1745,14 +1746,21 @@ impl ServiceManager {
                 )
                 .to_string();
 
+                let ch_address = SocketAddr::new(
+                    IpAddr::V6(listen_addr),
+                    CLICKHOUSE_KEEPER_TCP_PORT,
+                )
+                .to_string();
+
                 let clickhouse_admin_config =
                     PropertyGroupBuilder::new("config")
+                        .add_property("http_address", "astring", admin_address)
+                        .add_property("ch_address", "astring", ch_address)
                         .add_property(
-                            "clickhouse_address",
+                            "ch_binary",
                             "astring",
-                            ch_address,
-                        )
-                        .add_property("http_address", "astring", admin_address);
+                            CLICKHOUSE_KEEPER_BINARY,
+                        );
                 let clickhouse_admin_service =
                     ServiceBuilder::new("oxide/clickhouse-admin").add_instance(
                         ServiceInstanceBuilder::new("default")
@@ -1762,7 +1770,7 @@ impl ServiceManager {
                 let profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
                     .add_service(disabled_ssh_service)
-                    .add_service(clickhouse_keeper_service)
+                    .add_service(disaled_clickhouse_keeper_service)
                     .add_service(dns_service)
                     .add_service(enabled_dns_client_service)
                     .add_service(clickhouse_admin_service);
@@ -1808,7 +1816,7 @@ impl ServiceManager {
                     &[crdb_listen_ip],
                 )?;
 
-                let dns_service = Self::dns_install(info, None, &None).await?;
+                let dns_service = Self::dns_install(info, None, None).await?;
 
                 // Configure the CockroachDB service.
                 let cockroachdb_config = PropertyGroupBuilder::new("config")
@@ -1875,7 +1883,7 @@ impl ServiceManager {
 
                 let dataset_name = DatasetName::new(
                     dataset.pool_name.clone(),
-                    DatasetType::Crucible,
+                    DatasetKind::Crucible,
                 )
                 .full_name();
                 let uuid = &Uuid::new_v4().to_string();
@@ -2085,21 +2093,6 @@ impl ServiceManager {
                         ..
                     },
                 ..
-            })
-            | ZoneArgs::Omicron(OmicronZoneConfigLocal {
-                zone:
-                    OmicronZoneConfig {
-                        zone_type:
-                            OmicronZoneType::InternalNtp {
-                                dns_servers,
-                                ntp_servers,
-                                domain,
-                                ..
-                            },
-                        underlay_address,
-                        ..
-                    },
-                ..
             }) => {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
@@ -2111,28 +2104,21 @@ impl ServiceManager {
                     &[*underlay_address],
                 )?;
 
-                let is_boundary = matches!(
-                    // It's safe to unwrap here as we already know it's one of InternalNTP or BoundaryNtp.
-                    request.omicron_type().unwrap(),
-                    OmicronZoneType::BoundaryNtp { .. }
-                );
-
                 let rack_net =
                     Ipv6Subnet::<RACK_PREFIX>::new(info.underlay_address)
                         .net()
                         .to_string();
 
-                let dns_install_service =
-                    Self::dns_install(info, Some(dns_servers.to_vec()), domain)
-                        .await?;
+                let dns_install_service = Self::dns_install(
+                    info,
+                    Some(dns_servers.to_vec()),
+                    domain.as_deref(),
+                )
+                .await?;
 
                 let mut chrony_config = PropertyGroupBuilder::new("config")
                     .add_property("allow", "astring", &rack_net)
-                    .add_property(
-                        "boundary",
-                        "boolean",
-                        is_boundary.to_string(),
-                    )
+                    .add_property("boundary", "boolean", "true")
                     .add_property(
                         "boundary_pool",
                         "astring",
@@ -2160,20 +2146,79 @@ impl ServiceManager {
                             .add_property_group(chrony_config),
                     );
 
-                let mut profile = ProfileBuilder::new("omicron")
+                let opte_interface_setup =
+                    Self::opte_interface_set_up_install(&installed_zone)?;
+
+                let profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
                     .add_service(chrony_setup_service)
                     .add_service(disabled_ssh_service)
                     .add_service(dns_install_service)
                     .add_service(dns_client_service)
-                    .add_service(ntp_service);
+                    .add_service(ntp_service)
+                    .add_service(opte_interface_setup);
 
-                // Only Boundary NTP needs an OPTE interface and port configured.
-                if is_boundary {
-                    let opte_interface_setup =
-                        Self::opte_interface_set_up_install(&installed_zone)?;
-                    profile = profile.add_service(opte_interface_setup)
-                }
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| {
+                        Error::io("Failed to set up NTP profile", err)
+                    })?;
+
+                RunningZone::boot(installed_zone).await?
+            }
+            ZoneArgs::Omicron(OmicronZoneConfigLocal {
+                zone:
+                    OmicronZoneConfig {
+                        zone_type: OmicronZoneType::InternalNtp { .. },
+                        underlay_address,
+                        ..
+                    },
+                ..
+            }) => {
+                let Some(info) = self.inner.sled_info.get() else {
+                    return Err(Error::SledAgentNotReady);
+                };
+
+                let nw_setup_service = Self::zone_network_setup_install(
+                    Some(&info.underlay_address),
+                    &installed_zone,
+                    &[*underlay_address],
+                )?;
+
+                let rack_net =
+                    Ipv6Subnet::<RACK_PREFIX>::new(info.underlay_address)
+                        .net()
+                        .to_string();
+
+                let dns_install_service =
+                    Self::dns_install(info, None, None).await?;
+
+                let chrony_config = PropertyGroupBuilder::new("config")
+                    .add_property("allow", "astring", &rack_net)
+                    .add_property("boundary", "boolean", "false")
+                    .add_property(
+                        "boundary_pool",
+                        "astring",
+                        format!("{BOUNDARY_NTP_DNS_NAME}.{DNS_ZONE}"),
+                    );
+
+                let ntp_service = ServiceBuilder::new("oxide/ntp")
+                    .add_instance(ServiceInstanceBuilder::new("default"));
+
+                let chrony_setup_service =
+                    ServiceBuilder::new("oxide/chrony-setup").add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(chrony_config),
+                    );
+
+                let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
+                    .add_service(chrony_setup_service)
+                    .add_service(disabled_ssh_service)
+                    .add_service(dns_install_service)
+                    .add_service(enabled_dns_client_service)
+                    .add_service(ntp_service);
 
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
@@ -3124,9 +3169,7 @@ impl ServiceManager {
         // point. The only exception is the switch zone, during bootstrapping
         // but before we've either run RSS or unlocked the rack. In both those
         // cases, we have a `StartSledAgentRequest`, and so a metrics queue.
-        if let Some(queue) =
-            self.inner.sled_info.get().map(|sa| &sa.metrics_queue)
-        {
+        if let Some(queue) = self.maybe_metrics_queue() {
             if !queue.track_zone_links(&running_zone).await {
                 error!(
                     self.inner.log,
@@ -3282,9 +3325,7 @@ impl ServiceManager {
     }
 
     /// Returns the current Omicron zone configuration
-    pub async fn omicron_zones_list(
-        &self,
-    ) -> Result<OmicronZonesConfig, Error> {
+    pub async fn omicron_zones_list(&self) -> OmicronZonesConfig {
         let log = &self.inner.log;
 
         // We need to take the lock in order for the information in the ledger
@@ -3303,7 +3344,7 @@ impl ServiceManager {
             None => OmicronZonesConfigLocal::initial(),
         };
 
-        Ok(ledger_data.to_omicron_zones_config())
+        ledger_data.to_omicron_zones_config()
     }
 
     /// Ensures that particular Omicron zones are running
@@ -3503,9 +3544,7 @@ impl ServiceManager {
         };
         // Ensure that the sled agent's metrics task is not tracking the zone's
         // VNICs or OPTE ports.
-        if let Some(queue) =
-            self.inner.sled_info.get().map(|sa| &sa.metrics_queue)
-        {
+        if let Some(queue) = self.maybe_metrics_queue() {
             queue.untrack_zone_links(&zone.runtime).await;
         }
         debug!(
@@ -3731,17 +3770,8 @@ impl ServiceManager {
         Ok(())
     }
 
-    pub fn boottime_rewrite(&self) {
-        if self
-            .inner
-            .time_synced
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err()
-        {
-            // Already done.
-            return;
-        }
-
+    /// Adjust the system boot time to the latest boot time of all zones.
+    fn boottime_rewrite(&self) {
         // Call out to the 'tmpx' utility program which will rewrite the wtmpx
         // and utmpx databases in every zone, including the global zone, to
         // reflect the adjusted system boot time.
@@ -3773,7 +3803,7 @@ impl ServiceManager {
 
         if skip_timesync {
             info!(self.inner.log, "Configured to skip timesync checks");
-            self.boottime_rewrite();
+            self.on_time_sync().await;
             return Ok(TimeSync {
                 sync: true,
                 ref_id: 0,
@@ -3828,7 +3858,7 @@ impl ServiceManager {
                         && correction.abs() <= 0.05;
 
                     if sync {
-                        self.boottime_rewrite();
+                        self.on_time_sync().await;
                     }
 
                     Ok(TimeSync {
@@ -3847,6 +3877,39 @@ impl ServiceManager {
                 error!(self.inner.log, "chronyc command failed: {}", e);
                 Err(Error::NtpZoneNotReady)
             }
+        }
+    }
+
+    /// Check if the synchronization state of the sled has shifted to true and
+    /// if so, execute the any out-of-band actions that need to be taken.
+    ///
+    /// This function only executes the out-of-band actions once, once the
+    /// synchronization state has shifted to true.
+    async fn on_time_sync(&self) {
+        if self
+            .inner
+            .time_synced
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+        {
+            debug!(self.inner.log, "Time is now synchronized");
+            // We only want to rewrite the boot time once, so we do it here
+            // when we know the time is synchronized.
+            self.boottime_rewrite();
+
+            // We expect to have a metrics queue by this point, so
+            // we can safely send a message on it to say the sled has
+            // been synchronized.
+            let queue = self.metrics_queue();
+            if !queue.notify_time_synced_sled(self.sled_id()).await {
+                error!(
+                    self.inner.log,
+                    "Failed to notify metrics queue of sled \
+                     time synchronization, metrics may not be produced."
+                );
+            }
+        } else {
+            debug!(self.inner.log, "Time was already synchronized");
         }
     }
 
@@ -4577,7 +4640,7 @@ impl ServiceManager {
 }
 
 #[cfg(all(test, target_os = "illumos"))]
-mod test {
+mod illumos_tests {
     use crate::metrics;
 
     use super::*;
@@ -4590,6 +4653,7 @@ mod test {
         zone::MockZones,
     };
 
+    use omicron_uuid_kinds::OmicronZoneUuid;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use std::os::unix::process::ExitStatusExt;
     use std::{
@@ -4791,7 +4855,7 @@ mod test {
     // Prepare to call "ensure" for a new service, then actually call "ensure".
     async fn ensure_new_service(
         mgr: &ServiceManager,
-        id: Uuid,
+        id: OmicronZoneUuid,
         generation: Generation,
         tmp_dir: String,
     ) {
@@ -4801,12 +4865,7 @@ mod test {
             mgr,
             id,
             generation,
-            OmicronZoneType::InternalNtp {
-                address,
-                ntp_servers: vec![],
-                dns_servers: vec![],
-                domain: None,
-            },
+            OmicronZoneType::InternalNtp { address },
             tmp_dir,
         )
         .await
@@ -4815,7 +4874,7 @@ mod test {
 
     async fn try_new_service_of_type(
         mgr: &ServiceManager,
-        id: Uuid,
+        id: OmicronZoneUuid,
         generation: Generation,
         zone_type: OmicronZoneType,
         tmp_dir: String,
@@ -4844,7 +4903,7 @@ mod test {
     // return the service without actually installing a new zone.
     async fn ensure_existing_service(
         mgr: &ServiceManager,
-        id: Uuid,
+        id: OmicronZoneUuid,
         generation: Generation,
         tmp_dir: String,
     ) {
@@ -4856,12 +4915,7 @@ mod test {
                 zones: vec![OmicronZoneConfig {
                     id,
                     underlay_address: Ipv6Addr::LOCALHOST,
-                    zone_type: OmicronZoneType::InternalNtp {
-                        address,
-                        ntp_servers: vec![],
-                        dns_servers: vec![],
-                        domain: None,
-                    },
+                    zone_type: OmicronZoneType::InternalNtp { address },
                     filesystem_pool: None,
                 }],
             },
@@ -4886,7 +4940,7 @@ mod test {
 
         // Also send a message to the metrics task that the VNIC has been
         // deleted.
-        let queue = &mgr.inner.sled_info.get().unwrap().metrics_queue;
+        let queue = mgr.metrics_queue();
         for zone in mgr.inner.zones.lock().await.values() {
             queue.untrack_zone_links(&zone.runtime).await;
         }
@@ -5045,13 +5099,12 @@ mod test {
         .await;
 
         let v1 = Generation::new();
-        let found =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found = mgr.omicron_zones_list().await;
         assert_eq!(found.generation, v1);
         assert!(found.zones.is_empty());
 
         let v2 = v1.next();
-        let id = Uuid::new_v4();
+        let id = OmicronZoneUuid::new_v4();
         ensure_new_service(
             &mgr,
             id,
@@ -5060,14 +5113,24 @@ mod test {
         )
         .await;
 
-        let found =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found = mgr.omicron_zones_list().await;
         assert_eq!(found.generation, v2);
         assert_eq!(found.zones.len(), 1);
         assert_eq!(found.zones[0].id, id);
 
-        // Check that we received a message about the zone's VNIC.
-        let message = tokio::time::timeout(
+        // First check that we received the synced sled notification
+        let synced_message = tokio::time::timeout(
+            LINK_NOTIFICATION_TIMEOUT,
+            metrics_rx.recv(),
+        ).await.expect("Should have received a message about the sled being synced within the timeout")
+            .expect("Should have received a message about the sled being synced");
+        assert_eq!(
+            synced_message,
+            metrics::Message::TimeSynced { sled_id: mgr.sled_id() },
+        );
+
+        // Then, check that we received a message about the zone's VNIC.
+        let vnic_message = tokio::time::timeout(
             LINK_NOTIFICATION_TIMEOUT,
             metrics_rx.recv(),
         )
@@ -5078,7 +5141,7 @@ mod test {
             .expect("Should have received a message about the zone's VNIC");
         let zone_name = format!("oxz_ntp_{}", id);
         assert_eq!(
-            message,
+            vnic_message,
             metrics::Message::TrackVnic {
                 zone_name,
                 name: "oxControlService0".into()
@@ -5113,13 +5176,12 @@ mod test {
         .await;
 
         let v1 = Generation::new();
-        let found =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found = mgr.omicron_zones_list().await;
         assert_eq!(found.generation, v1);
         assert!(found.zones.is_empty());
 
         let v2 = v1.next();
-        let id = Uuid::new_v4();
+        let id = OmicronZoneUuid::new_v4();
 
         // Should fail: time has not yet synchronized.
         let address =
@@ -5162,12 +5224,7 @@ mod test {
             &mgr,
             id,
             v2,
-            OmicronZoneType::InternalNtp {
-                address,
-                ntp_servers: vec![],
-                dns_servers: vec![],
-                domain: None,
-            },
+            OmicronZoneType::InternalNtp { address },
             String::from(test_config.config_dir.path().as_str()),
         )
         .await
@@ -5197,21 +5254,31 @@ mod test {
         .await;
 
         let v2 = Generation::new().next();
-        let id = Uuid::new_v4();
+        let id = OmicronZoneUuid::new_v4();
         let dir = String::from(test_config.config_dir.path().as_str());
         ensure_new_service(&mgr, id, v2, dir.clone()).await;
         let v3 = v2.next();
         ensure_existing_service(&mgr, id, v3, dir).await;
-        let found =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found = mgr.omicron_zones_list().await;
         assert_eq!(found.generation, v3);
         assert_eq!(found.zones.len(), 1);
         assert_eq!(found.zones[0].id, id);
 
+        // First, we will get a message about the sled being synced.
+        let synced_message = tokio::time::timeout(
+            LINK_NOTIFICATION_TIMEOUT,
+            metrics_rx.recv(),
+        ).await.expect("Should have received a message about the sled being synced within the timeout")
+            .expect("Should have received a message about the sled being synced");
+        assert_eq!(
+            synced_message,
+            metrics::Message::TimeSynced { sled_id: mgr.sled_id() }
+        );
+
         // In this case, the manager creates the zone once, and then "ensuring"
         // it a second time is a no-op. So we simply expect the same message
         // sequence as starting a zone for the first time.
-        let message = tokio::time::timeout(
+        let vnic_message = tokio::time::timeout(
             LINK_NOTIFICATION_TIMEOUT,
             metrics_rx.recv(),
         )
@@ -5222,7 +5289,7 @@ mod test {
             .expect("Should have received a message about the zone's VNIC");
         let zone_name = format!("oxz_ntp_{}", id);
         assert_eq!(
-            message,
+            vnic_message,
             metrics::Message::TrackVnic {
                 zone_name,
                 name: "oxControlService0".into()
@@ -5258,7 +5325,7 @@ mod test {
         .await;
 
         let v2 = Generation::new().next();
-        let id = Uuid::new_v4();
+        let id = OmicronZoneUuid::new_v4();
         ensure_new_service(
             &mgr,
             id,
@@ -5266,21 +5333,33 @@ mod test {
             String::from(test_config.config_dir.path().as_str()),
         )
         .await;
+
+        let sled_id = mgr.sled_id();
         drop_service_manager(mgr).await;
+
+        // First, we will get a message about the sled being synced.
+        let synced_message = tokio::time::timeout(
+            LINK_NOTIFICATION_TIMEOUT,
+            metrics_rx.recv(),
+        ).await.expect("Should have received a message about the sled being synced within the timeout")
+            .expect("Should have received a message about the sled being synced");
+        assert_eq!(synced_message, metrics::Message::TimeSynced { sled_id });
 
         // Check that we received a message about the zone's VNIC. Since the
         // manager is being dropped, it should also send a message about the
         // VNIC being deleted.
         let zone_name = format!("oxz_ntp_{}", id);
-        for expected_message in [
+        for expected_vnic_message in [
             metrics::Message::TrackVnic {
                 zone_name,
                 name: "oxControlService0".into(),
             },
             metrics::Message::UntrackVnic { name: "oxControlService0".into() },
         ] {
-            println!("Expecting message from manager: {expected_message:#?}");
-            let message = tokio::time::timeout(
+            println!(
+                "Expecting message from manager: {expected_vnic_message:#?}"
+            );
+            let vnic_message = tokio::time::timeout(
                 LINK_NOTIFICATION_TIMEOUT,
                 metrics_rx.recv(),
             )
@@ -5289,7 +5368,7 @@ mod test {
                     "Should have received a message about the zone's VNIC within the timeout"
                 )
                 .expect("Should have received a message about the zone's VNIC");
-            assert_eq!(message, expected_message,);
+            assert_eq!(vnic_message, expected_vnic_message,);
         }
         // Note that the manager has been dropped, so we should get
         // disconnected, not empty.
@@ -5309,8 +5388,7 @@ mod test {
         .await;
         illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
 
-        let found =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found = mgr.omicron_zones_list().await;
         assert_eq!(found.generation, v2);
         assert_eq!(found.zones.len(), 1);
         assert_eq!(found.zones[0].id, id);
@@ -5350,7 +5428,7 @@ mod test {
 
         let v1 = Generation::new();
         let v2 = v1.next();
-        let id = Uuid::new_v4();
+        let id = OmicronZoneUuid::new_v4();
         ensure_new_service(
             &mgr,
             id,
@@ -5378,8 +5456,7 @@ mod test {
         )
         .await;
 
-        let found =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found = mgr.omicron_zones_list().await;
         assert_eq!(found.generation, v1);
         assert!(found.zones.is_empty());
 
@@ -5410,7 +5487,7 @@ mod test {
         // Like the normal tests, set up a generation with one zone in it.
         let v1 = Generation::new();
         let v2 = v1.next();
-        let id1 = Uuid::new_v4();
+        let id1 = OmicronZoneUuid::new_v4();
 
         let _expectations = expect_new_services();
         let address =
@@ -5418,12 +5495,7 @@ mod test {
         let mut zones = vec![OmicronZoneConfig {
             id: id1,
             underlay_address: Ipv6Addr::LOCALHOST,
-            zone_type: OmicronZoneType::InternalNtp {
-                address,
-                ntp_servers: vec![],
-                dns_servers: vec![],
-                domain: None,
-            },
+            zone_type: OmicronZoneType::InternalNtp { address },
             filesystem_pool: None,
         }];
 
@@ -5435,24 +5507,18 @@ mod test {
         .await
         .unwrap();
 
-        let found =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found = mgr.omicron_zones_list().await;
         assert_eq!(found.generation, v2);
         assert_eq!(found.zones.len(), 1);
         assert_eq!(found.zones[0].id, id1);
 
         // Make a new list of zones that we're going to try with a bunch of
         // different generation numbers.
-        let id2 = Uuid::new_v4();
+        let id2 = OmicronZoneUuid::new_v4();
         zones.push(OmicronZoneConfig {
             id: id2,
             underlay_address: Ipv6Addr::LOCALHOST,
-            zone_type: OmicronZoneType::InternalNtp {
-                address,
-                ntp_servers: vec![],
-                dns_servers: vec![],
-                domain: None,
-            },
+            zone_type: OmicronZoneType::InternalNtp { address },
             filesystem_pool: None,
         });
 
@@ -5471,8 +5537,7 @@ mod test {
             Error::RequestedConfigOutdated { requested, current }
             if requested == v1 && current == v2
         ));
-        let found2 =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found2 = mgr.omicron_zones_list().await;
         assert_eq!(found, found2);
 
         // Now try to apply that list with the same generation number that we
@@ -5488,8 +5553,7 @@ mod test {
             error,
             Error::RequestedConfigConflicts(vr) if vr == v2
         ));
-        let found3 =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found3 = mgr.omicron_zones_list().await;
         assert_eq!(found, found3);
 
         // But we should be able to apply this new list of zones as long as we
@@ -5501,8 +5565,7 @@ mod test {
         )
         .await
         .expect("failed to remove all zones in a new generation");
-        let found4 =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found4 = mgr.omicron_zones_list().await;
         assert_eq!(found4.generation, v3);
         let mut our_zones = zones;
         our_zones.sort_by(|a, b| a.id.cmp(&b.id));
@@ -5516,6 +5579,11 @@ mod test {
         helper.cleanup().await;
         logctx.cleanup_successful();
     }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
 
     #[test]
     fn test_bootstrap_addr_to_techport_prefixes() {

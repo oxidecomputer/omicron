@@ -24,10 +24,12 @@ use crate::db::model::UpstairsRepairProgress;
 use crate::db::model::Volume;
 use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
-use crate::db::queries::volume::DecreaseCrucibleResourceCountAndSoftDeleteVolume;
+use crate::db::queries::volume::*;
+use crate::db::DbConnection;
 use crate::transaction_retry::OptionalError;
 use anyhow::bail;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::Utc;
 use diesel::prelude::*;
 use diesel::OptionalExtension;
 use nexus_types::identity::Resource;
@@ -848,41 +850,82 @@ impl DataStore {
 
         Ok(crucible_targets)
     }
+}
 
-    /// Decrease the usage count for Crucible resources according to the
-    /// contents of the volume. Call this when deleting a volume (but before the
-    /// volume record has been hard deleted).
-    ///
-    /// Returns a list of Crucible resources to clean up, and soft-deletes the
-    /// volume. Note this function must be idempotent, it is called from a saga
-    /// node.
-    pub async fn decrease_crucible_resource_count_and_soft_delete_volume(
-        &self,
+#[derive(Debug, thiserror::Error)]
+enum SoftDeleteTransactionError {
+    #[error("Serde error decreasing Crucible resources: {0}")]
+    SerdeError(#[from] serde_json::Error),
+
+    #[error("Updated {0} database rows, expected 1")]
+    UnexpectedDatabaseUpdate(usize),
+}
+
+impl DataStore {
+    // See comment for `soft_delete_volume`
+    async fn soft_delete_volume_txn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         volume_id: Uuid,
-    ) -> Result<CrucibleResources, Error> {
-        // Grab all the targets that the volume construction request references.
-        // Do this outside the transaction, as the data inside volume doesn't
-        // change and this would simply add to the transaction time.
-        let crucible_targets = {
-            let volume =
-                if let Some(volume) = self.volume_get(volume_id).await? {
-                    volume
-                } else {
-                    // The volume was hard-deleted, return an empty
-                    // CrucibleResources
-                    return Ok(CrucibleResources::V1(
-                        CrucibleResourcesV1::default(),
-                    ));
+        err: OptionalError<SoftDeleteTransactionError>,
+    ) -> Result<CrucibleResources, diesel::result::Error> {
+        // Grab the volume, and check if the volume was already soft-deleted.
+        // We have to guard against the case where this function is called
+        // multiple times, and that is done by soft-deleting the volume during
+        // the transaction, and returning the previously serialized list of
+        // resources to clean up.
+        let volume = {
+            use db::schema::volume::dsl;
+
+            let volume = dsl::volume
+                .filter(dsl::id.eq(volume_id))
+                .select(Volume::as_select())
+                .get_result_async(conn)
+                .await
+                .optional()?;
+
+            let volume = if let Some(v) = volume {
+                v
+            } else {
+                // The volume was hard-deleted
+                return Ok(CrucibleResources::V1(
+                    CrucibleResourcesV1::default(),
+                ));
+            };
+
+            if volume.time_deleted.is_some() {
+                // this volume was already soft-deleted, return the existing
+                // serialized CrucibleResources
+                let existing_resources = match volume
+                    .resources_to_clean_up
+                    .as_ref()
+                {
+                    Some(v) => serde_json::from_str(v)
+                        .map_err(|e| err.bail(e.into()))?,
+
+                    None => {
+                        // Even volumes with nothing to clean up should have a
+                        // serialized CrucibleResources that contains empty
+                        // vectors instead of None. Instead of panicing here
+                        // though, just return the default (nothing to clean
+                        // up).
+                        CrucibleResources::V1(CrucibleResourcesV1::default())
+                    }
                 };
 
-            let vcr: VolumeConstructionRequest =
-                serde_json::from_str(&volume.data()).map_err(|e| {
-                    Error::internal_error(&format!(
-                        "serde_json::from_str error in volume_create: {}",
-                        e
-                    ))
-                })?;
+                return Ok(existing_resources);
+            }
 
+            volume
+        };
+
+        let vcr: VolumeConstructionRequest =
+            serde_json::from_str(&volume.data())
+                .map_err(|e| err.bail(e.into()))?;
+
+        // Grab all the targets that the volume construction request references.
+        // Do this _inside_ the transaction, as the read-only parent data inside
+        // volume can change as a result of region snapshot replacement.
+        let crucible_targets = {
             let mut crucible_targets = CrucibleTargets::default();
             read_only_resources_associated_with_volume(
                 &vcr,
@@ -891,63 +934,110 @@ impl DataStore {
             crucible_targets
         };
 
-        // Call a CTE that will:
-        //
-        // 1. decrease the number of references for each region snapshot that
-        //    this Volume references
-        // 2. soft-delete the volume
-        // 3. record the resources to clean up as a serialized CrucibleResources
-        //    struct in volume's `resources_to_clean_up` column.
-        //
-        // Step 3 is important because this function is called from a saga node.
-        // If saga execution crashes after steps 1 and 2, but before serializing
-        // the resources to be cleaned up as part of the saga node context, then
-        // that list of resources will be lost.
-        //
-        // We also have to guard against the case where this function is called
-        // multiple times, and that is done by soft-deleting the volume during
-        // the CTE, and returning the previously serialized list of resources to
-        // clean up if a soft-delete has already occurred.
+        // Decrease the number of references for each region snapshot that a
+        // volume references, returning the updated rows.
+        let updated_region_snapshots = ConditionallyDecreaseReferences::new(
+            crucible_targets.read_only_targets,
+        )
+        .get_results_async::<RegionSnapshot>(conn)
+        .await?;
 
-        let _old_volume: Vec<Volume> =
-            DecreaseCrucibleResourceCountAndSoftDeleteVolume::new(
-                volume_id,
-                crucible_targets.read_only_targets.clone(),
-            )
-            .get_results_async::<Volume>(
-                &*self.pool_connection_unauthorized().await?,
-            )
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        // Return all regions for the volume to be cleaned up.
+        let regions: Vec<Uuid> = {
+            use db::schema::region::dsl as region_dsl;
+            use db::schema::region_snapshot::dsl as region_snapshot_dsl;
 
-        // Get the updated Volume to get the resources to clean up
-        let resources_to_clean_up: CrucibleResources = match self
-            .volume_get(volume_id)
-            .await?
-        {
-            Some(volume) => {
-                match volume.resources_to_clean_up.as_ref() {
-                    Some(v) => serde_json::from_str(v)?,
-
-                    None => {
-                        // Even volumes with nothing to clean up should have
-                        // a serialized CrucibleResources that contains
-                        // empty vectors instead of None. Instead of
-                        // panicing here though, just return the default
-                        // (nothing to clean up).
-                        CrucibleResources::V1(CrucibleResourcesV1::default())
-                    }
-                }
-            }
-
-            None => {
-                // If the volume was hard-deleted already, return the
-                // default (nothing to clean up).
-                CrucibleResources::V1(CrucibleResourcesV1::default())
-            }
+            region_dsl::region
+                .left_join(
+                    region_snapshot_dsl::region_snapshot
+                        .on(region_snapshot_dsl::region_id.eq(region_dsl::id)),
+                )
+                .filter(
+                    region_snapshot_dsl::volume_references
+                        .eq(0)
+                        .or(region_snapshot_dsl::volume_references.is_null()),
+                )
+                .filter(region_dsl::volume_id.eq(volume_id))
+                .select(Region::as_select())
+                .get_results_async(conn)
+                .await?
+                .into_iter()
+                .map(|region| region.id())
+                .collect()
         };
 
-        Ok(resources_to_clean_up)
+        // Return the region snapshots that had their volume_references updated
+        // to 0 (and had the deleting flag set) to be cleaned up.
+        let region_snapshots = updated_region_snapshots
+            .into_iter()
+            .filter(|region_snapshot| {
+                region_snapshot.volume_references == 0
+                    && region_snapshot.deleting
+            })
+            .map(|region_snapshot| RegionSnapshotV3 {
+                dataset: region_snapshot.dataset_id,
+                region: region_snapshot.region_id,
+                snapshot: region_snapshot.snapshot_id,
+            })
+            .collect();
+
+        let resources_to_delete = CrucibleResources::V3(CrucibleResourcesV3 {
+            regions,
+            region_snapshots,
+        });
+
+        // Soft-delete the volume, and serialize the resources to delete.
+        let serialized_resources = serde_json::to_string(&resources_to_delete)
+            .map_err(|e| err.bail(e.into()))?;
+
+        {
+            use db::schema::volume::dsl;
+            let updated_rows = diesel::update(dsl::volume)
+                .filter(dsl::id.eq(volume_id))
+                .set((
+                    dsl::time_deleted.eq(Utc::now()),
+                    dsl::resources_to_clean_up.eq(Some(serialized_resources)),
+                ))
+                .execute_async(conn)
+                .await?;
+
+            if updated_rows != 1 {
+                return Err(err.bail(
+                    SoftDeleteTransactionError::UnexpectedDatabaseUpdate(
+                        updated_rows,
+                    ),
+                ));
+            }
+        }
+
+        Ok(resources_to_delete)
+    }
+
+    /// Decrease the usage count for Crucible resources according to the
+    /// contents of the volume, soft-delete the volume, and return a list of
+    /// Crucible resources to clean up. Note this function must be idempotent,
+    /// it is called from a saga node.
+    pub async fn soft_delete_volume(
+        &self,
+        volume_id: Uuid,
+    ) -> Result<CrucibleResources, Error> {
+        let err = OptionalError::new();
+        let conn = self.pool_connection_unauthorized().await?;
+        self.transaction_retry_wrapper("soft_delete_volume")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    Self::soft_delete_volume_txn(&conn, volume_id, err).await
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    Error::internal_error(&format!("{err}"))
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
     }
 
     // Here we remove the read only parent from volume_id, and attach it
@@ -1482,6 +1572,14 @@ impl DataStore {
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
+
+    /// Return true if a volume was soft-deleted or hard-deleted
+    pub async fn volume_deleted(&self, volume_id: Uuid) -> Result<bool, Error> {
+        match self.volume_get(volume_id).await? {
+            Some(v) => Ok(v.time_deleted.is_some()),
+            None => Ok(true),
+        }
+    }
 }
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
@@ -1806,13 +1904,28 @@ pub struct ReplacementTarget(pub SocketAddrV6);
 #[derive(Debug, Clone, Copy)]
 pub struct VolumeToDelete(pub Uuid);
 
+// The result type returned from both `volume_replace_region` and
+// `volume_replace_snapshot`
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub enum VolumeReplaceResult {
+    // based on the VCRs, seems like the replacement already happened
+    AlreadyHappened,
+
+    // this call performed the replacement
+    Done,
+
+    // the "existing" volume was deleted
+    ExistingVolumeDeleted,
+}
+
 impl DataStore {
     /// Replace a read-write region in a Volume with a new region.
     pub async fn volume_replace_region(
         &self,
         existing: VolumeReplacementParams,
         replacement: VolumeReplacementParams,
-    ) -> Result<(), Error> {
+    ) -> Result<VolumeReplaceResult, Error> {
         // In a single transaction:
         //
         // - set the existing region's volume id to the replacement's volume id
@@ -1911,9 +2024,6 @@ impl DataStore {
             #[error("Serde error during Volume region replacement: {0}")]
             SerdeError(#[from] serde_json::Error),
 
-            #[error("Target Volume deleted")]
-            TargetVolumeDeleted,
-
             #[error("Region replacement error: {0}")]
             RegionReplacementError(#[from] anyhow::Error),
         }
@@ -1947,10 +2057,19 @@ impl DataStore {
                     let old_volume = if let Some(old_volume) = maybe_old_volume {
                         old_volume
                     } else {
-                        // Existing volume was deleted, so return an error. We
-                        // can't perform the region replacement now!
-                        return Err(err.bail(VolumeReplaceRegionError::TargetVolumeDeleted));
+                        // Existing volume was hard-deleted, so return here. We
+                        // can't perform the region replacement now, and this
+                        // will short-circuit the rest of the process.
+
+                        return Ok(VolumeReplaceResult::ExistingVolumeDeleted);
                     };
+
+                    if old_volume.time_deleted.is_some() {
+                        // Existing volume was soft-deleted, so return here for
+                        // the same reason: the region replacement process
+                        // should be short-circuited now.
+                        return Ok(VolumeReplaceResult::ExistingVolumeDeleted);
+                    }
 
                     let old_vcr: VolumeConstructionRequest =
                         match serde_json::from_str(&old_volume.data()) {
@@ -1976,7 +2095,7 @@ impl DataStore {
 
                     if !old_region_in_vcr && new_region_in_vcr {
                         // It does seem like the replacement happened
-                        return Ok(());
+                        return Ok(VolumeReplaceResult::AlreadyHappened);
                     }
 
                     use db::schema::region::dsl as region_dsl;
@@ -2061,7 +2180,7 @@ impl DataStore {
                             })
                         })?;
 
-                    Ok(())
+                    Ok(VolumeReplaceResult::Done)
                 }
             })
             .await
@@ -2071,10 +2190,6 @@ impl DataStore {
                         VolumeReplaceRegionError::Public(e) => e,
 
                         VolumeReplaceRegionError::SerdeError(_) => {
-                            Error::internal_error(&err.to_string())
-                        }
-
-                        VolumeReplaceRegionError::TargetVolumeDeleted => {
                             Error::internal_error(&err.to_string())
                         }
 
@@ -2110,7 +2225,7 @@ impl DataStore {
         existing: ExistingTarget,
         replacement: ReplacementTarget,
         volume_to_delete_id: VolumeToDelete,
-    ) -> Result<(), Error> {
+    ) -> Result<VolumeReplaceResult, Error> {
         #[derive(Debug, thiserror::Error)]
         enum VolumeReplaceSnapshotError {
             #[error("Error from Volume snapshot replacement: {0}")]
@@ -2118,9 +2233,6 @@ impl DataStore {
 
             #[error("Serde error during Volume snapshot replacement: {0}")]
             SerdeError(#[from] serde_json::Error),
-
-            #[error("Target Volume deleted")]
-            TargetVolumeDeleted,
 
             #[error("Snapshot replacement error: {0}")]
             SnapshotReplacementError(#[from] anyhow::Error),
@@ -2163,12 +2275,19 @@ impl DataStore {
                     let old_volume = if let Some(old_volume) = maybe_old_volume {
                         old_volume
                     } else {
-                        // Existing volume was deleted, so return an error. We
-                        // can't perform the snapshot replacement now!
-                        return Err(err.bail(
-                            VolumeReplaceSnapshotError::TargetVolumeDeleted
-                        ));
+                        // Existing volume was hard-deleted, so return here. We
+                        // can't perform the region replacement now, and this
+                        // will short-circuit the rest of the process.
+
+                        return Ok(VolumeReplaceResult::ExistingVolumeDeleted);
                     };
+
+                    if old_volume.time_deleted.is_some() {
+                        // Existing volume was soft-deleted, so return here for
+                        // the same reason: the region replacement process
+                        // should be short-circuited now.
+                        return Ok(VolumeReplaceResult::ExistingVolumeDeleted);
+                    }
 
                     let old_vcr: VolumeConstructionRequest =
                         match serde_json::from_str(&old_volume.data()) {
@@ -2201,7 +2320,7 @@ impl DataStore {
 
                     if !old_target_in_vcr && new_target_in_vcr {
                         // It does seem like the replacement happened
-                        return Ok(());
+                        return Ok(VolumeReplaceResult::AlreadyHappened);
                     }
 
                     // Update the existing volume's construction request to
@@ -2312,7 +2431,7 @@ impl DataStore {
                         ));
                     }
 
-                    Ok(())
+                    Ok(VolumeReplaceResult::Done)
                 }
             })
             .await
@@ -2322,10 +2441,6 @@ impl DataStore {
                         VolumeReplaceSnapshotError::Public(e) => e,
 
                         VolumeReplaceSnapshotError::SerdeError(_) => {
-                            Error::internal_error(&err.to_string())
-                        }
-
-                        VolumeReplaceSnapshotError::TargetVolumeDeleted => {
                             Error::internal_error(&err.to_string())
                         }
 
@@ -2665,8 +2780,7 @@ impl DataStore {
 mod tests {
     use super::*;
 
-    use crate::db::datastore::test_utils::datastore_test;
-    use nexus_test_utils::db::test_setup_database;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use omicron_test_utils::dev;
     use sled_agent_client::types::CrucibleOpts;
 
@@ -2677,13 +2791,13 @@ mod tests {
         let logctx =
             dev::test_setup_log("test_deserialize_old_crucible_resources");
         let log = logctx.log.new(o!());
-        let mut db = test_setup_database(&log).await;
-        let (_opctx, db_datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&log).await;
+        let datastore = db.datastore();
 
         // Start with a fake volume, doesn't matter if it's empty
 
         let volume_id = Uuid::new_v4();
-        let _volume = db_datastore
+        let _volume = datastore
             .volume_create(nexus_db_model::Volume::new(
                 volume_id,
                 serde_json::to_string(&VolumeConstructionRequest::Volume {
@@ -2704,8 +2818,7 @@ mod tests {
         {
             use db::schema::volume::dsl;
 
-            let conn =
-                db_datastore.pool_connection_unauthorized().await.unwrap();
+            let conn = datastore.pool_connection_unauthorized().await.unwrap();
 
             let resources_to_clean_up = r#"{
   "V1": {
@@ -2741,25 +2854,25 @@ mod tests {
 
             diesel::update(dsl::volume)
                 .filter(dsl::id.eq(volume_id))
-                .set(dsl::resources_to_clean_up.eq(resources_to_clean_up))
+                .set((
+                    dsl::resources_to_clean_up.eq(resources_to_clean_up),
+                    dsl::time_deleted.eq(Utc::now()),
+                ))
                 .execute_async(&*conn)
                 .await
                 .unwrap();
         }
 
-        // Soft delete the volume, which runs the CTE
+        // Soft delete the volume
 
-        let cr = db_datastore
-            .decrease_crucible_resource_count_and_soft_delete_volume(volume_id)
-            .await
-            .unwrap();
+        let cr = datastore.soft_delete_volume(volume_id).await.unwrap();
 
         // Assert the contents of the returned CrucibleResources
 
         let datasets_and_regions =
-            db_datastore.regions_to_delete(&cr).await.unwrap();
+            datastore.regions_to_delete(&cr).await.unwrap();
         let datasets_and_snapshots =
-            db_datastore.snapshots_to_delete(&cr).await.unwrap();
+            datastore.snapshots_to_delete(&cr).await.unwrap();
 
         assert!(datasets_and_regions.is_empty());
         assert_eq!(datasets_and_snapshots.len(), 1);
@@ -2772,7 +2885,7 @@ mod tests {
         );
         assert_eq!(region_snapshot.deleting, false);
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2780,8 +2893,8 @@ mod tests {
     async fn test_volume_replace_region() {
         let logctx = dev::test_setup_log("test_volume_replace_region");
         let log = logctx.log.new(o!());
-        let mut db = test_setup_database(&log).await;
-        let (_opctx, db_datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&log).await;
+        let datastore = db.datastore();
 
         // Insert four Region records (three, plus one additionally allocated)
 
@@ -2796,7 +2909,7 @@ mod tests {
         ];
 
         {
-            let conn = db_datastore.pool_connection_for_tests().await.unwrap();
+            let conn = datastore.pool_connection_for_tests().await.unwrap();
 
             for i in 0..4 {
                 let (_, volume_id) = region_and_volume_ids[i];
@@ -2822,7 +2935,7 @@ mod tests {
             }
         }
 
-        let _volume = db_datastore
+        let _volume = datastore
             .volume_create(nexus_db_model::Volume::new(
                 volume_id,
                 serde_json::to_string(&VolumeConstructionRequest::Volume {
@@ -2862,7 +2975,7 @@ mod tests {
         let target = region_and_volume_ids[0];
         let replacement = region_and_volume_ids[3];
 
-        db_datastore
+        let volume_replace_region_result = datastore
             .volume_replace_region(
                 /* target */
                 db::datastore::VolumeReplacementParams {
@@ -2884,8 +2997,10 @@ mod tests {
             .await
             .unwrap();
 
+        assert_eq!(volume_replace_region_result, VolumeReplaceResult::Done);
+
         let vcr: VolumeConstructionRequest = serde_json::from_str(
-            db_datastore.volume_get(volume_id).await.unwrap().unwrap().data(),
+            datastore.volume_get(volume_id).await.unwrap().unwrap().data(),
         )
         .unwrap();
 
@@ -2922,7 +3037,7 @@ mod tests {
         );
 
         // Now undo the replacement. Note volume ID is not swapped.
-        db_datastore
+        let volume_replace_region_result = datastore
             .volume_replace_region(
                 /* target */
                 db::datastore::VolumeReplacementParams {
@@ -2944,8 +3059,10 @@ mod tests {
             .await
             .unwrap();
 
+        assert_eq!(volume_replace_region_result, VolumeReplaceResult::Done);
+
         let vcr: VolumeConstructionRequest = serde_json::from_str(
-            db_datastore.volume_get(volume_id).await.unwrap().unwrap().data(),
+            datastore.volume_get(volume_id).await.unwrap().unwrap().data(),
         )
         .unwrap();
 
@@ -2981,7 +3098,7 @@ mod tests {
             },
         );
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2989,8 +3106,8 @@ mod tests {
     async fn test_volume_replace_snapshot() {
         let logctx = dev::test_setup_log("test_volume_replace_snapshot");
         let log = logctx.log.new(o!());
-        let mut db = test_setup_database(&log).await;
-        let (_opctx, db_datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&log).await;
+        let datastore = db.datastore();
 
         // Insert two volumes: one with the target to replace, and one temporary
         // "volume to delete" that's blank.
@@ -2999,7 +3116,7 @@ mod tests {
         let volume_to_delete_id = Uuid::new_v4();
         let rop_id = Uuid::new_v4();
 
-        db_datastore
+        datastore
             .volume_create(nexus_db_model::Volume::new(
                 volume_id,
                 serde_json::to_string(&VolumeConstructionRequest::Volume {
@@ -3058,7 +3175,7 @@ mod tests {
             .await
             .unwrap();
 
-        db_datastore
+        datastore
             .volume_create(nexus_db_model::Volume::new(
                 volume_to_delete_id,
                 serde_json::to_string(&VolumeConstructionRequest::Volume {
@@ -3074,7 +3191,7 @@ mod tests {
 
         // Do the replacement
 
-        db_datastore
+        let volume_replace_snapshot_result = datastore
             .volume_replace_snapshot(
                 VolumeWithTarget(volume_id),
                 ExistingTarget("[fd00:1122:3344:104::1]:400".parse().unwrap()),
@@ -3086,10 +3203,12 @@ mod tests {
             .await
             .unwrap();
 
+        assert_eq!(volume_replace_snapshot_result, VolumeReplaceResult::Done,);
+
         // Ensure the shape of the resulting VCRs
 
         let vcr: VolumeConstructionRequest = serde_json::from_str(
-            db_datastore.volume_get(volume_id).await.unwrap().unwrap().data(),
+            datastore.volume_get(volume_id).await.unwrap().unwrap().data(),
         )
         .unwrap();
 
@@ -3149,7 +3268,7 @@ mod tests {
         );
 
         let vcr: VolumeConstructionRequest = serde_json::from_str(
-            db_datastore
+            datastore
                 .volume_get(volume_to_delete_id)
                 .await
                 .unwrap()
@@ -3190,7 +3309,7 @@ mod tests {
 
         // Now undo the replacement. Note volume ID is not swapped.
 
-        db_datastore
+        let volume_replace_snapshot_result = datastore
             .volume_replace_snapshot(
                 VolumeWithTarget(volume_id),
                 ExistingTarget("[fd55:1122:3344:101::1]:111".parse().unwrap()),
@@ -3202,8 +3321,10 @@ mod tests {
             .await
             .unwrap();
 
+        assert_eq!(volume_replace_snapshot_result, VolumeReplaceResult::Done,);
+
         let vcr: VolumeConstructionRequest = serde_json::from_str(
-            db_datastore.volume_get(volume_id).await.unwrap().unwrap().data(),
+            datastore.volume_get(volume_id).await.unwrap().unwrap().data(),
         )
         .unwrap();
 
@@ -3264,7 +3385,7 @@ mod tests {
         );
 
         let vcr: VolumeConstructionRequest = serde_json::from_str(
-            db_datastore
+            datastore
                 .volume_get(volume_to_delete_id)
                 .await
                 .unwrap()
@@ -3303,7 +3424,7 @@ mod tests {
             },
         );
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -3312,14 +3433,14 @@ mod tests {
         let logctx =
             dev::test_setup_log("test_find_volumes_referencing_socket_addr");
         let log = logctx.log.new(o!());
-        let mut db = test_setup_database(&log).await;
-        let (opctx, db_datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let volume_id = Uuid::new_v4();
 
         // case where the needle is found
 
-        db_datastore
+        datastore
             .volume_create(nexus_db_model::Volume::new(
                 volume_id,
                 serde_json::to_string(&VolumeConstructionRequest::Volume {
@@ -3356,7 +3477,7 @@ mod tests {
             .await
             .unwrap();
 
-        let volumes = db_datastore
+        let volumes = datastore
             .find_volumes_referencing_socket_addr(
                 &opctx,
                 "[fd00:1122:3344:104::1]:400".parse().unwrap(),
@@ -3369,7 +3490,7 @@ mod tests {
 
         // case where the needle is missing
 
-        let volumes = db_datastore
+        let volumes = datastore
             .find_volumes_referencing_socket_addr(
                 &opctx,
                 "[fd55:1122:3344:104::1]:400".parse().unwrap(),
@@ -3379,7 +3500,7 @@ mod tests {
 
         assert!(volumes.is_empty());
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 

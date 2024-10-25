@@ -27,14 +27,18 @@ use gateway_messages::ignition::IgnitionError;
 use gateway_messages::ignition::LinkEvents;
 use gateway_messages::sp_impl::BoundsChecked;
 use gateway_messages::sp_impl::DeviceDescription;
+use gateway_messages::sp_impl::Sender;
 use gateway_messages::sp_impl::SpHandler;
 use gateway_messages::CfpaPage;
 use gateway_messages::ComponentAction;
+use gateway_messages::ComponentActionResponse;
 use gateway_messages::ComponentDetails;
 use gateway_messages::DiscoverResponse;
 use gateway_messages::IgnitionCommand;
 use gateway_messages::IgnitionState;
 use gateway_messages::MgsError;
+use gateway_messages::MgsRequest;
+use gateway_messages::MgsResponse;
 use gateway_messages::PowerState;
 use gateway_messages::RotBootInfo;
 use gateway_messages::RotRequest;
@@ -468,37 +472,45 @@ impl SpHandler for Handler {
     type BulkIgnitionStateIter = iter::Skip<std::vec::IntoIter<IgnitionState>>;
     type BulkIgnitionLinkEventsIter =
         iter::Skip<std::vec::IntoIter<LinkEvents>>;
+    type VLanId = SpPort;
+
+    fn ensure_request_trusted(
+        &mut self,
+        kind: MgsRequest,
+        _sender: Sender<Self::VLanId>,
+    ) -> Result<MgsRequest, SpError> {
+        Ok(kind)
+    }
+
+    fn ensure_response_trusted(
+        &mut self,
+        kind: MgsResponse,
+        _sender: Sender<Self::VLanId>,
+    ) -> Option<MgsResponse> {
+        Some(kind)
+    }
 
     fn discover(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
+        sender: Sender<Self::VLanId>,
     ) -> Result<gateway_messages::DiscoverResponse, SpError> {
         debug!(
             &self.log,
             "received discover; sending response";
-            "sender" => %sender,
-            "port" => ?port,
+            "sender" => ?sender,
         );
-        Ok(DiscoverResponse { sp_port: port })
+        Ok(DiscoverResponse { sp_port: sender.vid })
     }
 
     fn num_ignition_ports(&mut self) -> Result<u32, SpError> {
         Ok(self.ignition.num_targets() as u32)
     }
 
-    fn ignition_state(
-        &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
-        target: u8,
-    ) -> Result<IgnitionState, SpError> {
+    fn ignition_state(&mut self, target: u8) -> Result<IgnitionState, SpError> {
         let state = self.ignition.get_target(target)?;
         debug!(
             &self.log,
             "received ignition state request";
-            "sender" => %sender,
-            "port" => ?port,
             "target" => target,
             "reply-state" => ?state,
         );
@@ -507,15 +519,11 @@ impl SpHandler for Handler {
 
     fn bulk_ignition_state(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         offset: u32,
     ) -> Result<Self::BulkIgnitionStateIter, SpError> {
         debug!(
             &self.log,
             "received bulk ignition state request";
-            "sender" => %sender,
-            "port" => ?port,
             "offset" => offset,
             "state" => ?self.ignition.state,
         );
@@ -524,8 +532,6 @@ impl SpHandler for Handler {
 
     fn ignition_link_events(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         target: u8,
     ) -> Result<LinkEvents, SpError> {
         // Check validity of `target`
@@ -536,8 +542,6 @@ impl SpHandler for Handler {
         debug!(
             &self.log,
             "received ignition link events request";
-            "sender" => %sender,
-            "port" => ?port,
             "target" => target,
             "events" => ?events,
         );
@@ -547,15 +551,11 @@ impl SpHandler for Handler {
 
     fn bulk_ignition_link_events(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         offset: u32,
     ) -> Result<Self::BulkIgnitionLinkEventsIter, SpError> {
         debug!(
             &self.log,
             "received bulk ignition link events request";
-            "sender" => %sender,
-            "port" => ?port,
             "offset" => offset,
         );
         Ok(self.ignition.link_events.clone().into_iter().skip(offset as usize))
@@ -564,8 +564,6 @@ impl SpHandler for Handler {
     /// If `target` is `None`, clear link events for all targets.
     fn clear_ignition_link_events(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         target: Option<u8>,
         transceiver_select: Option<ignition::TransceiverSelect>,
     ) -> Result<(), SpError> {
@@ -601,8 +599,6 @@ impl SpHandler for Handler {
         debug!(
             &self.log,
             "cleared ignition link events";
-            "sender" => %sender,
-            "port" => ?port,
             "target" => ?target,
             "transceiver_select" => ?transceiver_select,
         );
@@ -611,8 +607,6 @@ impl SpHandler for Handler {
 
     fn ignition_command(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         target: u8,
         command: IgnitionCommand,
     ) -> Result<(), SpError> {
@@ -620,8 +614,6 @@ impl SpHandler for Handler {
         debug!(
             &self.log,
             "received ignition command; sending ack";
-            "sender" => %sender,
-            "port" => ?port,
             "target" => target,
             "command" => ?command,
         );
@@ -630,98 +622,76 @@ impl SpHandler for Handler {
 
     fn serial_console_attach(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
+        sender: Sender<Self::VLanId>,
         _component: SpComponent,
     ) -> Result<(), SpError> {
         warn!(
             &self.log, "received serial console attach; unsupported by sidecar";
-            "sender" => %sender,
-            "port" => ?port,
+            "sender" => ?sender,
         );
         Err(SpError::RequestUnsupportedForSp)
     }
 
     fn serial_console_write(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
+        sender: Sender<Self::VLanId>,
         _offset: u64,
         _data: &[u8],
     ) -> Result<u64, SpError> {
         warn!(
             &self.log, "received serial console write; unsupported by sidecar";
-            "sender" => %sender,
-            "port" => ?port,
+            "sender" => ?sender,
         );
         Err(SpError::RequestUnsupportedForSp)
     }
 
     fn serial_console_keepalive(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
+        sender: Sender<Self::VLanId>,
     ) -> Result<(), SpError> {
         warn!(
             &self.log,
             "received serial console keepalive; unsupported by sidecar";
-            "sender" => %sender,
-            "port" => ?port,
+            "sender" => ?sender,
         );
         Err(SpError::RequestUnsupportedForSp)
     }
 
     fn serial_console_detach(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
+        sender: Sender<Self::VLanId>,
     ) -> Result<(), SpError> {
         warn!(
             &self.log, "received serial console detach; unsupported by sidecar";
-            "sender" => %sender,
-            "port" => ?port,
+            "sender" => ?sender,
         );
         Err(SpError::RequestUnsupportedForSp)
     }
 
     fn serial_console_break(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
+        sender: Sender<Self::VLanId>,
     ) -> Result<(), SpError> {
         warn!(
             &self.log,
             "received serial console break; not supported by sidecar";
-            "sender" => %sender,
-            "port" => ?port,
+            "sender" => ?sender,
         );
         Err(SpError::RequestUnsupportedForSp)
     }
 
-    fn send_host_nmi(
-        &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
-    ) -> Result<(), SpError> {
+    fn send_host_nmi(&mut self) -> Result<(), SpError> {
         warn!(
             &self.log,
             "received host NMI request; not supported by sidecar";
-            "sender" => %sender,
-            "port" => ?port,
         );
         Err(SpError::RequestUnsupportedForSp)
     }
 
-    fn sp_state(
-        &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
-    ) -> Result<SpStateV2, SpError> {
+    fn sp_state(&mut self) -> Result<SpStateV2, SpError> {
         let state = self.sp_state_impl();
         debug!(
             &self.log, "received state request";
-            "sender" => %sender,
-            "port" => ?port,
             "reply-state" => ?state,
         );
         Ok(state)
@@ -729,15 +699,11 @@ impl SpHandler for Handler {
 
     fn sp_update_prepare(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         update: gateway_messages::SpUpdatePrepare,
     ) -> Result<(), SpError> {
         debug!(
             &self.log,
             "received update prepare request";
-            "sender" => %sender,
-            "port" => ?port,
             "update" => ?update,
         );
         self.update_state.prepare(
@@ -749,15 +715,11 @@ impl SpHandler for Handler {
 
     fn component_update_prepare(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         update: gateway_messages::ComponentUpdatePrepare,
     ) -> Result<(), SpError> {
         debug!(
             &self.log,
             "received update prepare request";
-            "sender" => %sender,
-            "port" => ?port,
             "update" => ?update,
         );
         self.update_state.prepare(
@@ -769,15 +731,11 @@ impl SpHandler for Handler {
 
     fn update_status(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         component: SpComponent,
     ) -> Result<gateway_messages::UpdateStatus, SpError> {
         debug!(
             &self.log,
             "received update status request";
-            "sender" => %sender,
-            "port" => ?port,
             "component" => ?component,
         );
         Ok(self.update_state.status())
@@ -785,16 +743,12 @@ impl SpHandler for Handler {
 
     fn update_chunk(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         chunk: gateway_messages::UpdateChunk,
         chunk_data: &[u8],
     ) -> Result<(), SpError> {
         debug!(
             &self.log,
             "received update chunk";
-            "sender" => %sender,
-            "port" => ?port,
             "offset" => chunk.offset,
             "length" => chunk_data.len(),
         );
@@ -803,31 +757,21 @@ impl SpHandler for Handler {
 
     fn update_abort(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         component: SpComponent,
         update_id: gateway_messages::UpdateId,
     ) -> Result<(), SpError> {
         debug!(
             &self.log,
             "received update abort; not supported by simulated sidecar";
-            "sender" => %sender,
-            "port" => ?port,
             "component" => ?component,
             "id" => ?update_id,
         );
         self.update_state.abort(update_id)
     }
 
-    fn power_state(
-        &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
-    ) -> Result<gateway_messages::PowerState, SpError> {
+    fn power_state(&mut self) -> Result<gateway_messages::PowerState, SpError> {
         debug!(
             &self.log, "received power state";
-            "sender" => %sender,
-            "port" => ?port,
             "power_state" => ?self.power_state,
         );
         Ok(self.power_state)
@@ -835,14 +779,12 @@ impl SpHandler for Handler {
 
     fn set_power_state(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
+        sender: Sender<Self::VLanId>,
         power_state: gateway_messages::PowerState,
     ) -> Result<(), SpError> {
         debug!(
             &self.log, "received set power state";
-            "sender" => %sender,
-            "port" => ?port,
+            "sender" => ?sender,
             "power_state" => ?power_state,
         );
         self.power_state = power_state;
@@ -851,14 +793,10 @@ impl SpHandler for Handler {
 
     fn reset_component_prepare(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         component: SpComponent,
     ) -> Result<(), SpError> {
         debug!(
             &self.log, "received reset prepare request";
-            "sender" => %sender,
-            "port" => ?port,
             "component" => ?component,
         );
         if component == SpComponent::SP_ITSELF || component == SpComponent::ROT
@@ -872,14 +810,10 @@ impl SpHandler for Handler {
 
     fn reset_component_trigger(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         component: SpComponent,
     ) -> Result<(), SpError> {
         debug!(
             &self.log, "received sys-reset trigger request";
-            "sender" => %sender,
-            "port" => ?port,
             "component" => ?component,
         );
         if component == SpComponent::SP_ITSELF {
@@ -909,7 +843,7 @@ impl SpHandler for Handler {
         }
     }
 
-    fn num_devices(&mut self, _: SocketAddrV6, _: SpPort) -> u32 {
+    fn num_devices(&mut self) -> u32 {
         self.components.len().try_into().unwrap()
     }
 
@@ -930,8 +864,6 @@ impl SpHandler for Handler {
 
     fn num_component_details(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         component: SpComponent,
     ) -> Result<u32, SpError> {
         let num_sensor_details =
@@ -940,8 +872,6 @@ impl SpHandler for Handler {
         // to simulate that later...
         debug!(
             &self.log, "asked for number of component details";
-            "sender" => %sender,
-            "port" => ?port,
             "component" => ?component,
             "num_details" => num_sensor_details
         );
@@ -969,14 +899,10 @@ impl SpHandler for Handler {
 
     fn component_clear_status(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         component: SpComponent,
     ) -> Result<(), SpError> {
         warn!(
             &self.log, "asked to clear status (not supported for sim components)";
-            "sender" => %sender,
-            "port" => ?port,
             "component" => ?component,
         );
         Err(SpError::RequestUnsupportedForComponent)
@@ -984,14 +910,10 @@ impl SpHandler for Handler {
 
     fn component_get_active_slot(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         component: SpComponent,
     ) -> Result<u16, SpError> {
         warn!(
             &self.log, "asked for component active slot";
-            "sender" => %sender,
-            "port" => ?port,
             "component" => ?component,
         );
         if component == SpComponent::ROT {
@@ -1005,16 +927,12 @@ impl SpHandler for Handler {
 
     fn component_set_active_slot(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         component: SpComponent,
         slot: u16,
         persist: bool,
     ) -> Result<(), SpError> {
         warn!(
             &self.log, "asked to set component active slot";
-            "sender" => %sender,
-            "port" => ?port,
             "component" => ?component,
             "slot" => slot,
             "persist" => persist,
@@ -1031,58 +949,40 @@ impl SpHandler for Handler {
 
     fn component_action(
         &mut self,
-        sender: SocketAddrV6,
+        sender: Sender<Self::VLanId>,
         component: SpComponent,
         action: ComponentAction,
-    ) -> Result<(), SpError> {
+    ) -> Result<ComponentActionResponse, SpError> {
         warn!(
             &self.log, "asked to perform component action (not supported for sim components)";
-            "sender" => %sender,
+            "sender" => ?sender,
             "component" => ?component,
             "action" => ?action,
         );
         Err(SpError::RequestUnsupportedForComponent)
     }
 
-    fn get_startup_options(
-        &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
-    ) -> Result<StartupOptions, SpError> {
+    fn get_startup_options(&mut self) -> Result<StartupOptions, SpError> {
         warn!(
             &self.log, "asked for startup options (unsupported by sidecar)";
-            "sender" => %sender,
-            "port" => ?port,
         );
         Err(SpError::RequestUnsupportedForSp)
     }
 
     fn set_startup_options(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         startup_options: StartupOptions,
     ) -> Result<(), SpError> {
         warn!(
             &self.log, "asked to set startup options (unsupported by sidecar)";
-            "sender" => %sender,
-            "port" => ?port,
             "options" => ?startup_options,
         );
         Err(SpError::RequestUnsupportedForSp)
     }
 
-    fn mgs_response_error(
-        &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
-        message_id: u32,
-        err: MgsError,
-    ) {
+    fn mgs_response_error(&mut self, message_id: u32, err: MgsError) {
         warn!(
             &self.log, "received MGS error response";
-            "sender" => %sender,
-            "port" => ?port,
             "message_id" => message_id,
             "err" => ?err,
         );
@@ -1090,8 +990,7 @@ impl SpHandler for Handler {
 
     fn mgs_response_host_phase2_data(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
+        sender: Sender<Self::VLanId>,
         message_id: u32,
         hash: [u8; 32],
         offset: u64,
@@ -1099,8 +998,7 @@ impl SpHandler for Handler {
     ) {
         debug!(
             &self.log, "received host phase 2 data from MGS";
-            "sender" => %sender,
-            "port" => ?port,
+            "sender" => ?sender,
             "message_id" => message_id,
             "hash" => ?hash,
             "offset" => offset,
@@ -1110,16 +1008,12 @@ impl SpHandler for Handler {
 
     fn set_ipcc_key_lookup_value(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         key: u8,
         value: &[u8],
     ) -> Result<(), SpError> {
         warn!(
             &self.log,
             "received IPCC key/value; not supported by sidecar";
-            "sender" => %sender,
-            "port" => ?port,
             "key" => key,
             "value" => ?value,
         );
@@ -1167,12 +1061,16 @@ impl SpHandler for Handler {
             (SpComponent::ROT, b"NAME", _, _) => ROT_NAME,
             (SpComponent::ROT, b"VERS", 0, _) => ROT_VERS0,
             (SpComponent::ROT, b"VERS", 1, _) => ROT_VERS1,
+            // sidecar staging/devel hash
+            (SpComponent::ROT, b"SIGN", _, _) => &"1432cc4cfe5688c51b55546fe37837c753cfbc89e8c3c6aabcf977fdf0c41e27".as_bytes(),
             (SpComponent::STAGE0, b"GITC", 0, false) => STAGE0_GITC0,
             (SpComponent::STAGE0, b"GITC", 1, false) => STAGE0_GITC1,
             (SpComponent::STAGE0, b"BORD", _, false) => STAGE0_BORD,
             (SpComponent::STAGE0, b"NAME", _, false) => STAGE0_NAME,
             (SpComponent::STAGE0, b"VERS", 0, false) => STAGE0_VERS0,
             (SpComponent::STAGE0, b"VERS", 1, false) => STAGE0_VERS1,
+            // sidecar staging/devel hash
+            (SpComponent::STAGE0, b"SIGN", _, false) => &"1432cc4cfe5688c51b55546fe37837c753cfbc89e8c3c6aabcf977fdf0c41e27".as_bytes(),
             _ => return Err(SpError::NoSuchCabooseKey(key)),
         };
 
@@ -1265,8 +1163,6 @@ impl SpHandler for Handler {
 
     fn versioned_rot_boot_info(
         &mut self,
-        _sender: SocketAddrV6,
-        _port: SpPort,
         version: u8,
     ) -> Result<RotBootInfo, SpError> {
         if self.old_rot_state {

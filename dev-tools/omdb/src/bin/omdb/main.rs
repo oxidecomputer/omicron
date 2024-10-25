@@ -36,9 +36,12 @@
 use anyhow::anyhow;
 use anyhow::ensure;
 use anyhow::Context;
+use clap::Args;
+use clap::ColorChoice;
 use clap::Parser;
 use clap::Subcommand;
 use futures::StreamExt;
+use internal_dns_types::names::ServiceName;
 use omicron_common::address::Ipv6Subnet;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -108,8 +111,18 @@ struct Omdb {
     )]
     allow_destructive: bool,
 
+    #[command(flatten)]
+    output: OutputOpts,
+
     #[command(subcommand)]
     command: OmdbCommands,
+}
+
+#[derive(Debug, Args)]
+struct OutputOpts {
+    /// Color output
+    #[arg(long, global = true, value_enum, default_value_t)]
+    color: ColorChoice,
 }
 
 mod check_allow_destructive {
@@ -139,7 +152,7 @@ impl Omdb {
     async fn dns_lookup_all(
         &self,
         log: slog::Logger,
-        service_name: internal_dns::ServiceName,
+        service_name: ServiceName,
     ) -> Result<Vec<SocketAddrV6>, anyhow::Error> {
         let resolver = self.dns_resolver(log).await?;
         resolver
@@ -153,7 +166,7 @@ impl Omdb {
     async fn dns_lookup_one(
         &self,
         log: slog::Logger,
-        service_name: internal_dns::ServiceName,
+        service_name: ServiceName,
     ) -> Result<SocketAddrV6, anyhow::Error> {
         let addrs = self.dns_lookup_all(log, service_name).await?;
         ensure!(
@@ -210,10 +223,10 @@ impl Omdb {
     async fn dns_resolver(
         &self,
         log: slog::Logger,
-    ) -> Result<internal_dns::resolver::Resolver, anyhow::Error> {
+    ) -> Result<internal_dns_resolver::Resolver, anyhow::Error> {
         match &self.dns_server {
             Some(dns_server) => {
-                internal_dns::resolver::Resolver::new_from_addrs(
+                internal_dns_resolver::Resolver::new_from_addrs(
                     log,
                     &[*dns_server],
                 )
@@ -246,7 +259,7 @@ impl Omdb {
                     "note: (if this is not right, use --dns-server \
                     to specify an alternate DNS server)",
                 );
-                internal_dns::resolver::Resolver::new_from_subnet(log, subnet)
+                internal_dns_resolver::Resolver::new_from_subnet(log, subnet)
                     .with_context(|| {
                         format!(
                             "creating DNS resolver for subnet {}",

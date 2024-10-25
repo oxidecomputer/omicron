@@ -467,7 +467,7 @@ impl DataStore {
                     let lldp_link_ids: Vec<Uuid> = result
                         .links
                         .iter()
-                        .map(|link| link.lldp_link_config_id)
+                        .filter_map(|link| link.lldp_link_config_id)
                         .collect();
 
                     use db::schema::lldp_link_config;
@@ -799,7 +799,7 @@ impl DataStore {
 
                     let link_config = SwitchPortLinkConfig {
                         port_settings_id: parent_id,
-                        lldp_link_config_id,
+                        lldp_link_config_id: Some(lldp_link_config_id),
                         link_name: new_settings.name.to_string(),
                         mtu: new_settings.mtu.into(),
                         fec: new_settings.fec.into(),
@@ -894,12 +894,12 @@ impl DataStore {
                     .await?;
 
                     // delete lldp service configuration
-                    diesel::delete(lldp_link_dsl::lldp_link_config)
-                        .filter(
-                            lldp_link_dsl::id.eq(config.lldp_link_config_id),
-                        )
-                        .execute_async(&conn)
-                        .await?;
+                    if let Some(lldp_config_id) = config.lldp_link_config_id {
+                        diesel::delete(lldp_link_dsl::lldp_link_config)
+                            .filter(lldp_link_dsl::id.eq(lldp_config_id))
+                            .execute_async(&conn)
+                            .await?;
+                    }
 
                     Ok(())
                 }
@@ -1296,7 +1296,7 @@ impl DataStore {
                         dst: new_settings.dst.into(),
                         gw: new_settings.gw.into(),
                         vid: new_settings.vid.map(Into::into),
-                        local_pref: new_settings.local_pref.map(Into::into),
+                        rib_priority: new_settings.rib_priority.map(Into::into),
                     };
 
                     let config = diesel::insert_into(route_config::table)
@@ -3024,7 +3024,7 @@ async fn do_switch_port_settings_create(
                 route.dst.into(),
                 route.gw.into(),
                 route.vid.map(Into::into),
-                route.local_pref.map(Into::into),
+                route.rib_priority.map(Into::into),
             ));
         }
     }
@@ -3295,10 +3295,12 @@ async fn do_switch_port_settings_delete(
             .returning(SwitchPortLinkConfig::as_returning())
             .get_results_async(conn)
             .await?;
+
     // delete lldp configs
     use db::schema::lldp_link_config;
     let lldp_link_ids: Vec<Uuid> =
-        links.iter().map(|link| link.lldp_link_config_id).collect();
+        links.iter().filter_map(|link| link.lldp_link_config_id).collect();
+
     diesel::delete(lldp_link_config::dsl::lldp_link_config)
         .filter(lldp_link_config::id.eq_any(lldp_link_ids))
         .execute_async(conn)
@@ -3459,9 +3461,8 @@ async fn lldp_configuration_id(
 
 #[cfg(test)]
 mod test {
-    use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::UpdatePrecondition;
-    use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params::{
         BgpAnnounceSetCreate, BgpConfigCreate, BgpPeerConfig,
         SwitchPortConfigCreate, SwitchPortGeometry, SwitchPortSettingsCreate,
@@ -3477,8 +3478,8 @@ mod test {
     #[tokio::test]
     async fn test_bgp_boundary_switches() {
         let logctx = dev::test_setup_log("test_bgp_boundary_switches");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let rack_id: Uuid =
             nexus_test_utils::RACK_UUID.parse().expect("parse uuid");
@@ -3578,7 +3579,7 @@ mod test {
 
         assert_eq!(uplink_ports.len(), 1);
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

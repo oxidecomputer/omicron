@@ -144,7 +144,7 @@ table! {
         fec -> crate::SwitchLinkFecEnum,
         speed -> crate::SwitchLinkSpeedEnum,
         autoneg -> Bool,
-        lldp_link_config_id -> Uuid,
+        lldp_link_config_id -> Nullable<Uuid>,
     }
 }
 
@@ -188,7 +188,7 @@ table! {
         dst -> Inet,
         gw -> Inet,
         vid -> Nullable<Int4>,
-        local_pref -> Nullable<Int8>,
+        local_pref -> Nullable<Int2>,
     }
 }
 
@@ -407,13 +407,16 @@ table! {
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,
-        boot_on_fault -> Bool,
+        auto_restart_policy -> Nullable<crate::InstanceAutoRestartPolicyEnum>,
+        auto_restart_cooldown -> Nullable<Interval>,
+        boot_disk_id -> Nullable<Uuid>,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_propolis_id -> Nullable<Uuid>,
         target_propolis_id -> Nullable<Uuid>,
         migration_id -> Nullable<Uuid>,
         state -> crate::InstanceStateEnum,
+        time_last_auto_restarted -> Nullable<Timestamptz>,
         updater_id -> Nullable<Uuid>,
         updater_gen-> Int8,
     }
@@ -794,6 +797,7 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
+        time_expunged -> Nullable<Timestamptz>,
         ip -> Inet,
         port -> Int4,
     }
@@ -834,6 +838,16 @@ table! {
         data -> Nullable<Jsonb>,
         event_time -> Timestamptz,
         creator -> Uuid,
+    }
+}
+
+table! {
+    clickhouse_policy (version) {
+        version -> Int8,
+        clickhouse_mode -> crate::clickhouse_policy::ClickhouseModeEnum,
+        clickhouse_cluster_target_servers -> Int2,
+        clickhouse_cluster_target_keepers -> Int2,
+        time_created -> Timestamptz,
     }
 }
 
@@ -1023,6 +1037,7 @@ table! {
 
         kind -> crate::DatasetKindEnum,
         size_used -> Nullable<Int8>,
+        zone_name -> Nullable<Text>,
     }
 }
 
@@ -1139,6 +1154,46 @@ table! {
         vpc_router_id -> Uuid,
         target -> Text,
         destination -> Text,
+    }
+}
+
+table! {
+    internet_gateway(id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        vpc_id -> Uuid,
+        rcgen -> Int8,
+        resolved_version -> Int8,
+    }
+}
+
+table! {
+    internet_gateway_ip_pool(id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        internet_gateway_id -> Uuid,
+        ip_pool_id -> Uuid,
+    }
+}
+
+table! {
+    internet_gateway_ip_address(id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        internet_gateway_id -> Uuid,
+        address -> Inet,
     }
 }
 
@@ -1431,12 +1486,41 @@ table! {
 }
 
 table! {
+    inv_nvme_disk_firmware (inv_collection_id, sled_id, slot) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        slot -> Int8,
+
+        number_of_slots -> Int2,
+        active_slot -> Int2,
+        next_active_slot -> Nullable<Int2>,
+        slot1_is_read_only -> Bool,
+        slot_firmware_versions -> Array<Nullable<Text>>,
+    }
+}
+
+table! {
     inv_zpool (inv_collection_id, sled_id, id) {
         inv_collection_id -> Uuid,
         time_collected -> Timestamptz,
         id -> Uuid,
         sled_id -> Uuid,
         total_size -> Int8,
+    }
+}
+
+table! {
+    inv_dataset (inv_collection_id, sled_id, name) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+
+        id -> Nullable<Uuid>,
+        name -> Text,
+        available -> Int8,
+        used -> Int8,
+        quota -> Nullable<Int8>,
+        reservation -> Nullable<Int8>,
+        compression -> Text,
     }
 }
 
@@ -1491,6 +1575,15 @@ table! {
         vni -> Int8,
         is_primary -> Bool,
         slot -> Int2,
+    }
+}
+
+table! {
+    inv_clickhouse_keeper_membership (inv_collection_id, queried_keeper_id) {
+        inv_collection_id -> Uuid,
+        queried_keeper_id -> Int8,
+        leader_committed_log_index -> Int8,
+        raft_config -> Array<Int8>,
     }
 }
 
@@ -1608,6 +1701,34 @@ table! {
         vni -> Int8,
         is_primary -> Bool,
         slot -> Int2,
+    }
+}
+
+table! {
+    bp_clickhouse_cluster_config (blueprint_id) {
+        blueprint_id -> Uuid,
+        generation -> Int8,
+        max_used_server_id -> Int8,
+        max_used_keeper_id -> Int8,
+        cluster_name -> Text,
+        cluster_secret -> Text,
+        highest_seen_keeper_leader_committed_log_index -> Int8,
+    }
+}
+
+table! {
+    bp_clickhouse_keeper_zone_id_to_node_id (blueprint_id, omicron_zone_id, keeper_id) {
+        blueprint_id -> Uuid,
+        omicron_zone_id -> Uuid,
+        keeper_id -> Int8,
+    }
+}
+
+table! {
+    bp_clickhouse_server_zone_id_to_node_id (blueprint_id, omicron_zone_id, server_id) {
+        blueprint_id -> Uuid,
+        omicron_zone_id -> Uuid,
+        server_id -> Int8,
     }
 }
 
@@ -1848,6 +1969,7 @@ allow_tables_to_appear_in_same_query!(
     network_interface,
     instance_network_interface,
     inv_physical_disk,
+    inv_nvme_disk_firmware,
     service_network_interface,
     oximeter,
     physical_disk,
@@ -1873,6 +1995,9 @@ allow_tables_to_appear_in_same_query!(
     role_builtin,
     role_assignment,
     probe,
+    internet_gateway,
+    internet_gateway_ip_pool,
+    internet_gateway_ip_address,
 );
 
 allow_tables_to_appear_in_same_query!(dns_zone, dns_version, dns_name);
@@ -1881,6 +2006,20 @@ allow_tables_to_appear_in_same_query!(dns_zone, dns_version, dns_name);
 allow_tables_to_appear_in_same_query!(external_ip, instance);
 allow_tables_to_appear_in_same_query!(external_ip, project);
 allow_tables_to_appear_in_same_query!(external_ip, ip_pool_resource);
+allow_tables_to_appear_in_same_query!(external_ip, vmm);
+allow_tables_to_appear_in_same_query!(external_ip, network_interface);
+allow_tables_to_appear_in_same_query!(external_ip, inv_omicron_zone);
+allow_tables_to_appear_in_same_query!(external_ip, inv_omicron_zone_nic);
+allow_tables_to_appear_in_same_query!(inv_omicron_zone, inv_omicron_zone_nic);
+allow_tables_to_appear_in_same_query!(network_interface, inv_omicron_zone);
+allow_tables_to_appear_in_same_query!(network_interface, inv_omicron_zone_nic);
+allow_tables_to_appear_in_same_query!(network_interface, inv_collection);
+allow_tables_to_appear_in_same_query!(inv_omicron_zone, inv_collection);
+allow_tables_to_appear_in_same_query!(inv_omicron_zone_nic, inv_collection);
+allow_tables_to_appear_in_same_query!(external_ip, inv_collection);
+allow_tables_to_appear_in_same_query!(external_ip, internet_gateway);
+allow_tables_to_appear_in_same_query!(external_ip, internet_gateway_ip_pool);
+allow_tables_to_appear_in_same_query!(external_ip, internet_gateway_ip_address);
 
 allow_tables_to_appear_in_same_query!(disk, virtual_provisioning_resource);
 

@@ -22,11 +22,28 @@ use std::sync::Arc;
 pub struct RegionSnapshotReplacementGarbageCollect {
     datastore: Arc<DataStore>,
     sagas: Arc<dyn StartSaga>,
+    disabled: bool,
 }
 
 impl RegionSnapshotReplacementGarbageCollect {
+    #[allow(dead_code)]
     pub fn new(datastore: Arc<DataStore>, sagas: Arc<dyn StartSaga>) -> Self {
-        RegionSnapshotReplacementGarbageCollect { datastore, sagas }
+        RegionSnapshotReplacementGarbageCollect {
+            datastore,
+            sagas,
+            disabled: false,
+        }
+    }
+
+    pub fn disabled(
+        datastore: Arc<DataStore>,
+        sagas: Arc<dyn StartSaga>,
+    ) -> Self {
+        RegionSnapshotReplacementGarbageCollect {
+            datastore,
+            sagas,
+            disabled: true,
+        }
     }
 
     async fn send_garbage_collect_request(
@@ -56,7 +73,10 @@ impl RegionSnapshotReplacementGarbageCollect {
 
         let saga_dag =
             SagaRegionSnapshotReplacementGarbageCollect::prepare(&params)?;
-        self.sagas.saga_start(saga_dag).await
+        // We only care that the saga was started, and don't wish to wait for it
+        // to complete, so use `StartSaga::saga_start`, rather than `saga_run`.
+        self.sagas.saga_start(saga_dag).await?;
+        Ok(())
     }
 
     async fn clean_up_region_snapshot_replacement_volumes(
@@ -131,6 +151,10 @@ impl BackgroundTask for RegionSnapshotReplacementGarbageCollect {
         async move {
             let mut status =
                 RegionSnapshotReplacementGarbageCollectStatus::default();
+
+            if self.disabled {
+                return json!(status);
+            }
 
             self.clean_up_region_snapshot_replacement_volumes(
                 opctx,

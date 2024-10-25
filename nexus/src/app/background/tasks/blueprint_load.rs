@@ -78,6 +78,7 @@ impl BackgroundTask for TargetBlueprintLoader {
             };
 
             // Decide what to do with the new blueprint
+            let enabled = new_bp_target.enabled;
             let Some((old_bp_target, old_blueprint)) = self.last.as_deref()
             else {
                 // We've found a target blueprint for the first time.
@@ -97,6 +98,7 @@ impl BackgroundTask for TargetBlueprintLoader {
                     "time_created": time_created,
                     "time_found": chrono::Utc::now(),
                     "status": "first target blueprint",
+                    "enabled": enabled,
                 });
             };
 
@@ -116,7 +118,8 @@ impl BackgroundTask for TargetBlueprintLoader {
                     "target_id": target_id,
                     "time_created": time_created,
                     "time_found": chrono::Utc::now(),
-                    "status": "target blueprint updated"
+                    "status": "target blueprint updated",
+                    "enabled": enabled,
                 })
             } else {
                 // The new target id matches the old target id
@@ -159,6 +162,7 @@ impl BackgroundTask for TargetBlueprintLoader {
                         "time_created": time_created,
                         "time_found": chrono::Utc::now(),
                         "status": format!("target blueprint {status}"),
+                        "enabled": enabled,
                     })
                 } else {
                     // We found a new target blueprint that exactly
@@ -173,7 +177,8 @@ impl BackgroundTask for TargetBlueprintLoader {
                     json!({
                         "target_id": target_id,
                         "time_created": time_created,
-                        "status": "target blueprint unchanged"
+                        "status": "target blueprint unchanged",
+                        "enabled": enabled,
                     })
                 }
             }
@@ -220,6 +225,7 @@ mod test {
                 internal_dns_version: Generation::new(),
                 external_dns_version: Generation::new(),
                 cockroachdb_fingerprint: String::new(),
+                clickhouse_cluster_config: None,
                 time_created: now_db_precision(),
                 creator: "test".to_string(),
                 comment: "test blueprint".to_string(),
