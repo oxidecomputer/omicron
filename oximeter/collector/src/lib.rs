@@ -127,7 +127,7 @@ impl DbConfig {
 
 /// Default interval on which we refresh our list of producers from Nexus.
 pub const fn default_refresh_interval() -> Duration {
-    Duration::from_secs(60 * 10)
+    Duration::from_secs(15)
 }
 
 /// Configuration used to initialize an oximeter server
