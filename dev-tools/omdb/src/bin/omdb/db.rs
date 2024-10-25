@@ -451,6 +451,13 @@ struct InstanceInfoArgs {
     /// the UUID of the instance to show details for
     #[clap(value_name = "UUID")]
     id: InstanceUuid,
+
+    /// include a list of VMMs previously associated with this instance.
+    ///
+    /// note that this is not exhaustive, as some VMMs may have been
+    /// hard-deleted.
+    #[arg(short = 'i', long)]
+    history: bool,
 }
 
 #[derive(Debug, Args)]
@@ -2898,7 +2905,7 @@ async fn cmd_db_instance_info(
         Instance, InstanceKarmicStatus, InstanceRuntimeState, Migration,
         Reincarnatability, Vmm,
     };
-    let InstanceInfoArgs { id } = args;
+    let &InstanceInfoArgs { ref id, history } = args;
 
     let instance = instance_dsl::instance
         .filter(instance_dsl::id.eq(id.into_untyped_uuid()))
@@ -3192,15 +3199,71 @@ async fn cmd_db_instance_info(
 
         let table = tabled::Table::new(rows)
             .with(tabled::settings::Style::empty())
-            .with(tabled::settings::Padding::new(4, 1, 0, 0))
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
             .to_string();
 
         println!("\n{:=<80}\n\n{table}", "== MIGRATION HISTORY");
     }
 
+    if history {
+        let vmms = vmm_dsl::vmm
+            .filter(vmm_dsl::instance_id.eq(id.into_untyped_uuid()))
+            .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
+            .order_by(vmm_dsl::time_created)
+            .select(Vmm::as_select())
+            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .await
+            .context("listing historical VMMs")?;
+        if !vmms.is_empty() {
+            let table = tabled::Table::new(vmms.iter().map(VmmStateRow::from))
+                .with(tabled::settings::Style::empty())
+                .with(tabled::settings::Padding::new(, 1, 0, 0))
+                .to_string();
+            println!("\n{:=<80}\n\n{table}", "== HISTORICAL VMMS");
+        }
+    }
+
     Ok(())
 }
 
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct VmmStateRow {
+    id: Uuid,
+    state: db::model::VmmState,
+    #[tabled(rename = "GEN")]
+    generation: u64,
+    sled_id: Uuid,
+    time_created: chrono::DateTime<Utc>,
+    time_updated: chrono::DateTime<Utc>,
+    #[tabled(display_with = "display_option_blank")]
+    time_deleted: Option<chrono::DateTime<Utc>>,
+}
+
+impl From<&'_ Vmm> for VmmStateRow {
+    fn from(vmm: &Vmm) -> Self {
+        let &Vmm {
+            id,
+            time_created,
+            time_deleted,
+            sled_id,
+            propolis_ip: _,
+            propolis_port: _,
+            instance_id: _,
+            runtime:
+                db::model::VmmRuntimeState { time_state_updated, r#gen, state },
+        } = vmm;
+        Self {
+            id,
+            state,
+            time_created,
+            time_deleted,
+            time_updated: time_state_updated,
+            generation: r#gen.0.into(),
+            sled_id,
+        }
+    }
+}
 #[derive(Tabled)]
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
 struct CustomerInstanceRow {
