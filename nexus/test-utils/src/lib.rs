@@ -1470,7 +1470,11 @@ pub async fn start_oximeter(
     let config = oximeter_collector::Config {
         nexus_address: Some(nexus_address),
         db,
-        refresh_interval: oximeter_collector::default_refresh_interval(),
+        // The collector only learns about producers when it refreshes its list
+        // from Nexus. This interval is quite short, and much smaller than the
+        // one we use in production. That's important for test latency, but not
+        // strictly required for correctness.
+        refresh_interval: Duration::from_secs(2),
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Error },
     };
     let args = oximeter_collector::OximeterArguments {

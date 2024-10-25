@@ -5,8 +5,7 @@
 use chrono::{DateTime, Utc};
 use dropshot::{
     EmptyScanParams, HttpError, HttpResponseDeleted, HttpResponseOk,
-    HttpResponseUpdatedNoContent, PaginationParams, Query, RequestContext,
-    ResultsPage, TypedBody,
+    PaginationParams, Query, RequestContext, ResultsPage,
 };
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use schemars::JsonSchema;
@@ -16,16 +15,6 @@ use uuid::Uuid;
 #[dropshot::api_description]
 pub trait OximeterApi {
     type Context;
-
-    /// Handle a request from Nexus to register a new producer with this collector.
-    #[endpoint {
-        method = POST,
-        path = "/producers",
-    }]
-    async fn producers_post(
-        request_context: RequestContext<Self::Context>,
-        body: TypedBody<ProducerEndpoint>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// List all producers.
     #[endpoint {

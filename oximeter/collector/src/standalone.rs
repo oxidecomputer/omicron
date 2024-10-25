@@ -22,7 +22,6 @@ use nexus_types::internal_api::params::OximeterInfo;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerRegistrationResponse;
 use omicron_common::FileKv;
-use oximeter_client::Client;
 use rand::seq::IteratorRandom;
 use slog::debug;
 use slog::error;
@@ -104,7 +103,7 @@ impl StandaloneNexus {
                 //
                 // Select a random collector, and assign it to the producer.
                 // We'll return the assignment from this match block.
-                let Some((collector_id, collector_info)) =
+                let Some((collector_id, _collector_info)) =
                     inner.random_collector()
                 else {
                     return Err(HttpError::for_unavail(
@@ -112,13 +111,6 @@ impl StandaloneNexus {
                         String::from("No collectors available"),
                     ));
                 };
-                let client = Client::new(
-                    format!("http://{}", collector_info.address).as_str(),
-                    self.log.clone(),
-                );
-                client.producers_post(&info.into()).await.map_err(|e| {
-                    HttpError::for_internal_error(e.to_string())
-                })?;
                 let assignment =
                     ProducerAssignment { producer: info.clone(), collector_id };
                 assignment
@@ -131,18 +123,9 @@ impl StandaloneNexus {
                 }
 
                 // This appears to be a re-registration, e.g., the producer
-                // changed its IP address. Re-register it with the collector to
-                // which it's already assigned.
+                // changed its IP address. The collector will learn of this when
+                // it next fetches its list.
                 let collector_id = existing_assignment.collector_id;
-                let collector_info =
-                    inner.collectors.get(&collector_id).unwrap();
-                let client = Client::new(
-                    format!("http://{}", collector_info.address).as_str(),
-                    self.log.clone(),
-                );
-                client.producers_post(&info.into()).await.map_err(|e| {
-                    HttpError::for_internal_error(e.to_string())
-                })?;
                 ProducerAssignment { producer: info.clone(), collector_id }
             }
         };
@@ -154,27 +137,9 @@ impl StandaloneNexus {
         &self,
         info: OximeterInfo,
     ) -> Result<(), HttpError> {
-        // If this is being registered again, send all its assignments again.
-        let mut inner = self.inner.lock().await;
-        if inner.collectors.insert(info.collector_id, info).is_some() {
-            let client = Client::new(
-                format!("http://{}", info.address).as_str(),
-                self.log.clone(),
-            );
-            for producer_info in
-                inner.producers.values().filter_map(|assignment| {
-                    if assignment.collector_id == info.collector_id {
-                        Some(&assignment.producer)
-                    } else {
-                        None
-                    }
-                })
-            {
-                client.producers_post(&producer_info.into()).await.map_err(
-                    |e| HttpError::for_internal_error(e.to_string()),
-                )?;
-            }
-        }
+        // No-op if this is being re-registered. It will fetch its list of
+        // producers again if needed.
+        self.inner.lock().await.collectors.insert(info.collector_id, info);
         Ok(())
     }
 }
