@@ -1804,8 +1804,6 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     DiskTest::new(&cptestctx).await;
     let project_id = create_project_and_pool(client).await;
     let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
-    wait_for_producer(&cptestctx.oximeter, disk.id()).await;
-    oximeter.force_collect().await;
 
     // When grabbing a metric, we look for data points going back to the
     // start of this test all the way up to the current time.
@@ -1829,6 +1827,7 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
             .await;
     assert!(measurements.items.is_empty());
 
+    oximeter.force_collect().await;
     assert_eq!(
         get_latest_silo_metric(
             cptestctx,
@@ -1841,6 +1840,7 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
 
     // Create an instance, attach the disk to it.
     create_instance_with_disk(client).await;
+    wait_for_producer(&cptestctx.oximeter, disk.id()).await;
     oximeter.force_collect().await;
 
     for metric in &ALL_METRICS {
