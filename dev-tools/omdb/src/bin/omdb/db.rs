@@ -5809,7 +5809,6 @@ async fn cmd_db_vmm_list(
 
     let vmms = query
         .left_join(sled_dsl::sled.on(sled_dsl::id.eq(dsl::sled_id)))
-        .order_by(dsl::time_state_updated.desc())
         .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
         .select((Vmm::as_select(), Option::<Sled>::as_select()))
         .load_async::<(Vmm, Option<Sled>)>(
