@@ -316,12 +316,15 @@ impl Client {
     //
     // This is intended to be used for the methods which run SQL from one of the
     // SQL files in the crate, e.g., the DB initialization or update files.
+    //
+    // NOTE: This uses the native TCP connection interface to run its
+    // statements.
     async fn run_many_sql_statements(
         &self,
         sql: impl AsRef<str>,
     ) -> Result<(), Error> {
         for stmt in sql.as_ref().split(';').filter(|s| !s.trim().is_empty()) {
-            self.execute(stmt).await?;
+            self.execute_native(stmt).await?;
         }
         Ok(())
     }

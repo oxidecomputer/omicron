@@ -372,6 +372,42 @@ impl ValueArray {
             (_, _) => panic!("ValueArrays must have the same type"),
         }
     }
+
+    /// Return the data type for this array of values.
+    pub fn data_type(&self) -> DataType {
+        match self {
+            ValueArray::UInt8(_) => DataType::UInt8,
+            ValueArray::UInt16(_) => DataType::UInt16,
+            ValueArray::UInt32(_) => DataType::UInt32,
+            ValueArray::UInt64(_) => DataType::UInt64,
+            ValueArray::UInt128(_) => DataType::UInt128,
+            ValueArray::Int8(_) => DataType::Int8,
+            ValueArray::Int16(_) => DataType::Int16,
+            ValueArray::Int32(_) => DataType::Int32,
+            ValueArray::Int64(_) => DataType::Int64,
+            ValueArray::Int128(_) => DataType::Int128,
+            ValueArray::Float32(_) => DataType::Float32,
+            ValueArray::Float64(_) => DataType::Float64,
+            ValueArray::String(_) => DataType::String,
+            ValueArray::Uuid(_) => DataType::Uuid,
+            ValueArray::Ipv4(_) => DataType::Ipv4,
+            ValueArray::Ipv6(_) => DataType::Ipv6,
+            ValueArray::Date(_) => DataType::Date,
+            ValueArray::DateTime { tz, .. } => DataType::DateTime(*tz),
+            ValueArray::DateTime64 { precision, tz, .. } => {
+                DataType::DateTime64(*precision, *tz)
+            }
+            ValueArray::Nullable { values, .. } => {
+                DataType::Nullable(Box::new(values.data_type()))
+            }
+            ValueArray::Enum8 { variants, .. } => {
+                DataType::Enum8(variants.clone())
+            }
+            ValueArray::Array { inner_type, .. } => {
+                DataType::Array(Box::new(inner_type.clone()))
+            }
+        }
+    }
 }
 
 macro_rules! impl_value_array_from_vec {
