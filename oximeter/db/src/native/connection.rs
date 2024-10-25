@@ -6,6 +6,7 @@
 
 //! A connection and pool for talking to the ClickHouse server.
 
+use super::block::Block;
 use super::io::packet::client::Encoder;
 use super::io::packet::server::Decoder;
 use super::packets::client::Packet as ClientPacket;
@@ -208,8 +209,34 @@ impl Connection {
         Ok(false)
     }
 
-    /// Send a SQL query, possibly with data.
+    /// Send a SQL query that inserts data.
+    pub async fn insert(
+        &mut self,
+        query: &str,
+        block: Block,
+    ) -> Result<QueryResult, Error> {
+        self.query_inner(query, Some(block)).await
+    }
+
+    /// Send a SQL query, without any data.
     pub async fn query(&mut self, query: &str) -> Result<QueryResult, Error> {
+        self.query_inner(query, None).await
+    }
+
+    // Send a SQL query, possibly with data.
+    //
+    // If data is present, it is sent after the SQL query itself. An error is
+    // returned if the server indicates that the block structure required by the
+    // insert query doesn't match that of the provided block.
+    //
+    // IMPORTANT: We do not currently validate that data is provided iff the
+    // query is an INSERT statement! Callers are required to ensure that they
+    // provide data if and only if the query requires it.
+    async fn query_inner(
+        &mut self,
+        query: &str,
+        maybe_data: Option<Block>,
+    ) -> Result<QueryResult, Error> {
         let mut query_result = QueryResult {
             id: Uuid::new_v4(),
             progress: Progress::default(),
@@ -221,12 +248,109 @@ impl Connection {
         self.writer.send(ClientPacket::Query(query)).await?;
         probes::packet__sent!(|| "Query");
         self.outstanding_query = true;
+
+        // If we have data to send, wait for the server to send an empty block
+        // that describes its structure.
+        if let Some(block_to_insert) = maybe_data {
+            let res: Result<(), Error> = loop {
+                match self.reader.next().await {
+                    Some(Ok(packet)) => match packet {
+                        ServerPacket::Hello(_)
+                            | ServerPacket::Pong
+                            // The server should only send this after we've
+                            // inserted our data.
+                            | ServerPacket::EndOfStream =>
+                        {
+                            let kind = packet.kind();
+                            probes::unexpected__server__packet!(|| kind);
+                            break Err(Error::UnexpectedPacket(kind));
+                        }
+                        ServerPacket::Data(block) => {
+                            probes::data__packet__received!(|| {
+                                (
+                                    block.n_columns,
+                                    block.n_rows,
+                                    block
+                                        .columns
+                                        .iter()
+                                        .map(|(name, col)| {
+                                            (
+                                                name.clone(),
+                                                col.data_type.to_string(),
+                                            )
+                                        })
+                                        .collect::<Vec<_>>(),
+                                )
+                            });
+
+                            // Similar to when selecting data, the server sends
+                            // a block with zero rows that describes the table
+                            // structure, so any block with a non-zero number of
+                            // rows is an error here.
+                            if block.n_rows != 0 {
+                                break Err(Error::ExpectedEmptyDataBlock);
+                            }
+
+                            // Don't concatenate the block, but check that its
+                            // structure matches what we're about to insert.
+                            if !block.matches_structure(&block_to_insert) {
+                                break Err(Error::MismatchedBlockStructure);
+                            }
+
+                            // Finally, send the actual data block and an empty
+                            // block to tell the server we're finished.
+                            if let Err(e) = self
+                                .writer
+                                .send(ClientPacket::Data(block_to_insert))
+                                .await
+                            {
+                                break Err(e);
+                            }
+                            break self
+                                .writer
+                                .send(ClientPacket::Data(Block::empty()))
+                                .await;
+                        }
+                        ServerPacket::Exception(exceptions) => {
+                            break Err(Error::Exception { exceptions })
+                        }
+                        ServerPacket::Progress(progress) => {
+                            query_result.progress += progress
+                        }
+                        ServerPacket::ProfileInfo(info) => {
+                            let _ = query_result.profile_info.replace(info);
+                        }
+                        ServerPacket::TableColumns(columns) => {
+                            if !block_to_insert
+                                .matches_table_description(&columns)
+                            {
+                                break Err(Error::MismatchedBlockStructure);
+                            }
+                        }
+                        ServerPacket::ProfileEvents(block) => {
+                            let _ = query_result.profile_events.replace(block);
+                        }
+                    },
+                    Some(Err(e)) => break Err(e),
+                    None => break Err(Error::Disconnected),
+                }
+            };
+            if let Err(e) = res {
+                self.outstanding_query = false;
+                return Err(e);
+            }
+        }
+
+        // Now wait for the remainder of the query to execute.
         let res = loop {
             match self.reader.next().await {
                 Some(Ok(packet)) => match packet {
-                    ServerPacket::Hello(_) => {
-                        probes::unexpected__server__packet!(|| "Hello");
-                        break Err(Error::UnexpectedPacket("Hello"));
+                    ServerPacket::Hello(_)
+                    | ServerPacket::Pong
+                    | ServerPacket::TableColumns(_) => {
+                        let kind = packet.kind();
+                        probes::unexpected__server__packet!(|| kind);
+                        break Err(Error::UnexpectedPacket(kind));
                     }
                     ServerPacket::Data(block) => {
                         probes::data__packet__received!(|| {
@@ -262,10 +386,6 @@ impl Connection {
                     }
                     ServerPacket::Progress(progress) => {
                         query_result.progress += progress
-                    }
-                    ServerPacket::Pong => {
-                        probes::unexpected__server__packet!(|| "Hello");
-                        break Err(Error::UnexpectedPacket("Pong"));
                     }
                     ServerPacket::EndOfStream => break Ok(query_result),
                     ServerPacket::ProfileInfo(info) => {

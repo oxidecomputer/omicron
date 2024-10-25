@@ -29,6 +29,8 @@ use oximeter::types::Measurement;
 use oximeter::types::MissingDatum;
 use oximeter::types::Sample;
 use oximeter::Quantile;
+use parse_display::Display;
+use parse_display::FromStr;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -37,6 +39,9 @@ use std::convert::TryFrom;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use uuid::Uuid;
+
+pub mod from_block;
+pub mod to_block;
 
 /// Describes the version of the Oximeter database.
 ///
@@ -170,7 +175,9 @@ impl From<TimeseriesSchema> for DbTimeseriesSchema {
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(
+    Clone, Copy, Debug, Serialize, Deserialize, PartialEq, FromStr, Display,
+)]
 pub enum DbFieldType {
     String,
     I8,
@@ -223,7 +230,9 @@ impl From<FieldType> for DbFieldType {
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(
+    Clone, Copy, Debug, Serialize, Deserialize, PartialEq, FromStr, Display,
+)]
 pub enum DbDatumType {
     Bool,
     I8,

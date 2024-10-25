@@ -6,20 +6,28 @@
 
 //! Types for working with actual blocks and columns of data.
 
+use super::packets::server::ColumnDescription;
 use super::Error;
 use chrono::DateTime;
 use chrono::NaiveDate;
 use chrono_tz::Tz;
 use indexmap::IndexMap;
+use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::take_while1;
+use nom::character::complete::alphanumeric1;
+use nom::character::complete::i8 as nom_i8;
 use nom::character::complete::u8 as nom_u8;
+use nom::combinator::all_consuming;
 use nom::combinator::eof;
 use nom::combinator::map;
 use nom::combinator::map_opt;
 use nom::combinator::opt;
+use nom::combinator::value;
+use nom::multi::separated_list1;
 use nom::sequence::delimited;
 use nom::sequence::preceded;
+use nom::sequence::separated_pair;
 use nom::sequence::tuple;
 use nom::IResult;
 use std::fmt;
@@ -67,26 +75,15 @@ impl Block {
         self.n_columns == 0 && self.n_rows == 0
     }
 
-    /// Create an empty block with the provided column names and types
-    pub fn empty<'a>(
-        types: impl IntoIterator<Item = (&'a str, DataType)>,
-    ) -> Result<Self, Error> {
-        let mut columns = IndexMap::new();
-        let mut n_columns = 0;
-        for (name, type_) in types.into_iter() {
-            if !type_.is_supported() {
-                return Err(Error::UnsupportedDataType(type_.to_string()));
-            }
-            n_columns += 1;
-            columns.insert(name.to_string(), Column::empty(type_));
-        }
-        Ok(Self {
+    /// Create an empty block.
+    pub fn empty() -> Self {
+        Self {
             name: String::new(),
             info: BlockInfo::default(),
-            n_columns,
+            n_columns: 0,
             n_rows: 0,
-            columns,
-        })
+            columns: IndexMap::new(),
+        }
     }
 
     /// Concatenate this data block with another.
@@ -106,7 +103,10 @@ impl Block {
         Ok(())
     }
 
-    fn matches_structure(&self, block: &Block) -> bool {
+    /// Return true if this block matches the structure of the other.
+    ///
+    /// This means it has the same column names and types.
+    pub fn matches_structure(&self, block: &Block) -> bool {
         if self.n_columns != block.n_columns {
             return false;
         }
@@ -115,6 +115,32 @@ impl Block {
                 return false;
             }
             if us.1.data_type != them.1.data_type {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Return the values of the named column, if it exists.
+    pub fn column_values(&self, name: &str) -> Result<&ValueArray, Error> {
+        self.columns
+            .get(name)
+            .map(|col| &col.values)
+            .ok_or_else(|| Error::NoSuchColumn(name.to_string()))
+    }
+
+    pub(crate) fn matches_table_description(
+        &self,
+        columns: &[ColumnDescription],
+    ) -> bool {
+        if self.n_columns != columns.len() as u64 {
+            return false;
+        }
+        for (our_col, their_col) in self.columns.iter().zip(columns.iter()) {
+            if our_col.0 != &their_col.name {
+                return false;
+            }
+            if our_col.1.data_type != their_col.data_type {
                 return false;
             }
         }
@@ -177,6 +203,13 @@ pub struct Column {
     pub data_type: DataType,
 }
 
+impl From<ValueArray> for Column {
+    fn from(values: ValueArray) -> Self {
+        let data_type = values.data_type();
+        Self { values, data_type }
+    }
+}
+
 impl Column {
     /// Create an empty column of the provided type.
     pub fn empty(data_type: DataType) -> Self {
@@ -193,6 +226,16 @@ impl Column {
         }
         self.values.concat(rhs.values);
         Ok(())
+    }
+
+    /// Return true if the column is empty.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Return the number of elements in the column.
+    pub fn len(&self) -> usize {
+        self.values.len()
     }
 }
 
@@ -252,7 +295,7 @@ impl ValueArray {
     }
 
     /// Return an empty value array of the provided type.
-    fn empty(data_type: &DataType) -> ValueArray {
+    pub fn empty(data_type: &DataType) -> ValueArray {
         match data_type {
             DataType::UInt8 => ValueArray::UInt8(vec![]),
             DataType::UInt16 => ValueArray::UInt16(vec![]),
@@ -589,6 +632,39 @@ impl DataType {
     pub(crate) fn is_nullable(&self) -> bool {
         matches!(self, DataType::Nullable(_))
     }
+
+    /// Parse out a data type from a string.
+    ///
+    /// This is a `nom`-based function, so that the method can be used in other
+    /// contexts. The `DataType::from_str()` implementation is a thin wrapper
+    /// around this.
+    pub(super) fn nom_parse(s: &str) -> IResult<&str, Self> {
+        alt((
+            value(DataType::UInt8, tag("UInt8")),
+            value(DataType::UInt16, tag("UInt16")),
+            value(DataType::UInt32, tag("UInt32")),
+            value(DataType::UInt64, tag("UInt64")),
+            value(DataType::UInt128, tag("UInt128")),
+            value(DataType::Int8, tag("Int8")),
+            value(DataType::Int16, tag("Int16")),
+            value(DataType::Int32, tag("Int32")),
+            value(DataType::Int64, tag("Int64")),
+            value(DataType::Int128, tag("Int128")),
+            value(DataType::Float32, tag("Float32")),
+            value(DataType::Float64, tag("Float64")),
+            value(DataType::String, tag("String")),
+            value(DataType::Uuid, tag("UUID")),
+            value(DataType::Ipv4, tag("IPv4")),
+            value(DataType::Ipv6, tag("IPv6")),
+            // IMPORTANT: This needs to consume all its input, otherwise we may
+            // parse something like `DateTime(UTC)` as `Date`, which is
+            // incorrect.
+            value(DataType::Date, all_consuming(tag("Date"))),
+            // These need to be nested because `alt` supports a max of 21
+            // parsers, and we have 22 data types.
+            alt((datetime, datetime64, enum8, nullable, array)),
+        ))(s)
+    }
 }
 
 impl fmt::Display for DataType {
@@ -632,9 +708,23 @@ impl fmt::Display for DataType {
 }
 
 // Parse a quoted timezone, like `'UTC'` or `'America/Los_Angeles'`
+//
+// Note that the quotes may optionally be escaped, like `\'UTC\'`, which is
+// needed to support deserializing table descriptions, where the types for each
+// column are serialized as an escaped string.
 fn quoted_timezone(s: &str) -> IResult<&str, Tz> {
     map(
-        delimited(tag("'"), take_while1(|c| c != '\''), tag("'")),
+        delimited(
+            preceded(opt(tag("\\")), tag("'")),
+            take_while1(|c: char| {
+                c.is_ascii_alphanumeric()
+                    || c == '/'
+                    || c == '+'
+                    || c == '-'
+                    || c == '_'
+            }),
+            preceded(opt(tag("\\")), tag("'")),
+        ),
         parse_timezone,
     )(s)
 }
@@ -687,104 +777,68 @@ fn parse_timezone(s: &str) -> Tz {
     s.parse().unwrap_or_else(|_| *DEFAULT_TIMEZONE)
 }
 
+/// Parse an enum variant name.
+fn variant_name(s: &str) -> IResult<&str, &str> {
+    delimited(
+        preceded(opt(tag("\\")), tag("'")),
+        alphanumeric1,
+        preceded(opt(tag("\\")), tag("'")),
+    )(s)
+}
+
+/// Parse a single enum variant, like `'Foo' = 1`.
+///
+/// Note that the single-quotes may be escaped, which is required for parsing
+/// the `ColumnDescription` type from a `TableColumns` server packet.
+fn enum_variant(s: &str) -> IResult<&str, (i8, &str)> {
+    map(separated_pair(variant_name, tag(" = "), nom_i8), |(name, variant)| {
+        (variant, name)
+    })(s)
+}
+
+/// Parse an `Enum8` data type from a string.
+pub(super) fn enum8(s: &str) -> IResult<&str, DataType> {
+    map(
+        delimited(
+            tag("Enum8("),
+            separated_list1(tag(", "), enum_variant),
+            tag(")"),
+        ),
+        |variants| {
+            let mut map = IndexMap::new();
+            for (variant, name) in variants.into_iter() {
+                map.insert(variant, name.to_string());
+            }
+            DataType::Enum8(map)
+        },
+    )(s)
+}
+
+fn nullable(s: &str) -> IResult<&str, DataType> {
+    map(delimited(tag("Nullable("), DataType::nom_parse, tag(")")), |inner| {
+        DataType::Nullable(Box::new(inner))
+    })(s)
+}
+
+fn array(s: &str) -> IResult<&str, DataType> {
+    map(delimited(tag("Array("), DataType::nom_parse, tag(")")), |inner| {
+        DataType::Array(Box::new(inner))
+    })(s)
+}
+
 impl std::str::FromStr for DataType {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // Simple scalar types.
-        if s == "UInt8" {
-            return Ok(DataType::UInt8);
-        } else if s == "UInt16" {
-            return Ok(DataType::UInt16);
-        } else if s == "UInt32" {
-            return Ok(DataType::UInt32);
-        } else if s == "UInt64" {
-            return Ok(DataType::UInt64);
-        } else if s == "UInt128" {
-            return Ok(DataType::UInt128);
-        } else if s == "Int8" {
-            return Ok(DataType::Int8);
-        } else if s == "Int16" {
-            return Ok(DataType::Int16);
-        } else if s == "Int32" {
-            return Ok(DataType::Int32);
-        } else if s == "Int64" {
-            return Ok(DataType::Int64);
-        } else if s == "Int128" {
-            return Ok(DataType::Int128);
-        } else if s == "Float32" {
-            return Ok(DataType::Float32);
-        } else if s == "Float64" {
-            return Ok(DataType::Float64);
-        } else if s == "String" {
-            return Ok(DataType::String);
-        } else if s == "UUID" {
-            return Ok(DataType::Uuid);
-        } else if s == "IPv4" {
-            return Ok(DataType::Ipv4);
-        } else if s == "IPv6" {
-            return Ok(DataType::Ipv6);
-        } else if s == "Date" {
-            return Ok(DataType::Date);
-        }
-
-        // Check for datetime, possibly with a timezone.
-        if let Ok((_, dt)) = datetime(s) {
-            return Ok(dt);
-        };
-
-        // Check for DateTime64 with precision, and possibly a timezone.
-        if let Ok((_, dt)) = datetime64(s) {
-            return Ok(dt);
-        };
-
-        // Check for Enum8s.
-        //
-        // These are written like "Enum8('foo' = 1, 'bar' = 2)"
-        if let Some(suffix) = s.strip_prefix("Enum8(") {
-            let Some(inner) = suffix.strip_suffix(")") else {
-                return Err(Error::UnsupportedDataType(s.to_string()));
-            };
-            let mut map = IndexMap::new();
-            for each in inner.split(',') {
-                let Some((name, value)) = each.split_once(" = ") else {
-                    return Err(Error::UnsupportedDataType(s.to_string()));
-                };
-                let Ok(value) = value.parse() else {
-                    return Err(Error::UnsupportedDataType(s.to_string()));
-                };
-                // Trim whitespace from the name and strip any single-quotes.
-                let name = name.trim().trim_matches('\'').to_string();
-                map.insert(value, name.to_string());
-            }
-            return Ok(DataType::Enum8(map));
-        }
-
-        // Recurse for nullable types.
-        if let Some(suffix) = s.strip_prefix("Nullable(") {
-            let Some(inner) = suffix.strip_suffix(')') else {
-                return Err(Error::UnsupportedDataType(s.to_string()));
-            };
-            return inner
-                .parse()
-                .map(|inner| DataType::Nullable(Box::new(inner)));
-        }
-
-        // And for arrays.
-        if let Some(suffix) = s.strip_prefix("Array(") {
-            let Some(inner) = suffix.strip_suffix(')') else {
-                return Err(Error::UnsupportedDataType(s.to_string()));
-            };
-            return inner.parse().map(|inner| DataType::Array(Box::new(inner)));
-        }
-
-        // Anything else is unsupported for now.
-        Err(Error::UnsupportedDataType(s.to_string()))
+        Self::nom_parse(s)
+            .map(|(_, parsed)| parsed)
+            .map_err(|_| Error::UnsupportedDataType(s.to_string()))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::enum8;
     use super::Block;
     use super::BlockInfo;
     use super::Column;
@@ -794,6 +848,8 @@ mod tests {
     use super::DEFAULT_TIMEZONE;
     use crate::native::block::datetime;
     use crate::native::block::datetime64;
+    use crate::native::block::enum_variant;
+    use crate::native::block::quoted_timezone;
     use chrono::SubsecRound as _;
     use chrono::Utc;
     use chrono_tz::Tz;
@@ -934,6 +990,14 @@ mod tests {
     }
 
     #[test]
+    fn parse_escaped_date_time64() {
+        assert_eq!(
+            DataType::DateTime64(Precision(1), Tz::UTC),
+            datetime64(r#"DateTime64(1, \'UTC\')"#).unwrap().1
+        );
+    }
+
+    #[test]
     fn concat_blocks() {
         let data = vec![0, 1];
         let values = ValueArray::UInt64(data.clone());
@@ -954,5 +1018,64 @@ mod tests {
             block.columns["a"].values,
             ValueArray::UInt64([data.as_slice(), data.as_slice()].concat())
         );
+    }
+
+    #[test]
+    fn test_parse_enum_variant() {
+        assert_eq!(enum_variant("'Foo' = 1'").unwrap().1, (1, "Foo"),);
+        assert_eq!(enum_variant("\\'Foo\\' = 1'").unwrap().1, (1, "Foo"),);
+
+        enum_variant("'Foo'").unwrap_err();
+        enum_variant("'Foo' = ").unwrap_err();
+        enum_variant("'Foo' = x").unwrap_err();
+        enum_variant("\"Foo\" = 1").unwrap_err();
+    }
+
+    #[test]
+    fn test_parse_enum8() {
+        let parsed = enum8("Enum8('Foo' = 1, 'Bar' = 2)").unwrap().1;
+        let DataType::Enum8(map) = parsed else {
+            panic!("Expected DataType::Enum8, found {parsed:#?}");
+        };
+        assert_eq!(map.len(), 2);
+        assert_eq!(map.get(&1).unwrap(), "Foo");
+        assert_eq!(map.get(&2).unwrap(), "Bar");
+    }
+
+    #[test]
+    fn test_parse_array_enum8_with_escapes() {
+        const INPUT: &str = r#"Array(Enum8(\'Bool\' = 1, \'I64\' = 2))"#;
+        let parsed = DataType::nom_parse(INPUT).unwrap().1;
+        let DataType::Array(inner) = parsed else {
+            panic!("Expected a `DataType::Array(_)`, found {parsed:#?}");
+        };
+        let DataType::Enum8(map) = &*inner else {
+            panic!("Expected a `DataType::Enum8(_)`, found {inner:#?}");
+        };
+        assert_eq!(map.len(), 2);
+        assert_eq!(map.get(&1).unwrap(), "Bool");
+        assert_eq!(map.get(&2).unwrap(), "I64");
+    }
+
+    #[test]
+    fn test_parse_all_known_timezones() {
+        for tz in chrono_tz::TZ_VARIANTS.iter() {
+            let quoted = format!("'{}'", tz);
+            let Ok(out) = quoted_timezone(&quoted) else {
+                panic!("Failed to parse quoted timezone: {quoted}");
+            };
+            assert_eq!(&out.1, tz, "Failed to parse quoted timezone: {quoted}");
+
+            let escape_quoted = format!("\\'{}\\'", tz);
+            let Ok(out) = quoted_timezone(&escape_quoted) else {
+                panic!(
+                    "Failed to parse escaped quoted timezone: {escape_quoted}"
+                );
+            };
+            assert_eq!(
+                &out.1, tz,
+                "Failed to parse escaped quoted timezone: {escape_quoted}"
+            );
+        }
     }
 }

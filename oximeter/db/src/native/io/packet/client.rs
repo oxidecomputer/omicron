@@ -67,8 +67,7 @@ impl Encoder {
         io::string::encode("", &mut dst);
 
         // Send an empty block to signal the end of data transfer.
-        self.encode_block(Block::empty(std::iter::empty()).unwrap(), &mut dst)
-            .unwrap();
+        self.encode_block(Block::empty(), &mut dst).unwrap();
     }
 
     /// Encode a ClientInfo into the buffer.

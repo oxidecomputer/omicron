@@ -14,6 +14,8 @@ use crate::Metric;
 use crate::Target;
 use chrono::DateTime;
 use chrono::Utc;
+use parse_display::Display;
+use parse_display::FromStr;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -63,11 +65,14 @@ impl FieldSchema {
     Debug,
     PartialEq,
     Eq,
+    Hash,
     PartialOrd,
     Ord,
     Deserialize,
     Serialize,
     JsonSchema,
+    FromStr,
+    Display,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum FieldSource {

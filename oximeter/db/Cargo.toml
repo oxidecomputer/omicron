@@ -17,6 +17,7 @@ camino.workspace = true
 chrono.workspace = true
 chrono-tz.workspace = true
 clap.workspace = true
+const_format.workspace = true
 clickward.workspace = true
 debug-ignore.workspace = true
 dropshot.workspace = true
@@ -32,6 +33,7 @@ omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
 oximeter.workspace = true
 oxql-types.workspace = true
+parse-display.workspace = true
 qorb.workspace = true
 regex.workspace = true
 serde.workspace = true
@@ -92,6 +94,11 @@ optional = true
 [dependencies.tokio]
 workspace = true
 features = [ "rt-multi-thread", "macros" ]
+
+[build-dependencies]
+anyhow.workspace = true
+nom.workspace = true
+quote.workspace = true
 
 [dev-dependencies]
 camino-tempfile.workspace = true
