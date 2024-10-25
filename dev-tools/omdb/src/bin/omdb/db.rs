@@ -2552,6 +2552,7 @@ async fn cmd_db_region_replacement_list(
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct Row {
         pub id: Uuid,
+        #[tabled(display_with = "datetime_rfc3339_concise")]
         pub request_time: DateTime<Utc>,
         pub replacement_state: String,
     }
@@ -2677,6 +2678,7 @@ async fn cmd_db_region_replacement_info(
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
         struct Row {
+            #[tabled(display_with = "datetime_rfc3339_concise")]
             pub time: DateTime<Utc>,
 
             pub repair_id: String,
@@ -2752,6 +2754,7 @@ async fn cmd_db_region_replacement_info(
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
         struct StepRow {
+            #[tabled(display_with = "datetime_rfc3339_concise")]
             pub time: DateTime<Utc>,
             pub step_type: String,
             pub details: String,
@@ -3929,6 +3932,7 @@ async fn cmd_db_region_snapshot_replacement_list(
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct Row {
         pub id: Uuid,
+        #[tabled(display_with = "datetime_rfc3339_concise")]
         pub request_time: DateTime<Utc>,
         pub replacement_state: String,
     }
@@ -5345,16 +5349,17 @@ async fn cmd_db_migrations_list(
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
         struct VerboseMigrationRow {
+            #[tabled(display_with = "datetime_rfc3339_concise")]
             created: chrono::DateTime<Utc>,
             id: Uuid,
             instance: Uuid,
             #[tabled(inline)]
             vmms: MigrationVmms,
-            #[tabled(display_with = "display_option_blank")]
+            #[tabled(display_with = "datetime_opt_rfc3339_concise")]
             src_updated: Option<chrono::DateTime<Utc>>,
-            #[tabled(display_with = "display_option_blank")]
+            #[tabled(display_with = "datetime_opt_rfc3339_concise")]
             tgt_updated: Option<chrono::DateTime<Utc>>,
-            #[tabled(display_with = "display_option_blank")]
+            #[tabled(display_with = "datetime_opt_rfc3339_concise")]
             deleted: Option<chrono::DateTime<Utc>>,
         }
 
@@ -5390,6 +5395,7 @@ async fn cmd_db_migrations_list(
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
         struct MigrationRow {
+            #[tabled(display_with = "datetime_rfc3339_concise")]
             created: chrono::DateTime<Utc>,
             instance: Uuid,
             #[tabled(inline)]
@@ -5416,6 +5422,7 @@ async fn cmd_db_migrations_list(
 #[derive(Tabled)]
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
 struct SingleInstanceMigrationRow {
+    #[tabled(display_with = "datetime_rfc3339_concise")]
     created: chrono::DateTime<Utc>,
     #[tabled(inline)]
     vmms: MigrationVmms,
@@ -5451,4 +5458,19 @@ impl From<&'_ Migration> for MigrationVmms {
 // Display an empty cell for an Option<T> if it's None.
 fn display_option_blank<T: Display>(opt: &Option<T>) -> String {
     opt.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "".to_string())
+}
+
+// Format a `chrono::DateTime` in RFC3339 with milliseconds precision and using
+// `Z` rather than the UTC offset for UTC timestamps, to save a few characters
+// of line width in tabular output.
+fn datetime_rfc3339_concise(t: &DateTime<Utc>) -> String {
+    t.to_rfc3339_opts(chrono::format::SecondsFormat::Millis, true)
+}
+
+// Format an optional `chrono::DateTime` in RFC3339 with milliseconds precision
+// and using `Z` rather than the UTC offset for UTC timestamps, to save a few
+// characters of line width in tabular output.
+fn datetime_opt_rfc3339_concise(t: &Option<DateTime<Utc>>) -> String {
+    t.map(|t| t.to_rfc3339_opts(chrono::format::SecondsFormat::Millis, true))
+        .unwrap_or_else(|| "-".to_string())
 }
