@@ -3333,8 +3333,6 @@ struct VmmStateRow {
     sled_id: Uuid,
     #[tabled(display_with = "datetime_rfc3339_concise")]
     time_created: chrono::DateTime<Utc>,
-    #[tabled(display_with = "datetime_rfc3339_concise")]
-    time_updated: chrono::DateTime<Utc>,
     #[tabled(display_with = "datetime_opt_rfc3339_concise")]
     time_deleted: Option<chrono::DateTime<Utc>>,
 }
@@ -3350,14 +3348,13 @@ impl From<&'_ Vmm> for VmmStateRow {
             propolis_port: _,
             instance_id: _,
             runtime:
-                db::model::VmmRuntimeState { time_state_updated, r#gen, state },
+                db::model::VmmRuntimeState { time_state_updated: _, r#gen, state },
         } = vmm;
         Self {
             id,
             state,
             time_created,
             time_deleted,
-            time_updated: time_state_updated,
             generation: r#gen.0.into(),
             sled_id,
         }
