@@ -884,8 +884,7 @@ mod tests {
     // Period these tests wait using `tokio::time::advance()` before checking
     // their test conditions.
     const TEST_WAIT_PERIOD: Duration = Duration::from_millis(
-        COLLECTION_INTERVAL.as_millis() as u64 * N_COLLECTIONS
-            + COLLECTION_INTERVAL.as_millis() as u64 / 2,
+        COLLECTION_INTERVAL.as_millis() as u64 * N_COLLECTIONS,
     );
 
     // Test that we count successful collections from a target correctly.
