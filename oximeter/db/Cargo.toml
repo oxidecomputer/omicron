@@ -95,6 +95,11 @@ optional = true
 workspace = true
 features = [ "rt-multi-thread", "macros" ]
 
+[build-dependencies]
+anyhow.workspace = true
+nom.workspace = true
+quote.workspace = true
+
 [dev-dependencies]
 camino-tempfile.workspace = true
 criterion = { workspace = true, features = [ "async_tokio" ] }

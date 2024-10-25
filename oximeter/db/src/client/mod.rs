@@ -17,6 +17,7 @@ pub use self::dbwrite::DbWrite;
 pub use self::dbwrite::TestDbWrite;
 use crate::client::query_summary::QuerySummary;
 use crate::model;
+use crate::model::from_block::FromBlock;
 use crate::native;
 use crate::native::QueryResult;
 use crate::query;
@@ -1045,6 +1046,7 @@ impl Client {
     }
 
     // Execute a generic SQL statement, returning the query result as a data
+    // block.
     //
     // TODO-robustness This currently does no validation of the statement.
     async fn execute_with_body_native<S>(
@@ -1186,30 +1188,16 @@ impl Client {
         };
         let body = self.execute_with_body_native(sql).await?;
         let Some(data) = body.data.as_ref() else {
-            todo!();
+            trace!(self.log, "no new timeseries schema in database");
+            return Ok(());
         };
         if data.is_empty() {
             trace!(self.log, "no new timeseries schema in database");
             return Ok(());
         }
-
-        /*
-        if body.is_empty() {
-            trace!(self.log, "no new timeseries schema in database");
-        } else {
-            trace!(self.log, "extracting new timeseries schema");
-            let new = body.lines().map(|line| {
-                let schema = TimeseriesSchema::from(
-                    serde_json::from_str::<model::DbTimeseriesSchema>(line)
-                        .expect(
-                        "Failed to deserialize TimeseriesSchema from database",
-                    ),
-                );
-                (schema.timeseries_name.clone(), schema)
-            });
-            schema.extend(new);
+        for new_schema in TimeseriesSchema::from_block(data)?.into_iter() {
+            schema.insert(new_schema.timeseries_name.clone(), new_schema);
         }
-        */
         Ok(())
     }
 

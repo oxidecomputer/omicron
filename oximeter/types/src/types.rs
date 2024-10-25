@@ -42,6 +42,7 @@ use parse_display::Display;
     Debug,
     PartialEq,
     Eq,
+    Hash,
     PartialOrd,
     Ord,
     JsonSchema,

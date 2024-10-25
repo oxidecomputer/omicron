@@ -40,7 +40,8 @@ use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use uuid::Uuid;
 
-mod from_block;
+pub mod from_block;
+pub mod to_block;
 
 /// Describes the version of the Oximeter database.
 ///

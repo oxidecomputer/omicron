@@ -24,6 +24,9 @@ pub trait FromBlock: Sized {
     fn from_block(block: &Block) -> Result<Vec<Self>, Error>;
 }
 
+// TODO-cleanup: This is probably a good candidate for a derive-macro, which
+// expands to the code that checks that names / types in the block match those
+// of the fields in the struct itself.
 impl FromBlock for TimeseriesSchema {
     fn from_block(block: &Block) -> Result<Vec<Self>, Error> {
         if block.is_empty() {

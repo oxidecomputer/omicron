@@ -65,6 +65,7 @@ impl FieldSchema {
     Debug,
     PartialEq,
     Eq,
+    Hash,
     PartialOrd,
     Ord,
     Deserialize,

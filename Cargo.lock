@@ -7526,6 +7526,7 @@ dependencies = [
  "parse-display",
  "peg",
  "qorb",
+ "quote",
  "reedline",
  "regex",
  "reqwest 0.12.8",
