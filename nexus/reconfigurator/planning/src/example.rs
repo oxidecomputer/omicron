@@ -23,10 +23,20 @@ use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::VnicUuid;
 use typed_rng::TypedUuidRng;
 
+/// An example generated system, along with a consistent planning input and
+/// collection.
+///
+/// The components of this struct are generated together and match each other.
+/// The planning input and collection represent database input and inventory
+/// that would be collected from a system matching the system description.
+#[derive(Clone, Debug)]
 pub struct ExampleSystem {
     pub system: SystemDescription,
     pub input: PlanningInput,
     pub collection: Collection,
+    /// The initial blueprint that was used to describe the system. This
+    /// blueprint has sleds but no zones.
+    pub initial_blueprint: Blueprint,
     // If we add more types of RNGs than just sleds here, we'll need to
     // expand this to be similar to BlueprintBuilderRng where a root RNG
     // creates sub-RNGs.
@@ -388,6 +398,7 @@ impl ExampleSystemBuilder {
             system,
             input: input_builder.build(),
             collection: builder.build(),
+            initial_blueprint,
             sled_rng,
         };
         (example, blueprint)
