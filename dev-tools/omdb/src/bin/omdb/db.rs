@@ -31,6 +31,7 @@ use chrono::SecondsFormat;
 use chrono::Utc;
 use clap::builder::PossibleValue;
 use clap::builder::PossibleValuesParser;
+use clap::builder::TypedValueParser;
 use clap::ArgAction;
 use clap::Args;
 use clap::Subcommand;
@@ -446,7 +447,8 @@ struct InstanceListArgs {
             db::model::InstanceState::ALL_STATES
                 .iter()
                 .map(|v| PossibleValue::new(v.label()))
-        ),
+        ).try_map(|s| s.parse::<db::model::InstanceState>()),
+        action = ArgAction::Append,
     )]
     states: Vec<db::model::InstanceState>,
 }
@@ -843,7 +845,9 @@ struct VmmListArgs {
             db::model::VmmState::ALL_STATES
                 .iter()
                 .map(|v| PossibleValue::new(v.label()))
-        ),
+        )
+        .try_map(|s| s.parse::<db::model::VmmState>()),
+        action = ArgAction::Append,
     )]
     states: Vec<db::model::VmmState>,
 }
