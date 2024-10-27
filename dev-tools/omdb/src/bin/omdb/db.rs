@@ -5798,6 +5798,7 @@ async fn cmd_db_vmm_list(
     fetch_opts: &DbFetchOptions,
     &VmmListArgs { ref states, verbose }: &VmmListArgs,
 ) -> Result<(), anyhow::Error> {
+    use db::model::VmmState;
     use db::schema::{sled::dsl as sled_dsl, vmm::dsl};
 
     let ctx = || "loading VMMs";
@@ -5805,6 +5806,18 @@ async fn cmd_db_vmm_list(
 
     if !fetch_opts.include_deleted {
         query = query.filter(dsl::time_deleted.is_null());
+
+        // If the user wanted to see VMMs in states that the control plane may
+        // have soft-deleted, but didn't ask to include deleted records, let
+        // them know that some stuff may be missing.
+        let maybe_deleted_states =
+            states.iter().filter(|s| VmmState::DESTROYABLE_STATES.contains(s));
+        for state in maybe_deleted_states {
+            eprintln!(
+                "WARN: VMMs in the `{state:?}` state may have been deleted, \
+                 but `--include-deleted` was not specified",
+            );
+        }
     }
 
     if !states.is_empty() {
