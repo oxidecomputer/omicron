@@ -5825,22 +5825,21 @@ async fn cmd_db_vmm_list(
 
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-    struct VmmRow {
+    struct VmmRow<'a> {
         instance_id: Uuid,
         #[tabled(inline)]
         state: VmmStateRow,
-        #[tabled(display_with = "display_option_blank")]
-        sled: Option<String>,
+        sled: &'a str,
     }
 
-    impl From<&'_ (Vmm, Option<Sled>)> for VmmRow {
-        fn from((ref vmm, ref sled): &(Vmm, Option<Sled>)) -> Self {
+    impl<'a> From<&'a (Vmm, Option<Sled>)> for VmmRow<'a> {
+        fn from((ref vmm, ref sled): &'a (Vmm, Option<Sled>)) -> Self {
             let &Vmm {
                 id,
                 time_created: _,
                 time_deleted: _,
                 instance_id,
-                sled_id: _,
+                sled_id,
                 propolis_ip: _,
                 propolis_port: _,
                 runtime:
@@ -5850,21 +5849,26 @@ async fn cmd_db_vmm_list(
                         time_state_updated: _,
                     },
             } = vmm;
+            let sled = match sled {
+                Some(sled) => sled.serial_number(),
+                None => {
+                    eprintln!("WARN: no sled found with ID {sled_id}");
+                    "<unknown>"
+                }
+            };
             VmmRow {
                 instance_id,
                 state: VmmStateRow { id, state, generation: r#gen.0.into() },
-                sled: sled
-                    .as_ref()
-                    .map(|sled| sled.serial_number().to_string()),
+                sled,
             }
         }
     }
 
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-    struct VerboseVmmRow {
+    struct VerboseVmmRow<'a> {
         #[tabled(inline)]
-        inner: VmmRow,
+        inner: VmmRow<'a>,
         sled_id: Uuid,
         address: std::net::SocketAddr,
         #[tabled(display_with = "datetime_rfc3339_concise")]
@@ -5873,8 +5877,8 @@ async fn cmd_db_vmm_list(
         time_updated: DateTime<Utc>,
     }
 
-    impl From<&'_ (Vmm, Option<Sled>)> for VerboseVmmRow {
-        fn from(it: &(Vmm, Option<Sled>)) -> Self {
+    impl<'a> From<&'a (Vmm, Option<Sled>)> for VerboseVmmRow<'a> {
+        fn from(it: &'a (Vmm, Option<Sled>)) -> Self {
             let Vmm {
                 time_created,
                 time_deleted: _,
