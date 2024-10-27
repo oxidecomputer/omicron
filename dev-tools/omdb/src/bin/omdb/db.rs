@@ -5811,13 +5811,24 @@ async fn cmd_db_vmm_list(
         query = query.filter(dsl::state.eq_any(states.clone()));
     }
 
-    let vmms = query
-        .left_join(sled_dsl::sled.on(sled_dsl::id.eq(dsl::sled_id)))
-        .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
-        .select((Vmm::as_select(), Option::<Sled>::as_select()))
-        .load_async::<(Vmm, Option<Sled>)>(
-            &*datastore.pool_connection_for_tests().await?,
-        )
+    let vmms = datastore
+        .pool_connection_for_tests()
+        .await?
+        .transaction_async(|conn| async move {
+            // If we are including deleted VMMs, we can no longer use indices on
+            // the VMM table, which do not index deleted VMMs. Thus, we must
+            // allow a full-table scan in that case.
+            if fetch_opts.include_deleted {
+                conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+            }
+
+            query
+                .left_join(sled_dsl::sled.on(sled_dsl::id.eq(dsl::sled_id)))
+                .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
+                .select((Vmm::as_select(), Option::<Sled>::as_select()))
+                .load_async::<(Vmm, Option<Sled>)>(&conn)
+                .await
+        })
         .await
         .with_context(ctx)?;
 
