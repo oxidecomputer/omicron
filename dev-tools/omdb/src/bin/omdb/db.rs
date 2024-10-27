@@ -5932,12 +5932,12 @@ async fn cmd_db_vmm_list(
                 .with(tabled::settings::Padding::new(0, 1, 0, 0))
                 .to_string()
         }
-        (false, true) => {
-            tabled::Table::new(vmms.iter().map(WithDeleted::<VmmRow>::from))
-                .with(tabled::settings::Style::empty())
-                .with(tabled::settings::Padding::new(0, 1, 0, 0))
-                .to_string()
-        }
+        (false, true) => tabled::Table::new(
+            vmms.iter().map(WithDeleted::<WithDeleted<VmmRow>>::from),
+        )
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string(),
         (false, false) => tabled::Table::new(vmms.iter().map(VmmRow::from))
             .with(tabled::settings::Style::empty())
             .with(tabled::settings::Padding::new(0, 1, 0, 0))
