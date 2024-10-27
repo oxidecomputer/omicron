@@ -1541,7 +1541,6 @@ table! {
         sled_id -> Uuid,
 
         id -> Uuid,
-        underlay_address -> Inet,
         zone_type -> crate::ZoneTypeEnum,
 
         primary_service_ip -> Inet,

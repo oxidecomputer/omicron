@@ -137,7 +137,6 @@ impl DbRunArgs {
         // receive SIGINT.
         tokio::select! {
             _ = db_instance.wait_for_shutdown() => {
-                db_instance.cleanup().await.context("clean up after shutdown")?;
                 bail!(
                     "db-dev: database shut down unexpectedly \
                     (see error output above)"
