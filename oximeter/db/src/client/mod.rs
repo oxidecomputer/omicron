@@ -18,6 +18,8 @@ pub use self::dbwrite::TestDbWrite;
 use crate::client::query_summary::QuerySummary;
 use crate::model;
 use crate::native;
+use crate::native::block::ValueArray;
+use crate::native::QueryResult;
 use crate::query;
 use crate::Error;
 use crate::Metric;
@@ -68,9 +70,6 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-const CLICKHOUSE_DB_MISSING: &'static str = "Database oximeter does not exist";
-const CLICKHOUSE_DB_VERSION_MISSING: &'static str =
-    "Table oximeter.version does not exist";
 
 #[usdt::provider(provider = "clickhouse_client")]
 mod probes {
@@ -650,7 +649,7 @@ impl Client {
                 "path" => path.display(),
                 "filename" => &name,
             );
-            match self.execute(sql).await {
+            match self.execute_native(sql).await {
                 Ok(_) => debug!(
                     self.log,
                     "successfully applied schema upgrade file";
@@ -857,38 +856,86 @@ impl Client {
 
     /// Read the latest version applied in the database.
     pub async fn read_latest_version(&self) -> Result<u64, Error> {
+        const ALIAS: &str = "max_version";
         let sql = format!(
-            "SELECT MAX(value) FROM {db_name}.version;",
+            "SELECT MAX(value) AS {ALIAS} FROM {db_name}.version;",
             db_name = crate::DATABASE_NAME,
         );
-
-        let version = match self.execute_with_body(sql).await {
-            Ok((_, body)) if body.is_empty() => {
-                warn!(
+        match self.execute_with_result_native(sql).await {
+            Ok(result) => {
+                let Some(data) = &result.data else {
+                    error!(
+                        self.log,
+                        "expected a data block when reading \
+                        latest database version"
+                    );
+                    return Err(Error::Database(String::from(
+                        "Query for the database version unexpectedly \
+                        returned an empty data block",
+                    )));
+                };
+                let ValueArray::UInt64(values) = &data.columns[ALIAS].values
+                else {
+                    error!(
+                        self.log,
+                        "expected query for latest database version to \
+                        return a column of type UInt64";
+                        "actual_type" => %data.columns[ALIAS].values.data_type(),
+                    );
+                    return Err(Error::Database(format!(
+                        "Query for the database version was expected \
+                        to return a column of type UInt64, but found \
+                        one of type '{}'",
+                        data.columns[ALIAS].values.data_type(),
+                    )));
+                };
+                let version = if values.is_empty() {
+                    warn!(
+                        self.log,
+                        "no version in database (treated as 'version 0')",
+                    );
+                    0
+                } else {
+                    values[0]
+                };
+                Ok(version)
+            }
+            Err(Error::Native(native::Error::Exception { ref exceptions })) => {
+                if exceptions.iter().any(|exception| {
+                    // Case 1: The database has not been created.
+                    exception.code == native::errors::UNKNOWN_DATABASE ||
+                    // Case 2: The database has been created, but it's old
+                    // (exists prior to the version table).
+                    exception.code == native::errors::UNKNOWN_TABLE
+                }) {
+                    warn!(
+                        self.log,
+                        "oximeter database does not exist, or is out-of-date"
+                    );
+                    Ok(0)
+                } else {
+                    let error_messages = exceptions
+                        .iter()
+                        .map(|exc| exc.summary())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    error!(
+                        self.log,
+                        "failed to read version";
+                        "errors" => &error_messages,
+                    );
+                    Err(Error::Database(error_messages))
+                }
+            }
+            Err(e) => {
+                error!(
                     self.log,
-                    "no version in database (treated as 'version 0')"
+                    "unexpected error reading latest database version";
+                    "error" => %e,
                 );
-                0
+                Err(e)
             }
-            Ok((_, body)) => body.trim().parse::<u64>().map_err(|err| {
-                Error::Database(format!("Cannot read version: {err}"))
-            })?,
-            Err(Error::Database(err))
-                // Case 1: The database has not been created.
-                if err.contains(CLICKHOUSE_DB_MISSING) ||
-                // Case 2: The database has been created, but it's old (exists
-                // prior to the version table).
-                    err.contains(CLICKHOUSE_DB_VERSION_MISSING) =>
-            {
-                warn!(self.log, "oximeter database does not exist, or is out-of-date");
-                0
-            }
-            Err(err) => {
-                warn!(self.log, "failed to read version"; "error" => err.to_string());
-                return Err(err);
-            }
-        };
-        Ok(version)
+        }
     }
 
     /// Return Ok if the DB is at exactly the version compatible with this
@@ -910,14 +957,23 @@ impl Client {
             "INSERT INTO {db_name}.version (*) VALUES ({version}, now());",
             db_name = crate::DATABASE_NAME,
         );
-        self.execute(sql).await
+        self.execute_native(sql).await
     }
 
     /// Verifies if instance is part of oximeter_cluster
     pub async fn is_oximeter_cluster(&self) -> Result<bool, Error> {
-        let sql = "SHOW CLUSTERS FORMAT JSONEachRow;";
-        let res = self.execute_with_body(sql).await?.1;
-        Ok(res.contains("oximeter_cluster"))
+        let sql = format!("SHOW CLUSTER {}", crate::CLUSTER_NAME);
+        self.execute_with_result_native(sql).await.and_then(|result| {
+            result
+                .data
+                .ok_or_else(|| {
+                    Error::Database(String::from(
+                        "Query for `oximeter` cluster unexpectedly \
+                    returned an empty data block",
+                    ))
+                })
+                .map(|block| block.n_rows > 0)
+        })
     }
 
     // Verifies that the schema for a sample matches the schema in the database,
@@ -1032,6 +1088,40 @@ impl Client {
             timeseries.measurements.push(measurement);
         }
         Ok(timeseries_by_key.into_values().collect())
+    }
+
+    // Execute a generic SQL statement, using the native TCP interface.
+    async fn execute_native<S>(&self, sql: S) -> Result<(), Error>
+    where
+        S: Into<String>,
+    {
+        self.execute_with_result_native(sql).await.map(|_| ())
+    }
+
+    // Execute a generic SQL statement, returning the query result as a data
+    // block.
+    //
+    // TODO-robustness This currently does no validation of the statement.
+    async fn execute_with_result_native<S>(
+        &self,
+        sql: S,
+    ) -> Result<QueryResult, Error>
+    where
+        S: Into<String>,
+    {
+        let sql = sql.into();
+        trace!(
+            self.log,
+            "executing SQL query";
+            "sql" => &sql,
+        );
+
+        let mut handle = self.native_pool.claim().await?;
+        let id = usdt::UniqueId::new();
+        probes::sql__query__start!(|| (&id, &sql));
+        let result = handle.query(sql.as_str()).await.map_err(Error::from);
+        probes::sql__query__done!(|| (&id));
+        result
     }
 
     // Execute a generic SQL statement.
@@ -1258,7 +1348,7 @@ impl Client {
                     "table_name" => table,
                     "n_timeseries" => chunk.len(),
                 );
-                self.execute(sql).await?;
+                self.execute_native(sql).await?;
             }
         }
         Ok(())
@@ -3035,7 +3125,10 @@ mod tests {
         let insert_sql = format!(
             "INSERT INTO oximeter.{field_table} FORMAT JSONEachRow {row}"
         );
-        client.execute(insert_sql).await.expect("Failed to insert field row");
+        client
+            .execute_native(insert_sql)
+            .await
+            .expect("Failed to insert field row");
 
         // Select it exactly back out.
         let select_sql = format!(
@@ -3373,7 +3466,7 @@ mod tests {
         );
         println!("Inserted row: {}", inserted_row);
         client
-            .execute(insert_sql)
+            .execute_native(insert_sql)
             .await
             .expect("Failed to insert measurement row");
 
@@ -3943,9 +4036,12 @@ mod tests {
         // We'll test moving from version 1, which just creates a database and
         // table, to version 2, which adds two columns to that table in
         // different SQL files.
-        client.execute(format!("CREATE DATABASE {test_name};")).await.unwrap();
         client
-            .execute(format!(
+            .execute_native(format!("CREATE DATABASE {test_name};"))
+            .await
+            .unwrap();
+        client
+            .execute_native(format!(
                 "\
             CREATE TABLE {test_name}.tbl (\
                 `col0` UInt8 \
@@ -4152,9 +4248,12 @@ mod tests {
         // the `test_apply_one_schema_upgrade` test, but we split the two
         // modifications over two versions, rather than as multiple schema
         // upgrades in one version bump.
-        client.execute(format!("CREATE DATABASE {test_name};")).await.unwrap();
         client
-            .execute(format!(
+            .execute_native(format!("CREATE DATABASE {test_name};"))
+            .await
+            .unwrap();
+        client
+            .execute_native(format!(
                 "\
             CREATE TABLE {test_name}.tbl (\
                 `col0` UInt8 \
@@ -4925,5 +5024,95 @@ mod tests {
             out.push(Sample::new(&st, &m).unwrap());
         }
         out
+    }
+
+    #[tokio::test]
+    async fn read_latest_version_with_no_database_reports_zero() {
+        let logctx =
+            test_setup_log("read_latest_version_with_no_database_reports_zero");
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
+        assert_eq!(
+            client.read_latest_version().await.unwrap(),
+            0,
+            "Reading the database version when there is no database \
+            at all should return 0",
+        );
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn read_latest_version_with_no_version_table_reports_zero() {
+        let logctx = test_setup_log(
+            "read_latest_version_with_no_version_table_reports_zero",
+        );
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
+        init_db(&db, &client).await;
+        client.execute_native("DROP TABLE oximeter.version").await.unwrap();
+        assert_eq!(
+            client.read_latest_version().await.unwrap(),
+            0,
+            "Reading the database version when there is no \
+            version table should return 0",
+        );
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn read_latest_version_with_empty_version_table_reports_zero() {
+        let logctx = test_setup_log(
+            "read_latest_version_with_empty_version_table_reports_zero",
+        );
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
+        init_db(&db, &client).await;
+        assert_eq!(
+            client.read_latest_version().await.unwrap(),
+            0,
+            "Reading the database version when there are no \
+            rows in the version table should return 0",
+        );
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn read_latest_version_reports_max() {
+        let logctx = test_setup_log("read_latest_version_reports_max");
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
+        init_db(&db, &client).await;
+        client.insert_version(1).await.unwrap();
+        client.insert_version(10).await.unwrap();
+        assert_eq!(
+            client.read_latest_version().await.unwrap(),
+            10,
+            "Read incorrect database version",
+        );
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }

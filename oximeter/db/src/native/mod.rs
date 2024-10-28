@@ -211,3 +211,11 @@ pub enum Error {
     #[error("Value out of range for corresponding ClickHouse type")]
     OutOfRange { type_name: String, min: String, max: String, value: String },
 }
+
+/// Error codes and related constants.
+///
+/// See `ClickHouse/src/Common/ErrorCodes.cpp` for reference.
+pub mod errors {
+    pub const UNKNOWN_TABLE: i32 = 60;
+    pub const UNKNOWN_DATABASE: i32 = 81;
+}
