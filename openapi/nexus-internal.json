@@ -2159,10 +2159,6 @@
           "id": {
             "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
           },
-          "underlay_address": {
-            "type": "string",
-            "format": "ipv6"
-          },
           "zone_type": {
             "$ref": "#/components/schemas/BlueprintZoneType"
           }
@@ -2170,7 +2166,6 @@
         "required": [
           "disposition",
           "id",
-          "underlay_address",
           "zone_type"
         ]
       },

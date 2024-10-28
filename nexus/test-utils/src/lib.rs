@@ -283,9 +283,8 @@ impl RackInitRequestBuilder {
         self.internal_dns_config
             .host_zone_clickhouse(
                 OmicronZoneUuid::from_untyped_uuid(dataset_id),
-                *address.ip(),
                 ServiceName::Clickhouse,
-                address.port(),
+                address,
             )
             .expect("Failed to setup ClickHouse DNS");
     }
@@ -461,7 +460,6 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: OmicronZoneUuid::from_untyped_uuid(dataset_id),
-            underlay_address: *address.ip(),
             filesystem_pool: Some(ZpoolName::new_external(zpool_id)),
             zone_type: BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb {
@@ -514,7 +512,6 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: OmicronZoneUuid::from_untyped_uuid(dataset_id),
-            underlay_address: *http_address.ip(),
             filesystem_pool: Some(ZpoolName::new_external(zpool_id)),
             zone_type: BlueprintZoneType::Clickhouse(
                 blueprint_zone_type::Clickhouse {
@@ -703,7 +700,6 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: nexus_id,
-            underlay_address: *address.ip(),
             filesystem_pool: Some(ZpoolName::new_external(ZpoolUuid::new_v4())),
             zone_type: BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 external_dns_servers: self
@@ -1027,7 +1023,6 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
-            underlay_address: *address.ip(),
             filesystem_pool: Some(ZpoolName::new_external(ZpoolUuid::new_v4())),
             zone_type: BlueprintZoneType::CruciblePantry(
                 blueprint_zone_type::CruciblePantry { address },
@@ -1069,7 +1064,6 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
-            underlay_address: *dropshot_address.ip(),
             filesystem_pool: Some(ZpoolName::new_external(zpool_id)),
             zone_type: BlueprintZoneType::ExternalDns(
                 blueprint_zone_type::ExternalDns {
@@ -1132,7 +1126,6 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
-            underlay_address: *http_address.ip(),
             filesystem_pool: Some(ZpoolName::new_external(zpool_id)),
             zone_type: BlueprintZoneType::InternalDns(
                 blueprint_zone_type::InternalDns {
@@ -1478,7 +1471,11 @@ pub async fn start_oximeter(
     let config = oximeter_collector::Config {
         nexus_address: Some(nexus_address),
         db,
-        refresh_interval: oximeter_collector::default_refresh_interval(),
+        // The collector only learns about producers when it refreshes its list
+        // from Nexus. This interval is quite short, and much smaller than the
+        // one we use in production. That's important for test latency, but not
+        // strictly required for correctness.
+        refresh_interval: Duration::from_secs(2),
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Error },
     };
     let args = oximeter_collector::OximeterArguments {
