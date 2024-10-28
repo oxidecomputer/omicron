@@ -7,7 +7,6 @@ use omicron_common::api::external;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
-use strum::VariantArray;
 
 impl_enum_type!(
     #[derive(SqlType, Debug)]
@@ -23,7 +22,7 @@ impl_enum_type!(
         FromSqlRow,
         Serialize,
         Deserialize,
-        VariantArray,
+        strum::VariantArray,
     )]
     #[diesel(sql_type = InstanceStateEnum)]
     pub enum InstanceState;
@@ -50,6 +49,9 @@ impl InstanceState {
             InstanceState::Destroyed => "destroyed",
         }
     }
+
+    pub const ALL_STATES: &'static [Self] =
+        <Self as strum::VariantArray>::VARIANTS;
 }
 
 impl fmt::Display for InstanceState {
@@ -72,15 +74,15 @@ impl From<InstanceState> for omicron_common::api::external::InstanceState {
 }
 
 impl std::str::FromStr for InstanceState {
-    type Err = FromStrError;
+    type Err = InstanceStateParseError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        for &v in Self::VARIANTS {
+        for &v in Self::ALL_STATES {
             if s.eq_ignore_ascii_case(v.label()) {
                 return Ok(v);
             }
         }
 
-        Err(FromStrError(()))
+        Err(InstanceStateParseError(()))
     }
 }
 
@@ -90,12 +92,12 @@ impl diesel::query_builder::QueryId for InstanceStateEnum {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub struct FromStrError(());
+pub struct InstanceStateParseError(());
 
-impl fmt::Display for FromStrError {
+impl fmt::Display for InstanceStateParseError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "expected one of [")?;
-        let mut variants = InstanceState::VARIANTS.iter();
+        let mut variants = InstanceState::ALL_STATES.iter();
         if let Some(v) = variants.next() {
             write!(f, "{v}")?;
             for v in variants {
@@ -106,7 +108,7 @@ impl fmt::Display for FromStrError {
     }
 }
 
-impl std::error::Error for FromStrError {}
+impl std::error::Error for InstanceStateParseError {}
 
 #[cfg(test)]
 mod tests {
@@ -114,7 +116,7 @@ mod tests {
 
     #[test]
     fn test_from_str_roundtrips() {
-        for &variant in InstanceState::VARIANTS {
+        for &variant in InstanceState::ALL_STATES {
             assert_eq!(Ok(dbg!(variant)), dbg!(variant.to_string().parse()));
         }
     }

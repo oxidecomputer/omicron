@@ -129,6 +129,13 @@ impl fmt::Display for Exception {
     }
 }
 
+impl Exception {
+    /// Return a brief summary of the error as a string.
+    pub fn summary(&self) -> String {
+        format!("{} ({}: {})", self.message, self.code, self.name)
+    }
+}
+
 /// Describes the server's progress during a query.
 ///
 /// As the server runs large queries, it may send these periodically. They are
