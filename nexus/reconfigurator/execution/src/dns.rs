@@ -584,7 +584,6 @@ mod test {
         Ok(BlueprintZoneConfig {
             disposition,
             id: config.id,
-            underlay_address: config.underlay_address,
             filesystem_pool: config.filesystem_pool,
             zone_type,
         })
@@ -683,7 +682,6 @@ mod test {
             BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::Quiesced,
                 id: out_of_service_id,
-                underlay_address: out_of_service_addr,
                 filesystem_pool: Some(ZpoolName::new_external(
                     ZpoolUuid::new_v4(),
                 )),
@@ -757,7 +755,7 @@ mod test {
         // Omicron zone.
         let mut omicron_zones_by_ip: BTreeMap<_, _> = blueprint
             .all_omicron_zones(BlueprintZoneFilter::ShouldBeInInternalDns)
-            .map(|(_, zone)| (zone.underlay_address, zone.id))
+            .map(|(_, zone)| (zone.underlay_ip(), zone.id))
             .collect();
         println!("omicron zones by IP: {:#?}", omicron_zones_by_ip);
 
