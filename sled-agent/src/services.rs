@@ -131,6 +131,7 @@ const IPV6_UNSPECIFIED: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
 
 const COCKROACH: &str = "/opt/oxide/cockroachdb/bin/cockroach";
 
+// These are all the same binary. They just reside at different paths.
 const CLICKHOUSE_SERVER_BINARY: &str =
     "/opt/oxide/clickhouse_server/clickhouse";
 const CLICKHOUSE_KEEPER_BINARY: &str =
