@@ -98,24 +98,24 @@ sled ..........<REDACTED_UUID>...........
 subnet fd00:1122:3344:101::/64
 zpools (10):
     ..........<REDACTED_UUID>........... (zpool)
-    ↳ SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
     ..........<REDACTED_UUID>........... (zpool)
-    ↳ SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
     ..........<REDACTED_UUID>........... (zpool)
-    ↳ SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
     ..........<REDACTED_UUID>........... (zpool)
-    ↳ SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
     ..........<REDACTED_UUID>........... (zpool)
-    ↳ SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
     ..........<REDACTED_UUID>........... (zpool)
-    ↳ SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
     ..........<REDACTED_UUID>........... (zpool)
-    ↳ SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
     ..........<REDACTED_UUID>........... (zpool)
-    ↳ SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
     ..........<REDACTED_UUID>........... (zpool)
-    ↳ SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
     ..........<REDACTED_UUID>........... (zpool)
-    ↳ SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-..........<REDACTED_UUID>..........." }, disk_id: ..........<REDACTED_UUID>........... (physical_disk), policy: InService, state: Active }
 
 
