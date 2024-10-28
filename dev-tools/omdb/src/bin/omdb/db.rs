@@ -5738,7 +5738,10 @@ async fn cmd_db_vmm_info(
         true,
     );
 
-    fn prettyprint_reservation(resource: db::model::SledResource) {
+    fn prettyprint_reservation(
+        resource: db::model::SledResource,
+        include_sled_id: bool,
+    ) {
         use db::model::ByteCount;
         let db::model::SledResource {
             id: _,
@@ -5756,7 +5759,9 @@ async fn cmd_db_vmm_info(
         const RSS: &'static str = "RSS RAM";
         const RESERVOIR: &'static str = "reservoir RAM";
         const WIDTH: usize = const_max_len(&[SLED_ID, THREADS, RSS, RESERVOIR]);
-        println!("    {SLED_ID:>WIDTH$}: {sled_id}");
+        if include_sled_id {
+            println!("    {SLED_ID:>WIDTH$}: {sled_id}");
+        }
         println!("    {THREADS:>WIDTH$}: {hardware_threads}");
         println!("    {RSS:>WIDTH$}: {rss}");
         println!("    {RESERVOIR:>WIDTH$}: {reservoir}");
@@ -5775,16 +5780,18 @@ async fn cmd_db_vmm_info(
 
     if !reservations.is_empty() {
         println!("\n{:=<80}", "== SLED RESOURCE RESERVATIONS ");
-    }
-    if reservations.len() > 1 {
-        println!(
-            "/!\\ VMM has multiple sled resource reservation records, this \
-             seems weird!",
-        );
-    }
-    for r in reservations {
-        prettyprint_reservation(r);
-        println!();
+
+        let multiple_reservations = reservations.len() > 1;
+        if multiple_reservations {
+            println!(
+                "/!\\ VMM has multiple sled resource reservation records, \
+                this seems weird!",
+            );
+        }
+        for r in reservations {
+            prettyprint_reservation(r, multiple_reservations);
+            println!();
+        }
     }
 
     let ctx = || format!("listing migrations involving VMM {uuid}");
