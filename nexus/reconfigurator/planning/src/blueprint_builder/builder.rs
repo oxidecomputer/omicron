@@ -6,6 +6,10 @@
 
 use crate::ip_allocator::IpAllocator;
 use crate::planner::zone_needs_expungement;
+use crate::planner::EditDatasetsError;
+use crate::planner::EditZonesError;
+use crate::planner::SledAllocationError;
+use crate::planner::ZoneConfigurationError;
 use crate::planner::ZoneExpungeReason;
 use anyhow::anyhow;
 use clickhouse_admin_types::OXIMETER_CLUSTER;
@@ -127,12 +131,20 @@ pub enum Error {
     },
     #[error("programming error in planner")]
     Planner(#[source] anyhow::Error),
+    #[error("programming error editing zones in planner")]
+    PlannerEditingZones(#[from] EditZonesError),
+    #[error("error configuring new zone")]
+    NewZoneConfig(#[from] ZoneConfigurationError),
     #[error("no reserved subnets available for DNS")]
     NoAvailableDnsSubnets,
     #[error("can only have {INTERNAL_DNS_REDUNDANCY} internal DNS servers")]
     TooManyDnsServers,
     #[error("planner produced too many {kind:?} zones")]
     TooManyZones { kind: ZoneKind },
+    #[error(transparent)]
+    SledAllocationError(#[from] SledAllocationError),
+    #[error(transparent)]
+    EditDatasetsError(#[from] EditDatasetsError),
 }
 
 /// Describes whether an idempotent "ensure" operation resulted in action taken
@@ -2002,7 +2014,7 @@ impl<'a> BlueprintBuilder<'a> {
             }
         }
 
-        for &zpool_id in all_in_service_zpools {
+        for zpool_id in all_in_service_zpools {
             let zpool_name = ZpoolName::new_external(zpool_id);
             if !skip_zpools.contains(&zpool_name) {
                 return Ok(zpool_name);

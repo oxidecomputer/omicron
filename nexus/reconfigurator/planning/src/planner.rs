@@ -6,17 +6,24 @@
 //!
 //! See crate-level documentation for details.
 
-use crate::blueprint_builder::BlueprintBuilder;
-use crate::blueprint_builder::Ensure;
+use crate::blueprint_builder::ensure_input_records_appear_in_parent_blueprint;
+use crate::blueprint_builder::ClickhouseAllocator;
 use crate::blueprint_builder::EnsureMultiple;
 use crate::blueprint_builder::Error;
 use crate::blueprint_builder::Operation;
-use crate::planner::omicron_zone_placement::PlacementError;
+use anyhow::Context as _;
+use clickhouse_admin_types::OXIMETER_CLUSTER;
+use datasets::BlueprintDatasetsBuilder;
+use disks::BlueprintDisksBuilder;
+use nexus_inventory::now_db_precision;
 use nexus_sled_agent_shared::inventory::ZoneKind;
+use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::CockroachDbSettings;
@@ -27,24 +34,57 @@ use nexus_types::deployment::ZpoolFilter;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::ZpoolName;
+use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::SledUuid;
+use rng::PlannerRng;
+use slog::debug;
 use slog::error;
+use slog::o;
 use slog::{info, warn, Logger};
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::Hash;
 use std::str::FromStr;
 
+mod allocators;
+mod blueprint_zones_editor;
+mod datasets;
+mod disks;
+mod new_zone_configurator;
+mod omicron_zone_placement;
+mod rng;
+
+pub use self::allocators::RunningZoneMissingZpool;
+pub use self::allocators::SledAllocationError;
+pub use self::blueprint_zones_editor::EditZonesError;
+pub use self::datasets::EditDatasetsError;
+pub use self::new_zone_configurator::ZoneConfigurationError;
+
+pub(crate) use self::allocators::ExternalNetworkingChoice;
+pub(crate) use self::allocators::ExternalSnatNetworkingChoice;
 pub(crate) use self::omicron_zone_placement::DiscretionaryOmicronZone;
+
+use self::allocators::SledAllocators;
+use self::blueprint_zones_editor::BlueprintZonesEditor;
+use self::new_zone_configurator::NewZoneConfigurator;
 use self::omicron_zone_placement::OmicronZonePlacement;
 use self::omicron_zone_placement::OmicronZonePlacementSledState;
-
-mod omicron_zone_placement;
+use self::omicron_zone_placement::PlacementError;
 
 pub struct Planner<'a> {
+    rng: Option<PlannerRng>,
     log: Logger,
     input: &'a PlanningInput,
-    blueprint: BlueprintBuilder<'a>,
+    parent_blueprint: &'a Blueprint,
+    creator: String,
+    sled_state: BTreeMap<SledUuid, SledState>,
+    cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
+    disks_builder: BlueprintDisksBuilder<'a>,
+    datasets_builder: BlueprintDatasetsBuilder<'a>,
+    zones_editor: BlueprintZonesEditor,
+    operations: Vec<Operation>,
     // latest inventory collection
     //
     // We must be very careful when using this during planning.  The real-world
@@ -67,14 +107,57 @@ impl<'a> Planner<'a> {
         // collection.  See the comment on the corresponding field in `Planner`.
         inventory: &'a Collection,
     ) -> anyhow::Result<Planner<'a>> {
-        let blueprint = BlueprintBuilder::new_based_on(
-            &log,
+        // Basic checks on our inputs; these should never fail.
+        let redundancy = input.target_internal_dns_zone_count();
+        if redundancy > INTERNAL_DNS_REDUNDANCY {
+            return Err(Error::TooManyDnsServers.into());
+        }
+        ensure_input_records_appear_in_parent_blueprint(
             parent_blueprint,
             input,
-            inventory,
-            creator,
         )?;
-        Ok(Planner { log, input, blueprint, inventory })
+
+        // Prefer the sled state from our parent blueprint for sleds
+        // that were in it; there may be new sleds in `input`, in which
+        // case we'll use their current state as our starting point.
+        let mut sled_state = parent_blueprint.sled_state.clone();
+        let mut commissioned_sled_ids = BTreeSet::new();
+        for (sled_id, details) in input.all_sleds(SledFilter::Commissioned) {
+            commissioned_sled_ids.insert(sled_id);
+            sled_state.entry(sled_id).or_insert(details.state);
+        }
+
+        // Make a garbage collection pass through `sled_state`. We want to keep
+        // any sleds which either:
+        //
+        // 1. do not have a desired state of `Decommissioned`
+        // 2. do have a desired state of `Decommissioned` and are still included
+        //    in our input's list of commissioned sleds
+        //
+        // Sleds that don't fall into either of these cases have reached the
+        // actual `Decommissioned` state, which means we no longer need to carry
+        // forward that desired state.
+        sled_state.retain(|sled_id, state| {
+            *state != SledState::Decommissioned
+                || commissioned_sled_ids.contains(sled_id)
+        });
+        Ok(Planner {
+            rng: Some(PlannerRng::new()),
+            log,
+            input,
+            parent_blueprint,
+            creator: creator.to_string(),
+            sled_state,
+            cockroachdb_setting_preserve_downgrade: parent_blueprint
+                .cockroachdb_setting_preserve_downgrade,
+            disks_builder: BlueprintDisksBuilder::new(parent_blueprint),
+            datasets_builder: BlueprintDatasetsBuilder::new(parent_blueprint),
+            zones_editor: BlueprintZonesEditor::new(
+                parent_blueprint.blueprint_zones.clone(),
+            ),
+            operations: Vec::new(),
+            inventory,
+        })
     }
 
     /// Within tests, set a seeded RNG for deterministic results.
@@ -84,21 +167,123 @@ impl<'a> Planner<'a> {
     pub fn with_rng_seed<H: Hash>(mut self, seed: H) -> Self {
         // This is an owned builder because it is almost never going to be
         // conditional.
-        self.blueprint.set_rng_seed(seed);
+        self.rng
+            .as_mut()
+            .expect("rng is Some(_) until planning starts")
+            .set_seed(seed);
         self
     }
 
-    pub fn plan(mut self) -> Result<Blueprint, Error> {
-        self.do_plan()?;
-        Ok(self.blueprint.build())
+    /// Records an operation to the blueprint, identifying what changes have
+    /// occurred.
+    ///
+    /// This is currently intended only for debugging.
+    fn record_operation(&mut self, operation: Operation) {
+        self.operations.push(operation);
     }
 
-    fn do_plan(&mut self) -> Result<(), Error> {
+    pub fn plan(mut self) -> Result<Blueprint, Error> {
+        let mut rng =
+            self.rng.take().expect("rng is Some(_) until planning starts");
+        self.do_plan(&mut rng)?;
+        Ok(self.build(&mut rng))
+    }
+
+    fn build(self, rng: &mut PlannerRng) -> Blueprint {
+        // Collect the Omicron zones config for all sleds, including sleds that
+        // are no longer in service and need expungement work.
+        let blueprint_zones = self
+            .zones_editor
+            .into_zones_map(self.input.all_sled_ids(SledFilter::Commissioned));
+
+        // Collect the disks and datasets for all in-service sleds.
+        let blueprint_disks = self
+            .disks_builder
+            .into_disks_map(self.input.all_sled_ids(SledFilter::InService));
+        let blueprint_datasets = self
+            .datasets_builder
+            .into_datasets_map(self.input.all_sled_ids(SledFilter::InService));
+
+        // If we have the clickhouse cluster setup enabled via policy and we
+        // don't yet have a `ClickhouseClusterConfiguration`, then we must
+        // create one and feed it to a `ClickhouseAllocator`.
+        let clickhouse_cluster_config = if self
+            .input
+            .clickhouse_cluster_enabled()
+        {
+            let parent_config = self
+                .parent_blueprint
+                .clickhouse_cluster_config
+                .clone()
+                .unwrap_or_else(|| {
+                    info!(
+                        self.log,
+                        "Clickhouse cluster enabled by policy: \
+                        generating initial 'ClickhouseClusterConfig' \
+                        and 'ClickhouseAllocator'"
+                    );
+                    ClickhouseClusterConfig::new(OXIMETER_CLUSTER.to_string())
+                });
+            let clickhouse_allocator = ClickhouseAllocator::new(
+                self.log.clone(),
+                parent_config,
+                self.inventory.latest_clickhouse_keeper_membership(),
+            );
+            match clickhouse_allocator.plan(&(&blueprint_zones).into()) {
+                Ok(config) => Some(config),
+                Err(e) => {
+                    error!(
+                        self.log, "clickhouse allocator error";
+                        InlineErrorChain::new(&e),
+                    );
+                    Some(clickhouse_allocator.parent_config().clone())
+                }
+            }
+        } else {
+            if self.parent_blueprint.clickhouse_cluster_config.is_some() {
+                info!(
+                    self.log,
+                    "clickhouse cluster disabled via policy \
+                    discarding existing 'ClickhouseAllocator' and \
+                    the resulting generated 'ClickhouseClusterConfig"
+                );
+            }
+            None
+        };
+        Blueprint {
+            id: rng.next_blueprint(),
+            blueprint_zones,
+            blueprint_disks,
+            blueprint_datasets,
+            sled_state: self.sled_state,
+            parent_blueprint_id: Some(self.parent_blueprint.id),
+            internal_dns_version: self.input.internal_dns_version(),
+            external_dns_version: self.input.external_dns_version(),
+            cockroachdb_fingerprint: self
+                .input
+                .cockroachdb_settings()
+                .state_fingerprint
+                .clone(),
+            cockroachdb_setting_preserve_downgrade: self
+                .cockroachdb_setting_preserve_downgrade,
+            clickhouse_cluster_config,
+            time_created: now_db_precision(),
+            creator: self.creator,
+            comment: self
+                .operations
+                .iter()
+                .map(|op| op.to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+        }
+    }
+
+    fn do_plan(&mut self, rng: &mut PlannerRng) -> Result<(), Error> {
         // We perform planning in two loops: the first one turns expunged sleds
         // into expunged zones, and the second one adds services.
 
         self.do_plan_expunge()?;
-        self.do_plan_add()?;
+        self.do_plan_add(rng)?;
         self.do_plan_decommission()?;
         self.do_plan_cockroachdb_settings();
 
@@ -147,7 +332,7 @@ impl<'a> Planner<'a> {
             // Check 2: have all this sled's zones been expunged? It's possible
             // we ourselves have made this change, which is fine.
             let all_zones_expunged = self
-                .blueprint
+                .zones_editor
                 .current_sled_zones(sled_id, BlueprintZoneFilter::All)
                 .all(|zone| {
                     zone.disposition == BlueprintZoneDisposition::Expunged
@@ -159,8 +344,7 @@ impl<'a> Planner<'a> {
             let num_instances_assigned = 0;
 
             if all_zones_expunged && num_instances_assigned == 0 {
-                self.blueprint
-                    .set_sled_state(sled_id, SledState::Decommissioned);
+                self.sled_state.insert(sled_id, SledState::Decommissioned);
             }
         }
 
@@ -179,7 +363,7 @@ impl<'a> Planner<'a> {
             commissioned_sled_ids.insert(sled_id);
 
             // Perform the expungement, for any zones that might need it.
-            self.blueprint.expunge_zones_for_sled(sled_id, sled_details)?;
+            self.do_plan_expunge_for_sled(sled_id, sled_details)?;
         }
 
         // Check for any decommissioned sleds (i.e., sleds for which our
@@ -187,10 +371,10 @@ impl<'a> Planner<'a> {
         // for decommissioned sleds must have already be expunged for
         // decommissioning to have happened; fail if we find non-expunged zones
         // associated with a decommissioned sled.
-        for sled_id in self.blueprint.sled_ids_with_zones() {
+        for sled_id in self.zones_editor.sled_ids_with_zones() {
             if !commissioned_sled_ids.contains(&sled_id) {
                 let num_zones = self
-                    .blueprint
+                    .zones_editor
                     .current_sled_zones(sled_id, BlueprintZoneFilter::All)
                     .filter(|zone| {
                         zone.disposition != BlueprintZoneDisposition::Expunged
@@ -210,7 +394,140 @@ impl<'a> Planner<'a> {
         Ok(())
     }
 
-    fn do_plan_add(&mut self) -> Result<(), Error> {
+    fn do_plan_expunge_for_sled(
+        &mut self,
+        sled_id: SledUuid,
+        sled_details: &SledDetails,
+    ) -> Result<(), Error> {
+        let log = self.log.new(o!(
+            "sled_id" => sled_id.to_string(),
+        ));
+
+        // Do any zones need to be marked expunged?
+        let mut zones_to_expunge = BTreeMap::new();
+
+        let sled_zones = self
+            .zones_editor
+            .current_sled_zones(sled_id, BlueprintZoneFilter::All)
+            .collect::<Vec<_>>();
+        for zone_config in sled_zones {
+            let Some(reason) =
+                zone_needs_expungement(sled_details, zone_config, &self.input)
+            else {
+                continue;
+            };
+
+            if zone_config.disposition != BlueprintZoneDisposition::Expunged {
+                zones_to_expunge.insert(zone_config.id, reason);
+            }
+        }
+
+        if zones_to_expunge.is_empty() {
+            debug!(
+                log,
+                "sled has no zones that need expungement; skipping";
+            );
+            return Ok(());
+        }
+
+        // Actually expunge the zones.
+        let mut count_disk_expunged = 0;
+        let mut count_sled_decommissioned = 0;
+        let mut count_sled_expunged = 0;
+        let mut count_clickhouse_cluster_disabled = 0;
+        let mut count_clickhouse_single_node_disabled = 0;
+        for (zone_id, reason) in zones_to_expunge {
+            let log = log.new(o!(
+                "zone_id" => zone_id.to_string(),
+            ));
+            self.zones_editor
+                .expunge_zone(sled_id, zone_id)
+                .context("failed to mark zone expunged")
+                .map_err(Error::Planner)?;
+            match reason {
+                ZoneExpungeReason::DiskExpunged => {
+                    count_disk_expunged += 1;
+                    info!(
+                        &log,
+                        "expunged disk with non-expunged zone was found"
+                    );
+                }
+                ZoneExpungeReason::SledDecommissioned => {
+                    count_sled_decommissioned += 1;
+                    // A sled marked as decommissioned should have no
+                    // resources allocated to it. If it does, it's an
+                    // illegal state, possibly introduced by a bug elsewhere
+                    // in the system -- we need to produce a loud warning
+                    // (i.e. an ERROR-level log message) on this, while
+                    // still removing the zones.
+                    error!(
+                        &log,
+                        "sled has state Decommissioned, yet has zone \
+                             allocated to it; will expunge it"
+                    );
+                }
+                ZoneExpungeReason::SledExpunged => {
+                    count_sled_expunged += 1;
+                    // This is the expected situation.
+                    info!(&log, "expunged sled with non-expunged zone found");
+                }
+                ZoneExpungeReason::ClickhouseClusterDisabled => {
+                    count_clickhouse_cluster_disabled += 1;
+                    info!(
+                        &log,
+                        "clickhouse cluster disabled via policy, \
+                            expunging related zone"
+                    );
+                }
+                ZoneExpungeReason::ClickhouseSingleNodeDisabled => {
+                    count_clickhouse_single_node_disabled += 1;
+                    info!(
+                        &log,
+                        "clickhouse single-node disabled via policy, \
+                            expunging related zone"
+                    );
+                }
+            }
+        }
+
+        // Finally, add comments describing what happened.
+        //
+        // Group the zones by their reason for expungement.
+        let count_and_reason = [
+            (count_disk_expunged, ZoneExpungeReason::DiskExpunged),
+            (count_sled_decommissioned, ZoneExpungeReason::SledDecommissioned),
+            (count_sled_expunged, ZoneExpungeReason::SledExpunged),
+            (
+                count_clickhouse_cluster_disabled,
+                ZoneExpungeReason::ClickhouseClusterDisabled,
+            ),
+            (
+                count_clickhouse_single_node_disabled,
+                ZoneExpungeReason::ClickhouseSingleNodeDisabled,
+            ),
+        ];
+        for (count, reason) in count_and_reason {
+            if count > 0 {
+                self.record_operation(Operation::ZoneExpunged {
+                    sled_id,
+                    reason,
+                    count,
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    fn do_plan_add(&mut self, rng: &mut PlannerRng) -> Result<(), Error> {
+        let sled_resources_allocator = SledAllocators::new(
+            self.input.service_ip_pool_ranges(),
+            self.input.all_sled_resources(SledFilter::Commissioned),
+            &self.zones_editor,
+        )?;
+        let mut new_zones =
+            NewZoneConfigurator::new(rng, sled_resources_allocator);
+
         // Internal DNS is a prerequisite for bringing up all other zones.  At
         // this point, we assume that internal DNS (as a service) is already
         // functioning.
@@ -236,14 +553,15 @@ impl<'a> Planner<'a> {
                 updated,
                 expunged: _,
                 removed,
-            } = self.blueprint.sled_ensure_disks(sled_id, &sled_resources)?
+            } =
+                self.disks_builder.sled_ensure_disks(sled_id, &sled_resources)
             {
                 info!(
                     &self.log,
                     "altered physical disks";
                     "sled_id" => %sled_id
                 );
-                self.blueprint.record_operation(Operation::UpdateDisks {
+                self.record_operation(Operation::UpdateDisks {
                     sled_id,
                     added,
                     updated,
@@ -259,15 +577,24 @@ impl<'a> Planner<'a> {
             // there, all we can do is provision that one zone.  We have to wait
             // for that to succeed and synchronize the clock before we can
             // provision anything else.
-            if self.blueprint.sled_ensure_zone_ntp(sled_id)? == Ensure::Added {
+            if !self
+                .zones_editor
+                .current_sled_zones(
+                    sled_id,
+                    BlueprintZoneFilter::ShouldBeRunning,
+                )
+                .any(|z| z.zone_type.is_ntp())
+            {
                 info!(
-                    &self.log,
+                    self.log,
                     "found sled missing NTP zone (will add one)";
                     "sled_id" => %sled_id
                 );
-                self.blueprint.record_operation(Operation::AddZone {
+                let zone_config = new_zones.internal_ntp(sled_id)?;
+                self.zones_editor.add_zone(sled_id, zone_config)?;
+                self.record_operation(Operation::AddZone {
                     sled_id,
-                    kind: ZoneKind::BoundaryNtp,
+                    kind: ZoneKind::InternalNtp,
                 });
                 // Don't make any other changes to this sled.  However, this
                 // change is compatible with any other changes to other sleds,
@@ -316,22 +643,41 @@ impl<'a> Planner<'a> {
             }
 
             // Every provisionable zpool on the sled should have a Crucible zone
-            // on it.
-            let mut ncrucibles_added = 0;
-            for zpool_id in sled_resources.all_zpools(ZpoolFilter::InService) {
-                if self
-                    .blueprint
-                    .sled_ensure_zone_crucible(sled_id, *zpool_id)?
-                    == Ensure::Added
+            // on it. First, build a list of all the zpools we should have.
+            let mut zpools_to_ensure_exist = sled_resources
+                .all_zpools(ZpoolFilter::InService)
+                .map(ZpoolName::new_external)
+                .collect::<BTreeSet<_>>();
+
+            // Next, remove zpools from this list if they already have an
+            // associated crucible zone.
+            for z in self.zones_editor.current_sled_zones(
+                sled_id,
+                BlueprintZoneFilter::ShouldBeRunning,
+            ) {
+                if let BlueprintZoneType::Crucible(
+                    blueprint_zone_type::Crucible { dataset, .. },
+                ) = &z.zone_type
                 {
-                    info!(
-                        &self.log,
-                        "found sled zpool missing Crucible zone (will add one)";
-                        "sled_id" => ?sled_id,
-                        "zpool_id" => ?zpool_id,
-                    );
-                    ncrucibles_added += 1;
+                    // If we have a crucible zone whose dataset is _not_ in
+                    // `zpools_to_ensure_exist`, what should we do? For now,
+                    // warn.
+                    if !zpools_to_ensure_exist.remove(&dataset.pool_name) {
+                        warn!(
+                            self.log,
+                            "found unexpected Crucible zone";
+                            "zone" => ?z,
+                        );
+                    }
                 }
+            }
+
+            // Finally, add crucible zones for any remaining zpools.
+            let mut ncrucibles_added = 0;
+            for pool_name in zpools_to_ensure_exist {
+                let zone_config = new_zones.crucible(sled_id, pool_name)?;
+                self.zones_editor.add_zone(sled_id, zone_config)?;
+                ncrucibles_added += 1;
             }
 
             if ncrucibles_added > 0 {
@@ -341,7 +687,7 @@ impl<'a> Planner<'a> {
                 // (Yes, it's currently the last thing in the loop, but being
                 // explicit here means we won't forget to do this when more code
                 // is added below.)
-                self.blueprint.record_operation(Operation::AddZone {
+                self.record_operation(Operation::AddZone {
                     sled_id,
                     kind: ZoneKind::Crucible,
                 });
@@ -349,7 +695,10 @@ impl<'a> Planner<'a> {
             }
         }
 
-        self.do_plan_add_discretionary_zones(&sleds_waiting_for_ntp_zone)?;
+        self.do_plan_add_discretionary_zones(
+            &sleds_waiting_for_ntp_zone,
+            &mut new_zones,
+        )?;
 
         // Now that we've added all the disks and zones we plan on adding,
         // ensure that all sleds have the datasets they need to have.
@@ -367,9 +716,13 @@ impl<'a> Planner<'a> {
                 updated,
                 expunged,
                 removed,
-            } =
-                self.blueprint.sled_ensure_datasets(sled_id, &sled_resources)?
-            {
+            } = self.datasets_builder.sled_ensure_datasets(
+                sled_id,
+                &sled_resources,
+                &self.disks_builder,
+                &self.zones_editor,
+                &self.log,
+            )? {
                 info!(
                     &self.log,
                     "altered datasets";
@@ -379,7 +732,7 @@ impl<'a> Planner<'a> {
                     "expunged" => expunged,
                     "removed" => removed,
                 );
-                self.blueprint.record_operation(Operation::UpdateDatasets {
+                self.record_operation(Operation::UpdateDatasets {
                     sled_id,
                     added,
                     updated,
@@ -394,6 +747,7 @@ impl<'a> Planner<'a> {
     fn do_plan_add_discretionary_zones(
         &mut self,
         sleds_waiting_for_ntp_zone: &BTreeSet<SledUuid>,
+        zone_configurator: &mut NewZoneConfigurator<'_>,
     ) -> Result<(), Error> {
         // We usually don't need to construct an `OmicronZonePlacement` to add
         // discretionary zones, so defer its creation until it's needed.
@@ -437,7 +791,7 @@ impl<'a> Planner<'a> {
                                 .all_zpools(ZpoolFilter::InService)
                                 .count(),
                             discretionary_zones: self
-                                .blueprint
+                                .zones_editor
                                 .current_sled_zones(
                                     sled_id,
                                     BlueprintZoneFilter::ShouldBeRunning,
@@ -454,6 +808,7 @@ impl<'a> Planner<'a> {
             });
             self.add_discretionary_zones(
                 zone_placement,
+                zone_configurator,
                 zone_kind,
                 num_zones_to_add,
             )?;
@@ -468,17 +823,13 @@ impl<'a> Planner<'a> {
         &mut self,
         zone_kind: DiscretionaryOmicronZone,
     ) -> usize {
-        // Count the number of `kind` zones on all in-service sleds. This
-        // will include sleds that are in service but not eligible for new
-        // services, but will not include sleds that have been expunged or
-        // decommissioned.
-        let mut num_existing_kind_zones = 0;
-        for sled_id in self.input.all_sled_ids(SledFilter::InService) {
-            let num_zones_of_kind = self
-                .blueprint
-                .sled_num_running_zones_of_kind(sled_id, zone_kind.into());
-            num_existing_kind_zones += num_zones_of_kind;
-        }
+        // Count the number of running `kind` zones across all sleds.
+        let zone_type_kind = zone_kind.into();
+        let num_existing_kind_zones = self
+            .zones_editor
+            .current_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .filter(|(_, zone)| zone.zone_type.kind() == zone_type_kind)
+            .count();
 
         let target_count = match zone_kind {
             DiscretionaryOmicronZone::BoundaryNtp => {
@@ -504,8 +855,21 @@ impl<'a> Planner<'a> {
             }
             DiscretionaryOmicronZone::ExternalDns => {
                 // TODO-cleanup: When external DNS addresses are
-                // in the policy, this can use the input, too.
-                self.blueprint.count_parent_external_dns_zones()
+                // in the policy, this can use the input, too. For now, we count
+                // the number of unique external DNS IPs present in our parent
+                // blueprint (intentionally including any expunged external DNS
+                // zones, which should not be removed until a new zone is
+                // running with its same external IP).
+                self.parent_blueprint
+                    .all_omicron_zones(BlueprintZoneFilter::All)
+                    .filter_map(|(_id, zone)| match &zone.zone_type {
+                        BlueprintZoneType::ExternalDns(dns) => {
+                            Some(dns.dns_address.addr.ip())
+                        }
+                        _ => None,
+                    })
+                    .collect::<BTreeSet<_>>()
+                    .len()
             }
             DiscretionaryOmicronZone::Nexus => {
                 self.input.target_nexus_zone_count()
@@ -538,17 +902,13 @@ impl<'a> Planner<'a> {
     fn add_discretionary_zones(
         &mut self,
         zone_placement: &mut OmicronZonePlacement,
+        zone_configurator: &mut NewZoneConfigurator<'_>,
         kind: DiscretionaryOmicronZone,
-        mut num_zones_to_add: usize,
+        num_zones_to_add: usize,
     ) -> Result<(), Error> {
-        // Build a map of sled -> new zones to add.
-        let mut sleds_to_change: BTreeMap<SledUuid, usize> = BTreeMap::new();
-
         for i in 0..num_zones_to_add {
-            match zone_placement.place_zone(kind) {
-                Ok(sled_id) => {
-                    *sleds_to_change.entry(sled_id).or_default() += 1;
-                }
+            let sled_id = match zone_placement.place_zone(kind) {
+                Ok(sled_id) => sled_id,
                 Err(PlacementError::NoSledsEligible { .. }) => {
                     // We won't treat this as a hard error; it's possible
                     // (albeit unlikely?) we're in a weird state where we need
@@ -560,121 +920,122 @@ impl<'a> Planner<'a> {
                         "placed" => i,
                         "wanted_to_place" => num_zones_to_add,
                     );
-
-                    // Adjust `num_zones_to_add` downward so it's consistent
-                    // with the number of zones we're actually adding.
-                    num_zones_to_add = i;
-
                     break;
                 }
-            }
-        }
+            };
 
-        // For each sled we need to change, actually do so.
-        let mut new_zones_added = 0;
-        for (sled_id, additional_zone_count) in sleds_to_change {
-            // TODO-cleanup This is awkward: the builder wants to know how many
-            // total zones go on a given sled, but we have a count of how many
-            // we want to add. Construct a new target count. Maybe the builder
-            // should provide a different interface here?
-            let new_total_zone_count = self
-                .blueprint
-                .sled_num_running_zones_of_kind(sled_id, kind.into())
-                + additional_zone_count;
+            let zone_config = match kind {
+                DiscretionaryOmicronZone::BoundaryNtp => {
+                    // The upstream NTP/DNS servers and domain _should_ come
+                    // from Nexus and be modifiable by the operator, but
+                    // currently can only be set at RSS. We can only promote a
+                    // new boundary NTP zone by copying these settings from an
+                    // existing one.
+                    let (ntp_servers, dns_servers, domain) = self
+                        .parent_blueprint
+                        .all_omicron_zones(BlueprintZoneFilter::All)
+                        .find_map(|(_, z)| match &z.zone_type {
+                            BlueprintZoneType::BoundaryNtp(zone_config) => {
+                                Some((
+                                    zone_config.ntp_servers.clone(),
+                                    zone_config.dns_servers.clone(),
+                                    zone_config.domain.clone(),
+                                ))
+                            }
+                            _ => None,
+                        })
+                        .ok_or(Error::NoBoundaryNtpZonesInParentBlueprint)?;
 
-            let result = match kind {
-                DiscretionaryOmicronZone::BoundaryNtp => self
-                    .blueprint
-                    .sled_promote_internal_ntp_to_boundary_ntp(sled_id)?,
-                DiscretionaryOmicronZone::Clickhouse => {
-                    self.blueprint.sled_ensure_zone_multiple_clickhouse(
+                    // If we're adding a boundary NTP zone, we should
+                    // simultaneously expunge the existing internal NTP zone
+                    // (which we know exists, because the only sleds eligible
+                    // for discretionary zones must already have NTP zones of
+                    // some kind, and we cannot choose a boundary NTP sled if it
+                    // already has a boundary NTP zone).
+                    let internal_ntp_zone_id = self
+                        .zones_editor
+                        .current_sled_running_internal_ntp_zone(sled_id)?
+                        .ok_or_else(|| {
+                            Error::Planner(anyhow::anyhow!(
+                                "cannot promote internal NTP zone on sled \
+                                 {sled_id}: no internal NTP zone found"
+                            ))
+                        })?
+                        .id;
+                    self.zones_editor
+                        .expunge_zone(sled_id, internal_ntp_zone_id)?;
+
+                    zone_configurator.boundary_ntp(
                         sled_id,
-                        new_total_zone_count,
-                    )?
+                        ntp_servers,
+                        dns_servers,
+                        domain,
+                    )
+                }
+                DiscretionaryOmicronZone::Clickhouse => {
+                    zone_configurator.clickhouse(sled_id)
                 }
                 DiscretionaryOmicronZone::ClickhouseKeeper => {
-                    self.blueprint.sled_ensure_zone_multiple_clickhouse_keeper(
-                        sled_id,
-                        new_total_zone_count,
-                    )?
+                    zone_configurator.clickhouse_keeper(sled_id)
                 }
                 DiscretionaryOmicronZone::ClickhouseServer => {
-                    self.blueprint.sled_ensure_zone_multiple_clickhouse_server(
-                        sled_id,
-                        new_total_zone_count,
-                    )?
+                    zone_configurator.clickhouse_server(sled_id)
                 }
                 DiscretionaryOmicronZone::CockroachDb => {
-                    self.blueprint.sled_ensure_zone_multiple_cockroachdb(
-                        sled_id,
-                        new_total_zone_count,
-                    )?
+                    zone_configurator.cockroachdb(sled_id)
                 }
                 DiscretionaryOmicronZone::CruciblePantry => {
-                    self.blueprint.sled_ensure_zone_multiple_crucible_pantry(
-                        sled_id,
-                        new_total_zone_count,
-                    )?
+                    zone_configurator.crucible_pantry(sled_id)
                 }
                 DiscretionaryOmicronZone::InternalDns => {
-                    self.blueprint.sled_ensure_zone_multiple_internal_dns(
-                        sled_id,
-                        new_total_zone_count,
-                    )?
+                    zone_configurator.internal_dns(sled_id)
                 }
                 DiscretionaryOmicronZone::ExternalDns => {
-                    self.blueprint.sled_ensure_zone_multiple_external_dns(
-                        sled_id,
-                        new_total_zone_count,
-                    )?
+                    zone_configurator.external_dns(sled_id)
                 }
                 DiscretionaryOmicronZone::Nexus => {
-                    self.blueprint.sled_ensure_zone_multiple_nexus(
+                    // Whether Nexus should use TLS and what the external DNS
+                    // servers it should use are currently provided at
+                    // rack-setup time, and should be consistent across all
+                    // Nexus instances. We'll assume we can copy them from any
+                    // other Nexus zone in our parent blueprint.
+                    //
+                    // TODO-correctness Once these properties can be changed by
+                    // a rack operator, this will need more work. At a minimum,
+                    // if such a change goes through the blueprint system (which
+                    // seems likely), we'll need to check that we're if this
+                    // builder is being used to make such a change, that change
+                    // is also reflected here in a new zone. Perhaps these
+                    // settings should be part of `Policy` instead?
+                    let (external_tls, external_dns_servers) = self
+                        .parent_blueprint
+                        .all_omicron_zones(BlueprintZoneFilter::All)
+                        .find_map(|(_, z)| match &z.zone_type {
+                            BlueprintZoneType::Nexus(nexus) => Some((
+                                nexus.external_tls,
+                                nexus.external_dns_servers.clone(),
+                            )),
+                            _ => None,
+                        })
+                        .ok_or(Error::NoNexusZonesInParentBlueprint)?;
+                    zone_configurator.nexus(
                         sled_id,
-                        new_total_zone_count,
-                    )?
+                        external_tls,
+                        external_dns_servers,
+                    )
                 }
                 DiscretionaryOmicronZone::Oximeter => {
-                    self.blueprint.sled_ensure_zone_multiple_oximeter(
-                        sled_id,
-                        new_total_zone_count,
-                    )?
+                    zone_configurator.oximeter(sled_id)
                 }
-            };
-            match result {
-                EnsureMultiple::Changed {
-                    added,
-                    updated,
-                    expunged,
-                    removed,
-                } => {
-                    info!(
-                        self.log, "modified zones on sled";
-                        "sled_id" => %sled_id,
-                        "kind" => ?kind,
-                        "added" => added,
-                        "updated" => updated,
-                        "expunged" => expunged,
-                        "removed" => removed,
-                    );
-                    new_zones_added += added;
-                }
-                // This is only possible if we asked the sled to ensure the same
-                // number of zones it already has, but that's impossible based
-                // on the way we built up `sleds_to_change`.
-                EnsureMultiple::NotNeeded => unreachable!(
-                    "sled on which we added {kind:?} zones did not add any"
-                ),
-            }
-        }
+            }?;
 
-        // Double check that we didn't make any arithmetic mistakes. If we've
-        // arrived here, we think we've added the number of `kind` zones we
-        // needed to.
-        assert_eq!(
-            new_zones_added, num_zones_to_add,
-            "internal error counting {kind:?} zones"
-        );
+            self.zones_editor.add_zone(sled_id, zone_config)?;
+            info!(
+                self.log, "added zone to sled";
+                "sled_id" => %sled_id,
+                "kind" => ?kind,
+            );
+        }
 
         Ok(())
     }
@@ -756,7 +1117,7 @@ impl<'a> Planner<'a> {
             // of an cluster upgrade.
             Err(_) => CockroachDbPreserveDowngrade::DoNotModify,
         };
-        self.blueprint.cockroachdb_preserve_downgrade(value);
+        self.cockroachdb_setting_preserve_downgrade = value;
         info!(
             &self.log,
             "will ensure cockroachdb setting";
@@ -899,6 +1260,7 @@ mod test {
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use slog_error_chain::InlineErrorChain;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
     use std::net::IpAddr;
@@ -1291,17 +1653,14 @@ mod test {
             &builder.build(),
             "test_blueprint2",
             &collection,
-        )
-        .expect("created planner")
-        .plan()
-        {
+        ) {
             Ok(_) => panic!("unexpected success"),
             Err(err) => {
                 let err = format!("{err:#}");
                 assert!(
                     err.contains("can only have ")
                         && err.contains(" internal DNS servers"),
-                    "unexpected error: {err}"
+                    "unexpected error: {err}",
                 );
             }
         }

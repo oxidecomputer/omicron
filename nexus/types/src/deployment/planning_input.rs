@@ -258,6 +258,10 @@ pub struct SledLookupError {
 }
 
 impl SledLookupError {
+    pub fn new(sled_id: SledUuid, kind: SledLookupErrorKind) -> Self {
+        Self { sled_id, kind }
+    }
+
     /// Returns the ID of the sled that was looked up.
     pub fn sled_id(&self) -> SledUuid {
         self.sled_id
@@ -627,11 +631,11 @@ impl SledResources {
     pub fn all_zpools(
         &self,
         filter: ZpoolFilter,
-    ) -> impl Iterator<Item = &ZpoolUuid> + '_ {
+    ) -> impl Iterator<Item = ZpoolUuid> + '_ {
         self.zpools.iter().filter_map(move |(zpool, (disk, _datasets))| {
             filter
                 .matches_policy_and_state(disk.policy, disk.state)
-                .then_some(zpool)
+                .then_some(*zpool)
         })
     }
 

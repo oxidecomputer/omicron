@@ -12,3 +12,4 @@ mod zones;
 
 pub use builder::*;
 pub use clickhouse::{ClickhouseAllocator, ClickhouseZonesThatShouldBeRunning};
+pub(crate) use external_networking::ensure_input_records_appear_in_parent_blueprint;

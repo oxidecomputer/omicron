@@ -161,8 +161,8 @@ pub(super) fn is_already_expunged(
         | BlueprintZoneDisposition::Quiesced => {
             if state != BuilderZoneState::Unchanged {
                 // We shouldn't be trying to expunge zones that have also been
-                // changed in this blueprint -- something went wrong in the planner
-                // logic.
+                // changed in this blueprint -- something went wrong in the
+                // planner logic.
                 return Err(BuilderZonesConfigError::ExpungeModifiedZone {
                     zone_id: zone.id,
                     state,
