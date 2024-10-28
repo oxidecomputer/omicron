@@ -5685,15 +5685,27 @@ impl From<&'_ Migration> for MigrationVmms {
     }
 }
 
+impl From<&'_ Migration> for SingleInstanceMigrationRow {
+    fn from(migration: &Migration) -> Self {
+        Self {
+            created: migration.time_created,
+            vmms: MigrationVmms::from(migration),
+        }
+    }
+}
+
 // VMMs
 
 async fn cmd_db_vmm_info(
     opctx: &OpContext,
     datastore: &DataStore,
-    _: &DbFetchOptions,
+    fetch_opts: &DbFetchOptions,
     &VmmInfoArgs { uuid }: &VmmInfoArgs,
 ) -> Result<(), anyhow::Error> {
-    use nexus_db_model::schema::vmm::dsl as vmm_dsl;
+    use db::schema::migration::dsl as migration_dsl;
+    use db::schema::sled_resource::dsl as resource_dsl;
+    use db::schema::vmm::dsl as vmm_dsl;
+
     let vmm = vmm_dsl::vmm
         .filter(vmm_dsl::id.eq(uuid))
         .select(Vmm::as_select())
@@ -5725,6 +5737,94 @@ async fn cmd_db_vmm_info(
         sled.as_ref().map(|sled| sled.serial_number()),
         true,
     );
+
+    fn prettyprint_reservation(resource: db::model::SledResource) {
+        use db::model::ByteCount;
+        let db::model::SledResource {
+            id: _,
+            sled_id,
+            kind: _,
+            resources:
+                db::model::Resources {
+                    hardware_threads,
+                    rss_ram: ByteCount(rss),
+                    reservoir_ram: ByteCount(reservoir),
+                },
+        } = resource;
+        const SLED_ID: &'static str = "sled ID";
+        const THREADS: &'static str = "hardware threads";
+        const RSS: &'static str = "RSS RAM";
+        const RESERVOIR: &'static str = "reservoir RAM";
+        const WIDTH: usize = const_max_len(&[SLED_ID, THREADS, RSS, RESERVOIR]);
+        println!("    {SLED_ID:>WIDTH$}: {sled_id}");
+        println!("    {THREADS:>WIDTH$}: {hardware_threads}");
+        println!("    {RSS:>WIDTH$}: {rss}");
+        println!("    {RESERVOIR:>WIDTH$}: {reservoir}");
+    }
+
+    let reservations = resource_dsl::sled_resource
+        .filter(resource_dsl::id.eq(uuid))
+        .select(db::model::SledResource::as_select())
+        .load_async::<db::model::SledResource>(
+            &*datastore.pool_connection_for_tests().await?,
+        )
+        .await
+        .with_context(|| {
+            format!("failed to fetch sled resource records for {uuid}")
+        })?;
+
+    if !reservations.is_empty() {
+        println!("\n{:=<80}", "== SLED RESOURCE RESERVATIONS ");
+    }
+    if reservations.len() > 1 {
+        println!(
+            "/!\\ VMM has multiple sled resource reservation records, this \
+             seems weird!",
+        );
+    }
+    for r in reservations {
+        prettyprint_reservation(r);
+        println!();
+    }
+
+    let ctx = || format!("listing migrations involving VMM {uuid}");
+    let migrations = migration_dsl::migration
+        .filter(
+            migration_dsl::source_propolis_id
+                .eq(uuid)
+                .or(migration_dsl::target_propolis_id.eq(uuid)),
+        )
+        // A single VMM will typically only have 0-1 migrations in, but it may
+        // have any number of migrations out, since attempts to migrate out of
+        // the VMM may have failed on the migration target's side.
+        .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
+        .order_by(migration_dsl::time_created)
+        // This is just to prove to CRDB that it can use the
+        // migrations-by-time-created index, it doesn't actually do anything.
+        .filter(migration_dsl::time_created.gt(chrono::DateTime::UNIX_EPOCH))
+        .select(db::model::Migration::as_select())
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .with_context(ctx)?;
+
+    check_limit(&migrations, fetch_opts.fetch_limit, ctx);
+
+    if !migrations.is_empty() {
+        println!("\n{:=<80}", "== MIGRATIONS ");
+        // TODO: since this command is focused on the individual VMM, we could
+        // potentially be a bit fancier when displaying migrations, and print
+        // something like "IN"/"OUT" based on the VMM's role in that migration,
+        // rather than just sticking its UUID in the source/target column as
+        // appropriate.
+        let table = tabled::Table::new(
+            migrations.iter().map(SingleInstanceMigrationRow::from),
+        )
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+        println!("{table}");
+    }
+
     Ok(())
 }
 
