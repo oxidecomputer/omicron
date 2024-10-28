@@ -180,7 +180,7 @@ pub struct RackInitializationRequest {
     /// x.509 Certificates used to encrypt communication with the external API.
     pub certs: Vec<Certificate>,
     /// initial internal DNS config
-    pub internal_dns_zone_config: dns_service_client::types::DnsConfigParams,
+    pub internal_dns_zone_config: internal_dns_types::config::DnsConfigParams,
     /// delegated DNS name for external DNS
     pub external_dns_zone_name: String,
     /// configuration for the initial (recovery) Silo
@@ -193,10 +193,10 @@ pub struct RackInitializationRequest {
     pub allowed_source_ips: AllowedSourceIps,
 }
 
-pub type DnsConfigParams = dns_service_client::types::DnsConfigParams;
-pub type DnsConfigZone = dns_service_client::types::DnsConfigZone;
-pub type DnsRecord = dns_service_client::types::DnsRecord;
-pub type Srv = dns_service_client::types::Srv;
+pub type DnsConfigParams = internal_dns_types::config::DnsConfigParams;
+pub type DnsConfigZone = internal_dns_types::config::DnsConfigZone;
+pub type DnsRecord = internal_dns_types::config::DnsRecord;
+pub type Srv = internal_dns_types::config::Srv;
 
 /// Message used to notify Nexus that this oximeter instance is up and running.
 #[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]

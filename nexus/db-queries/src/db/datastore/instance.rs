@@ -223,16 +223,23 @@ impl From<InstanceAndActiveVmm> for external::Instance {
                     },
                 );
 
-            let policy = value
-                .instance
-                .auto_restart
-                .policy
-                .unwrap_or(InstanceAutoRestart::DEFAULT_POLICY);
-            let enabled = match policy {
+            let policy = value.instance.auto_restart.policy;
+            // The active policy for this instance --- either its configured
+            // policy or the default. We report the configured policy as the
+            // instance's policy, but we must use this to determine whether it
+            // will be auto-restarted, since it may have no configured policy.
+            let active_policy =
+                policy.unwrap_or(InstanceAutoRestart::DEFAULT_POLICY);
+
+            let enabled = match active_policy {
                 InstanceAutoRestartPolicy::Never => false,
                 InstanceAutoRestartPolicy::BestEffort => true,
             };
-            external::InstanceAutoRestartStatus { enabled, cooldown_expiration }
+            external::InstanceAutoRestartStatus {
+                enabled,
+                policy: policy.map(Into::into),
+                cooldown_expiration,
+            }
         };
 
         Self {
@@ -572,6 +579,27 @@ impl DataStore {
     ) -> LookupResult<InstanceAndActiveVmm> {
         opctx.authorize(authz::Action::Read, authz_instance).await?;
 
+        self.instance_fetch_with_vmm_on_conn(
+            &*self.pool_connection_authorized(opctx).await?,
+            authz_instance,
+        )
+        .await
+        .map_err(|e| {
+            public_error_from_diesel(
+                e,
+                ErrorHandler::NotFoundByLookup(
+                    ResourceType::Instance,
+                    LookupType::ById(authz_instance.id()),
+                ),
+            )
+        })
+    }
+
+    async fn instance_fetch_with_vmm_on_conn(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        authz_instance: &authz::Instance,
+    ) -> Result<InstanceAndActiveVmm, diesel::result::Error> {
         use db::schema::instance::dsl as instance_dsl;
         use db::schema::vmm::dsl as vmm_dsl;
 
@@ -585,19 +613,8 @@ impl DataStore {
                     .and(vmm_dsl::time_deleted.is_null())),
             )
             .select((Instance::as_select(), Option::<Vmm>::as_select()))
-            .get_result_async::<(Instance, Option<Vmm>)>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Instance,
-                        LookupType::ById(authz_instance.id()),
-                    ),
-                )
-            })?;
+            .get_result_async::<(Instance, Option<Vmm>)>(conn)
+            .await?;
 
         Ok(InstanceAndActiveVmm { instance, vmm })
     }
@@ -1013,134 +1030,39 @@ impl DataStore {
     ) -> Result<InstanceAndActiveVmm, Error> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
 
-        use crate::db::model::InstanceState;
-
-        use db::schema::disk::dsl as disk_dsl;
         use db::schema::instance::dsl as instance_dsl;
-        use db::schema::vmm::dsl as vmm_dsl;
 
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
-        let (instance, vmm) = self
+        let instance_and_vmm = self
             .transaction_retry_wrapper("reconfigure_instance")
             .transaction(&conn, |conn| {
                 let err = err.clone();
-                let update = update.clone();
+                let InstanceUpdate { boot_disk_id, auto_restart_policy } =
+                    update.clone();
                 async move {
-                    // * Allow reconfiguration in NoVmm because there is no VMM
-                    //   to contend with.
-                    // * Allow reconfiguration in Failed to allow changing the
-                    //   boot disk of a failed instance and free its boot disk
-                    //   for detach.
-                    // * Allow reconfiguration in Creating because one of the
-                    //   last steps of instance creation, while the instance is
-                    //   still in Creating, is to reconfigure the instance to
-                    //   the desired boot disk.
-                    let ok_to_reconfigure_instance_states = [
-                        InstanceState::NoVmm,
-                        InstanceState::Failed,
-                        InstanceState::Creating,
-                    ];
-
-                    let instance_state = instance_dsl::instance
-                        .filter(instance_dsl::id.eq(authz_instance.id()))
-                        .filter(instance_dsl::time_deleted.is_null())
-                        .select(instance_dsl::state)
-                        .first_async::<InstanceState>(&conn)
-                        .await;
-
-                    match instance_state {
-                        Ok(state) => {
-                            let state_ok = ok_to_reconfigure_instance_states
-                                .contains(&state);
-
-                            if !state_ok {
-                                return Err(err.bail(Error::conflict(
-                                    "instance must be stopped to update",
-                                )));
-                            }
-                        }
-                        Err(diesel::NotFound) => {
-                            // If the instance simply doesn't exist, we
-                            // shouldn't retry. Bail with a useful error.
-                            return Err(err.bail(Error::not_found_by_id(
-                                ResourceType::Instance,
-                                &authz_instance.id(),
-                            )));
-                        }
-                        Err(e) => {
-                            return Err(e);
-                        }
-                    }
-
-                    if let Some(disk_id) = update.boot_disk_id {
-                        // Ensure the disk is currently attached before updating
-                        // the database.
-                        let expected_state = api::external::DiskState::Attached(
-                            authz_instance.id(),
-                        );
-
-                        let attached_disk: Option<Uuid> = disk_dsl::disk
-                            .filter(disk_dsl::id.eq(disk_id))
-                            .filter(
-                                disk_dsl::attach_instance_id
-                                    .eq(authz_instance.id()),
-                            )
-                            .filter(
-                                disk_dsl::disk_state.eq(expected_state.label()),
-                            )
-                            .select(disk_dsl::id)
-                            .first_async::<Uuid>(&conn)
-                            .await
-                            .optional()?;
-
-                        if attached_disk.is_none() {
-                            return Err(err.bail(Error::conflict(
-                                "boot disk must be attached",
-                            )));
-                        }
-                    }
-
-                    // if and when `Update` can update other fields, set them
-                    // here.
-                    //
-                    // NOTE: from this point forward it is OK if we update the
-                    // instance's `boot_disk_id` column with the updated value
-                    // again. It will have already been assigned with constraint
-                    // checking performed above, so updates will just be
-                    // repetitive, not harmful.
-
-                    // Update the row. We don't care about the returned
-                    // UpdateStatus, either way the database has been updated
-                    // with the state we're setting.
+                    // Set the auto-restart policy.
                     diesel::update(instance_dsl::instance)
                         .filter(instance_dsl::id.eq(authz_instance.id()))
-                        .set(update)
+                        .set(
+                            instance_dsl::auto_restart_policy
+                                .eq(auto_restart_policy),
+                        )
                         .execute_async(&conn)
                         .await?;
 
-                    // TODO: dedupe this query and  `instance_fetch_with_vmm`.
-                    // At the moment, we're only allowing instance
-                    // reconfiguration in states that would have no VMM, but
-                    // load it anyway so that we return correct data if this is
-                    // relaxed in the future...
-                    let (instance, vmm) = instance_dsl::instance
-                        .filter(instance_dsl::id.eq(authz_instance.id()))
-                        .filter(instance_dsl::time_deleted.is_null())
-                        .left_join(
-                            vmm_dsl::vmm.on(vmm_dsl::id
-                                .nullable()
-                                .eq(instance_dsl::active_propolis_id)
-                                .and(vmm_dsl::time_deleted.is_null())),
-                        )
-                        .select((
-                            Instance::as_select(),
-                            Option::<Vmm>::as_select(),
-                        ))
-                        .get_result_async(&conn)
-                        .await?;
+                    // Next, set the boot disk if needed.
+                    self.instance_set_boot_disk_on_conn(
+                        &conn,
+                        &err,
+                        authz_instance,
+                        boot_disk_id,
+                    )
+                    .await?;
 
-                    Ok((instance, vmm))
+                    // Finally, fetch the new instance state.
+                    self.instance_fetch_with_vmm_on_conn(&conn, authz_instance)
+                        .await
                 }
             })
             .await
@@ -1152,7 +1074,145 @@ impl DataStore {
                 public_error_from_diesel(e, ErrorHandler::Server)
             })?;
 
-        Ok(InstanceAndActiveVmm { instance, vmm })
+        Ok(instance_and_vmm)
+    }
+
+    pub async fn instance_set_boot_disk(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        boot_disk_id: Option<Uuid>,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, authz_instance).await?;
+
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.transaction_retry_wrapper("instance_set_boot_disk")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    self.instance_set_boot_disk_on_conn(
+                        &conn,
+                        &err,
+                        authz_instance,
+                        boot_disk_id,
+                    )
+                    .await?;
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    return err;
+                }
+
+                public_error_from_diesel(e, ErrorHandler::Server)
+            })
+    }
+
+    /// Set an instance's boot disk to the provided `boot_disk_id` (or unset it,
+    /// if `boot_disk_id` is `None`), within an existing transaction.
+    ///
+    /// This is factored out as it is used by both
+    /// [`DataStore::instance_reconfigure`], which mutates many instance fields,
+    /// and [`DataStore::instance_set_boot_disk`], which only touches the boot
+    /// disk.
+    async fn instance_set_boot_disk_on_conn(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        err: &OptionalError<Error>,
+        authz_instance: &authz::Instance,
+        boot_disk_id: Option<Uuid>,
+    ) -> Result<(), diesel::result::Error> {
+        use db::schema::disk::dsl as disk_dsl;
+        use db::schema::instance::dsl as instance_dsl;
+
+        // * Allow setting the boot disk in NoVmm because there is no VMM to
+        //   contend with.
+        // * Allow setting the boot disk in Failed to allow changing the boot
+        //   disk of a failed instance and free its boot disk for detach.
+        // * Allow setting the boot disk in Creating because one of the last
+        //   steps of instance creation, while the instance is still in
+        //   Creating, is to reconfigure the instance to the desired boot disk.
+        const OK_TO_SET_BOOT_DISK_STATES: &'static [InstanceState] = &[
+            InstanceState::NoVmm,
+            InstanceState::Failed,
+            InstanceState::Creating,
+        ];
+
+        let maybe_instance = instance_dsl::instance
+            .filter(instance_dsl::id.eq(authz_instance.id()))
+            .filter(instance_dsl::time_deleted.is_null())
+            .select(Instance::as_select())
+            .first_async::<Instance>(conn)
+            .await;
+        let instance = match maybe_instance {
+            Ok(i) => i,
+            Err(diesel::NotFound) => {
+                // If the instance simply doesn't exist, we
+                // shouldn't retry. Bail with a useful error.
+                return Err(err.bail(Error::not_found_by_id(
+                    ResourceType::Instance,
+                    &authz_instance.id(),
+                )));
+            }
+            Err(e) => return Err(e),
+        };
+
+        // If the desired boot disk is already set, we're good here, and can
+        // elide the check that the instance is in an acceptable state to change
+        // the boot disk.
+        if instance.boot_disk_id == boot_disk_id {
+            return Ok(());
+        }
+
+        if let Some(disk_id) = boot_disk_id {
+            // Ensure the disk is currently attached before updating
+            // the database.
+            let expected_state =
+                api::external::DiskState::Attached(authz_instance.id());
+
+            let attached_disk: Option<Uuid> = disk_dsl::disk
+                .filter(disk_dsl::id.eq(disk_id))
+                .filter(disk_dsl::attach_instance_id.eq(authz_instance.id()))
+                .filter(disk_dsl::disk_state.eq(expected_state.label()))
+                .select(disk_dsl::id)
+                .first_async::<Uuid>(conn)
+                .await
+                .optional()?;
+
+            if attached_disk.is_none() {
+                return Err(
+                    err.bail(Error::conflict("boot disk must be attached"))
+                );
+            }
+        }
+        //
+        // NOTE: from this point forward it is OK if we update the
+        // instance's `boot_disk_id` column with the updated value
+        // again. It will have already been assigned with constraint
+        // checking performed above, so updates will just be
+        // repetitive, not harmful.
+
+        let r = diesel::update(instance_dsl::instance)
+            .filter(instance_dsl::id.eq(authz_instance.id()))
+            .filter(instance_dsl::state.eq_any(OK_TO_SET_BOOT_DISK_STATES))
+            .set(instance_dsl::boot_disk_id.eq(boot_disk_id))
+            .check_if_exists::<Instance>(authz_instance.id())
+            .execute_and_check(&conn)
+            .await?;
+        match r.status {
+            UpdateStatus::NotUpdatedButExists => {
+                // This should be the only reason the query would fail...
+                debug_assert!(!OK_TO_SET_BOOT_DISK_STATES
+                    .contains(&r.found.runtime().nexus_state));
+                Err(err.bail(Error::conflict(
+                    "instance must be stopped to set boot disk",
+                )))
+            }
+            UpdateStatus::Updated => Ok(()),
+        }
     }
 
     pub async fn project_delete_instance(
@@ -1883,17 +1943,17 @@ impl DataStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::sled;
-    use crate::db::datastore::test_utils::datastore_test;
     use crate::db::lookup::LookupPath;
     use crate::db::pagination::Paginator;
     use nexus_db_model::InstanceState;
     use nexus_db_model::Project;
     use nexus_db_model::VmmRuntimeState;
     use nexus_db_model::VmmState;
-    use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
     use nexus_types::identity::Asset;
+    use nexus_types::silo::DEFAULT_SILO_ID;
     use omicron_common::api::external;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -1903,7 +1963,7 @@ mod tests {
         datastore: &DataStore,
         opctx: &OpContext,
     ) -> (authz::Project, Project) {
-        let silo_id = *nexus_db_fixed_data::silo::DEFAULT_SILO_ID;
+        let silo_id = DEFAULT_SILO_ID;
         let project_id = Uuid::new_v4();
         datastore
             .project_create(
@@ -1973,8 +2033,8 @@ mod tests {
     async fn test_instance_updater_acquires_lock() {
         // Setup
         let logctx = dev::test_setup_log("test_instance_updater_acquires_lock");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let saga1 = Uuid::new_v4();
         let saga2 = Uuid::new_v4();
         let (authz_project, _) = create_test_project(&datastore, &opctx).await;
@@ -2047,7 +2107,7 @@ mod tests {
         assert!(unlocked, "instance must actually be unlocked");
 
         // Clean up.
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2056,8 +2116,8 @@ mod tests {
         // Setup
         let logctx =
             dev::test_setup_log("test_instance_updater_lock_is_idempotent");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _) = create_test_project(&datastore, &opctx).await;
         let authz_instance = create_test_instance(
             &datastore,
@@ -2111,7 +2171,7 @@ mod tests {
         assert!(!unlocked, "instance should already have been unlocked");
 
         // Clean up.
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2121,8 +2181,8 @@ mod tests {
         let logctx = dev::test_setup_log(
             "test_instance_updater_cant_unlock_someone_elses_instance_",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _) = create_test_project(&datastore, &opctx).await;
         let authz_instance = create_test_instance(
             &datastore,
@@ -2204,7 +2264,7 @@ mod tests {
         assert!(!unlocked);
 
         // Clean up.
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2213,8 +2273,8 @@ mod tests {
         // Setup
         let logctx =
             dev::test_setup_log("test_unlocking_a_deleted_instance_is_okay");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _) = create_test_project(&datastore, &opctx).await;
         let authz_instance = create_test_instance(
             &datastore,
@@ -2263,7 +2323,7 @@ mod tests {
         .expect("instance should unlock");
 
         // Clean up.
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2272,8 +2332,8 @@ mod tests {
         // Setup
         let logctx =
             dev::test_setup_log("test_instance_commit_update_is_idempotent");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _) = create_test_project(&datastore, &opctx).await;
         let authz_instance = create_test_instance(
             &datastore,
@@ -2361,7 +2421,7 @@ mod tests {
         assert_eq!(instance.runtime().r#gen, new_runtime.r#gen);
 
         // Clean up.
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2371,8 +2431,8 @@ mod tests {
         let logctx = dev::test_setup_log(
             "test_instance_update_invalidated_while_locked",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _) = create_test_project(&datastore, &opctx).await;
         let authz_instance = create_test_instance(
             &datastore,
@@ -2451,7 +2511,7 @@ mod tests {
         assert_eq!(instance.runtime().nexus_state, new_runtime.nexus_state);
 
         // Clean up.
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2459,8 +2519,8 @@ mod tests {
     async fn test_instance_fetch_all() {
         // Setup
         let logctx = dev::test_setup_log("test_instance_fetch_all");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _) = create_test_project(&datastore, &opctx).await;
         let authz_instance = create_test_instance(
             &datastore,
@@ -2631,7 +2691,7 @@ mod tests {
         );
 
         // Clean up.
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2639,8 +2699,8 @@ mod tests {
     async fn test_instance_set_migration_ids() {
         // Setup
         let logctx = dev::test_setup_log("test_instance_set_migration_ids");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _) = create_test_project(&datastore, &opctx).await;
         let authz_instance = create_test_instance(
             &datastore,
@@ -2898,7 +2958,7 @@ mod tests {
         assert_eq!(instance.runtime().dst_propolis_id, Some(vmm3.id));
 
         // Clean up.
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2908,8 +2968,8 @@ mod tests {
         // Setup
         let logctx =
             dev::test_setup_log("test_instance_and_vmm_list_by_sled_agent");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _) = create_test_project(&datastore, &opctx).await;
 
         let mut expected_instances = BTreeSet::new();
@@ -3035,7 +3095,7 @@ mod tests {
         assert_eq!(expected_instances, found_instances);
 
         // Clean up.
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

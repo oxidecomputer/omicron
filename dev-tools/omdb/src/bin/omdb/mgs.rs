@@ -21,6 +21,7 @@ use gateway_client::types::SpIgnitionInfo;
 use gateway_client::types::SpIgnitionSystemType;
 use gateway_client::types::SpState;
 use gateway_client::types::SpType;
+use internal_dns_types::names::ServiceName;
 use tabled::Tabled;
 
 mod dashboard;
@@ -75,7 +76,7 @@ impl MgsArgs {
                 let addr = omdb
                     .dns_lookup_one(
                         log.clone(),
-                        internal_dns::ServiceName::ManagementGatewayService,
+                        ServiceName::ManagementGatewayService,
                     )
                     .await?;
                 format!("http://{}", addr)

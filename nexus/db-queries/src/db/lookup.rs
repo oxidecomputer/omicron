@@ -227,9 +227,30 @@ impl<'a> LookupPath<'a> {
         VpcRouter::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    /// Select a resource of type InternetGateway, identified by its id
+    pub fn internet_gateway_id(self, id: Uuid) -> InternetGateway<'a> {
+        InternetGateway::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
     /// Select a resource of type RouterRoute, identified by its id
     pub fn router_route_id(self, id: Uuid) -> RouterRoute<'a> {
         RouterRoute::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type InternetGatewayIpPool, identified by its id
+    pub fn internet_gateway_ip_pool_id(
+        self,
+        id: Uuid,
+    ) -> InternetGatewayIpPool<'a> {
+        InternetGatewayIpPool::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type InternetGatewayIpAddress, identified by its id
+    pub fn internet_gateway_ip_address_id(
+        self,
+        id: Uuid,
+    ) -> InternetGatewayIpAddress<'a> {
+        InternetGatewayIpAddress::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type FloatingIp, identified by its id
@@ -686,7 +707,7 @@ lookup_resource! {
 lookup_resource! {
     name = "Vpc",
     ancestors = [ "Silo", "Project" ],
-    children = [ "VpcRouter", "VpcSubnet" ],
+    children = [ "VpcRouter", "VpcSubnet", "InternetGateway" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -713,6 +734,33 @@ lookup_resource! {
 lookup_resource! {
     name = "VpcSubnet",
     ancestors = [ "Silo", "Project", "Vpc" ],
+    children = [ ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "InternetGateway",
+    ancestors = [ "Silo", "Project", "Vpc" ],
+    children = [ "InternetGatewayIpPool", "InternetGatewayIpAddress" ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "InternetGatewayIpPool",
+    ancestors = [ "Silo", "Project", "Vpc", "InternetGateway" ],
+    children = [ ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "InternetGatewayIpAddress",
+    ancestors = [ "Silo", "Project", "Vpc", "InternetGateway" ],
     children = [ ],
     lookup_by_name = true,
     soft_deletes = true,
@@ -910,24 +958,16 @@ mod test {
     use super::Instance;
     use super::LookupPath;
     use super::Project;
-    use crate::context::OpContext;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::model::Name;
-    use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
-    use std::sync::Arc;
 
     /* This is a smoke test that things basically appear to work. */
     #[tokio::test]
     async fn test_lookup() {
         let logctx = dev::test_setup_log("test_lookup");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (_, datastore) =
-            crate::db::datastore::test_utils::datastore_test(&logctx, &db)
-                .await;
-        let opctx = OpContext::for_tests(
-            logctx.log.new(o!()),
-            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
-        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let project_name: Name = Name("my-project".parse().unwrap());
         let instance_name: Name = Name("my-instance".parse().unwrap());
 
@@ -951,7 +991,7 @@ mod test {
             Project::PrimaryKey(_, p)
             if *p == project_id));
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

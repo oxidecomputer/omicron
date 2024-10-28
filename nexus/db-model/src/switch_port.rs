@@ -559,7 +559,8 @@ pub struct SwitchPortRouteConfig {
     pub dst: IpNetwork,
     pub gw: IpNetwork,
     pub vid: Option<SqlU16>,
-    pub local_pref: Option<SqlU32>,
+    #[diesel(column_name = local_pref)]
+    pub rib_priority: Option<SqlU8>,
 }
 
 impl SwitchPortRouteConfig {
@@ -569,9 +570,9 @@ impl SwitchPortRouteConfig {
         dst: IpNetwork,
         gw: IpNetwork,
         vid: Option<SqlU16>,
-        local_pref: Option<SqlU32>,
+        rib_priority: Option<SqlU8>,
     ) -> Self {
-        Self { port_settings_id, interface_name, dst, gw, vid, local_pref }
+        Self { port_settings_id, interface_name, dst, gw, vid, rib_priority }
     }
 }
 
@@ -583,7 +584,7 @@ impl Into<external::SwitchPortRouteConfig> for SwitchPortRouteConfig {
             dst: self.dst.into(),
             gw: self.gw.into(),
             vlan_id: self.vid.map(Into::into),
-            local_pref: self.local_pref.map(Into::into),
+            rib_priority: self.rib_priority.map(Into::into),
         }
     }
 }

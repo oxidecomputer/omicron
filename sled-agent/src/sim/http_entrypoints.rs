@@ -25,6 +25,7 @@ use nexus_sled_agent_shared::inventory::{Inventory, OmicronZonesConfig};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::api::internal::nexus::UpdateArtifactId;
+use omicron_common::api::internal::shared::ExternalIpGatewayMap;
 use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
 use omicron_common::api::internal::shared::{
@@ -324,13 +325,6 @@ impl SledAgentApi for SledAgentSimImpl {
         Ok(HttpResponseOk(sa.omicron_physical_disks_list().await?))
     }
 
-    async fn omicron_zones_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<OmicronZonesConfig>, HttpError> {
-        let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.omicron_zones_list().await))
-    }
-
     async fn omicron_zones_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<OmicronZonesConfig>,
@@ -361,6 +355,15 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         sa.set_vpc_routes(body.into_inner()).await;
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn set_eip_gateways(
+        rqctx: RequestContext<Self::Context>,
+        _body: TypedBody<ExternalIpGatewayMap>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let _sa = rqctx.context();
+        // sa.set_vpc_routes(body.into_inner()).await;
         Ok(HttpResponseUpdatedNoContent())
     }
 

@@ -20,6 +20,7 @@ mod host_phase1_updater;
 mod images;
 mod initialization;
 mod instances;
+mod internet_gateway;
 mod ip_pools;
 mod metrics;
 mod oximeter;

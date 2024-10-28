@@ -218,7 +218,7 @@ mod tests {
         let logctx = dev::test_setup_log("test_prune_expired_producers");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) =
-            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+            datastore_test(&logctx.log, &db, Uuid::new_v4()).await;
 
         // Insert an Oximeter collector
         let collector_info = OximeterInfo::new(&params::OximeterInfo {
@@ -239,22 +239,19 @@ mod tests {
         assert!(pruned.failures.is_empty());
 
         // Insert a producer.
-        let producer = ProducerEndpoint::new(
-            &nexus::ProducerEndpoint {
-                id: Uuid::new_v4(),
-                kind: nexus::ProducerKind::Service,
-                address: "[::1]:0".parse().unwrap(), // unused
-                interval: Duration::from_secs(0),    // unused
-            },
-            collector_info.id,
-        );
+        let producer = nexus::ProducerEndpoint {
+            id: Uuid::new_v4(),
+            kind: nexus::ProducerKind::Service,
+            address: "[::1]:0".parse().unwrap(), // unused
+            interval: Duration::from_secs(0),    // unused
+        };
         datastore
-            .producer_endpoint_create(&opctx, &producer)
+            .producer_endpoint_upsert_and_assign(&opctx, &producer)
             .await
             .expect("failed to insert producer");
 
         let producer_time_modified =
-            read_time_modified(&datastore, producer.id()).await;
+            read_time_modified(&datastore, producer.id).await;
 
         // GC'ing expired producers with an expiration time older than our
         // producer's `time_modified` should not prune anything.
@@ -278,7 +275,7 @@ mod tests {
         .await
         .expect("failed to prune expired producers");
         let expected_success =
-            [producer.id()].into_iter().collect::<BTreeSet<_>>();
+            [producer.id].into_iter().collect::<BTreeSet<_>>();
         assert_eq!(pruned.successes, expected_success);
         assert!(pruned.failures.is_empty());
 
@@ -294,6 +291,7 @@ mod tests {
         assert!(pruned.successes.is_empty());
         assert!(pruned.failures.is_empty());
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -306,7 +304,7 @@ mod tests {
         );
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) =
-            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+            datastore_test(&logctx.log, &db, Uuid::new_v4()).await;
 
         let mut collector = httptest::Server::run();
 
@@ -321,22 +319,19 @@ mod tests {
             .expect("failed to insert collector");
 
         // Insert a producer.
-        let producer = ProducerEndpoint::new(
-            &nexus::ProducerEndpoint {
-                id: Uuid::new_v4(),
-                kind: nexus::ProducerKind::Service,
-                address: "[::1]:0".parse().unwrap(), // unused
-                interval: Duration::from_secs(0),    // unused
-            },
-            collector_info.id,
-        );
+        let producer = nexus::ProducerEndpoint {
+            id: Uuid::new_v4(),
+            kind: nexus::ProducerKind::Service,
+            address: "[::1]:0".parse().unwrap(), // unused
+            interval: Duration::from_secs(0),    // unused
+        };
         datastore
-            .producer_endpoint_create(&opctx, &producer)
+            .producer_endpoint_upsert_and_assign(&opctx, &producer)
             .await
             .expect("failed to insert producer");
 
         let producer_time_modified =
-            read_time_modified(&datastore, producer.id()).await;
+            read_time_modified(&datastore, producer.id).await;
 
         // GC'ing expired producers with an expiration time _newer_ than our
         // producer's `time_modified` should prune our one producer and notify
@@ -344,7 +339,7 @@ mod tests {
         collector.expect(
             Expectation::matching(request::method_path(
                 "DELETE",
-                format!("/producers/{}", producer.id()),
+                format!("/producers/{}", producer.id),
             ))
             .respond_with(status_code(204)),
         );
@@ -357,12 +352,13 @@ mod tests {
         .await
         .expect("failed to prune expired producers");
         let expected_success =
-            [producer.id()].into_iter().collect::<BTreeSet<_>>();
+            [producer.id].into_iter().collect::<BTreeSet<_>>();
         assert_eq!(pruned.successes, expected_success);
         assert!(pruned.failures.is_empty());
 
         collector.verify_and_clear();
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

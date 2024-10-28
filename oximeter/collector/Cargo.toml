@@ -10,18 +10,21 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+async-trait.workspace = true
 camino.workspace = true
 chrono.workspace = true
 clap.workspace = true
 dropshot.workspace = true
 futures.workspace = true
-internal-dns.workspace = true
+internal-dns-resolver.workspace = true
+internal-dns-types.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 oximeter.workspace = true
 oximeter-api.workspace = true
 oximeter-client.workspace = true
 oximeter-db.workspace = true
+qorb.workspace = true
 rand.workspace = true
 reqwest = { workspace = true, features = [ "json" ] }
 schemars.workspace = true

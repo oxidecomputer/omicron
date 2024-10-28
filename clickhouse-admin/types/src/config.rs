@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{KeeperId, ServerId, OXIMETER_CLUSTER};
+use crate::{path_schema, KeeperId, ServerId, OXIMETER_CLUSTER};
 use anyhow::{bail, Error};
 use camino::Utf8PathBuf;
 use omicron_common::address::{
@@ -10,22 +10,10 @@ use omicron_common::address::{
     CLICKHOUSE_KEEPER_RAFT_PORT, CLICKHOUSE_KEEPER_TCP_PORT,
     CLICKHOUSE_TCP_PORT,
 };
-use schemars::{
-    gen::SchemaGenerator,
-    schema::{Schema, SchemaObject},
-    JsonSchema,
-};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::{fmt::Display, str::FromStr};
-
-// Used for schemars to be able to be used with camino:
-// See https://github.com/camino-rs/camino/issues/91#issuecomment-2027908513
-pub fn path_schema(gen: &mut SchemaGenerator) -> Schema {
-    let mut schema: SchemaObject = <String>::json_schema(gen).into();
-    schema.format = Some("Utf8PathBuf".to_owned());
-    schema.into()
-}
 
 /// Configuration for a ClickHouse replica server
 #[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
@@ -136,6 +124,13 @@ impl ReplicaConfig {
             </interval>
         </default>
     </quotas>
+
+    <query_log>
+        <database>system</database>
+        <table>query_log</table>
+        <engine>Engine = MergeTree ORDER BY event_time TTL event_date + INTERVAL 7 DAY</engine>
+        <flush_interval_milliseconds>10000</flush_interval_milliseconds>
+    </query_log>
 
     <tmp_path>{temp_files_path}</tmp_path>
     <user_files_path>{user_files_path}</user_files_path>

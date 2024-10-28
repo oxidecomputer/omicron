@@ -53,7 +53,7 @@ pub(crate) async fn deploy_datasets(
 
             let client = nexus_networking::sled_client_from_address(
                 sled_id.into_untyped_uuid(),
-                db_sled.sled_agent_address,
+                db_sled.sled_agent_address(),
                 &log,
             );
 
@@ -254,7 +254,7 @@ pub(crate) async fn ensure_dataset_records_exist(
 mod tests {
     use super::*;
     use nexus_db_model::Zpool;
-    use nexus_reconfigurator_planning::example::example;
+    use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintZoneFilter;
@@ -304,11 +304,13 @@ mod tests {
         let opctx = &opctx;
 
         // Use the standard example system.
-        let (collection, _, mut blueprint) = example(&opctx.log, TEST_NAME, 5);
+        let (example, mut blueprint) =
+            ExampleSystemBuilder::new(&opctx.log, TEST_NAME).nsleds(5).build();
 
         // Set the target so our database-modifying operations know they
         // can safely act on the current target blueprint.
         update_blueprint_target(&datastore, &opctx, &mut blueprint).await;
+        let collection = example.collection;
 
         // Record the sleds and zpools.
         crate::tests::insert_sled_records(datastore, &blueprint).await;
@@ -387,7 +389,7 @@ mod tests {
         // Create another zpool on one of the sleds, so we can add new
         // zones that use it.
         let new_zpool_id = ZpoolUuid::new_v4();
-        for &sled_id in collection.omicron_zones.keys().take(1) {
+        for &sled_id in collection.sled_agents.keys().take(1) {
             let zpool = Zpool::new(
                 new_zpool_id.into_untyped_uuid(),
                 sled_id.into_untyped_uuid(),
@@ -489,7 +491,8 @@ mod tests {
         let opctx = &opctx;
 
         // Use the standard example system.
-        let (_, _, mut blueprint) = example(&opctx.log, TEST_NAME, 5);
+        let (_example, mut blueprint) =
+            ExampleSystemBuilder::new(&opctx.log, TEST_NAME).nsleds(5).build();
 
         // Set the target so our database-modifying operations know they
         // can safely act on the current target blueprint.
@@ -573,7 +576,8 @@ mod tests {
         let opctx = &opctx;
 
         // Use the standard example system.
-        let (_, _, mut blueprint) = example(&opctx.log, TEST_NAME, 5);
+        let (_example, mut blueprint) =
+            ExampleSystemBuilder::new(&opctx.log, TEST_NAME).nsleds(5).build();
 
         // Set the target so our database-modifying operations know they
         // can safely act on the current target blueprint.
@@ -687,7 +691,8 @@ mod tests {
         let opctx = &opctx;
 
         // Use the standard example system.
-        let (_, _, mut blueprint) = example(&opctx.log, TEST_NAME, 5);
+        let (_example, mut blueprint) =
+            ExampleSystemBuilder::new(&opctx.log, TEST_NAME).nsleds(5).build();
 
         // Set the target so our database-modifying operations know they
         // can safely act on the current target blueprint.

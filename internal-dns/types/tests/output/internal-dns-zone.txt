@@ -1,0 +1,139 @@
+builder: "empty"
+{}
+builder: "hosts_only"
+{
+  "001de000-51ed-4000-8000-000000000001.sled": [
+    {
+      "type": "AAAA",
+      "data": "::1"
+    }
+  ],
+  "001de000-51ed-4000-8000-000000000002.sled": [
+    {
+      "type": "AAAA",
+      "data": "::2"
+    }
+  ]
+}
+builder: "zones_only"
+{
+  "001de000-c04e-4000-8000-000000000001.host": [
+    {
+      "type": "AAAA",
+      "data": "::1:1"
+    }
+  ],
+  "001de000-c04e-4000-8000-000000000002.host": [
+    {
+      "type": "AAAA",
+      "data": "::1:2"
+    }
+  ]
+}
+builder: "non_trivial"
+{
+  "001de000-51ed-4000-8000-000000000001.sled": [
+    {
+      "type": "AAAA",
+      "data": "::1"
+    }
+  ],
+  "001de000-51ed-4000-8000-000000000002.sled": [
+    {
+      "type": "AAAA",
+      "data": "::2"
+    }
+  ],
+  "001de000-c04e-4000-8000-000000000001.host": [
+    {
+      "type": "AAAA",
+      "data": "::1:1"
+    }
+  ],
+  "001de000-c04e-4000-8000-000000000002.host": [
+    {
+      "type": "AAAA",
+      "data": "::1:2"
+    }
+  ],
+  "001de000-c04e-4000-8000-000000000003.host": [
+    {
+      "type": "AAAA",
+      "data": "::1:3"
+    }
+  ],
+  "001de000-c04e-4000-8000-000000000004.host": [
+    {
+      "type": "AAAA",
+      "data": "::1:4"
+    }
+  ],
+  "_boundary-ntp._tcp": [
+    {
+      "type": "SRV",
+      "data": {
+        "prio": 0,
+        "weight": 0,
+        "port": 127,
+        "target": "001de000-c04e-4000-8000-000000000002.host.control-plane.oxide.internal"
+      }
+    }
+  ],
+  "_nexus._tcp": [
+    {
+      "type": "SRV",
+      "data": {
+        "prio": 0,
+        "weight": 0,
+        "port": 123,
+        "target": "001de000-c04e-4000-8000-000000000001.host.control-plane.oxide.internal"
+      }
+    },
+    {
+      "type": "SRV",
+      "data": {
+        "prio": 0,
+        "weight": 0,
+        "port": 124,
+        "target": "001de000-c04e-4000-8000-000000000002.host.control-plane.oxide.internal"
+      }
+    }
+  ],
+  "_oximeter._tcp": [
+    {
+      "type": "SRV",
+      "data": {
+        "prio": 0,
+        "weight": 0,
+        "port": 125,
+        "target": "001de000-c04e-4000-8000-000000000002.host.control-plane.oxide.internal"
+      }
+    },
+    {
+      "type": "SRV",
+      "data": {
+        "prio": 0,
+        "weight": 0,
+        "port": 126,
+        "target": "001de000-c04e-4000-8000-000000000003.host.control-plane.oxide.internal"
+      }
+    }
+  ],
+  "_sledagent._tcp.001de000-51ed-4000-8000-000000000001": [
+    {
+      "type": "SRV",
+      "data": {
+        "prio": 0,
+        "weight": 0,
+        "port": 123,
+        "target": "001de000-51ed-4000-8000-000000000001.sled.control-plane.oxide.internal"
+      }
+    }
+  ],
+  "boundary-ntp": [
+    {
+      "type": "AAAA",
+      "data": "::1:2"
+    }
+  ]
+}

@@ -16,11 +16,12 @@ use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
-use dns_service_client::types::DnsConfig;
-use dns_service_client::{
-    types::{DnsConfigParams, DnsConfigZone, DnsRecord, Srv},
-    Client,
-};
+use dns_service_client::Client;
+use internal_dns_types::config::DnsConfig;
+use internal_dns_types::config::DnsConfigParams;
+use internal_dns_types::config::DnsConfigZone;
+use internal_dns_types::config::DnsRecord;
+use internal_dns_types::config::Srv;
 use slog::{Drain, Logger};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -219,7 +220,7 @@ async fn main() -> Result<()> {
                 .collect();
 
             let new_config = DnsConfigParams {
-                generation: old_config.generation + 1,
+                generation: old_config.generation.next(),
                 time_created: chrono::Utc::now(),
                 zones,
             };
@@ -274,7 +275,7 @@ fn add_record(
     our_kv.1.push(record);
 
     Ok(DnsConfigParams {
-        generation: generation + 1,
+        generation: generation.next(),
         time_created: chrono::Utc::now(),
         zones: other_zones
             .into_iter()

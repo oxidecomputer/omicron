@@ -895,15 +895,14 @@ impl DataStore {
 mod test {
     use super::*;
 
-    use crate::db::datastore::test_utils::datastore_test;
-    use nexus_test_utils::db::test_setup_database;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use omicron_test_utils::dev;
 
     #[tokio::test]
     async fn test_one_replacement_per_volume() {
         let logctx = dev::test_setup_log("test_one_replacement_per_volume");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let region_1_id = Uuid::new_v4();
         let region_2_id = Uuid::new_v4();
@@ -921,7 +920,7 @@ mod test {
             .await
             .unwrap_err();
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -934,8 +933,8 @@ mod test {
         let logctx = dev::test_setup_log(
             "test_replacement_done_in_middle_of_drive_saga",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let region_id = Uuid::new_v4();
         let volume_id = Uuid::new_v4();
@@ -1014,7 +1013,7 @@ mod test {
         );
         assert_eq!(actual_request.operating_saga_id, None);
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1026,8 +1025,8 @@ mod test {
         let logctx = dev::test_setup_log(
             "test_replacement_done_in_middle_of_finish_saga",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let region_id = Uuid::new_v4();
         let volume_id = Uuid::new_v4();
@@ -1081,7 +1080,7 @@ mod test {
             .await
             .unwrap();
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

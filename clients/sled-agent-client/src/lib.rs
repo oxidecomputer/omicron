@@ -47,6 +47,7 @@ progenitor::generate_api!(
         DatasetKind = omicron_common::api::internal::shared::DatasetKind,
         DiskIdentity = omicron_common::disk::DiskIdentity,
         DiskVariant = omicron_common::disk::DiskVariant,
+        ExternalIpGatewayMap = omicron_common::api::internal::shared::ExternalIpGatewayMap,
         Generation = omicron_common::api::external::Generation,
         ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
         Inventory = nexus_sled_agent_shared::inventory::Inventory,

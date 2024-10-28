@@ -537,4 +537,9 @@ mod optional_time_delta {
 pub struct InstanceUpdate {
     #[diesel(column_name = boot_disk_id)]
     pub boot_disk_id: Option<Uuid>,
+
+    /// The auto-restart policy for this instance. If this is `None`, it will
+    /// set the instance's auto-restart policy to `NULL`.
+    #[diesel(column_name = auto_restart_policy)]
+    pub auto_restart_policy: Option<InstanceAutoRestartPolicy>,
 }

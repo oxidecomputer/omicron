@@ -19,7 +19,6 @@ use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::DATABASE_OPTIONS_HEADING;
 use crate::Omdb;
-use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
@@ -29,6 +28,8 @@ use camino::Utf8PathBuf;
 use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
+use clap::builder::PossibleValue;
+use clap::builder::PossibleValuesParser;
 use clap::ArgAction;
 use clap::Args;
 use clap::Subcommand;
@@ -45,6 +46,7 @@ use gateway_client::types::SpType;
 use indicatif::ProgressBar;
 use indicatif::ProgressDrawTarget;
 use indicatif::ProgressStyle;
+use internal_dns_types::names::ServiceName;
 use ipnetwork::IpNetwork;
 use nexus_config::PostgresConfigWithUrl;
 use nexus_db_model::Dataset;
@@ -136,6 +138,7 @@ use std::fmt::Display;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
+use strum::VariantArray;
 use tabled::Tabled;
 use uuid::Uuid;
 
@@ -221,10 +224,7 @@ impl DbUrlOptions {
                 );
                 eprintln!("note: (override with --db-url or OMDB_DB_URL)");
                 let addrs = omdb
-                    .dns_lookup_all(
-                        log.clone(),
-                        internal_dns::ServiceName::Cockroach,
-                    )
+                    .dns_lookup_all(log.clone(), ServiceName::Cockroach)
                     .await?;
 
                 format!(
@@ -257,10 +257,7 @@ impl DbUrlOptions {
         // doesn't match what we expect.  So we use `DataStore::new_unchecked()`
         // here.  We will then check the schema version explicitly and warn the
         // user if it doesn't match.
-        let datastore = Arc::new(
-            DataStore::new_unchecked(log.clone(), pool)
-                .map_err(|e| anyhow!(e).context("creating datastore"))?,
-        );
+        let datastore = Arc::new(DataStore::new_unchecked(log.clone(), pool));
         check_schema_version(&datastore).await;
         Ok(datastore)
     }
@@ -432,6 +429,21 @@ struct InstanceListArgs {
     /// Only show the running instances
     #[arg(short, long, action=ArgAction::SetTrue)]
     running: bool,
+
+    /// Only show instances in the provided state(s).
+    ///
+    /// By default, all instances are selected.
+    #[arg(
+        short,
+        long = "state",
+        conflicts_with = "running",
+        value_parser = PossibleValuesParser::new(
+            db::model::InstanceState::VARIANTS
+                .iter()
+                .map(|v| PossibleValue::new(v.label()))
+        ),
+    )]
+    states: Vec<db::model::InstanceState>,
 }
 
 #[derive(Debug, Args)]
@@ -787,7 +799,7 @@ impl DbArgs {
     ) -> Result<(), anyhow::Error> {
         let datastore = self.db_url_opts.connect(omdb, log).await?;
         let opctx = OpContext::for_tests(log.clone(), datastore.clone());
-        match &self.command {
+        let res = match &self.command {
             DbCommands::Rack(RackArgs { command: RackCommands::List }) => {
                 cmd_db_rack_list(&opctx, &datastore, &self.fetch_opts).await
             }
@@ -906,13 +918,8 @@ impl DbArgs {
             DbCommands::Instance(InstanceArgs {
                 command: InstanceCommands::List(args),
             }) => {
-                cmd_db_instances(
-                    &opctx,
-                    &datastore,
-                    &self.fetch_opts,
-                    args.running,
-                )
-                .await
+                cmd_db_instances(&opctx, &datastore, &self.fetch_opts, args)
+                    .await
             }
             DbCommands::Instance(InstanceArgs {
                 command: InstanceCommands::Info(args),
@@ -925,7 +932,7 @@ impl DbArgs {
                     &opctx,
                     &datastore,
                     &self.fetch_opts,
-                    instances_options.running,
+                    instances_options,
                 )
                 .await
             }
@@ -1015,7 +1022,9 @@ impl DbArgs {
             DbCommands::Volumes(VolumeArgs {
                 command: VolumeCommands::List,
             }) => cmd_db_volume_list(&datastore, &self.fetch_opts).await,
-        }
+        };
+        datastore.terminate().await;
+        res
     }
 }
 
@@ -3205,7 +3214,7 @@ async fn cmd_db_instances(
     opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
-    running: bool,
+    &InstanceListArgs { running, ref states }: &InstanceListArgs,
 ) -> Result<(), anyhow::Error> {
     use db::schema::instance::dsl;
     use db::schema::vmm::dsl as vmm_dsl;
@@ -3214,6 +3223,10 @@ async fn cmd_db_instances(
     let mut query = dsl::instance.into_boxed();
     if !fetch_opts.include_deleted {
         query = query.filter(dsl::time_deleted.is_null());
+    }
+
+    if !states.is_empty() {
+        query = query.filter(dsl::state.eq_any(states.clone()));
     }
 
     let instances: Vec<InstanceAndActiveVmm> = query
@@ -5182,31 +5195,23 @@ fn inv_collection_print_sleds(collection: &Collection) {
             println!("        reservation: {reservation:?}, quota: {quota:?}");
         }
 
-        if let Some(zones) = collection.omicron_zones.get(&sled.sled_id) {
-            println!(
-                "    zones collected from {} at {}",
-                zones.source, zones.time_collected,
-            );
-            println!(
-                "    zones generation: {} (count: {})",
-                zones.zones.generation,
-                zones.zones.zones.len()
-            );
+        println!(
+            "    zones generation: {} (count: {})",
+            sled.omicron_zones.generation,
+            sled.omicron_zones.zones.len(),
+        );
 
-            if zones.zones.zones.is_empty() {
-                continue;
-            }
+        if sled.omicron_zones.zones.is_empty() {
+            continue;
+        }
 
-            println!("    ZONES FOUND");
-            for z in &zones.zones.zones {
-                println!(
-                    "      zone {} (type {})",
-                    z.id,
-                    z.zone_type.kind().report_str()
-                );
-            }
-        } else {
-            println!("  warning: no zone information found");
+        println!("    ZONES FOUND");
+        for z in &sled.omicron_zones.zones {
+            println!(
+                "      zone {} (type {})",
+                z.id,
+                z.zone_type.kind().report_str()
+            );
         }
     }
 }

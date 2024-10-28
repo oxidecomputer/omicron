@@ -330,7 +330,9 @@ impl super::Nexus {
             None => None,
         };
 
-        let update = InstanceUpdate { boot_disk_id };
+        let auto_restart_policy = params.auto_restart_policy.map(Into::into);
+
+        let update = InstanceUpdate { boot_disk_id, auto_restart_policy };
         self.datastore()
             .instance_reconfigure(opctx, &authz_instance, update)
             .await
@@ -530,6 +532,8 @@ impl super::Nexus {
             }
         }
 
+        self.background_tasks.task_vpc_route_manager.activate();
+
         // TODO: This operation should return the instance as it was created.
         // Refetching the instance state here won't return that version of the
         // instance if its state changed between the time the saga finished and
@@ -592,6 +596,8 @@ impl super::Nexus {
                 saga_params,
             )
             .await?;
+
+        self.background_tasks.task_vpc_route_manager.activate();
         Ok(())
     }
 
@@ -643,6 +649,8 @@ impl super::Nexus {
                 saga_params,
             )
             .await?;
+
+        self.background_tasks.task_vpc_route_manager.activate();
 
         // TODO correctness TODO robustness TODO design
         // Should we lookup the instance again here?
@@ -2007,10 +2015,18 @@ impl super::Nexus {
             )
             .await?;
 
-        saga_outputs
+        let out = saga_outputs
             .lookup_node_output::<views::ExternalIp>("output")
             .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
-            .internal_context("looking up output from ip attach saga")
+            .internal_context("looking up output from ip attach saga");
+
+        // The VPC routing RPW currently has double-duty on ensuring that
+        // sled-agents have up-to-date mappings between the EIPs they should
+        // know about and keeping routes up-to-date.
+        // Trigger the RPW so that OPTE can accurately select the IP ASAP.
+        self.vpc_needed_notify_sleds();
+
+        out
     }
 
     /// Detach an external IP from an instance.

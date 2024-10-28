@@ -8,7 +8,6 @@ use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 use super::storage::PantryServer;
-use crate::nexus::d2n_params;
 use crate::nexus::NexusClient;
 use crate::rack_setup::service::build_initial_blueprint_from_sled_configs;
 use crate::rack_setup::SledConfig;
@@ -19,7 +18,9 @@ use crate::rack_setup::{
 use anyhow::anyhow;
 use crucible_agent_client::types::State as RegionState;
 use illumos_utils::zpool::ZpoolName;
-use internal_dns::ServiceName;
+use internal_dns_types::config::DnsConfigBuilder;
+use internal_dns_types::names::ServiceName;
+use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
 use nexus_client::types as NexusTypes;
 use nexus_client::types::{IpRange, Ipv4Range, Ipv6Range};
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
@@ -334,7 +335,7 @@ pub async fn run_standalone_server(
     } else {
         dns_server::TransientServer::new(&log).await?
     };
-    let mut dns_config_builder = internal_dns::DnsConfigBuilder::new();
+    let mut dns_config_builder = DnsConfigBuilder::new();
 
     // Start the Crucible Pantry
     let pantry_server = server.start_pantry().await;
@@ -362,8 +363,7 @@ pub async fn run_standalone_server(
     let dns_config =
         dns_config_builder.build_full_config_for_initial_generation();
     dns.initialize_with_config(&log, &dns_config).await?;
-    let internal_dns_version = Generation::try_from(dns_config.generation)
-        .expect("invalid internal dns version");
+    let internal_dns_version = dns_config.generation;
 
     let all_u2_zpools = server.sled_agent.get_zpools().await;
     let get_random_zpool = || {
@@ -384,7 +384,6 @@ pub async fn run_standalone_server(
     let mut zones = vec![BlueprintZoneConfig {
         disposition: BlueprintZoneDisposition::InService,
         id: OmicronZoneUuid::new_v4(),
-        underlay_address: *http_bound.ip(),
         zone_type: BlueprintZoneType::InternalDns(
             blueprint_zone_type::InternalDns {
                 dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
@@ -410,10 +409,6 @@ pub async fn run_standalone_server(
         zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id,
-            underlay_address: match ip {
-                IpAddr::V4(_) => panic!("did not expect v4 address"),
-                IpAddr::V6(a) => a,
-            },
             zone_type: BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 internal_address: match config.nexus_address {
                     SocketAddr::V4(_) => panic!("did not expect v4 address"),
@@ -462,7 +457,6 @@ pub async fn run_standalone_server(
         zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id,
-            underlay_address: ip,
             zone_type: BlueprintZoneType::ExternalDns(
                 blueprint_zone_type::ExternalDns {
                     dataset: OmicronZoneDataset {
@@ -560,9 +554,8 @@ pub async fn run_standalone_server(
         datasets,
         internal_services_ip_pool_ranges,
         certs,
-        internal_dns_zone_config: d2n_params(&dns_config),
-        external_dns_zone_name: internal_dns::names::DNS_ZONE_EXTERNAL_TESTING
-            .to_owned(),
+        internal_dns_zone_config: dns_config,
+        external_dns_zone_name: DNS_ZONE_EXTERNAL_TESTING.to_owned(),
         recovery_silo,
         external_port_count: NexusTypes::ExternalPortDiscovery::Static(
             HashMap::new(),

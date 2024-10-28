@@ -14,15 +14,18 @@ use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
 use futures::TryStreamExt;
-use internal_dns::resolver::Resolver;
-use internal_dns::ServiceName;
 use nexus_client::types::IdSortMode;
+use nexus_client::Client as NexusClient;
+use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
 use oximeter::types::ProducerResults;
 use oximeter::types::ProducerResultsItem;
 use oximeter_db::Client;
 use oximeter_db::DbWrite;
+use qorb::claim::Handle;
+use qorb::pool::Pool;
+use qorb::resolver::BoxedResolver;
 use slog::debug;
 use slog::error;
 use slog::info;
@@ -152,7 +155,6 @@ async fn collection_task(
     let mut log = orig_log.new(o!("address" => producer.address));
     let client = reqwest::Client::new();
     let mut collection_timer = interval(producer.interval);
-    collection_timer.tick().await; // completes immediately
     debug!(
         log,
         "starting oximeter collection task";
@@ -382,12 +384,15 @@ pub struct OximeterAgent {
 
 impl OximeterAgent {
     /// Construct a new agent with the given ID and logger.
+    // TODO(cleanup): Remove this lint when we have only a native resolver.
+    #[allow(clippy::too_many_arguments)]
     pub async fn with_id(
         id: Uuid,
         address: SocketAddrV6,
         refresh_interval: Duration,
         db_config: DbConfig,
-        resolver: &Resolver,
+        http_resolver: BoxedResolver,
+        native_resolver: BoxedResolver,
         log: &Logger,
         replicated: bool,
     ) -> Result<Self, Error> {
@@ -398,22 +403,6 @@ impl OximeterAgent {
             "collector_ip" => address.ip().to_string(),
         ));
         let insertion_log = log.new(o!("component" => "results-sink"));
-
-        // Construct the ClickHouse client first, propagate an error if we can't reach the
-        // database.
-        let db_address = if let Some(address) = db_config.address {
-            address
-        } else if replicated {
-            SocketAddr::V6(
-                resolver
-                    .lookup_socket_v6(ServiceName::ClickhouseServer)
-                    .await?,
-            )
-        } else {
-            SocketAddr::V6(
-                resolver.lookup_socket_v6(ServiceName::Clickhouse).await?,
-            )
-        };
 
         // Determine the version of the database.
         //
@@ -429,7 +418,8 @@ impl OximeterAgent {
         // - The DB doesn't exist at all. This reports a version number of 0. We
         // need to create the DB here, at the latest version. This is used in
         // fresh installations and tests.
-        let client = Client::new(db_address, &log);
+        let client =
+            Client::new_with_pool(http_resolver, native_resolver, &log);
         match client.check_db_is_at_expected_version().await {
             Ok(_) => {}
             Err(oximeter_db::Error::DatabaseVersionMismatch {
@@ -482,11 +472,14 @@ impl OximeterAgent {
 
     /// Ensure the background task that polls Nexus periodically for our list of
     /// assigned producers is running.
-    pub(crate) fn ensure_producer_refresh_task(&self, resolver: Resolver) {
+    pub(crate) fn ensure_producer_refresh_task(
+        &self,
+        nexus_pool: Pool<NexusClient>,
+    ) {
         let mut task = self.refresh_task.lock().unwrap();
         if task.is_none() {
             let refresh_task =
-                tokio::spawn(refresh_producer_list(self.clone(), resolver));
+                tokio::spawn(refresh_producer_list(self.clone(), nexus_pool));
             *task = Some(refresh_task);
         }
     }
@@ -518,12 +511,18 @@ impl OximeterAgent {
         // prints the results as they're received.
         let insertion_log = log.new(o!("component" => "results-sink"));
         if let Some(db_config) = db_config {
-            let Some(address) = db_config.address else {
+            let Some(http_address) = db_config.address else {
                 return Err(Error::Standalone(anyhow!(
                     "Must provide explicit IP address in standalone mode"
                 )));
             };
-            let client = Client::new(address, &log);
+
+            // Grab the native TCP address, or construct one from the defaults.
+            let native_address =
+                db_config.native_address.unwrap_or_else(|| {
+                    SocketAddr::new(http_address.ip(), CLICKHOUSE_TCP_PORT)
+                });
+            let client = Client::new(http_address, native_address, &log);
             let replicated = client.is_oximeter_cluster().await?;
             if !replicated {
                 client.init_single_node_db().await?;
@@ -763,15 +762,16 @@ impl OximeterAgent {
 }
 
 // A task which periodically updates our list of producers from Nexus.
-async fn refresh_producer_list(agent: OximeterAgent, resolver: Resolver) {
+async fn refresh_producer_list(
+    agent: OximeterAgent,
+    nexus_pool: Pool<NexusClient>,
+) {
     let mut interval = tokio::time::interval(agent.refresh_interval);
     loop {
         interval.tick().await;
         info!(agent.log, "refreshing list of producers from Nexus");
-        let nexus_addr =
-            resolve_nexus_with_backoff(&agent.log, &resolver).await;
-        let url = format!("http://{}", nexus_addr);
-        let client = nexus_client::Client::new(&url, agent.log.clone());
+
+        let client = claim_nexus_with_backoff(&agent.log, &nexus_pool).await;
         let mut stream = client.cpapi_assigned_producers_list_stream(
             &agent.id,
             // This is a _total_ limit, not a page size, so `None` means "get
@@ -826,10 +826,10 @@ async fn refresh_producer_list(agent: OximeterAgent, resolver: Resolver) {
     }
 }
 
-async fn resolve_nexus_with_backoff(
+async fn claim_nexus_with_backoff(
     log: &Logger,
-    resolver: &Resolver,
-) -> SocketAddrV6 {
+    nexus_pool: &Pool<NexusClient>,
+) -> Handle<NexusClient> {
     let log_failure = |error, delay| {
         warn!(
             log,
@@ -839,8 +839,8 @@ async fn resolve_nexus_with_backoff(
         );
     };
     let do_lookup = || async {
-        resolver
-            .lookup_socket_v6(ServiceName::Nexus)
+        nexus_pool
+            .claim()
             .await
             .map_err(|e| BackoffError::transient(e.to_string()))
     };
@@ -884,8 +884,7 @@ mod tests {
     // Period these tests wait using `tokio::time::advance()` before checking
     // their test conditions.
     const TEST_WAIT_PERIOD: Duration = Duration::from_millis(
-        COLLECTION_INTERVAL.as_millis() as u64 * N_COLLECTIONS
-            + COLLECTION_INTERVAL.as_millis() as u64 / 2,
+        COLLECTION_INTERVAL.as_millis() as u64 * N_COLLECTIONS,
     );
 
     // Test that we count successful collections from a target correctly.

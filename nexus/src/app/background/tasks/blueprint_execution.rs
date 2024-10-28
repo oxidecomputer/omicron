@@ -7,7 +7,7 @@
 use crate::app::background::{Activator, BackgroundTask};
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use internal_dns::resolver::Resolver;
+use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_execution::RealizeBlueprintOutput;
@@ -406,7 +406,6 @@ mod test {
                 zones: vec![BlueprintZoneConfig {
                     disposition,
                     id: OmicronZoneUuid::new_v4(),
-                    underlay_address: "::1".parse().unwrap(),
                     filesystem_pool: Some(ZpoolName::new_external(pool_id)),
                     zone_type: BlueprintZoneType::InternalDns(
                         blueprint_zone_type::InternalDns {
