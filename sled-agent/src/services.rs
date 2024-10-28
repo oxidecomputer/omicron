@@ -124,11 +124,12 @@ const IPV6_UNSPECIFIED: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
 
 const COCKROACH: &str = "/opt/oxide/cockroachdb/bin/cockroach";
 
+// These are all the same binary. They just reside at different paths.
 const CLICKHOUSE_SERVER_BINARY: &str =
-    "/opt/oxide//opt/oxide/clickhouse_server/clickhouse";
+    "/opt/oxide/clickhouse_server/clickhouse";
 const CLICKHOUSE_KEEPER_BINARY: &str =
-    "/opt/oxide//opt/oxide/clickhouse_keeper/clickhouse";
-const CLICKHOUSE_BINARY: &str = "/opt/oxide//opt/oxide/clickhouse/clickhouse";
+    "/opt/oxide/clickhouse_keeper/clickhouse";
+const CLICKHOUSE_BINARY: &str = "/opt/oxide/clickhouse/clickhouse";
 
 pub const SWITCH_ZONE_BASEBOARD_FILE: &str = "/opt/oxide/baseboard.json";
 
@@ -1677,10 +1678,11 @@ impl ServiceManager {
                             CLICKHOUSE_SERVER_BINARY,
                         );
                 let clickhouse_admin_service =
-                    ServiceBuilder::new("oxide/clickhouse-admin").add_instance(
-                        ServiceInstanceBuilder::new("default")
-                            .add_property_group(clickhouse_admin_config),
-                    );
+                    ServiceBuilder::new("oxide/clickhouse-admin-server")
+                        .add_instance(
+                            ServiceInstanceBuilder::new("default")
+                                .add_property_group(clickhouse_admin_config),
+                        );
 
                 let profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
@@ -1750,10 +1752,11 @@ impl ServiceManager {
                             CLICKHOUSE_KEEPER_BINARY,
                         );
                 let clickhouse_admin_service =
-                    ServiceBuilder::new("oxide/clickhouse-admin").add_instance(
-                        ServiceInstanceBuilder::new("default")
-                            .add_property_group(clickhouse_admin_config),
-                    );
+                    ServiceBuilder::new("oxide/clickhouse-admin-keeper")
+                        .add_instance(
+                            ServiceInstanceBuilder::new("default")
+                                .add_property_group(clickhouse_admin_config),
+                        );
 
                 let profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
