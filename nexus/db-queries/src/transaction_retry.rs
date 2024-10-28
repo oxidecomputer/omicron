@@ -106,15 +106,14 @@ impl RetryHelper {
             + Send
             + Sync,
     {
-        let slef = Arc::new(self);
         let result = conn
-            .transaction_async_with_retry(f, slef.clone().as_callback())
+            .transaction_async_with_retry(f, || self.retry_callback())
             .await;
 
-        let retry_info = slef.inner.lock().unwrap();
+        let retry_info = self.inner.lock().unwrap();
         if retry_info.has_retried() {
             info!(
-                slef.log,
+                self.log,
                 "transaction completed";
                 "attempts" => retry_info.attempts,
             );
@@ -168,17 +167,6 @@ impl RetryHelper {
         // of attempts we've tried.
         let inner = self.inner.lock().unwrap().tick();
         return inner.attempts < MAX_RETRY_ATTEMPTS;
-    }
-
-    // Converts this function to a retryable callback that can be used from
-    // "transaction_async_with_retry".
-    fn as_callback(
-        self: Arc<Self>,
-    ) -> impl Fn() -> futures::future::BoxFuture<'static, bool> {
-        move || {
-            let r = self.clone();
-            Box::pin(async move { r.retry_callback().await })
-        }
     }
 }
 
@@ -258,8 +246,7 @@ impl<E: std::fmt::Debug> OptionalError<E> {
 mod test {
     use super::*;
 
-    use crate::db::datastore::test_utils::datastore_test;
-    use nexus_test_utils::db::test_setup_database;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use omicron_test_utils::dev;
     use oximeter::types::FieldValue;
 
@@ -271,8 +258,8 @@ mod test {
         let logctx = dev::test_setup_log(
             "test_transaction_rollback_produces_no_samples",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (_opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
 
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
@@ -294,7 +281,7 @@ mod test {
             .clone();
         assert_eq!(samples, vec![]);
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -304,8 +291,8 @@ mod test {
     async fn test_transaction_retry_produces_samples() {
         let logctx =
             dev::test_setup_log("test_transaction_retry_produces_samples");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (_opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
 
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         datastore
@@ -355,7 +342,7 @@ mod test {
             );
         }
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

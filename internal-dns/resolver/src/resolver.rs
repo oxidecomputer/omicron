@@ -686,7 +686,7 @@ mod test {
 
         // If we deploy a new generation that removes all records, then we don't
         // find anything any more.
-        dns_config.generation += 1;
+        dns_config.generation = dns_config.generation.next();
         dns_config.zones[0].records = HashMap::new();
         dns_server.update(&dns_config).await.unwrap();
 
@@ -707,7 +707,7 @@ mod test {
         // If we remove the zone altogether, we'll get a different resolution
         // error because the DNS server is no longer authoritative for this
         // zone.
-        dns_config.generation += 1;
+        dns_config.generation = dns_config.generation.next();
         dns_config.zones = Vec::new();
         dns_server.update(&dns_config).await.unwrap();
 
@@ -746,7 +746,7 @@ mod test {
         dns_builder.service_backend_zone(srv_crdb, &zone, 54321).unwrap();
         let mut dns_config =
             dns_builder.build_full_config_for_initial_generation();
-        dns_config.generation += 1;
+        dns_config.generation = dns_config.generation.next();
         dns_server.update(&dns_config).await.unwrap();
         let found_addr = resolver
             .lookup_socket_v6(ServiceName::Cockroach)
@@ -1024,7 +1024,7 @@ mod test {
 
         // Now let's remove one of the AAAA records for a zone/target.
         // The lookup should still succeed and return the other address.
-        dns_config.generation += 1;
+        dns_config.generation = dns_config.generation.next();
         let root = dns_config
             .zones
             .iter_mut()
@@ -1066,7 +1066,7 @@ mod test {
         assert_eq!(targets, expected_targets);
 
         // Finally, let's remove the last AAAA record as well
-        dns_config.generation += 1;
+        dns_config.generation = dns_config.generation.next();
         let root = dns_config
             .zones
             .iter_mut()

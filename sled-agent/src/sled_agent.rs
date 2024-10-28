@@ -190,11 +190,21 @@ impl From<Error> for omicron_common::api::external::Error {
 impl From<Error> for dropshot::HttpError {
     fn from(err: Error) -> Self {
         const NO_SUCH_INSTANCE: &str = "NO_SUCH_INSTANCE";
+        const INSTANCE_CHANNEL_FULL: &str = "INSTANCE_CHANNEL_FULL";
         match err {
             Error::Instance(crate::instance_manager::Error::Instance(
                 instance_error,
             )) => {
                 match instance_error {
+                    // The instance's request channel is full, so it cannot
+                    // currently process this request. Shed load, but indicate
+                    // to the client that it can try again later.
+                    err @ crate::instance::Error::FailedSendChannelFull => {
+                        HttpError::for_unavail(
+                            Some(INSTANCE_CHANNEL_FULL.to_string()),
+                            err.to_string(),
+                        )
+                    }
                     crate::instance::Error::Propolis(propolis_error) => {
                         // Work around dropshot#693: HttpError::for_status
                         // only accepts client errors and asserts on server

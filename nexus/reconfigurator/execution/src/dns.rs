@@ -19,7 +19,6 @@ use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsConfigParams;
 use nexus_types::internal_api::params::DnsConfigZone;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::InternalContext;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::SledUuid;
@@ -219,7 +218,7 @@ pub(crate) async fn deploy_dns_one(
     let dns_config_blueprint = DnsConfigParams {
         zones: vec![dns_zone_blueprint],
         time_created: chrono::Utc::now(),
-        generation: u64::from(blueprint_generation.next()),
+        generation: blueprint_generation.next(),
     };
 
     info!(
@@ -228,16 +227,13 @@ pub(crate) async fn deploy_dns_one(
         dns_config_current.generation,
         dns_config_blueprint.generation,
     );
-    let generation_u32 =
-        u32::try_from(dns_config_current.generation).map_err(|e| {
-            Error::internal_error(&format!(
-                "DNS generation got too large: {}",
-                e,
-            ))
-        })?;
-    let generation =
-        nexus_db_model::Generation::from(Generation::from(generation_u32));
-    datastore.dns_update_from_version(opctx, update, generation).await
+    datastore
+        .dns_update_from_version(
+            opctx,
+            update,
+            dns_config_current.generation.into(),
+        )
+        .await
 }
 
 fn dns_compute_update(
@@ -387,7 +383,7 @@ mod test {
 
     fn dns_config_empty() -> DnsConfigParams {
         DnsConfigParams {
-            generation: 1,
+            generation: Generation::new(),
             time_created: chrono::Utc::now(),
             zones: vec![DnsConfigZone {
                 zone_name: String::from("internal"),
@@ -588,7 +584,6 @@ mod test {
         Ok(BlueprintZoneConfig {
             disposition,
             id: config.id,
-            underlay_address: config.underlay_address,
             filesystem_pool: config.filesystem_pool,
             zone_type,
         })
@@ -661,8 +656,7 @@ mod test {
         }
 
         let dns_empty = dns_config_empty();
-        let initial_dns_generation =
-            Generation::from(u32::try_from(dns_empty.generation).unwrap());
+        let initial_dns_generation = dns_empty.generation;
         let mut blueprint = Blueprint {
             id: Uuid::new_v4(),
             blueprint_zones,
@@ -688,7 +682,6 @@ mod test {
             BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::Quiesced,
                 id: out_of_service_id,
-                underlay_address: out_of_service_addr,
                 filesystem_pool: Some(ZpoolName::new_external(
                     ZpoolUuid::new_v4(),
                 )),
@@ -762,7 +755,7 @@ mod test {
         // Omicron zone.
         let mut omicron_zones_by_ip: BTreeMap<_, _> = blueprint
             .all_omicron_zones(BlueprintZoneFilter::ShouldBeInInternalDns)
-            .map(|(_, zone)| (zone.underlay_address, zone.id))
+            .map(|(_, zone)| (zone.underlay_ip(), zone.id))
             .collect();
         println!("omicron zones by IP: {:#?}", omicron_zones_by_ip);
 
@@ -1356,14 +1349,8 @@ mod test {
                 sled_rows: &sled_rows,
                 zpool_rows: &zpool_rows,
                 ip_pool_range_rows: &ip_pool_range_rows,
-                internal_dns_version: Generation::from(
-                    u32::try_from(dns_initial_internal.generation).unwrap(),
-                )
-                .into(),
-                external_dns_version: Generation::from(
-                    u32::try_from(dns_latest_external.generation).unwrap(),
-                )
-                .into(),
+                internal_dns_version: dns_initial_internal.generation.into(),
+                external_dns_version: dns_latest_external.generation.into(),
                 // These are not used because we're not actually going through
                 // the planner.
                 cockroachdb_settings: &CockroachDbSettings::empty(),
@@ -1377,6 +1364,7 @@ mod test {
                 target_cockroachdb_cluster_version:
                     CockroachDbClusterVersion::POLICY,
                 target_crucible_pantry_zone_count: CRUCIBLE_PANTRY_REDUNDANCY,
+                clickhouse_policy: None,
                 log,
             }
             .build()
@@ -1459,7 +1447,7 @@ mod test {
 
         assert_eq!(
             dns_latest_internal.generation,
-            dns_initial_internal.generation + 1,
+            dns_initial_internal.generation.next(),
         );
 
         let diff = diff_sole_zones(&dns_initial_internal, &dns_latest_internal);
@@ -1497,7 +1485,7 @@ mod test {
             .expect("fetching latest external DNS");
         assert_eq!(
             dns_latest_external.generation,
-            dns_previous_external.generation + 1,
+            dns_previous_external.generation.next(),
         );
         let diff =
             diff_sole_zones(&dns_previous_external, &dns_latest_external);
@@ -1623,7 +1611,10 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::External)
             .await
             .expect("fetching latest external DNS");
-        assert_eq!(old_external.generation + 1, dns_latest_external.generation);
+        assert_eq!(
+            old_external.generation.next(),
+            dns_latest_external.generation
+        );
 
         // Specifically, there should be one new name (for the new Silo).
         let diff = diff_sole_zones(&old_external, &dns_latest_external);
@@ -1653,7 +1644,10 @@ mod test {
             .await
             .expect("fetching latest external DNS");
         assert_eq!(old_internal.generation, dns_latest_internal.generation);
-        assert_eq!(old_external.generation + 1, dns_latest_external.generation);
+        assert_eq!(
+            old_external.generation.next(),
+            dns_latest_external.generation
+        );
 
         dns_latest_external
     }

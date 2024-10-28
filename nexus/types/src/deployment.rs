@@ -59,6 +59,7 @@ pub use network_resources::OmicronZoneExternalSnatIp;
 pub use network_resources::OmicronZoneNetworkResources;
 pub use network_resources::OmicronZoneNic;
 pub use network_resources::OmicronZoneNicEntry;
+pub use planning_input::ClickhouseMode;
 pub use planning_input::ClickhousePolicy;
 pub use planning_input::CockroachDbClusterVersion;
 pub use planning_input::CockroachDbPreserveDowngrade;
@@ -370,7 +371,7 @@ impl BpSledSubtableData for BlueprintOrCollectionZonesConfig {
                     zone.kind().report_str().to_string(),
                     zone.id().to_string(),
                     zone.disposition().to_string(),
-                    zone.underlay_address().to_string(),
+                    zone.underlay_ip().to_string(),
                 ],
             )
         })
@@ -645,17 +646,25 @@ pub struct BlueprintZoneConfig {
     pub disposition: BlueprintZoneDisposition,
 
     pub id: OmicronZoneUuid,
-    pub underlay_address: Ipv6Addr,
     /// zpool used for the zone's (transient) root filesystem
     pub filesystem_pool: Option<ZpoolName>,
     pub zone_type: BlueprintZoneType,
+}
+
+impl BlueprintZoneConfig {
+    /// Returns the underlay IP address associated with this zone.
+    ///
+    /// Assumes all zone have exactly one underlay IP address (which is
+    /// currently true).
+    pub fn underlay_ip(&self) -> Ipv6Addr {
+        self.zone_type.underlay_ip()
+    }
 }
 
 impl From<BlueprintZoneConfig> for OmicronZoneConfig {
     fn from(z: BlueprintZoneConfig) -> Self {
         Self {
             id: z.id,
-            underlay_address: z.underlay_address,
             filesystem_pool: z.filesystem_pool,
             zone_type: z.zone_type.into(),
         }
@@ -968,7 +977,7 @@ impl PartialEq<BlueprintZoneConfig> for BlueprintOrCollectionZoneConfig {
     fn eq(&self, other: &BlueprintZoneConfig) -> bool {
         self.kind() == other.kind()
             && self.disposition() == other.disposition
-            && self.underlay_address() == other.underlay_address
+            && self.underlay_ip() == other.underlay_ip()
             && self.is_zone_type_equal(&other.zone_type)
     }
 }
@@ -998,12 +1007,10 @@ impl BlueprintOrCollectionZoneConfig {
         }
     }
 
-    pub fn underlay_address(&self) -> Ipv6Addr {
+    pub fn underlay_ip(&self) -> Ipv6Addr {
         match self {
-            BlueprintOrCollectionZoneConfig::Collection(z) => {
-                z.underlay_address
-            }
-            BlueprintOrCollectionZoneConfig::Blueprint(z) => z.underlay_address,
+            BlueprintOrCollectionZoneConfig::Collection(z) => z.underlay_ip(),
+            BlueprintOrCollectionZoneConfig::Blueprint(z) => z.underlay_ip(),
         }
     }
 

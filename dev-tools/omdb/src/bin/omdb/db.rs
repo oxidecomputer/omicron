@@ -19,7 +19,6 @@ use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::DATABASE_OPTIONS_HEADING;
 use crate::Omdb;
-use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
@@ -29,6 +28,8 @@ use camino::Utf8PathBuf;
 use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
+use clap::builder::PossibleValue;
+use clap::builder::PossibleValuesParser;
 use clap::ArgAction;
 use clap::Args;
 use clap::Subcommand;
@@ -137,6 +138,7 @@ use std::fmt::Display;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
+use strum::VariantArray;
 use tabled::Tabled;
 use uuid::Uuid;
 
@@ -255,10 +257,7 @@ impl DbUrlOptions {
         // doesn't match what we expect.  So we use `DataStore::new_unchecked()`
         // here.  We will then check the schema version explicitly and warn the
         // user if it doesn't match.
-        let datastore = Arc::new(
-            DataStore::new_unchecked(log.clone(), pool)
-                .map_err(|e| anyhow!(e).context("creating datastore"))?,
-        );
+        let datastore = Arc::new(DataStore::new_unchecked(log.clone(), pool));
         check_schema_version(&datastore).await;
         Ok(datastore)
     }
@@ -430,6 +429,21 @@ struct InstanceListArgs {
     /// Only show the running instances
     #[arg(short, long, action=ArgAction::SetTrue)]
     running: bool,
+
+    /// Only show instances in the provided state(s).
+    ///
+    /// By default, all instances are selected.
+    #[arg(
+        short,
+        long = "state",
+        conflicts_with = "running",
+        value_parser = PossibleValuesParser::new(
+            db::model::InstanceState::VARIANTS
+                .iter()
+                .map(|v| PossibleValue::new(v.label()))
+        ),
+    )]
+    states: Vec<db::model::InstanceState>,
 }
 
 #[derive(Debug, Args)]
@@ -437,6 +451,14 @@ struct InstanceInfoArgs {
     /// the UUID of the instance to show details for
     #[clap(value_name = "UUID")]
     id: InstanceUuid,
+
+    /// include a list of VMMs and migrations previously associated with this
+    /// instance.
+    ///
+    /// note that this is not exhaustive, as some VMM or migration records may
+    /// have been hard-deleted.
+    #[arg(short = 'i', long)]
+    history: bool,
 }
 
 #[derive(Debug, Args)]
@@ -785,7 +807,7 @@ impl DbArgs {
     ) -> Result<(), anyhow::Error> {
         let datastore = self.db_url_opts.connect(omdb, log).await?;
         let opctx = OpContext::for_tests(log.clone(), datastore.clone());
-        match &self.command {
+        let res = match &self.command {
             DbCommands::Rack(RackArgs { command: RackCommands::List }) => {
                 cmd_db_rack_list(&opctx, &datastore, &self.fetch_opts).await
             }
@@ -904,13 +926,8 @@ impl DbArgs {
             DbCommands::Instance(InstanceArgs {
                 command: InstanceCommands::List(args),
             }) => {
-                cmd_db_instances(
-                    &opctx,
-                    &datastore,
-                    &self.fetch_opts,
-                    args.running,
-                )
-                .await
+                cmd_db_instances(&opctx, &datastore, &self.fetch_opts, args)
+                    .await
             }
             DbCommands::Instance(InstanceArgs {
                 command: InstanceCommands::Info(args),
@@ -923,7 +940,7 @@ impl DbArgs {
                     &opctx,
                     &datastore,
                     &self.fetch_opts,
-                    instances_options.running,
+                    instances_options,
                 )
                 .await
             }
@@ -1013,7 +1030,9 @@ impl DbArgs {
             DbCommands::Volumes(VolumeArgs {
                 command: VolumeCommands::List,
             }) => cmd_db_volume_list(&datastore, &self.fetch_opts).await,
-        }
+        };
+        datastore.terminate().await;
+        res
     }
 }
 
@@ -1202,27 +1221,57 @@ async fn lookup_project(
 
 // Disks
 
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct DiskIdentity {
+    name: String,
+    id: Uuid,
+    size: String,
+    state: String,
+}
+
+impl From<&'_ db::model::Disk> for DiskIdentity {
+    fn from(disk: &db::model::Disk) -> Self {
+        Self {
+            name: disk.name().to_string(),
+            id: disk.id(),
+            size: disk.size.to_string(),
+            state: disk.runtime().disk_state,
+        }
+    }
+}
+
 /// Run `omdb db disk list`.
 async fn cmd_db_disk_list(
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
 ) -> Result<(), anyhow::Error> {
-    #[derive(Tabled)]
-    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-    struct DiskRow {
-        name: String,
-        id: String,
-        size: String,
-        state: String,
-        attached_to: String,
-    }
-
     let ctx = || "listing disks".to_string();
 
     use db::schema::disk::dsl;
     let mut query = dsl::disk.into_boxed();
     if !fetch_opts.include_deleted {
         query = query.filter(dsl::time_deleted.is_null());
+    }
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct DiskRow {
+        #[tabled(inline)]
+        identity: DiskIdentity,
+        attached_to: String,
+    }
+
+    impl From<&'_ db::model::Disk> for DiskRow {
+        fn from(disk: &db::model::Disk) -> Self {
+            Self {
+                identity: disk.into(),
+                attached_to: match disk.runtime().attach_instance_id {
+                    Some(uuid) => uuid.to_string(),
+                    None => "-".to_string(),
+                },
+            }
+        }
     }
 
     let disks = query
@@ -1234,16 +1283,7 @@ async fn cmd_db_disk_list(
 
     check_limit(&disks, fetch_opts.fetch_limit, ctx);
 
-    let rows = disks.into_iter().map(|disk| DiskRow {
-        name: disk.name().to_string(),
-        id: disk.id().to_string(),
-        size: disk.size.to_string(),
-        state: disk.runtime().disk_state,
-        attached_to: match disk.runtime().attach_instance_id {
-            Some(uuid) => uuid.to_string(),
-            None => "-".to_string(),
-        },
-    });
+    let rows = disks.iter().map(DiskRow::from);
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
@@ -2541,6 +2581,7 @@ async fn cmd_db_region_replacement_list(
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct Row {
         pub id: Uuid,
+        #[tabled(display_with = "datetime_rfc3339_concise")]
         pub request_time: DateTime<Utc>,
         pub replacement_state: String,
     }
@@ -2666,6 +2707,7 @@ async fn cmd_db_region_replacement_info(
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
         struct Row {
+            #[tabled(display_with = "datetime_rfc3339_concise")]
             pub time: DateTime<Utc>,
 
             pub repair_id: String,
@@ -2741,6 +2783,7 @@ async fn cmd_db_region_replacement_info(
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
         struct StepRow {
+            #[tabled(display_with = "datetime_rfc3339_concise")]
             pub time: DateTime<Utc>,
             pub step_type: String,
             pub details: String,
@@ -2877,14 +2920,14 @@ async fn cmd_db_instance_info(
     args: &InstanceInfoArgs,
 ) -> Result<(), anyhow::Error> {
     use nexus_db_model::schema::{
-        instance::dsl as instance_dsl, migration::dsl as migration_dsl,
-        vmm::dsl as vmm_dsl,
+        disk::dsl as disk_dsl, instance::dsl as instance_dsl,
+        migration::dsl as migration_dsl, vmm::dsl as vmm_dsl,
     };
     use nexus_db_model::{
         Instance, InstanceKarmicStatus, InstanceRuntimeState, Migration,
         Reincarnatability, Vmm,
     };
-    let InstanceInfoArgs { id } = args;
+    let &InstanceInfoArgs { ref id, history } = args;
 
     let instance = instance_dsl::instance
         .filter(instance_dsl::id.eq(id.into_untyped_uuid()))
@@ -3153,40 +3196,170 @@ async fn cmd_db_instance_info(
             }
         }
     }
-    let past_migrations = migration_dsl::migration
-        .filter(migration_dsl::instance_id.eq(id.into_untyped_uuid()))
+
+    let ctx = || "listing attached disks";
+    let mut query = disk_dsl::disk
+        .filter(disk_dsl::attach_instance_id.eq(id.into_untyped_uuid()))
         .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
-        .order_by(migration_dsl::time_created)
-        // This is just to prove to CRDB that it can use the
-        // migrations-by-time-created index, it doesn't actually do anything.
-        .filter(migration_dsl::time_created.gt(chrono::DateTime::UNIX_EPOCH))
-        .select(Migration::as_select())
+        .order_by(disk_dsl::time_created.desc())
+        .into_boxed();
+    if !fetch_opts.include_deleted {
+        query = query.filter(disk_dsl::time_deleted.is_null());
+    }
+
+    let disks = query
+        .select(Disk::as_select())
         .load_async(&*datastore.pool_connection_for_tests().await?)
         .await
-        .context("listing migrations")?;
+        .with_context(ctx)?;
 
-    check_limit(&past_migrations, fetch_opts.fetch_limit, || {
-        "listing migrations"
-    });
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct DiskRow {
+        #[tabled(display_with = "display_option_blank")]
+        slot: Option<u8>,
+        #[tabled(inline)]
+        identity: DiskIdentity,
+    }
 
-    if !past_migrations.is_empty() {
-        let rows =
-            past_migrations.into_iter().map(|m| SingleInstanceMigrationRow {
-                created: m.time_created,
-                vmms: MigrationVmms::from(&m),
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct MaybeDeletedDiskRow {
+        #[tabled(inline)]
+        r: DiskRow,
+        #[tabled(display_with = "datetime_opt_rfc3339_concise")]
+        time_deleted: Option<DateTime<Utc>>,
+    }
+
+    impl From<&'_ db::model::Disk> for DiskRow {
+        fn from(disk: &db::model::Disk) -> Self {
+            Self { slot: disk.slot.map(|s| s.into()), identity: disk.into() }
+        }
+    }
+
+    impl From<&'_ db::model::Disk> for MaybeDeletedDiskRow {
+        fn from(disk: &db::model::Disk) -> Self {
+            Self { r: disk.into(), time_deleted: disk.time_deleted() }
+        }
+    }
+
+    if !disks.is_empty() {
+        println!("\n{:=<80}\n", "== ATTACHED DISKS");
+
+        check_limit(&disks, fetch_opts.fetch_limit, ctx);
+        let table = if fetch_opts.include_deleted {
+            tabled::Table::new(disks.iter().map(MaybeDeletedDiskRow::from))
+                .with(tabled::settings::Style::empty())
+                .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                .to_string()
+        } else {
+            tabled::Table::new(disks.iter().map(DiskRow::from))
+                .with(tabled::settings::Style::empty())
+                .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                .to_string()
+        };
+        println!("{table}");
+    }
+
+    if history {
+        let ctx = || "listing migrations";
+        let past_migrations = migration_dsl::migration
+            .filter(migration_dsl::instance_id.eq(id.into_untyped_uuid()))
+            .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
+            .order_by(migration_dsl::time_created.desc())
+            // This is just to prove to CRDB that it can use the
+            // migrations-by-time-created index, it doesn't actually do anything.
+            .filter(
+                migration_dsl::time_created.gt(chrono::DateTime::UNIX_EPOCH),
+            )
+            .select(Migration::as_select())
+            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .await
+            .with_context(ctx)?;
+
+        if !past_migrations.is_empty() {
+            println!("\n{:=<80}\n", "== MIGRATION HISTORY");
+
+            check_limit(&past_migrations, fetch_opts.fetch_limit, ctx);
+
+            let rows = past_migrations.into_iter().map(|m| {
+                SingleInstanceMigrationRow {
+                    created: m.time_created,
+                    vmms: MigrationVmms::from(&m),
+                }
             });
 
-        let table = tabled::Table::new(rows)
-            .with(tabled::settings::Style::empty())
-            .with(tabled::settings::Padding::new(4, 1, 0, 0))
-            .to_string();
+            let table = tabled::Table::new(rows)
+                .with(tabled::settings::Style::empty())
+                .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                .to_string();
 
-        println!("\n{:=<80}\n\n{table}", "== MIGRATION HISTORY");
+            println!("{table}");
+        }
+
+        let ctx = || "listing past VMMs";
+        let vmms = vmm_dsl::vmm
+            .filter(vmm_dsl::instance_id.eq(id.into_untyped_uuid()))
+            .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
+            .order_by(vmm_dsl::time_created.desc())
+            .select(Vmm::as_select())
+            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .await
+            .with_context(ctx)?;
+
+        if !vmms.is_empty() {
+            println!("\n{:=<80}\n", "== VMM HISTORY");
+
+            check_limit(&vmms, fetch_opts.fetch_limit, ctx);
+
+            let table = tabled::Table::new(vmms.iter().map(VmmStateRow::from))
+                .with(tabled::settings::Style::empty())
+                .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                .to_string();
+            println!("{table}");
+        }
     }
 
     Ok(())
 }
 
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct VmmStateRow {
+    id: Uuid,
+    state: db::model::VmmState,
+    #[tabled(rename = "GEN")]
+    generation: u64,
+    sled_id: Uuid,
+    #[tabled(display_with = "datetime_rfc3339_concise")]
+    time_created: chrono::DateTime<Utc>,
+    #[tabled(display_with = "datetime_opt_rfc3339_concise")]
+    time_deleted: Option<chrono::DateTime<Utc>>,
+}
+
+impl From<&'_ Vmm> for VmmStateRow {
+    fn from(vmm: &Vmm) -> Self {
+        let &Vmm {
+            id,
+            time_created,
+            time_deleted,
+            sled_id,
+            propolis_ip: _,
+            propolis_port: _,
+            instance_id: _,
+            runtime:
+                db::model::VmmRuntimeState { time_state_updated: _, r#gen, state },
+        } = vmm;
+        Self {
+            id,
+            state,
+            time_created,
+            time_deleted,
+            generation: r#gen.0.into(),
+            sled_id,
+        }
+    }
+}
 #[derive(Tabled)]
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
 struct CustomerInstanceRow {
@@ -3203,7 +3376,7 @@ async fn cmd_db_instances(
     opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
-    running: bool,
+    &InstanceListArgs { running, ref states }: &InstanceListArgs,
 ) -> Result<(), anyhow::Error> {
     use db::schema::instance::dsl;
     use db::schema::vmm::dsl as vmm_dsl;
@@ -3212,6 +3385,10 @@ async fn cmd_db_instances(
     let mut query = dsl::instance.into_boxed();
     if !fetch_opts.include_deleted {
         query = query.filter(dsl::time_deleted.is_null());
+    }
+
+    if !states.is_empty() {
+        query = query.filter(dsl::state.eq_any(states.clone()));
     }
 
     let instances: Vec<InstanceAndActiveVmm> = query
@@ -3914,6 +4091,7 @@ async fn cmd_db_region_snapshot_replacement_list(
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct Row {
         pub id: Uuid,
+        #[tabled(display_with = "datetime_rfc3339_concise")]
         pub request_time: DateTime<Utc>,
         pub replacement_state: String,
     }
@@ -5330,16 +5508,17 @@ async fn cmd_db_migrations_list(
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
         struct VerboseMigrationRow {
+            #[tabled(display_with = "datetime_rfc3339_concise")]
             created: chrono::DateTime<Utc>,
             id: Uuid,
             instance: Uuid,
             #[tabled(inline)]
             vmms: MigrationVmms,
-            #[tabled(display_with = "display_option_blank")]
+            #[tabled(display_with = "datetime_opt_rfc3339_concise")]
             src_updated: Option<chrono::DateTime<Utc>>,
-            #[tabled(display_with = "display_option_blank")]
+            #[tabled(display_with = "datetime_opt_rfc3339_concise")]
             tgt_updated: Option<chrono::DateTime<Utc>>,
-            #[tabled(display_with = "display_option_blank")]
+            #[tabled(display_with = "datetime_opt_rfc3339_concise")]
             deleted: Option<chrono::DateTime<Utc>>,
         }
 
@@ -5375,6 +5554,7 @@ async fn cmd_db_migrations_list(
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
         struct MigrationRow {
+            #[tabled(display_with = "datetime_rfc3339_concise")]
             created: chrono::DateTime<Utc>,
             instance: Uuid,
             #[tabled(inline)]
@@ -5401,6 +5581,7 @@ async fn cmd_db_migrations_list(
 #[derive(Tabled)]
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
 struct SingleInstanceMigrationRow {
+    #[tabled(display_with = "datetime_rfc3339_concise")]
     created: chrono::DateTime<Utc>,
     #[tabled(inline)]
     vmms: MigrationVmms,
@@ -5436,4 +5617,19 @@ impl From<&'_ Migration> for MigrationVmms {
 // Display an empty cell for an Option<T> if it's None.
 fn display_option_blank<T: Display>(opt: &Option<T>) -> String {
     opt.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "".to_string())
+}
+
+// Format a `chrono::DateTime` in RFC3339 with milliseconds precision and using
+// `Z` rather than the UTC offset for UTC timestamps, to save a few characters
+// of line width in tabular output.
+fn datetime_rfc3339_concise(t: &DateTime<Utc>) -> String {
+    t.to_rfc3339_opts(chrono::format::SecondsFormat::Millis, true)
+}
+
+// Format an optional `chrono::DateTime` in RFC3339 with milliseconds precision
+// and using `Z` rather than the UTC offset for UTC timestamps, to save a few
+// characters of line width in tabular output.
+fn datetime_opt_rfc3339_concise(t: &Option<DateTime<Utc>>) -> String {
+    t.map(|t| t.to_rfc3339_opts(chrono::format::SecondsFormat::Millis, true))
+        .unwrap_or_else(|| "-".to_string())
 }

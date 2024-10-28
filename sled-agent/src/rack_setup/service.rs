@@ -714,8 +714,7 @@ impl ServiceInner {
         let blueprint = build_initial_blueprint_from_plan(
             &sled_configs_by_id,
             service_plan,
-        )
-        .map_err(SetupServiceError::ConvertPlanToBlueprint)?;
+        );
 
         info!(self.log, "Nexus address: {}", nexus_address.to_string());
 
@@ -1427,17 +1426,11 @@ fn build_sled_configs_by_id(
 fn build_initial_blueprint_from_plan(
     sled_configs_by_id: &BTreeMap<SledUuid, SledConfig>,
     service_plan: &ServicePlan,
-) -> anyhow::Result<Blueprint> {
-    let internal_dns_version =
-        Generation::try_from(service_plan.dns_config.generation)
-            .context("invalid internal dns version")?;
-
-    let blueprint = build_initial_blueprint_from_sled_configs(
+) -> Blueprint {
+    build_initial_blueprint_from_sled_configs(
         sled_configs_by_id,
-        internal_dns_version,
-    );
-
-    Ok(blueprint)
+        service_plan.dns_config.generation,
+    )
 }
 
 pub(crate) fn build_initial_blueprint_from_sled_configs(

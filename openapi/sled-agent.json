@@ -4139,17 +4139,12 @@
           "id": {
             "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
           },
-          "underlay_address": {
-            "type": "string",
-            "format": "ipv6"
-          },
           "zone_type": {
             "$ref": "#/components/schemas/OmicronZoneType"
           }
         },
         "required": [
           "id",
-          "underlay_address",
           "zone_type"
         ]
       },

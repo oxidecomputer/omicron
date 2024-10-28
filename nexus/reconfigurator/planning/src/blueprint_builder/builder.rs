@@ -182,6 +182,9 @@ impl fmt::Display for Operation {
                     ZoneExpungeReason::ClickhouseClusterDisabled => {
                         "clickhouse cluster disabled via policy"
                     }
+                    ZoneExpungeReason::ClickhouseSingleNodeDisabled => {
+                        "clickhouse single-node disabled via policy"
+                    }
                 };
                 write!(
                     f,
@@ -562,13 +565,6 @@ impl<'a> BlueprintBuilder<'a> {
             "sled_id" => sled_id.to_string(),
         ));
 
-        // If there are any `ClickhouseServer` or `ClickhouseKeeper` zones that
-        // are not expunged and we no longer have a `ClickhousePolicy` which
-        // indicates replicated clickhouse clusters should be running, we need
-        // to expunge all such zones.
-        let clickhouse_cluster_enabled =
-            self.input.clickhouse_cluster_enabled();
-
         // Do any zones need to be marked expunged?
         let mut zones_to_expunge = BTreeMap::new();
 
@@ -580,11 +576,9 @@ impl<'a> BlueprintBuilder<'a> {
                 "zone_id" => zone_id.to_string()
             ));
 
-            let Some(reason) = zone_needs_expungement(
-                sled_details,
-                zone_config,
-                clickhouse_cluster_enabled,
-            ) else {
+            let Some(reason) =
+                zone_needs_expungement(sled_details, zone_config, &self.input)
+            else {
                 continue;
             };
 
@@ -630,6 +624,13 @@ impl<'a> BlueprintBuilder<'a> {
                             expunging related zone"
                         );
                     }
+                    ZoneExpungeReason::ClickhouseSingleNodeDisabled => {
+                        info!(
+                            &log,
+                            "clickhouse single-node disabled via policy, \
+                            expunging related zone"
+                        );
+                    }
                 }
 
                 zones_to_expunge.insert(zone_id, reason);
@@ -661,6 +662,7 @@ impl<'a> BlueprintBuilder<'a> {
         let mut count_sled_decommissioned = 0;
         let mut count_sled_expunged = 0;
         let mut count_clickhouse_cluster_disabled = 0;
+        let mut count_clickhouse_single_node_disabled = 0;
         for reason in zones_to_expunge.values() {
             match reason {
                 ZoneExpungeReason::DiskExpunged => count_disk_expunged += 1,
@@ -671,6 +673,9 @@ impl<'a> BlueprintBuilder<'a> {
                 ZoneExpungeReason::ClickhouseClusterDisabled => {
                     count_clickhouse_cluster_disabled += 1
                 }
+                ZoneExpungeReason::ClickhouseSingleNodeDisabled => {
+                    count_clickhouse_single_node_disabled += 1
+                }
             };
         }
         let count_and_reason = [
@@ -680,6 +685,10 @@ impl<'a> BlueprintBuilder<'a> {
             (
                 count_clickhouse_cluster_disabled,
                 ZoneExpungeReason::ClickhouseClusterDisabled,
+            ),
+            (
+                count_clickhouse_single_node_disabled,
+                ZoneExpungeReason::ClickhouseSingleNodeDisabled,
             ),
         ];
         for (count, reason) in count_and_reason {
@@ -794,7 +803,6 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: self.rng.zone_rng.next(),
-            underlay_address: address,
             filesystem_pool: Some(zpool),
             zone_type,
         };
@@ -879,7 +887,6 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id,
-            underlay_address,
             filesystem_pool: Some(pool_name),
             zone_type,
         };
@@ -952,7 +959,6 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: self.rng.zone_rng.next(),
-            underlay_address: ip,
             filesystem_pool: Some(filesystem_pool),
             zone_type,
         };
@@ -1009,7 +1015,6 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: self.rng.zone_rng.next(),
-            underlay_address: ip,
             filesystem_pool: Some(filesystem_pool),
             zone_type,
         };
@@ -1137,7 +1142,6 @@ impl<'a> BlueprintBuilder<'a> {
             let zone = BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: nexus_id,
-                underlay_address: ip,
                 filesystem_pool: Some(filesystem_pool),
                 zone_type,
             };
@@ -1183,7 +1187,6 @@ impl<'a> BlueprintBuilder<'a> {
             let zone = BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: oximeter_id,
-                underlay_address: ip,
                 filesystem_pool: Some(filesystem_pool),
                 zone_type,
             };
@@ -1228,7 +1231,6 @@ impl<'a> BlueprintBuilder<'a> {
             let zone = BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: pantry_id,
-                underlay_address: ip,
                 filesystem_pool: Some(filesystem_pool),
                 zone_type,
             };
@@ -1284,7 +1286,6 @@ impl<'a> BlueprintBuilder<'a> {
             let zone = BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: zone_id,
-                underlay_address: underlay_ip,
                 filesystem_pool: Some(filesystem_pool),
                 zone_type,
             };
@@ -1313,7 +1314,6 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id,
-            underlay_address,
             filesystem_pool: Some(pool_name),
             zone_type,
         };
@@ -1388,7 +1388,6 @@ impl<'a> BlueprintBuilder<'a> {
             let zone = BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: zone_id,
-                underlay_address: underlay_ip,
                 filesystem_pool: Some(filesystem_pool),
                 zone_type,
             };
@@ -1444,7 +1443,6 @@ impl<'a> BlueprintBuilder<'a> {
             let zone = BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: zone_id,
-                underlay_address: underlay_ip,
                 filesystem_pool: Some(filesystem_pool),
                 zone_type,
             };
@@ -1580,7 +1578,6 @@ impl<'a> BlueprintBuilder<'a> {
             BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: new_zone_id,
-                underlay_address: underlay_ip,
                 filesystem_pool: Some(filesystem_pool),
                 zone_type,
             },
@@ -1654,13 +1651,13 @@ impl<'a> BlueprintBuilder<'a> {
                 assert!(minimum > switch_zone_addr);
                 assert!(maximum > switch_zone_addr);
 
-                // Record each of the sled's zones' underlay addresses as
+                // Record each of the sled's zones' underlay IPs as
                 // allocated.
                 for (z, _) in self
                     .zones
                     .current_sled_zones(sled_id, BlueprintZoneFilter::All)
                 {
-                    allocator.reserve(z.underlay_address);
+                    allocator.reserve(z.underlay_ip());
                 }
 
                 allocator
@@ -2049,13 +2046,13 @@ pub mod test {
             blueprint.all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
         {
             if let Some(previous) =
-                underlay_ips.insert(zone.underlay_address, zone)
+                underlay_ips.insert(zone.underlay_ip(), zone)
             {
                 panic!(
                     "found duplicate underlay IP {} in zones {} and {}\
                     \n\n\
                     blueprint: {}",
-                    zone.underlay_address,
+                    zone.underlay_ip(),
                     zone.id,
                     previous.id,
                     blueprint.display(),
@@ -2240,10 +2237,7 @@ pub mod test {
 
         // All zones' underlay addresses ought to be on the sled's subnet.
         for z in &new_sled_zones.zones {
-            assert!(new_sled_resources
-                .subnet
-                .net()
-                .contains(z.underlay_address()));
+            assert!(new_sled_resources.subnet.net().contains(z.underlay_ip()));
         }
 
         // Check for an NTP zone.  Its sockaddr's IP should also be on the

@@ -316,13 +316,14 @@ cargo_metadata = "0.18.1"
 chacha20poly1305 = "0.10.1"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
+chrono-tz = "0.10.0"
 ciborium = "0.2.2"
 clap = { version = "4.5", features = ["cargo", "derive", "env", "wrap_help"] }
 clickhouse-admin-api = { path = "clickhouse-admin/api" }
 clickhouse-admin-keeper-client = { path = "clients/clickhouse-admin-keeper-client" }
 clickhouse-admin-server-client = { path = "clients/clickhouse-admin-server-client" }
 clickhouse-admin-types = { path = "clickhouse-admin/types" }
-clickward = { git = "https://github.com/oxidecomputer/clickward", rev = "ceec762e6a87d2a22bf56792a3025e145caa095e" }
+clickward = { git = "https://github.com/oxidecomputer/clickward", rev = "a1b342c2558e835d09e6e39a40d3de798a29c2f" }
 cockroach-admin-api = { path = "cockroach-admin/api" }
 cockroach-admin-client = { path = "clients/cockroach-admin-client" }
 cockroach-admin-types = { path = "cockroach-admin/types" }
@@ -347,7 +348,7 @@ derive_more = "0.99.18"
 derive-where = "1.2.7"
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
 diesel = { version = "2.2.4", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
-diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", branch = "main" }
+diesel-dtrace = "0.3.0"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
@@ -402,6 +403,7 @@ hyper-util = "0.1.9"
 hyper-rustls = "0.26.0"
 hyper-staticfile = "0.10.0"
 illumos-utils = { path = "illumos-utils" }
+iana-time-zone = "0.1.61"
 indent_write = "2.2.0"
 indexmap = "2.6.0"
 indicatif = { version = "0.17.8", features = ["rayon"] }
@@ -420,7 +422,7 @@ ipnetwork = { version = "0.20", features = ["schemars"] }
 ispf = { git = "https://github.com/oxidecomputer/ispf" }
 key-manager = { path = "key-manager" }
 kstat-rs = "0.2.4"
-libc = "0.2.159"
+libc = "0.2.161"
 libipcc = { git = "https://github.com/oxidecomputer/libipcc", rev = "fdffa212373a8f92473ea5f411088912bf458d5f" }
 libfalcon = { git = "https://github.com/oxidecomputer/falcon", branch = "main" }
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
@@ -522,7 +524,7 @@ propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = 
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "11371b0f3743f8df5b047dc0edc2699f4bdf3927" }
 propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "11371b0f3743f8df5b047dc0edc2699f4bdf3927" }
 proptest = "1.5.0"
-qorb = { git = "https://github.com/oxidecomputer/qorb", branch = "master" }
+qorb = "0.1.2"
 quote = "1.0"
 rand = "0.8.5"
 rand_core = "0.6.4"
@@ -628,7 +630,7 @@ update-engine = { path = "update-engine" }
 url = "2.5.2"
 usdt = "0.5.0"
 uuid = { version = "1.10.0", features = ["serde", "v4"] }
-uzers = "0.11"
+uzers = "0.12"
 walkdir = "2.5"
 whoami = "1.5"
 wicket = { path = "wicket" }
