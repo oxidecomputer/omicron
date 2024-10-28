@@ -972,7 +972,7 @@ impl Client {
                     returned an empty data block",
                     ))
                 })
-                .map(|block| !block.is_empty())
+                .map(|block| block.n_rows > 0)
         })
     }
 

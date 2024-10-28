@@ -57,9 +57,14 @@ impl Block {
         self.columns.values().map(|col| &col.data_type)
     }
 
-    /// Return true if the provided block is empty.
+    /// Return true if the provided block is empty, meaning zero columns and
+    /// rows.
+    ///
+    /// NOTE: This is mostly used to indicate the "end of stream" data blocks.
+    /// Blocks with zero rows are used to communicate the column names and
+    /// types, and are _not_ considered empty.
     pub fn is_empty(&self) -> bool {
-        self.n_rows == 0
+        self.n_columns == 0 && self.n_rows == 0
     }
 
     /// Create an empty block with the provided column names and types
