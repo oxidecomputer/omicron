@@ -65,14 +65,9 @@ use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
 use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig, ZoneKind,
 };
-use omicron_common::address::CLICKHOUSE_HTTP_PORT;
-use omicron_common::address::CLICKHOUSE_KEEPER_TCP_PORT;
+use omicron_common::address::AZ_PREFIX;
 use omicron_common::address::COCKROACH_PORT;
-use omicron_common::address::CRUCIBLE_PANTRY_PORT;
-use omicron_common::address::CRUCIBLE_PORT;
 use omicron_common::address::DENDRITE_PORT;
-use omicron_common::address::DNS_HTTP_PORT;
-use omicron_common::address::DNS_PORT;
 use omicron_common::address::LLDP_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::RACK_PREFIX;
@@ -83,7 +78,6 @@ use omicron_common::address::{
     get_internal_dns_server_addresses, CLICKHOUSE_ADMIN_PORT,
 };
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
-use omicron_common::address::{AZ_PREFIX, OXIMETER_PORT};
 use omicron_common::address::{BOOTSTRAP_ARTIFACT_PORT, COCKROACH_ADMIN_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::{
@@ -1558,8 +1552,7 @@ impl ServiceManager {
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
                     OmicronZoneConfig {
-                        zone_type: OmicronZoneType::Clickhouse { .. },
-                        underlay_address,
+                        zone_type: OmicronZoneType::Clickhouse { address, .. },
                         ..
                     },
                 ..
@@ -1568,13 +1561,10 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let listen_addr = *underlay_address;
-                let listen_port = &CLICKHOUSE_HTTP_PORT.to_string();
-
                 let nw_setup_service = Self::zone_network_setup_install(
                     Some(&info.underlay_address),
                     &installed_zone,
-                    &[listen_addr],
+                    &[*address.ip()],
                 )?;
 
                 let dns_service = Self::dns_install(info, None, None).await?;
@@ -1583,9 +1573,13 @@ impl ServiceManager {
                     .add_property(
                         "listen_addr",
                         "astring",
-                        listen_addr.to_string(),
+                        address.ip().to_string(),
                     )
-                    .add_property("listen_port", "astring", listen_port)
+                    .add_property(
+                        "listen_port",
+                        "astring",
+                        address.port().to_string(),
+                    )
                     .add_property("store", "astring", "/data");
                 let clickhouse_service =
                     ServiceBuilder::new("oxide/clickhouse").add_instance(
@@ -1593,22 +1587,22 @@ impl ServiceManager {
                             .add_property_group(config),
                     );
 
-                let admin_address = SocketAddr::new(
-                    IpAddr::V6(listen_addr),
-                    CLICKHOUSE_ADMIN_PORT,
-                )
-                .to_string();
-
-                let ch_address = SocketAddr::new(
-                    IpAddr::V6(listen_addr),
-                    CLICKHOUSE_HTTP_PORT,
-                )
-                .to_string();
+                // We shouldn't need to hardcode a port here:
+                // https://github.com/oxidecomputer/omicron/issues/6796
+                let admin_address = {
+                    let mut addr = *address;
+                    addr.set_port(CLICKHOUSE_ADMIN_PORT);
+                    addr.to_string()
+                };
 
                 let clickhouse_admin_config =
                     PropertyGroupBuilder::new("config")
                         .add_property("http_address", "astring", admin_address)
-                        .add_property("ch_address", "astring", ch_address)
+                        .add_property(
+                            "ch_address",
+                            "astring",
+                            address.to_string(),
+                        )
                         .add_property(
                             "ch_binary",
                             "astring",
@@ -1639,8 +1633,8 @@ impl ServiceManager {
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
                     OmicronZoneConfig {
-                        zone_type: OmicronZoneType::ClickhouseServer { .. },
-                        underlay_address,
+                        zone_type:
+                            OmicronZoneType::ClickhouseServer { address, .. },
                         ..
                     },
                 ..
@@ -1649,12 +1643,10 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let listen_addr = *underlay_address;
-
                 let nw_setup_service = Self::zone_network_setup_install(
                     Some(&info.underlay_address),
                     &installed_zone,
-                    &[listen_addr],
+                    &[*address.ip()],
                 )?;
 
                 let dns_service = Self::dns_install(info, None, None).await?;
@@ -1665,22 +1657,22 @@ impl ServiceManager {
                             ServiceInstanceBuilder::new("default").disable(),
                         );
 
-                let admin_address = SocketAddr::new(
-                    IpAddr::V6(listen_addr),
-                    CLICKHOUSE_ADMIN_PORT,
-                )
-                .to_string();
-
-                let ch_address = SocketAddr::new(
-                    IpAddr::V6(listen_addr),
-                    CLICKHOUSE_HTTP_PORT,
-                )
-                .to_string();
+                // We shouldn't need to hardcode a port here:
+                // https://github.com/oxidecomputer/omicron/issues/6796
+                let admin_address = {
+                    let mut addr = *address;
+                    addr.set_port(CLICKHOUSE_ADMIN_PORT);
+                    addr.to_string()
+                };
 
                 let clickhouse_admin_config =
                     PropertyGroupBuilder::new("config")
                         .add_property("http_address", "astring", admin_address)
-                        .add_property("ch_address", "astring", ch_address)
+                        .add_property(
+                            "ch_address",
+                            "astring",
+                            address.to_string(),
+                        )
                         .add_property(
                             "ch_binary",
                             "astring",
@@ -1714,8 +1706,8 @@ impl ServiceManager {
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
                     OmicronZoneConfig {
-                        zone_type: OmicronZoneType::ClickhouseKeeper { .. },
-                        underlay_address,
+                        zone_type:
+                            OmicronZoneType::ClickhouseKeeper { address, .. },
                         ..
                     },
                 ..
@@ -1724,12 +1716,10 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let listen_addr = *underlay_address;
-
                 let nw_setup_service = Self::zone_network_setup_install(
                     Some(&info.underlay_address),
                     &installed_zone,
-                    &[listen_addr],
+                    &[*address.ip()],
                 )?;
 
                 let dns_service = Self::dns_install(info, None, None).await?;
@@ -1740,22 +1730,22 @@ impl ServiceManager {
                             ServiceInstanceBuilder::new("default").disable(),
                         );
 
-                let admin_address = SocketAddr::new(
-                    IpAddr::V6(listen_addr),
-                    CLICKHOUSE_ADMIN_PORT,
-                )
-                .to_string();
-
-                let ch_address = SocketAddr::new(
-                    IpAddr::V6(listen_addr),
-                    CLICKHOUSE_KEEPER_TCP_PORT,
-                )
-                .to_string();
+                // We shouldn't need to hardcode a port here:
+                // https://github.com/oxidecomputer/omicron/issues/6796
+                let admin_address = {
+                    let mut addr = *address;
+                    addr.set_port(CLICKHOUSE_ADMIN_PORT);
+                    addr.to_string()
+                };
 
                 let clickhouse_admin_config =
                     PropertyGroupBuilder::new("config")
                         .add_property("http_address", "astring", admin_address)
-                        .add_property("ch_address", "astring", ch_address)
+                        .add_property(
+                            "ch_address",
+                            "astring",
+                            address.to_string(),
+                        )
                         .add_property(
                             "ch_binary",
                             "astring",
@@ -1790,8 +1780,7 @@ impl ServiceManager {
                 zone:
                     OmicronZoneConfig {
                         id: zone_id,
-                        zone_type: OmicronZoneType::CockroachDb { .. },
-                        underlay_address,
+                        zone_type: OmicronZoneType::CockroachDb { address, .. },
                         ..
                     },
                 ..
@@ -1800,27 +1789,25 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let crdb_listen_ip = *underlay_address;
-                let crdb_address =
-                    SocketAddr::new(IpAddr::V6(crdb_listen_ip), COCKROACH_PORT)
-                        .to_string();
-                let admin_address = SocketAddr::new(
-                    IpAddr::V6(crdb_listen_ip),
-                    COCKROACH_ADMIN_PORT,
-                )
-                .to_string();
+                // We shouldn't need to hardcode a port here:
+                // https://github.com/oxidecomputer/omicron/issues/6796
+                let admin_address = {
+                    let mut addr = *address;
+                    addr.set_port(COCKROACH_ADMIN_PORT);
+                    addr.to_string()
+                };
 
                 let nw_setup_service = Self::zone_network_setup_install(
                     Some(&info.underlay_address),
                     &installed_zone,
-                    &[crdb_listen_ip],
+                    &[*address.ip()],
                 )?;
 
                 let dns_service = Self::dns_install(info, None, None).await?;
 
                 // Configure the CockroachDB service.
                 let cockroachdb_config = PropertyGroupBuilder::new("config")
-                    .add_property("listen_addr", "astring", &crdb_address)
+                    .add_property("listen_addr", "astring", address.to_string())
                     .add_property("store", "astring", "/data");
                 let cockroachdb_service =
                     ServiceBuilder::new("oxide/cockroachdb").add_instance(
@@ -1835,7 +1822,7 @@ impl ServiceManager {
                         .add_property(
                             "cockroach_address",
                             "astring",
-                            crdb_address,
+                            address.to_string(),
                         )
                         .add_property("http_address", "astring", admin_address);
                 let cockroach_admin_service =
@@ -1863,8 +1850,8 @@ impl ServiceManager {
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
                     OmicronZoneConfig {
-                        zone_type: OmicronZoneType::Crucible { dataset, .. },
-                        underlay_address,
+                        zone_type:
+                            OmicronZoneType::Crucible { address, dataset },
                         ..
                     },
                 ..
@@ -1872,13 +1859,11 @@ impl ServiceManager {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
                 };
-                let listen_addr = *underlay_address;
-                let listen_port = &CRUCIBLE_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
                     Some(&info.underlay_address),
                     &installed_zone,
-                    &[listen_addr],
+                    &[*address.ip()],
                 )?;
 
                 let dataset_name = DatasetName::new(
@@ -1892,9 +1877,13 @@ impl ServiceManager {
                     .add_property(
                         "listen_addr",
                         "astring",
-                        listen_addr.to_string(),
+                        address.ip().to_string(),
                     )
-                    .add_property("listen_port", "astring", listen_port)
+                    .add_property(
+                        "listen_port",
+                        "astring",
+                        address.port().to_string(),
+                    )
                     .add_property("uuid", "astring", uuid)
                     .add_property("store", "astring", "/data");
 
@@ -1921,8 +1910,7 @@ impl ServiceManager {
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
                     OmicronZoneConfig {
-                        zone_type: OmicronZoneType::CruciblePantry { .. },
-                        underlay_address,
+                        zone_type: OmicronZoneType::CruciblePantry { address },
                         ..
                     },
                 ..
@@ -1931,22 +1919,23 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let listen_addr = *underlay_address;
-                let listen_port = &CRUCIBLE_PANTRY_PORT.to_string();
-
                 let nw_setup_service = Self::zone_network_setup_install(
                     Some(&info.underlay_address),
                     &installed_zone,
-                    &[listen_addr],
+                    &[*address.ip()],
                 )?;
 
                 let config = PropertyGroupBuilder::new("config")
                     .add_property(
                         "listen_addr",
                         "astring",
-                        listen_addr.to_string(),
+                        address.ip().to_string(),
                     )
-                    .add_property("listen_port", "astring", listen_port);
+                    .add_property(
+                        "listen_port",
+                        "astring",
+                        address.port().to_string(),
+                    );
 
                 let profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
@@ -1969,8 +1958,7 @@ impl ServiceManager {
                 zone:
                     OmicronZoneConfig {
                         id,
-                        zone_type: OmicronZoneType::Oximeter { .. },
-                        underlay_address,
+                        zone_type: OmicronZoneType::Oximeter { address },
                         ..
                     },
                 ..
@@ -1979,21 +1967,15 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                // Configure the Oximeter service.
-                let address = SocketAddr::new(
-                    IpAddr::V6(*underlay_address),
-                    OXIMETER_PORT,
-                );
-
                 let nw_setup_service = Self::zone_network_setup_install(
                     Some(&info.underlay_address),
                     &installed_zone,
-                    &[*underlay_address],
+                    &[*address.ip()],
                 )?;
 
                 let oximeter_config = PropertyGroupBuilder::new("config")
-                    .add_property("id", "astring", &id.to_string())
-                    .add_property("address", "astring", &address.to_string());
+                    .add_property("id", "astring", id.to_string())
+                    .add_property("address", "astring", address.to_string());
                 let oximeter_service = ServiceBuilder::new("oxide/oximeter")
                     .add_instance(
                         ServiceInstanceBuilder::new("default")
@@ -2016,8 +1998,13 @@ impl ServiceManager {
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
                     OmicronZoneConfig {
-                        zone_type: OmicronZoneType::ExternalDns { .. },
-                        underlay_address,
+                        zone_type:
+                            OmicronZoneType::ExternalDns {
+                                http_address,
+                                dns_address,
+                                nic,
+                                ..
+                            },
                         ..
                     },
                 ..
@@ -2029,7 +2016,7 @@ impl ServiceManager {
                 let nw_setup_service = Self::zone_network_setup_install(
                     Some(&info.underlay_address),
                     &installed_zone,
-                    &[*underlay_address],
+                    &[*http_address.ip()],
                 )?;
                 // Like Nexus, we need to be reachable externally via
                 // `dns_address` but we don't listen on that address
@@ -2038,27 +2025,19 @@ impl ServiceManager {
                 let opte_interface_setup =
                     Self::opte_interface_set_up_install(&installed_zone)?;
 
-                let port_idx = 0;
-                let port = installed_zone
-                    .opte_ports()
-                    .nth(port_idx)
-                    .ok_or_else(|| {
-                        Error::ZoneEnsureAddress(
-                            EnsureAddressError::MissingOptePort {
-                                zone: String::from(installed_zone.name()),
-                                port_idx,
-                            },
-                        )
-                    })?;
-                let opte_ip = port.ip();
-
-                let http_addr =
-                    format!("[{}]:{}", underlay_address, DNS_HTTP_PORT);
-                let dns_addr = format!("{}:{}", opte_ip, DNS_PORT);
+                // We need to tell external_dns to listen on its OPTE port IP
+                // address, which comes from `nic`. Attach the port from its
+                // true external DNS address (`dns_address`).
+                let dns_address =
+                    SocketAddr::new(nic.ip, dns_address.port()).to_string();
 
                 let external_dns_config = PropertyGroupBuilder::new("config")
-                    .add_property("http_address", "astring", &http_addr)
-                    .add_property("dns_address", "astring", &dns_addr);
+                    .add_property(
+                        "http_address",
+                        "astring",
+                        http_address.to_string(),
+                    )
+                    .add_property("dns_address", "astring", dns_address);
                 let external_dns_service =
                     ServiceBuilder::new("oxide/external_dns").add_instance(
                         ServiceInstanceBuilder::new("default")
@@ -2084,12 +2063,12 @@ impl ServiceManager {
                     OmicronZoneConfig {
                         zone_type:
                             OmicronZoneType::BoundaryNtp {
+                                address,
                                 dns_servers,
                                 ntp_servers,
                                 domain,
                                 ..
                             },
-                        underlay_address,
                         ..
                     },
                 ..
@@ -2101,7 +2080,7 @@ impl ServiceManager {
                 let nw_setup_service = Self::zone_network_setup_install(
                     Some(&info.underlay_address),
                     &installed_zone,
-                    &[*underlay_address],
+                    &[*address.ip()],
                 )?;
 
                 let rack_net =
@@ -2170,8 +2149,7 @@ impl ServiceManager {
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
                     OmicronZoneConfig {
-                        zone_type: OmicronZoneType::InternalNtp { .. },
-                        underlay_address,
+                        zone_type: OmicronZoneType::InternalNtp { address },
                         ..
                     },
                 ..
@@ -2183,7 +2161,7 @@ impl ServiceManager {
                 let nw_setup_service = Self::zone_network_setup_install(
                     Some(&info.underlay_address),
                     &installed_zone,
-                    &[*underlay_address],
+                    &[*address.ip()],
                 )?;
 
                 let rack_net =
@@ -2240,15 +2218,19 @@ impl ServiceManager {
                                 gz_address_index,
                                 ..
                             },
-                        underlay_address,
                         ..
                     },
                 ..
             }) => {
+                let underlay_ips = if http_address.ip() == dns_address.ip() {
+                    vec![*http_address.ip()]
+                } else {
+                    vec![*http_address.ip(), *dns_address.ip()]
+                };
                 let nw_setup_service = Self::zone_network_setup_install(
                     Some(gz_address),
                     &installed_zone,
-                    &[*underlay_address],
+                    &underlay_ips,
                 )?;
 
                 // Internal DNS zones require a special route through
@@ -2282,14 +2264,17 @@ impl ServiceManager {
                 // maghemite so it can advertise it to other sleds.
                 self.advertise_prefix_of_address(*gz_address).await;
 
-                let http_addr =
-                    format!("[{}]:{}", http_address.ip(), http_address.port());
-                let dns_addr =
-                    format!("[{}]:{}", dns_address.ip(), dns_address.port());
-
                 let internal_dns_config = PropertyGroupBuilder::new("config")
-                    .add_property("http_address", "astring", &http_addr)
-                    .add_property("dns_address", "astring", &dns_addr);
+                    .add_property(
+                        "http_address",
+                        "astring",
+                        http_address.to_string(),
+                    )
+                    .add_property(
+                        "dns_address",
+                        "astring",
+                        dns_address.to_string(),
+                    );
                 let internal_dns_service =
                     ServiceBuilder::new("oxide/internal_dns").add_instance(
                         ServiceInstanceBuilder::new("default")
@@ -2319,7 +2304,6 @@ impl ServiceManager {
                                 external_dns_servers,
                                 ..
                             },
-                        underlay_address,
                         id,
                         ..
                     },
@@ -2332,7 +2316,7 @@ impl ServiceManager {
                 let nw_setup_service = Self::zone_network_setup_install(
                     Some(&info.underlay_address),
                     &installed_zone,
-                    &[*underlay_address],
+                    &[*internal_address.ip()],
                 )?;
 
                 // While Nexus will be reachable via `external_ip`, it
@@ -4887,7 +4871,6 @@ mod illumos_tests {
                     generation,
                     zones: vec![OmicronZoneConfig {
                         id,
-                        underlay_address: Ipv6Addr::LOCALHOST,
                         zone_type,
                         filesystem_pool: None,
                     }],
@@ -4914,7 +4897,6 @@ mod illumos_tests {
                 generation,
                 zones: vec![OmicronZoneConfig {
                     id,
-                    underlay_address: Ipv6Addr::LOCALHOST,
                     zone_type: OmicronZoneType::InternalNtp { address },
                     filesystem_pool: None,
                 }],
@@ -5494,7 +5476,6 @@ mod illumos_tests {
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, EXPECTED_PORT, 0, 0);
         let mut zones = vec![OmicronZoneConfig {
             id: id1,
-            underlay_address: Ipv6Addr::LOCALHOST,
             zone_type: OmicronZoneType::InternalNtp { address },
             filesystem_pool: None,
         }];
@@ -5517,7 +5498,6 @@ mod illumos_tests {
         let id2 = OmicronZoneUuid::new_v4();
         zones.push(OmicronZoneConfig {
             id: id2,
-            underlay_address: Ipv6Addr::LOCALHOST,
             zone_type: OmicronZoneType::InternalNtp { address },
             filesystem_pool: None,
         });

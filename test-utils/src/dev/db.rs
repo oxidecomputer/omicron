@@ -514,6 +514,21 @@ pub enum CockroachStartError {
     },
 }
 
+#[derive(Copy, Clone, Debug)]
+enum Signal {
+    Kill,
+    Terminate,
+}
+
+impl From<Signal> for libc::c_int {
+    fn from(signal: Signal) -> Self {
+        match signal {
+            Signal::Kill => libc::SIGKILL,
+            Signal::Terminate => libc::SIGTERM,
+        }
+    }
+}
+
 /// Manages a CockroachDB process running as a single-node cluster
 ///
 /// You are **required** to invoke [`CockroachInstance::wait_for_shutdown()`] or
@@ -578,7 +593,8 @@ impl CockroachInstance {
         client.cleanup().await.context("cleaning up after wipe")
     }
 
-    /// Waits for the child process to exit
+    /// Waits for the child process to exit, and cleans up its temporary
+    /// storage.
     ///
     /// Note that CockroachDB will normally run forever unless the caller
     /// arranges for it to be shutdown.
@@ -593,24 +609,43 @@ impl CockroachInstance {
                 .await;
         }
         self.child_process = None;
+
+        // It shouldn't really matter which cleanup API we use, since
+        // the child process is gone anyway.
         self.cleanup().await
     }
 
-    /// Cleans up the child process and temporary directory
+    /// Gracefully cleans up the child process and temporary directory
+    ///
+    /// If the child process is still running, it will be killed with SIGTERM and
+    /// this function will wait for it to exit.  Then the temporary directory
+    /// will be cleaned up.
+    pub async fn cleanup_gracefully(&mut self) -> Result<(), anyhow::Error> {
+        self.cleanup_inner(Signal::Terminate).await
+    }
+
+    /// Quickly cleans up the child process and temporary directory
     ///
     /// If the child process is still running, it will be killed with SIGKILL and
     /// this function will wait for it to exit.  Then the temporary directory
     /// will be cleaned up.
     pub async fn cleanup(&mut self) -> Result<(), anyhow::Error> {
-        // SIGTERM the process and wait for it to exit so that we can remove the
+        self.cleanup_inner(Signal::Kill).await
+    }
+
+    async fn cleanup_inner(
+        &mut self,
+        signal: Signal,
+    ) -> Result<(), anyhow::Error> {
+        // Kill the process and wait for it to exit so that we can remove the
         // temporary directory that we may have used to store its data.  We
         // don't care what the result of the process was.
         if let Some(child_process) = self.child_process.as_mut() {
             let pid = child_process.id().expect("Missing child PID") as i32;
             let success =
-                0 == unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+                0 == unsafe { libc::kill(pid as libc::pid_t, signal.into()) };
             if !success {
-                bail!("Failed to send SIGTERM to DB");
+                bail!("Failed to send {signal:?} to DB");
             }
             child_process.wait().await.context("waiting for child process")?;
             self.child_process = None;

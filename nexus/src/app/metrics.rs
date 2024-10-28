@@ -112,14 +112,6 @@ impl super::Nexus {
         // resources they have access to.
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.timeseries_client
-            .get()
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "Cannot access timeseries DB: {}",
-                    e
-                ))
-            })?
             .timeseries_schema_list(&pagination.page, limit)
             .await
             .map_err(|e| match e {
@@ -145,14 +137,6 @@ impl super::Nexus {
         // resources they have access to.
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.timeseries_client
-            .get()
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "Cannot access timeseries DB: {}",
-                    e
-                ))
-            })?
             .oxql_query(query)
             .await
             .map(|result| {

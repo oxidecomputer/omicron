@@ -7,19 +7,14 @@
 use crate::external_api::params::ResourceMetrics;
 use crate::internal_api::params::OximeterInfo;
 use dropshot::PaginationParams;
-use internal_dns_resolver::{ResolveError, Resolver};
-use internal_dns_types::names::ServiceName;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
-use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use omicron_common::api::external::{DataPageParams, Error, ListResultVec};
 use omicron_common::api::internal::nexus::{self, ProducerEndpoint};
 use oximeter_client::Client as OximeterClient;
 use oximeter_db::query::Timestamp;
 use oximeter_db::Measurement;
-use slog::Logger;
-use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
 use std::time::Duration;
@@ -30,58 +25,6 @@ use uuid::Uuid;
 /// Producers are expected to renew their registration lease periodically, at
 /// some interval of this overall duration.
 pub const PRODUCER_LEASE_DURATION: Duration = Duration::from_secs(10 * 60);
-
-/// A client which knows how to connect to Clickhouse, but does so
-/// only when a request is actually made.
-///
-/// This allows callers to set up the mechanism of connection (by address
-/// or DNS) separately from actually making that connection. This
-/// is particularly useful in situations where configurations are parsed
-/// prior to Clickhouse existing.
-pub struct LazyTimeseriesClient {
-    log: Logger,
-    source: ClientSource,
-}
-
-enum ClientSource {
-    FromDns { resolver: Resolver },
-    FromIp { address: SocketAddr },
-}
-
-impl LazyTimeseriesClient {
-    pub fn new_from_dns(log: Logger, resolver: Resolver) -> Self {
-        Self { log, source: ClientSource::FromDns { resolver } }
-    }
-
-    pub fn new_from_address(log: Logger, address: SocketAddr) -> Self {
-        Self { log, source: ClientSource::FromIp { address } }
-    }
-
-    pub(crate) async fn get(
-        &self,
-    ) -> Result<oximeter_db::Client, ResolveError> {
-        let (http_address, native_address) = match &self.source {
-            ClientSource::FromIp { address } => {
-                let native_address =
-                    SocketAddr::new(address.ip(), CLICKHOUSE_TCP_PORT);
-                (*address, native_address)
-            }
-            ClientSource::FromDns { resolver } => {
-                let http_address = SocketAddr::from(
-                    resolver.lookup_socket_v6(ServiceName::Clickhouse).await?,
-                );
-                let native_address = SocketAddr::from(
-                    resolver
-                        .lookup_socket_v6(ServiceName::ClickhouseNative)
-                        .await?,
-                );
-                (http_address, native_address)
-            }
-        };
-
-        Ok(oximeter_db::Client::new(http_address, native_address, &self.log))
-    }
-}
 
 impl super::Nexus {
     /// Insert a new record of an Oximeter collector server.
@@ -118,6 +61,9 @@ impl super::Nexus {
     }
 
     /// Assign a newly-registered metric producer to an oximeter collector server.
+    ///
+    /// Note that we don't send the registration to the collector, the collector
+    /// polls for its list of producers periodically.
     pub(crate) async fn assign_producer(
         &self,
         opctx: &OpContext,
@@ -127,20 +73,6 @@ impl super::Nexus {
             .db_datastore
             .producer_endpoint_upsert_and_assign(opctx, &producer_info)
             .await?;
-
-        let address = SocketAddr::from((
-            collector_info.ip.ip(),
-            collector_info.port.try_into().unwrap(),
-        ));
-        let collector =
-            build_oximeter_client(&self.log, &collector_info.id, address);
-
-        collector
-            .producers_post(&oximeter_client::types::ProducerEndpoint::from(
-                &producer_info,
-            ))
-            .await
-            .map_err(Error::from)?;
         info!(
             self.log,
             "assigned collector to new producer";
@@ -202,14 +134,6 @@ impl super::Nexus {
 
         let timeseries_list = self
             .timeseries_client
-            .get()
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "Cannot access timeseries DB: {}",
-                    e
-                ))
-            })?
             .select_timeseries_with(
                 timeseries_name,
                 criteria,
