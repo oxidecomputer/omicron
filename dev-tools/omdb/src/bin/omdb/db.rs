@@ -5784,8 +5784,9 @@ async fn cmd_db_vmm_info(
         let multiple_reservations = reservations.len() > 1;
         if multiple_reservations {
             println!(
-                "/!\\ VMM has multiple sled resource reservation records, \
-                this seems weird!",
+                "/!\\ VMM has multiple sled resource reservation records! \
+                 This is a bug; please open an issue about it here:\n\
+                 https://github.com/oxidecomputer/omicron/issues/new?template=Blank+issue",
             );
         }
         for r in reservations {
@@ -6050,30 +6051,22 @@ async fn cmd_db_vmm_list(
         }
     }
 
-    let table = match (verbose, fetch_opts.include_deleted) {
+    let mut table = match (verbose, fetch_opts.include_deleted) {
         (true, true) => tabled::Table::new(
             vmms.iter().map(WithDeleted::<VerboseVmmRow>::from),
-        )
-        .with(tabled::settings::Style::empty())
-        .with(tabled::settings::Padding::new(0, 1, 0, 0))
-        .to_string(),
+        ),
         (true, false) => {
             tabled::Table::new(vmms.iter().map(VerboseVmmRow::from))
-                .with(tabled::settings::Style::empty())
-                .with(tabled::settings::Padding::new(0, 1, 0, 0))
-                .to_string()
         }
-        (false, true) => tabled::Table::new(
-            vmms.iter().map(WithDeleted::<WithDeleted<VmmRow>>::from),
-        )
-        .with(tabled::settings::Style::empty())
-        .with(tabled::settings::Padding::new(0, 1, 0, 0))
-        .to_string(),
-        (false, false) => tabled::Table::new(vmms.iter().map(VmmRow::from))
-            .with(tabled::settings::Style::empty())
-            .with(tabled::settings::Padding::new(0, 1, 0, 0))
-            .to_string(),
+        (false, true) => {
+            tabled::Table::new(vmms.iter().map(WithDeleted::<VmmRow>::from))
+        }
+        (false, false) => tabled::Table::new(vmms.iter().map(VmmRow::from)),
     };
+    table
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0));
+
     println!("{table}");
 
     Ok(())
