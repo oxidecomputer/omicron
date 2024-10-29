@@ -464,8 +464,20 @@ struct InstanceInfoArgs {
     ///
     /// note that this is not exhaustive, as some VMM or migration records may
     /// have been hard-deleted.
+    ///
+    /// this is also enabled by `--all`.
     #[arg(short = 'i', long)]
     history: bool,
+
+    /// include virtual resources provisioned by this instance.
+    ///
+    /// this is also enabled by `--all`.
+    #[arg(short = 'r', long)]
+    resources: bool,
+
+    /// include all optional output.
+    #[arg(short = 'a', long)]
+    all: bool,
 }
 
 #[derive(Debug, Args)]
@@ -2990,7 +3002,7 @@ async fn cmd_db_instance_info(
         Instance, InstanceKarmicStatus, InstanceRuntimeState, Migration,
         Reincarnatability,
     };
-    let &InstanceInfoArgs { ref id, history } = args;
+    let &InstanceInfoArgs { ref id, history, resources, all } = args;
 
     let instance = instance_dsl::instance
         .filter(instance_dsl::id.eq(id.into_untyped_uuid()))
@@ -3306,7 +3318,7 @@ async fn cmd_db_instance_info(
     }
 
     if !disks.is_empty() {
-        println!("\n{:=<80}\n", "== ATTACHED DISKS ");
+        println!("\n{:=<80}", "== ATTACHED DISKS ");
 
         check_limit(&disks, fetch_opts.fetch_limit, ctx);
         let table = if fetch_opts.include_deleted {
@@ -3323,7 +3335,58 @@ async fn cmd_db_instance_info(
         println!("{table}");
     }
 
-    if history {
+    if resources || all {
+        use db::schema::virtual_provisioning_resource::dsl as resource_dsl;
+        let resources = resource_dsl::virtual_provisioning_resource
+            .filter(resource_dsl::id.eq(id.into_untyped_uuid()))
+            .select(db::model::VirtualProvisioningResource::as_select())
+            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .await
+            .context("fetching instance virtual provisioning record")?;
+        println!("\n{:=<80}", "== VIRTUAL RESOURCES PROVISIONED ");
+        if resources.is_empty() {
+            println!("(i) no virtual resources provisioned for this instance")
+        } else {
+            if resources.len() > 1 {
+                println!(
+                    "/!\\ there should only be one virtual resource record \
+                     for a given UUID! this is a bug!",
+                );
+            }
+            for resource in resources {
+                let db::model::VirtualProvisioningResource {
+                    id: _,
+                    time_modified,
+                    resource_type,
+                    virtual_disk_bytes_provisioned: db::model::ByteCount(disk),
+                    cpus_provisioned,
+                    ram_provisioned: db::model::ByteCount(ram),
+                } = resource;
+                const DISK: &'static str = "virtual disk";
+                const RAM: &'static str = "RAM";
+                const WIDTH: usize = crate::helpers::const_max_len(&[
+                    VCPUS,
+                    DISK,
+                    RAM,
+                    LAST_UPDATED,
+                ]);
+                if resource_type != "instance" {
+                    println!(
+                        "/!\\ virtual provisioning resource type is \
+                 {resource_type:?} (expected \"instance\")",
+                    );
+                }
+                println!("    {VCPUS:>WIDTH$}: {cpus_provisioned}");
+                println!("    {RAM:>WIDTH$}: {ram}");
+                println!("    {DISK:>WIDTH$}: {disk}");
+                if let Some(modified) = time_modified {
+                    println!("    {LAST_UPDATED:>WIDTH$}: {modified}")
+                }
+            }
+        }
+    }
+
+    if history || all {
         let ctx = || "listing migrations";
         let past_migrations = migration_dsl::migration
             .filter(migration_dsl::instance_id.eq(id.into_untyped_uuid()))
@@ -3381,7 +3444,7 @@ async fn cmd_db_instance_info(
             .with_context(ctx)?;
 
         if !vmms.is_empty() {
-            println!("\n{:=<80}\n", "== VMM HISTORY");
+            println!("\n{:=<80}", "== VMM HISTORY ");
 
             check_limit(&vmms, fetch_opts.fetch_limit, ctx);
 
