@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use camino::Utf8PathBuf;
@@ -309,7 +309,7 @@ pub trait SledAgentApi {
     }]
     async fn artifact_list(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<BTreeSet<ArtifactHash>>, HttpError>;
+    ) -> Result<HttpResponseOk<BTreeMap<ArtifactHash, usize>>, HttpError>;
 
     #[endpoint {
         method = POST,

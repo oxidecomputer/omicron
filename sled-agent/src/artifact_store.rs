@@ -13,7 +13,7 @@
 //!
 //! POST, PUT, and DELETE operations are handled by the Sled Agent API.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::io::ErrorKind;
 use std::net::SocketAddrV6;
 use std::str::FromStr;
@@ -204,8 +204,10 @@ impl<T: DatasetsManager> ArtifactStore<T> {
     ///
     /// We try all datasets, logging errors as we go; if we're experiencing I/O
     /// errors, Nexus should still be aware of the artifacts we think we have.
-    pub(crate) async fn list(&self) -> Result<BTreeSet<ArtifactHash>, Error> {
-        let mut set = BTreeSet::new();
+    pub(crate) async fn list(
+        &self,
+    ) -> Result<BTreeMap<ArtifactHash, usize>, Error> {
+        let mut map = BTreeMap::new();
         let mut any_datasets = false;
         for mountpoint in self.storage.artifact_storage_paths().await? {
             any_datasets = true;
@@ -243,7 +245,7 @@ impl<T: DatasetsManager> ArtifactStore<T> {
                         if let Ok(file_name) = entry.file_name().into_string() {
                             if let Ok(hash) = ArtifactHash::from_str(&file_name)
                             {
-                                set.insert(hash);
+                                *map.entry(hash).or_default() += 1;
                             }
                         }
                     }
@@ -261,7 +263,7 @@ impl<T: DatasetsManager> ArtifactStore<T> {
             }
         }
         if any_datasets {
-            Ok(set)
+            Ok(map)
         } else {
             Err(Error::NoUpdateDataset)
         }
@@ -793,7 +795,12 @@ mod test {
                 .await
                 .unwrap();
             // list lists the file
-            assert!(store.list().await.unwrap().into_iter().eq([TEST_HASH]));
+            assert!(store
+                .list()
+                .await
+                .unwrap()
+                .into_iter()
+                .eq([(TEST_HASH, 2)]));
             // get succeeds, file reads back OK
             let mut file = store.get(TEST_HASH).await.unwrap();
             let mut vec = Vec::new();

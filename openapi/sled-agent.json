@@ -19,13 +19,13 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Set_of_hex_schema",
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "format": "hex string (32 bytes)"
-                  },
-                  "uniqueItems": true
+                  "title": "Map_of_uint",
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer",
+                    "format": "uint",
+                    "minimum": 0
+                  }
                 }
               }
             }

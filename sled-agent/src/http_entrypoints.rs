@@ -51,7 +51,7 @@ use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     StorageLimit, ZoneBundleId, ZoneBundleMetadata,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 type SledApiDescription = ApiDescription<SledAgent>;
 
@@ -404,7 +404,7 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn artifact_list(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<BTreeSet<ArtifactHash>>, HttpError> {
+    ) -> Result<HttpResponseOk<BTreeMap<ArtifactHash, usize>>, HttpError> {
         Ok(HttpResponseOk(rqctx.context().artifact_store().list().await?))
     }
 
