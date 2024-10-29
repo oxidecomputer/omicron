@@ -132,19 +132,33 @@ async fn inventory_activate(
         })
         .collect::<Vec<_>>();
 
-    // Find clickhouse-admin-keeper clients
-    let keeper_admin_clients = resolver
-        .lookup_socket_v6(ServiceName::ClickhouseAdminKeeper)
+    // Find clickhouse-admin-keeper clients if there are any
+    let keeper_admin_clients = match resolver
+        .lookup_all_socket_v6(ServiceName::ClickhouseAdminKeeper)
         .await
-        .context("looking up ClickhouseAdminKeeper addresses")
-        .into_iter()
-        .map(|sockaddr| {
-            let url = format!("http://{}", sockaddr);
-            let log =
-                opctx.log.new(o!("clickhouse_admin_keeper_url" => url.clone()));
-            clickhouse_admin_keeper_client::Client::new(&url, log)
-        })
-        .collect::<Vec<_>>();
+    {
+        Ok(sockaddrs) => sockaddrs
+            .into_iter()
+            .map(|sockaddr| {
+                let url = format!("http://{}", sockaddr);
+                let log = opctx
+                    .log
+                    .new(o!("clickhouse_admin_keeper_url" => url.clone()));
+                clickhouse_admin_keeper_client::Client::new(&url, log)
+            })
+            .collect::<Vec<_>>(),
+        Err(err) => {
+            warn!(
+                opctx.log,
+                concat!(
+                    "Failed to lookup ClickhouseAdminKeeper in internal DNS:",
+                    " {}. Is it enabled via policy?"
+                ),
+                err
+            );
+            vec![]
+        }
+    };
 
     // Create an enumerator to find sled agents.
     let sled_enum = DbSledAgentEnumerator { opctx, datastore };

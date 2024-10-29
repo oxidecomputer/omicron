@@ -5054,6 +5054,7 @@ async fn cmd_db_inventory_collections_show(
     let nerrors = inv_collection_print_errors(&collection).await?;
     inv_collection_print_devices(&collection, &long_string_formatter).await?;
     inv_collection_print_sleds(&collection);
+    inv_collection_print_keeper_membership(&collection);
 
     if nerrors > 0 {
         eprintln!(
@@ -5376,6 +5377,24 @@ fn inv_collection_print_sleds(collection: &Collection) {
                 z.zone_type.kind().report_str()
             );
         }
+    }
+}
+
+fn inv_collection_print_keeper_membership(collection: &Collection) {
+    println!("\nKEEPER MEMBERSHIP");
+    for k in &collection.clickhouse_keeper_cluster_membership {
+        println!("\n    queried keeper: {}", k.queried_keeper);
+        println!(
+            "    leader_committed_log_index: {}",
+            k.leader_committed_log_index
+        );
+        let raft_config =
+            k.raft_config.iter().fold("".to_string(), |mut acc, id| {
+                acc.push_str(&format!("{id}, "));
+                acc
+            });
+        let s = raft_config.trim_end_matches(", ");
+        println!("    raft config: {s}");
     }
 }
 
