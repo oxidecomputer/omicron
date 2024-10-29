@@ -28,7 +28,7 @@ use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::params::Address;
 use nexus_types::external_api::params::AddressConfig;
-use nexus_types::external_api::params::AddressLotBlockCreate;
+use nexus_types::external_api::params::AddressLotBlockAddRemove;
 use nexus_types::external_api::params::BgpAnnounceSetCreate;
 use nexus_types::external_api::params::BgpAnnouncementCreate;
 use nexus_types::external_api::params::BgpConfigCreate;
@@ -47,11 +47,12 @@ use nexus_types::external_api::shared::SiloIdentityMode;
 use nexus_types::external_api::shared::SiloRole;
 use nexus_types::external_api::shared::UninitializedSled;
 use nexus_types::external_api::views;
+use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::silo::silo_dns_name;
 use omicron_common::address::{get_64_subnet, Ipv6Subnet, RACK_PREFIX};
 use omicron_common::api::external::AddressLotKind;
-use omicron_common::api::external::BgpPeer;
+use omicron_common::api::external::BgpPeerCombined;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -401,23 +402,44 @@ impl super::Nexus {
 
         let first_address = IpAddr::V4(rack_network_config.infra_ip_first);
         let last_address = IpAddr::V4(rack_network_config.infra_ip_last);
-        let ipv4_block = AddressLotBlockCreate { first_address, last_address };
+        let ipv4_block =
+            AddressLotBlockAddRemove { first_address, last_address };
 
-        let blocks = vec![ipv4_block];
+        let address_lot_params = AddressLotCreate { identity, kind };
 
-        let address_lot_params = AddressLotCreate { identity, kind, blocks };
-
-        match self
+        let address_lot_id = match self
             .db_datastore
             .address_lot_create(opctx, &address_lot_params)
             .await
         {
-            Ok(_) => Ok(()),
+            Ok(v) => Ok(v.id()),
             Err(e) => match e {
                 Error::ObjectAlreadyExists { type_name: _, object_name: _ } => {
-                    Ok(())
+                    let address_lot_lookup = self.address_lot_lookup(
+                        &opctx,
+                        NameOrId::Name(address_lot_name.clone()),
+                    )?;
+
+                    let (.., authz_address_lot) = address_lot_lookup
+                        .lookup_for(authz::Action::CreateChild)
+                        .await?;
+                    Ok(authz_address_lot.id())
                 }
                 _ => Err(e),
+            },
+        }?;
+
+        match self
+            .db_datastore
+            .address_lot_block_create(opctx, address_lot_id, ipv4_block.clone())
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(e) => match e {
+                Error::ObjectAlreadyExists { .. } => Ok(()),
+                _ => Err(Error::internal_error(&format!(
+                    "unable to create block for address lot {address_lot_id}: {e}",
+                ))),
             },
         }?;
 
@@ -435,40 +457,66 @@ impl super::Nexus {
             let address_lot_name: Name =
                 format!("as{}-lot", bgp_config.asn).parse().unwrap();
 
-            match self
+            let address_lot_id = match self
                 .db_datastore
                 .address_lot_create(
                     &opctx,
                     &AddressLotCreate {
                         identity: IdentityMetadataCreateParams {
-                            name: address_lot_name,
+                            name: address_lot_name.clone(),
                             description: format!(
                                 "Address lot for announce set in as {}",
                                 bgp_config.asn
                             ),
                         },
                         kind: AddressLotKind::Infra,
-                        blocks: bgp_config
-                            .originate
-                            .iter()
-                            .map(|o| AddressLotBlockCreate {
-                                first_address: o.first_addr().into(),
-                                last_address: o.last_addr().into(),
-                            })
-                            .collect(),
                     },
                 )
                 .await
             {
-                Ok(_) => Ok(()),
+                Ok(v) => Ok(v.id()),
                 Err(e) => match e {
-                    Error::ObjectAlreadyExists { .. } => Ok(()),
+                    Error::ObjectAlreadyExists { .. } => {
+                        let address_lot_lookup = self.address_lot_lookup(
+                            &opctx,
+                            NameOrId::Name(address_lot_name),
+                        )?;
+
+                        let (.., authz_address_lot) = address_lot_lookup
+                            .lookup_for(authz::Action::CreateChild)
+                            .await?;
+                        Ok(authz_address_lot.id())
+                    }
                     _ => Err(Error::internal_error(&format!(
                         "unable to create address lot for BGP as {}: {e}",
                         bgp_config.asn
                     ))),
                 },
             }?;
+
+            for net in &bgp_config.originate {
+                match self
+                    .db_datastore
+                    .address_lot_block_create(
+                        &opctx,
+                        address_lot_id,
+                        AddressLotBlockAddRemove {
+                            first_address: net.first_addr().into(),
+                            last_address: net.last_addr().into(),
+                        },
+                    )
+                    .await
+                {
+                    Ok(_) => Ok(()),
+                    Err(e) => match e {
+                        Error::ObjectAlreadyExists { .. } => Ok(()),
+                        _ => Err(Error::internal_error(&format!(
+                            "unable to create address lot block for BGP as {}: {e}",
+                            bgp_config.asn
+                        ))),
+                    },
+                }?;
+            }
 
             match self
                 .db_datastore
@@ -543,7 +591,7 @@ impl super::Nexus {
         for (idx, uplink_config) in rack_network_config.ports.iter().enumerate()
         {
             let switch = uplink_config.switch.to_string();
-            let switch_location = Name::from_str(&switch).map_err(|e| {
+            let switch_location = switch.parse().map_err(|e| {
                 Error::internal_error(&format!(
                     "unable to use {switch} as Name: {e}"
                 ))
@@ -601,10 +649,10 @@ impl super::Nexus {
                 .routes
                 .insert("phy0".to_string(), RouteConfig { routes });
 
-            let peers: Vec<BgpPeer> = uplink_config
+            let peers: Vec<BgpPeerCombined> = uplink_config
                 .bgp_peers
                 .iter()
-                .map(|r| BgpPeer {
+                .map(|r| BgpPeerCombined {
                     bgp_config: NameOrId::Name(
                         format!("as{}", r.asn).parse().unwrap(),
                     ),
@@ -682,7 +730,7 @@ impl super::Nexus {
                 .switch_port_get_id(
                     opctx,
                     rack_id,
-                    switch_location.into(),
+                    switch_location,
                     Name::from_str(&uplink_config.port).unwrap().into(),
                 )
                 .await?;

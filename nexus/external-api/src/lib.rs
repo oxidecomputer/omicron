@@ -1339,6 +1339,30 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<ResultsPage<AddressLot>>, HttpError>;
 
+    /// Add block to address lot
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/address-lot/{address_lot}/blocks/add",
+        tags = ["system/networking"],
+    }]
+    async fn networking_address_lot_block_add(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::AddressLotPath>,
+        block: TypedBody<params::AddressLotBlockAddRemove>,
+    ) -> Result<HttpResponseCreated<AddressLotBlock>, HttpError>;
+
+    /// Remove block from address lot
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/address-lot/{address_lot}/blocks/remove",
+        tags = ["system/networking"],
+    }]
+    async fn networking_address_lot_block_remove(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::AddressLotPath>,
+        block: TypedBody<params::AddressLotBlockAddRemove>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
     /// List blocks in address lot
     #[endpoint {
         method = GET,
@@ -1387,10 +1411,10 @@ pub trait NexusExternalApi {
     /// Create switch port settings
     #[endpoint {
         method = POST,
-        path = "/v1/system/networking/switch-port-settings",
+        path = "/v1/system/networking/switch-port-configuration",
         tags = ["system/networking"],
     }]
-    async fn networking_switch_port_settings_create(
+    async fn networking_switch_port_configuration_create(
         rqctx: RequestContext<Self::Context>,
         new_settings: TypedBody<params::SwitchPortSettingsCreate>,
     ) -> Result<HttpResponseCreated<SwitchPortSettingsView>, HttpError>;
@@ -1398,37 +1422,319 @@ pub trait NexusExternalApi {
     /// Delete switch port settings
     #[endpoint {
         method = DELETE,
-        path = "/v1/system/networking/switch-port-settings",
+        path = "/v1/system/networking/switch-port-configuration/{configuration}",
         tags = ["system/networking"],
     }]
-    async fn networking_switch_port_settings_delete(
+    async fn networking_switch_port_configuration_delete(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<params::SwitchPortSettingsSelector>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
     /// List switch port settings
     #[endpoint {
         method = GET,
-        path = "/v1/system/networking/switch-port-settings",
+        path = "/v1/system/networking/switch-port-configuration",
         tags = ["system/networking"],
     }]
-    async fn networking_switch_port_settings_list(
+    async fn networking_switch_port_configuration_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<
             PaginatedByNameOrId<params::SwitchPortSettingsSelector>,
         >,
     ) -> Result<HttpResponseOk<ResultsPage<SwitchPortSettings>>, HttpError>;
 
-    /// Get information about switch port
+    /// View a switch port configuration
     #[endpoint {
         method = GET,
-        path = "/v1/system/networking/switch-port-settings/{port}",
+        path = "/v1/system/networking/switch-port-configuration/{configuration}",
         tags = ["system/networking"],
     }]
-    async fn networking_switch_port_settings_view(
+    async fn networking_switch_port_configuration_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SwitchPortSettingsInfoSelector>,
     ) -> Result<HttpResponseOk<SwitchPortSettingsView>, HttpError>;
+
+    /// Get switch port geometry for a provided switch port configuration
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/switch-port-configuration/{configuration}/geometry",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_configuration_geometry_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+    ) -> Result<HttpResponseOk<SwitchPortConfig>, HttpError>;
+
+    /// Set switch port geometry for a provided switch port configuration
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/switch-port-configuration/{configuration}/geometry",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_configuration_geometry_set(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        new_settings: TypedBody<params::SwitchPortConfigCreate>,
+    ) -> Result<HttpResponseCreated<SwitchPortConfig>, HttpError>;
+
+    /// List links for a provided switch port configuration
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/switch-port-configuration/{configuration}/link",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_configuration_link_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        // omitting pagination should be ok since there are a small number of possible links
+    ) -> Result<HttpResponseOk<Vec<SwitchPortLinkConfig>>, HttpError>;
+
+    /// Create a link for a provided switch port configuration
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/switch-port-configuration/{configuration}/link",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_configuration_link_create(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        new_settings: TypedBody<params::NamedLinkConfigCreate>,
+    ) -> Result<HttpResponseCreated<SwitchPortLinkConfig>, HttpError>;
+
+    /// View a link for a provided switch port configuration
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/switch-port-configuration/{configuration}/link/{link}",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_configuration_link_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsLinkInfoSelector>,
+    ) -> Result<HttpResponseOk<SwitchPortLinkConfig>, HttpError>;
+
+    /// Delete a link for a provided switch port configuration
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/networking/switch-port-configuration/{configuration}/link/{link}",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_configuration_link_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsLinkInfoSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List addresses assigned to a provided interface configuration
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/switch-port-configuration/{configuration}/address",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_configuration_address_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+    ) -> Result<HttpResponseOk<Vec<SwitchPortAddressConfig>>, HttpError>;
+
+    /// Add address to an interface configuration
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/switch-port-configuration/{configuration}/address/add",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_configuration_address_add(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        address: TypedBody<params::AddressAddRemove>,
+    ) -> Result<HttpResponseCreated<SwitchPortAddressConfig>, HttpError>;
+
+    /// Remove address from an interface configuration
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/switch-port-configuration/{configuration}/address/remove",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_configuration_address_remove(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        address: TypedBody<params::AddressAddRemove>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List routes assigned to a provided interface configuration
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/switch-port-configuration/{configuration}/route",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_configuration_route_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+    ) -> Result<HttpResponseOk<Vec<SwitchPortRouteConfig>>, HttpError>;
+
+    /// Add route to an interface configuration
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/switch-port-configuration/{configuration}/route/add",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_configuration_route_add(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        route: TypedBody<params::RouteAddRemove>,
+    ) -> Result<HttpResponseCreated<SwitchPortRouteConfig>, HttpError>;
+
+    /// Remove route from an interface configuration
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/switch-port-configuration/{configuration}/route/remove",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_configuration_route_remove(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        route: TypedBody<params::RouteAddRemove>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List bgp peers assigned to a provided interface configuration
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_configuration_bgp_peer_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+    ) -> Result<HttpResponseOk<Vec<BgpPeer>>, HttpError>;
+
+    /// Add bgp peer to an interface configuration
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/add",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_configuration_bgp_peer_add(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        bgp_peer: TypedBody<BgpPeer>,
+    ) -> Result<HttpResponseCreated<BgpPeer>, HttpError>;
+
+    /// Remove bgp peer from an interface configuration
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/remove",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_configuration_bgp_peer_remove(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        bgp_peer: TypedBody<BgpPeerRemove>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List prefixes allowed to be imported by a given bgp peer
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-import",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_configuration_bgp_peer_allow_import_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        query: Query<params::BgpPeerQuerySelector>,
+    ) -> Result<HttpResponseOk<Vec<BgpAllowedPrefix>>, HttpError>;
+
+    /// Add prefix to bgp peer allowed import list
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-import/add",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_configuration_bgp_peer_allow_import_add(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        prefix: TypedBody<params::AllowedPrefixAddRemove>,
+    ) -> Result<HttpResponseCreated<BgpAllowedPrefix>, HttpError>;
+
+    /// Remove prefix from bgp peer allowed import list
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-import/remove",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_configuration_bgp_peer_allow_import_remove(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        prefix: TypedBody<params::AllowedPrefixAddRemove>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List prefixes allowed to be exported by a given bgp peer
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-export",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_configuration_bgp_peer_allow_export_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        query: Query<params::BgpPeerQuerySelector>,
+    ) -> Result<HttpResponseOk<Vec<BgpAllowedPrefix>>, HttpError>;
+
+    /// Add prefix to bgp peer allowed export list
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-export/add",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_configuration_bgp_peer_allow_export_add(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        prefix: TypedBody<params::AllowedPrefixAddRemove>,
+    ) -> Result<HttpResponseCreated<BgpAllowedPrefix>, HttpError>;
+
+    /// Remove prefix from bgp peer allowed export list
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-export/remove",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_configuration_bgp_peer_allow_export_remove(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        prefix: TypedBody<params::AllowedPrefixAddRemove>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List communities assigned to a bgp peer
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/community",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_configuration_bgp_peer_community_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        query: Query<params::BgpPeerQuerySelector>,
+    ) -> Result<HttpResponseOk<Vec<BgpCommunity>>, HttpError>;
+
+    /// Add community to bgp peer
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/community/add",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_configuration_bgp_peer_community_add(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        community: TypedBody<params::BgpCommunityAddRemove>,
+    ) -> Result<HttpResponseCreated<BgpCommunity>, HttpError>;
+
+    /// Remove community from bgp peer
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/community/remove",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_configuration_bgp_peer_community_remove(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        community: TypedBody<params::BgpCommunityAddRemove>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
 
     /// List switch ports
     #[endpoint {
@@ -1453,11 +1759,46 @@ pub trait NexusExternalApi {
         query_params: Query<params::SwitchPortSelector>,
     ) -> Result<HttpResponseOk<shared::SwitchLinkState>, HttpError>;
 
+    /// View switch port configuration
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/racks/{rack_id}/switch/{switch}/switch-port/{port}/configuration",
+        tags = ["system/hardware"],
+    }]
+    async fn networking_switch_port_active_configuration_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortConfigurationSelector>,
+    ) -> Result<HttpResponseOk<Option<SwitchPortSettings>>, HttpError>;
+
+    /// Set switch port configuration
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/hardware/racks/{rack_id}/switch/{switch}/switch-port/{port}/configuration",
+        tags = ["system/hardware"],
+    }]
+    async fn networking_switch_port_active_configuration_set(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortConfigurationSelector>,
+        settings_body: TypedBody<params::SwitchPortApplySettings>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Clear switch port configuration
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/hardware/racks/{rack_id}/switch/{switch}/switch-port/{port}/configuration",
+        tags = ["system/hardware"],
+    }]
+    async fn networking_switch_port_active_configuration_clear(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortConfigurationSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
     /// Apply switch port settings
     #[endpoint {
         method = POST,
         path = "/v1/system/hardware/switch-port/{port}/settings",
         tags = ["system/hardware"],
+        deprecated = true,
     }]
     async fn networking_switch_port_apply_settings(
         rqctx: RequestContext<Self::Context>,
@@ -1471,6 +1812,7 @@ pub trait NexusExternalApi {
         method = DELETE,
         path = "/v1/system/hardware/switch-port/{port}/settings",
         tags = ["system/hardware"],
+        deprecated = true,
     }]
     async fn networking_switch_port_clear_settings(
         rqctx: RequestContext<Self::Context>,
@@ -1499,6 +1841,17 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<ResultsPage<BgpConfig>>, HttpError>;
+
+    /// Delete BGP configuration
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/networking/bgp/{bgp_config}",
+        tags = ["system/networking"],
+    }]
+    async fn networking_bgp_config_delete(
+        rqctx: RequestContext<Self::Context>,
+        sel: Path<params::BgpConfigSelector>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     //TODO pagination? the normal by-name/by-id stuff does not work here
     /// Get BGP peer status
@@ -1545,17 +1898,6 @@ pub trait NexusExternalApi {
         query_params: Query<params::BgpRouteSelector>,
     ) -> Result<HttpResponseOk<Vec<BgpImportedRouteIpv4>>, HttpError>;
 
-    /// Delete BGP configuration
-    #[endpoint {
-        method = DELETE,
-        path = "/v1/system/networking/bgp",
-        tags = ["system/networking"],
-    }]
-    async fn networking_bgp_config_delete(
-        rqctx: RequestContext<Self::Context>,
-        sel: Query<params::BgpConfigSelector>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
     /// Update BGP announce set
     ///
     /// If the announce set exists, this endpoint replaces the existing announce
@@ -1568,7 +1910,7 @@ pub trait NexusExternalApi {
     async fn networking_bgp_announce_set_update(
         rqctx: RequestContext<Self::Context>,
         config: TypedBody<params::BgpAnnounceSetCreate>,
-    ) -> Result<HttpResponseCreated<BgpAnnounceSet>, HttpError>;
+    ) -> Result<HttpResponseOk<BgpAnnounceSet>, HttpError>;
 
     /// List BGP announce sets
     #[endpoint {

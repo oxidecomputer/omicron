@@ -4519,6 +4519,10 @@ CREATE INDEX IF NOT EXISTS lookup_region_snapshot_by_snapshot_id on omicron.publ
     snapshot_id
 );
 
+
+/* Lookup switch port settings by name */
+CREATE INDEX IF NOT EXISTS switch_port_settings_name ON omicron.public.switch_port_settings (name);
+
 CREATE INDEX IF NOT EXISTS lookup_bgp_config_by_bgp_announce_set_id ON omicron.public.bgp_config (
     bgp_announce_set_id
 ) WHERE
@@ -4536,7 +4540,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '111.0.0', NULL)
+    (TRUE, NOW(), NOW(), '112.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

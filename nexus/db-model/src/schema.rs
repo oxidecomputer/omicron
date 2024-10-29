@@ -2020,17 +2020,6 @@ allow_tables_to_appear_in_same_query!(external_ip, internet_gateway);
 allow_tables_to_appear_in_same_query!(external_ip, internet_gateway_ip_pool);
 allow_tables_to_appear_in_same_query!(external_ip, internet_gateway_ip_address);
 
-allow_tables_to_appear_in_same_query!(
-    switch_port,
-    switch_port_settings_route_config
-);
-
-allow_tables_to_appear_in_same_query!(
-    switch_port,
-    switch_port_settings_bgp_peer_config,
-    bgp_config
-);
-
 allow_tables_to_appear_in_same_query!(disk, virtual_provisioning_resource);
 
 allow_tables_to_appear_in_same_query!(volume, virtual_provisioning_resource);
@@ -2042,3 +2031,17 @@ joinable!(instance_ssh_key -> instance (instance_id));
 allow_tables_to_appear_in_same_query!(sled, sled_instance);
 
 joinable!(network_interface -> probe (parent_id));
+
+allow_tables_to_appear_in_same_query!(
+    switch_port,
+    switch_port_settings,
+    switch_port_settings_port_config,
+    switch_port_settings_link_config,
+    switch_port_settings_address_config,
+    switch_port_settings_route_config,
+    switch_port_settings_bgp_peer_config,
+    switch_port_settings_bgp_peer_config_allow_export,
+    switch_port_settings_bgp_peer_config_allow_import,
+    switch_port_settings_bgp_peer_config_communities,
+    bgp_config,
+);

@@ -20,30 +20,21 @@ use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use diesel_dtrace::DTraceConnection;
 use ipnetwork::IpNetwork;
 use nexus_types::external_api::params;
-use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, ResourceType,
 };
 use ref_cast::RefCast;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct AddressLotCreateResult {
-    pub lot: AddressLot,
-    pub blocks: Vec<AddressLotBlock>,
-}
 
 impl DataStore {
     pub async fn address_lot_create(
         &self,
         opctx: &OpContext,
         params: &params::AddressLotCreate,
-    ) -> CreateResult<AddressLotCreateResult> {
+    ) -> CreateResult<AddressLot> {
         use db::schema::address_lot::dsl as lot_dsl;
-        use db::schema::address_lot_block::dsl as block_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -81,63 +72,7 @@ impl DataStore {
                     }
                 };
 
-                let desired_blocks: Vec<AddressLotBlock> = params
-                    .blocks
-                    .iter()
-                    .map(|b| {
-                        AddressLotBlock::new(
-                            db_lot.id(),
-                            b.first_address.into(),
-                            b.last_address.into(),
-                        )
-                    })
-                    .collect();
-
-                let found_blocks: Vec<AddressLotBlock> =
-                    block_dsl::address_lot_block
-                        .filter(block_dsl::address_lot_id.eq(db_lot.id()))
-                        .filter(
-                            block_dsl::first_address.eq_any(
-                                desired_blocks
-                                    .iter()
-                                    .map(|b| b.first_address)
-                                    .collect::<Vec<_>>(),
-                            ),
-                        )
-                        .filter(
-                            block_dsl::last_address.eq_any(
-                                desired_blocks
-                                    .iter()
-                                    .map(|b| b.last_address)
-                                    .collect::<Vec<_>>(),
-                            ),
-                        )
-                        .get_results_async(&conn)
-                        .await?;
-
-                let mut blocks = vec![];
-
-                // If the block is found in the database, use the found block.
-                // If the block is not found in the database, insert it.
-                for desired_block in desired_blocks {
-                    let block = match found_blocks.iter().find(|db_b| {
-                        db_b.first_address == desired_block.first_address
-                            && db_b.last_address == desired_block.last_address
-                    }) {
-                        Some(block) => block.clone(),
-                        None => {
-                            diesel::insert_into(block_dsl::address_lot_block)
-                                .values(desired_block)
-                                .returning(AddressLotBlock::as_returning())
-                                .get_results_async(&conn)
-                                .await?[0]
-                                .clone()
-                        }
-                    };
-                    blocks.push(block);
-                }
-
-                Ok(AddressLotCreateResult { lot: db_lot, blocks })
+                Ok(db_lot)
             })
             .await
             .map_err(|e| {
@@ -261,6 +196,177 @@ impl DataStore {
             .load_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn address_lot_block_create(
+        &self,
+        opctx: &OpContext,
+        address_lot_id: Uuid,
+        params: params::AddressLotBlockAddRemove,
+    ) -> CreateResult<AddressLotBlock> {
+        use db::schema::address_lot;
+        use db::schema::address_lot_block::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper("address_lot_create")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+
+                async move {
+
+                    // Verify parent address lot exists
+                    address_lot::table
+                        .filter(address_lot::id.eq(address_lot_id))
+                        .select(AddressLot::as_select())
+                        .get_result_async(&conn)
+                        .await
+                        .map_err(|e: diesel::result::Error| {
+                            match e {
+                                diesel::result::Error::NotFound => {
+                                    err.bail(
+                                        Error::non_resourcetype_not_found(
+                                            format!("unable to find address lot with identifier {address_lot_id}")
+                                        )
+                                    )
+                                },
+                                _ => {
+                                    err.bail(Error::internal_error(
+                                        "error while looking up address lot for address lot block"
+                                    ))
+                                },
+                            }
+                        })?;
+
+                    let found_block: Option<AddressLotBlock> =
+                        dsl::address_lot_block
+                        .filter(dsl::address_lot_id.eq(address_lot_id))
+                        .filter(
+                            dsl::first_address
+                                .eq(IpNetwork::from(params.first_address)),
+                        )
+                        .filter(
+                            dsl::last_address
+                                .eq(IpNetwork::from(params.last_address)),
+                        )
+                        .select(AddressLotBlock::as_select())
+                        .limit(1)
+                        .first_async(&conn)
+                        .await
+                        .ok();
+
+                    let new_block = AddressLotBlock::new(
+                        address_lot_id,
+                        IpNetwork::from(params.first_address),
+                        IpNetwork::from(params.last_address),
+                    );
+
+                    let db_block = match found_block {
+                        Some(v) => v,
+                        None => {
+                            diesel::insert_into(dsl::address_lot_block)
+                                .values(new_block)
+                                .returning(AddressLotBlock::as_returning())
+                                .get_result_async(&conn)
+                                .await?
+                        }
+                    };
+
+                    Ok(db_block)
+                }
+            })
+            .await
+            .map_err(|e| {
+                let message = "address_lot_block_create failed";
+                match err.take() {
+                    Some(external_error) => {
+                        error!(opctx.log, "{message}"; "error" => ?external_error);
+                        external_error
+                    },
+                    None => {
+                        error!(opctx.log, "{message}"; "error" => ?e);
+                        Error::internal_error("error while adding address block to address lot")
+                    },
+                }
+            })
+    }
+
+    pub async fn address_lot_block_delete(
+        &self,
+        opctx: &OpContext,
+        address_lot_id: Uuid,
+        params: params::AddressLotBlockAddRemove,
+    ) -> DeleteResult {
+        use db::schema::address_lot_block::dsl;
+        use db::schema::address_lot_rsvd_block::dsl as rsvd_block_dsl;
+
+        #[derive(Debug)]
+        enum AddressLotBlockDeleteError {
+            BlockInUse,
+        }
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper("address_lot_delete")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    let rsvd: Vec<AddressLotReservedBlock> =
+                        rsvd_block_dsl::address_lot_rsvd_block
+                            .filter(
+                                rsvd_block_dsl::address_lot_id
+                                    .eq(address_lot_id),
+                            )
+                            .filter(
+                                rsvd_block_dsl::first_address
+                                    .eq(IpNetwork::from(params.first_address)),
+                            )
+                            .filter(
+                                rsvd_block_dsl::last_address
+                                    .eq(IpNetwork::from(params.last_address)),
+                            )
+                            .select(AddressLotReservedBlock::as_select())
+                            .limit(1)
+                            .load_async(&conn)
+                            .await?;
+
+                    if !rsvd.is_empty() {
+                        return Err(
+                            err.bail(AddressLotBlockDeleteError::BlockInUse)
+                        );
+                    }
+
+                    diesel::delete(dsl::address_lot_block)
+                        .filter(dsl::address_lot_id.eq(address_lot_id))
+                        .filter(
+                            dsl::first_address
+                                .eq(IpNetwork::from(params.first_address)),
+                        )
+                        .filter(
+                            dsl::last_address
+                                .eq(IpNetwork::from(params.last_address)),
+                        )
+                        .execute_async(&conn)
+                        .await?;
+
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    match err {
+                        AddressLotBlockDeleteError::BlockInUse => {
+                            Error::invalid_request("block is in use")
+                        }
+                    }
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
     }
 
     pub async fn address_lot_id_for_block_id(

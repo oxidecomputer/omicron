@@ -8,18 +8,32 @@ use db::datastore::SwitchPortSettingsCombinedResult;
 use dpd_client::types::LinkId;
 use dpd_client::types::PortId;
 use http::StatusCode;
+use nexus_db_model::SwitchPortAddressConfig;
+use nexus_db_model::SwitchPortBgpPeerConfig;
+use nexus_db_model::SwitchPortBgpPeerConfigAllowExport;
+use nexus_db_model::SwitchPortBgpPeerConfigAllowImport;
+use nexus_db_model::SwitchPortBgpPeerConfigCommunity;
+use nexus_db_model::SwitchPortConfig;
+use nexus_db_model::SwitchPortGeometry;
+use nexus_db_model::SwitchPortLinkConfig;
+use nexus_db_model::SwitchPortRouteConfig;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::UpdatePrecondition;
 use nexus_db_queries::db::model::{SwitchPort, SwitchPortSettings};
 use nexus_db_queries::db::DataStore;
+use nexus_types::external_api::params::AllowedPrefixAddRemove;
+use nexus_types::external_api::params::BgpCommunityAddRemove;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::api::external::BgpPeer;
+use omicron_common::api::external::BgpPeerRemove;
 use omicron_common::api::external::SwitchLocation;
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, Name, NameOrId, UpdateResult,
 };
+use std::net::IpAddr;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -134,7 +148,7 @@ impl super::Nexus {
     pub(crate) async fn switch_port_settings_delete(
         &self,
         opctx: &OpContext,
-        params: &params::SwitchPortSettingsSelector,
+        params: &NameOrId,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         self.db_datastore.switch_port_settings_delete(opctx, params).await
@@ -156,6 +170,361 @@ impl super::Nexus {
     ) -> LookupResult<SwitchPortSettingsCombinedResult> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.db_datastore.switch_port_settings_get(opctx, name_or_id).await
+    }
+
+    pub(crate) async fn switch_port_configuration_geometry_get(
+        &self,
+        opctx: &OpContext,
+        name_or_id: NameOrId,
+    ) -> LookupResult<SwitchPortConfig> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_geometry_get(opctx, name_or_id)
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_geometry_set(
+        &self,
+        opctx: &OpContext,
+        name_or_id: NameOrId,
+        geometry: SwitchPortGeometry,
+    ) -> CreateResult<SwitchPortConfig> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_geometry_set(opctx, name_or_id, geometry)
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_link_list(
+        &self,
+        opctx: &OpContext,
+        name_or_id: NameOrId,
+    ) -> ListResultVec<SwitchPortLinkConfig> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_link_list(opctx, name_or_id)
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_link_create(
+        &self,
+        opctx: &OpContext,
+        name_or_id: NameOrId,
+        new_settings: params::NamedLinkConfigCreate,
+    ) -> CreateResult<SwitchPortLinkConfig> {
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_link_create(
+                opctx,
+                name_or_id,
+                new_settings,
+            )
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_link_view(
+        &self,
+        opctx: &OpContext,
+        name_or_id: NameOrId,
+        link: Name,
+    ) -> LookupResult<SwitchPortLinkConfig> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_link_view(opctx, name_or_id, link.into())
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_link_delete(
+        &self,
+        opctx: &OpContext,
+        name_or_id: NameOrId,
+        link: Name,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_link_delete(
+                opctx,
+                name_or_id,
+                link.into(),
+            )
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_address_list(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+    ) -> ListResultVec<SwitchPortAddressConfig> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_address_list(opctx, configuration)
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_address_add(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        address: params::AddressAddRemove,
+    ) -> CreateResult<SwitchPortAddressConfig> {
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_address_add(
+                opctx,
+                configuration,
+                address,
+            )
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_address_remove(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        address: params::AddressAddRemove,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_address_remove(
+                opctx,
+                configuration,
+                address,
+            )
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_route_list(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+    ) -> ListResultVec<SwitchPortRouteConfig> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_route_list(opctx, configuration)
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_route_add(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        route: params::RouteAddRemove,
+    ) -> CreateResult<SwitchPortRouteConfig> {
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_route_add(opctx, configuration, route)
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_route_remove(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        route: params::RouteAddRemove,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_route_remove(opctx, configuration, route)
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_bgp_peer_list(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+    ) -> ListResultVec<SwitchPortBgpPeerConfig> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_bgp_peer_list(opctx, configuration)
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_bgp_peer_add(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: BgpPeer,
+    ) -> CreateResult<SwitchPortBgpPeerConfig> {
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_bgp_peer_add(
+                opctx,
+                configuration,
+                bgp_peer,
+            )
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_bgp_peer_remove(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: BgpPeerRemove,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_bgp_peer_remove(
+                opctx,
+                configuration,
+                bgp_peer,
+            )
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_bgp_peer_allow_import_list(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+    ) -> ListResultVec<SwitchPortBgpPeerConfigAllowImport> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_bgp_peer_allow_import_list(
+                opctx,
+                configuration,
+                bgp_peer,
+            )
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_bgp_peer_allow_import_add(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+        prefix: AllowedPrefixAddRemove,
+    ) -> CreateResult<SwitchPortBgpPeerConfigAllowImport> {
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_bgp_peer_allow_import_add(
+                opctx,
+                configuration,
+                bgp_peer,
+                prefix,
+            )
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_bgp_peer_allow_import_remove(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+        prefix: AllowedPrefixAddRemove,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_bgp_peer_allow_import_remove(
+                opctx,
+                configuration,
+                bgp_peer,
+                prefix,
+            )
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_bgp_peer_allow_export_list(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+    ) -> ListResultVec<SwitchPortBgpPeerConfigAllowExport> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_bgp_peer_allow_export_list(
+                opctx,
+                configuration,
+                bgp_peer,
+            )
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_bgp_peer_allow_export_add(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+        prefix: AllowedPrefixAddRemove,
+    ) -> CreateResult<SwitchPortBgpPeerConfigAllowExport> {
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_bgp_peer_allow_export_add(
+                opctx,
+                configuration,
+                bgp_peer,
+                prefix,
+            )
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_bgp_peer_allow_export_remove(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+        prefix: AllowedPrefixAddRemove,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_bgp_peer_allow_export_remove(
+                opctx,
+                configuration,
+                bgp_peer,
+                prefix,
+            )
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_bgp_peer_community_list(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+    ) -> ListResultVec<SwitchPortBgpPeerConfigCommunity> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_bgp_peer_community_list(
+                opctx,
+                configuration,
+                bgp_peer,
+            )
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_bgp_peer_community_add(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+        community: BgpCommunityAddRemove,
+    ) -> CreateResult<SwitchPortBgpPeerConfigCommunity> {
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_bgp_peer_community_add(
+                opctx,
+                configuration,
+                bgp_peer,
+                community,
+            )
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_bgp_peer_community_remove(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+        community: BgpCommunityAddRemove,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_bgp_peer_community_remove(
+                opctx,
+                configuration,
+                bgp_peer,
+                community,
+            )
+            .await
     }
 
     async fn switch_port_create(
@@ -202,11 +571,30 @@ impl super::Nexus {
             .await
     }
 
+    pub(crate) async fn switch_port_view_configuration(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        port: &Name,
+        rack_id: Uuid,
+        switch_location: SwitchLocation,
+    ) -> LookupResult<Option<SwitchPortSettings>> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_get_active_configuration(
+                opctx,
+                rack_id,
+                switch_location,
+                port.clone().into(),
+            )
+            .await
+    }
+
     pub(crate) async fn switch_port_apply_settings(
         self: &Arc<Self>,
         opctx: &OpContext,
         port: &Name,
-        selector: &params::SwitchPortSelector,
+        rack_id: Uuid,
+        switch_location: SwitchLocation,
         settings: &params::SwitchPortApplySettings,
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
@@ -214,8 +602,8 @@ impl super::Nexus {
             .db_datastore
             .switch_port_get_id(
                 opctx,
-                selector.rack_id,
-                selector.switch_location.clone().into(),
+                rack_id,
+                switch_location,
                 port.clone().into(),
             )
             .await?;
@@ -248,15 +636,16 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         port: &Name,
-        params: &params::SwitchPortSelector,
+        rack_id: Uuid,
+        switch_location: SwitchLocation,
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let switch_port_id = self
             .db_datastore
             .switch_port_get_id(
                 opctx,
-                params.rack_id,
-                params.switch_location.clone().into(),
+                rack_id,
+                switch_location,
                 port.clone().into(),
             )
             .await?;
@@ -306,16 +695,10 @@ impl super::Nexus {
     pub(crate) async fn switch_port_status(
         &self,
         opctx: &OpContext,
-        switch: Name,
+        switch: SwitchLocation,
         port: Name,
     ) -> Result<SwitchLinkState, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-
-        let loc: SwitchLocation = switch.as_str().parse().map_err(|e| {
-            Error::invalid_request(&format!(
-                "invalid switch name {switch}: {e}"
-            ))
-        })?;
 
         let port_id = PortId::Qsfp(port.as_str().parse().map_err(|e| {
             Error::invalid_request(&format!("invalid port name: {port} {e}"))
@@ -328,7 +711,7 @@ impl super::Nexus {
             Error::internal_error(&format!("dpd clients get: {e}"))
         })?;
 
-        let dpd = dpd_clients.get(&loc).ok_or(Error::internal_error(
+        let dpd = dpd_clients.get(&switch).ok_or(Error::internal_error(
             &format!("no client for switch {switch}"),
         ))?;
 

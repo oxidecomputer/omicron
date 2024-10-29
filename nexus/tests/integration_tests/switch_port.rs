@@ -9,7 +9,7 @@ use http::StatusCode;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
-    Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
+    Address, AddressConfig, AddressLotBlockAddRemove, AddressLotCreate,
     BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate,
     BgpPeerConfig, LinkConfigCreate, LldpLinkConfigCreate, Route, RouteConfig,
     SwitchInterfaceConfigCreate, SwitchInterfaceKind, SwitchPortApplySettings,
@@ -18,8 +18,8 @@ use nexus_types::external_api::params::{
 use nexus_types::external_api::views::Rack;
 use omicron_common::api::external::ImportExportPolicy;
 use omicron_common::api::external::{
-    self, AddressLotKind, BgpPeer, IdentityMetadataCreateParams, LinkFec,
-    LinkSpeed, NameOrId, SwitchPort, SwitchPortSettingsView,
+    self, AddressLotKind, BgpPeerCombined, IdentityMetadataCreateParams,
+    LinkFec, LinkSpeed, NameOrId, SwitchPort, SwitchPortSettingsView,
 };
 
 type ControlPlaneTestContext =
@@ -40,17 +40,18 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
             description: "an address parking lot".into(),
         },
         kind: AddressLotKind::Infra,
-        blocks: vec![
-            AddressLotBlockCreate {
-                first_address: "203.0.113.10".parse().unwrap(),
-                last_address: "203.0.113.20".parse().unwrap(),
-            },
-            AddressLotBlockCreate {
-                first_address: "1.2.3.0".parse().unwrap(),
-                last_address: "1.2.3.255".parse().unwrap(),
-            },
-        ],
     };
+
+    let block_params = vec![
+        AddressLotBlockAddRemove {
+            first_address: "203.0.113.10".parse().unwrap(),
+            last_address: "203.0.113.20".parse().unwrap(),
+        },
+        AddressLotBlockAddRemove {
+            first_address: "1.2.3.0".parse().unwrap(),
+            last_address: "1.2.3.255".parse().unwrap(),
+        },
+    ];
 
     NexusRequest::objects_post(
         client,
@@ -61,6 +62,21 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .unwrap();
+
+    for params in block_params {
+        NexusRequest::objects_post(
+            client,
+            &format!(
+                "/v1/system/networking/address-lot/{}/blocks",
+                lot_params.identity.name
+            ),
+            &params,
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    }
 
     // Create BGP announce set
     let announce_set = BgpAnnounceSetCreate {
@@ -282,7 +298,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     settings.bgp_peers.insert(
         "phy0".into(),
         BgpPeerConfig {
-            peers: vec![BgpPeer {
+            peers: vec![BgpPeerCombined {
                 bgp_config: NameOrId::Name("as47".parse().unwrap()),
                 interface_name: "phy0".to_string(),
                 addr: "1.2.3.4".parse().unwrap(),

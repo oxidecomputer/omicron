@@ -129,6 +129,9 @@ snapshot_view                            GET      /v1/snapshots/{snapshot}
 
 API operations found with tag "system/hardware"
 OPERATION ID                             METHOD   URL PATH
+networking_switch_port_active_configuration_clear DELETE   /v1/system/hardware/racks/{rack_id}/switch/{switch}/switch-port/{port}/configuration
+networking_switch_port_active_configuration_set PUT      /v1/system/hardware/racks/{rack_id}/switch/{switch}/switch-port/{port}/configuration
+networking_switch_port_active_configuration_view GET      /v1/system/hardware/racks/{rack_id}/switch/{switch}/switch-port/{port}/configuration
 networking_switch_port_apply_settings    POST     /v1/system/hardware/switch-port/{port}/settings
 networking_switch_port_clear_settings    DELETE   /v1/system/hardware/switch-port/{port}/settings
 networking_switch_port_list              GET      /v1/system/hardware/switch-port
@@ -173,7 +176,9 @@ system_metric                            GET      /v1/system/metrics/{metric_nam
 
 API operations found with tag "system/networking"
 OPERATION ID                             METHOD   URL PATH
+networking_address_lot_block_add         POST     /v1/system/networking/address-lot/{address_lot}/blocks/add
 networking_address_lot_block_list        GET      /v1/system/networking/address-lot/{address_lot}/blocks
+networking_address_lot_block_remove      POST     /v1/system/networking/address-lot/{address_lot}/blocks/remove
 networking_address_lot_create            POST     /v1/system/networking/address-lot
 networking_address_lot_delete            DELETE   /v1/system/networking/address-lot/{address_lot}
 networking_address_lot_list              GET      /v1/system/networking/address-lot
@@ -187,7 +192,7 @@ networking_bgp_announce_set_list         GET      /v1/system/networking/bgp-anno
 networking_bgp_announce_set_update       PUT      /v1/system/networking/bgp-announce-set
 networking_bgp_announcement_list         GET      /v1/system/networking/bgp-announce-set/{announce_set}/announcement
 networking_bgp_config_create             POST     /v1/system/networking/bgp
-networking_bgp_config_delete             DELETE   /v1/system/networking/bgp
+networking_bgp_config_delete             DELETE   /v1/system/networking/bgp/{bgp_config}
 networking_bgp_config_list               GET      /v1/system/networking/bgp
 networking_bgp_exported                  GET      /v1/system/networking/bgp-exported
 networking_bgp_imported_routes_ipv4      GET      /v1/system/networking/bgp-routes-ipv4
@@ -196,10 +201,34 @@ networking_bgp_status                    GET      /v1/system/networking/bgp-stat
 networking_loopback_address_create       POST     /v1/system/networking/loopback-address
 networking_loopback_address_delete       DELETE   /v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}
 networking_loopback_address_list         GET      /v1/system/networking/loopback-address
-networking_switch_port_settings_create   POST     /v1/system/networking/switch-port-settings
-networking_switch_port_settings_delete   DELETE   /v1/system/networking/switch-port-settings
-networking_switch_port_settings_list     GET      /v1/system/networking/switch-port-settings
-networking_switch_port_settings_view     GET      /v1/system/networking/switch-port-settings/{port}
+networking_switch_port_configuration_address_add POST     /v1/system/networking/switch-port-configuration/{configuration}/address/add
+networking_switch_port_configuration_address_list GET      /v1/system/networking/switch-port-configuration/{configuration}/address
+networking_switch_port_configuration_address_remove POST     /v1/system/networking/switch-port-configuration/{configuration}/address/remove
+networking_switch_port_configuration_bgp_peer_add POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/add
+networking_switch_port_configuration_bgp_peer_allow_export_add POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-export/add
+networking_switch_port_configuration_bgp_peer_allow_export_list GET      /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-export
+networking_switch_port_configuration_bgp_peer_allow_export_remove POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-export/remove
+networking_switch_port_configuration_bgp_peer_allow_import_add POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-import/add
+networking_switch_port_configuration_bgp_peer_allow_import_list GET      /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-import
+networking_switch_port_configuration_bgp_peer_allow_import_remove POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-import/remove
+networking_switch_port_configuration_bgp_peer_community_add POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/community/add
+networking_switch_port_configuration_bgp_peer_community_list GET      /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/community
+networking_switch_port_configuration_bgp_peer_community_remove POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/community/remove
+networking_switch_port_configuration_bgp_peer_list GET      /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer
+networking_switch_port_configuration_bgp_peer_remove POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/remove
+networking_switch_port_configuration_create POST     /v1/system/networking/switch-port-configuration
+networking_switch_port_configuration_delete DELETE   /v1/system/networking/switch-port-configuration/{configuration}
+networking_switch_port_configuration_geometry_set POST     /v1/system/networking/switch-port-configuration/{configuration}/geometry
+networking_switch_port_configuration_geometry_view GET      /v1/system/networking/switch-port-configuration/{configuration}/geometry
+networking_switch_port_configuration_link_create POST     /v1/system/networking/switch-port-configuration/{configuration}/link
+networking_switch_port_configuration_link_delete DELETE   /v1/system/networking/switch-port-configuration/{configuration}/link/{link}
+networking_switch_port_configuration_link_list GET      /v1/system/networking/switch-port-configuration/{configuration}/link
+networking_switch_port_configuration_link_view GET      /v1/system/networking/switch-port-configuration/{configuration}/link/{link}
+networking_switch_port_configuration_list GET      /v1/system/networking/switch-port-configuration
+networking_switch_port_configuration_route_add POST     /v1/system/networking/switch-port-configuration/{configuration}/route/add
+networking_switch_port_configuration_route_list GET      /v1/system/networking/switch-port-configuration/{configuration}/route
+networking_switch_port_configuration_route_remove POST     /v1/system/networking/switch-port-configuration/{configuration}/route/remove
+networking_switch_port_configuration_view GET      /v1/system/networking/switch-port-configuration/{configuration}
 
 API operations found with tag "system/silos"
 OPERATION ID                             METHOD   URL PATH

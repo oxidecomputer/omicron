@@ -110,7 +110,6 @@ mod volume_repair;
 mod vpc;
 mod zpool;
 
-pub use address_lot::AddressLotCreateResult;
 pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
 pub use instance::{InstanceAndActiveVmm, InstanceGestalt};
@@ -124,6 +123,7 @@ pub use region::RegionAllocationParameters;
 pub use silo::Discoverability;
 pub use sled::SledTransition;
 pub use sled::TransitionError;
+pub use switch_port::BgpPeerConfig;
 pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use virtual_provisioning_collection::StorageType;
 pub use vmm::VmmStateUpdateResult;

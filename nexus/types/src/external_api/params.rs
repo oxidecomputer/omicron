@@ -10,11 +10,11 @@ use base64::Engine;
 use chrono::{DateTime, Utc};
 use http::Uri;
 use omicron_common::api::external::{
-    AddressLotKind, AllowedSourceIps, BfdMode, BgpPeer, ByteCount, Hostname,
-    IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
+    AddressLotKind, AllowedSourceIps, BfdMode, BgpPeerCombined, ByteCount,
+    Hostname, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
     InstanceAutoRestartPolicy, InstanceCpuCount, LinkFec, LinkSpeed, Name,
     NameOrId, PaginationOrder, RouteDestination, RouteTarget, SemverVersion,
-    UserId,
+    SwitchLocation, UserId,
 };
 use omicron_common::disk::DiskVariant;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
@@ -1557,14 +1557,12 @@ pub struct AddressLotCreate {
     pub identity: IdentityMetadataCreateParams,
     /// The kind of address lot to create.
     pub kind: AddressLotKind,
-    /// The blocks to add along with the new address lot.
-    pub blocks: Vec<AddressLotBlockCreate>,
 }
 
-/// Parameters for creating an address lot block. Fist and last addresses are
-/// inclusive.
+/// Parameters for adding or removing an address lot block.
+/// First and last addresses are inclusive.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct AddressLotBlockCreate {
+pub struct AddressLotBlockAddRemove {
     /// The first address in the lot (inclusive).
     pub first_address: IpAddr,
     /// The last address in the lot (inclusive).
@@ -1705,6 +1703,28 @@ pub struct LinkConfigCreate {
     pub autoneg: bool,
 }
 
+/// Named switch link configuration.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct NamedLinkConfigCreate {
+    /// Name of link
+    pub name: Name,
+
+    /// Maximum transmission unit for the link.
+    pub mtu: u16,
+
+    /// The optional link-layer discovery protocol (LLDP) configuration for the link.
+    pub lldp_config: Option<NameOrId>,
+
+    /// The forward error correction mode of the link.
+    pub fec: LinkFec,
+
+    /// The speed of the link.
+    pub speed: LinkSpeed,
+
+    /// Whether or not to set autonegotiation
+    pub autoneg: bool,
+}
+
 /// The LLDP configuration associated with a port.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct LldpLinkConfigCreate {
@@ -1788,21 +1808,67 @@ pub struct Route {
     /// VLAN id the gateway is reachable over.
     pub vid: Option<u16>,
 
-    /// Local preference for route. Higher preference indictes precedence
+    /// Local preference for route. Higher preference indicates precedence
     /// within and across protocols.
     pub rib_priority: Option<u8>,
+}
+
+/// A network route to to add to or remove from an interface.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RouteAddRemove {
+    /// The interface to configure the route on
+    pub interface: Name,
+
+    /// The route destination.
+    pub dst: IpNet,
+
+    /// The route gateway.
+    pub gw: IpAddr,
+
+    /// VLAN id the gateway is reachable over.
+    pub vid: Option<u16>,
+
+    /// Local preference for route. Higher preference indicates precedence
+    /// within and across protocols.
+    pub rib_priority: Option<u8>,
+}
+
+/// A prefix allowed to be imported or exported by a bgp peer
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AllowedPrefixAddRemove {
+    /// An address identifying the target bgp peer
+    pub peer_address: IpAddr,
+
+    /// The interface the peer is configured on
+    pub interface: Name,
+
+    /// The allowed prefix to add or remove
+    pub prefix: IpNet,
+}
+
+/// A community to be added to or removed from a bgp peer
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct BgpCommunityAddRemove {
+    /// An address identifying the target bgp peer
+    pub peer_address: IpAddr,
+
+    /// The interface the peer is configured on
+    pub interface: Name,
+
+    /// The community to add or remove
+    pub community: u32,
 }
 
 /// Select a BGP config by a name or id.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct BgpConfigSelector {
     /// A name or id to use when selecting BGP config.
-    pub name_or_id: NameOrId,
+    pub bgp_config: NameOrId,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct BgpPeerConfig {
-    pub peers: Vec<BgpPeer>,
+    pub peers: Vec<BgpPeerCombined>,
 }
 
 /// Parameters for creating a named set of BGP announcements.
@@ -1927,7 +1993,23 @@ pub struct Address {
     /// The address lot this address is drawn from.
     pub address_lot: NameOrId,
 
-    /// The address and prefix length of this address.
+    /// The address and subnet mask
+    pub address: IpNet,
+
+    /// Optional VLAN ID for this address
+    pub vlan_id: Option<u16>,
+}
+
+/// An address to be added to or removed from an interface
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AddressAddRemove {
+    /// The name of the interface
+    pub interface: Name,
+
+    /// The address lot this address is drawn from.
+    pub address_lot: NameOrId,
+
+    /// The address and subnet mask
     pub address: IpNet,
 
     /// Optional VLAN ID for this address
@@ -1937,15 +2019,32 @@ pub struct Address {
 /// Select a port settings object by an optional name or id.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct SwitchPortSettingsSelector {
-    /// An optional name or id to use when selecting port settings.
-    pub port_settings: Option<NameOrId>,
+    /// An optional name or id to use when selecting a switch port configuration.
+    pub configuration: Option<NameOrId>,
 }
 
 /// Select a port settings info object by name or id.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct SwitchPortSettingsInfoSelector {
-    /// A name or id to use when selecting switch port settings info objects.
-    pub port: NameOrId,
+    /// A name or id to use when selecting a switch port configuration.
+    pub configuration: NameOrId,
+}
+
+/// Select a bgp peer by address.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BgpPeerQuerySelector {
+    /// An address identifying a configured bgp peer.
+    pub peer_address: IpAddr,
+}
+
+/// Select a link settings info object by port settings name and link name.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SwitchPortSettingsLinkInfoSelector {
+    /// A name or id to use when selecting a switch port configuration.
+    pub configuration: NameOrId,
+
+    /// Link name
+    pub link: Name,
 }
 
 /// Select a switch port by name.
@@ -1962,7 +2061,7 @@ pub struct SwitchPortSelector {
     pub rack_id: Uuid,
 
     /// A switch location to use when selecting switch ports.
-    pub switch_location: Name,
+    pub switch_location: SwitchLocation,
 }
 
 /// Select switch port interfaces by id.
@@ -1972,11 +2071,31 @@ pub struct SwitchPortPageSelector {
     pub switch_port_id: Option<Uuid>,
 }
 
+/// Select switch port interface config by id
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SwitchPortInterfaceConfigPageSelector {
+    /// An optional switch port id to use when listing switch ports.
+    pub switch_port_id: Option<Uuid>,
+}
+
 /// Parameters for applying settings to switch ports.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct SwitchPortApplySettings {
     /// A name or id to use when applying switch port settings.
     pub port_settings: NameOrId,
+}
+
+/// Select a switch port by name
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SwitchPortConfigurationSelector {
+    /// A rack id to use when selecting switch ports.
+    pub rack_id: Uuid,
+
+    /// A switch location to use when selecting switch ports.
+    pub switch: SwitchLocation,
+
+    /// A name to use when selecting switch ports.
+    pub port: Name,
 }
 
 // IMAGES

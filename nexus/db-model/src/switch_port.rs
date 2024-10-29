@@ -20,8 +20,10 @@ use diesel::AsChangeset;
 use ipnetwork::IpNetwork;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
-use omicron_common::api::external;
-use omicron_common::api::external::{BgpPeer, ImportExportPolicy};
+use omicron_common::api::external::{
+    self, BgpAllowedPrefix, BgpCommunity, NameOrId,
+};
+use omicron_common::api::external::{BgpPeerCombined, ImportExportPolicy};
 use omicron_common::api::internal::shared::{PortFec, PortSpeed};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -621,6 +623,32 @@ pub struct SwitchPortBgpPeerConfig {
     pub vlan_id: Option<SqlU16>,
 }
 
+impl Into<external::BgpPeer> for SwitchPortBgpPeerConfig {
+    fn into(self) -> external::BgpPeer {
+        external::BgpPeer {
+            bgp_config: NameOrId::Id(self.bgp_config_id),
+            interface_name: self.interface_name,
+            addr: self.addr.into(),
+            hold_time: self.hold_time.into(),
+            idle_hold_time: self.idle_hold_time.into(),
+            delay_open: self.delay_open.into(),
+            connect_retry: self.connect_retry.into(),
+            keepalive: self.keepalive.into(),
+            remote_asn: self.remote_asn.map(Into::into),
+            min_ttl: self.min_ttl.map(Into::into),
+            md5_auth_key: self.md5_auth_key,
+            multi_exit_discriminator: self
+                .multi_exit_discriminator
+                .map(Into::into),
+            local_pref: self.local_pref.map(Into::into),
+            enforce_first_as: self.enforce_first_as,
+            allow_import_list_active: self.allow_import_list_active,
+            allow_export_list_active: self.allow_export_list_active,
+            vlan_id: self.vlan_id.map(Into::into),
+        }
+    }
+}
+
 #[derive(
     Queryable,
     Insertable,
@@ -637,6 +665,17 @@ pub struct SwitchPortBgpPeerConfigCommunity {
     pub interface_name: String,
     pub addr: IpNetwork,
     pub community: SqlU32,
+}
+
+impl Into<BgpCommunity> for SwitchPortBgpPeerConfigCommunity {
+    fn into(self) -> BgpCommunity {
+        BgpCommunity {
+            port_settings_id: self.port_settings_id,
+            interface_name: self.interface_name,
+            addr: self.addr.into(),
+            community: self.community.into(),
+        }
+    }
 }
 
 #[derive(
@@ -659,6 +698,17 @@ pub struct SwitchPortBgpPeerConfigAllowExport {
     pub addr: IpNetwork,
     /// Allowed Prefix
     pub prefix: IpNetwork,
+}
+
+impl Into<BgpAllowedPrefix> for SwitchPortBgpPeerConfigAllowExport {
+    fn into(self) -> BgpAllowedPrefix {
+        BgpAllowedPrefix {
+            port_settings_id: self.port_settings_id,
+            interface_name: self.interface_name,
+            addr: self.addr.into(),
+            prefix: self.prefix.into(),
+        }
+    }
 }
 
 #[derive(
@@ -689,7 +739,7 @@ impl SwitchPortBgpPeerConfig {
         port_settings_id: Uuid,
         bgp_config_id: Uuid,
         interface_name: String,
-        p: &BgpPeer,
+        p: &BgpPeerCombined,
     ) -> Self {
         Self {
             port_settings_id,
@@ -718,6 +768,17 @@ impl SwitchPortBgpPeerConfig {
                 _ => true,
             },
             vlan_id: p.vlan_id.map(|x| x.into()),
+        }
+    }
+}
+
+impl Into<BgpAllowedPrefix> for SwitchPortBgpPeerConfigAllowImport {
+    fn into(self) -> BgpAllowedPrefix {
+        BgpAllowedPrefix {
+            port_settings_id: self.port_settings_id,
+            interface_name: self.interface_name,
+            addr: self.addr.into(),
+            prefix: self.prefix.into(),
         }
     }
 }

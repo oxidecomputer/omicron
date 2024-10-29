@@ -96,6 +96,16 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
                     .unwrap(),
                 id_routes,
             ),
+            SetupReq::Put { url, body, id_routes } => (
+                url,
+                NexusRequest::object_put(client, url, Some(body))
+                    .authn_as(AuthnMode::PrivilegedUser)
+                    .execute()
+                    .await
+                    .map_err(|e| panic!("Failed to PUT to URL: {url}, {e}"))
+                    .unwrap(),
+                id_routes,
+            ),
         };
 
         setup_results.insert(url, result.clone());
@@ -169,6 +179,11 @@ enum SetupReq {
         body: serde_json::Value,
         id_routes: Vec<&'static str>,
     },
+    Put {
+        url: &'static str,
+        body: serde_json::Value,
+        id_routes: Vec<&'static str>,
+    },
 }
 
 pub static HTTP_SERVER: Lazy<httptest::Server> =
@@ -213,6 +228,19 @@ static SETUP_REQUESTS: Lazy<Vec<SetupReq>> = Lazy::new(|| {
                 &*DEMO_SILO_USER_ID_DELETE_URL,
                 &*DEMO_SILO_USER_ID_SET_PASSWORD_URL,
             ],
+        },
+        // Create the default Address Lot
+        SetupReq::Post {
+            url: &DEMO_ADDRESS_LOTS_URL,
+            body: serde_json::to_value(&*DEMO_ADDRESS_LOT_CREATE).unwrap(),
+            id_routes: vec!["/v1/system/networking/address-lot/{id}"],
+        },
+        // Create the default Address Lot Block
+        SetupReq::Post {
+            url: &DEMO_ADDRESS_LOT_BLOCK_ADD_URL,
+            body: serde_json::to_value(&*DEMO_ADDRESS_LOT_BLOCK_CREATE)
+                .unwrap(),
+            id_routes: vec![],
         },
         // Create the default IP pool
         SetupReq::Post {
@@ -319,6 +347,86 @@ static SETUP_REQUESTS: Lazy<Vec<SetupReq>> = Lazy::new(|| {
         SetupReq::Post {
             url: &DEMO_CERTIFICATES_URL,
             body: serde_json::to_value(&*DEMO_CERTIFICATE_CREATE).unwrap(),
+            id_routes: vec![],
+        },
+        // Create a switch port configuration
+        SetupReq::Post {
+            url: &DEMO_SWITCH_PORT_SETTINGS_URL,
+            body: serde_json::to_value(&*DEMO_SWITCH_PORT_SETTINGS_CREATE)
+                .unwrap(),
+            id_routes: vec![],
+        },
+        // Create a switch port geometry
+        SetupReq::Post {
+            url: &DEMO_SWITCH_PORT_GEOMETRY_URL,
+            body: serde_json::to_value(&*DEMO_SWITCH_PORT_GEOMETRY_CREATE)
+                .unwrap(),
+            id_routes: vec![],
+        },
+        // Create a switch port link
+        SetupReq::Post {
+            url: &DEMO_SWITCH_PORT_LINK_URL,
+            body: serde_json::to_value(&*DEMO_SWITCH_PORT_LINK_CREATE).unwrap(),
+            id_routes: vec![],
+        },
+        // Create a switch port address
+        SetupReq::Post {
+            url: &DEMO_SWITCH_PORT_ADDRESS_ADD_URL,
+            body: serde_json::to_value(&*DEMO_SWITCH_PORT_ADDRESS_ADD_REMOVE)
+                .unwrap(),
+            id_routes: vec![],
+        },
+        // Create a switch port route
+        SetupReq::Post {
+            url: &DEMO_SWITCH_PORT_ROUTE_ADD_URL,
+            body: serde_json::to_value(&*DEMO_SWITCH_PORT_ROUTE_ADD_REMOVE)
+                .unwrap(),
+            id_routes: vec![],
+        },
+        // Create a bgp announce set
+        SetupReq::Put {
+            url: &DEMO_BGP_ANNOUNCE_SET_URL,
+            body: serde_json::to_value(&*DEMO_BGP_ANNOUNCE).unwrap(),
+            id_routes: vec![],
+        },
+        // Create a bgp config
+        SetupReq::Post {
+            url: &DEMO_BGP_CONFIG_URL,
+            body: serde_json::to_value(&*DEMO_BGP_CONFIG).unwrap(),
+            id_routes: vec![],
+        },
+        // Create a switch port bgp peer
+        SetupReq::Post {
+            url: &DEMO_SWITCH_PORT_BGP_PEER_ADD_URL,
+            body: serde_json::to_value(&*DEMO_SWITCH_PORT_BGP_PEER_ADD)
+                .unwrap(),
+            id_routes: vec![],
+        },
+        // Allow a prefix to be exported by a peer
+        SetupReq::Post {
+            url: &DEMO_SWITCH_PORT_BGP_PEER_ALLOW_IMPORT_ADD_URL,
+            body: serde_json::to_value(
+                &*DEMO_SWITCH_PORT_BGP_PEER_ALLOWED_PREFIX,
+            )
+            .unwrap(),
+            id_routes: vec![],
+        },
+        // Allow a prefix to be imported by a peer
+        SetupReq::Post {
+            url: &DEMO_SWITCH_PORT_BGP_PEER_ALLOW_EXPORT_ADD_URL,
+            body: serde_json::to_value(
+                &*DEMO_SWITCH_PORT_BGP_PEER_ALLOWED_PREFIX,
+            )
+            .unwrap(),
+            id_routes: vec![],
+        },
+        // Add a community to a peer
+        SetupReq::Post {
+            url: &DEMO_SWITCH_PORT_BGP_PEER_COMMUNITY_ADD_URL,
+            body: serde_json::to_value(
+                &*DEMO_SWITCH_PORT_BGP_PEER_COMMUNITY_ADD_REMOVE,
+            )
+            .unwrap(),
             id_routes: vec![],
         },
     ]

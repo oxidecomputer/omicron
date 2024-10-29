@@ -48,23 +48,6 @@ use nexus_types::{
         shared::{BfdStatus, ProbeInfo},
     },
 };
-use omicron_common::api::external::http_pagination::data_page_params_for;
-use omicron_common::api::external::http_pagination::marker_for_name;
-use omicron_common::api::external::http_pagination::marker_for_name_or_id;
-use omicron_common::api::external::http_pagination::name_or_id_pagination;
-use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::external::http_pagination::PaginatedById;
-use omicron_common::api::external::http_pagination::PaginatedByName;
-use omicron_common::api::external::http_pagination::PaginatedByNameOrId;
-use omicron_common::api::external::http_pagination::ScanById;
-use omicron_common::api::external::http_pagination::ScanByName;
-use omicron_common::api::external::http_pagination::ScanByNameOrId;
-use omicron_common::api::external::http_pagination::ScanParams;
-use omicron_common::api::external::AddressLot;
-use omicron_common::api::external::AddressLotBlock;
-use omicron_common::api::external::AddressLotCreateResponse;
-use omicron_common::api::external::AggregateBgpMessageHistory;
-use omicron_common::api::external::BgpAnnounceSet;
 use omicron_common::api::external::BgpAnnouncement;
 use omicron_common::api::external::BgpConfig;
 use omicron_common::api::external::BgpExported;
@@ -82,12 +65,29 @@ use omicron_common::api::external::Probe;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::SwitchPort;
+use omicron_common::api::external::SwitchPortConfig;
+use omicron_common::api::external::SwitchPortLinkConfig;
 use omicron_common::api::external::SwitchPortSettings;
 use omicron_common::api::external::SwitchPortSettingsView;
 use omicron_common::api::external::TufRepoGetResponse;
 use omicron_common::api::external::TufRepoInsertResponse;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
+use omicron_common::api::external::{
+    http_pagination::{
+        data_page_params_for, marker_for_name, marker_for_name_or_id,
+        name_or_id_pagination, PaginatedBy, PaginatedById, PaginatedByName,
+        PaginatedByNameOrId, ScanById, ScanByName, ScanByNameOrId, ScanParams,
+    },
+    SwitchPortAddressConfig,
+};
+use omicron_common::api::external::{AddressLot, BgpPeerRemove};
+use omicron_common::api::external::{AddressLotBlock, SwitchPortRouteConfig};
+use omicron_common::api::external::{
+    AddressLotCreateResponse, BgpAllowedPrefix,
+};
+use omicron_common::api::external::{AggregateBgpMessageHistory, BgpCommunity};
+use omicron_common::api::external::{BgpAnnounceSet, BgpPeer};
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
@@ -2611,11 +2611,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let result = nexus.address_lot_create(&opctx, params).await?;
 
-            let lot: AddressLot = result.lot.into();
-            let blocks: Vec<AddressLotBlock> =
-                result.blocks.iter().map(|b| b.clone().into()).collect();
-
-            Ok(HttpResponseCreated(AddressLotCreateResponse { lot, blocks }))
+            let lot: AddressLot = result.into();
+            Ok(HttpResponseCreated(AddressLotCreateResponse { lot }))
         };
         apictx
             .context
@@ -2714,6 +2711,75 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn networking_address_lot_block_add(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::AddressLotPath>,
+        block: TypedBody<params::AddressLotBlockAddRemove>,
+    ) -> Result<HttpResponseCreated<AddressLotBlock>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let address_lot_lookup =
+                nexus.address_lot_lookup(&opctx, path.address_lot)?;
+
+            let (.., authz_address_lot) = address_lot_lookup
+                .lookup_for(authz::Action::CreateChild)
+                .await?;
+
+            let result = nexus
+                .address_lot_block_create(
+                    &opctx,
+                    authz_address_lot.id(),
+                    block.into_inner(),
+                )
+                .await?;
+
+            Ok(HttpResponseCreated(result.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_address_lot_block_remove(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::AddressLotPath>,
+        block: TypedBody<params::AddressLotBlockAddRemove>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let address_lot_lookup =
+                nexus.address_lot_lookup(&opctx, path.address_lot)?;
+
+            let (.., authz_address_lot) =
+                address_lot_lookup.lookup_for(authz::Action::Delete).await?;
+
+            nexus
+                .address_lot_block_delete(
+                    &opctx,
+                    authz_address_lot.id(),
+                    block.into_inner(),
+                )
+                .await?;
+
+            Ok(HttpResponseUpdatedNoContent())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn networking_loopback_address_create(
         rqctx: RequestContext<ApiContext>,
         new_loopback_address: TypedBody<params::LoopbackAddressCreate>,
@@ -2802,7 +2868,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn networking_switch_port_settings_create(
+    async fn networking_switch_port_configuration_create(
         rqctx: RequestContext<ApiContext>,
         new_settings: TypedBody<params::SwitchPortSettingsCreate>,
     ) -> Result<HttpResponseCreated<SwitchPortSettingsView>, HttpError> {
@@ -2825,14 +2891,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn networking_switch_port_settings_delete(
+    async fn networking_switch_port_configuration_delete(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<params::SwitchPortSettingsSelector>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
-            let selector = query_params.into_inner();
+            let selector = path_params.into_inner().configuration;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             nexus.switch_port_settings_delete(&opctx, &selector).await?;
@@ -2845,7 +2911,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn networking_switch_port_settings_list(
+    async fn networking_switch_port_configuration_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<
             PaginatedByNameOrId<params::SwitchPortSettingsSelector>,
@@ -2881,19 +2947,683 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn networking_switch_port_settings_view(
+    async fn networking_switch_port_configuration_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SwitchPortSettingsInfoSelector>,
     ) -> Result<HttpResponseOk<SwitchPortSettingsView>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
-            let query = path_params.into_inner().port;
+            let query = path_params.into_inner().configuration;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let settings =
                 nexus.switch_port_settings_get(&opctx, &query).await?;
             Ok(HttpResponseOk(settings.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_configuration_geometry_view(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+    ) -> Result<HttpResponseOk<SwitchPortConfig>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let config = path_params.into_inner().configuration;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let geometry = nexus
+                .switch_port_configuration_geometry_get(&opctx, config)
+                .await?;
+            Ok(HttpResponseOk(geometry.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_configuration_geometry_set(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        new_settings: TypedBody<params::SwitchPortConfigCreate>,
+    ) -> Result<HttpResponseCreated<SwitchPortConfig>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let config = path_params.into_inner().configuration;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let geometry = nexus
+                .switch_port_configuration_geometry_set(
+                    &opctx,
+                    config,
+                    new_settings.into_inner().geometry.into(),
+                )
+                .await?;
+            Ok(HttpResponseCreated(geometry.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_configuration_link_list(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        // omitting pagination should be ok since there are a small number of possible links
+    ) -> Result<HttpResponseOk<Vec<SwitchPortLinkConfig>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let config = path_params.into_inner().configuration;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let settings = nexus
+                .switch_port_configuration_link_list(&opctx, config)
+                .await?;
+            Ok(HttpResponseOk(settings.into_iter().map(Into::into).collect()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_configuration_link_create(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        new_settings: TypedBody<params::NamedLinkConfigCreate>,
+    ) -> Result<HttpResponseCreated<SwitchPortLinkConfig>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let config = path_params.into_inner().configuration;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let settings = nexus
+                .switch_port_configuration_link_create(
+                    &opctx,
+                    config,
+                    new_settings.into_inner(),
+                )
+                .await?;
+            Ok(HttpResponseCreated(settings.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_configuration_link_view(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortSettingsLinkInfoSelector>,
+    ) -> Result<HttpResponseOk<SwitchPortLinkConfig>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let params::SwitchPortSettingsLinkInfoSelector {
+                configuration,
+                link,
+            } = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let settings = nexus
+                .switch_port_configuration_link_view(
+                    &opctx,
+                    configuration,
+                    link,
+                )
+                .await?;
+            Ok(HttpResponseOk(settings.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_configuration_link_delete(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortSettingsLinkInfoSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let params::SwitchPortSettingsLinkInfoSelector {
+                configuration,
+                link,
+            } = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            nexus
+                .switch_port_configuration_link_delete(
+                    &opctx,
+                    configuration,
+                    link,
+                )
+                .await?;
+            Ok(HttpResponseDeleted {})
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_configuration_address_list(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+    ) -> Result<HttpResponseOk<Vec<SwitchPortAddressConfig>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let configuration = path_params.into_inner().configuration;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let settings = nexus
+                .switch_port_configuration_address_list(&opctx, configuration)
+                .await?;
+            Ok(HttpResponseOk(settings.into_iter().map(Into::into).collect()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_configuration_address_add(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        address: TypedBody<params::AddressAddRemove>,
+    ) -> Result<HttpResponseCreated<SwitchPortAddressConfig>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let configuration = path_params.into_inner().configuration;
+            let address = address.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let settings = nexus
+                .switch_port_configuration_address_add(
+                    &opctx,
+                    configuration,
+                    address,
+                )
+                .await?;
+            Ok(HttpResponseCreated(settings.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_configuration_address_remove(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        address: TypedBody<params::AddressAddRemove>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let configuration = path_params.into_inner().configuration;
+            let address = address.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            nexus
+                .switch_port_configuration_address_remove(
+                    &opctx,
+                    configuration,
+                    address,
+                )
+                .await?;
+            Ok(HttpResponseDeleted())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_configuration_route_list(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+    ) -> Result<HttpResponseOk<Vec<SwitchPortRouteConfig>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let configuration = path_params.into_inner().configuration;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let settings = nexus
+                .switch_port_configuration_route_list(&opctx, configuration)
+                .await?;
+            Ok(HttpResponseOk(settings.into_iter().map(Into::into).collect()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_configuration_route_add(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        route: TypedBody<params::RouteAddRemove>,
+    ) -> Result<HttpResponseCreated<SwitchPortRouteConfig>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let configuration = path_params.into_inner().configuration;
+            let route = route.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let settings = nexus
+                .switch_port_configuration_route_add(
+                    &opctx,
+                    configuration,
+                    route,
+                )
+                .await?;
+            Ok(HttpResponseCreated(settings.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_configuration_route_remove(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        route: TypedBody<params::RouteAddRemove>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let configuration = path_params.into_inner().configuration;
+            let route = route.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            nexus
+                .switch_port_configuration_route_remove(
+                    &opctx,
+                    configuration,
+                    route,
+                )
+                .await?;
+            Ok(HttpResponseDeleted())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_configuration_bgp_peer_list(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+    ) -> Result<HttpResponseOk<Vec<BgpPeer>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let configuration = path_params.into_inner().configuration;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let settings = nexus
+                .switch_port_configuration_bgp_peer_list(&opctx, configuration)
+                .await?;
+
+            Ok(HttpResponseOk(settings.into_iter().map(Into::into).collect()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_configuration_bgp_peer_add(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        bgp_peer: TypedBody<BgpPeer>,
+    ) -> Result<HttpResponseCreated<BgpPeer>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let configuration = path_params.into_inner().configuration;
+            let bgp_peer = bgp_peer.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let settings = nexus
+                .switch_port_configuration_bgp_peer_add(
+                    &opctx,
+                    configuration,
+                    bgp_peer,
+                )
+                .await?;
+            Ok(HttpResponseCreated(settings.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_configuration_bgp_peer_remove(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        bgp_peer: TypedBody<BgpPeerRemove>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let configuration = path_params.into_inner().configuration;
+            let bgp_peer = bgp_peer.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            nexus
+                .switch_port_configuration_bgp_peer_remove(
+                    &opctx,
+                    configuration,
+                    bgp_peer,
+                )
+                .await?;
+            Ok(HttpResponseDeleted())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_configuration_bgp_peer_allow_import_list(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        query: Query<params::BgpPeerQuerySelector>,
+    ) -> Result<HttpResponseOk<Vec<BgpAllowedPrefix>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let settings = nexus
+                .switch_port_configuration_bgp_peer_allow_import_list(
+                    &opctx,
+                    path_params.into_inner().configuration,
+                    query.into_inner().peer_address,
+                )
+                .await?;
+
+            Ok(HttpResponseOk(settings.into_iter().map(Into::into).collect()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_configuration_bgp_peer_allow_import_add(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        prefix: TypedBody<params::AllowedPrefixAddRemove>,
+    ) -> Result<HttpResponseCreated<BgpAllowedPrefix>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let prefix = prefix.into_inner();
+
+            let settings = nexus
+                .switch_port_configuration_bgp_peer_allow_import_add(
+                    &opctx,
+                    path_params.into_inner().configuration,
+                    prefix.peer_address,
+                    prefix,
+                )
+                .await?;
+            Ok(HttpResponseCreated(settings.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_configuration_bgp_peer_allow_import_remove(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        prefix: TypedBody<params::AllowedPrefixAddRemove>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let prefix = prefix.into_inner();
+
+            nexus
+                .switch_port_configuration_bgp_peer_allow_import_remove(
+                    &opctx,
+                    path_params.into_inner().configuration,
+                    prefix.peer_address,
+                    prefix,
+                )
+                .await?;
+            Ok(HttpResponseDeleted())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_configuration_bgp_peer_allow_export_list(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        query: Query<params::BgpPeerQuerySelector>,
+    ) -> Result<HttpResponseOk<Vec<BgpAllowedPrefix>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let settings = nexus
+                .switch_port_configuration_bgp_peer_allow_export_list(
+                    &opctx,
+                    path_params.into_inner().configuration,
+                    query.into_inner().peer_address,
+                )
+                .await?;
+
+            Ok(HttpResponseOk(settings.into_iter().map(Into::into).collect()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_configuration_bgp_peer_allow_export_add(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        prefix: TypedBody<params::AllowedPrefixAddRemove>,
+    ) -> Result<HttpResponseCreated<BgpAllowedPrefix>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let prefix = prefix.into_inner();
+
+            let settings = nexus
+                .switch_port_configuration_bgp_peer_allow_export_add(
+                    &opctx,
+                    path_params.into_inner().configuration,
+                    prefix.peer_address,
+                    prefix,
+                )
+                .await?;
+            Ok(HttpResponseCreated(settings.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_configuration_bgp_peer_allow_export_remove(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        prefix: TypedBody<params::AllowedPrefixAddRemove>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let prefix = prefix.into_inner();
+
+            nexus
+                .switch_port_configuration_bgp_peer_allow_export_remove(
+                    &opctx,
+                    path_params.into_inner().configuration,
+                    prefix.peer_address,
+                    prefix,
+                )
+                .await?;
+            Ok(HttpResponseDeleted())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_configuration_bgp_peer_community_list(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        query: Query<params::BgpPeerQuerySelector>,
+    ) -> Result<HttpResponseOk<Vec<BgpCommunity>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let settings = nexus
+                .switch_port_configuration_bgp_peer_community_list(
+                    &opctx,
+                    path_params.into_inner().configuration,
+                    query.into_inner().peer_address,
+                )
+                .await?;
+            Ok(HttpResponseOk(settings.into_iter().map(Into::into).collect()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_configuration_bgp_peer_community_add(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        community: TypedBody<params::BgpCommunityAddRemove>,
+    ) -> Result<HttpResponseCreated<BgpCommunity>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let community = community.into_inner();
+
+            let settings = nexus
+                .switch_port_configuration_bgp_peer_community_add(
+                    &opctx,
+                    path_params.into_inner().configuration,
+                    community.peer_address,
+                    community,
+                )
+                .await?;
+            Ok(HttpResponseCreated(settings.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_configuration_bgp_peer_community_remove(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+        community: TypedBody<params::BgpCommunityAddRemove>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let community = community.into_inner();
+
+            nexus
+                .switch_port_configuration_bgp_peer_community_remove(
+                    &opctx,
+                    path_params.into_inner().configuration,
+                    community.peer_address,
+                    community,
+                )
+                .await?;
+            Ok(HttpResponseDeleted())
         };
         apictx
             .context
@@ -2962,6 +3692,88 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn networking_switch_port_active_configuration_view(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortConfigurationSelector>,
+    ) -> Result<HttpResponseOk<Option<SwitchPortSettings>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let params::SwitchPortConfigurationSelector {
+                rack_id,
+                switch,
+                port,
+            } = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let configuration = nexus
+                .switch_port_view_configuration(&opctx, &port, rack_id, switch)
+                .await?;
+            Ok(HttpResponseOk(configuration.map(Into::into)))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_active_configuration_set(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortConfigurationSelector>,
+        settings_body: TypedBody<params::SwitchPortApplySettings>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let params::SwitchPortConfigurationSelector {
+                rack_id,
+                switch,
+                port,
+            } = path_params.into_inner();
+            let settings = settings_body.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            nexus
+                .switch_port_apply_settings(
+                    &opctx, &port, rack_id, switch, &settings,
+                )
+                .await?;
+            Ok(HttpResponseUpdatedNoContent {})
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_active_configuration_clear(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortConfigurationSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let params::SwitchPortConfigurationSelector {
+                rack_id,
+                switch,
+                port,
+            } = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            nexus
+                .switch_port_clear_settings(&opctx, &port, rack_id, switch)
+                .await?;
+            Ok(HttpResponseDeleted {})
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn networking_switch_port_apply_settings(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SwitchPortPathSelector>,
@@ -2972,12 +3784,19 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let handler = async {
             let nexus = &apictx.context.nexus;
             let port = path_params.into_inner().port;
-            let query = query_params.into_inner();
+            let params::SwitchPortSelector { rack_id, switch_location } =
+                query_params.into_inner();
             let settings = settings_body.into_inner();
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             nexus
-                .switch_port_apply_settings(&opctx, &port, &query, &settings)
+                .switch_port_apply_settings(
+                    &opctx,
+                    &port,
+                    rack_id,
+                    switch_location,
+                    &settings,
+                )
                 .await?;
             Ok(HttpResponseUpdatedNoContent {})
         };
@@ -2997,10 +3816,18 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let handler = async {
             let nexus = &apictx.context.nexus;
             let port = path_params.into_inner().port;
-            let query = query_params.into_inner();
+            let params::SwitchPortSelector { rack_id, switch_location } =
+                query_params.into_inner();
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            nexus.switch_port_clear_settings(&opctx, &port, &query).await?;
+            nexus
+                .switch_port_clear_settings(
+                    &opctx,
+                    &port,
+                    rack_id,
+                    switch_location,
+                )
+                .await?;
             Ok(HttpResponseUpdatedNoContent {})
         };
         apictx
@@ -3140,12 +3967,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn networking_bgp_config_delete(
         rqctx: RequestContext<ApiContext>,
-        sel: Query<params::BgpConfigSelector>,
+        sel: Path<params::BgpConfigSelector>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
-            let sel = sel.into_inner();
+            let sel = sel.into_inner().bgp_config;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             nexus.bgp_config_delete(&opctx, &sel).await?;
@@ -3161,7 +3988,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_announce_set_update(
         rqctx: RequestContext<ApiContext>,
         config: TypedBody<params::BgpAnnounceSetCreate>,
-    ) -> Result<HttpResponseCreated<BgpAnnounceSet>, HttpError> {
+    ) -> Result<HttpResponseOk<BgpAnnounceSet>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -3169,7 +3996,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let result = nexus.bgp_update_announce_set(&opctx, &config).await?;
-            Ok(HttpResponseCreated::<BgpAnnounceSet>(result.0.into()))
+            Ok(HttpResponseOk::<BgpAnnounceSet>(result.0.into()))
         };
         apictx
             .context
