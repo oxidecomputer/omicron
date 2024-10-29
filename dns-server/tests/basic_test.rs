@@ -6,11 +6,20 @@ use anyhow::{Context, Result};
 use camino_tempfile::Utf8TempDir;
 use dns_service_client::Client;
 use dropshot::{test_util::LogContext, HandlerTaskMode};
+use hickory_client::{
+    client::{AsyncClient, ClientHandle},
+    error::ClientError,
+    udp::UdpClientStream,
+};
 use hickory_resolver::error::ResolveErrorKind;
 use hickory_resolver::TokioAsyncResolver;
 use hickory_resolver::{
     config::{NameServerConfig, Protocol, ResolverConfig, ResolverOpts},
-    proto::op::ResponseCode,
+    proto::{
+        op::ResponseCode,
+        rr::{DNSClass, Name, RecordType},
+        xfer::DnsResponse,
+    },
 };
 use internal_dns_types::config::{
     DnsConfigParams, DnsConfigZone, DnsRecord, Srv,
@@ -86,6 +95,59 @@ pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
 }
 
 #[tokio::test]
+pub async fn answers_match_question() -> Result<(), anyhow::Error> {
+    let test_ctx = init_client_server("answers_match_question").await?;
+    let client = &test_ctx.client;
+
+    // records should initially be empty
+    let records = dns_records_list(client, TEST_ZONE).await?;
+    assert!(records.is_empty());
+
+    // add an aaaa record
+    let name = "devron".to_string();
+    let addr = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
+    let aaaa = DnsRecord::Aaaa(addr);
+    let input_records = HashMap::from([(name.clone(), vec![aaaa])]);
+    dns_records_create(client, TEST_ZONE, input_records.clone()).await?;
+
+    // read back the aaaa record
+    let records = dns_records_list(client, TEST_ZONE).await?;
+    assert_eq!(input_records, records);
+
+    let name = Name::from_ascii(&(name + "." + TEST_ZONE + "."))
+        .expect("can construct name for query");
+
+    // If a server returns answers incorrectly, such as sending AAAA answers to
+    // an A query, it turns out `hickory-resolver`'s internal CachingClient
+    // transparently corrects the misbehavior. The caching client will cache the
+    // extra record, then see there are no A records matching the query, and
+    // finally send a correct response with no answers.
+    //
+    // `raw_dns_client_query` avoids using a hickory Resolver, so we can assert
+    // on the exact answer from our server.
+    let response = raw_dns_client_query(
+        test_ctx.dns_server.local_address(),
+        name,
+        RecordType::A,
+    )
+    .await
+    .expect("test query is ok");
+
+    // The answer we expect is:
+    // * no error: the domain exists, so NXDOMAIN would be wrong
+    // * no answers: we ask specifically for a record type the server does not
+    //   have
+    // * no additionals: the server could return AAAA records as additionals to
+    //   an A query, but does not currently.
+    assert_eq!(response.header().response_code(), ResponseCode::NoError);
+    assert_eq!(response.answers(), &[]);
+    assert_eq!(response.additionals(), &[]);
+
+    test_ctx.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
 pub async fn srv_crud() -> Result<(), anyhow::Error> {
     let test_ctx = init_client_server("srv_crud").await?;
     let client = &test_ctx.client;
@@ -97,6 +159,7 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
 
     // add a srv record
     let name = "hromi".to_string();
+    let test_fqdn = name.clone() + "." + TEST_ZONE + ".";
     let target = "outpost47";
     let srv = Srv {
         prio: 47,
@@ -121,8 +184,13 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
     )]);
     dns_records_create(client, TEST_ZONE, input_records.clone()).await?;
 
-    // resolve the srv
-    let response = resolver.srv_lookup(name + "." + TEST_ZONE + ".").await?;
+    // resolve the srv. we'll test this in two ways:
+    // * the srv record as seen through `hickory_resolver`, the higher-level
+    //   interface we use in many places
+    // * the srv record as seen through `hickory_client`, to double-check that
+    //   the exact DNS response has the answers/additionals sections as we'd
+    //   expect it to be
+    let response = resolver.srv_lookup(&test_fqdn).await?;
     let srvr = response.iter().next().expect("no srv records returned!");
     assert_eq!(srvr.priority(), srv.prio);
     assert_eq!(srvr.weight(), srv.weight);
@@ -131,6 +199,27 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
     let mut aaaa_records = response.ip_iter().collect::<Vec<_>>();
     aaaa_records.sort();
     assert_eq!(aaaa_records, [IpAddr::from(addr1), IpAddr::from(addr2)]);
+
+    // OK, through `hickory_resolver` everything looks right. now double-check
+    // that the additional records really do come back in the "Additionals"
+    // section of the response.
+
+    let name = hickory_client::rr::domain::Name::from_ascii(&test_fqdn)
+        .expect("can construct name for query");
+
+    let response = raw_dns_client_query(
+        test_ctx.dns_server.local_address(),
+        name,
+        RecordType::SRV,
+    )
+    .await
+    .expect("test query is ok");
+    assert_eq!(response.header().response_code(), ResponseCode::NoError);
+    assert_eq!(response.answers().len(), 1);
+    assert_eq!(response.answers()[0].record_type(), RecordType::SRV);
+    assert_eq!(response.additionals().len(), 2);
+    assert_eq!(response.additionals()[0].record_type(), RecordType::AAAA);
+    assert_eq!(response.additionals()[1].record_type(), RecordType::AAAA);
 
     test_ctx.cleanup().await;
     Ok(())
@@ -480,4 +569,25 @@ async fn dns_records_list(
         .find(|z| z.zone_name == zone_name)
         .map(|z| z.records)
         .unwrap_or_else(HashMap::new))
+}
+
+/// Issue a DNS query of `record_ty` records for `name`.
+///
+/// In most tests we just use `hickory-resolver` for a higher-level interface to
+/// making DNS queries and handling responses. This is also the crate used
+/// elsewhere to handle DNS responses in Omicron. However, it is slightly
+/// higher-level than the actual wire response we produce from the DNS server in
+/// this same crate; to assert on responses we send on the wire, this issues a
+/// query using `hickory-client` and returns the corresponding `DnsResponse`.
+async fn raw_dns_client_query(
+    resolver_addr: std::net::SocketAddr,
+    name: Name,
+    record_ty: RecordType,
+) -> Result<DnsResponse, ClientError> {
+    let stream = UdpClientStream::<tokio::net::UdpSocket>::new(resolver_addr);
+    let (mut trust_client, bg) = AsyncClient::connect(stream).await.unwrap();
+
+    tokio::spawn(bg);
+
+    trust_client.query(name, DNSClass::IN, record_ty).await
 }
