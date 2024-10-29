@@ -1185,17 +1185,16 @@ impl Client {
             })?;
 
         // Convert the HTTP response into a database response.
-        let response = handle_db_response(response).await.map_err(|err| {
-            probes::sql__query__done!(|| (&id));
-            err
-        })?;
+        let response =
+            handle_db_response(response).await.inspect_err(|_| {
+                probes::sql__query__done!(|| (&id));
+            })?;
 
         // Extract the query summary, measuring resource usage and duration.
         let summary =
             QuerySummary::from_headers(start.elapsed(), response.headers())
-                .map_err(|err| {
+                .inspect_err(|_| {
                     probes::sql__query__done!(|| (&id));
-                    err
                 })?;
 
         // Extract the actual text of the response.
