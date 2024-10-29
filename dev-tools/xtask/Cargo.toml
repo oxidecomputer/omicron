@@ -31,6 +31,7 @@ clap.workspace = true
 fs-err.workspace = true
 macaddr.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 shell-words.workspace = true
 swrite.workspace = true
 tabled.workspace = true

@@ -57,11 +57,13 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
         home_dir.join(".cache/a4x2-package")
     };
 
+    let src_dir = env::current_dir()?;
+
     // Delete any results from previous runs. We don't mind if there's errors.
     fs::remove_dir_all(&work_dir).ok();
-
     // Create work dir
     fs::create_dir_all(&work_dir)?;
+    sh.change_dir(&work_dir);
 
     // Output. Maybe in CI we want this to be /out
     let out_dir = work_dir.join("a4x2-package-out");
@@ -75,7 +77,7 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
     // buildomat-at-home
     {
         cmd!(sh, "banner 'prepare'").run()?;
-        let src_dir = env::current_dir()?;
+        let _popdir = sh.push_dir(&src_dir);
 
         // Get a ref we can checkout from the local working tree
         let mut treeish = cmd!(sh, "git stash create {src_dir}").read()?;
@@ -175,11 +177,14 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
         let testbed_dir = work_dir.join("testbed");
         let a4x2_dir = testbed_dir.join("a4x2");
 
+        // XXX move this clone & build to the top, so that if the omicron build
+        // takes awhile we wont have lost our git token when we get here.
         cmd!(
             sh,
             "git clone https://github.com/oxidecomputer/testbed {testbed_dir}"
         )
         .run()?;
+        cmd!(sh, "git -C {testbed_dir} checkout artemis/init-in-smf").run()?;
         let _popdir = sh.push_dir(&a4x2_dir);
 
         // build a4x2
@@ -227,7 +232,7 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
             let mut can_dedupe = true;
             for prefix in &prefixes {
                 let path = prefix.join(base_path);
-                // if it doesn't exist, we can't dedupe
+                // if it doesn't exist in all bays, we can't dedupe
                 if !path.try_exists()? {
                     can_dedupe = false;
                     break;
