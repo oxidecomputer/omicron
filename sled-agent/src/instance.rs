@@ -537,26 +537,8 @@ impl InstanceRunner {
                 // Requests to terminate the instance take priority over any
                 // other request to the instance.
                 request = terminate_rx.recv() => {
-                    let Some(TerminateRequest { mark_failed, tx}) = request else {
-                        warn!(
-                            self.log,
-                            "Instance termination request channel closed; \
-                             shutting down",
-                        );
-                        self.terminate(false).await;
-                        break;
-                    };
-                     let result = tx.send(Ok(VmmUnregisterResponse {
-                        updated_runtime: Some(self.terminate(mark_failed).await)
-                    }))
-                    .map_err(|_| Error::FailedSendClientClosed);
-                    if let Err(err) = result {
-                        warn!(
-                            self.log,
-                            "Error handling request to terminate instance";
-                            "err" => ?err,
-                        );
-                    }
+                    self.handle_termination_request(request, None).await;
+                    break;
                 }
 
                 // Handle external requests to act upon the instance.
@@ -630,37 +612,11 @@ impl InstanceRunner {
                         biased;
 
                         request = terminate_rx.recv() => {
-                            match request {
-                                Some(TerminateRequest { tx, mark_failed }) => {
-                                    info!(
-                                        self.log,
-                                        "Received request to terminate instance \
-                                         while waiting on an ongoing request";
-                                        "request" => request_variant,
-                                    );
-                                    let result = tx.send(Ok(VmmUnregisterResponse {
-                                        updated_runtime: Some(self.terminate(mark_failed).await)
-                                    }))
-                                    .map_err(|_| Error::FailedSendClientClosed);
-                                if let Err(err) = result {
-                                        warn!(
-                                            self.log,
-                                            "Error handling request to terminate instance";
-                                            "err" => ?err,
-                                        );
-                                    }
-                                    break;
-                                },
-                                None => {
-                                    warn!(
-                                        self.log,
-                                        "Instance termination request channel closed; \
-                                        shutting down";
-                                    );
-                                    self.terminate(false).await;
-                                    break;
-                                },
-                            };
+                            self.handle_termination_request(
+                                request,
+                                Some(&request_variant),
+                            ).await;
+                            break;
                         }
 
                         result = op => {
@@ -1854,6 +1810,64 @@ impl InstanceRunner {
         info!(self.log, "Propolis HTTP server online");
 
         Ok(PropolisSetup { client, running_zone })
+    }
+
+    async fn handle_termination_request(
+        &mut self,
+        req: Option<TerminateRequest>,
+        current_req: Option<&str>,
+    ) {
+        match req {
+            Some(TerminateRequest { tx, mark_failed }) => {
+                if let Some(request) = current_req {
+                    info!(
+                        self.log,
+                        "Received request to terminate instance while waiting \
+                         on an ongoing request";
+                        "request" => %request,
+                        "mark_failed" => mark_failed,
+                    );
+                } else {
+                    info!(
+                        self.log,
+                        "Received request to terminate instance";
+                        "mark_failed" => mark_failed,
+                    );
+                }
+
+                let result = tx
+                    .send(Ok(VmmUnregisterResponse {
+                        updated_runtime: Some(
+                            self.terminate(mark_failed).await,
+                        ),
+                    }))
+                    .map_err(|_| Error::FailedSendClientClosed);
+                if let Err(err) = result {
+                    warn!(
+                        self.log,
+                        "Error handling request to terminate instance";
+                        "err" => ?err,
+                    );
+                }
+            }
+            None => {
+                if let Some(request) = current_req {
+                    warn!(
+                        self.log,
+                        "Instance termination request channel closed while \
+                         waiting on an ongoing request; shutting down";
+                        "request" => %request,
+                    );
+                } else {
+                    warn!(
+                        self.log,
+                        "Instance termination request channel closed; \
+                         shutting down";
+                    );
+                }
+                self.terminate(false).await;
+            }
+        };
     }
 
     async fn terminate(&mut self, mark_failed: bool) -> SledVmmState {
