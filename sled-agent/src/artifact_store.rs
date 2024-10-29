@@ -36,6 +36,7 @@ use sled_storage::dataset::M2_ARTIFACT_DATASET;
 use sled_storage::error::Error as StorageError;
 use sled_storage::manager::StorageHandle;
 use slog::{error, info, Logger};
+use slog_error_chain::SlogInlineError;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::AsyncWriteExt;
 
@@ -275,10 +276,10 @@ impl<T: DatasetsManager> ArtifactStore<T> {
     /// Errors are logged and ignored unless a temporary file already exists
     /// (another task is writing to this artifact) or no temporary files could
     /// be created.
-    async fn put_writer(
+    async fn writer(
         &self,
         sha256: ArtifactHash,
-    ) -> Result<MultiWriter, Error> {
+    ) -> Result<ArtifactWriter, Error> {
         let mut inner = Vec::new();
         let mut last_error = None;
         for mountpoint in self.storage.artifact_storage_paths().await? {
@@ -315,55 +316,18 @@ impl<T: DatasetsManager> ArtifactStore<T> {
             };
             let file = NamedUtf8TempFile::from_parts(file, temp_path);
 
-            inner.push((file, mountpoint, sha256));
+            inner.push(Some((file, mountpoint)));
         }
         if inner.is_empty() {
             Err(last_error.unwrap_or(Error::NoUpdateDataset))
         } else {
-            Ok(MultiWriter { inner })
+            Ok(ArtifactWriter {
+                hasher: Sha256::new(),
+                files: inner,
+                log: self.log.clone(),
+                sha256,
+            })
         }
-    }
-
-    /// Common implementation for all artifact write operations that copies a
-    /// generic stream of bytes to a set of temporary files, then persists those
-    /// files.
-    async fn put_impl(
-        &self,
-        multi_writer: Option<MultiWriter>,
-        sha256: ArtifactHash,
-        stream: impl Stream<Item = Result<impl AsRef<[u8]>, Error>>,
-    ) -> Result<(), Error> {
-        let multi_writer = match multi_writer {
-            Some(multi_writer) => multi_writer,
-            None => self.put_writer(sha256).await?,
-        };
-
-        let (multi_writer, hasher) = stream
-            .try_fold(
-                (multi_writer, Sha256::new()),
-                |(mut multi_writer, mut hasher), chunk| async move {
-                    hasher.update(&chunk);
-                    multi_writer.write(&self.log, chunk).await?;
-                    Ok((multi_writer, hasher))
-                },
-            )
-            .await?;
-
-        let digest = hasher.finalize();
-        if digest.as_slice() != sha256.as_ref() {
-            return Err(Error::HashMismatch {
-                expected: sha256,
-                actual: ArtifactHash(digest.into()),
-            });
-        }
-
-        multi_writer.finalize(&self.log).await?;
-        info!(
-            &self.log,
-            "Wrote artifact";
-            "sha256" => &sha256.to_string(),
-        );
-        Ok(())
     }
 
     /// PUT operation (served by Sled Agent API) which takes a [`StreamingBody`]
@@ -372,7 +336,9 @@ impl<T: DatasetsManager> ArtifactStore<T> {
         sha256: ArtifactHash,
         body: StreamingBody,
     ) -> Result<(), Error> {
-        self.put_impl(None, sha256, body.into_stream().map_err(Error::Body))
+        self.writer(sha256)
+            .await?
+            .write_stream(body.into_stream().map_err(Error::Body))
             .await
     }
 
@@ -391,23 +357,35 @@ impl<T: DatasetsManager> ArtifactStore<T> {
             )),
         );
         // Check that there's no conflict before we send the upstream request.
-        let multi_writer = self.put_writer(sha256).await?;
-        let stream = client
+        let writer = self.writer(sha256).await?;
+        let response = client
             .artifact_get_by_sha256(&sha256.to_string())
             .await
             .map_err(|err| Error::DepotCopy {
                 sha256,
                 base_url: depot_base_url.to_owned(),
                 err,
-            })?
-            .into_inner()
-            .into_inner()
-            .map_err(|err| Error::DepotCopy {
-                sha256,
-                base_url: depot_base_url.to_owned(),
-                err: repo_depot_client::ClientError::ResponseBodyError(err),
+            })?;
+        // Copy from the stream on its own task and immediately return.
+        let log = self.log.clone();
+        let base_url = depot_base_url.to_owned();
+        tokio::task::spawn(async move {
+            let stream = response.into_inner().into_inner().map_err(|err| {
+                Error::DepotCopy {
+                    sha256,
+                    base_url: base_url.clone(),
+                    err: repo_depot_client::ClientError::ResponseBodyError(err),
+                }
             });
-        self.put_impl(Some(multi_writer), sha256, stream).await
+            if let Err(err) = writer.write_stream(stream).await {
+                error!(
+                    &log,
+                    "Failed to write artifact";
+                    "err" => &err,
+                );
+            }
+        });
+        Ok(())
     }
 
     /// DELETE operation (served by Sled Agent API)
@@ -454,7 +432,7 @@ impl<T: DatasetsManager> ArtifactStore<T> {
 /// Abstracts over what kind of sled agent we are; each of the real sled agent,
 /// simulated sled agent, and this module's unit tests have different ways of
 /// keeping track of the datasets on the system.
-pub(crate) trait DatasetsManager {
+pub(crate) trait DatasetsManager: Sync {
     async fn artifact_storage_paths(
         &self,
     ) -> Result<impl Iterator<Item = Utf8PathBuf> + '_, StorageError>;
@@ -487,39 +465,55 @@ impl DatasetsManager for StorageHandle {
     }
 }
 
-/// Abstraction for `ArtifactStore::put_impl` that handles writing to several
-/// temporary files.
-struct MultiWriter {
-    inner: Vec<(NamedUtf8TempFile<File>, Utf8PathBuf, ArtifactHash)>,
+/// Abstraction that handles writing to several temporary files.
+struct ArtifactWriter {
+    files: Vec<Option<(NamedUtf8TempFile<File>, Utf8PathBuf)>>,
+    hasher: Sha256,
+    log: Logger,
+    sha256: ArtifactHash,
 }
 
-impl MultiWriter {
+impl ArtifactWriter {
+    async fn write_stream(
+        self,
+        stream: impl Stream<Item = Result<impl AsRef<[u8]>, Error>>,
+    ) -> Result<(), Error> {
+        let writer = stream
+            .try_fold(self, |mut writer, chunk| async {
+                writer.write(chunk).await?;
+                Ok(writer)
+            })
+            .await?;
+        writer.finalize().await
+    }
+
     /// Write `chunk` to all files. If an error occurs, it is logged and the
     /// temporary file is dropped. If there are no files left to write to, the
     /// most recently-seen error is returned.
-    async fn write(
-        &mut self,
-        log: &Logger,
-        chunk: impl AsRef<[u8]>,
-    ) -> Result<(), Error> {
-        // We would rather use `Vec::retain_mut` here but we'd need an async
-        // version...
-        let to_write = std::mem::take(&mut self.inner);
-        self.inner.reserve_exact(to_write.len());
+    async fn write(&mut self, chunk: impl AsRef<[u8]>) -> Result<(), Error> {
+        self.hasher.update(&chunk);
+
         let mut last_error = None;
-        for (mut file, mountpoint, sha256) in to_write {
-            match file.as_file_mut().write_all(chunk.as_ref()).await {
-                Ok(()) => self.inner.push((file, mountpoint, sha256)),
-                Err(err) => {
-                    let path = file.path().to_owned();
-                    log_and_store!(last_error, log, "write to", path, err);
-                    // `file` and `final_path` are dropped here, cleaning up
-                    // the file
+        for option in &mut self.files {
+            if let Some((mut file, mountpoint)) = option.take() {
+                match file.as_file_mut().write_all(chunk.as_ref()).await {
+                    Ok(()) => {
+                        *option = Some((file, mountpoint));
+                    }
+                    Err(err) => {
+                        let path = file.path().to_owned();
+                        log_and_store!(
+                            last_error, &self.log, "write to", path, err
+                        );
+                        // `file` and `final_path` are dropped here, cleaning up
+                        // the file
+                    }
                 }
             }
         }
 
-        if self.inner.is_empty() {
+        self.files.retain(Option::is_some);
+        if self.files.is_empty() {
             Err(last_error.unwrap_or(Error::NoUpdateDataset))
         } else {
             Ok(())
@@ -529,16 +523,26 @@ impl MultiWriter {
     /// Rename all files to their final paths. If an error occurs, it is logged.
     /// If none of the files are renamed successfully, the most recently-seen
     /// error is returned.
-    async fn finalize(self, log: &Logger) -> Result<(), Error> {
+    async fn finalize(self) -> Result<(), Error> {
+        let digest = self.hasher.finalize();
+        if digest.as_slice() != self.sha256.as_ref() {
+            return Err(Error::HashMismatch {
+                expected: self.sha256,
+                actual: ArtifactHash(digest.into()),
+            });
+        }
+
         let mut last_error = None;
         let mut any_success = false;
-        for (mut file, mountpoint, sha256) in self.inner {
+        for (mut file, mountpoint) in self.files.into_iter().flatten() {
             // 1. Open the mountpoint and its temp dir so we can fsync them at
             // the end.
             let parent_dir = match File::open(&mountpoint).await {
                 Ok(dir) => dir,
                 Err(err) => {
-                    log_and_store!(last_error, log, "open", mountpoint, err);
+                    log_and_store!(
+                        last_error, &self.log, "open", mountpoint, err
+                    );
                     continue;
                 }
             };
@@ -546,18 +550,24 @@ impl MultiWriter {
             let temp_dir = match File::open(&temp_dir_path).await {
                 Ok(dir) => dir,
                 Err(err) => {
-                    log_and_store!(last_error, log, "open", temp_dir_path, err);
+                    log_and_store!(
+                        last_error,
+                        &self.log,
+                        "open",
+                        temp_dir_path,
+                        err
+                    );
                     continue;
                 }
             };
             // 2. fsync the file.
             if let Err(err) = file.as_file_mut().sync_all().await {
                 let path = file.path().to_owned();
-                log_and_store!(last_error, log, "sync", path, err);
+                log_and_store!(last_error, &self.log, "sync", path, err);
                 continue;
             }
             // 3. Rename temporary file.
-            let final_path = mountpoint.join(sha256.to_string());
+            let final_path = mountpoint.join(self.sha256.to_string());
             let moved_final_path = final_path.clone();
             if let Err(err) = tokio::task::spawn_blocking(move || {
                 file.persist(&moved_final_path)
@@ -565,7 +575,7 @@ impl MultiWriter {
             .await?
             {
                 error!(
-                    log,
+                    &self.log,
                     "Failed to rename temporary file";
                     "error" => &err.error,
                     "from" => err.file.path().as_str(),
@@ -581,11 +591,17 @@ impl MultiWriter {
             // 4. fsync the parent directory for both the final path and its
             // previous path.
             if let Err(err) = parent_dir.sync_all().await {
-                log_and_store!(last_error, log, "sync", mountpoint, err);
+                log_and_store!(last_error, &self.log, "sync", mountpoint, err);
                 continue;
             }
             if let Err(err) = temp_dir.sync_all().await {
-                log_and_store!(last_error, log, "sync", temp_dir_path, err);
+                log_and_store!(
+                    last_error,
+                    &self.log,
+                    "sync",
+                    temp_dir_path,
+                    err
+                );
                 continue;
             }
 
@@ -593,6 +609,11 @@ impl MultiWriter {
         }
 
         if any_success {
+            info!(
+                &self.log,
+                "Wrote artifact";
+                "sha256" => &self.sha256.to_string(),
+            );
             Ok(())
         } else {
             Err(last_error.unwrap_or(Error::NoUpdateDataset))
@@ -621,7 +642,7 @@ impl RepoDepotApi for RepoDepotImpl {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, SlogInlineError)]
 pub(crate) enum Error {
     #[error("Another task is already writing artifact {sha256}")]
     AlreadyInProgress { sha256: ArtifactHash },
@@ -787,11 +808,10 @@ mod test {
         // 3. we don't fail trying to create TEMP_SUBDIR twice
         for _ in 0..2 {
             store
-                .put_impl(
-                    None,
-                    TEST_HASH,
-                    stream::once(async { Ok(TEST_ARTIFACT) }),
-                )
+                .writer(TEST_HASH)
+                .await
+                .unwrap()
+                .write_stream(stream::once(async { Ok(TEST_ARTIFACT) }))
                 .await
                 .unwrap();
             // list lists the file
@@ -845,13 +865,7 @@ mod test {
         let store = ArtifactStore::new(&log.log, backend);
 
         assert!(matches!(
-            store
-                .put_impl(
-                    None,
-                    TEST_HASH,
-                    stream::once(async { Ok(TEST_ARTIFACT) })
-                )
-                .await,
+            store.writer(TEST_HASH).await,
             Err(Error::NoUpdateDataset)
         ));
         assert!(matches!(
@@ -862,6 +876,39 @@ mod test {
         assert!(matches!(
             store.delete(TEST_HASH).await,
             Err(Error::NoUpdateDataset)
+        ));
+
+        log.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn wrong_hash() {
+        const ACTUAL: ArtifactHash = ArtifactHash(hex!(
+            "4d27a9d1ddb65e0f2350a400cf73157e42ae2ca687a4220aa0a73b9bb2d211f7"
+        ));
+
+        let log = test_setup_log("wrong_hash");
+        let backend = TestBackend::new(2);
+        let store = ArtifactStore::new(&log.log, backend);
+        let err = store
+            .writer(TEST_HASH)
+            .await
+            .unwrap()
+            .write_stream(stream::once(async {
+                Ok(b"This isn't right at all.")
+            }))
+            .await
+            .unwrap_err();
+        match err {
+            Error::HashMismatch { expected, actual } => {
+                assert_eq!(expected, TEST_HASH);
+                assert_eq!(actual, ACTUAL);
+            }
+            err => panic!("wrong error: {err}"),
+        }
+        assert!(matches!(
+            store.get(TEST_HASH).await,
+            Err(Error::NotFound { .. })
         ));
 
         log.cleanup_successful();
