@@ -7,12 +7,13 @@
 
 use anyhow::anyhow;
 use camino::Utf8PathBuf;
-use clickhouse_admin_api::KeeperConfigurableSettings;
-use clickhouse_admin_api::ServerConfigurableSettings;
-use clickhouse_admin_client::Client;
-use clickhouse_admin_types::config::ClickhouseHost;
-use clickhouse_admin_types::config::RaftServerSettings;
+use clickhouse_admin_keeper_client::Client as ClickhouseKeeperClient;
+use clickhouse_admin_server_client::Client as ClickhouseServerClient;
+use clickhouse_admin_types::ClickhouseHost;
+use clickhouse_admin_types::KeeperConfigurableSettings;
 use clickhouse_admin_types::KeeperSettings;
+use clickhouse_admin_types::RaftServerSettings;
+use clickhouse_admin_types::ServerConfigurableSettings;
 use clickhouse_admin_types::ServerSettings;
 use futures::future::Either;
 use futures::stream::FuturesUnordered;
@@ -91,23 +92,19 @@ pub(crate) async fn deploy_nodes(
         let admin_url = format!("http://{admin_addr}");
         let log = log.new(slog::o!("admin_url" => admin_url.clone()));
         futs.push(Either::Left(async move {
-            let client = Client::new(&admin_url, log.clone());
-            client
-                .generate_keeper_config_and_enable(&config)
-                .await
-                .map(|_| ())
-                .map_err(|e| {
-                    anyhow!(
-                        concat!(
-                            "failed to send config for clickhouse keeper ",
-                            "with id {} to clickhouse-admin; admin_url = {}",
-                            "error = {}"
-                        ),
-                        config.settings.id,
-                        admin_url,
-                        e
-                    )
-                })
+            let client = ClickhouseKeeperClient::new(&admin_url, log.clone());
+            client.generate_config(&config).await.map(|_| ()).map_err(|e| {
+                anyhow!(
+                    concat!(
+                        "failed to send config for clickhouse keeper ",
+                        "with id {} to clickhouse-admin-keeper; admin_url = {}",
+                        "error = {}"
+                    ),
+                    config.settings.id,
+                    admin_url,
+                    e
+                )
+            })
         }));
     }
     for config in server_configs {
@@ -120,23 +117,19 @@ pub(crate) async fn deploy_nodes(
         let admin_url = format!("http://{admin_addr}");
         let log = opctx.log.new(slog::o!("admin_url" => admin_url.clone()));
         futs.push(Either::Right(async move {
-            let client = Client::new(&admin_url, log.clone());
-            client
-                .generate_server_config_and_enable(&config)
-                .await
-                .map(|_| ())
-                .map_err(|e| {
-                    anyhow!(
-                        concat!(
-                            "failed to send config for clickhouse server ",
-                            "with id {} to clickhouse-admin; admin_url = {}",
-                            "error = {}"
-                        ),
-                        config.settings.id,
-                        admin_url,
-                        e
-                    )
-                })
+            let client = ClickhouseServerClient::new(&admin_url, log.clone());
+            client.generate_config(&config).await.map(|_| ()).map_err(|e| {
+                anyhow!(
+                    concat!(
+                        "failed to send config for clickhouse server ",
+                        "with id {} to clickhouse-admin-server; admin_url = {}",
+                        "error = {}"
+                    ),
+                    config.settings.id,
+                    admin_url,
+                    e
+                )
+            })
         }));
     }
 
@@ -163,7 +156,7 @@ fn server_configs(
     zones: &BTreeMap<SledUuid, BlueprintZonesConfig>,
     clickhouse_cluster_config: &ClickhouseClusterConfig,
     keepers: Vec<ClickhouseHost>,
-) -> Result<Vec<ServerConfigurableSettings>, anyhow::Error> {
+) -> anyhow::Result<Vec<ServerConfigurableSettings>> {
     let server_ips: BTreeMap<OmicronZoneUuid, Ipv6Addr> = zones
         .values()
         .flat_map(|zones_config| {
@@ -175,9 +168,7 @@ fn server_configs(
                         .servers
                         .contains_key(&zone_config.id)
                 })
-                .map(|zone_config| {
-                    (zone_config.id, zone_config.underlay_address)
-                })
+                .map(|zone_config| (zone_config.id, zone_config.underlay_ip()))
         })
         .collect();
 
@@ -235,9 +226,7 @@ fn keeper_configs(
                         .keepers
                         .contains_key(&zone_config.id)
                 })
-                .map(|zone_config| {
-                    (zone_config.id, zone_config.underlay_address)
-                })
+                .map(|zone_config| (zone_config.id, zone_config.underlay_ip()))
         })
         .collect();
 
@@ -285,7 +274,7 @@ fn keeper_configs(
 #[cfg(test)]
 mod test {
     use super::*;
-    use clickhouse_admin_types::config::ClickhouseHost;
+    use clickhouse_admin_types::ClickhouseHost;
     use clickhouse_admin_types::KeeperId;
     use clickhouse_admin_types::ServerId;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
@@ -315,21 +304,20 @@ mod test {
                 zones: vec![BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: zone_id,
-                    underlay_address: Ipv6Addr::new(
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        keeper_id as u16,
-                    ),
                     filesystem_pool: None,
                     zone_type: BlueprintZoneType::ClickhouseKeeper(
                         blueprint_zone_type::ClickhouseKeeper {
                             address: SocketAddrV6::new(
-                                Ipv6Addr::LOCALHOST,
+                                Ipv6Addr::new(
+                                    0,
+                                    0,
+                                    0,
+                                    0,
+                                    0,
+                                    0,
+                                    0,
+                                    keeper_id as u16,
+                                ),
                                 0,
                                 0,
                                 0,
@@ -355,21 +343,20 @@ mod test {
                 zones: vec![BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: zone_id,
-                    underlay_address: Ipv6Addr::new(
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        server_id as u16 + 10,
-                    ),
                     filesystem_pool: None,
                     zone_type: BlueprintZoneType::ClickhouseServer(
                         blueprint_zone_type::ClickhouseServer {
                             address: SocketAddrV6::new(
-                                Ipv6Addr::LOCALHOST,
+                                Ipv6Addr::new(
+                                    0,
+                                    0,
+                                    0,
+                                    0,
+                                    0,
+                                    0,
+                                    0,
+                                    server_id as u16 + 10,
+                                ),
                                 0,
                                 0,
                                 0,

@@ -22,7 +22,8 @@ camino.workspace = true
 camino-tempfile.workspace = true
 clap.workspace = true
 chrono.workspace = true
-clickhouse-admin-client.workspace = true
+clickhouse-admin-keeper-client.workspace = true
+clickhouse-admin-server-client.workspace = true
 cockroach-admin-client.workspace = true
 crucible-agent-client.workspace = true
 crucible-pantry-client.workspace = true
@@ -68,6 +69,7 @@ paste.workspace = true
 pq-sys = "*"
 progenitor-client.workspace = true
 propolis-client.workspace = true
+qorb.workspace = true
 rand.workspace = true
 ref-cast.workspace = true
 reqwest = { workspace = true, features = ["json"] }

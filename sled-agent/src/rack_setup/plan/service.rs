@@ -21,8 +21,9 @@ use nexus_types::deployment::{
 };
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet,
-    DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, MGD_PORT, MGS_PORT, NTP_PORT,
-    NUM_SOURCE_NAT_PORTS, RSS_RESERVED_ADDRESSES, SLED_PREFIX,
+    DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, MGD_PORT, MGS_PORT,
+    NEXUS_INTERNAL_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS,
+    RSS_RESERVED_ADDRESSES, SLED_PREFIX,
 };
 use omicron_common::api::external::{Generation, MacAddr, Vni};
 use omicron_common::api::internal::shared::{
@@ -38,8 +39,9 @@ use omicron_common::disk::{
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_common::policy::{
-    BOUNDARY_NTP_REDUNDANCY, COCKROACHDB_REDUNDANCY, INTERNAL_DNS_REDUNDANCY,
-    NEXUS_REDUNDANCY, OXIMETER_REDUNDANCY, RESERVED_INTERNAL_DNS_REDUNDANCY,
+    BOUNDARY_NTP_REDUNDANCY, COCKROACHDB_REDUNDANCY,
+    CRUCIBLE_PANTRY_REDUNDANCY, INTERNAL_DNS_REDUNDANCY, NEXUS_REDUNDANCY,
+    OXIMETER_REDUNDANCY, RESERVED_INTERNAL_DNS_REDUNDANCY,
     SINGLE_NODE_CLICKHOUSE_REDUNDANCY,
 };
 use omicron_uuid_kinds::{
@@ -63,9 +65,6 @@ use thiserror::Error;
 use uuid::Uuid;
 
 const MINIMUM_U2_COUNT: usize = 3;
-// TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
-// when Nexus provisions the Pantry.
-const PANTRY_COUNT: usize = 3;
 
 /// Describes errors which may occur while generating a plan for services.
 #[derive(Error, Debug)]
@@ -465,9 +464,8 @@ impl Plan {
             dns_builder
                 .host_zone_with_one_backend(
                     id,
-                    ip,
                     ServiceName::InternalDns,
-                    DNS_HTTP_PORT,
+                    dns_address,
                 )
                 .unwrap();
             let dataset_name =
@@ -477,7 +475,6 @@ impl Plan {
             sled.request.zones.push(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id,
-                underlay_address: ip,
                 filesystem_pool,
                 zone_type: BlueprintZoneType::InternalDns(
                     blueprint_zone_type::InternalDns {
@@ -505,12 +502,7 @@ impl Plan {
             let port = omicron_common::address::COCKROACH_PORT;
             let address = SocketAddrV6::new(ip, port, 0, 0);
             dns_builder
-                .host_zone_with_one_backend(
-                    id,
-                    ip,
-                    ServiceName::Cockroach,
-                    port,
-                )
+                .host_zone_with_one_backend(id, ServiceName::Cockroach, address)
                 .unwrap();
             let dataset_name =
                 sled.alloc_dataset_from_u2s(DatasetKind::Cockroach)?;
@@ -518,7 +510,6 @@ impl Plan {
             sled.request.zones.push(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id,
-                underlay_address: ip,
                 zone_type: BlueprintZoneType::CockroachDb(
                     blueprint_zone_type::CockroachDb {
                         address,
@@ -552,9 +543,8 @@ impl Plan {
             dns_builder
                 .host_zone_with_one_backend(
                     id,
-                    internal_ip,
                     ServiceName::ExternalDns,
-                    http_port,
+                    http_address,
                 )
                 .unwrap();
             let dns_port = omicron_common::address::DNS_PORT;
@@ -568,7 +558,6 @@ impl Plan {
             sled.request.zones.push(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id,
-                underlay_address: *http_address.ip(),
                 zone_type: BlueprintZoneType::ExternalDns(
                     blueprint_zone_type::ExternalDns {
                         dataset: OmicronZoneDataset {
@@ -591,13 +580,14 @@ impl Plan {
                 &mut sled_info[which_sled]
             };
             let id = OmicronZoneUuid::new_v4();
-            let address = sled.addr_alloc.next().expect("Not enough addrs");
+            let ip = sled.addr_alloc.next().expect("Not enough addrs");
+            let internal_address =
+                SocketAddrV6::new(ip, NEXUS_INTERNAL_PORT, 0, 0);
             dns_builder
                 .host_zone_with_one_backend(
                     id,
-                    address,
                     ServiceName::Nexus,
-                    omicron_common::address::NEXUS_INTERNAL_PORT,
+                    internal_address,
                 )
                 .unwrap();
             let (nic, external_ip) = svc_port_builder.next_nexus(id)?;
@@ -605,15 +595,9 @@ impl Plan {
             sled.request.zones.push(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id,
-                underlay_address: address,
                 zone_type: BlueprintZoneType::Nexus(
                     blueprint_zone_type::Nexus {
-                        internal_address: SocketAddrV6::new(
-                            address,
-                            omicron_common::address::NEXUS_INTERNAL_PORT,
-                            0,
-                            0,
-                        ),
+                        internal_address,
                         external_ip: from_ipaddr_to_external_floating_ip(
                             external_ip,
                         ),
@@ -641,29 +625,22 @@ impl Plan {
                 &mut sled_info[which_sled]
             };
             let id = OmicronZoneUuid::new_v4();
-            let address = sled.addr_alloc.next().expect("Not enough addrs");
+            let ip = sled.addr_alloc.next().expect("Not enough addrs");
+            let address = SocketAddrV6::new(
+                ip,
+                omicron_common::address::OXIMETER_PORT,
+                0,
+                0,
+            );
             dns_builder
-                .host_zone_with_one_backend(
-                    id,
-                    address,
-                    ServiceName::Oximeter,
-                    omicron_common::address::OXIMETER_PORT,
-                )
+                .host_zone_with_one_backend(id, ServiceName::Oximeter, address)
                 .unwrap();
             let filesystem_pool = Some(sled.alloc_zpool_from_u2s()?);
             sled.request.zones.push(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id,
-                underlay_address: address,
                 zone_type: BlueprintZoneType::Oximeter(
-                    blueprint_zone_type::Oximeter {
-                        address: SocketAddrV6::new(
-                            address,
-                            omicron_common::address::OXIMETER_PORT,
-                            0,
-                            0,
-                        ),
-                    },
+                    blueprint_zone_type::Oximeter { address },
                 ),
                 filesystem_pool,
             })
@@ -682,12 +659,7 @@ impl Plan {
             let http_port = omicron_common::address::CLICKHOUSE_HTTP_PORT;
             let http_address = SocketAddrV6::new(ip, http_port, 0, 0);
             dns_builder
-                .host_zone_clickhouse(
-                    id,
-                    ip,
-                    ServiceName::Clickhouse,
-                    http_port,
-                )
+                .host_zone_clickhouse(id, ServiceName::Clickhouse, http_address)
                 .unwrap();
             let dataset_name =
                 sled.alloc_dataset_from_u2s(DatasetKind::Clickhouse)?;
@@ -695,7 +667,6 @@ impl Plan {
             sled.request.zones.push(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id,
-                underlay_address: ip,
                 zone_type: BlueprintZoneType::Clickhouse(
                     blueprint_zone_type::Clickhouse {
                         address: http_address,
@@ -710,32 +681,29 @@ impl Plan {
 
         // Provision Crucible Pantry zones, continuing to stripe across sleds.
         // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
-        for _ in 0..PANTRY_COUNT {
+        for _ in 0..CRUCIBLE_PANTRY_REDUNDANCY {
             let sled = {
                 let which_sled =
                     sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
                 &mut sled_info[which_sled]
             };
-            let address = sled.addr_alloc.next().expect("Not enough addrs");
+            let ip = sled.addr_alloc.next().expect("Not enough addrs");
             let port = omicron_common::address::CRUCIBLE_PANTRY_PORT;
+            let address = SocketAddrV6::new(ip, port, 0, 0);
             let id = OmicronZoneUuid::new_v4();
             let filesystem_pool = Some(sled.alloc_zpool_from_u2s()?);
             dns_builder
                 .host_zone_with_one_backend(
                     id,
-                    address,
                     ServiceName::CruciblePantry,
-                    port,
+                    address,
                 )
                 .unwrap();
             sled.request.zones.push(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id,
-                underlay_address: address,
                 zone_type: BlueprintZoneType::CruciblePantry(
-                    blueprint_zone_type::CruciblePantry {
-                        address: SocketAddrV6::new(address, port, 0, 0),
-                    },
+                    blueprint_zone_type::CruciblePantry { address },
                 ),
                 filesystem_pool,
             });
@@ -752,16 +720,14 @@ impl Plan {
                 dns_builder
                     .host_zone_with_one_backend(
                         id,
-                        ip,
                         ServiceName::Crucible(id),
-                        port,
+                        address,
                     )
                     .unwrap();
 
                 sled.request.zones.push(BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id,
-                    underlay_address: ip,
                     zone_type: BlueprintZoneType::Crucible(
                         blueprint_zone_type::Crucible {
                             address,
@@ -781,8 +747,8 @@ impl Plan {
         let mut boundary_ntp_servers = vec![];
         for (idx, sled) in sled_info.iter_mut().enumerate() {
             let id = OmicronZoneUuid::new_v4();
-            let address = sled.addr_alloc.next().expect("Not enough addrs");
-            let ntp_address = SocketAddrV6::new(address, NTP_PORT, 0, 0);
+            let ip = sled.addr_alloc.next().expect("Not enough addrs");
+            let ntp_address = SocketAddrV6::new(ip, NTP_PORT, 0, 0);
             let filesystem_pool = Some(sled.alloc_zpool_from_u2s()?);
 
             let (zone_type, svcname) = if idx < BOUNDARY_NTP_REDUNDANCY {
@@ -817,13 +783,12 @@ impl Plan {
             };
 
             dns_builder
-                .host_zone_with_one_backend(id, address, svcname, NTP_PORT)
+                .host_zone_with_one_backend(id, svcname, ntp_address)
                 .unwrap();
 
             sled.request.zones.push(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id,
-                underlay_address: address,
                 zone_type,
                 filesystem_pool,
             });

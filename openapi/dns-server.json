@@ -64,9 +64,7 @@
         "type": "object",
         "properties": {
           "generation": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
+            "$ref": "#/components/schemas/Generation"
           },
           "time_applied": {
             "type": "string",
@@ -94,9 +92,7 @@
         "type": "object",
         "properties": {
           "generation": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
+            "$ref": "#/components/schemas/Generation"
           },
           "time_created": {
             "type": "string",
@@ -214,6 +210,12 @@
           "message",
           "request_id"
         ]
+      },
+      "Generation": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
       },
       "Srv": {
         "type": "object",

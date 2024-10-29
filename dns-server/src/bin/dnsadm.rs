@@ -220,7 +220,7 @@ async fn main() -> Result<()> {
                 .collect();
 
             let new_config = DnsConfigParams {
-                generation: old_config.generation + 1,
+                generation: old_config.generation.next(),
                 time_created: chrono::Utc::now(),
                 zones,
             };
@@ -275,7 +275,7 @@ fn add_record(
     our_kv.1.push(record);
 
     Ok(DnsConfigParams {
-        generation: generation + 1,
+        generation: generation.next(),
         time_created: chrono::Utc::now(),
         zones: other_zones
             .into_iter()

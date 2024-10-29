@@ -139,11 +139,20 @@ label = "Bootstrap Agent"
 server_package_name = "bootstrap-agent-api"
 
 [[apis]]
-client_package_name = "clickhouse-admin-client"
-label = "Clickhouse Cluster Admin"
+client_package_name = "clickhouse-admin-keeper-client"
+label = "Clickhouse Cluster Admin for Keepers"
 server_package_name = "clickhouse-admin-api"
 notes = """
-This is the server running inside multi-node Clickhouse zones that's \
+This is the server running inside multi-node Clickhouse keeper zones that's \
+responsible for local configuration and monitoring.
+"""
+
+[[apis]]
+client_package_name = "clickhouse-admin-server-client"
+label = "Clickhouse Cluster Admin for Servers"
+server_package_name = "clickhouse-admin-api"
+notes = """
+This is the server running inside multi-node Clickhouse server zones that's \
 responsible for local configuration and monitoring.
 """
 

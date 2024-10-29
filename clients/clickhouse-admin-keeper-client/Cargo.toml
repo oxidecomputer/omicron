@@ -1,12 +1,11 @@
 [package]
-name = "clickhouse-admin-client"
+name = "clickhouse-admin-keeper-client"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 chrono.workspace = true
 clickhouse-admin-types.workspace = true
-clickhouse-admin-api.workspace = true
 omicron-uuid-kinds.workspace = true
 progenitor.workspace = true
 reqwest = { workspace = true, features = [ "json", "rustls-tls", "stream" ] }

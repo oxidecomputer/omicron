@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
 
-<service_bundle type='manifest' name='clickhouse-admin'>
+<service_bundle type='manifest' name='clickhouse-admin-keeper'>
 
-  <service name='oxide/clickhouse-admin' type='service' version='1'>
+  <service name='oxide/clickhouse-admin-keeper' type='service' version='1'>
   <create_default_instance enabled='true' />
 
   <dependency name='multi_user' grouping='require_all' restart_on='none'
@@ -17,7 +17,7 @@
   </dependency>
 
   <exec_method type='method' name='start'
-    exec='ctrun -l child -o noorphan,regent /opt/oxide/clickhouse-admin/bin/clickhouse-admin run -c /var/svc/manifest/site/clickhouse-admin/config.toml -a %{config/http_address} -l %{config/ch_address} -b %{config/ch_binary}  &amp;'
+    exec='ctrun -l child -o noorphan,regent /opt/oxide/omicron-clickhouse-admin/bin/clickhouse-admin-keeper run --config /var/svc/manifest/site/clickhouse-admin-keeper/config.toml --http-address %{config/http_address} --listen-address %{config/ch_address} --binary-path %{config/ch_binary}  &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
@@ -35,10 +35,10 @@
 
   <template>
     <common_name>
-      <loctext xml:lang='C'>Omicron ClickHouse Admin Server</loctext>
+      <loctext xml:lang='C'>Omicron ClickHouse Admin Keeper Server</loctext>
     </common_name>
     <description>
-      <loctext xml:lang='C'>Administering Oxide's Time-Series Database and Coordination Nodes</loctext>
+      <loctext xml:lang='C'>Administering Oxide's Time-Series Database Coordination Nodes</loctext>
     </description>
   </template>
 </service>

@@ -223,7 +223,7 @@ mod tests {
         // Create another zpool on one of the sleds, so we can add new
         // zones that use it.
         let new_zpool_id = ZpoolUuid::new_v4();
-        for &sled_id in collection.omicron_zones.keys().take(1) {
+        for &sled_id in collection.sled_agents.keys().take(1) {
             let zpool = Zpool::new(
                 new_zpool_id.into_untyped_uuid(),
                 sled_id.into_untyped_uuid(),
@@ -241,7 +241,6 @@ mod tests {
             BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: OmicronZoneUuid::new_v4(),
-                underlay_address: "::1".parse().unwrap(),
                 filesystem_pool: Some(ZpoolName::new_external(new_zpool_id)),
                 zone_type: BlueprintZoneType::Crucible(
                     blueprint_zone_type::Crucible {
@@ -255,7 +254,6 @@ mod tests {
             BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: OmicronZoneUuid::new_v4(),
-                underlay_address: "::1".parse().unwrap(),
                 filesystem_pool: Some(ZpoolName::new_external(new_zpool_id)),
                 zone_type: BlueprintZoneType::CockroachDb(
                     blueprint_zone_type::CockroachDb {

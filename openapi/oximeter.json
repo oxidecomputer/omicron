@@ -81,31 +81,6 @@
         "x-dropshot-pagination": {
           "required": []
         }
-      },
-      "post": {
-        "summary": "Handle a request from Nexus to register a new producer with this collector.",
-        "operationId": "producers_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProducerEndpoint"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
       }
     },
     "/producers/{producer_id}": {

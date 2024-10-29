@@ -30,6 +30,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use subprocess::Exec;
+use subprocess::ExitStatus;
 use swrite::swriteln;
 use swrite::SWrite;
 
@@ -37,15 +38,45 @@ fn path_to_cli() -> PathBuf {
     path_to_executable(env!("CARGO_BIN_EXE_reconfigurator-cli"))
 }
 
+fn run_cli(file: impl AsRef<Utf8Path>) -> (ExitStatus, String, String) {
+    let file = file.as_ref();
+
+    // Turn the path into an absolute one, because we're going to set a custom
+    // cwd for the subprocess.
+    let file = file.canonicalize_utf8().expect("file canonicalized");
+    eprintln!("using file: {file}");
+
+    // Create a temporary directory for the CLI to use -- that will let it
+    // read and write files in its own sandbox.
+    let tmpdir = camino_tempfile::tempdir().expect("failed to create tmpdir");
+    let exec = Exec::cmd(path_to_cli()).arg(file).cwd(tmpdir.path());
+    run_command(exec)
+}
+
 // Run a battery of simple commands and make sure things basically seem to work.
 #[test]
 fn test_basic() {
-    let exec = Exec::cmd(path_to_cli()).arg("tests/input/cmds.txt");
-    let (exit_status, stdout_text, stderr_text) = run_command(exec);
+    let (exit_status, stdout_text, stderr_text) =
+        run_cli("tests/input/cmds.txt");
     assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
     let stdout_text = Redactor::default().do_redact(&stdout_text);
     assert_contents("tests/output/cmd-stdout", &stdout_text);
     assert_contents("tests/output/cmd-stderr", &stderr_text);
+}
+
+// Run tests against a loaded example system.
+#[test]
+fn test_example() {
+    let (exit_status, stdout_text, stderr_text) =
+        run_cli("tests/input/cmds-example.txt");
+    assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
+
+    // The example system uses a fixed seed, which means that UUIDs are
+    // deterministic. Some of the test commands also use those UUIDs, and it's
+    // convenient for everyone if they aren't redacted.
+    let stdout_text = Redactor::default().uuids(false).do_redact(&stdout_text);
+    assert_contents("tests/output/cmd-example-stdout", &stdout_text);
+    assert_contents("tests/output/cmd-example-stderr", &stderr_text);
 }
 
 type ControlPlaneTestContext =

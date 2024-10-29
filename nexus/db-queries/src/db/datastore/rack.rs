@@ -997,10 +997,10 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::test::{
         sled_baseboard_for_test, sled_system_hardware_for_test,
     };
-    use crate::db::datastore::test_utils::datastore_test;
     use crate::db::datastore::Discoverability;
     use crate::db::model::ExternalIp;
     use crate::db::model::IpKind;
@@ -1015,7 +1015,6 @@ mod test {
         SledBuilder, SystemDescription,
     };
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-    use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use nexus_types::deployment::{
@@ -1131,8 +1130,8 @@ mod test {
     #[tokio::test]
     async fn rack_set_initialized_empty() {
         let logctx = dev::test_setup_log("rack_set_initialized_empty");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let before = Utc::now();
         let rack_init = RackInit::default();
 
@@ -1151,7 +1150,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::Internal)
             .await
             .unwrap();
-        assert_eq!(dns_internal.generation, 1);
+        assert_eq!(u64::from(dns_internal.generation), 1);
         assert!(dns_internal.time_created >= before);
         assert!(dns_internal.time_created <= after);
         assert_eq!(dns_internal.zones.len(), 0);
@@ -1162,7 +1161,7 @@ mod test {
             .unwrap();
         // The external DNS zone has an extra update due to the initial Silo
         // creation.
-        assert_eq!(dns_internal.generation + 1, dns_external.generation);
+        assert_eq!(dns_internal.generation.next(), dns_external.generation);
         assert_eq!(dns_internal.zones, dns_external.zones);
 
         // Verify the details about the initial Silo.
@@ -1233,7 +1232,7 @@ mod test {
             .unwrap();
         assert_eq!(dns_internal, dns_internal2);
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1317,8 +1316,8 @@ mod test {
     async fn rack_set_initialized_with_services() {
         let test_name = "rack_set_initialized_with_services";
         let logctx = dev::test_setup_log(test_name);
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let sled1 = create_test_sled(&datastore, Uuid::new_v4()).await;
         let sled2 = create_test_sled(&datastore, Uuid::new_v4()).await;
@@ -1379,7 +1378,6 @@ mod test {
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: external_dns_id,
-                        underlay_address: Ipv6Addr::LOCALHOST,
                         filesystem_pool: Some(dataset.pool_name.clone()),
                         zone_type: BlueprintZoneType::ExternalDns(
                             blueprint_zone_type::ExternalDns {
@@ -1409,7 +1407,6 @@ mod test {
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: ntp1_id,
-                        underlay_address: Ipv6Addr::LOCALHOST,
                         filesystem_pool: Some(random_zpool()),
                         zone_type: BlueprintZoneType::BoundaryNtp(
                             blueprint_zone_type::BoundaryNtp {
@@ -1452,7 +1449,6 @@ mod test {
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: nexus_id,
-                        underlay_address: Ipv6Addr::LOCALHOST,
                         filesystem_pool: Some(random_zpool()),
                         zone_type: BlueprintZoneType::Nexus(
                             blueprint_zone_type::Nexus {
@@ -1485,7 +1481,6 @@ mod test {
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: ntp2_id,
-                        underlay_address: Ipv6Addr::LOCALHOST,
                         filesystem_pool: Some(random_zpool()),
                         zone_type: BlueprintZoneType::BoundaryNtp(
                             blueprint_zone_type::BoundaryNtp {
@@ -1527,7 +1522,6 @@ mod test {
                 zones: vec![BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: ntp3_id,
-                    underlay_address: Ipv6Addr::LOCALHOST,
                     filesystem_pool: Some(random_zpool()),
                     zone_type: BlueprintZoneType::InternalNtp(
                         blueprint_zone_type::InternalNtp {
@@ -1661,7 +1655,7 @@ mod test {
         let observed_datasets = get_all_datasets(&datastore).await;
         assert!(observed_datasets.is_empty());
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1669,8 +1663,8 @@ mod test {
     async fn rack_set_initialized_with_many_nexus_services() {
         let test_name = "rack_set_initialized_with_many_nexus_services";
         let logctx = dev::test_setup_log(test_name);
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let sled = create_test_sled(&datastore, Uuid::new_v4()).await;
 
@@ -1708,7 +1702,6 @@ mod test {
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: nexus_id1,
-                        underlay_address: Ipv6Addr::LOCALHOST,
                         filesystem_pool: Some(random_zpool()),
                         zone_type: BlueprintZoneType::Nexus(
                             blueprint_zone_type::Nexus {
@@ -1741,7 +1734,6 @@ mod test {
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: nexus_id2,
-                        underlay_address: Ipv6Addr::LOCALHOST,
                         filesystem_pool: Some(random_zpool()),
                         zone_type: BlueprintZoneType::Nexus(
                             blueprint_zone_type::Nexus {
@@ -1923,7 +1915,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::Internal)
             .await
             .unwrap();
-        assert_eq!(dns_config_internal.generation, 1);
+        assert_eq!(u64::from(dns_config_internal.generation), 1);
         assert_eq!(dns_config_internal.zones.len(), 1);
         assert_eq!(dns_config_internal.zones[0].zone_name, DNS_ZONE);
         assert_eq!(
@@ -1935,7 +1927,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::External)
             .await
             .unwrap();
-        assert_eq!(dns_config_external.generation, 2);
+        assert_eq!(u64::from(dns_config_external.generation), 2);
         assert_eq!(dns_config_external.zones.len(), 1);
         assert_eq!(
             dns_config_external.zones[0].zone_name,
@@ -1946,7 +1938,7 @@ mod test {
             Some(&external_records)
         );
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1955,8 +1947,8 @@ mod test {
         let test_name =
             "rack_set_initialized_missing_service_pool_ip_throws_error";
         let logctx = dev::test_setup_log(test_name);
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let sled = create_test_sled(&datastore, Uuid::new_v4()).await;
 
@@ -1981,7 +1973,6 @@ mod test {
                 zones: vec![BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: nexus_id,
-                    underlay_address: Ipv6Addr::LOCALHOST,
                     filesystem_pool: Some(random_zpool()),
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {
@@ -2046,7 +2037,7 @@ mod test {
         assert!(get_all_datasets(&datastore).await.is_empty());
         assert!(get_all_external_ips(&datastore).await.is_empty());
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2054,8 +2045,8 @@ mod test {
     async fn rack_set_initialized_overlapping_ips_throws_error() {
         let test_name = "rack_set_initialized_overlapping_ips_throws_error";
         let logctx = dev::test_setup_log(test_name);
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let sled = create_test_sled(&datastore, Uuid::new_v4()).await;
 
@@ -2091,7 +2082,6 @@ mod test {
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: external_dns_id,
-                        underlay_address: Ipv6Addr::LOCALHOST,
                         filesystem_pool: Some(dataset.pool_name.clone()),
                         zone_type: BlueprintZoneType::ExternalDns(
                             blueprint_zone_type::ExternalDns {
@@ -2121,7 +2111,6 @@ mod test {
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: nexus_id,
-                        underlay_address: Ipv6Addr::LOCALHOST,
                         filesystem_pool: Some(random_zpool()),
                         zone_type: BlueprintZoneType::Nexus(
                             blueprint_zone_type::Nexus {
@@ -2195,15 +2184,15 @@ mod test {
         assert!(get_all_datasets(&datastore).await.is_empty());
         assert!(get_all_external_ips(&datastore).await.is_empty());
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn rack_sled_subnet_allocations() {
         let logctx = dev::test_setup_log("rack_sled_subnet_allocations");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let rack_id = Uuid::new_v4();
 
@@ -2288,15 +2277,15 @@ mod test {
             allocations.iter().map(|a| a.subnet_octet).collect::<Vec<_>>()
         );
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn allocate_sled_underlay_subnet_octets() {
         let logctx = dev::test_setup_log("rack_sled_subnet_allocations");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let rack_id = Uuid::new_v4();
 
@@ -2482,7 +2471,7 @@ mod test {
             next_expected_octet += 1;
         }
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

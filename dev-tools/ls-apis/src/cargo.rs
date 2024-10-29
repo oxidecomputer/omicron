@@ -69,7 +69,14 @@ impl Workspace {
         if let Some(extra_features) = extra_features {
             cmd.features(extra_features);
         }
-        let metadata = cmd.exec().context("loading metadata")?;
+        let metadata = match cmd.exec() {
+            Err(original_err) if name == "maghemite" => {
+                dendrite_workaround(cmd, original_err)?
+            }
+            otherwise => otherwise.with_context(|| {
+                format!("failed to load metadata for {name}")
+            })?,
+        };
         let workspace_root = metadata.workspace_root;
 
         // Build an index of all packages by id.  Identify duplicates because we
@@ -378,4 +385,84 @@ impl DepPath {
     pub fn contains_any(&self, pkgids: &BTreeSet<&PackageId>) -> bool {
         self.0.iter().any(|p| pkgids.contains(p))
     }
+}
+
+// Dendrite is not (yet) a public repository, but it's a dependency of
+// Maghemite. There are two expected cases for running Omicron tests locally
+// that we know of:
+// - The developer has a Git credential helper of some kind set up to
+//   successfully clone private repositories over HTTPS.
+// - The developer has an SSH agent or other local SSH key that they use to
+//   clone repositories over SSH.
+// We call this function when we fail to fetch the Dendrite repository over
+// HTTPS. Under the assumption that the user falls in the second group.
+// we attempt to use SSH to fetch the repository by setting `GIT_CONFIG_*`
+// environment variables to rewrite the repository URL to an SSH URL. If that
+// fails, we'll verbosely inform the user as to how both methods failed and
+// provide some context.
+//
+// This entire workaround can and very much should go away once Dendrite is
+// public.
+fn dendrite_workaround(
+    mut cmd: cargo_metadata::MetadataCommand,
+    original_err: cargo_metadata::Error,
+) -> Result<cargo_metadata::Metadata> {
+    eprintln!(
+        "warning: failed to load metadata for maghemite; \
+        trying dendrite workaround"
+    );
+
+    let count = std::env::var_os("GIT_CONFIG_COUNT")
+        .map(|s| -> Result<u64> {
+            s.into_string()
+                .map_err(|_| anyhow!("$GIT_CONFIG_COUNT is not an integer"))?
+                .parse()
+                .context("$GIT_CONFIG_COUNT is not an integer")
+        })
+        .transpose()?
+        .unwrap_or_default();
+    cmd.env("CARGO_NET_GIT_FETCH_WITH_CLI", "true");
+    cmd.env(
+        format!("GIT_CONFIG_KEY_{count}"),
+        "url.git@github.com:oxidecomputer/dendrite.insteadOf",
+    );
+    cmd.env(
+        format!("GIT_CONFIG_VALUE_{count}"),
+        "https://github.com/oxidecomputer/dendrite",
+    );
+    cmd.env("GIT_CONFIG_COUNT", (count + 1).to_string());
+    cmd.exec().map_err(|err| {
+        let cmd = cmd.cargo_command();
+        let original_err = anyhow::Error::from(original_err);
+        let err = anyhow::Error::from(err);
+        anyhow::anyhow!("failed to load metadata for maghemite
+
+`cargo xtask ls-apis` expects to be able to run `cargo metadata` on the
+Maghemite workspace that Omicron depends on. Maghemite has a dependency on a
+private repository (Dendrite), so `cargo metadata` can fail if you are unable
+to clone Dendrite via an HTTPS URL. As a fallback, we also tried to run `cargo
+metadata` with environment variables that force `cargo metadata` to use an SSH
+URL; unfortunately that also failed.
+
+To successfully run this command (or expectorate test), your environment needs
+to be set up to clone a private Oxide repository from GitHub. This can be done
+with either a Git credential helper or an SSH key:
+
+https://doc.rust-lang.org/cargo/appendix/git-authentication.html
+https://docs.github.com/en/get-started/getting-started-with-git/caching-your-github-credentials-in-git
+
+(If you don't have access to private Oxide repos, you won't be able to
+successfully run this command or test.)
+
+More context: https://github.com/oxidecomputer/omicron/issues/6839
+
+===== The fallback command that failed: =====
+{cmd:?}
+
+===== The error that occurred while fetching using HTTPS: =====
+{original_err:?}
+
+===== The error that occurred while fetching using SSH (fallback): =====
+{err:?}")
+    })
 }

@@ -2,7 +2,10 @@ Bootstrap Agent (client: bootstrap-agent-client)
     consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
     consumed by: wicketd (omicron/wicketd) via 2 paths
 
-Clickhouse Cluster Admin (client: clickhouse-admin-client)
+Clickhouse Cluster Admin for Keepers (client: clickhouse-admin-keeper-client)
+    consumed by: omicron-nexus (omicron/nexus) via 3 paths
+
+Clickhouse Cluster Admin for Servers (client: clickhouse-admin-server-client)
     consumed by: omicron-nexus (omicron/nexus) via 3 paths
 
 CockroachDB Cluster Admin (client: cockroach-admin-client)

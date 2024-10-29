@@ -6,7 +6,8 @@
 
 //! Packets sent from the server.
 
-use std::{fmt, time::Duration};
+use std::fmt;
+use std::time::Duration;
 
 use crate::native::block::Block;
 
@@ -125,6 +126,13 @@ impl fmt::Display for Exception {
             }
         }
         Ok(())
+    }
+}
+
+impl Exception {
+    /// Return a brief summary of the error as a string.
+    pub fn summary(&self) -> String {
+        format!("{} ({}: {})", self.message, self.code, self.name)
     }
 }
 

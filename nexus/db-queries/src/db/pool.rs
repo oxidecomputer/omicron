@@ -8,15 +8,13 @@
 use super::Config as DbConfig;
 use crate::db::pool_connection::{DieselPgConnector, DieselPgConnectorArgs};
 
+use internal_dns_resolver::QorbResolver;
 use internal_dns_types::names::ServiceName;
 use qorb::backend;
 use qorb::policy::Policy;
 use qorb::resolver::{AllBackends, Resolver};
-use qorb::resolvers::dns::{DnsResolver, DnsResolverConfig};
-use qorb::service;
 use slog::Logger;
 use std::collections::BTreeMap;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::watch;
 
@@ -30,6 +28,8 @@ type QorbPool = qorb::pool::Pool<QorbConnection>;
 /// Expected to be used as the primary interface to the database.
 pub struct Pool {
     inner: QorbPool,
+
+    terminated: std::sync::atomic::AtomicBool,
 }
 
 // Provides an alternative to the DNS resolver for cases where we want to
@@ -53,19 +53,6 @@ impl Resolver for SingleHostResolver {
     fn monitor(&mut self) -> watch::Receiver<AllBackends> {
         self.tx.subscribe()
     }
-}
-
-fn make_dns_resolver(
-    bootstrap_dns: Vec<SocketAddr>,
-) -> qorb::resolver::BoxedResolver {
-    Box::new(DnsResolver::new(
-        service::Name(ServiceName::Cockroach.srv_name()),
-        bootstrap_dns,
-        DnsResolverConfig {
-            hardcoded_ttl: Some(tokio::time::Duration::MAX),
-            ..Default::default()
-        },
-    ))
 }
 
 fn make_single_host_resolver(
@@ -96,15 +83,18 @@ impl Pool {
     ///
     /// Creating this pool does not necessarily wait for connections to become
     /// available, as backends may shift over time.
-    pub fn new(log: &Logger, bootstrap_dns: Vec<SocketAddr>) -> Self {
+    pub fn new(log: &Logger, resolver: &QorbResolver) -> Self {
         // Make sure diesel-dtrace's USDT probes are enabled.
         usdt::register_probes().expect("Failed to register USDT DTrace probes");
 
-        let resolver = make_dns_resolver(bootstrap_dns);
+        let resolver = resolver.for_service(ServiceName::Cockroach);
         let connector = make_postgres_connector(log);
 
         let policy = Policy::default();
-        Pool { inner: qorb::pool::Pool::new(resolver, connector, policy) }
+        Pool {
+            inner: qorb::pool::Pool::new(resolver, connector, policy),
+            terminated: std::sync::atomic::AtomicBool::new(false),
+        }
     }
 
     /// Creates a new qorb-backed connection pool to a single instance of the
@@ -122,7 +112,10 @@ impl Pool {
         let connector = make_postgres_connector(log);
 
         let policy = Policy::default();
-        Pool { inner: qorb::pool::Pool::new(resolver, connector, policy) }
+        Pool {
+            inner: qorb::pool::Pool::new(resolver, connector, policy),
+            terminated: std::sync::atomic::AtomicBool::new(false),
+        }
     }
 
     /// Creates a new qorb-backed connection pool which returns an error
@@ -146,7 +139,10 @@ impl Pool {
             claim_timeout: tokio::time::Duration::from_millis(1),
             ..Default::default()
         };
-        Pool { inner: qorb::pool::Pool::new(resolver, connector, policy) }
+        Pool {
+            inner: qorb::pool::Pool::new(resolver, connector, policy),
+            terminated: std::sync::atomic::AtomicBool::new(false),
+        }
     }
 
     /// Returns a connection from the pool
@@ -154,5 +150,37 @@ impl Pool {
         &self,
     ) -> anyhow::Result<qorb::claim::Handle<QorbConnection>> {
         Ok(self.inner.claim().await?)
+    }
+
+    /// Stops the qorb background tasks, and causes all future claims to fail
+    pub async fn terminate(&self) {
+        let _termination_result = self.inner.terminate().await;
+        self.terminated.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl Drop for Pool {
+    fn drop(&mut self) {
+        // Dropping the pool means that qorb may have background tasks, which
+        // may send requests even after this "drop" point.
+        //
+        // When we drop the qorb pool, we'll attempt to cancel those tasks, but
+        // it's possible for these tasks to keep nudging slightly forward if
+        // we're using a multi-threaded async executor.
+        //
+        // With this check, we'll reliably panic (rather than flake) if the pool
+        // is dropped without terminating these worker tasks.
+        if !self.terminated.load(std::sync::atomic::Ordering::SeqCst) {
+            // If we're already panicking, don't panic again.
+            // Doing so can ruin test handlers by aborting the process.
+            //
+            // Instead, just drop a message to stderr and carry on.
+            let msg = "Pool dropped without invoking `terminate`";
+            if std::thread::panicking() {
+                eprintln!("{msg}");
+            } else {
+                panic!("{msg}");
+            }
+        }
     }
 }

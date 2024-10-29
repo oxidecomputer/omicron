@@ -28,7 +28,7 @@ const SLED_AGENT_TIMEOUT: Duration = Duration::from_secs(60);
 pub struct Collector<'a> {
     log: slog::Logger,
     mgs_clients: Vec<gateway_client::Client>,
-    keeper_admin_clients: Vec<clickhouse_admin_client::Client>,
+    keeper_admin_clients: Vec<clickhouse_admin_keeper_client::Client>,
     sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
     in_progress: CollectionBuilder,
 }
@@ -37,7 +37,7 @@ impl<'a> Collector<'a> {
     pub fn new(
         creator: &str,
         mgs_clients: Vec<gateway_client::Client>,
-        keeper_admin_clients: Vec<clickhouse_admin_client::Client>,
+        keeper_admin_clients: Vec<clickhouse_admin_keeper_client::Client>,
         sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
         log: slog::Logger,
     ) -> Self {
@@ -353,24 +353,7 @@ impl<'a> Collector<'a> {
             }
         };
 
-        let sled_id = inventory.sled_id;
-        self.in_progress.found_sled_inventory(&sled_agent_url, inventory)?;
-
-        let maybe_config =
-            client.omicron_zones_get().await.with_context(|| {
-                format!("Sled Agent {:?}: omicron zones", &sled_agent_url)
-            });
-        match maybe_config {
-            Err(error) => {
-                self.in_progress.found_error(InventoryError::from(error));
-                Ok(())
-            }
-            Ok(zones) => self.in_progress.found_sled_omicron_zones(
-                &sled_agent_url,
-                sled_id,
-                zones.into_inner(),
-            ),
-        }
+        self.in_progress.found_sled_inventory(&sled_agent_url, inventory)
     }
 
     /// Collect inventory from about keepers from all `ClickhouseAdminKeeper`
@@ -384,7 +367,7 @@ impl<'a> Collector<'a> {
 
     /// Collect inventory about one keeper from one `ClickhouseAdminKeeper`
     async fn collect_one_keeper(
-        client: &clickhouse_admin_client::Client,
+        client: &clickhouse_admin_keeper_client::Client,
         log: &slog::Logger,
         in_progress: &mut CollectionBuilder,
     ) {
@@ -522,24 +505,21 @@ mod test {
             write!(&mut s, "    baseboard {:?}\n", sled_info.baseboard_id)
                 .unwrap();
 
-            if let Some(found_zones) = collection.omicron_zones.get(sled_id) {
-                assert_eq!(*sled_id, found_zones.sled_id);
+            write!(
+                &mut s,
+                "    zone generation: {:?}\n",
+                sled_info.omicron_zones.generation
+            )
+            .unwrap();
+            write!(&mut s, "    zones found:\n").unwrap();
+            for zone in &sled_info.omicron_zones.zones {
                 write!(
                     &mut s,
-                    "    zone generation: {:?}\n",
-                    found_zones.zones.generation
+                    "        zone {} type {}\n",
+                    zone.id,
+                    zone.zone_type.kind().report_str(),
                 )
                 .unwrap();
-                write!(&mut s, "    zones found:\n").unwrap();
-                for zone in &found_zones.zones.zones {
-                    write!(
-                        &mut s,
-                        "        zone {} type {}\n",
-                        zone.id,
-                        zone.zone_type.kind().report_str(),
-                    )
-                    .unwrap();
-                }
             }
         }
 
@@ -596,7 +576,6 @@ mod test {
                 generation: Generation::from(3),
                 zones: vec![OmicronZoneConfig {
                     id: zone_id,
-                    underlay_address: *zone_address.ip(),
                     zone_type: OmicronZoneType::Oximeter {
                         address: zone_address,
                     },

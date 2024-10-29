@@ -363,8 +363,7 @@ pub async fn run_standalone_server(
     let dns_config =
         dns_config_builder.build_full_config_for_initial_generation();
     dns.initialize_with_config(&log, &dns_config).await?;
-    let internal_dns_version = Generation::try_from(dns_config.generation)
-        .expect("invalid internal dns version");
+    let internal_dns_version = dns_config.generation;
 
     let all_u2_zpools = server.sled_agent.get_zpools().await;
     let get_random_zpool = || {
@@ -385,7 +384,6 @@ pub async fn run_standalone_server(
     let mut zones = vec![BlueprintZoneConfig {
         disposition: BlueprintZoneDisposition::InService,
         id: OmicronZoneUuid::new_v4(),
-        underlay_address: *http_bound.ip(),
         zone_type: BlueprintZoneType::InternalDns(
             blueprint_zone_type::InternalDns {
                 dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
@@ -411,10 +409,6 @@ pub async fn run_standalone_server(
         zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id,
-            underlay_address: match ip {
-                IpAddr::V4(_) => panic!("did not expect v4 address"),
-                IpAddr::V6(a) => a,
-            },
             zone_type: BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 internal_address: match config.nexus_address {
                     SocketAddr::V4(_) => panic!("did not expect v4 address"),
@@ -463,7 +457,6 @@ pub async fn run_standalone_server(
         zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id,
-            underlay_address: ip,
             zone_type: BlueprintZoneType::ExternalDns(
                 blueprint_zone_type::ExternalDns {
                     dataset: OmicronZoneDataset {

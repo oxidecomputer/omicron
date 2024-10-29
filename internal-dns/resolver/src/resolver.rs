@@ -26,6 +26,46 @@ pub enum ResolveError {
     NotFoundByString(String),
 }
 
+/// A wrapper around a set of bootstrap DNS addresses, providing a convenient
+/// way to construct a [`qorb::resolvers::dns::DnsResolver`] for specific
+/// services.
+#[derive(Debug, Clone)]
+pub struct QorbResolver {
+    bootstrap_dns_ips: Vec<SocketAddr>,
+}
+
+impl QorbResolver {
+    pub fn new(bootstrap_dns_ips: Vec<SocketAddr>) -> Self {
+        Self { bootstrap_dns_ips }
+    }
+
+    pub fn bootstrap_dns_ips(&self) -> &[SocketAddr] {
+        &self.bootstrap_dns_ips
+    }
+
+    pub fn for_service(
+        &self,
+        service: ServiceName,
+    ) -> qorb::resolver::BoxedResolver {
+        let config = qorb::resolvers::dns::DnsResolverConfig {
+            // Ignore the TTL returned by our servers, primarily to avoid
+            // thrashing if they return a TTL of 0 (which they currently do:
+            // https://github.com/oxidecomputer/omicron/issues/6790).
+            hardcoded_ttl: Some(std::time::Duration::MAX),
+            // We don't currently run additional internal DNS servers that
+            // themselves need to be found via a set of bootstrap DNS IPs, but
+            // if we did, we'd populate `resolver_service` here to tell qorb how
+            // to find them.
+            ..Default::default()
+        };
+        Box::new(qorb::resolvers::dns::DnsResolver::new(
+            qorb::service::Name(service.srv_name()),
+            self.bootstrap_dns_ips.clone(),
+            config,
+        ))
+    }
+}
+
 /// A wrapper around a DNS resolver, providing a way to conveniently
 /// look up IP addresses of services based on their SRV keys.
 #[derive(Clone)]
@@ -646,7 +686,7 @@ mod test {
 
         // If we deploy a new generation that removes all records, then we don't
         // find anything any more.
-        dns_config.generation += 1;
+        dns_config.generation = dns_config.generation.next();
         dns_config.zones[0].records = HashMap::new();
         dns_server.update(&dns_config).await.unwrap();
 
@@ -667,7 +707,7 @@ mod test {
         // If we remove the zone altogether, we'll get a different resolution
         // error because the DNS server is no longer authoritative for this
         // zone.
-        dns_config.generation += 1;
+        dns_config.generation = dns_config.generation.next();
         dns_config.zones = Vec::new();
         dns_server.update(&dns_config).await.unwrap();
 
@@ -706,7 +746,7 @@ mod test {
         dns_builder.service_backend_zone(srv_crdb, &zone, 54321).unwrap();
         let mut dns_config =
             dns_builder.build_full_config_for_initial_generation();
-        dns_config.generation += 1;
+        dns_config.generation = dns_config.generation.next();
         dns_server.update(&dns_config).await.unwrap();
         let found_addr = resolver
             .lookup_socket_v6(ServiceName::Cockroach)
@@ -984,7 +1024,7 @@ mod test {
 
         // Now let's remove one of the AAAA records for a zone/target.
         // The lookup should still succeed and return the other address.
-        dns_config.generation += 1;
+        dns_config.generation = dns_config.generation.next();
         let root = dns_config
             .zones
             .iter_mut()
@@ -1026,7 +1066,7 @@ mod test {
         assert_eq!(targets, expected_targets);
 
         // Finally, let's remove the last AAAA record as well
-        dns_config.generation += 1;
+        dns_config.generation = dns_config.generation.next();
         let root = dns_config
             .zones
             .iter_mut()

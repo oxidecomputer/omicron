@@ -116,7 +116,8 @@ function install_packages {
   if [[ "${HOST_OS}" == "Linux" ]]; then
     # If Nix is in use, we don't need to install any packagess here,
     # as they're provided by the Nix flake. 
-    if nix flake show &> /dev/null; then
+    if [[ "${OMICRON_USE_FLAKE-}" = 1 ]] && nix flake show &> /dev/null; then
+      echo "OMICRON_USE_FLAKE=1 in environment and nix detected in PATH, skipping package installation"
       return
     fi
 

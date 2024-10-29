@@ -142,7 +142,7 @@ async fn inventory_activate(
             let url = format!("http://{}", sockaddr);
             let log =
                 opctx.log.new(o!("clickhouse_admin_keeper_url" => url.clone()));
-            clickhouse_admin_client::Client::new(&url, log)
+            clickhouse_admin_keeper_client::Client::new(&url, log)
         })
         .collect::<Vec<_>>();
 

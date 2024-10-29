@@ -208,6 +208,7 @@ source.paths = [
   { from = "out/clickhouse", to = "/opt/oxide/clickhouse_server" },
   { from = "smf/clickhouse_server/manifest.xml", to = "/var/svc/manifest/site/clickhouse_server/manifest.xml" },
   { from = "smf/clickhouse_server/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse_server.sh" },
+  { from = "smf/clickhouse-admin-server", to = "/var/svc/manifest/site/clickhouse-admin-server" },
 ]
 output.type = "zone"
 output.intermediate_only = true
@@ -237,20 +238,22 @@ source.paths = [
   { from = "out/clickhouse", to = "/opt/oxide/clickhouse_keeper" },
   { from = "smf/clickhouse_keeper/manifest.xml", to = "/var/svc/manifest/site/clickhouse_keeper/manifest.xml" },
   { from = "smf/clickhouse_keeper/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse_keeper.sh" },
+  { from = "smf/clickhouse-admin-keeper", to = "/var/svc/manifest/site/clickhouse-admin-keeper" },
 ]
 output.type = "zone"
 output.intermediate_only = true
 setup_hint = "Run `cargo xtask download clickhouse` to download the necessary binaries"
 
 [package.omicron-clickhouse-admin]
-service_name = "clickhouse-admin"
+service_name = "omicron-clickhouse-admin"
 only_for_targets.image = "standard"
 source.type = "local"
-source.rust.binary_names = ["clickhouse-admin"]
+source.rust.binary_names = ["clickhouse-admin-keeper", "clickhouse-admin-server"]
 source.rust.release = true
-source.paths = [
-  { from = "smf/clickhouse-admin", to = "/var/svc/manifest/site/clickhouse-admin" },
-]
+# We specifically put the smf manifests with their corresponding container zones
+# so that both servers aren't started simultaneously
+# See [package.clickhouse_keeper_svc] and [package.clickhouse_server_svc]
+source.paths = []
 output.type = "zone"
 output.intermediate_only = true
 

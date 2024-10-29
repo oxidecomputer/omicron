@@ -958,6 +958,7 @@ pub mod test {
     use nexus_types::internal_api::params as nexus_params;
     use nexus_types::internal_api::params::DnsRecord;
     use omicron_common::api::external::Error;
+    use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::poll;
     use std::net::SocketAddr;
     use std::sync::atomic::AtomicU64;
@@ -1057,7 +1058,7 @@ pub mod test {
             .dns_config_get()
             .await
             .expect("failed to get initial DNS server config");
-        assert_eq!(config.generation, 1);
+        assert_eq!(config.generation, Generation::from_u32(1));
 
         let internal_dns_srv_name = ServiceName::InternalDns.dns_name();
 
@@ -1167,7 +1168,7 @@ pub mod test {
             &cptestctx.logctx.log,
             "initial",
             initial_dns_dropshot_server.local_addr(),
-            2,
+            Generation::from_u32(2),
         )
         .await;
 
@@ -1180,7 +1181,7 @@ pub mod test {
             &cptestctx.logctx.log,
             "new",
             new_dns_dropshot_server.local_addr(),
-            2,
+            Generation::from_u32(2),
         )
         .await;
 
@@ -1198,7 +1199,7 @@ pub mod test {
             &cptestctx.logctx.log,
             "initial",
             initial_dns_dropshot_server.local_addr(),
-            3,
+            Generation::from_u32(3),
         )
         .await;
 
@@ -1206,7 +1207,7 @@ pub mod test {
             &cptestctx.logctx.log,
             "new",
             new_dns_dropshot_server.local_addr(),
-            3,
+            Generation::from_u32(3),
         )
         .await;
     }
@@ -1216,7 +1217,7 @@ pub mod test {
         log: &slog::Logger,
         label: &str,
         addr: SocketAddr,
-        generation: u64,
+        generation: Generation,
     ) {
         println!(
             "waiting for propagation of generation {generation} to {label} \

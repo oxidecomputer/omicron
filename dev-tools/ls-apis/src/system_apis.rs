@@ -443,22 +443,6 @@ impl<'a> ServerComponentsTracker<'a> {
             return;
         }
 
-        // TODO Work around omicron#6829.
-        // Through the dependency tree, omicron-nexus appears to export the
-        // clickhouse-admin-api, but it doesn't really.
-        // This is just like the Crucible Pantry one above in that we can't
-        // build our data model unless we ignore it so we have to hardcode this
-        // here rather than use "dependency_filter_rules".
-        if **server_pkgname == "omicron-nexus"
-            && *api.client_package_name == "clickhouse-admin-client"
-        {
-            eprintln!(
-                "note: ignoring Cargo dependency from crucible-pantry -> \
-                 ... -> crucible-control-client",
-            );
-            return;
-        }
-
         if let Some((previous, _)) = self.api_producers.insert(
             api.client_package_name.clone(),
             (server_pkgname.clone(), dep_path.clone()),

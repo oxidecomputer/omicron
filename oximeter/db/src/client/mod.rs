@@ -17,6 +17,9 @@ pub use self::dbwrite::DbWrite;
 pub use self::dbwrite::TestDbWrite;
 use crate::client::query_summary::QuerySummary;
 use crate::model;
+use crate::native;
+use crate::native::block::ValueArray;
+use crate::native::QueryResult;
 use crate::query;
 use crate::Error;
 use crate::Metric;
@@ -25,6 +28,8 @@ use crate::Timeseries;
 use crate::TimeseriesPageSelector;
 use crate::TimeseriesScanParams;
 use crate::TimeseriesSchema;
+use anyhow::anyhow;
+use debug_ignore::DebugIgnore;
 use dropshot::EmptyScanParams;
 use dropshot::PaginationOrder;
 use dropshot::ResultsPage;
@@ -33,6 +38,11 @@ use omicron_common::backoff;
 use oximeter::schema::TimeseriesKey;
 use oximeter::types::Sample;
 use oximeter::TimeseriesName;
+use qorb::backend;
+use qorb::backend::Error as QorbError;
+use qorb::pool::Pool;
+use qorb::resolver::BoxedResolver;
+use qorb::resolvers::single_host::SingleHostResolver;
 use regex::Regex;
 use regex::RegexBuilder;
 use slog::debug;
@@ -51,6 +61,7 @@ use std::num::NonZeroU32;
 use std::ops::Bound;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
 use std::time::Instant;
@@ -59,9 +70,6 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-const CLICKHOUSE_DB_MISSING: &'static str = "Database oximeter does not exist";
-const CLICKHOUSE_DB_VERSION_MISSING: &'static str =
-    "Table oximeter.version does not exist";
 
 #[usdt::provider(provider = "clickhouse_client")]
 mod probes {
@@ -72,27 +80,158 @@ mod probes {
     fn sql__query__done(_: &usdt::UniqueId) {}
 }
 
+// A "qorb connector" which creates a ReqwestClient for the backend.
+//
+// This also keeps track of the underlying address, so we can use it
+// for making HTTP requests directly to the backend.
+struct ReqwestConnector {}
+
+#[async_trait::async_trait]
+impl backend::Connector for ReqwestConnector {
+    type Connection = ReqwestClient;
+
+    async fn connect(
+        &self,
+        backend: &backend::Backend,
+    ) -> Result<Self::Connection, backend::Error> {
+        Ok(ReqwestClient {
+            client: reqwest::Client::builder()
+                .pool_max_idle_per_host(1)
+                .build()
+                .map_err(|e| QorbError::Other(anyhow!(e)))?,
+            url: format!("http://{}", backend.address),
+        })
+    }
+
+    async fn is_valid(
+        &self,
+        conn: &mut Self::Connection,
+    ) -> Result<(), backend::Error> {
+        handle_db_response(
+            conn.client
+                .get(format!("{}/ping", conn.url))
+                .send()
+                .await
+                .map_err(|err| QorbError::Other(anyhow!(err.to_string())))?,
+        )
+        .await
+        .map_err(|e| QorbError::Other(anyhow!(e)))?;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ReqwestClient {
+    url: String,
+    client: reqwest::Client,
+}
+
+#[derive(Debug)]
+pub(crate) enum ClientSource {
+    Static(ReqwestClient),
+    Pool { pool: DebugIgnore<Pool<ReqwestClient>> },
+}
+
+pub(crate) enum ClientVariant {
+    Static(ReqwestClient),
+    Handle(qorb::claim::Handle<ReqwestClient>),
+}
+
+impl ClientVariant {
+    pub(crate) async fn new(source: &ClientSource) -> Result<Self, Error> {
+        let client = match source {
+            ClientSource::Static(client) => {
+                ClientVariant::Static(client.clone())
+            }
+            ClientSource::Pool { pool } => {
+                let handle = pool.claim().await?;
+                ClientVariant::Handle(handle)
+            }
+        };
+        Ok(client)
+    }
+
+    pub(crate) fn url(&self) -> &str {
+        match self {
+            ClientVariant::Static(client) => &client.url,
+            ClientVariant::Handle(handle) => &handle.url,
+        }
+    }
+
+    pub(crate) fn reqwest(&self) -> &reqwest::Client {
+        match self {
+            ClientVariant::Static(client) => &client.client,
+            ClientVariant::Handle(handle) => &handle.client,
+        }
+    }
+}
+
 /// A `Client` to the ClickHouse metrics database.
 #[derive(Debug)]
 pub struct Client {
     _id: Uuid,
     log: Logger,
-    url: String,
-    client: reqwest::Client,
+    // Source for creating HTTP connections.
+    source: ClientSource,
+    // qorb pool for native TCP connections.
+    native_pool: DebugIgnore<native::connection::Pool>,
     schema: Mutex<BTreeMap<TimeseriesName, TimeseriesSchema>>,
     request_timeout: Duration,
 }
 
 impl Client {
+    /// Construct a Clickhouse client of the database with a connection pool.
+    pub fn new_with_pool(
+        http_resolver: BoxedResolver,
+        native_resolver: BoxedResolver,
+        log: &Logger,
+    ) -> Self {
+        let id = Uuid::new_v4();
+        let log = log.new(slog::o!(
+            "component" => "clickhouse-client",
+            "id" => id.to_string(),
+        ));
+        let schema = Mutex::new(BTreeMap::new());
+        let request_timeout = DEFAULT_REQUEST_TIMEOUT;
+        Self {
+            _id: id,
+            log,
+            source: ClientSource::Pool {
+                pool: DebugIgnore(Pool::new(
+                    http_resolver,
+                    Arc::new(ReqwestConnector {}),
+                    qorb::policy::Policy::default(),
+                )),
+            },
+            native_pool: DebugIgnore(Pool::new(
+                native_resolver,
+                Arc::new(native::connection::Connector),
+                Default::default(),
+            )),
+            schema,
+            request_timeout,
+        }
+    }
+
     /// Construct a new ClickHouse client of the database at `address`.
-    pub fn new(address: SocketAddr, log: &Logger) -> Self {
-        Self::new_with_request_timeout(address, log, DEFAULT_REQUEST_TIMEOUT)
+    pub fn new(
+        http_address: SocketAddr,
+        native_address: SocketAddr,
+        log: &Logger,
+    ) -> Self {
+        Self::new_with_request_timeout(
+            http_address,
+            native_address,
+            log,
+            DEFAULT_REQUEST_TIMEOUT,
+        )
     }
 
     /// Construct a new ClickHouse client of the database at `address`, and a
     /// custom request timeout.
     pub fn new_with_request_timeout(
-        address: SocketAddr,
+        http_address: SocketAddr,
+        native_address: SocketAddr,
         log: &Logger,
         request_timeout: Duration,
     ) -> Self {
@@ -102,27 +241,39 @@ impl Client {
             "id" => id.to_string(),
         ));
         let client = reqwest::Client::new();
-        let url = format!("http://{}", address);
+        let url = format!("http://{}", http_address);
         let schema = Mutex::new(BTreeMap::new());
-        Self { _id: id, log, url, client, schema, request_timeout }
+        Self {
+            _id: id,
+            log,
+            source: ClientSource::Static(ReqwestClient { url, client }),
+            native_pool: DebugIgnore(Pool::new(
+                Box::new(SingleHostResolver::new(native_address)),
+                Arc::new(native::connection::Connector),
+                Default::default(),
+            )),
+            schema,
+            request_timeout,
+        }
     }
 
-    /// Return the url the client is trying to connect to
+    /// Return the url the client is trying to connect to.
+    ///
+    /// For pool-based clients, this returns "dynamic", as the URL may change
+    /// between accesses.
     pub fn url(&self) -> &str {
-        &self.url
+        match &self.source {
+            ClientSource::Static(client) => &client.url,
+            ClientSource::Pool { .. } => "dynamic",
+        }
     }
 
-    /// Ping the ClickHouse server to verify connectivitiy.
+    /// Ping the ClickHouse server to verify connectivity.
     pub async fn ping(&self) -> Result<(), Error> {
-        handle_db_response(
-            self.client
-                .get(format!("{}/ping", self.url))
-                .send()
-                .await
-                .map_err(|err| Error::DatabaseUnavailable(err.to_string()))?,
-        )
-        .await?;
-        debug!(self.log, "successful ping of ClickHouse server");
+        let mut handle = self.native_pool.claim().await?;
+        trace!(self.log, "acquired native pool claim");
+        handle.ping().await.map_err(Error::Native)?;
+        trace!(self.log, "successful ping of ClickHouse server");
         Ok(())
     }
 
@@ -498,7 +649,7 @@ impl Client {
                 "path" => path.display(),
                 "filename" => &name,
             );
-            match self.execute(sql).await {
+            match self.execute_native(sql).await {
                 Ok(_) => debug!(
                     self.log,
                     "successfully applied schema upgrade file";
@@ -705,38 +856,86 @@ impl Client {
 
     /// Read the latest version applied in the database.
     pub async fn read_latest_version(&self) -> Result<u64, Error> {
+        const ALIAS: &str = "max_version";
         let sql = format!(
-            "SELECT MAX(value) FROM {db_name}.version;",
+            "SELECT MAX(value) AS {ALIAS} FROM {db_name}.version;",
             db_name = crate::DATABASE_NAME,
         );
-
-        let version = match self.execute_with_body(sql).await {
-            Ok((_, body)) if body.is_empty() => {
-                warn!(
+        match self.execute_with_result_native(sql).await {
+            Ok(result) => {
+                let Some(data) = &result.data else {
+                    error!(
+                        self.log,
+                        "expected a data block when reading \
+                        latest database version"
+                    );
+                    return Err(Error::Database(String::from(
+                        "Query for the database version unexpectedly \
+                        returned an empty data block",
+                    )));
+                };
+                let ValueArray::UInt64(values) = &data.columns[ALIAS].values
+                else {
+                    error!(
+                        self.log,
+                        "expected query for latest database version to \
+                        return a column of type UInt64";
+                        "actual_type" => %data.columns[ALIAS].values.data_type(),
+                    );
+                    return Err(Error::Database(format!(
+                        "Query for the database version was expected \
+                        to return a column of type UInt64, but found \
+                        one of type '{}'",
+                        data.columns[ALIAS].values.data_type(),
+                    )));
+                };
+                let version = if values.is_empty() {
+                    warn!(
+                        self.log,
+                        "no version in database (treated as 'version 0')",
+                    );
+                    0
+                } else {
+                    values[0]
+                };
+                Ok(version)
+            }
+            Err(Error::Native(native::Error::Exception { ref exceptions })) => {
+                if exceptions.iter().any(|exception| {
+                    // Case 1: The database has not been created.
+                    exception.code == native::errors::UNKNOWN_DATABASE ||
+                    // Case 2: The database has been created, but it's old
+                    // (exists prior to the version table).
+                    exception.code == native::errors::UNKNOWN_TABLE
+                }) {
+                    warn!(
+                        self.log,
+                        "oximeter database does not exist, or is out-of-date"
+                    );
+                    Ok(0)
+                } else {
+                    let error_messages = exceptions
+                        .iter()
+                        .map(|exc| exc.summary())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    error!(
+                        self.log,
+                        "failed to read version";
+                        "errors" => &error_messages,
+                    );
+                    Err(Error::Database(error_messages))
+                }
+            }
+            Err(e) => {
+                error!(
                     self.log,
-                    "no version in database (treated as 'version 0')"
+                    "unexpected error reading latest database version";
+                    "error" => %e,
                 );
-                0
+                Err(e)
             }
-            Ok((_, body)) => body.trim().parse::<u64>().map_err(|err| {
-                Error::Database(format!("Cannot read version: {err}"))
-            })?,
-            Err(Error::Database(err))
-                // Case 1: The database has not been created.
-                if err.contains(CLICKHOUSE_DB_MISSING) ||
-                // Case 2: The database has been created, but it's old (exists
-                // prior to the version table).
-                    err.contains(CLICKHOUSE_DB_VERSION_MISSING) =>
-            {
-                warn!(self.log, "oximeter database does not exist, or is out-of-date");
-                0
-            }
-            Err(err) => {
-                warn!(self.log, "failed to read version"; "error" => err.to_string());
-                return Err(err);
-            }
-        };
-        Ok(version)
+        }
     }
 
     /// Return Ok if the DB is at exactly the version compatible with this
@@ -758,14 +957,23 @@ impl Client {
             "INSERT INTO {db_name}.version (*) VALUES ({version}, now());",
             db_name = crate::DATABASE_NAME,
         );
-        self.execute(sql).await
+        self.execute_native(sql).await
     }
 
     /// Verifies if instance is part of oximeter_cluster
     pub async fn is_oximeter_cluster(&self) -> Result<bool, Error> {
-        let sql = "SHOW CLUSTERS FORMAT JSONEachRow;";
-        let res = self.execute_with_body(sql).await?.1;
-        Ok(res.contains("oximeter_cluster"))
+        let sql = format!("SHOW CLUSTER {}", crate::CLUSTER_NAME);
+        self.execute_with_result_native(sql).await.and_then(|result| {
+            result
+                .data
+                .ok_or_else(|| {
+                    Error::Database(String::from(
+                        "Query for `oximeter` cluster unexpectedly \
+                    returned an empty data block",
+                    ))
+                })
+                .map(|block| block.n_rows > 0)
+        })
     }
 
     // Verifies that the schema for a sample matches the schema in the database,
@@ -882,6 +1090,40 @@ impl Client {
         Ok(timeseries_by_key.into_values().collect())
     }
 
+    // Execute a generic SQL statement, using the native TCP interface.
+    async fn execute_native<S>(&self, sql: S) -> Result<(), Error>
+    where
+        S: Into<String>,
+    {
+        self.execute_with_result_native(sql).await.map(|_| ())
+    }
+
+    // Execute a generic SQL statement, returning the query result as a data
+    // block.
+    //
+    // TODO-robustness This currently does no validation of the statement.
+    async fn execute_with_result_native<S>(
+        &self,
+        sql: S,
+    ) -> Result<QueryResult, Error>
+    where
+        S: Into<String>,
+    {
+        let sql = sql.into();
+        trace!(
+            self.log,
+            "executing SQL query";
+            "sql" => &sql,
+        );
+
+        let mut handle = self.native_pool.claim().await?;
+        let id = usdt::UniqueId::new();
+        probes::sql__query__start!(|| (&id, &sql));
+        let result = handle.query(sql.as_str()).await.map_err(Error::from);
+        probes::sql__query__done!(|| (&id));
+        result
+    }
+
     // Execute a generic SQL statement.
     //
     // TODO-robustness This currently does no validation of the statement.
@@ -920,9 +1162,11 @@ impl Client {
         let start = Instant::now();
 
         // Submit the SQL request itself.
-        let response = self
-            .client
-            .post(&self.url)
+        let client = ClientVariant::new(&self.source).await?;
+
+        let response = client
+            .reqwest()
+            .post(client.url())
             .timeout(self.request_timeout)
             .query(&[
                 ("output_format_json_quote_64bit_integers", "0"),
@@ -1029,7 +1273,7 @@ impl Client {
             self.expunge_timeseries_by_name_once(replicated, to_delete)
                 .await
                 .map_err(|err| match err {
-                    Error::DatabaseUnavailable(_) => {
+                    Error::DatabaseUnavailable(_) | Error::Connection(_) => {
                         backoff::BackoffError::transient(err)
                     }
                     _ => backoff::BackoffError::permanent(err),
@@ -1104,7 +1348,7 @@ impl Client {
                     "table_name" => table,
                     "n_timeseries" => chunk.len(),
                 );
-                self.execute(sql).await?;
+                self.execute_native(sql).await?;
             }
         }
         Ok(())
@@ -1367,7 +1611,8 @@ mod tests {
         let logctx = test_setup_log("test_replicated");
         let mut cluster = create_cluster(&logctx).await;
         let address = cluster.http_address().into();
-        let client = Client::new(address, &logctx.log);
+        let native_address = cluster.native_address().into();
+        let client = Client::new(address, native_address, &logctx.log);
         let futures: Vec<(&'static str, AsyncTest)> = vec![
             (
                 "test_is_oximeter_cluster_replicated",
@@ -1523,7 +1768,8 @@ mod tests {
         for (test_name, mut test) in futures {
             let testctx = test_setup_log(test_name);
             init_db(&cluster, &client).await;
-            test(&cluster, Client::new(address, &logctx.log)).await;
+            test(&cluster, Client::new(address, native_address, &logctx.log))
+                .await;
             wipe_db(&cluster, &client).await;
             testctx.cleanup_successful();
         }
@@ -1532,14 +1778,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bad_db_connection_test() {
-        let logctx = test_setup_log("test_bad_db_connection");
+    async fn cannot_ping_nonexistent_server() {
+        let logctx = test_setup_log("cannot_ping_nonexistent_server");
         let log = &logctx.log;
-        let client = Client::new("127.0.0.1:443".parse().unwrap(), &log);
-        assert!(matches!(
-            client.ping().await,
-            Err(Error::DatabaseUnavailable(_))
-        ));
+        let dont_care = "127.0.0.1:443".parse().unwrap();
+        let bad_addr = "[::1]:80".parse().unwrap();
+        let client = Client::new(dont_care, bad_addr, &log);
+        let e = client
+            .ping()
+            .await
+            .expect_err("Should fail to ping non-existent server");
+        let Error::Connection(qorb::pool::Error::TimedOut) = &e else {
+            panic!("Expected connection error, found {e:?}");
+        };
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn can_ping_clickhouse() {
+        let logctx = test_setup_log("can_ping_clickhouse");
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
+        client.ping().await.expect("Should be able to ping existing server");
+        db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
 
@@ -1548,7 +1814,11 @@ mod tests {
         let logctx = test_setup_log("test_is_oximeter_cluster");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         init_db(&db, &client).await;
         test_is_oximeter_cluster_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -1571,7 +1841,11 @@ mod tests {
         let logctx = test_setup_log("test_insert_samples");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         init_db(&db, &client).await;
         test_insert_samples_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -1620,7 +1894,11 @@ mod tests {
         let logctx = test_setup_log("test_schema_mismatch");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         init_db(&db, &client).await;
         test_schema_mismatch_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -1653,7 +1931,11 @@ mod tests {
         let logctx = test_setup_log("test_schema_update");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         init_db(&db, &client).await;
         test_schema_updated_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -1732,7 +2014,11 @@ mod tests {
         let logctx = test_setup_log("test_client_select_timeseries_one");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         init_db(&db, &client).await;
         test_client_select_timeseries_one_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -1820,7 +2106,11 @@ mod tests {
         let logctx = test_setup_log("test_field_record_cont");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         init_db(&db, &client).await;
         test_field_record_count_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -1878,7 +2168,11 @@ mod tests {
         let logctx = test_setup_log("test_unquoted_64bit_integers");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         init_db(&db, &client).await;
         test_unquoted_64bit_integers_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -1912,7 +2206,11 @@ mod tests {
         let logctx = test_setup_log("test_differentiate_by_timeseries_name");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         init_db(&db, &client).await;
         test_differentiate_by_timeseries_name_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -1982,7 +2280,11 @@ mod tests {
         let logctx = test_setup_log("test_select_timeseries_with_select_one");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         init_db(&db, &client).await;
         test_select_timeseries_with_select_one_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -2047,7 +2349,11 @@ mod tests {
         );
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         init_db(&db, &client).await;
         test_select_timeseries_with_select_one_field_with_multiple_values_impl(
             &db, client,
@@ -2120,7 +2426,11 @@ mod tests {
             test_setup_log("test_select_timeseries_with_select_multiple_fields_with_multiple_values");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         init_db(&db, &client).await;
         test_select_timeseries_with_select_multiple_fields_with_multiple_values_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -2196,7 +2506,11 @@ mod tests {
         let logctx = test_setup_log("test_select_timeseries_with_all");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         init_db(&db, &client).await;
         test_select_timeseries_with_all_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -2257,7 +2571,11 @@ mod tests {
         let logctx = test_setup_log("test_select_timeseries_with_start_time");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         init_db(&db, &client).await;
         test_select_timeseries_with_start_time_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -2308,7 +2626,11 @@ mod tests {
         let logctx = test_setup_log("test_select_timeseries_with_limit");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         init_db(&db, &client).await;
         test_select_timeseries_with_limit_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -2427,7 +2749,11 @@ mod tests {
         let logctx = test_setup_log("test_select_timeseries_with_order");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         init_db(&db, &client).await;
         test_select_timeseries_with_order_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -2529,7 +2855,11 @@ mod tests {
         let logctx = test_setup_log("test_get_schema_no_new_values");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         init_db(&db, &client).await;
         test_get_schema_no_new_values_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -2557,7 +2887,11 @@ mod tests {
         let logctx = test_setup_log("test_timeseries_schema_list");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         init_db(&db, &client).await;
         test_timeseries_schema_list_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -2596,7 +2930,11 @@ mod tests {
         let logctx = test_setup_log("test_list_timeseries");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         init_db(&db, &client).await;
         test_list_timeseries_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -2787,7 +3125,10 @@ mod tests {
         let insert_sql = format!(
             "INSERT INTO oximeter.{field_table} FORMAT JSONEachRow {row}"
         );
-        client.execute(insert_sql).await.expect("Failed to insert field row");
+        client
+            .execute_native(insert_sql)
+            .await
+            .expect("Failed to insert field row");
 
         // Select it exactly back out.
         let select_sql = format!(
@@ -3125,7 +3466,7 @@ mod tests {
         );
         println!("Inserted row: {}", inserted_row);
         client
-            .execute(insert_sql)
+            .execute_native(insert_sql)
             .await
             .expect("Failed to insert measurement row");
 
@@ -3171,7 +3512,11 @@ mod tests {
         let logctx = test_setup_log("test_recall_of_all_fields");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         init_db(&db, &client).await;
         test_recall_of_all_fields_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -3227,7 +3572,11 @@ mod tests {
             test_setup_log("test_database_version_update_is_idempotent");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         // NOTE: We don't init the DB, because the test explicitly tests that.
         test_database_version_update_is_idempotent_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -3268,7 +3617,11 @@ mod tests {
         let logctx = test_setup_log("test_database_version_will_not_downgrade");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         // NOTE: We don't init the DB, because the test explicitly tests that.
         test_database_version_will_not_downgrade_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -3307,7 +3660,11 @@ mod tests {
         let logctx = test_setup_log("test_database_version_wipes_old_version");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         // NOTE: We don't init the DB, because the test explicitly tests that.
         test_database_version_wipes_old_version_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -3347,7 +3704,11 @@ mod tests {
         let logctx = test_setup_log("test_update_schema_cache_on_new_sample");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         init_db(&db, &client).await;
         test_update_schema_cache_on_new_sample_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -3397,7 +3758,11 @@ mod tests {
         let logctx = test_setup_log("test_select_all_datum_types");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         init_db(&db, &client).await;
         test_select_all_datum_types_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -3436,7 +3801,11 @@ mod tests {
             test_setup_log("test_new_schema_removed_when_not_inserted");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         init_db(&db, &client).await;
         test_new_schema_removed_when_not_inserted_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -3654,21 +4023,25 @@ mod tests {
 
     async fn test_apply_one_schema_upgrade_impl(
         log: &Logger,
-        address: SocketAddr,
+        http_address: SocketAddr,
+        native_address: SocketAddr,
         replicated: bool,
     ) {
         let test_name = format!(
             "test_apply_one_schema_upgrade_{}",
             if replicated { "replicated" } else { "single_node" }
         );
-        let client = Client::new(address, &log);
+        let client = Client::new(http_address, native_address, &log);
 
         // We'll test moving from version 1, which just creates a database and
         // table, to version 2, which adds two columns to that table in
         // different SQL files.
-        client.execute(format!("CREATE DATABASE {test_name};")).await.unwrap();
         client
-            .execute(format!(
+            .execute_native(format!("CREATE DATABASE {test_name};"))
+            .await
+            .unwrap();
+        client
+            .execute_native(format!(
                 "\
             CREATE TABLE {test_name}.tbl (\
                 `col0` UInt8 \
@@ -3738,7 +4111,13 @@ mod tests {
         let log = &logctx.log;
         let mut cluster = create_cluster(&logctx).await;
         let address = cluster.http_address().into();
-        test_apply_one_schema_upgrade_impl(log, address, true).await;
+        test_apply_one_schema_upgrade_impl(
+            log,
+            address,
+            cluster.native_address().into(),
+            true,
+        )
+        .await;
         cluster.cleanup().await.expect("Failed to cleanup ClickHouse cluster");
         logctx.cleanup_successful();
     }
@@ -3752,7 +4131,13 @@ mod tests {
             .await
             .expect("Failed to start ClickHouse");
         let address = db.http_address().into();
-        test_apply_one_schema_upgrade_impl(log, address, false).await;
+        test_apply_one_schema_upgrade_impl(
+            log,
+            address,
+            db.native_address().into(),
+            false,
+        )
+        .await;
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
         logctx.cleanup_successful();
     }
@@ -3766,7 +4151,7 @@ mod tests {
             .await
             .expect("Failed to start ClickHouse");
         let address = db.http_address().into();
-        let client = Client::new(address, &log);
+        let client = Client::new(address, db.native_address().into(), &log);
         const REPLICATED: bool = false;
         client
             .initialize_db_with_version(
@@ -3809,7 +4194,7 @@ mod tests {
             .await
             .expect("Failed to start ClickHouse");
         let address = db.http_address().into();
-        let client = Client::new(address, &log);
+        let client = Client::new(address, db.native_address().into(), &log);
         const REPLICATED: bool = false;
         client
             .initialize_db_with_version(
@@ -3843,14 +4228,15 @@ mod tests {
 
     async fn test_ensure_schema_walks_through_multiple_steps_impl(
         log: &Logger,
-        address: SocketAddr,
+        http_address: SocketAddr,
+        native_address: SocketAddr,
         replicated: bool,
     ) {
         let test_name = format!(
             "test_ensure_schema_walks_through_multiple_steps_{}",
             if replicated { "replicated" } else { "single_node" }
         );
-        let client = Client::new(address, &log);
+        let client = Client::new(http_address, native_address, &log);
 
         // We need to actually have the oximeter DB here, and the version table,
         // since `ensure_schema()` writes out versions to the DB as they're
@@ -3862,9 +4248,12 @@ mod tests {
         // the `test_apply_one_schema_upgrade` test, but we split the two
         // modifications over two versions, rather than as multiple schema
         // upgrades in one version bump.
-        client.execute(format!("CREATE DATABASE {test_name};")).await.unwrap();
         client
-            .execute(format!(
+            .execute_native(format!("CREATE DATABASE {test_name};"))
+            .await
+            .unwrap();
+        client
+            .execute_native(format!(
                 "\
             CREATE TABLE {test_name}.tbl (\
                 `col0` UInt8 \
@@ -3943,7 +4332,10 @@ mod tests {
             .expect("Failed to start ClickHouse");
         let address = db.http_address().into();
         test_ensure_schema_walks_through_multiple_steps_impl(
-            log, address, false,
+            log,
+            address,
+            db.native_address().into(),
+            false,
         )
         .await;
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
@@ -3959,7 +4351,10 @@ mod tests {
         let mut cluster = create_cluster(&logctx).await;
         let address = cluster.http_address().into();
         test_ensure_schema_walks_through_multiple_steps_impl(
-            log, address, true,
+            log,
+            address,
+            cluster.native_address().into(),
+            true,
         )
         .await;
         cluster.cleanup().await.expect("Failed to clean up ClickHouse cluster");
@@ -4039,7 +4434,7 @@ mod tests {
             .await
             .expect("Failed to start ClickHouse");
         let address = db.http_address().into();
-        let client = Client::new(address, &log);
+        let client = Client::new(address, db.native_address().into(), &log);
         client
             .init_single_node_db()
             .await
@@ -4071,7 +4466,7 @@ mod tests {
             .await
             .expect("Failed to start ClickHouse");
         let address = db.http_address().into();
-        let client = Client::new(address, &log);
+        let client = Client::new(address, db.native_address().into(), &log);
         client
             .initialize_db_with_version(false, OXIMETER_VERSION)
             .await
@@ -4220,7 +4615,11 @@ mod tests {
                 .await
                 .expect("Failed to start ClickHouse")
         };
-        let client = Client::new(db.http_address().into(), &log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &log,
+        );
 
         // Let's start with version 2, which is the first tracked and contains
         // the full SQL files we need to populate the DB.
@@ -4413,6 +4812,7 @@ mod tests {
         test_expunge_timeseries_by_name_impl(
             log,
             db.http_address().into(),
+            db.native_address().into(),
             false,
         )
         .await;
@@ -4426,7 +4826,13 @@ mod tests {
         let logctx = test_setup_log(TEST_NAME);
         let mut cluster = create_cluster(&logctx).await;
         let address = cluster.http_address().into();
-        test_expunge_timeseries_by_name_impl(&logctx.log, address, true).await;
+        test_expunge_timeseries_by_name_impl(
+            &logctx.log,
+            address,
+            cluster.native_address().into(),
+            true,
+        )
+        .await;
         cluster.cleanup().await.expect("Failed to cleanup ClickHouse cluster");
         logctx.cleanup_successful();
     }
@@ -4435,11 +4841,12 @@ mod tests {
     // upgrade.
     async fn test_expunge_timeseries_by_name_impl(
         log: &Logger,
-        address: SocketAddr,
+        http_address: SocketAddr,
+        native_address: SocketAddr,
         replicated: bool,
     ) {
         usdt::register_probes().unwrap();
-        let client = Client::new(address, &log);
+        let client = Client::new(http_address, native_address, &log);
 
         const STARTING_VERSION: u64 = 1;
         const NEXT_VERSION: u64 = 2;
@@ -4617,5 +5024,95 @@ mod tests {
             out.push(Sample::new(&st, &m).unwrap());
         }
         out
+    }
+
+    #[tokio::test]
+    async fn read_latest_version_with_no_database_reports_zero() {
+        let logctx =
+            test_setup_log("read_latest_version_with_no_database_reports_zero");
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
+        assert_eq!(
+            client.read_latest_version().await.unwrap(),
+            0,
+            "Reading the database version when there is no database \
+            at all should return 0",
+        );
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn read_latest_version_with_no_version_table_reports_zero() {
+        let logctx = test_setup_log(
+            "read_latest_version_with_no_version_table_reports_zero",
+        );
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
+        init_db(&db, &client).await;
+        client.execute_native("DROP TABLE oximeter.version").await.unwrap();
+        assert_eq!(
+            client.read_latest_version().await.unwrap(),
+            0,
+            "Reading the database version when there is no \
+            version table should return 0",
+        );
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn read_latest_version_with_empty_version_table_reports_zero() {
+        let logctx = test_setup_log(
+            "read_latest_version_with_empty_version_table_reports_zero",
+        );
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
+        init_db(&db, &client).await;
+        assert_eq!(
+            client.read_latest_version().await.unwrap(),
+            0,
+            "Reading the database version when there are no \
+            rows in the version table should return 0",
+        );
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn read_latest_version_reports_max() {
+        let logctx = test_setup_log("read_latest_version_reports_max");
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
+        init_db(&db, &client).await;
+        client.insert_version(1).await.unwrap();
+        client.insert_version(10).await.unwrap();
+        assert_eq!(
+            client.read_latest_version().await.unwrap(),
+            10,
+            "Read incorrect database version",
+        );
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }

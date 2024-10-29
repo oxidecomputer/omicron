@@ -14,6 +14,7 @@ omicron-rpaths.workspace = true
 anyhow.workspace = true
 assert_matches.workspace = true
 camino.workspace = true
+chrono.workspace = true
 clap.workspace = true
 dropshot.workspace = true
 humantime.workspace = true
@@ -33,6 +34,7 @@ slog-error-chain.workspace = true
 slog.workspace = true
 swrite.workspace = true
 tabled.workspace = true
+typed-rng.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 

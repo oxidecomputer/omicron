@@ -4,9 +4,10 @@
 
 use crate::context::ServerContext;
 use clickhouse_admin_api::*;
-use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
 use clickhouse_admin_types::{
-    ClickhouseKeeperClusterMembership, KeeperConf, Lgif, RaftConfig,
+    ClickhouseKeeperClusterMembership, KeeperConf, KeeperConfig,
+    KeeperConfigurableSettings, Lgif, RaftConfig, ReplicaConfig,
+    ServerConfigurableSettings,
 };
 use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
@@ -16,17 +17,22 @@ use std::sync::Arc;
 
 type ClickhouseApiDescription = dropshot::ApiDescription<Arc<ServerContext>>;
 
-pub fn api() -> ClickhouseApiDescription {
-    clickhouse_admin_api_mod::api_description::<ClickhouseAdminImpl>()
+pub fn clickhouse_admin_server_api() -> ClickhouseApiDescription {
+    clickhouse_admin_server_api_mod::api_description::<ClickhouseAdminServerImpl>()
         .expect("registered entrypoints")
 }
 
-enum ClickhouseAdminImpl {}
+pub fn clickhouse_admin_keeper_api() -> ClickhouseApiDescription {
+    clickhouse_admin_keeper_api_mod::api_description::<ClickhouseAdminKeeperImpl>()
+        .expect("registered entrypoints")
+}
 
-impl ClickhouseAdminApi for ClickhouseAdminImpl {
+enum ClickhouseAdminServerImpl {}
+
+impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
     type Context = Arc<ServerContext>;
 
-    async fn generate_server_config_and_enable(
+    async fn generate_config(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<ServerConfigurableSettings>,
     ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError> {
@@ -41,8 +47,14 @@ impl ClickhouseAdminApi for ClickhouseAdminImpl {
 
         Ok(HttpResponseCreated(output))
     }
+}
 
-    async fn generate_keeper_config_and_enable(
+enum ClickhouseAdminKeeperImpl {}
+
+impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
+    type Context = Arc<ServerContext>;
+
+    async fn generate_config(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<KeeperConfigurableSettings>,
     ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError> {

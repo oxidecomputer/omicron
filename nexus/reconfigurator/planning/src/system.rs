@@ -9,10 +9,13 @@ use anyhow::{anyhow, bail, ensure, Context};
 use gateway_client::types::RotState;
 use gateway_client::types::SpState;
 use indexmap::IndexMap;
+use ipnet::Ipv6Net;
+use ipnet::Ipv6Subnets;
 use nexus_inventory::CollectionBuilder;
 use nexus_sled_agent_shared::inventory::Baseboard;
 use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
+use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
@@ -42,7 +45,6 @@ use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
-use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use std::collections::BTreeMap;
@@ -50,12 +52,7 @@ use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
-
-trait SubnetIterator: Iterator<Item = Ipv6Subnet<SLED_PREFIX>> + Debug {}
-impl<T> SubnetIterator for T where
-    T: Iterator<Item = Ipv6Subnet<SLED_PREFIX>> + Debug
-{
-}
+use std::sync::Arc;
 
 /// Describes an actual or synthetic Oxide rack for planning and testing
 ///
@@ -73,11 +70,15 @@ impl<T> SubnetIterator for T where
 ///    assign subnets and maybe even lay out the initial set of zones (which
 ///    does not exist here yet).  This way Reconfigurator and RSS are using the
 ///    same code to do this.
-#[derive(Debug)]
+///
+/// This is cheaply cloneable, and uses copy-on-write semantics for data inside.
+#[derive(Clone, Debug)]
 pub struct SystemDescription {
     collector: Option<String>,
-    sleds: IndexMap<SledUuid, Sled>,
-    sled_subnets: Box<dyn SubnetIterator>,
+    // Arc<Sled> to make cloning cheap. Mutating sleds is uncommon but
+    // possible, in which case we'll clone-on-write with Arc::make_mut.
+    sleds: IndexMap<SledUuid, Arc<Sled>>,
+    sled_subnets: SubnetIterator,
     available_non_scrimlet_slots: BTreeSet<u16>,
     available_scrimlet_slots: BTreeSet<u16>,
     target_boundary_ntp_zone_count: usize,
@@ -86,6 +87,7 @@ pub struct SystemDescription {
     target_oximeter_zone_count: usize,
     target_cockroachdb_zone_count: usize,
     target_cockroachdb_cluster_version: CockroachDbClusterVersion,
+    target_crucible_pantry_zone_count: usize,
     service_ip_pool_ranges: Vec<IpRange>,
     internal_dns_version: Generation,
     external_dns_version: Generation,
@@ -124,13 +126,7 @@ impl SystemDescription {
         // Skip the initial DNS subnet.
         // (The same behavior is replicated in RSS in `Plan::create()` in
         // sled-agent/src/rack_setup/plan/sled.rs.)
-        let sled_subnets = Box::new(
-            rack_subnet
-                .subnets(SLED_PREFIX)
-                .unwrap()
-                .skip(1)
-                .map(|s| Ipv6Subnet::new(s.network())),
-        );
+        let sled_subnets = SubnetIterator::new(rack_subnet);
 
         // Policy defaults
         let target_nexus_zone_count = NEXUS_REDUNDANCY;
@@ -143,6 +139,7 @@ impl SystemDescription {
         let target_boundary_ntp_zone_count = 0;
         let target_cockroachdb_zone_count = 0;
         let target_oximeter_zone_count = 0;
+        let target_crucible_pantry_zone_count = 0;
 
         let target_cockroachdb_cluster_version =
             CockroachDbClusterVersion::POLICY;
@@ -166,6 +163,7 @@ impl SystemDescription {
             target_oximeter_zone_count,
             target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version,
+            target_crucible_pantry_zone_count,
             service_ip_pool_ranges,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
@@ -209,6 +207,18 @@ impl SystemDescription {
 
     pub fn get_target_nexus_zone_count(&self) -> usize {
         self.target_nexus_zone_count
+    }
+
+    pub fn target_crucible_pantry_zone_count(
+        &mut self,
+        count: usize,
+    ) -> &mut Self {
+        self.target_crucible_pantry_zone_count = count;
+        self
+    }
+
+    pub fn get_target_crucible_pantry_zone_count(&self) -> usize {
+        self.target_crucible_pantry_zone_count
     }
 
     pub fn target_internal_dns_zone_count(
@@ -280,9 +290,10 @@ impl SystemDescription {
             sled.unique,
             sled.hardware,
             hardware_slot,
+            sled.omicron_zones,
             sled.npools,
         );
-        self.sleds.insert(sled_id, sled);
+        self.sleds.insert(sled_id, Arc::new(sled));
         Ok(self)
     }
 
@@ -308,15 +319,43 @@ impl SystemDescription {
         );
         self.sleds.insert(
             sled_id,
-            Sled::new_full(
+            Arc::new(Sled::new_full(
                 sled_id,
                 sled_policy,
                 sled_state,
                 sled_resources,
                 inventory_sp,
                 inventory_sled_agent,
-            ),
+            )),
         );
+        Ok(self)
+    }
+
+    /// Return true if the system has any sleds in it.
+    pub fn has_sleds(&self) -> bool {
+        !self.sleds.is_empty()
+    }
+
+    /// Set Omicron zones for a sled.
+    ///
+    /// The zones will be reported in the collection generated by
+    /// [`Self::to_collection_builder`].
+    ///
+    /// Returns an error if the sled is not found.
+    ///
+    /// # Notes
+    ///
+    /// It is okay to call `sled_set_omicron_zones` in ways that wouldn't
+    /// happen in production, such as to test illegal states.
+    pub fn sled_set_omicron_zones(
+        &mut self,
+        sled_id: SledUuid,
+        omicron_zones: OmicronZonesConfig,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
+            format!("attempted to access sled {} not found in system", sled_id)
+        })?;
+        Arc::make_mut(sled).inventory_sled_agent.omicron_zones = omicron_zones;
         Ok(self)
     }
 
@@ -367,6 +406,8 @@ impl SystemDescription {
             target_cockroachdb_zone_count: self.target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version: self
                 .target_cockroachdb_cluster_version,
+            target_crucible_pantry_zone_count: self
+                .target_crucible_pantry_zone_count,
             clickhouse_policy: self.clickhouse_policy.clone(),
         };
         let mut builder = PlanningInputBuilder::new(
@@ -404,6 +445,7 @@ pub struct SledBuilder {
     hardware: SledHardware,
     hardware_slot: Option<u16>,
     sled_role: SledRole,
+    omicron_zones: OmicronZonesConfig,
     npools: u8,
 }
 
@@ -421,6 +463,11 @@ impl SledBuilder {
             hardware: SledHardware::Gimlet,
             hardware_slot: None,
             sled_role: SledRole::Gimlet,
+            omicron_zones: OmicronZonesConfig {
+                // The initial generation is the one with no zones.
+                generation: OmicronZonesConfig::INITIAL_GENERATION,
+                zones: Vec::new(),
+            },
             npools: Self::DEFAULT_NPOOLS,
         }
     }
@@ -501,6 +548,7 @@ struct Sled {
 
 impl Sled {
     /// Create a `Sled` using faked-up information based on a `SledBuilder`
+    #[allow(clippy::too_many_arguments)]
     fn new_simulated(
         sled_id: SledUuid,
         sled_subnet: Ipv6Subnet<SLED_PREFIX>,
@@ -508,6 +556,7 @@ impl Sled {
         unique: Option<String>,
         hardware: SledHardware,
         hardware_slot: u16,
+        omicron_zones: OmicronZonesConfig,
         nzpools: u8,
     ) -> Sled {
         use typed_rng::TypedUuidRng;
@@ -519,6 +568,10 @@ impl Sled {
             "SystemSimultatedSled",
             (sled_id, "ZpoolUuid"),
         );
+        let mut physical_disk_rng = TypedUuidRng::from_seed(
+            "SystemSimulatedSled",
+            (sled_id, "PhysicalDiskUuid"),
+        );
         let zpools: BTreeMap<_, _> = (0..nzpools)
             .map(|_| {
                 let zpool = ZpoolUuid::from(zpool_rng.next());
@@ -528,7 +581,7 @@ impl Sled {
                         serial: format!("serial-{zpool}"),
                         model: String::from("fake-model"),
                     },
-                    disk_id: PhysicalDiskUuid::new_v4(),
+                    disk_id: physical_disk_rng.next(),
                     policy: PhysicalDiskPolicy::InService,
                     state: PhysicalDiskState::Active,
                 };
@@ -590,6 +643,7 @@ impl Sled {
                 sled_id,
                 usable_hardware_threads: 10,
                 usable_physical_ram: ByteCount::from(1024 * 1024),
+                omicron_zones,
                 // Populate disks, appearing like a real device.
                 disks: zpools
                     .values()
@@ -745,6 +799,7 @@ impl Sled {
             sled_id,
             usable_hardware_threads: inv_sled_agent.usable_hardware_threads,
             usable_physical_ram: inv_sled_agent.usable_physical_ram,
+            omicron_zones: inv_sled_agent.omicron_zones.clone(),
             disks: vec![],
             zpools: vec![],
             datasets: vec![],
@@ -766,5 +821,29 @@ impl Sled {
 
     fn sled_agent_inventory(&self) -> &Inventory {
         &self.inventory_sled_agent
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SubnetIterator {
+    subnets: Ipv6Subnets,
+}
+
+impl SubnetIterator {
+    fn new(rack_subnet: Ipv6Net) -> Self {
+        let mut subnets = rack_subnet.subnets(SLED_PREFIX).unwrap();
+        // Skip the initial DNS subnet.
+        // (The same behavior is replicated in RSS in `Plan::create()` in
+        // sled-agent/src/rack_setup/plan/sled.rs.)
+        subnets.next();
+        Self { subnets }
+    }
+}
+
+impl Iterator for SubnetIterator {
+    type Item = Ipv6Subnet<SLED_PREFIX>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.subnets.next().map(|s| Ipv6Subnet::new(s.network()))
     }
 }
