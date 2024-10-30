@@ -9,6 +9,7 @@ use anyhow::ensure;
 use anyhow::Context;
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use internal_dns_resolver::ResolveError;
 use internal_dns_types::names::ServiceName;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -147,17 +148,23 @@ async fn inventory_activate(
                 clickhouse_admin_keeper_client::Client::new(&url, log)
             })
             .collect::<Vec<_>>(),
-        Err(err) => {
-            warn!(
-                opctx.log,
-                concat!(
-                    "Failed to lookup ClickhouseAdminKeeper in internal DNS:",
-                    " {}. Is it enabled via policy?"
-                ),
-                err
-            );
-            vec![]
-        }
+        Err(err) => match err {
+            ResolveError::NotFound(_) | ResolveError::NotFoundByString(_) => {
+                vec![]
+            }
+            ResolveError::Resolve(hickory_err)
+                if matches!(
+                    hickory_err.kind(),
+                    hickory_resolver::error::ResolveErrorKind::NoRecordsFound { .. }
+                ) =>
+            {
+                vec![]
+            }
+            _ => {
+                return Err(err)
+                    .context("looking up clickhouse-admin-keeper addresses");
+            }
+        },
     };
 
     // Create an enumerator to find sled agents.
