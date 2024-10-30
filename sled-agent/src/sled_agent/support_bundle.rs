@@ -4,8 +4,6 @@
 
 //! Management of and access to Support Bundles
 
-use crate::range::PotentialRange;
-use crate::range::SingleRange;
 use crate::sled_agent::SledAgent;
 use camino::Utf8Path;
 use dropshot::Body;
@@ -24,6 +22,8 @@ use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use range_requests::PotentialRange;
+use range_requests::SingleRange;
 use sha2::{Digest, Sha256};
 use sled_agent_api::*;
 use sled_storage::manager::NestedDatasetListOptions;
@@ -54,7 +54,7 @@ pub enum Error {
     Io(#[from] std::io::Error),
 
     #[error(transparent)]
-    Range(#[from] crate::range::Error),
+    Range(#[from] range_requests::Error),
 
     #[error(transparent)]
     Zip(#[from] ZipError),
@@ -158,10 +158,9 @@ fn stream_zip_entry(
     };
 
     let range = if let Some(range) = pr {
-        let Ok(range) = range.single_range(size) else {
-            return Ok(ZipStreamOutput::RangeResponse(
-                crate::range::bad_range_response(size),
-            ));
+        let range = match range.parse(size) {
+            Ok(range) => range,
+            Err(err) => return Ok(ZipStreamOutput::RangeResponse(err)),
         };
         Some(range)
     } else {
@@ -439,6 +438,7 @@ impl SledAgent {
         support_bundle_id: SupportBundleUuid,
         range: Option<PotentialRange>,
         query: SupportBundleQueryType,
+        head_only: bool,
     ) -> Result<http::Response<Body>, Error> {
         // Regardless of the type of query, we first need to access the entire
         // bundle as a file.
@@ -451,23 +451,32 @@ impl SledAgent {
                 let len = file.metadata().await?.len();
                 let content_type = Some("application/zip");
 
+                if head_only {
+                    return Ok(range_requests::make_head_response(
+                        None,
+                        len,
+                        content_type,
+                    )?);
+                }
+
                 if let Some(range) = range {
                     // If this has a range request, we need to validate the range
                     // and put bounds on the part of the file we're reading.
-                    let Ok(range) = range.single_range(len) else {
-                        return Ok(crate::range::bad_range_response(len));
+                    let range = match range.parse(len) {
+                        Ok(range) => range,
+                        Err(err_response) => return Ok(err_response),
                     };
 
                     file.seek(std::io::SeekFrom::Start(range.start())).await?;
                     let limit = range.content_length() as usize;
-                    return Ok(crate::range::make_get_response(
+                    return Ok(range_requests::make_get_response(
                         Some(range),
                         len,
                         content_type,
                         ReaderStream::new(file).take(limit),
                     )?);
                 } else {
-                    return Ok(crate::range::make_get_response(
+                    return Ok(range_requests::make_get_response(
                         None,
                         len,
                         content_type,
@@ -482,26 +491,38 @@ impl SledAgent {
                 let all_names = names.join("\n");
                 let all_names_bytes = all_names.as_bytes();
                 let len = all_names_bytes.len() as u64;
+                let content_type = Some("text/plain");
 
-                let (range, body) = if let Some(range) = range {
-                    let Ok(range) = range.single_range(len) else {
-                        return Ok(crate::range::bad_range_response(len));
+                if head_only {
+                    return Ok(range_requests::make_head_response(
+                        None,
+                        len,
+                        content_type,
+                    )?);
+                }
+
+                let (range, bytes) = if let Some(range) = range {
+                    let range = match range.parse(len) {
+                        Ok(range) => range,
+                        Err(err_response) => return Ok(err_response),
                     };
 
                     let section = &all_names_bytes
-                        [range.start() as usize..=range.end() as usize];
-                    (Some(range), Body::with_content(section.to_owned()))
+                        [range.start() as usize..=range.end_inclusive() as usize];
+                    (Some(range), section.to_owned())
                 } else {
-                    (None, Body::with_content(all_names_bytes.to_owned()))
+                    (None, all_names_bytes.to_owned())
                 };
 
-                return Ok(crate::range::make_response_common(
+                let stream = futures::stream::once(async {
+                    Ok::<_, std::convert::Infallible>(bytes)
+                });
+                return Ok(range_requests::make_get_response(
                     range,
                     len,
-                    Some("text/plain"),
-                )
-                .body(body)
-                .unwrap());
+                    content_type,
+                    stream,
+                )?);
             }
             SupportBundleQueryType::Path { file_path } => {
                 let file_std = file.into_std().await;
@@ -517,7 +538,15 @@ impl SledAgent {
                         }
                     };
 
-                return Ok(crate::range::make_get_response(
+                if head_only {
+                    return Ok(range_requests::make_head_response(
+                        None,
+                        entry_stream.size,
+                        None,
+                    )?);
+                }
+
+                return Ok(range_requests::make_get_response(
                     entry_stream.range,
                     entry_stream.size,
                     None,

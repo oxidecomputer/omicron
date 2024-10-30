@@ -4,7 +4,6 @@
 
 //! HTTP entrypoint functions for the sled agent's exposed API
 
-use super::range::RequestContextEx;
 use super::sled_agent::SledAgent;
 use crate::sled_agent::Error as SledAgentError;
 use crate::zone_bundle::BundleError;
@@ -32,6 +31,7 @@ use omicron_common::disk::{
     DatasetsConfig, DatasetsManagementResult, DiskVariant,
     DisksManagementResult, M2Slot, OmicronPhysicalDisksConfig,
 };
+use range_requests::RequestContextEx;
 use sled_agent_api::*;
 use sled_agent_types::boot_disk::{
     BootDiskOsWriteStatus, BootDiskPathParams, BootDiskUpdatePathParams,
@@ -274,6 +274,7 @@ impl SledAgentApi for SledAgentImpl {
 
         let range = rqctx.range();
         let query = body.into_inner().query_type;
+        let head_only = false;
         Ok(sa
             .support_bundle_get(
                 zpool_id,
@@ -281,6 +282,31 @@ impl SledAgentApi for SledAgentImpl {
                 support_bundle_id,
                 range,
                 query,
+                head_only,
+            )
+            .await?)
+    }
+
+    async fn support_bundle_head(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        body: TypedBody<SupportBundleGetQueryParams>,
+    ) -> Result<http::Response<Body>, HttpError> {
+        let sa = rqctx.context();
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+
+        let range = rqctx.range();
+        let query = body.into_inner().query_type;
+        let head_only = true;
+        Ok(sa
+            .support_bundle_get(
+                zpool_id,
+                dataset_id,
+                support_bundle_id,
+                range,
+                query,
+                head_only,
             )
             .await?)
     }

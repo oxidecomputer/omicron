@@ -67,6 +67,7 @@ propolis_api_types.workspace = true
 propolis-client.workspace = true
 propolis-mock-server.workspace = true # Only used by the simulated sled agent
 rand = { workspace = true, features = ["getrandom"] }
+range-requests.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
 semver.workspace = true

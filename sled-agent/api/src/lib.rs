@@ -190,6 +190,17 @@ pub trait SledAgentApi {
         body: TypedBody<SupportBundleGetQueryParams>,
     ) -> Result<http::Response<Body>, HttpError>;
 
+    /// Fetch a service bundle from a particular dataset
+    #[endpoint {
+        method = HEAD,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}"
+    }]
+    async fn support_bundle_head(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        body: TypedBody<SupportBundleGetQueryParams>,
+    ) -> Result<http::Response<Body>, HttpError>;
+
     /// Delete a service bundle from a particular dataset
     #[endpoint {
         method = DELETE,

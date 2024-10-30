@@ -16,8 +16,6 @@ http.workspace = true
 http-range.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
-schemars.workspace = true
-serde.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
