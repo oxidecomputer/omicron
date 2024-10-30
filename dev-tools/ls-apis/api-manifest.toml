@@ -414,6 +414,17 @@ nexus-types depends on gateway-client for defining some types.
 """
 
 [[dependency_filter_rules]]
+ancestor = "internal-dns"
+client = "dns-service-client"
+evaluation = "bogus"
+note = """
+Past versions of internal-dns (which does not exist any more) depended on
+dns-service-client for defining some types.  We can remove this when other repos
+that depend on Omicron have updated past the removal of the "internal-dns"
+package.
+"""
+
+[[dependency_filter_rules]]
 ancestor = "nexus-types"
 client = "dns-service-client"
 evaluation = "bogus"
