@@ -347,7 +347,7 @@ mod test {
         assert_eq!(headers.get(CONTENT_LENGTH).unwrap(), "512");
         assert_eq!(
             headers.get(CONTENT_RANGE).unwrap(),
-            &format!("bytes 0-511/1024")
+            "bytes 0-511/1024",
         );
 
         // Second half
@@ -364,7 +364,7 @@ mod test {
         assert_eq!(headers.get(CONTENT_LENGTH).unwrap(), "512");
         assert_eq!(
             headers.get(CONTENT_RANGE).unwrap(),
-            &format!("bytes 512-1023/1024")
+            "bytes 512-1023/1024",
         );
 
         // Partially out of bounds
@@ -381,7 +381,7 @@ mod test {
         assert_eq!(headers.get(CONTENT_LENGTH).unwrap(), "24");
         assert_eq!(
             headers.get(CONTENT_RANGE).unwrap(),
-            &format!("bytes 1000-1023/1024")
+            "bytes 1000-1023/1024",
         );
 
         // Fully out of bounds

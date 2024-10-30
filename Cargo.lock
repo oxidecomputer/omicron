@@ -8902,6 +8902,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "range-requests"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "dropshot",
+ "futures",
+ "http 1.1.0",
+ "http-body-util",
+ "http-range",
+ "hyper 1.4.1",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "ratatui"
 version = "0.28.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
