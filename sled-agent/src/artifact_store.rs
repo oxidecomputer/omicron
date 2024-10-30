@@ -11,7 +11,8 @@
 //! it does not have from another Repo Depot that does have them (at Nexus's
 //! direction). This API's implementation is also part of this module.
 //!
-//! POST, PUT, and DELETE operations are handled by the Sled Agent API.
+//! POST, PUT, and DELETE operations are called by Nexus and handled by the Sled
+//! Agent API.
 
 use std::collections::BTreeMap;
 use std::io::ErrorKind;
@@ -280,7 +281,7 @@ impl<T: DatasetsManager> ArtifactStore<T> {
         &self,
         sha256: ArtifactHash,
     ) -> Result<ArtifactWriter, Error> {
-        let mut inner = Vec::new();
+        let mut files = Vec::new();
         let mut last_error = None;
         for mountpoint in self.storage.artifact_storage_paths().await? {
             let temp_dir = mountpoint.join(TEMP_SUBDIR);
@@ -316,14 +317,14 @@ impl<T: DatasetsManager> ArtifactStore<T> {
             };
             let file = NamedUtf8TempFile::from_parts(file, temp_path);
 
-            inner.push(Some((file, mountpoint)));
+            files.push(Some((file, mountpoint)));
         }
-        if inner.is_empty() {
+        if files.is_empty() {
             Err(last_error.unwrap_or(Error::NoUpdateDataset))
         } else {
             Ok(ArtifactWriter {
                 hasher: Sha256::new(),
-                files: inner,
+                files,
                 log: self.log.clone(),
                 sha256,
             })
@@ -535,8 +536,13 @@ impl ArtifactWriter {
         let mut last_error = None;
         let mut any_success = false;
         for (mut file, mountpoint) in self.files.into_iter().flatten() {
-            // 1. Open the mountpoint and its temp dir so we can fsync them at
-            // the end.
+            // 1. fsync the temporary file.
+            if let Err(err) = file.as_file_mut().sync_all().await {
+                let path = file.path().to_owned();
+                log_and_store!(last_error, &self.log, "sync", path, err);
+                continue;
+            }
+            // 2. Open the parent directory so we can fsync it.
             let parent_dir = match File::open(&mountpoint).await {
                 Ok(dir) => dir,
                 Err(err) => {
@@ -546,27 +552,7 @@ impl ArtifactWriter {
                     continue;
                 }
             };
-            let temp_dir_path = mountpoint.join(TEMP_SUBDIR);
-            let temp_dir = match File::open(&temp_dir_path).await {
-                Ok(dir) => dir,
-                Err(err) => {
-                    log_and_store!(
-                        last_error,
-                        &self.log,
-                        "open",
-                        temp_dir_path,
-                        err
-                    );
-                    continue;
-                }
-            };
-            // 2. fsync the file.
-            if let Err(err) = file.as_file_mut().sync_all().await {
-                let path = file.path().to_owned();
-                log_and_store!(last_error, &self.log, "sync", path, err);
-                continue;
-            }
-            // 3. Rename temporary file.
+            // 3. Rename the temporary file.
             let final_path = mountpoint.join(self.sha256.to_string());
             let moved_final_path = final_path.clone();
             if let Err(err) = tokio::task::spawn_blocking(move || {
@@ -588,20 +574,9 @@ impl ArtifactWriter {
                 });
                 continue;
             }
-            // 4. fsync the parent directory for both the final path and its
-            // previous path.
+            // 4. fsync the parent directory.
             if let Err(err) = parent_dir.sync_all().await {
                 log_and_store!(last_error, &self.log, "sync", mountpoint, err);
-                continue;
-            }
-            if let Err(err) = temp_dir.sync_all().await {
-                log_and_store!(
-                    last_error,
-                    &self.log,
-                    "sync",
-                    temp_dir_path,
-                    err
-                );
                 continue;
             }
 
