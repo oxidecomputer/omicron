@@ -170,10 +170,8 @@ different way to backfill the data before you can apply the step that adds the
 
 ==== Changing enum variants
 
-Adding a new variant to an enum is straightforward: `ALTER TYPE your_type ADD
-VALUE IF NOT EXISTS your_new_value AFTER some_existing_value` (or `... BEFORE
-some_existing_value`) (e.g., the `add-management-gateway-producer-kind`
-migration).
+Adding a new variant to an enum is straightforward: `ALTER TYPE your_type ADD VALUE IF NOT EXISTS your_new_value AFTER some_existing_value`
+(or `... BEFORE some_existing_value`); for an example, see the `add-management-gateway-producer-kind` migration.
 
 Removing or renaming variants is more burdensome. `ALTER TYPE DROP VALUE ...`
 and `ALTER TYPE RENAME VALUE ...` both exist, but they do not have idempotent
