@@ -31,6 +31,7 @@ use nexus_config::InternalDns;
 use nexus_config::MgdConfig;
 use nexus_config::NexusConfig;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+use nexus_db_queries::db::pub_test_utils::crdb;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
@@ -94,7 +95,7 @@ pub mod resource_helpers;
 
 pub const SLED_AGENT_UUID: &str = "b6d65341-167c-41df-9b5c-41cded99c229";
 pub const SLED_AGENT2_UUID: &str = "039be560-54cc-49e3-88df-1a29dadbf913";
-pub const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
+pub const RACK_UUID: &str = nexus_db_queries::db::pub_test_utils::RACK_UUID;
 pub const SWITCH_UUID: &str = "dae4e1f1-410e-4314-bff1-fec0504be07e";
 pub const PHYSICAL_DISK_UUID: &str = "fbf4e1f1-410e-4314-bff1-fec0504be07e";
 pub const OXIMETER_UUID: &str = "39e6175b-4df2-4730-b11d-cbc1e60a2e78";
@@ -420,13 +421,13 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         // Start up CockroachDB.
         let database = match populate {
             PopulateCrdb::FromEnvironmentSeed => {
-                db::test_setup_database(log).await
+                crdb::test_setup_database(log).await
             }
             #[cfg(feature = "omicron-dev")]
             PopulateCrdb::FromSeed { input_tar } => {
-                db::test_setup_database_from_seed(log, input_tar).await
+                crdb::test_setup_database_from_seed(log, input_tar).await
             }
-            PopulateCrdb::Empty => db::test_setup_database_empty(log).await,
+            PopulateCrdb::Empty => crdb::test_setup_database_empty(log).await,
         };
 
         eprintln!("DB URL: {}", database.pg_config());
