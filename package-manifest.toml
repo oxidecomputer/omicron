@@ -208,6 +208,7 @@ source.paths = [
   { from = "out/clickhouse", to = "/opt/oxide/clickhouse_server" },
   { from = "smf/clickhouse_server/manifest.xml", to = "/var/svc/manifest/site/clickhouse_server/manifest.xml" },
   { from = "smf/clickhouse_server/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse_server.sh" },
+  { from = "smf/clickhouse-admin-server", to = "/var/svc/manifest/site/clickhouse-admin-server" },
 ]
 output.type = "zone"
 output.intermediate_only = true
@@ -237,6 +238,7 @@ source.paths = [
   { from = "out/clickhouse", to = "/opt/oxide/clickhouse_keeper" },
   { from = "smf/clickhouse_keeper/manifest.xml", to = "/var/svc/manifest/site/clickhouse_keeper/manifest.xml" },
   { from = "smf/clickhouse_keeper/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse_keeper.sh" },
+  { from = "smf/clickhouse-admin-keeper", to = "/var/svc/manifest/site/clickhouse-admin-keeper" },
 ]
 output.type = "zone"
 output.intermediate_only = true
@@ -248,10 +250,10 @@ only_for_targets.image = "standard"
 source.type = "local"
 source.rust.binary_names = ["clickhouse-admin-keeper", "clickhouse-admin-server"]
 source.rust.release = true
-source.paths = [
-  { from = "smf/clickhouse-admin-keeper", to = "/var/svc/manifest/site/clickhouse-admin-keeper" },
-  { from = "smf/clickhouse-admin-server", to = "/var/svc/manifest/site/clickhouse-admin-server" },
-]
+# We specifically put the smf manifests with their corresponding container zones
+# so that both servers aren't started simultaneously
+# See [package.clickhouse_keeper_svc] and [package.clickhouse_server_svc]
+source.paths = []
 output.type = "zone"
 output.intermediate_only = true
 
@@ -576,10 +578,10 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "2b88ab88461fb06aaf2aab11c5e381a3cad25eac"
+source.commit = "b7b9d5660b28ca5e865242b2bdecd032c0852d40"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "0927e7211f645ef8c3f715c7b6a8be81a0f4b6250a3ff352348ae701e89713f5"
+source.sha256 = "44e623730765f8fc0b702d107939552514530a33b306ca5e8bc8276ff0aaf79a"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -588,10 +590,10 @@ service_name = "crucible_pantry_prebuilt"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "2b88ab88461fb06aaf2aab11c5e381a3cad25eac"
+source.commit = "b7b9d5660b28ca5e865242b2bdecd032c0852d40"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
-source.sha256 = "c273dd273cb09cbd8007925b41fcc6df9807dd93e395347b36ce8306a8dc93e4"
+source.sha256 = "bc0a41d349646ec2111bff346db2c300001d646a99f33b05b39b78188e34ae41"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -605,10 +607,10 @@ service_name = "crucible_dtrace"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "2b88ab88461fb06aaf2aab11c5e381a3cad25eac"
+source.commit = "b7b9d5660b28ca5e865242b2bdecd032c0852d40"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-dtrace.sha256.txt
-source.sha256 = "972a713eb02bc1aeaa7b16db24fef7f82afcfc4546abe998792c85f4a48269c0"
+source.sha256 = "64e37f7a062f7c8941fac3b95a81d98475e5c02ff01111554b0ddb7fc232f40f"
 output.type = "tarball"
 
 # Refer to
@@ -619,10 +621,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "11371b0f3743f8df5b047dc0edc2699f4bdf3927"
+source.commit = "e0c83fd0e0760eec1af306286c50081689d11a51"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "07383cbad45bc032de1b65d3553839751fde96342cc76249ca4a45b89872aae9"
+source.sha256 = "05e3b3497d340f6a6a1eda6aebdca81979c1b2e0b99411b9a20af9e35bdf07de"
 output.type = "zone"
 
 [package.mg-ddm-gz]

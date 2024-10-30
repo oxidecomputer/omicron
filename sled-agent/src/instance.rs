@@ -1046,7 +1046,7 @@ impl InstanceRunner {
             }
         }
 
-        let Some(primary_nic) = self.requested_nics.get(0) else {
+        let Some(primary_nic) = self.primary_nic() else {
             return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
         };
 
@@ -1062,7 +1062,7 @@ impl InstanceRunner {
     }
 
     fn refresh_external_ips_inner(&mut self) -> Result<(), Error> {
-        let Some(primary_nic) = self.requested_nics.get(0) else {
+        let Some(primary_nic) = self.primary_nic() else {
             return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
         };
 
@@ -1110,7 +1110,7 @@ impl InstanceRunner {
             }
         }
 
-        let Some(primary_nic) = self.requested_nics.get(0) else {
+        let Some(primary_nic) = self.primary_nic() else {
             return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
         };
 
@@ -1123,6 +1123,10 @@ impl InstanceRunner {
         )?;
 
         Ok(())
+    }
+
+    fn primary_nic(&self) -> Option<&NetworkInterface> {
+        self.requested_nics.iter().find(|nic| nic.primary)
     }
 }
 

@@ -2023,11 +2023,11 @@
         ]
       },
       "BootOrderEntry": {
-        "description": "An entry in a list of boot options.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"An entry in a list of boot options.\", \"type\": \"object\", \"required\": [ \"name\" ], \"properties\": { \"name\": { \"description\": \"The name of the device to attempt booting from.\", \"type\": \"string\" } } } ``` </details>",
+        "description": "An entry in the boot order stored in a [`BootSettings`] component.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"An entry in the boot order stored in a [`BootSettings`] component.\", \"type\": \"object\", \"required\": [ \"name\" ], \"properties\": { \"name\": { \"description\": \"The name of another component in the spec that Propolis should try to boot from.\\n\\nCurrently, only disk device components are supported.\", \"type\": \"string\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "name": {
-            "description": "The name of the device to attempt booting from.",
+            "description": "The name of another component in the spec that Propolis should try to boot from.\n\nCurrently, only disk device components are supported.",
             "type": "string"
           }
         },
@@ -2036,10 +2036,11 @@
         ]
       },
       "BootSettings": {
-        "description": "BootSettings\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"order\" ], \"properties\": { \"order\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/BootOrderEntry\" } } } } ``` </details>",
+        "description": "Settings supplied to the guest's firmware image that specify the order in which it should consider its options when selecting a device to try to boot from.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Settings supplied to the guest's firmware image that specify the order in which it should consider its options when selecting a device to try to boot from.\", \"type\": \"object\", \"required\": [ \"order\" ], \"properties\": { \"order\": { \"description\": \"An ordered list of components to attempt to boot from.\", \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/BootOrderEntry\" } } }, \"additionalProperties\": false } ``` </details>",
         "type": "object",
         "properties": {
           "order": {
+            "description": "An ordered list of components to attempt to boot from.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BootOrderEntry"
@@ -2048,7 +2049,8 @@
         },
         "required": [
           "order"
-        ]
+        ],
+        "additionalProperties": false
       },
       "BootstoreStatus": {
         "type": "object",

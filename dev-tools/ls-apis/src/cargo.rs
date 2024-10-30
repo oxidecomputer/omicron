@@ -9,7 +9,7 @@ use anyhow::bail;
 use anyhow::{anyhow, ensure, Context, Result};
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
-use cargo_metadata::Package;
+use cargo_metadata::{CargoOpt, Package};
 use cargo_metadata::{DependencyKind, PackageId};
 use std::collections::BTreeSet;
 use std::collections::{BTreeMap, VecDeque};
@@ -50,6 +50,7 @@ impl Workspace {
     pub fn load(
         name: &str,
         manifest_path: Option<&Utf8Path>,
+        extra_features: Option<CargoOpt>,
         ignored_non_clients: &BTreeSet<ClientPackageName>,
     ) -> Result<Self> {
         eprintln!(
@@ -64,6 +65,9 @@ impl Workspace {
         let mut cmd = cargo_metadata::MetadataCommand::new();
         if let Some(manifest_path) = manifest_path {
             cmd.manifest_path(manifest_path);
+        }
+        if let Some(extra_features) = extra_features {
+            cmd.features(extra_features);
         }
         let metadata = match cmd.exec() {
             Err(original_err) if name == "maghemite" => {
@@ -268,11 +272,6 @@ impl Workspace {
         while let Some(Remaining { node: next, path }) = remaining.pop() {
             for d in &next.deps {
                 let did = &d.pkg;
-                if seen.contains(did) {
-                    continue;
-                }
-
-                seen.insert(did.clone());
                 if !d.dep_kinds.iter().any(|k| {
                     matches!(
                         k.kind,
@@ -290,8 +289,13 @@ impl Workspace {
                 let dep_pkg = self.packages_by_id.get(did).unwrap();
                 let dep_node = self.nodes_by_id.get(did).unwrap();
                 func(dep_pkg, &path);
+                if seen.contains(did) {
+                    continue;
+                }
+
+                seen.insert(did.clone());
                 let dep_path = path.with_dependency_on(did.clone());
-                remaining.push(Remaining { node: dep_node, path: dep_path })
+                remaining.push(Remaining { node: dep_node, path: dep_path });
             }
         }
 
