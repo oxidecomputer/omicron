@@ -174,9 +174,9 @@ Adding a new variant to an enum is straightforward: `ALTER TYPE your_type ADD VA
 (or `... BEFORE some_existing_value`); for an example, see the `add-management-gateway-producer-kind` migration.
 
 Removing or renaming variants is more burdensome. `ALTER TYPE DROP VALUE ...`
-and `ALTER TYPE RENAME VALUE ...` both exist, but they do not have idempotent
-variants, making them unsuitable for migrations. Instead, you can use the
-following sequence of migration steps:
+and `ALTER TYPE RENAME VALUE ...` both exist, but they do not have clauses to
+support idempotent operation, making them unsuitable for migrations. Instead,
+you can use the following sequence of migration steps:
 
 1. Create a new temporary enum with the new variants, and a different name as the old type.
 2. Create a new temporary column with the temporary enum type. (Adding a column supports `IF NOT EXISTS`).
