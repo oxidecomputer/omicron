@@ -1943,10 +1943,10 @@ impl DataStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::sled;
     use crate::db::lookup::LookupPath;
     use crate::db::pagination::Paginator;
+    use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::InstanceState;
     use nexus_db_model::Project;
     use nexus_db_model::VmmRuntimeState;

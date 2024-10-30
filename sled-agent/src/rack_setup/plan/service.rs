@@ -465,7 +465,7 @@ impl Plan {
                 .host_zone_with_one_backend(
                     id,
                     ServiceName::InternalDns,
-                    dns_address,
+                    http_address,
                 )
                 .unwrap();
             let dataset_name =

@@ -13,7 +13,17 @@ impl_enum_type!(
     #[diesel(postgres_type(name = "vmm_state", schema = "public"))]
     pub struct VmmStateEnum;
 
-    #[derive(Copy, Clone, Debug, PartialEq, AsExpression, FromSqlRow, Serialize, Deserialize)]
+    #[derive(
+        Copy,
+        Clone,
+        Debug,
+        PartialEq,
+        AsExpression,
+        FromSqlRow,
+        Serialize,
+        Deserialize,
+        strum::VariantArray,
+    )]
     #[diesel(sql_type = VmmStateEnum)]
     pub enum VmmState;
 
@@ -44,6 +54,10 @@ impl VmmState {
             VmmState::SagaUnwound => "saga_unwound",
         }
     }
+
+    /// All VMM states.
+    pub const ALL_STATES: &'static [Self] =
+        <Self as strum::VariantArray>::VARIANTS;
 
     /// States in which it is safe to deallocate a VMM's sled resources and mark
     /// it as deleted.
@@ -160,6 +174,38 @@ impl diesel::query_builder::QueryId for VmmStateEnum {
     const HAS_STATIC_QUERY_ID: bool = false;
 }
 
+impl std::str::FromStr for VmmState {
+    type Err = VmmStateParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        for &state in Self::ALL_STATES {
+            if s.eq_ignore_ascii_case(state.label()) {
+                return Ok(state);
+            }
+        }
+
+        Err(VmmStateParseError(()))
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct VmmStateParseError(());
+
+impl fmt::Display for VmmStateParseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "expected one of [")?;
+        let mut variants = VmmState::ALL_STATES.iter();
+        if let Some(v) = variants.next() {
+            write!(f, "{v}")?;
+            for v in variants {
+                write!(f, ", {v}")?;
+            }
+        }
+        f.write_str("]")
+    }
+}
+
+impl std::error::Error for VmmStateParseError {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,6 +219,13 @@ mod tests {
                 "API VmmState::{api_state:?} is considered terminal, but its \
                  corresponding DB state ({db_state:?}) is not!"
             );
+        }
+    }
+
+    #[test]
+    fn test_from_str_roundtrips() {
+        for &variant in VmmState::ALL_STATES {
+            assert_eq!(Ok(dbg!(variant)), dbg!(variant.to_string().parse()));
         }
     }
 }

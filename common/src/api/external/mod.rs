@@ -1225,13 +1225,16 @@ pub struct InstanceAutoRestartStatus {
     #[serde(rename = "auto_restart_enabled")]
     pub enabled: bool,
 
-    /// The auto-restart policy configured for this instance, or `None` if no
-    /// explicit policy is configured.
+    /// The auto-restart policy configured for this instance, or `null` if no
+    /// explicit policy has been configured.
     ///
-    /// If this is not present, then this instance uses the default auto-restart
-    /// policy, which may or may not allow it to be restarted. The
-    /// `auto_restart_enabled` field indicates whether the instance will be
-    /// automatically restarted.
+    /// This policy determines whether the instance should be automatically
+    /// restarted by the control plane on failure. If this is `null`, the
+    /// control plane will use the default policy when determining whether or
+    /// not to automatically restart this instance, which may or may not allow
+    /// it to be restarted. The value of the `auto_restart_enabled` field
+    /// indicates whether the instance will be auto-restarted, based on its
+    /// current policy or the default if it has no configured policy.
     //
     // Rename this field, as the struct is `#[serde(flatten)]`ed into the
     // `Instance` type, and we would like the field to be prefixed with
