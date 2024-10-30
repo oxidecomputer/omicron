@@ -43,22 +43,28 @@ pub struct TestDatabaseBuilder {
 
 impl TestDatabaseBuilder {
     /// Creates a new database buidler.
+    ///
+    /// By default, this creates a database with no schema, and with no pools
+    /// nor datastores built on top.
+    ///
+    /// This is equivalent to calling [Self::populate_nothing] and
+    /// [Self::no_interface].
     pub fn new() -> Self {
         Self { populate: Populate::Nothing, interface: Interface::Nothing }
     }
 
     /// Populates the database without a schema
-    pub fn without_schema(self) -> Self {
+    pub fn populate_nothing(self) -> Self {
         self.populate(Populate::Nothing)
     }
 
     /// Populates the database with a schema
-    pub fn with_schema(self) -> Self {
+    pub fn populate_schema(self) -> Self {
         self.populate(Populate::Schema)
     }
 
     /// Populates the database with a schema and loads it with data
-    pub fn with_schema_and_builtin_data(self) -> Self {
+    pub fn populate_schema_and_builtin_data(self) -> Self {
         self.populate(Populate::SchemaAndData)
     }
 
@@ -68,12 +74,12 @@ impl TestDatabaseBuilder {
     }
 
     /// Builds a pool interface on top of the database
-    pub fn with_pool(self) -> Self {
+    pub fn interface_pool(self) -> Self {
         self.interface(Interface::Pool)
     }
 
     /// Builds a datatore interface on top of the database
-    pub fn with_datastore(self) -> Self {
+    pub fn interface_datastore(self) -> Self {
         self.interface(Interface::Datastore)
     }
 
@@ -161,9 +167,9 @@ impl TestDatabase {
     /// Creates a new database for test usage, without any schema nor interface
     ///
     /// [`Self::terminate`] should be called before the test finishes.
-    pub async fn new_without_schema(log: &Logger) -> Self {
+    pub async fn new_populate_nothing(log: &Logger) -> Self {
         TestDatabaseBuilder::new()
-            .without_schema()
+            .populate_nothing()
             .no_interface()
             .build(log)
             .await
@@ -172,15 +178,23 @@ impl TestDatabase {
     /// Creates a new database for test usage, with a schema but no interface
     ///
     /// [`Self::terminate`] should be called before the test finishes.
-    pub async fn new_with_schema_only(log: &Logger) -> Self {
-        TestDatabaseBuilder::new().with_schema().no_interface().build(log).await
+    pub async fn new_populate_schema_only(log: &Logger) -> Self {
+        TestDatabaseBuilder::new()
+            .populate_schema()
+            .no_interface()
+            .build(log)
+            .await
     }
 
     /// Creates a new database for test usage, with a pool.
     ///
     /// [`Self::terminate`] should be called before the test finishes.
     pub async fn new_with_pool(log: &Logger) -> Self {
-        TestDatabaseBuilder::new().with_schema().with_pool().build(log).await
+        TestDatabaseBuilder::new()
+            .populate_schema()
+            .interface_pool()
+            .build(log)
+            .await
     }
 
     /// Creates a new database for test usage, with a pre-loaded datastore.
@@ -188,8 +202,8 @@ impl TestDatabase {
     /// [`Self::terminate`] should be called before the test finishes.
     pub async fn new_with_datastore(log: &Logger) -> Self {
         TestDatabaseBuilder::new()
-            .with_schema_and_builtin_data()
-            .with_datastore()
+            .populate_schema_and_builtin_data()
+            .interface_datastore()
             .build(log)
             .await
     }
@@ -199,8 +213,8 @@ impl TestDatabase {
     /// [`Self::terminate`] should be called before the test finishes.
     pub async fn new_with_raw_datastore(log: &Logger) -> Self {
         TestDatabaseBuilder::new()
-            .with_schema()
-            .with_datastore()
+            .populate_schema()
+            .interface_datastore()
             .build(log)
             .await
     }

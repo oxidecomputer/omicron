@@ -526,7 +526,7 @@ async fn dbinit_version_matches_version_known_to_nexus() {
         &config.pkg.log,
     );
     let log = &logctx.log;
-    let db = TestDatabase::new_with_schema_only(&log).await;
+    let db = TestDatabase::new_populate_schema_only(&log).await;
     let crdb = db.crdb();
 
     assert_eq!(
@@ -599,7 +599,7 @@ async fn versions_have_idempotent_up() {
     let logctx =
         LogContext::new("versions_have_idempotent_up", &config.pkg.log);
     let log = &logctx.log;
-    let db = TestDatabase::new_without_schema(&logctx.log).await;
+    let db = TestDatabase::new_populate_nothing(&logctx.log).await;
     let crdb = db.crdb();
 
     let all_versions = read_all_schema_versions();
@@ -928,7 +928,7 @@ async fn dbinit_equals_sum_of_all_up() {
         LogContext::new("dbinit_equals_sum_of_all_up", &config.pkg.log);
     let log = &logctx.log;
 
-    let db = TestDatabase::new_without_schema(&logctx.log).await;
+    let db = TestDatabase::new_populate_nothing(&logctx.log).await;
     let crdb = db.crdb();
 
     let all_versions = read_all_schema_versions();
@@ -1005,7 +1005,7 @@ async fn dbinit_equals_sum_of_all_up() {
     db.terminate().await;
 
     // Create a new DB with data populated from dbinit.sql for comparison
-    let db = TestDatabase::new_with_schema_only(&logctx.log).await;
+    let db = TestDatabase::new_populate_schema_only(&logctx.log).await;
     let crdb = db.crdb();
     let expected_schema = InformationSchema::new(&crdb).await;
     let expected_data = expected_schema.query_all_tables(log, &crdb).await;
@@ -1623,7 +1623,7 @@ async fn validate_data_migration() {
     let logctx = LogContext::new("validate_data_migration", &config.pkg.log);
     let log = &logctx.log;
 
-    let db = TestDatabase::new_without_schema(&logctx.log).await;
+    let db = TestDatabase::new_populate_nothing(&logctx.log).await;
     let crdb = db.crdb();
     let client = crdb.connect().await.expect("Failed to access CRDB client");
 
@@ -1660,7 +1660,7 @@ async fn validate_data_migration() {
 
 // Returns the InformationSchema object for a database populated via `sql`.
 async fn get_information_schema(log: &Logger, sql: &str) -> InformationSchema {
-    let db = TestDatabase::new_without_schema(&log).await;
+    let db = TestDatabase::new_populate_nothing(&log).await;
     let crdb = db.crdb();
 
     let client = crdb.connect().await.expect("failed to connect");
