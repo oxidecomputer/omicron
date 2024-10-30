@@ -5,7 +5,7 @@ name = "bgp_session"
 description = "A peer-to-peer session of the Border Gateway Protocol"
 authz_scope = "fleet"
 versions = [
-    { version = 1, fields = [ "hostname", "local_asn", "peer", "rack_id", "sled_id" ] }
+    { version = 1, fields = [ "hostname", "local_asn", "peer", "rack_id", "sled_id", "sled_model", "sled_revision", "sled_serial", "switch_id", "switch_fab", "switch_lot", "switch_wafer", "switch_wafer_loc_x", "switch_wafer_loc_y", "switch_model", "switch_revision", "switch_serial", "switch_slot" ] }
 ]
 
 [[metrics]]
@@ -291,3 +291,55 @@ description = "ID of the rack on which our BGP peer is running"
 [fields.sled_id]
 type = "uuid"
 description = "ID of the sled on which our BGP peer is running"
+
+[fields.sled_model]
+type = "string"
+description = "Model number of the sled on which our BGP peer is running"
+
+[fields.sled_revision]
+type = "u32"
+description = "Revision number of the sled on which our BGP peer is running"
+
+[fields.sled_serial]
+type = "string"
+description = "Serial number of the sled on which our BGP peer is running"
+
+[fields.switch_id]
+type = "uuid"
+description = "ID of the switch on which our BGP peer is running"
+
+[fields.switch_fab]
+type = "string"
+description = "Fabrication plant identifier on of the switch on which our BGP peer is running"
+
+[fields.switch_lot]
+type = "string"
+description = "Lot number of the switch on which our BGP peer is running"
+
+[fields.switch_wafer]
+type = "u8"
+description = "Wafer number of the switch on which our BGP peer is running"
+
+[fields.switch_wafer_loc_x]
+type = "i8"
+description = "X-coordinate wafer location of the switch on which our BGP peer is running"
+
+[fields.switch_wafer_loc_y]
+type = "i8"
+description = "Y-coordinate wafer location of the switch on which our BGP peer is running"
+
+[fields.switch_model]
+type = "string"
+description = "The model number switch on which our BGP peer is running"
+
+[fields.switch_revision]
+type = "u32"
+description = "Revision number of the switch on which our BGP peer is running"
+
+[fields.switch_serial]
+type = "string"
+description = "Serial number of the switch on which our BGP peer is running"
+
+[fields.switch_slot]
+type = "u16"
+description = "Slot number of the switch on which our BGP peer is running"
