@@ -5530,6 +5530,10 @@ fn inv_collection_print_keeper_membership(collection: &Collection) {
         let s = raft_config.trim_end_matches(", ");
         println!("    raft config: {s}");
     }
+    if collection.clickhouse_keeper_cluster_membership.is_empty() {
+        println!("No membership retrieved.");
+    }
+    println!("");
 }
 
 #[derive(Debug)]
