@@ -36,7 +36,7 @@ fn new_pool(log: &Logger, db: &CockroachInstance) -> Arc<db::Pool> {
     Arc::new(db::Pool::new_single_host(log, &cfg))
 }
 
-pub struct TestDatabaseBuilder {
+struct TestDatabaseBuilder {
     populate: Populate,
     interface: Interface,
 }
@@ -49,49 +49,41 @@ impl TestDatabaseBuilder {
     ///
     /// This is equivalent to calling [Self::populate_nothing] and
     /// [Self::no_interface].
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self { populate: Populate::Nothing, interface: Interface::Nothing }
     }
 
     /// Populates the database without a schema
-    pub fn populate_nothing(self) -> Self {
+    fn populate_nothing(self) -> Self {
         self.populate(Populate::Nothing)
     }
 
     /// Populates the database with a schema
-    pub fn populate_schema(self) -> Self {
+    fn populate_schema(self) -> Self {
         self.populate(Populate::Schema)
     }
 
     /// Populates the database with a schema and loads it with data
-    pub fn populate_schema_and_builtin_data(self) -> Self {
+    fn populate_schema_and_builtin_data(self) -> Self {
         self.populate(Populate::SchemaAndData)
     }
 
     /// Builds no interface on top of the database (neither pool nor datastore)
-    pub fn no_interface(self) -> Self {
+    fn no_interface(self) -> Self {
         self.interface(Interface::Nothing)
     }
 
     /// Builds a pool interface on top of the database
-    pub fn interface_pool(self) -> Self {
+    fn interface_pool(self) -> Self {
         self.interface(Interface::Pool)
     }
 
     /// Builds a datatore interface on top of the database
-    pub fn interface_datastore(self) -> Self {
+    fn interface_datastore(self) -> Self {
         self.interface(Interface::Datastore)
     }
 
-    fn populate(self, populate: Populate) -> Self {
-        Self { populate, ..self }
-    }
-
-    fn interface(self, interface: Interface) -> Self {
-        Self { interface, ..self }
-    }
-
-    pub async fn build(self, log: &Logger) -> TestDatabase {
+    async fn build(self, log: &Logger) -> TestDatabase {
         match (self.populate, self.interface) {
             (Populate::Nothing, interface) => {
                 let db = crdb::test_setup_database_empty(log).await;
@@ -147,6 +139,14 @@ impl TestDatabaseBuilder {
                 panic!("If you're fully populating a datastore, you probably want a connection to it");
             }
         }
+    }
+
+    fn populate(self, populate: Populate) -> Self {
+        Self { populate, ..self }
+    }
+
+    fn interface(self, interface: Interface) -> Self {
+        Self { interface, ..self }
     }
 }
 

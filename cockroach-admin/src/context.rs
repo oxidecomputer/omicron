@@ -146,7 +146,7 @@ mod tests {
     #[tokio::test]
     async fn test_node_id() {
         let logctx = dev::test_setup_log("test_node_id");
-        let db = TestDatabase::new_without_schema(&logctx.log).await;
+        let db = TestDatabase::new_populate_nothing(&logctx.log).await;
         let crdb = db.crdb();
 
         // Construct a `ServerContext`.

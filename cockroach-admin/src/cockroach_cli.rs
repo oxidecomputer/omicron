@@ -179,7 +179,7 @@ mod tests {
     #[tokio::test]
     async fn test_node_status_compatibility() {
         let logctx = dev::test_setup_log("test_node_status_compatibility");
-        let db = TestDatabase::new_without_schema(&logctx.log).await;
+        let db = TestDatabase::new_populate_nothing(&logctx.log).await;
         let db_url = db.crdb().listen_url().to_string();
 
         let expected_headers = "id,address,sql_address,build,started_at,updated_at,locality,is_available,is_live";
@@ -236,7 +236,7 @@ mod tests {
     async fn test_node_decommission_compatibility() {
         let logctx =
             dev::test_setup_log("test_node_decommission_compatibility");
-        let db = TestDatabase::new_without_schema(&logctx.log).await;
+        let db = TestDatabase::new_populate_nothing(&logctx.log).await;
         let db_url = db.crdb().listen_url().to_string();
 
         let expected_headers =
