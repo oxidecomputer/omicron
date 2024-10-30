@@ -507,8 +507,8 @@ impl SledAgent {
                         Err(err_response) => return Ok(err_response),
                     };
 
-                    let section = &all_names_bytes
-                        [range.start() as usize..=range.end_inclusive() as usize];
+                    let section = &all_names_bytes[range.start() as usize
+                        ..=range.end_inclusive() as usize];
                     (Some(range), section.to_owned())
                 } else {
                     (None, all_names_bytes.to_owned())

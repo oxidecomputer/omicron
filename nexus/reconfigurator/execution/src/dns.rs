@@ -661,6 +661,7 @@ mod test {
             id: Uuid::new_v4(),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
+            blueprint_datasets: BTreeMap::new(),
             sled_state,
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
@@ -1336,6 +1337,8 @@ mod test {
             .unwrap();
         let zpool_rows =
             datastore.zpool_list_all_external_batched(&opctx).await.unwrap();
+        let dataset_rows =
+            datastore.dataset_list_all_batched(&opctx, None).await.unwrap();
         let ip_pool_range_rows = {
             let (authz_service_ip_pool, _) =
                 datastore.ip_pools_service_lookup(&opctx).await.unwrap();
@@ -1348,6 +1351,7 @@ mod test {
             let mut builder = PlanningInputFromDb {
                 sled_rows: &sled_rows,
                 zpool_rows: &zpool_rows,
+                dataset_rows: &dataset_rows,
                 ip_pool_range_rows: &ip_pool_range_rows,
                 internal_dns_version: dns_initial_internal.generation.into(),
                 external_dns_version: dns_latest_external.generation.into(),
@@ -1395,7 +1399,15 @@ mod test {
         let rv = builder
             .sled_ensure_zone_multiple_nexus(sled_id, nalready + 1)
             .unwrap();
-        assert_eq!(rv, EnsureMultiple::Changed { added: 1, removed: 0 });
+        assert_eq!(
+            rv,
+            EnsureMultiple::Changed {
+                added: 1,
+                updated: 0,
+                expunged: 0,
+                removed: 0
+            }
+        );
         let blueprint2 = builder.build();
         eprintln!("blueprint2: {}", blueprint2.display());
         // Figure out the id of the new zone.

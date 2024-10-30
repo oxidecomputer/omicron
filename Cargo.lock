@@ -5786,6 +5786,7 @@ dependencies = [
  "debug-ignore",
  "expectorate",
  "gateway-client",
+ "illumos-utils",
  "indexmap 2.6.0",
  "internal-dns-resolver",
  "ipnet",

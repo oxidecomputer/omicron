@@ -271,16 +271,20 @@ mod tests {
                             ),
                             zpools: BTreeMap::from([(
                                 ZpoolUuid::new_v4(),
-                                SledDisk {
-                                    disk_identity: DiskIdentity {
-                                        vendor: String::from("fake-vendor"),
-                                        serial: String::from("fake-serial"),
-                                        model: String::from("fake-model"),
+                                (
+                                    SledDisk {
+                                        disk_identity: DiskIdentity {
+                                            vendor: String::from("fake-vendor"),
+                                            serial: String::from("fake-serial"),
+                                            model: String::from("fake-model"),
+                                        },
+                                        disk_id: PhysicalDiskUuid::new_v4(),
+                                        policy: PhysicalDiskPolicy::InService,
+                                        state: PhysicalDiskState::Active,
                                     },
-                                    disk_id: PhysicalDiskUuid::new_v4(),
-                                    policy: PhysicalDiskPolicy::InService,
-                                    state: PhysicalDiskState::Active,
-                                },
+                                    // Datasets: Leave empty
+                                    vec![],
+                                ),
                             )]),
                         },
                     },
@@ -420,6 +424,13 @@ mod tests {
                 state: BuilderZoneState::Added
             }
         );
+
+        // Ensure all datasets are created for the zones we've provisioned
+        for (sled_id, resources) in
+            input2.all_sled_resources(SledFilter::Commissioned)
+        {
+            builder.sled_ensure_datasets(sled_id, resources).unwrap();
+        }
 
         // Now build the blueprint and ensure that all the changes we described
         // above are present.

@@ -66,7 +66,7 @@ pub(crate) async fn deploy_disks(
                     if !errs.is_empty() {
                         warn!(
                             log,
-                            "Failed to deploy storage for sled agent";
+                            "Failed to deploy physical disk for sled agent";
                             "successfully configured disks" => successes.len(),
                             "failed disk configurations" => errs.len(),
                         );
@@ -81,7 +81,7 @@ pub(crate) async fn deploy_disks(
 
                     info!(
                         log,
-                        "Successfully deployed storage for sled agent";
+                        "Successfully deployed physical disks for sled agent";
                         "successfully configured disks" => successes.len(),
                     );
                     None
@@ -181,6 +181,7 @@ mod test {
                 id,
                 blueprint_zones: BTreeMap::new(),
                 blueprint_disks,
+                blueprint_datasets: BTreeMap::new(),
                 sled_state: BTreeMap::new(),
                 cockroachdb_setting_preserve_downgrade:
                     CockroachDbPreserveDowngrade::DoNotModify,
