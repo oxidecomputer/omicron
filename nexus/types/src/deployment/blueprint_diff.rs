@@ -5,12 +5,16 @@
 //! Types helpful for diffing blueprints.
 
 use super::blueprint_display::{
-    constants::*, linear_table_modified, linear_table_unchanged, BpDiffState,
-    BpGeneration, BpOmicronZonesSubtableSchema, BpPhysicalDisksSubtableSchema,
+    constants::*, linear_table_modified, linear_table_unchanged,
+    BpClickhouseServersSubtableSchema, BpDiffState, BpGeneration,
+    BpOmicronZonesSubtableSchema, BpPhysicalDisksSubtableSchema,
     BpSledSubtable, BpSledSubtableColumn, BpSledSubtableData,
     BpSledSubtableRow, KvListWithHeading, KvPair,
 };
-use super::{zone_sort_key, CockroachDbPreserveDowngrade};
+use super::{
+    zone_sort_key, Blueprint, ClickhouseClusterConfig,
+    CockroachDbPreserveDowngrade, DiffBeforeClickhouseClusterConfig,
+};
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
@@ -19,6 +23,7 @@ use omicron_uuid_kinds::SledUuid;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+use crate::deployment::blueprint_display::BpClickhouseKeepersSubtableSchema;
 use crate::deployment::{
     BlueprintMetadata, BlueprintOrCollectionDisksConfig,
     BlueprintOrCollectionZoneConfig, BlueprintOrCollectionZonesConfig,
@@ -566,22 +571,25 @@ pub struct BlueprintDiff {
     pub sleds_removed: BTreeSet<SledUuid>,
     pub sleds_unchanged: BTreeSet<SledUuid>,
     pub sleds_modified: BTreeSet<SledUuid>,
+    pub before_clickhouse_cluster_config: DiffBeforeClickhouseClusterConfig,
+    pub after_clickhouse_cluster_config: Option<ClickhouseClusterConfig>,
 }
 
 impl BlueprintDiff {
     /// Build a diff with the provided contents, verifying that the provided
     /// data is valid.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         before_meta: DiffBeforeMetadata,
+        before_clickhouse_cluster_config: DiffBeforeClickhouseClusterConfig,
         before_state: BTreeMap<SledUuid, SledState>,
         before_zones: BTreeMap<SledUuid, BlueprintOrCollectionZonesConfig>,
         before_disks: BTreeMap<SledUuid, BlueprintOrCollectionDisksConfig>,
-        after_meta: BlueprintMetadata,
-        mut after_state: BTreeMap<SledUuid, SledState>,
-        after_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
-        after_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
+        after_blueprint: &Blueprint,
     ) -> Self {
+        let mut after_state = after_blueprint.sled_state.clone();
+        let after_zones = after_blueprint.blueprint_zones.clone();
+        let after_disks = after_blueprint.blueprint_disks.clone();
+
         // Work around a quirk of sled decommissioning. If a sled has a before
         // state of `decommissioned`, it may or may not be present in
         // `after_state` (presence will depend on whether or not the sled was
@@ -669,7 +677,7 @@ impl BlueprintDiff {
 
         BlueprintDiff {
             before_meta,
-            after_meta,
+            after_meta: after_blueprint.metadata(),
             before_state,
             after_state,
             zones,
@@ -678,12 +686,378 @@ impl BlueprintDiff {
             sleds_removed,
             sleds_unchanged: unchanged_sleds,
             sleds_modified,
+            before_clickhouse_cluster_config,
+            after_clickhouse_cluster_config: after_blueprint
+                .clickhouse_cluster_config
+                .clone(),
         }
     }
 
     /// Return a struct that can be used to display the diff.
     pub fn display(&self) -> BlueprintDiffDisplay<'_> {
         BlueprintDiffDisplay::new(self)
+    }
+}
+
+pub struct ClickhouseClusterConfigDiffTables {
+    pub metadata: KvListWithHeading,
+    pub keepers: BpSledSubtable,
+    pub servers: Option<BpSledSubtable>,
+}
+
+impl ClickhouseClusterConfigDiffTables {
+    pub fn diff_collection_and_blueprint(
+        before: &clickhouse_admin_types::ClickhouseKeeperClusterMembership,
+        after: &ClickhouseClusterConfig,
+    ) -> Self {
+        let leader_committed_log_index = if before.leader_committed_log_index
+            == after.highest_seen_keeper_leader_committed_log_index
+        {
+            KvPair::new(
+                BpDiffState::Unchanged,
+                CLICKHOUSE_HIGHEST_SEEN_KEEPER_LEADER_COMMITTED_LOG_INDEX,
+                linear_table_unchanged(
+                    &after.highest_seen_keeper_leader_committed_log_index,
+                ),
+            )
+        } else {
+            KvPair::new(
+                BpDiffState::Modified,
+                CLICKHOUSE_HIGHEST_SEEN_KEEPER_LEADER_COMMITTED_LOG_INDEX,
+                linear_table_modified(
+                    &before.leader_committed_log_index,
+                    &after.highest_seen_keeper_leader_committed_log_index,
+                ),
+            )
+        };
+        let metadata = KvListWithHeading::new(
+            CLICKHOUSE_CLUSTER_CONFIG_HEADING,
+            vec![
+                KvPair::new(
+                    BpDiffState::Added,
+                    GENERATION,
+                    linear_table_modified(
+                        &NOT_PRESENT_IN_COLLECTION_PARENS,
+                        &after.generation,
+                    ),
+                ),
+                KvPair::new(
+                    BpDiffState::Added,
+                    CLICKHOUSE_MAX_USED_SERVER_ID,
+                    linear_table_modified(
+                        &NOT_PRESENT_IN_COLLECTION_PARENS,
+                        &after.max_used_server_id,
+                    ),
+                ),
+                KvPair::new(
+                    BpDiffState::Added,
+                    CLICKHOUSE_MAX_USED_KEEPER_ID,
+                    linear_table_modified(
+                        &NOT_PRESENT_IN_COLLECTION_PARENS,
+                        &after.max_used_keeper_id,
+                    ),
+                ),
+                KvPair::new(
+                    BpDiffState::Added,
+                    CLICKHOUSE_CLUSTER_NAME,
+                    linear_table_modified(
+                        &NOT_PRESENT_IN_COLLECTION_PARENS,
+                        &after.cluster_name,
+                    ),
+                ),
+                KvPair::new(
+                    BpDiffState::Added,
+                    CLICKHOUSE_CLUSTER_SECRET,
+                    linear_table_modified(
+                        &NOT_PRESENT_IN_COLLECTION_PARENS,
+                        &after.cluster_secret,
+                    ),
+                ),
+                leader_committed_log_index,
+            ],
+        );
+
+        // Build up our keeper table
+        let mut keeper_rows = vec![];
+        for (zone_id, keeper_id) in &after.keepers {
+            if before.raft_config.contains(keeper_id) {
+                // Unchanged keepers
+                keeper_rows.push(BpSledSubtableRow::new(
+                    BpDiffState::Unchanged,
+                    vec![
+                        BpSledSubtableColumn::Value(zone_id.to_string()),
+                        BpSledSubtableColumn::Value(keeper_id.to_string()),
+                    ],
+                ));
+            } else {
+                // Added keepers
+                keeper_rows.push(BpSledSubtableRow::new(
+                    BpDiffState::Added,
+                    vec![
+                        BpSledSubtableColumn::Value(zone_id.to_string()),
+                        BpSledSubtableColumn::Value(keeper_id.to_string()),
+                    ],
+                ));
+            }
+        }
+
+        let after_ids: BTreeSet<_> = after.keepers.values().clone().collect();
+        for keeper_id in &before.raft_config {
+            if !after_ids.contains(keeper_id) {
+                // Removed keepers
+                keeper_rows.push(BpSledSubtableRow::new(
+                    BpDiffState::Removed,
+                    vec![
+                        BpSledSubtableColumn::Value(
+                            NOT_PRESENT_IN_COLLECTION_PARENS.to_string(),
+                        ),
+                        BpSledSubtableColumn::Value(keeper_id.to_string()),
+                    ],
+                ));
+            }
+        }
+
+        let keepers = BpSledSubtable::new(
+            BpClickhouseKeepersSubtableSchema {},
+            BpGeneration::Diff { before: None, after: Some(after.generation) },
+            keeper_rows,
+        );
+
+        // Build up our server table
+        let server_rows: Vec<BpSledSubtableRow> = after
+            .servers
+            .iter()
+            .map(|(zone_id, server_id)| {
+                BpSledSubtableRow::new(
+                    BpDiffState::Added,
+                    vec![
+                        BpSledSubtableColumn::diff(
+                            NOT_PRESENT_IN_COLLECTION_PARENS.to_string(),
+                            zone_id.to_string(),
+                        ),
+                        BpSledSubtableColumn::diff(
+                            NOT_PRESENT_IN_COLLECTION_PARENS.to_string(),
+                            server_id.to_string(),
+                        ),
+                    ],
+                )
+            })
+            .collect();
+
+        let servers = Some(BpSledSubtable::new(
+            BpClickhouseServersSubtableSchema {},
+            BpGeneration::Diff { before: None, after: Some(after.generation) },
+            server_rows,
+        ));
+
+        ClickhouseClusterConfigDiffTables { metadata, keepers, servers }
+    }
+
+    pub fn diff_blueprints(
+        before: &ClickhouseClusterConfig,
+        after: &ClickhouseClusterConfig,
+    ) -> Self {
+        macro_rules! diff_row {
+            ($member:ident, $label:expr) => {
+                if before.$member == after.$member {
+                    KvPair::new(
+                        BpDiffState::Unchanged,
+                        $label,
+                        linear_table_unchanged(&after.$member),
+                    )
+                } else {
+                    KvPair::new(
+                        BpDiffState::Modified,
+                        $label,
+                        linear_table_modified(&before.$member, &after.$member),
+                    )
+                }
+            };
+        }
+
+        let metadata = KvListWithHeading::new(
+            CLICKHOUSE_CLUSTER_CONFIG_HEADING,
+            vec![
+                diff_row!(generation, GENERATION),
+                diff_row!(max_used_server_id, CLICKHOUSE_MAX_USED_SERVER_ID),
+                diff_row!(max_used_keeper_id, CLICKHOUSE_MAX_USED_KEEPER_ID),
+                diff_row!(cluster_name, CLICKHOUSE_CLUSTER_NAME),
+                diff_row!(cluster_secret, CLICKHOUSE_CLUSTER_SECRET),
+                diff_row!(
+                    highest_seen_keeper_leader_committed_log_index,
+                    CLICKHOUSE_HIGHEST_SEEN_KEEPER_LEADER_COMMITTED_LOG_INDEX
+                ),
+            ],
+        );
+
+        // Macro used to construct keeper and server tables
+        macro_rules! diff_table_rows {
+            ($rows:ident, $collection:ident) => {
+                for (zone_id, id) in &after.$collection {
+                    if before.$collection.contains_key(zone_id) {
+                        // Unchanged
+                        $rows.push(BpSledSubtableRow::new(
+                            BpDiffState::Unchanged,
+                            vec![
+                                BpSledSubtableColumn::Value(
+                                    zone_id.to_string(),
+                                ),
+                                BpSledSubtableColumn::Value(id.to_string()),
+                            ],
+                        ));
+                    } else {
+                        // Added
+                        $rows.push(BpSledSubtableRow::new(
+                            BpDiffState::Added,
+                            vec![
+                                BpSledSubtableColumn::Value(
+                                    zone_id.to_string(),
+                                ),
+                                BpSledSubtableColumn::Value(id.to_string()),
+                            ],
+                        ));
+                    }
+                }
+
+                for (zone_id, id) in &before.$collection {
+                    if !after.$collection.contains_key(zone_id) {
+                        // Removed
+                        $rows.push(BpSledSubtableRow::new(
+                            BpDiffState::Removed,
+                            vec![
+                                BpSledSubtableColumn::Value(
+                                    zone_id.to_string(),
+                                ),
+                                BpSledSubtableColumn::Value(id.to_string()),
+                            ],
+                        ));
+                    }
+                }
+            };
+        }
+
+        // Construct our keeper table
+        let mut keeper_rows = vec![];
+        diff_table_rows!(keeper_rows, keepers);
+        let keepers = BpSledSubtable::new(
+            BpClickhouseKeepersSubtableSchema {},
+            BpGeneration::Diff {
+                before: Some(before.generation),
+                after: Some(after.generation),
+            },
+            keeper_rows,
+        );
+
+        // Construct our server table
+        let mut server_rows = vec![];
+        diff_table_rows!(server_rows, servers);
+
+        let servers = Some(BpSledSubtable::new(
+            BpClickhouseServersSubtableSchema {},
+            BpGeneration::Diff {
+                before: Some(before.generation),
+                after: Some(after.generation),
+            },
+            server_rows,
+        ));
+
+        ClickhouseClusterConfigDiffTables { metadata, keepers, servers }
+    }
+
+    /// We are diffing a `Collection` and `Blueprint` but  the latest blueprint
+    /// does not have a ClickhouseClusterConfig.
+    pub fn removed_from_collection(
+        before: &clickhouse_admin_types::ClickhouseKeeperClusterMembership,
+    ) -> Self {
+        // There's only so much information in a collection. Show what we can.
+        let metadata = KvListWithHeading::new(
+            CLICKHOUSE_CLUSTER_CONFIG_HEADING,
+            vec![KvPair::new(
+                BpDiffState::Removed,
+                CLICKHOUSE_HIGHEST_SEEN_KEEPER_LEADER_COMMITTED_LOG_INDEX,
+                before.leader_committed_log_index.to_string(),
+            )],
+        );
+
+        let keeper_rows: Vec<BpSledSubtableRow> = before
+            .raft_config
+            .iter()
+            .map(|keeper_id| {
+                BpSledSubtableRow::new(
+                    BpDiffState::Removed,
+                    vec![
+                        BpSledSubtableColumn::Value(
+                            NOT_PRESENT_IN_COLLECTION_PARENS.to_string(),
+                        ),
+                        BpSledSubtableColumn::Value(keeper_id.to_string()),
+                    ],
+                )
+            })
+            .collect();
+
+        let keepers = BpSledSubtable::new(
+            BpClickhouseKeepersSubtableSchema {},
+            BpGeneration::unknown(),
+            keeper_rows,
+        );
+
+        ClickhouseClusterConfigDiffTables { metadata, keepers, servers: None }
+    }
+
+    /// The "before" inventory collection or blueprint does not have a relevant
+    /// keeper configuration.
+    pub fn added_to_blueprint(after: &ClickhouseClusterConfig) -> Self {
+        Self::single_blueprint_table(BpDiffState::Added, after)
+    }
+
+    /// We are diffing two `Blueprint`s, but The latest bluerprint does not have
+    /// a `ClickhouseClusterConfig`.
+    pub fn removed_from_blueprint(before: &ClickhouseClusterConfig) -> Self {
+        Self::single_blueprint_table(BpDiffState::Removed, before)
+    }
+
+    pub fn single_blueprint_table(
+        diff_state: BpDiffState,
+        config: &ClickhouseClusterConfig,
+    ) -> Self {
+        let rows: Vec<_> = [
+            (GENERATION, config.generation.to_string()),
+            (
+                CLICKHOUSE_MAX_USED_SERVER_ID,
+                config.max_used_server_id.to_string(),
+            ),
+            (
+                CLICKHOUSE_MAX_USED_KEEPER_ID,
+                config.max_used_keeper_id.to_string(),
+            ),
+            (CLICKHOUSE_CLUSTER_NAME, config.cluster_name.clone()),
+            (CLICKHOUSE_CLUSTER_SECRET, config.cluster_secret.clone()),
+            (
+                CLICKHOUSE_HIGHEST_SEEN_KEEPER_LEADER_COMMITTED_LOG_INDEX,
+                config
+                    .highest_seen_keeper_leader_committed_log_index
+                    .to_string(),
+            ),
+        ]
+        .into_iter()
+        .map(|(key, val)| KvPair::new(diff_state, key, val))
+        .collect();
+
+        let metadata =
+            KvListWithHeading::new(CLICKHOUSE_CLUSTER_CONFIG_HEADING, rows);
+
+        let keepers = BpSledSubtable::new(
+            BpClickhouseKeepersSubtableSchema {},
+            BpGeneration::Value(config.generation),
+            (config.generation, &config.keepers).rows(diff_state).collect(),
+        );
+        let servers = Some(BpSledSubtable::new(
+            BpClickhouseServersSubtableSchema {},
+            BpGeneration::Value(config.generation),
+            (config.generation, &config.servers).rows(diff_state).collect(),
+        ));
+
+        ClickhouseClusterConfigDiffTables { metadata, keepers, servers }
     }
 }
 
@@ -772,6 +1146,72 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
                 ],
             ),
         ]
+    }
+
+    pub fn make_clickhouse_cluster_config_diff_tables(
+        &self,
+    ) -> Option<ClickhouseClusterConfigDiffTables> {
+        match (
+            &self.diff.before_clickhouse_cluster_config,
+            &self.diff.after_clickhouse_cluster_config,
+        ) {
+            // Before collection + after blueprint
+            (
+                DiffBeforeClickhouseClusterConfig::Collection {
+                    latest_keeper_membership: Some(before),
+                    ..
+                },
+                Some(after),
+            ) => Some(ClickhouseClusterConfigDiffTables::diff_collection_and_blueprint(before, after)),
+
+            // Before collection only
+            (
+                DiffBeforeClickhouseClusterConfig::Collection {
+                    latest_keeper_membership: Some(before),
+                    ..
+                },
+                None,
+            ) => Some(ClickhouseClusterConfigDiffTables::removed_from_collection(before)),
+
+            // After blueprint only
+            (
+                DiffBeforeClickhouseClusterConfig::Collection {
+                    latest_keeper_membership: None,
+                    ..
+                },
+                Some(after),
+            ) => Some(ClickhouseClusterConfigDiffTables::added_to_blueprint(after)),
+
+            // No before or after
+            (
+                DiffBeforeClickhouseClusterConfig::Collection {
+                    latest_keeper_membership: None,
+                    ..
+                },
+                None,
+            ) => None,
+
+            // Before blueprint + after blueprint
+            (
+                DiffBeforeClickhouseClusterConfig::Blueprint(Some(before)),
+                Some(after),
+            ) => Some(ClickhouseClusterConfigDiffTables::diff_blueprints(before, after)),
+
+            // Before blueprint only
+            (
+                DiffBeforeClickhouseClusterConfig::Blueprint(Some(before)),
+                None,
+            ) => Some(ClickhouseClusterConfigDiffTables::removed_from_blueprint(before)),
+
+            // After blueprint only
+            (
+                DiffBeforeClickhouseClusterConfig::Blueprint(None),
+                Some(after),
+            ) => Some(ClickhouseClusterConfigDiffTables::added_to_blueprint(after)),
+
+            // No before or after
+            (DiffBeforeClickhouseClusterConfig::Blueprint(None), None) => None,
+        }
     }
 
     /// Write out physical disk and zone tables for a given `sled_id`
@@ -974,6 +1414,16 @@ impl<'diff> fmt::Display for BlueprintDiffDisplay<'diff> {
         // Write out metadata diff table
         for table in self.make_metadata_diff_tables() {
             writeln!(f, "{}", table)?;
+        }
+
+        // Write out clickhouse cluster diff tables
+        if let Some(tables) = self.make_clickhouse_cluster_config_diff_tables()
+        {
+            writeln!(f, "{}", tables.metadata)?;
+            writeln!(f, "{}", tables.keepers)?;
+            if let Some(servers) = &tables.servers {
+                writeln!(f, "{}", servers)?;
+            }
         }
 
         Ok(())

@@ -23,6 +23,14 @@ pub mod constants {
     pub const COCKROACHDB_PRESERVE_DOWNGRADE: &str =
         "cluster.preserve_downgrade_option";
     pub const METADATA_HEADING: &str = "METADATA";
+    pub const CLICKHOUSE_CLUSTER_CONFIG_HEADING: &str =
+        "CLICKHOUSE CLUSTER CONFIG";
+    pub const CLICKHOUSE_MAX_USED_SERVER_ID: &str = "max used server id";
+    pub const CLICKHOUSE_MAX_USED_KEEPER_ID: &str = "max used keeper id";
+    pub const CLICKHOUSE_CLUSTER_NAME: &str = "cluster name";
+    pub const CLICKHOUSE_CLUSTER_SECRET: &str = "cluster secret";
+    pub const CLICKHOUSE_HIGHEST_SEEN_KEEPER_LEADER_COMMITTED_LOG_INDEX: &str =
+        "highest seen keeper leader committed log index";
     pub const CREATED_BY: &str = "created by";
     pub const CREATED_AT: &str = "created at";
     pub const INTERNAL_DNS_VERSION: &str = "internal DNS version";
@@ -34,6 +42,7 @@ pub mod constants {
     pub const NOT_PRESENT_IN_COLLECTION_PARENS: &str =
         "(not present in collection)";
     pub const INVALID_VALUE_PARENS: &str = "(invalid value)";
+    pub const GENERATION: &str = "generation";
 }
 use constants::*;
 
@@ -80,6 +89,13 @@ pub enum BpGeneration {
     Diff { before: Option<Generation>, after: Option<Generation> },
 }
 
+impl BpGeneration {
+    // Used when there isn't a corresponding generation
+    pub fn unknown() -> Self {
+        BpGeneration::Diff { before: None, after: None }
+    }
+}
+
 impl fmt::Display for BpGeneration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -100,7 +116,7 @@ impl fmt::Display for BpGeneration {
                 }
             }
             BpGeneration::Diff { before: None, after: None } => {
-                write!(f, "Error: unknown generation")
+                write!(f, "unknown generation")
             }
         }
     }
@@ -176,6 +192,9 @@ pub trait BpSledSubtableData {
 }
 
 /// A table specific to a sled resource, such as a zone or disk.
+//
+// TODO: Rename to `BpTable` since it is also used for blueprint wide tables
+// like those relating to `ClickhouseClusterConfig`?
 pub struct BpSledSubtable {
     table_name: &'static str,
     column_names: &'static [&'static str],
@@ -331,6 +350,30 @@ impl BpSledSubtableSchema for BpOmicronZonesSubtableSchema {
     }
     fn column_names(&self) -> &'static [&'static str] {
         &["zone type", "zone id", "disposition", "underlay IP"]
+    }
+}
+
+/// The [`BpSledSubtable`] schema for clickhouse keepers
+pub struct BpClickhouseKeepersSubtableSchema {}
+impl BpSledSubtableSchema for BpClickhouseKeepersSubtableSchema {
+    fn table_name(&self) -> &'static str {
+        "clickhouse keepers"
+    }
+
+    fn column_names(&self) -> &'static [&'static str] {
+        &["zone id", "keeper id"]
+    }
+}
+
+/// The [`BpSledSubtable`] schema for clickhouse servers
+pub struct BpClickhouseServersSubtableSchema {}
+impl BpSledSubtableSchema for BpClickhouseServersSubtableSchema {
+    fn table_name(&self) -> &'static str {
+        "clickhouse servers"
+    }
+
+    fn column_names(&self) -> &'static [&'static str] {
+        &["zone id", "server id"]
     }
 }
 

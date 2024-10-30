@@ -17,6 +17,7 @@ use crate::internal_api::params::DnsConfigParams;
 use crate::inventory::Collection;
 pub use crate::inventory::SourceNatConfig;
 pub use crate::inventory::ZpoolName;
+use blueprint_diff::ClickhouseClusterConfigDiffTables;
 use derive_more::From;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
@@ -268,8 +269,7 @@ impl Blueprint {
         self.blueprint_zones.keys().copied()
     }
 
-    /// Summarize the difference between sleds and zones between two
-    /// blueprints.
+    /// Summarize the difference between two blueprints.
     ///
     /// The argument provided is the "before" side, and `self` is the "after"
     /// side. This matches the order of arguments to
@@ -277,6 +277,7 @@ impl Blueprint {
     pub fn diff_since_blueprint(&self, before: &Blueprint) -> BlueprintDiff {
         BlueprintDiff::new(
             DiffBeforeMetadata::Blueprint(Box::new(before.metadata())),
+            DiffBeforeClickhouseClusterConfig::from(before),
             before.sled_state.clone(),
             before
                 .blueprint_zones
@@ -288,15 +289,11 @@ impl Blueprint {
                 .iter()
                 .map(|(sled_id, disks)| (*sled_id, disks.clone().into()))
                 .collect(),
-            self.metadata(),
-            self.sled_state.clone(),
-            self.blueprint_zones.clone(),
-            self.blueprint_disks.clone(),
+            &self,
         )
     }
 
-    /// Summarize the differences in sleds and zones between a collection and a
-    /// blueprint.
+    /// Summarize the differences between a collection and a blueprint.
     ///
     /// This gives an idea about what would change about a running system if
     /// one were to execute the blueprint.
@@ -339,13 +336,11 @@ impl Blueprint {
 
         BlueprintDiff::new(
             DiffBeforeMetadata::Collection { id: before.id },
+            DiffBeforeClickhouseClusterConfig::from(before),
             before_state,
             before_zones,
             before_disks,
-            self.metadata(),
-            self.sled_state.clone(),
-            self.blueprint_zones.clone(),
-            self.blueprint_disks.clone(),
+            &self,
         )
     }
 
@@ -395,6 +390,30 @@ impl BpSledSubtableData for BlueprintOrCollectionZonesConfig {
                     zone.disposition().to_string(),
                     zone.underlay_ip().to_string(),
                 ],
+            )
+        })
+    }
+}
+
+// Useful implementation for printing two column tables stored in a `BTreeMap`, where
+// each key and value impl `Display`.
+impl<S1, S2> BpSledSubtableData for (Generation, &BTreeMap<S1, S2>)
+where
+    S1: fmt::Display,
+    S2: fmt::Display,
+{
+    fn bp_generation(&self) -> BpGeneration {
+        BpGeneration::Value(self.0)
+    }
+
+    fn rows(
+        &self,
+        state: BpDiffState,
+    ) -> impl Iterator<Item = BpSledSubtableRow> {
+        self.1.iter().map(move |(s1, s2)| {
+            BpSledSubtableRow::from_strings(
+                state,
+                vec![s1.to_string(), s2.to_string()],
             )
         })
     }
@@ -461,6 +480,30 @@ impl<'a> BlueprintDisplay<'a> {
                 ),
             ],
         )
+    }
+
+    // Return tables representing a [`ClickhouseClusterConfig`] in a given blueprint
+    fn make_clickhouse_cluster_config_tables(
+        &self,
+    ) -> Option<(KvListWithHeading, BpSledSubtable, BpSledSubtable)> {
+        let Some(config) = &self.blueprint.clickhouse_cluster_config else {
+            return None;
+        };
+
+        let diff_table =
+            ClickhouseClusterConfigDiffTables::single_blueprint_table(
+                BpDiffState::Unchanged,
+                config,
+            );
+
+        Some((
+            diff_table.metadata,
+            diff_table.keepers,
+            // Safety: The call to
+            // `ClickhouseClusterConfigDiffTables::single_blueprint_table`
+            // always returns all tables.
+            diff_table.servers.unwrap(),
+        ))
     }
 }
 
@@ -543,6 +586,11 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
                     )
                 )?;
             }
+        }
+
+        if let Some((t1, t2, t3)) = self.make_clickhouse_cluster_config_tables()
+        {
+            writeln!(f, "{t1}\n{t2}\n{t3}\n")?;
         }
 
         writeln!(f, "{}", self.make_cockroachdb_table())?;
@@ -1009,6 +1057,37 @@ impl DiffBeforeMetadata {
             DiffBeforeMetadata::Collection { id } => format!("collection {id}"),
             DiffBeforeMetadata::Blueprint(b) => b.display_id(),
         }
+    }
+}
+
+/// Data about the "before" version within a [`BlueprintDiff`]
+///
+/// We only track keepers in inventory collections.
+#[derive(Clone, Debug)]
+pub enum DiffBeforeClickhouseClusterConfig {
+    Collection {
+        id: CollectionUuid,
+        latest_keeper_membership:
+            Option<clickhouse_admin_types::ClickhouseKeeperClusterMembership>,
+    },
+    Blueprint(Option<ClickhouseClusterConfig>),
+}
+
+impl From<&Collection> for DiffBeforeClickhouseClusterConfig {
+    fn from(value: &Collection) -> Self {
+        DiffBeforeClickhouseClusterConfig::Collection {
+            id: value.id,
+            latest_keeper_membership: value
+                .latest_clickhouse_keeper_membership(),
+        }
+    }
+}
+
+impl From<&Blueprint> for DiffBeforeClickhouseClusterConfig {
+    fn from(value: &Blueprint) -> Self {
+        DiffBeforeClickhouseClusterConfig::Blueprint(
+            value.clickhouse_cluster_config.clone(),
+        )
     }
 }
 
