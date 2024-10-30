@@ -431,7 +431,7 @@ done
 	--image-description "debian 11 original base image" \
 	--image-os debian \
 	--image-version "11" \
-    --thread-count 1
+	--parallelism 1
 /usr/oxide/oxide --resolve "$OXIDE_RESOLVE" --cacert "$E2E_TLS_CERT" \
 	image promote --project images --image debian11
 
