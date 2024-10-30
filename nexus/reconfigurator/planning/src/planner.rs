@@ -231,8 +231,12 @@ impl<'a> Planner<'a> {
         {
             // First, we need to ensure that sleds are using their expected
             // disks. This is necessary before we can allocate any zones.
-            if let EnsureMultiple::Changed { added, removed } =
-                self.blueprint.sled_ensure_disks(sled_id, &sled_resources)?
+            if let EnsureMultiple::Changed {
+                added,
+                updated,
+                expunged: _,
+                removed,
+            } = self.blueprint.sled_ensure_disks(sled_id, &sled_resources)?
             {
                 info!(
                     &self.log,
@@ -242,6 +246,7 @@ impl<'a> Planner<'a> {
                 self.blueprint.record_operation(Operation::UpdateDisks {
                     sled_id,
                     added,
+                    updated,
                     removed,
                 });
 
@@ -344,7 +349,46 @@ impl<'a> Planner<'a> {
             }
         }
 
-        self.do_plan_add_discretionary_zones(&sleds_waiting_for_ntp_zone)
+        self.do_plan_add_discretionary_zones(&sleds_waiting_for_ntp_zone)?;
+
+        // Now that we've added all the disks and zones we plan on adding,
+        // ensure that all sleds have the datasets they need to have.
+        self.do_plan_datasets()?;
+
+        Ok(())
+    }
+
+    fn do_plan_datasets(&mut self) -> Result<(), Error> {
+        for (sled_id, sled_resources) in
+            self.input.all_sled_resources(SledFilter::InService)
+        {
+            if let EnsureMultiple::Changed {
+                added,
+                updated,
+                expunged,
+                removed,
+            } =
+                self.blueprint.sled_ensure_datasets(sled_id, &sled_resources)?
+            {
+                info!(
+                    &self.log,
+                    "altered datasets";
+                    "sled_id" => %sled_id,
+                    "added" => added,
+                    "updated" => updated,
+                    "expunged" => expunged,
+                    "removed" => removed,
+                );
+                self.blueprint.record_operation(Operation::UpdateDatasets {
+                    sled_id,
+                    added,
+                    updated,
+                    expunged,
+                    removed,
+                });
+            }
+        }
+        Ok(())
     }
 
     fn do_plan_add_discretionary_zones(
@@ -598,12 +642,19 @@ impl<'a> Planner<'a> {
                 }
             };
             match result {
-                EnsureMultiple::Changed { added, removed } => {
+                EnsureMultiple::Changed {
+                    added,
+                    updated,
+                    expunged,
+                    removed,
+                } => {
                     info!(
                         self.log, "modified zones on sled";
                         "sled_id" => %sled_id,
                         "kind" => ?kind,
                         "added" => added,
+                        "updated" => updated,
+                        "expunged" => expunged,
                         "removed" => removed,
                     );
                     new_zones_added += added;
@@ -1445,7 +1496,12 @@ mod test {
             builder
                 .sled_ensure_zone_multiple_external_dns(sled_id, 3)
                 .expect("can't add external DNS zones"),
-            EnsureMultiple::Changed { added: 0, removed: 0 },
+            EnsureMultiple::Changed {
+                added: 0,
+                updated: 0,
+                removed: 0,
+                expunged: 0
+            },
         );
 
         // Build a builder for a modfied blueprint that will include
@@ -1484,13 +1540,23 @@ mod test {
             blueprint_builder
                 .sled_ensure_zone_multiple_external_dns(sled_1, 2)
                 .expect("can't add external DNS zones to blueprint"),
-            EnsureMultiple::Changed { added: 2, removed: 0 }
+            EnsureMultiple::Changed {
+                added: 2,
+                updated: 0,
+                removed: 0,
+                expunged: 0
+            }
         ));
         assert!(matches!(
             blueprint_builder
                 .sled_ensure_zone_multiple_external_dns(sled_2, 1)
                 .expect("can't add external DNS zones to blueprint"),
-            EnsureMultiple::Changed { added: 1, removed: 0 }
+            EnsureMultiple::Changed {
+                added: 1,
+                updated: 0,
+                removed: 0,
+                expunged: 0
+            }
         ));
 
         let blueprint1a = blueprint_builder.build();
@@ -1641,13 +1707,13 @@ mod test {
         for _ in 0..NEW_IN_SERVICE_DISKS {
             sled_details.resources.zpools.insert(
                 ZpoolUuid::from(zpool_rng.next()),
-                new_sled_disk(PhysicalDiskPolicy::InService),
+                (new_sled_disk(PhysicalDiskPolicy::InService), vec![]),
             );
         }
         for _ in 0..NEW_EXPUNGED_DISKS {
             sled_details.resources.zpools.insert(
                 ZpoolUuid::from(zpool_rng.next()),
-                new_sled_disk(PhysicalDiskPolicy::Expunged),
+                (new_sled_disk(PhysicalDiskPolicy::Expunged), vec![]),
             );
         }
 
@@ -1726,7 +1792,7 @@ mod test {
             }
         }
         let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
-        let (_, disk) = sled_details
+        let (_, (disk, _datasets)) = sled_details
             .resources
             .zpools
             .iter_mut()
@@ -1851,7 +1917,7 @@ mod test {
         // For that pool, find the physical disk behind it, and mark it
         // expunged.
         let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
-        let disk = sled_details
+        let (disk, _datasets) = sled_details
             .resources
             .zpools
             .get_mut(&pool_to_expunge.id())

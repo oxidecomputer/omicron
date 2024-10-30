@@ -12,11 +12,13 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::execution::*;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintDatasetFilter;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::SledState;
 use nexus_types::identity::Asset;
 use omicron_physical_disks::DeployDisksDone;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -110,6 +112,13 @@ pub async fn realize_blueprint_with_overrides(
 
     let deploy_disks_done = register_deploy_disks_step(
         &engine.for_component(ExecutionComponent::PhysicalDisks),
+        &opctx,
+        blueprint,
+        sled_list.clone(),
+    );
+
+    register_deploy_datasets_step(
+        &engine.for_component(ExecutionComponent::Datasets),
         &opctx,
         blueprint,
         sled_list.clone(),
@@ -283,6 +292,32 @@ fn register_deploy_disks_step<'a>(
         .register()
 }
 
+fn register_deploy_datasets_step<'a>(
+    registrar: &ComponentRegistrar<'_, 'a>,
+    opctx: &'a OpContext,
+    blueprint: &'a Blueprint,
+    sleds: SharedStepHandle<Arc<BTreeMap<SledUuid, Sled>>>,
+) {
+    registrar
+        .new_step(
+            ExecutionStepId::Ensure,
+            "Deploy datasets",
+            move |cx| async move {
+                let sleds_by_id = sleds.into_value(cx.token()).await;
+                datasets::deploy_datasets(
+                    &opctx,
+                    &sleds_by_id,
+                    &blueprint.blueprint_datasets,
+                )
+                .await
+                .map_err(merge_anyhow_list)?;
+
+                StepSuccess::new(()).into()
+            },
+        )
+        .register();
+}
+
 fn register_deploy_zones_step<'a>(
     registrar: &ComponentRegistrar<'_, 'a>,
     opctx: &'a OpContext,
@@ -348,6 +383,7 @@ fn register_dataset_records_step<'a>(
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
 ) {
+    let bp_id = BlueprintUuid::from_untyped_uuid(blueprint.id);
     registrar
         .new_step(
             ExecutionStepId::Ensure,
@@ -356,9 +392,8 @@ fn register_dataset_records_step<'a>(
                 datasets::ensure_dataset_records_exist(
                     &opctx,
                     datastore,
-                    blueprint
-                        .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
-                        .map(|(_sled_id, zone)| zone),
+                    bp_id,
+                    blueprint.all_omicron_datasets(BlueprintDatasetFilter::All),
                 )
                 .await?;
 

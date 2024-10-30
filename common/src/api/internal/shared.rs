@@ -860,8 +860,8 @@ pub enum DatasetKind {
     InternalDns,
 
     // Zone filesystems
-    ZoneRoot,
-    Zone {
+    TransientZoneRoot,
+    TransientZone {
         name: String,
     },
 
@@ -929,7 +929,7 @@ impl DatasetKind {
         match self {
             Cockroach | Crucible | Clickhouse | ClickhouseKeeper
             | ClickhouseServer | ExternalDns | InternalDns => true,
-            ZoneRoot | Zone { .. } | Debug | Update => false,
+            TransientZoneRoot | TransientZone { .. } | Debug | Update => false,
         }
     }
 
@@ -937,7 +937,7 @@ impl DatasetKind {
     ///
     /// Otherwise, returns "None".
     pub fn zone_name(&self) -> Option<&str> {
-        if let DatasetKind::Zone { name } = self {
+        if let DatasetKind::TransientZone { name } = self {
             Some(name)
         } else {
             None
@@ -961,8 +961,8 @@ impl fmt::Display for DatasetKind {
             ClickhouseServer => "clickhouse_server",
             ExternalDns => "external_dns",
             InternalDns => "internal_dns",
-            ZoneRoot => "zone",
-            Zone { name } => {
+            TransientZoneRoot => "zone",
+            TransientZone { name } => {
                 write!(f, "zone/{}", name)?;
                 return Ok(());
             }
@@ -992,12 +992,12 @@ impl FromStr for DatasetKind {
             "clickhouse_server" => ClickhouseServer,
             "external_dns" => ExternalDns,
             "internal_dns" => InternalDns,
-            "zone" => ZoneRoot,
+            "zone" => TransientZoneRoot,
             "debug" => Debug,
             "update" => Update,
             other => {
                 if let Some(name) = other.strip_prefix("zone/") {
-                    Zone { name: name.to_string() }
+                    TransientZone { name: name.to_string() }
                 } else {
                     return Err(DatasetKindParseError::UnknownDataset(
                         s.to_string(),
@@ -1087,8 +1087,8 @@ mod tests {
             DatasetKind::ClickhouseServer,
             DatasetKind::ExternalDns,
             DatasetKind::InternalDns,
-            DatasetKind::ZoneRoot,
-            DatasetKind::Zone { name: String::from("myzone") },
+            DatasetKind::TransientZoneRoot,
+            DatasetKind::TransientZone { name: String::from("myzone") },
             DatasetKind::Debug,
             DatasetKind::Update,
         ];
