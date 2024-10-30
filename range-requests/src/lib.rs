@@ -111,9 +111,7 @@ impl PotentialRange {
     /// On failure, returns a range response with the appropriate headers
     /// to inform the caller how to make a correct range request.
     pub fn parse(&self, len: u64) -> Result<SingleRange, Response<Body>> {
-        self.single_range(len).map_err(|_err| {
-            bad_range_response(len)
-        })
+        self.single_range(len).map_err(|_err| bad_range_response(len))
     }
 
     fn single_range(&self, len: u64) -> Result<SingleRange, Error> {
@@ -142,9 +140,9 @@ pub struct SingleRange {
 #[cfg(test)]
 impl PartialEq for SingleRange {
     fn eq(&self, other: &Self) -> bool {
-        self.range.start == other.range.start &&
-            self.range.length == other.range.length &&
-            self.total == other.total
+        self.range.start == other.range.start
+            && self.range.length == other.range.length
+            && self.total == other.total
     }
 }
 
@@ -155,7 +153,8 @@ impl SingleRange {
     ) -> Result<Self, Error> {
         let http_range::HttpRange { start, mut length } = range;
 
-        const INVALID_RANGE: Error = Error::Parse(http_range::HttpRangeParseError::InvalidRange);
+        const INVALID_RANGE: Error =
+            Error::Parse(http_range::HttpRangeParseError::InvalidRange);
 
         // Clip the length to avoid going beyond the end of the total range
         if start.checked_add(length).ok_or(INVALID_RANGE)? >= total {
@@ -166,10 +165,7 @@ impl SingleRange {
             return Err(INVALID_RANGE);
         }
 
-        Ok(Self {
-            range: http_range::HttpRange { start, length },
-            total
-        })
+        Ok(Self { range: http_range::HttpRange { start, length }, total })
     }
 
     /// Return the first byte in this range for use in inclusive ranges.
@@ -181,13 +177,23 @@ impl SingleRange {
     pub fn end_inclusive(&self) -> u64 {
         assert!(self.range.length > 0);
 
-        self.range.start.checked_add(self.range.length).unwrap().checked_sub(1).unwrap()
+        self.range
+            .start
+            .checked_add(self.range.length)
+            .unwrap()
+            .checked_sub(1)
+            .unwrap()
     }
 
     /// Generate the Content-Range header for inclusion in a HTTP 206 partial
     /// content response using this range.
     pub fn to_content_range(&self) -> String {
-        format!("bytes {}-{}/{}", self.range.start, self.end_inclusive(), self.total)
+        format!(
+            "bytes {}-{}/{}",
+            self.range.start,
+            self.end_inclusive(),
+            self.total
+        )
     }
 
     /// Generate a Range header for inclusion in another HTTP request; e.g.,
@@ -267,20 +273,16 @@ mod test {
     #[test]
     fn parse_range_invalid() {
         let pr = PotentialRange(b"bytes=50-50".to_vec());
-        assert!(
-            matches!(
-                pr.single_range(50).expect_err("Range should be invalid"),
-                Error::Parse(http_range::HttpRangeParseError::NoOverlap),
-            )
-        );
+        assert!(matches!(
+            pr.single_range(50).expect_err("Range should be invalid"),
+            Error::Parse(http_range::HttpRangeParseError::NoOverlap),
+        ));
 
         let pr = PotentialRange(b"bytes=20-1".to_vec());
-        assert!(
-            matches!(
-                pr.single_range(50).expect_err("Range should be invalid"),
-                Error::Parse(http_range::HttpRangeParseError::InvalidRange),
-            )
-        );
+        assert!(matches!(
+            pr.single_range(50).expect_err("Range should be invalid"),
+            Error::Parse(http_range::HttpRangeParseError::InvalidRange),
+        ));
     }
 
     #[test]
