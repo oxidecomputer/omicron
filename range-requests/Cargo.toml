@@ -17,6 +17,7 @@ http-range.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
 thiserror.workspace = true
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
