@@ -132,7 +132,7 @@ async fn inventory_activate(
         })
         .collect::<Vec<_>>();
 
-    // Find clickhouse-admin-keeper clients if there are any
+    // Find clickhouse-admin-keeper servers if there are any.
     let keeper_admin_clients = match resolver
         .lookup_all_socket_v6(ServiceName::ClickhouseAdminKeeper)
         .await
