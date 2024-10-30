@@ -345,10 +345,7 @@ mod test {
             "application/octet-stream"
         );
         assert_eq!(headers.get(CONTENT_LENGTH).unwrap(), "512");
-        assert_eq!(
-            headers.get(CONTENT_RANGE).unwrap(),
-            &format!("bytes 0-511/1024")
-        );
+        assert_eq!(headers.get(CONTENT_RANGE).unwrap(), "bytes 0-511/1024",);
 
         // Second half
         let response = ranged_get_request(512, 512, 1024);
@@ -362,10 +359,7 @@ mod test {
             "application/octet-stream"
         );
         assert_eq!(headers.get(CONTENT_LENGTH).unwrap(), "512");
-        assert_eq!(
-            headers.get(CONTENT_RANGE).unwrap(),
-            &format!("bytes 512-1023/1024")
-        );
+        assert_eq!(headers.get(CONTENT_RANGE).unwrap(), "bytes 512-1023/1024",);
 
         // Partially out of bounds
         let response = ranged_get_request(1000, 512, 1024);
@@ -379,10 +373,7 @@ mod test {
             "application/octet-stream"
         );
         assert_eq!(headers.get(CONTENT_LENGTH).unwrap(), "24");
-        assert_eq!(
-            headers.get(CONTENT_RANGE).unwrap(),
-            &format!("bytes 1000-1023/1024")
-        );
+        assert_eq!(headers.get(CONTENT_RANGE).unwrap(), "bytes 1000-1023/1024",);
 
         // Fully out of bounds
         assert!(matches!(
