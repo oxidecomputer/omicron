@@ -168,6 +168,34 @@ If you cannot write the data migration in SQL, you would need to figure out a
 different way to backfill the data before you can apply the step that adds the
 `NOT NULL` constraint. This is likely a substantial project
 
+==== Changing enum variants
+
+Adding a new variant to an enum is straightforward: `ALTER TYPE your_type ADD
+VALUE IF NOT EXISTS your_new_value AFTER some_existing_value` (or `... BEFORE
+some_existing_value`) (e.g., the `add-management-gateway-producer-kind`
+migration).
+
+Removing or renaming variants is more burdensome. `ALTER TYPE DROP VALUE ...`
+and `ALTER TYPE RENAME VALUE ...` both exist, but they do not have idempotent
+variants, making them unsuitable for migrations. Instead, you can use the
+following sequence of migration steps:
+
+1. Create a new temporary enum with the new variants, and a different name as the old type.
+2. Create a new temporary column with the temporary enum type. (Adding a column supports `IF NOT EXISTS`).
+3. Set the values of the temporary column based on the value of the old column.
+4. Drop the old column.
+5. Drop the old type.
+6. Create a new enum with the new variants, and the same name as the original enum type (which we can now do, as the old type has been dropped).
+7. Create a new column with the same name as the original column, and the new type --- again, we can do this now as the original column has been dropped.
+8. Set the values of the new column based on the temporary column.
+9. Drop the temporary column.
+10. Drop the temporary type.
+
+For an example, see the `auto-restart-policy-v2` migration (whose README is the
+source of this list!). The steps can be simplified some if the enum itself is
+being renamed, in which case you may not need the temporary enum; see the
+`separate-instance-and-vmm-states` migration for an example.
+
 ==== Renaming columns
 
 Idempotently renaming existing columns is unfortunately not possible in our
