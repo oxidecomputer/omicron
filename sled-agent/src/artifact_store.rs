@@ -272,11 +272,18 @@ impl<T: DatasetsManager> ArtifactStore<T> {
     }
 
     /// Common implementation for all artifact write operations that creates
-    /// a temporary file on all datasets.
+    /// a temporary file on all datasets. Returns an [`ArtifactWriter`] that
+    /// can be used to write the artifact to all temporary files, then move all
+    /// temporary files to their final paths.
     ///
-    /// Errors are logged and ignored unless a temporary file already exists
-    /// (another task is writing to this artifact) or no temporary files could
-    /// be created.
+    /// Most errors during the write process are considered non-fatal errors.
+    /// All non-fatal errors are logged, and the most recently-seen non-fatal
+    /// error is returned by [`ArtifactWriter::finalize`].
+    ///
+    /// In this method, possible fatal errors are:
+    /// - No temporary files could be created.
+    /// - A temporary file already exists (another task is writing to this
+    ///   artifact).
     async fn writer(
         &self,
         sha256: ArtifactHash,
@@ -327,6 +334,7 @@ impl<T: DatasetsManager> ArtifactStore<T> {
                 files,
                 log: self.log.clone(),
                 sha256,
+                last_error,
             })
         }
     }
@@ -472,9 +480,13 @@ struct ArtifactWriter {
     hasher: Sha256,
     log: Logger,
     sha256: ArtifactHash,
+    last_error: Option<Error>,
 }
 
 impl ArtifactWriter {
+    /// Calls [`ArtifactWriter::write`] for each chunk in the stream, then
+    /// [`ArtifactWriter::finalize`]. See the documentation for these functions
+    /// for error handling information.
     async fn write_stream(
         self,
         stream: impl Stream<Item = Result<impl AsRef<[u8]>, Error>>,
@@ -488,13 +500,17 @@ impl ArtifactWriter {
         writer.finalize().await
     }
 
-    /// Write `chunk` to all files. If an error occurs, it is logged and the
-    /// temporary file is dropped. If there are no files left to write to, the
-    /// most recently-seen error is returned.
+    /// Write `chunk` to all temporary files.
+    ///
+    /// Errors in this method are considered non-fatal errors. All non-fatal
+    /// errors are logged, and the most recently-seen non-fatal error is
+    /// returned by [`ArtifactWriter::finalize`].
+    ///
+    /// If all files have failed, this method returns the most recently-seen
+    /// non-fatal error as a fatal error.
     async fn write(&mut self, chunk: impl AsRef<[u8]>) -> Result<(), Error> {
         self.hasher.update(&chunk);
 
-        let mut last_error = None;
         for option in &mut self.files {
             if let Some((mut file, mountpoint)) = option.take() {
                 match file.as_file_mut().write_all(chunk.as_ref()).await {
@@ -504,7 +520,11 @@ impl ArtifactWriter {
                     Err(err) => {
                         let path = file.path().to_owned();
                         log_and_store!(
-                            last_error, &self.log, "write to", path, err
+                            self.last_error,
+                            &self.log,
+                            "write to",
+                            path,
+                            err
                         );
                         // `file` and `final_path` are dropped here, cleaning up
                         // the file
@@ -515,16 +535,18 @@ impl ArtifactWriter {
 
         self.files.retain(Option::is_some);
         if self.files.is_empty() {
-            Err(last_error.unwrap_or(Error::NoUpdateDataset))
+            Err(self.last_error.take().unwrap_or(Error::NoUpdateDataset))
         } else {
             Ok(())
         }
     }
 
-    /// Rename all files to their final paths. If an error occurs, it is logged.
-    /// If none of the files are renamed successfully, the most recently-seen
-    /// error is returned.
-    async fn finalize(self) -> Result<(), Error> {
+    /// Rename all files to their final paths.
+    ///
+    /// Errors in this method are considered non-fatal errors, but this method
+    /// will return the most recently-seen error by any method in the write
+    /// process.
+    async fn finalize(mut self) -> Result<(), Error> {
         let digest = self.hasher.finalize();
         if digest.as_slice() != self.sha256.as_ref() {
             return Err(Error::HashMismatch {
@@ -533,13 +555,12 @@ impl ArtifactWriter {
             });
         }
 
-        let mut last_error = None;
         let mut any_success = false;
         for (mut file, mountpoint) in self.files.into_iter().flatten() {
             // 1. fsync the temporary file.
             if let Err(err) = file.as_file_mut().sync_all().await {
                 let path = file.path().to_owned();
-                log_and_store!(last_error, &self.log, "sync", path, err);
+                log_and_store!(self.last_error, &self.log, "sync", path, err);
                 continue;
             }
             // 2. Open the parent directory so we can fsync it.
@@ -547,7 +568,11 @@ impl ArtifactWriter {
                 Ok(dir) => dir,
                 Err(err) => {
                     log_and_store!(
-                        last_error, &self.log, "open", mountpoint, err
+                        self.last_error,
+                        &self.log,
+                        "open",
+                        mountpoint,
+                        err
                     );
                     continue;
                 }
@@ -567,7 +592,7 @@ impl ArtifactWriter {
                     "from" => err.file.path().as_str(),
                     "to" => final_path.as_str(),
                 );
-                last_error = Some(Error::FileRename {
+                self.last_error = Some(Error::FileRename {
                     from: err.file.path().to_owned(),
                     to: final_path,
                     err: err.error,
@@ -576,14 +601,22 @@ impl ArtifactWriter {
             }
             // 4. fsync the parent directory.
             if let Err(err) = parent_dir.sync_all().await {
-                log_and_store!(last_error, &self.log, "sync", mountpoint, err);
+                log_and_store!(
+                    self.last_error,
+                    &self.log,
+                    "sync",
+                    mountpoint,
+                    err
+                );
                 continue;
             }
 
             any_success = true;
         }
 
-        if any_success {
+        if let Some(last_error) = self.last_error {
+            Err(last_error)
+        } else if any_success {
             info!(
                 &self.log,
                 "Wrote artifact";
@@ -591,7 +624,7 @@ impl ArtifactWriter {
             );
             Ok(())
         } else {
-            Err(last_error.unwrap_or(Error::NoUpdateDataset))
+            Err(Error::NoUpdateDataset)
         }
     }
 }
