@@ -198,7 +198,6 @@ impl SingleRange {
 
     /// Generate a Range header for inclusion in another HTTP request; e.g.,
     /// to a backend object store.
-    #[allow(dead_code)]
     pub fn to_range(&self) -> String {
         format!("bytes={}-{}", self.range.start, self.end_inclusive())
     }
