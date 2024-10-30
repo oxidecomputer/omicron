@@ -1,0 +1,23 @@
+[package]
+name = "range-requests"
+description = "Helpers for making and receiving range requests"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+bytes.workspace = true
+dropshot.workspace = true
+futures.workspace = true
+http.workspace = true
+http-range.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+tokio-util.workspace = true

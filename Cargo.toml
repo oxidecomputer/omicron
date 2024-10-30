@@ -96,6 +96,7 @@ members = [
     "oximeter/types",
     "package",
     "passwords",
+    "range-requests",
     "rpaths",
     "sled-agent",
     "sled-agent/api",
@@ -221,6 +222,7 @@ default-members = [
     "oximeter/types",
     "package",
     "passwords",
+    "range-requests",
     "rpaths",
     "sled-agent",
     "sled-agent/api",
@@ -390,6 +392,7 @@ highway = "1.2.0"
 hkdf = "0.12.4"
 http = "1.1.0"
 http-body-util = "0.1.2"
+http-range = "0.1.5"
 httpmock = "0.8.0-alpha.1"
 httptest = "0.16.1"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
@@ -526,6 +529,7 @@ rand = "0.8.5"
 rand_core = "0.6.4"
 rand_distr = "0.4.3"
 rand_seeder = "0.3.0"
+range-requests = { path = "range-requests" }
 ratatui = "0.28.1"
 rayon = "1.10"
 rcgen = "0.12.1"
