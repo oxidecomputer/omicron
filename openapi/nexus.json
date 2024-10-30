@@ -15816,7 +15816,7 @@
           },
           "auto_restart_policy": {
             "nullable": true,
-            "description": "The auto-restart policy configured for this instance, or `None` if no explicit policy is configured.\n\nIf this is not present, then this instance uses the default auto-restart policy, which may or may not allow it to be restarted. The `auto_restart_enabled` field indicates whether the instance will be automatically restarted.",
+            "description": "The auto-restart policy configured for this instance, or `null` if no explicit policy has been configured.\n\nThis policy determines whether the instance should be automatically restarted by the control plane on failure. If this is `null`, the control plane will use the default policy when determining whether or not to automatically restart this instance, which may or may not allow it to be restarted. The value of the `auto_restart_enabled` field indicates whether the instance will be auto-restarted, based on its current policy or the default if it has no configured policy.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceAutoRestartPolicy"
@@ -15941,7 +15941,7 @@
         "properties": {
           "auto_restart_policy": {
             "nullable": true,
-            "description": "The auto-restart policy for this instance.\n\nThis indicates whether the instance should be automatically restarted by the control plane on failure. If this is `null`, no auto-restart policy has been configured for this instance by the user.",
+            "description": "The auto-restart policy for this instance.\n\nThis policy determines whether the instance should be automatically restarted by the control plane on failure. If this is `null`, no auto-restart policy will be explicitly configured for this instance, and the control plane will select the default policy when determining whether the instance can be automatically restarted.\n\nCurrently, the global default auto-restart policy is \"best-effort\", so instances with `null` auto-restart policies will be automatically restarted. However, in the future, the default policy may be configurable through other mechanisms, such as on a per-project basis. In that case, any configured default policy will be used if this is `null`.",
             "default": null,
             "allOf": [
               {
@@ -16476,7 +16476,7 @@
         "properties": {
           "auto_restart_policy": {
             "nullable": true,
-            "description": "The auto-restart policy for this instance.\n\nIf not provided, unset the instance's auto-restart policy.",
+            "description": "Sets the auto-restart policy for this instance.\n\nThis policy determines whether the instance should be automatically restarted by the control plane on failure. If this is `null`, any explicitly configured auto-restart policy will be unset, and the control plane will select the default policy when determining whether the instance can be automatically restarted.\n\nCurrently, the global default auto-restart policy is \"best-effort\", so instances with `null` auto-restart policies will be automatically restarted. However, in the future, the default policy may be configurable through other mechanisms, such as on a per-project basis. In that case, any configured default policy will be used if this is `null`.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceAutoRestartPolicy"
