@@ -131,6 +131,7 @@ uuid = { version = "1.10.0", features = ["serde", "v4"] }
 x509-cert = { version = "0.2.5" }
 zerocopy = { version = "0.7.35", features = ["derive", "simd"] }
 zeroize = { version = "1.8.1", features = ["std", "zeroize_derive"] }
+zip = { version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
 
 [build-dependencies]
 ahash = { version = "0.8.11" }
@@ -250,6 +251,7 @@ uuid = { version = "1.10.0", features = ["serde", "v4"] }
 x509-cert = { version = "0.2.5" }
 zerocopy = { version = "0.7.35", features = ["derive", "simd"] }
 zeroize = { version = "1.8.1", features = ["std", "zeroize_derive"] }
+zip = { version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
 
 [target.x86_64-unknown-linux-gnu.dependencies]
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
