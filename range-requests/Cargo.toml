@@ -20,5 +20,6 @@ thiserror.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+http-body.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
