@@ -8726,9 +8726,9 @@ dependencies = [
 
 [[package]]
 name = "qorb"
-version = "0.1.2"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d25f71eb7c5ba56a99f0721fd771b2503aa6de4ec73f0891f9b7ac115ca34723"
+checksum = "9cd19ad8fae9abd8da01d8f435b633b567d53835cf3bce89d6f616617d10583c"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8746,6 +8746,7 @@ dependencies = [
  "tokio-stream",
  "tokio-tungstenite 0.24.0",
  "tracing",
+ "usdt",
 ]
 
 [[package]]
