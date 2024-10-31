@@ -23,6 +23,13 @@ use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::VnicUuid;
 use typed_rng::TypedUuidRng;
 
+/// An example generated system, along with a consistent planning input and
+/// collection.
+///
+/// The components of this struct are generated together and match each other.
+/// The planning input and collection represent database input and inventory
+/// that would be collected from a system matching the system description.
+#[derive(Clone, Debug)]
 pub struct ExampleSystem {
     pub system: SystemDescription,
     pub input: PlanningInput,
@@ -338,6 +345,7 @@ impl ExampleSystemBuilder {
                         .unwrap();
                 }
             }
+            builder.sled_ensure_datasets(sled_id, &sled_resources).unwrap();
         }
 
         let blueprint = builder.build();
@@ -379,6 +387,27 @@ impl ExampleSystemBuilder {
                     ),
                 )
                 .unwrap();
+        }
+
+        // Ensure that our "input" contains the datasets we would have
+        // provisioned.
+        //
+        // This mimics them existing within the database.
+        let input_sleds = input_builder.sleds_mut();
+        for (sled_id, bp_datasets_config) in &blueprint.blueprint_datasets {
+            let sled = input_sleds.get_mut(sled_id).unwrap();
+            for (_, bp_dataset) in &bp_datasets_config.datasets {
+                let (_, datasets) = sled
+                    .resources
+                    .zpools
+                    .get_mut(&bp_dataset.pool.id())
+                    .unwrap();
+                let bp_config: omicron_common::disk::DatasetConfig =
+                    bp_dataset.clone().try_into().unwrap();
+                if !datasets.contains(&bp_config) {
+                    datasets.push(bp_config);
+                }
+            }
         }
 
         let mut builder =

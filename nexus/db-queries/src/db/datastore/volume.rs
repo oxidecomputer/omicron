@@ -3829,9 +3829,9 @@ impl DataStore {
 mod tests {
     use super::*;
 
-    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::test::TestDatasets;
     use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
+    use crate::db::pub_test_utils::TestDatabase;
     use nexus_config::RegionAllocationStrategy;
     use nexus_db_model::SqlU16;
     use nexus_types::external_api::params::DiskSource;

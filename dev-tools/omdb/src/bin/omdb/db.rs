@@ -16,6 +16,7 @@
 #![allow(clippy::useless_vec)]
 
 use crate::check_allow_destructive::DestructiveOperationToken;
+use crate::helpers::const_max_len;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::DATABASE_OPTIONS_HEADING;
 use crate::Omdb;
@@ -28,6 +29,9 @@ use camino::Utf8PathBuf;
 use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
+use clap::builder::PossibleValue;
+use clap::builder::PossibleValuesParser;
+use clap::builder::TypedValueParser;
 use clap::ArgAction;
 use clap::Args;
 use clap::Subcommand;
@@ -323,6 +327,11 @@ enum DbCommands {
     Validate(ValidateArgs),
     /// Print information about volumes
     Volumes(VolumeArgs),
+    /// Print information about Propolis virtual machine manager (VMM)
+    /// processes.
+    Vmm(VmmArgs),
+    /// Alias to `omdb db vmm list`.
+    Vmms(VmmListArgs),
 }
 
 #[derive(Debug, Args)]
@@ -426,6 +435,22 @@ struct InstanceListArgs {
     /// Only show the running instances
     #[arg(short, long, action=ArgAction::SetTrue)]
     running: bool,
+
+    /// Only show instances in the provided state(s).
+    ///
+    /// By default, all instances are selected.
+    #[arg(
+        short,
+        long = "state",
+        conflicts_with = "running",
+        value_parser = PossibleValuesParser::new(
+            db::model::InstanceState::ALL_STATES
+                .iter()
+                .map(|v| PossibleValue::new(v.label()))
+        ).try_map(|s| s.parse::<db::model::InstanceState>()),
+        action = ArgAction::Append,
+    )]
+    states: Vec<db::model::InstanceState>,
 }
 
 #[derive(Debug, Args)]
@@ -433,6 +458,26 @@ struct InstanceInfoArgs {
     /// the UUID of the instance to show details for
     #[clap(value_name = "UUID")]
     id: InstanceUuid,
+
+    /// include a list of VMMs and migrations previously associated with this
+    /// instance.
+    ///
+    /// note that this is not exhaustive, as some VMM or migration records may
+    /// have been hard-deleted.
+    ///
+    /// this is also enabled by `--all`.
+    #[arg(short = 'i', long)]
+    history: bool,
+
+    /// include virtual resources provisioned by this instance.
+    ///
+    /// this is also enabled by `--all`.
+    #[arg(short = 'r', long)]
+    resources: bool,
+
+    /// include all optional output.
+    #[arg(short = 'a', long)]
+    all: bool,
 }
 
 #[derive(Debug, Args)]
@@ -772,6 +817,53 @@ struct VolumeInfoArgs {
     uuid: Uuid,
 }
 
+#[derive(Debug, Args)]
+struct VmmArgs {
+    #[command(subcommand)]
+    command: VmmCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum VmmCommands {
+    /// Get info for a specific VMM process
+    #[clap(alias = "show")]
+    Info(VmmInfoArgs),
+    /// List VMM processes
+    #[clap(alias = "ls")]
+    List(VmmListArgs),
+}
+
+#[derive(Debug, Args)]
+struct VmmInfoArgs {
+    /// The UUID of the VMM process.
+    uuid: Uuid,
+}
+
+#[derive(Debug, Args)]
+struct VmmListArgs {
+    /// Enable verbose output.
+    ///
+    /// You may need a really wide monitor for this!
+    #[arg(long, short)]
+    verbose: bool,
+
+    /// Only show VMMs in the provided state(s).
+    ///
+    /// By default, all VMM states are selected.
+    #[arg(
+        short,
+        long = "state",
+        value_parser = PossibleValuesParser::new(
+            db::model::VmmState::ALL_STATES
+                .iter()
+                .map(|v| PossibleValue::new(v.label()))
+        )
+        .try_map(|s| s.parse::<db::model::VmmState>()),
+        action = ArgAction::Append,
+    )]
+    states: Vec<db::model::VmmState>,
+}
+
 impl DbArgs {
     /// Run a `omdb db` subcommand.
     pub(crate) async fn run_cmd(
@@ -900,13 +992,8 @@ impl DbArgs {
             DbCommands::Instance(InstanceArgs {
                 command: InstanceCommands::List(args),
             }) => {
-                cmd_db_instances(
-                    &opctx,
-                    &datastore,
-                    &self.fetch_opts,
-                    args.running,
-                )
-                .await
+                cmd_db_instances(&opctx, &datastore, &self.fetch_opts, args)
+                    .await
             }
             DbCommands::Instance(InstanceArgs {
                 command: InstanceCommands::Info(args),
@@ -919,7 +1006,7 @@ impl DbArgs {
                     &opctx,
                     &datastore,
                     &self.fetch_opts,
-                    instances_options.running,
+                    instances_options,
                 )
                 .await
             }
@@ -1009,6 +1096,15 @@ impl DbArgs {
             DbCommands::Volumes(VolumeArgs {
                 command: VolumeCommands::List,
             }) => cmd_db_volume_list(&datastore, &self.fetch_opts).await,
+
+            DbCommands::Vmm(VmmArgs { command: VmmCommands::Info(args) }) => {
+                cmd_db_vmm_info(&opctx, &datastore, &self.fetch_opts, &args)
+                    .await
+            }
+            DbCommands::Vmm(VmmArgs { command: VmmCommands::List(args) })
+            | DbCommands::Vmms(args) => {
+                cmd_db_vmm_list(&datastore, &self.fetch_opts, args).await
+            }
         };
         datastore.terminate().await;
         res
@@ -1200,27 +1296,57 @@ async fn lookup_project(
 
 // Disks
 
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct DiskIdentity {
+    name: String,
+    id: Uuid,
+    size: String,
+    state: String,
+}
+
+impl From<&'_ db::model::Disk> for DiskIdentity {
+    fn from(disk: &db::model::Disk) -> Self {
+        Self {
+            name: disk.name().to_string(),
+            id: disk.id(),
+            size: disk.size.to_string(),
+            state: disk.runtime().disk_state,
+        }
+    }
+}
+
 /// Run `omdb db disk list`.
 async fn cmd_db_disk_list(
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
 ) -> Result<(), anyhow::Error> {
-    #[derive(Tabled)]
-    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-    struct DiskRow {
-        name: String,
-        id: String,
-        size: String,
-        state: String,
-        attached_to: String,
-    }
-
     let ctx = || "listing disks".to_string();
 
     use db::schema::disk::dsl;
     let mut query = dsl::disk.into_boxed();
     if !fetch_opts.include_deleted {
         query = query.filter(dsl::time_deleted.is_null());
+    }
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct DiskRow {
+        #[tabled(inline)]
+        identity: DiskIdentity,
+        attached_to: String,
+    }
+
+    impl From<&'_ db::model::Disk> for DiskRow {
+        fn from(disk: &db::model::Disk) -> Self {
+            Self {
+                identity: disk.into(),
+                attached_to: match disk.runtime().attach_instance_id {
+                    Some(uuid) => uuid.to_string(),
+                    None => "-".to_string(),
+                },
+            }
+        }
     }
 
     let disks = query
@@ -1232,16 +1358,7 @@ async fn cmd_db_disk_list(
 
     check_limit(&disks, fetch_opts.fetch_limit, ctx);
 
-    let rows = disks.into_iter().map(|disk| DiskRow {
-        name: disk.name().to_string(),
-        id: disk.id().to_string(),
-        size: disk.size.to_string(),
-        state: disk.runtime().disk_state,
-        attached_to: match disk.runtime().attach_instance_id {
-            Some(uuid) => uuid.to_string(),
-            None => "-".to_string(),
-        },
-    });
+    let rows = disks.iter().map(DiskRow::from);
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
@@ -2535,6 +2652,7 @@ async fn cmd_db_region_replacement_list(
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct Row {
         pub id: Uuid,
+        #[tabled(display_with = "datetime_rfc3339_concise")]
         pub request_time: DateTime<Utc>,
         pub replacement_state: String,
     }
@@ -2660,6 +2778,7 @@ async fn cmd_db_region_replacement_info(
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
         struct Row {
+            #[tabled(display_with = "datetime_rfc3339_concise")]
             pub time: DateTime<Utc>,
 
             pub repair_id: String,
@@ -2735,6 +2854,7 @@ async fn cmd_db_region_replacement_info(
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
         struct StepRow {
+            #[tabled(display_with = "datetime_rfc3339_concise")]
             pub time: DateTime<Utc>,
             pub step_type: String,
             pub details: String,
@@ -2871,14 +2991,14 @@ async fn cmd_db_instance_info(
     args: &InstanceInfoArgs,
 ) -> Result<(), anyhow::Error> {
     use nexus_db_model::schema::{
-        instance::dsl as instance_dsl, migration::dsl as migration_dsl,
-        vmm::dsl as vmm_dsl,
+        disk::dsl as disk_dsl, instance::dsl as instance_dsl,
+        migration::dsl as migration_dsl, vmm::dsl as vmm_dsl,
     };
     use nexus_db_model::{
         Instance, InstanceKarmicStatus, InstanceRuntimeState, Migration,
-        Reincarnatability, Vmm,
+        Reincarnatability,
     };
-    let InstanceInfoArgs { id } = args;
+    let &InstanceInfoArgs { ref id, history, resources, all } = args;
 
     let instance = instance_dsl::instance
         .filter(instance_dsl::id.eq(id.into_untyped_uuid()))
@@ -3037,10 +3157,14 @@ async fn cmd_db_instance_info(
     );
     match can_reincarnate {
         Reincarnatability::WillReincarnate => {
-            println!("    {KARMIC_STATUS:>WIDTH$}: bound to saṃsāra");
+            println!(
+                "    {KARMIC_STATUS:>WIDTH$}: saṃsāra (reincarnation enabled)"
+            );
         }
         Reincarnatability::Nirvana => {
-            println!("    {KARMIC_STATUS:>WIDTH$}: attained nirvāṇa");
+            println!(
+                "    {KARMIC_STATUS:>WIDTH$}: nirvāṇa (reincarnation disabled)"
+            );
         }
         Reincarnatability::CoolingDown(remaining) => {
             println!(
@@ -3053,6 +3177,7 @@ async fn cmd_db_instance_info(
 
     println!("    {ACTIVE_VMM:>WIDTH$}: {propolis_id:?}");
     println!("    {TARGET_VMM:>WIDTH$}: {dst_propolis_id:?}");
+
     println!(
         "{}{MIGRATION_ID:>WIDTH$}: {migration_id:?}",
         if migration_id.is_some() { "(i) " } else { "    " },
@@ -3064,16 +3189,14 @@ async fn cmd_db_instance_info(
     }
     println!(" at generation: {}", instance.updater_gen.0);
 
-    fn print_vmm(slug: &str, kind: &str, id: Uuid, vmm: Option<&Vmm>) {
+    fn print_vmm(kind: &str, id: Uuid, vmm: Option<&Vmm>) {
         match vmm {
             Some(vmm) => {
                 println!(
-                    "\n    {slug:>WIDTH$}:\n{}",
-                    textwrap::indent(
-                        &format!("{vmm:#?}"),
-                        &" ".repeat(WIDTH - slug.len() + 8)
-                    )
+                    "\n{:=<80}",
+                    format!("== {} VMM ", kind.to_ascii_uppercase())
                 );
+                prettyprint_vmm("    ", vmm, Some(WIDTH), None, true);
                 if vmm.time_deleted.is_some() {
                     eprintln!(
                         "\n/!\\ BAD: dangling foreign key to deleted {kind} \
@@ -3091,7 +3214,7 @@ async fn cmd_db_instance_info(
     }
 
     if let Some(id) = propolis_id {
-        print_vmm(ACTIVE_VMM_RECORD, "active", id, active_vmm.as_ref());
+        print_vmm("active", id, active_vmm.as_ref());
     }
 
     if let Some(id) = dst_propolis_id {
@@ -3104,7 +3227,7 @@ async fn cmd_db_instance_info(
         match fetch_result {
             Ok(rs) => {
                 let vmm = rs.into_iter().next();
-                print_vmm(TARGET_VMM_RECORD, "target", id, vmm.as_ref());
+                print_vmm("target", id, vmm.as_ref());
             }
             Err(e) => {
                 eprintln!("error looking up target VMM record {id}: {e}");
@@ -3147,38 +3270,228 @@ async fn cmd_db_instance_info(
             }
         }
     }
-    let past_migrations = migration_dsl::migration
-        .filter(migration_dsl::instance_id.eq(id.into_untyped_uuid()))
+
+    let ctx = || "listing attached disks";
+    let mut query = disk_dsl::disk
+        .filter(disk_dsl::attach_instance_id.eq(id.into_untyped_uuid()))
         .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
-        .order_by(migration_dsl::time_created)
-        // This is just to prove to CRDB that it can use the
-        // migrations-by-time-created index, it doesn't actually do anything.
-        .filter(migration_dsl::time_created.gt(chrono::DateTime::UNIX_EPOCH))
-        .select(Migration::as_select())
+        .order_by(disk_dsl::time_created.desc())
+        .into_boxed();
+    if !fetch_opts.include_deleted {
+        query = query.filter(disk_dsl::time_deleted.is_null());
+    }
+
+    let disks = query
+        .select(Disk::as_select())
         .load_async(&*datastore.pool_connection_for_tests().await?)
         .await
-        .context("listing migrations")?;
+        .with_context(ctx)?;
 
-    check_limit(&past_migrations, fetch_opts.fetch_limit, || {
-        "listing migrations"
-    });
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct DiskRow {
+        #[tabled(rename = "#", display_with = "display_option_blank")]
+        slot: Option<u8>,
+        #[tabled(inline)]
+        identity: DiskIdentity,
+    }
 
-    if !past_migrations.is_empty() {
-        let rows =
-            past_migrations.into_iter().map(|m| SingleInstanceMigrationRow {
-                created: m.time_created,
-                vmms: MigrationVmms::from(&m),
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct MaybeDeletedDiskRow {
+        #[tabled(inline)]
+        r: DiskRow,
+        #[tabled(display_with = "datetime_opt_rfc3339_concise")]
+        time_deleted: Option<DateTime<Utc>>,
+    }
+
+    impl From<&'_ db::model::Disk> for DiskRow {
+        fn from(disk: &db::model::Disk) -> Self {
+            Self { slot: disk.slot.map(|s| s.into()), identity: disk.into() }
+        }
+    }
+
+    impl From<&'_ db::model::Disk> for MaybeDeletedDiskRow {
+        fn from(disk: &db::model::Disk) -> Self {
+            Self { r: disk.into(), time_deleted: disk.time_deleted() }
+        }
+    }
+
+    if !disks.is_empty() {
+        println!("\n{:=<80}", "== ATTACHED DISKS ");
+
+        check_limit(&disks, fetch_opts.fetch_limit, ctx);
+        let table = if fetch_opts.include_deleted {
+            tabled::Table::new(disks.iter().map(MaybeDeletedDiskRow::from))
+                .with(tabled::settings::Style::empty())
+                .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                .to_string()
+        } else {
+            tabled::Table::new(disks.iter().map(DiskRow::from))
+                .with(tabled::settings::Style::empty())
+                .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                .to_string()
+        };
+        println!("{table}");
+    }
+
+    if resources || all {
+        use db::schema::virtual_provisioning_resource::dsl as resource_dsl;
+        let resources = resource_dsl::virtual_provisioning_resource
+            .filter(resource_dsl::id.eq(id.into_untyped_uuid()))
+            .select(db::model::VirtualProvisioningResource::as_select())
+            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .await
+            .context("fetching instance virtual provisioning record")?;
+        println!("\n{:=<80}", "== VIRTUAL RESOURCES PROVISIONED ");
+        if resources.is_empty() {
+            println!("(i) no virtual resources provisioned for this instance")
+        } else {
+            if resources.len() > 1 {
+                println!(
+                    "/!\\ there should only be one virtual resource record \
+                     for a given UUID! this is a bug!",
+                );
+            }
+            for resource in resources {
+                let db::model::VirtualProvisioningResource {
+                    id: _,
+                    time_modified,
+                    resource_type,
+                    virtual_disk_bytes_provisioned: db::model::ByteCount(disk),
+                    cpus_provisioned,
+                    ram_provisioned: db::model::ByteCount(ram),
+                } = resource;
+                const DISK: &'static str = "virtual disk";
+                const RAM: &'static str = "RAM";
+                const WIDTH: usize = crate::helpers::const_max_len(&[
+                    VCPUS,
+                    DISK,
+                    RAM,
+                    LAST_UPDATED,
+                ]);
+                if resource_type != "instance" {
+                    println!(
+                        "/!\\ virtual provisioning resource type is \
+                 {resource_type:?} (expected \"instance\")",
+                    );
+                }
+                println!("    {VCPUS:>WIDTH$}: {cpus_provisioned}");
+                println!("    {RAM:>WIDTH$}: {ram}");
+                println!("    {DISK:>WIDTH$}: {disk}");
+                if let Some(modified) = time_modified {
+                    println!("    {LAST_UPDATED:>WIDTH$}: {modified}")
+                }
+            }
+        }
+    }
+
+    if history || all {
+        let ctx = || "listing migrations";
+        let past_migrations = migration_dsl::migration
+            .filter(migration_dsl::instance_id.eq(id.into_untyped_uuid()))
+            .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
+            .order_by(migration_dsl::time_created.desc())
+            // This is just to prove to CRDB that it can use the
+            // migrations-by-time-created index, it doesn't actually do anything.
+            .filter(
+                migration_dsl::time_created.gt(chrono::DateTime::UNIX_EPOCH),
+            )
+            .select(Migration::as_select())
+            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .await
+            .with_context(ctx)?;
+
+        if !past_migrations.is_empty() {
+            println!("\n{:=<80}\n", "== MIGRATION HISTORY");
+
+            check_limit(&past_migrations, fetch_opts.fetch_limit, ctx);
+
+            let rows = past_migrations.into_iter().map(|m| {
+                SingleInstanceMigrationRow {
+                    created: m.time_created,
+                    vmms: MigrationVmms::from(&m),
+                }
             });
 
-        let table = tabled::Table::new(rows)
-            .with(tabled::settings::Style::empty())
-            .with(tabled::settings::Padding::new(4, 1, 0, 0))
-            .to_string();
+            let table = tabled::Table::new(rows)
+                .with(tabled::settings::Style::empty())
+                .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                .to_string();
 
-        println!("\n{:=<80}\n\n{table}", "== MIGRATION HISTORY");
+            println!("{table}");
+        }
+
+        let ctx = || "listing past VMMs";
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct VmmRow {
+            #[tabled(inline)]
+            state: VmmStateRow,
+            sled_id: Uuid,
+            #[tabled(display_with = "datetime_rfc3339_concise")]
+            time_created: chrono::DateTime<Utc>,
+            #[tabled(display_with = "datetime_opt_rfc3339_concise")]
+            time_deleted: Option<chrono::DateTime<Utc>>,
+        }
+        let vmms = vmm_dsl::vmm
+            .filter(vmm_dsl::instance_id.eq(id.into_untyped_uuid()))
+            .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
+            .order_by(vmm_dsl::time_created.desc())
+            .select(Vmm::as_select())
+            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .await
+            .with_context(ctx)?;
+
+        if !vmms.is_empty() {
+            println!("\n{:=<80}", "== VMM HISTORY ");
+
+            check_limit(&vmms, fetch_opts.fetch_limit, ctx);
+
+            let table = tabled::Table::new(vmms.iter().map(|vmm| {
+                let &Vmm {
+                    id,
+                    sled_id,
+                    propolis_ip: _,
+                    propolis_port: _,
+                    instance_id: _,
+                    time_created,
+                    time_deleted,
+                    runtime:
+                        db::model::VmmRuntimeState {
+                            time_state_updated: _,
+                            r#gen,
+                            state,
+                        },
+                } = vmm;
+                VmmRow {
+                    state: VmmStateRow {
+                        id,
+                        state,
+                        generation: r#gen.0.into(),
+                    },
+                    sled_id,
+                    time_created,
+                    time_deleted,
+                }
+            }))
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string();
+            println!("{table}");
+        }
     }
 
     Ok(())
+}
+
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct VmmStateRow {
+    id: Uuid,
+    state: db::model::VmmState,
+    #[tabled(rename = "GEN")]
+    generation: u64,
 }
 
 #[derive(Tabled)]
@@ -3197,7 +3510,7 @@ async fn cmd_db_instances(
     opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
-    running: bool,
+    &InstanceListArgs { running, ref states }: &InstanceListArgs,
 ) -> Result<(), anyhow::Error> {
     use db::schema::instance::dsl;
     use db::schema::vmm::dsl as vmm_dsl;
@@ -3206,6 +3519,10 @@ async fn cmd_db_instances(
     let mut query = dsl::instance.into_boxed();
     if !fetch_opts.include_deleted {
         query = query.filter(dsl::time_deleted.is_null());
+    }
+
+    if !states.is_empty() {
+        query = query.filter(dsl::state.eq_any(states.clone()));
     }
 
     let instances: Vec<InstanceAndActiveVmm> = query
@@ -3908,6 +4225,7 @@ async fn cmd_db_region_snapshot_replacement_list(
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct Row {
         pub id: Uuid,
+        #[tabled(display_with = "datetime_rfc3339_concise")]
         pub request_time: DateTime<Utc>,
         pub replacement_state: String,
     }
@@ -5324,16 +5642,17 @@ async fn cmd_db_migrations_list(
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
         struct VerboseMigrationRow {
+            #[tabled(display_with = "datetime_rfc3339_concise")]
             created: chrono::DateTime<Utc>,
             id: Uuid,
             instance: Uuid,
             #[tabled(inline)]
             vmms: MigrationVmms,
-            #[tabled(display_with = "display_option_blank")]
+            #[tabled(display_with = "datetime_opt_rfc3339_concise")]
             src_updated: Option<chrono::DateTime<Utc>>,
-            #[tabled(display_with = "display_option_blank")]
+            #[tabled(display_with = "datetime_opt_rfc3339_concise")]
             tgt_updated: Option<chrono::DateTime<Utc>>,
-            #[tabled(display_with = "display_option_blank")]
+            #[tabled(display_with = "datetime_opt_rfc3339_concise")]
             deleted: Option<chrono::DateTime<Utc>>,
         }
 
@@ -5369,6 +5688,7 @@ async fn cmd_db_migrations_list(
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
         struct MigrationRow {
+            #[tabled(display_with = "datetime_rfc3339_concise")]
             created: chrono::DateTime<Utc>,
             instance: Uuid,
             #[tabled(inline)]
@@ -5395,6 +5715,7 @@ async fn cmd_db_migrations_list(
 #[derive(Tabled)]
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
 struct SingleInstanceMigrationRow {
+    #[tabled(display_with = "datetime_rfc3339_concise")]
     created: chrono::DateTime<Utc>,
     #[tabled(inline)]
     vmms: MigrationVmms,
@@ -5427,7 +5748,409 @@ impl From<&'_ Migration> for MigrationVmms {
     }
 }
 
+impl From<&'_ Migration> for SingleInstanceMigrationRow {
+    fn from(migration: &Migration) -> Self {
+        Self {
+            created: migration.time_created,
+            vmms: MigrationVmms::from(migration),
+        }
+    }
+}
+
+// VMMs
+
+async fn cmd_db_vmm_info(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    &VmmInfoArgs { uuid }: &VmmInfoArgs,
+) -> Result<(), anyhow::Error> {
+    use db::schema::migration::dsl as migration_dsl;
+    use db::schema::sled_resource::dsl as resource_dsl;
+    use db::schema::vmm::dsl as vmm_dsl;
+
+    let vmm = vmm_dsl::vmm
+        .filter(vmm_dsl::id.eq(uuid))
+        .select(Vmm::as_select())
+        .limit(1)
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .with_context(|| format!("failed to fetch VMM record for {uuid}"))?
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("no VMM found with ID {uuid}"))?;
+    let sled_result =
+        LookupPath::new(opctx, datastore).sled_id(vmm.sled_id).fetch().await;
+    let sled = match sled_result {
+        Ok((_, sled)) => Some(sled),
+        Err(err) => {
+            eprintln!(
+                "WARN: failed to fetch sled with ID {}: {err}",
+                vmm.sled_id
+            );
+            None
+        }
+    };
+
+    println!("\n{:=<80}", "== VMM ");
+    prettyprint_vmm(
+        "    ",
+        &vmm,
+        None,
+        sled.as_ref().map(|sled| sled.serial_number()),
+        true,
+    );
+
+    fn prettyprint_reservation(
+        resource: db::model::SledResource,
+        include_sled_id: bool,
+    ) {
+        use db::model::ByteCount;
+        let db::model::SledResource {
+            id: _,
+            sled_id,
+            kind: _,
+            resources:
+                db::model::Resources {
+                    hardware_threads,
+                    rss_ram: ByteCount(rss),
+                    reservoir_ram: ByteCount(reservoir),
+                },
+        } = resource;
+        const SLED_ID: &'static str = "sled ID";
+        const THREADS: &'static str = "hardware threads";
+        const RSS: &'static str = "RSS RAM";
+        const RESERVOIR: &'static str = "reservoir RAM";
+        const WIDTH: usize = const_max_len(&[SLED_ID, THREADS, RSS, RESERVOIR]);
+        if include_sled_id {
+            println!("    {SLED_ID:>WIDTH$}: {sled_id}");
+        }
+        println!("    {THREADS:>WIDTH$}: {hardware_threads}");
+        println!("    {RSS:>WIDTH$}: {rss}");
+        println!("    {RESERVOIR:>WIDTH$}: {reservoir}");
+    }
+
+    let reservations = resource_dsl::sled_resource
+        .filter(resource_dsl::id.eq(uuid))
+        .select(db::model::SledResource::as_select())
+        .load_async::<db::model::SledResource>(
+            &*datastore.pool_connection_for_tests().await?,
+        )
+        .await
+        .with_context(|| {
+            format!("failed to fetch sled resource records for {uuid}")
+        })?;
+
+    if !reservations.is_empty() {
+        println!("\n{:=<80}", "== SLED RESOURCE RESERVATIONS ");
+
+        let multiple_reservations = reservations.len() > 1;
+        if multiple_reservations {
+            println!(
+                "/!\\ VMM has multiple sled resource reservation records! \
+                 This is a bug; please open an issue about it here:\n\
+                 https://github.com/oxidecomputer/omicron/issues/new?template=Blank+issue",
+            );
+        }
+        for r in reservations {
+            prettyprint_reservation(r, multiple_reservations);
+            println!();
+        }
+    }
+
+    let ctx = || format!("listing migrations involving VMM {uuid}");
+    let migrations = migration_dsl::migration
+        .filter(
+            migration_dsl::source_propolis_id
+                .eq(uuid)
+                .or(migration_dsl::target_propolis_id.eq(uuid)),
+        )
+        // A single VMM will typically only have 0-1 migrations in, but it may
+        // have any number of migrations out, since attempts to migrate out of
+        // the VMM may have failed on the migration target's side.
+        .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
+        .order_by(migration_dsl::time_created)
+        // This is just to prove to CRDB that it can use the
+        // migrations-by-time-created index, it doesn't actually do anything.
+        .filter(migration_dsl::time_created.gt(chrono::DateTime::UNIX_EPOCH))
+        .select(db::model::Migration::as_select())
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .with_context(ctx)?;
+
+    check_limit(&migrations, fetch_opts.fetch_limit, ctx);
+
+    if !migrations.is_empty() {
+        println!("\n{:=<80}", "== MIGRATIONS ");
+        // TODO: since this command is focused on the individual VMM, we could
+        // potentially be a bit fancier when displaying migrations, and print
+        // something like "IN"/"OUT" based on the VMM's role in that migration,
+        // rather than just sticking its UUID in the source/target column as
+        // appropriate.
+        let table = tabled::Table::new(
+            migrations.iter().map(SingleInstanceMigrationRow::from),
+        )
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+        println!("{table}");
+    }
+
+    Ok(())
+}
+
+fn prettyprint_vmm(
+    indent: &str,
+    vmm: &Vmm,
+    width: Option<usize>,
+    sled_serial: Option<&str>,
+    inst_id: bool,
+) {
+    const ID: &'static str = "ID";
+    const CREATED: &'static str = "created at";
+    const DELETED: &'static str = "deleted at";
+    const UPDATED: &'static str = "updated at";
+    const INSTANCE_ID: &'static str = "instance ID";
+    const SLED_ID: &'static str = "sled ID";
+    const SLED_SERIAL: &'static str = "sled serial";
+    const ADDRESS: &'static str = "propolis address";
+    const STATE: &'static str = "state";
+    const WIDTH: usize = const_max_len(&[
+        ID,
+        CREATED,
+        DELETED,
+        UPDATED,
+        INSTANCE_ID,
+        SLED_ID,
+        SLED_SERIAL,
+        STATE,
+        ADDRESS,
+    ]);
+
+    let width = std::cmp::max(width, Some(WIDTH)).unwrap_or(WIDTH);
+    let Vmm {
+        id,
+        time_created,
+        time_deleted,
+        instance_id,
+        sled_id,
+        propolis_ip,
+        propolis_port,
+        runtime: db::model::VmmRuntimeState { state, r#gen, time_state_updated },
+    } = vmm;
+
+    println!("{indent}{ID:>width$}: {id}");
+    if inst_id {
+        println!("{indent}{INSTANCE_ID:>width$}: {instance_id}");
+    }
+    println!("{indent}{CREATED:>width$}: {time_created}");
+    if let Some(deleted) = time_deleted {
+        println!("{indent}{DELETED:width$}: {deleted}");
+    }
+    println!("{indent}{STATE:>width$}: {state}");
+    let g = u64::from(r#gen.0);
+    println!(
+        "{indent}{UPDATED:>width$}: {time_state_updated:?} (generation {g})"
+    );
+
+    println!(
+        "{indent}{ADDRESS:>width$}: {}:{}",
+        propolis_ip.ip(),
+        propolis_port.0
+    );
+    println!("{indent}{SLED_ID:>width$}: {sled_id}");
+    if let Some(serial) = sled_serial {
+        println!("{indent}{SLED_SERIAL:>width$}: {serial}");
+    }
+}
+
+async fn cmd_db_vmm_list(
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    &VmmListArgs { ref states, verbose }: &VmmListArgs,
+) -> Result<(), anyhow::Error> {
+    use db::model::VmmState;
+    use db::schema::{sled::dsl as sled_dsl, vmm::dsl};
+
+    let ctx = || "loading VMMs";
+    let mut query = dsl::vmm.into_boxed();
+
+    if !fetch_opts.include_deleted {
+        query = query.filter(dsl::time_deleted.is_null());
+
+        // If the user wanted to see VMMs in states that the control plane may
+        // have soft-deleted, but didn't ask to include deleted records, let
+        // them know that some stuff may be missing.
+        let maybe_deleted_states =
+            states.iter().filter(|s| VmmState::DESTROYABLE_STATES.contains(s));
+        for state in maybe_deleted_states {
+            eprintln!(
+                "WARN: VMMs in the `{state:?}` state may have been deleted, \
+                 but `--include-deleted` was not specified",
+            );
+        }
+    }
+
+    if !states.is_empty() {
+        query = query.filter(dsl::state.eq_any(states.clone()));
+    }
+
+    let vmms = datastore
+        .pool_connection_for_tests()
+        .await?
+        .transaction_async(|conn| async move {
+            // If we are including deleted VMMs, we can no longer use indices on
+            // the VMM table, which do not index deleted VMMs. Thus, we must
+            // allow a full-table scan in that case.
+            if fetch_opts.include_deleted {
+                conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+            }
+
+            query
+                .left_join(sled_dsl::sled.on(sled_dsl::id.eq(dsl::sled_id)))
+                .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
+                .select((Vmm::as_select(), Option::<Sled>::as_select()))
+                .load_async::<(Vmm, Option<Sled>)>(&conn)
+                .await
+        })
+        .await
+        .with_context(ctx)?;
+
+    check_limit(&vmms, fetch_opts.fetch_limit, ctx);
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct VmmRow<'a> {
+        instance_id: Uuid,
+        #[tabled(inline)]
+        state: VmmStateRow,
+        sled: &'a str,
+    }
+
+    impl<'a> From<&'a (Vmm, Option<Sled>)> for VmmRow<'a> {
+        fn from((ref vmm, ref sled): &'a (Vmm, Option<Sled>)) -> Self {
+            let &Vmm {
+                id,
+                time_created: _,
+                time_deleted: _,
+                instance_id,
+                sled_id,
+                propolis_ip: _,
+                propolis_port: _,
+                runtime:
+                    db::model::VmmRuntimeState {
+                        state,
+                        r#gen,
+                        time_state_updated: _,
+                    },
+            } = vmm;
+            let sled = match sled {
+                Some(sled) => sled.serial_number(),
+                None => {
+                    eprintln!("WARN: no sled found with ID {sled_id}");
+                    "<unknown>"
+                }
+            };
+            VmmRow {
+                instance_id,
+                state: VmmStateRow { id, state, generation: r#gen.0.into() },
+                sled,
+            }
+        }
+    }
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct VerboseVmmRow<'a> {
+        #[tabled(inline)]
+        inner: VmmRow<'a>,
+        sled_id: Uuid,
+        address: std::net::SocketAddr,
+        #[tabled(display_with = "datetime_rfc3339_concise")]
+        time_created: DateTime<Utc>,
+        #[tabled(display_with = "datetime_rfc3339_concise")]
+        time_updated: DateTime<Utc>,
+    }
+
+    impl<'a> From<&'a (Vmm, Option<Sled>)> for VerboseVmmRow<'a> {
+        fn from(it: &'a (Vmm, Option<Sled>)) -> Self {
+            let Vmm {
+                time_created,
+                time_deleted: _,
+                sled_id,
+                propolis_ip,
+                propolis_port,
+                ref runtime,
+                ..
+            } = it.0;
+            VerboseVmmRow {
+                sled_id,
+                inner: VmmRow::from(it),
+                address: std::net::SocketAddr::new(
+                    propolis_ip.ip(),
+                    propolis_port.into(),
+                ),
+                time_created,
+                time_updated: runtime.time_state_updated,
+            }
+        }
+    }
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct WithDeleted<T: Tabled> {
+        #[tabled(inline)]
+        inner: T,
+        #[tabled(display_with = "datetime_opt_rfc3339_concise")]
+        time_deleted: Option<DateTime<Utc>>,
+    }
+
+    impl<'a, T> From<&'a (Vmm, Option<Sled>)> for WithDeleted<T>
+    where
+        T: Tabled + From<&'a (Vmm, Option<Sled>)>,
+    {
+        fn from(it: &'a (Vmm, Option<Sled>)) -> Self {
+            Self { inner: T::from(it), time_deleted: it.0.time_deleted }
+        }
+    }
+
+    let mut table = match (verbose, fetch_opts.include_deleted) {
+        (true, true) => tabled::Table::new(
+            vmms.iter().map(WithDeleted::<VerboseVmmRow>::from),
+        ),
+        (true, false) => {
+            tabled::Table::new(vmms.iter().map(VerboseVmmRow::from))
+        }
+        (false, true) => {
+            tabled::Table::new(vmms.iter().map(WithDeleted::<VmmRow>::from))
+        }
+        (false, false) => tabled::Table::new(vmms.iter().map(VmmRow::from)),
+    };
+    table
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0));
+
+    println!("{table}");
+
+    Ok(())
+}
+
 // Display an empty cell for an Option<T> if it's None.
 fn display_option_blank<T: Display>(opt: &Option<T>) -> String {
     opt.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "".to_string())
+}
+
+// Format a `chrono::DateTime` in RFC3339 with milliseconds precision and using
+// `Z` rather than the UTC offset for UTC timestamps, to save a few characters
+// of line width in tabular output.
+fn datetime_rfc3339_concise(t: &DateTime<Utc>) -> String {
+    t.to_rfc3339_opts(chrono::format::SecondsFormat::Millis, true)
+}
+
+// Format an optional `chrono::DateTime` in RFC3339 with milliseconds precision
+// and using `Z` rather than the UTC offset for UTC timestamps, to save a few
+// characters of line width in tabular output.
+fn datetime_opt_rfc3339_concise(t: &Option<DateTime<Utc>>) -> String {
+    t.map(|t| t.to_rfc3339_opts(chrono::format::SecondsFormat::Millis, true))
+        .unwrap_or_else(|| "-".to_string())
 }

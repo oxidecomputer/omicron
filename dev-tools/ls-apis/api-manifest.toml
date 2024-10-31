@@ -279,6 +279,11 @@ label = "Sled Agent"
 server_package_name = "sled-agent-api"
 
 [[apis]]
+client_package_name = "repo-depot-client"
+label = "Repo Depot API"
+server_package_name = "repo-depot-api"
+
+[[apis]]
 client_package_name = "wicketd-client"
 label = "Wicketd"
 server_package_name = "wicketd-api"
@@ -411,6 +416,17 @@ client = "gateway-client"
 evaluation = "bogus"
 note = """
 nexus-types depends on gateway-client for defining some types.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "internal-dns"
+client = "dns-service-client"
+evaluation = "bogus"
+note = """
+Past versions of internal-dns (which does not exist any more) depended on
+dns-service-client for defining some types.  We can remove this when other repos
+that depend on Omicron have updated past the removal of the "internal-dns"
+package.
 """
 
 [[dependency_filter_rules]]

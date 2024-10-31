@@ -582,6 +582,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.dataset (
     /* Only valid if kind = zone -- the name of this zone */
     zone_name TEXT,
 
+    quota INT8,
+    reservation INT8,
+    compression TEXT,
+
     /* Crucible must make use of 'size_used'; other datasets manage their own storage */
     CONSTRAINT size_used_column_set_for_crucible CHECK (
       (kind != 'crucible') OR
@@ -3490,7 +3494,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
 
     -- unique id for this zone
     id UUID NOT NULL,
-    underlay_address INET NOT NULL,
     zone_type omicron.public.zone_type NOT NULL,
 
     -- SocketAddr of the "primary" service for this zone
@@ -3612,6 +3615,11 @@ CREATE TYPE IF NOT EXISTS omicron.public.bp_zone_disposition AS ENUM (
     'expunged'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.bp_dataset_disposition AS ENUM (
+    'in_service',
+    'expunged'
+);
+
 -- list of all blueprints
 CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     id UUID PRIMARY KEY,
@@ -3713,6 +3721,52 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_physical_disk  (
     PRIMARY KEY (blueprint_id, id)
 );
 
+-- description of a collection of omicron datasets stored in a blueprint
+CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_datasets (
+    -- foreign key into the `blueprint` table
+    blueprint_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    generation INT8 NOT NULL,
+
+    PRIMARY KEY (blueprint_id, sled_id)
+);
+
+-- description of an omicron dataset specified in a blueprint.
+CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_dataset (
+    -- foreign key into the `blueprint` table
+    blueprint_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    id UUID NOT NULL,
+
+    -- Dataset disposition
+    disposition omicron.public.bp_dataset_disposition NOT NULL,
+
+    pool_id UUID NOT NULL,
+    kind omicron.public.dataset_kind NOT NULL,
+    -- Only valid if kind = zone
+    zone_name TEXT,
+
+    -- Only valid if kind = crucible
+    ip INET,
+    port INT4 CHECK (port BETWEEN 0 AND 65535),
+
+    quota INT8,
+    reservation INT8,
+    compression TEXT NOT NULL,
+
+    CONSTRAINT zone_name_for_zone_kind CHECK (
+      (kind != 'zone') OR
+      (kind = 'zone' AND zone_name IS NOT NULL)
+    ),
+
+    CONSTRAINT ip_and_port_set_for_crucible CHECK (
+      (kind != 'crucible') OR
+      (kind = 'crucible' AND ip IS NOT NULL and port IS NOT NULL)
+    ),
+
+    PRIMARY KEY (blueprint_id, id)
+);
+
 -- see inv_sled_omicron_zones, which is identical except it references a
 -- collection whereas this table references a blueprint
 CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_zones (
@@ -3741,7 +3795,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
 
     -- unique id for this zone
     id UUID NOT NULL,
-    underlay_address INET NOT NULL,
     zone_type omicron.public.zone_type NOT NULL,
 
     -- SocketAddr of the "primary" service for this zone
@@ -4621,7 +4674,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '111.0.0', NULL)
+    (TRUE, NOW(), NOW(), '113.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

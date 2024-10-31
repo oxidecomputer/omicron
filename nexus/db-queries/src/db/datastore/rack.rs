@@ -997,7 +997,6 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::test::{
         sled_baseboard_for_test, sled_system_hardware_for_test,
     };
@@ -1006,6 +1005,7 @@ mod test {
     use crate::db::model::IpKind;
     use crate::db::model::IpPoolRange;
     use crate::db::model::Sled;
+    use crate::db::pub_test_utils::TestDatabase;
     use async_bb8_diesel::AsyncSimpleConnection;
     use internal_dns_types::names::DNS_ZONE;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
@@ -1059,6 +1059,7 @@ mod test {
                     id: Uuid::new_v4(),
                     blueprint_zones: BTreeMap::new(),
                     blueprint_disks: BTreeMap::new(),
+                    blueprint_datasets: BTreeMap::new(),
                     sled_state: BTreeMap::new(),
                     cockroachdb_setting_preserve_downgrade:
                         CockroachDbPreserveDowngrade::DoNotModify,
@@ -1378,7 +1379,6 @@ mod test {
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: external_dns_id,
-                        underlay_address: Ipv6Addr::LOCALHOST,
                         filesystem_pool: Some(dataset.pool_name.clone()),
                         zone_type: BlueprintZoneType::ExternalDns(
                             blueprint_zone_type::ExternalDns {
@@ -1408,7 +1408,6 @@ mod test {
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: ntp1_id,
-                        underlay_address: Ipv6Addr::LOCALHOST,
                         filesystem_pool: Some(random_zpool()),
                         zone_type: BlueprintZoneType::BoundaryNtp(
                             blueprint_zone_type::BoundaryNtp {
@@ -1451,7 +1450,6 @@ mod test {
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: nexus_id,
-                        underlay_address: Ipv6Addr::LOCALHOST,
                         filesystem_pool: Some(random_zpool()),
                         zone_type: BlueprintZoneType::Nexus(
                             blueprint_zone_type::Nexus {
@@ -1484,7 +1482,6 @@ mod test {
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: ntp2_id,
-                        underlay_address: Ipv6Addr::LOCALHOST,
                         filesystem_pool: Some(random_zpool()),
                         zone_type: BlueprintZoneType::BoundaryNtp(
                             blueprint_zone_type::BoundaryNtp {
@@ -1526,7 +1523,6 @@ mod test {
                 zones: vec![BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: ntp3_id,
-                    underlay_address: Ipv6Addr::LOCALHOST,
                     filesystem_pool: Some(random_zpool()),
                     zone_type: BlueprintZoneType::InternalNtp(
                         blueprint_zone_type::InternalNtp {
@@ -1544,6 +1540,7 @@ mod test {
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
+            blueprint_datasets: BTreeMap::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
@@ -1707,7 +1704,6 @@ mod test {
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: nexus_id1,
-                        underlay_address: Ipv6Addr::LOCALHOST,
                         filesystem_pool: Some(random_zpool()),
                         zone_type: BlueprintZoneType::Nexus(
                             blueprint_zone_type::Nexus {
@@ -1740,7 +1736,6 @@ mod test {
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: nexus_id2,
-                        underlay_address: Ipv6Addr::LOCALHOST,
                         filesystem_pool: Some(random_zpool()),
                         zone_type: BlueprintZoneType::Nexus(
                             blueprint_zone_type::Nexus {
@@ -1806,6 +1801,7 @@ mod test {
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
+            blueprint_datasets: BTreeMap::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
@@ -1980,7 +1976,6 @@ mod test {
                 zones: vec![BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: nexus_id,
-                    underlay_address: Ipv6Addr::LOCALHOST,
                     filesystem_pool: Some(random_zpool()),
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {
@@ -2018,6 +2013,7 @@ mod test {
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
+            blueprint_datasets: BTreeMap::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
@@ -2090,7 +2086,6 @@ mod test {
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: external_dns_id,
-                        underlay_address: Ipv6Addr::LOCALHOST,
                         filesystem_pool: Some(dataset.pool_name.clone()),
                         zone_type: BlueprintZoneType::ExternalDns(
                             blueprint_zone_type::ExternalDns {
@@ -2120,7 +2115,6 @@ mod test {
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: nexus_id,
-                        underlay_address: Ipv6Addr::LOCALHOST,
                         filesystem_pool: Some(random_zpool()),
                         zone_type: BlueprintZoneType::Nexus(
                             blueprint_zone_type::Nexus {
@@ -2162,6 +2156,7 @@ mod test {
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
+            blueprint_datasets: BTreeMap::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,

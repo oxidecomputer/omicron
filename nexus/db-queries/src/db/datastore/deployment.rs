@@ -21,6 +21,8 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
 use clickhouse_admin_types::{KeeperId, ServerId};
+use core::future::Future;
+use core::pin::Pin;
 use diesel::expression::SelectableHelper;
 use diesel::pg::Pg;
 use diesel::query_builder::AstPass;
@@ -36,18 +38,22 @@ use diesel::IntoSql;
 use diesel::OptionalExtension;
 use diesel::QueryDsl;
 use diesel::RunQueryDsl;
+use futures::FutureExt;
 use nexus_db_model::Blueprint as DbBlueprint;
 use nexus_db_model::BpClickhouseClusterConfig;
 use nexus_db_model::BpClickhouseKeeperZoneIdToNodeId;
 use nexus_db_model::BpClickhouseServerZoneIdToNodeId;
+use nexus_db_model::BpOmicronDataset;
 use nexus_db_model::BpOmicronPhysicalDisk;
 use nexus_db_model::BpOmicronZone;
 use nexus_db_model::BpOmicronZoneNic;
+use nexus_db_model::BpSledOmicronDatasets;
 use nexus_db_model::BpSledOmicronPhysicalDisks;
 use nexus_db_model::BpSledOmicronZones;
 use nexus_db_model::BpSledState;
 use nexus_db_model::BpTarget;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintTarget;
@@ -62,6 +68,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -100,6 +107,76 @@ impl DataStore {
     ) -> Result<(), Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
         Self::blueprint_insert_on_connection(&conn, opctx, blueprint).await
+    }
+
+    /// Creates a transaction iff the current blueprint is "bp_id".
+    ///
+    /// - The transaction is retryable and named "name"
+    /// - The "bp_id" value is checked as the first operation within the
+    /// transaction.
+    /// - If "bp_id" is still the current target, then "f" is called,
+    /// within a transactional context.
+    pub async fn transaction_if_current_blueprint_is<Func, R>(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        name: &'static str,
+        opctx: &OpContext,
+        bp_id: BlueprintUuid,
+        f: Func,
+    ) -> Result<R, Error>
+    where
+        Func: for<'t> Fn(
+                &'t async_bb8_diesel::Connection<DbConnection>,
+            ) -> Pin<
+                Box<
+                    dyn Future<Output = Result<R, TransactionError<Error>>>
+                        + Send
+                        + 't,
+                >,
+            > + Send
+            + Sync
+            + Clone,
+        R: Send + 'static,
+    {
+        let err = OptionalError::new();
+        let r = self
+            .transaction_retry_wrapper(name)
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let f = f.clone();
+                async move {
+                    // Bail if `bp_id` is no longer the target
+                    let target =
+                        Self::blueprint_target_get_current_on_connection(
+                            &conn, opctx,
+                        )
+                        .await
+                        .map_err(|txn_error| txn_error.into_diesel(&err))?;
+                    let bp_id_current =
+                        BlueprintUuid::from_untyped_uuid(target.target_id);
+                    if bp_id_current != bp_id {
+                        return Err(err.bail(
+                            Error::invalid_request(format!(
+                                "blueprint target has changed from {} -> {}",
+                                bp_id, bp_id_current
+                            ))
+                            .into(),
+                        ));
+                    }
+
+                    // Otherwise, perform our actual operation
+                    f(&conn)
+                        .await
+                        .map_err(|txn_error| txn_error.into_diesel(&err))
+                }
+                .boxed()
+            })
+            .await
+            .map_err(|e| match err.take() {
+                Some(txn_error) => txn_error.into(),
+                None => public_error_from_diesel(e, ErrorHandler::Server),
+            })?;
+        Ok(r)
     }
 
     /// Variant of [Self::blueprint_insert] which may be called from a
@@ -156,6 +233,28 @@ impl DataStore {
                 })
             })
             .collect::<Vec<_>>();
+
+        let sled_omicron_datasets = blueprint
+            .blueprint_datasets
+            .iter()
+            .map(|(sled_id, datasets_config)| {
+                BpSledOmicronDatasets::new(
+                    blueprint_id,
+                    *sled_id,
+                    datasets_config,
+                )
+            })
+            .collect::<Vec<_>>();
+        let omicron_datasets = blueprint
+            .blueprint_datasets
+            .iter()
+            .flat_map(|(sled_id, datasets_config)| {
+                datasets_config.datasets.values().map(move |dataset| {
+                    BpOmicronDataset::new(blueprint_id, *sled_id, dataset)
+                })
+            })
+            .collect::<Vec<_>>();
+
         let sled_omicron_zones = blueprint
             .blueprint_zones
             .iter()
@@ -270,6 +369,24 @@ impl DataStore {
                 use db::schema::bp_omicron_physical_disk::dsl as omicron_disk;
                 let _ = diesel::insert_into(omicron_disk::bp_omicron_physical_disk)
                     .values(omicron_physical_disks)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            // Insert all datasets for this blueprint.
+
+            {
+                use db::schema::bp_sled_omicron_datasets::dsl as sled_datasets;
+                let _ = diesel::insert_into(sled_datasets::bp_sled_omicron_datasets)
+                    .values(sled_omicron_datasets)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            {
+                use db::schema::bp_omicron_dataset::dsl as omicron_dataset;
+                let _ = diesel::insert_into(omicron_dataset::bp_omicron_dataset)
+                    .values(omicron_datasets)
                     .execute_async(&conn)
                     .await?;
             }
@@ -522,6 +639,50 @@ impl DataStore {
             blueprint_physical_disks
         };
 
+        // Do the same thing we just did for zones, but for datasets too.
+        let mut blueprint_datasets: BTreeMap<
+            SledUuid,
+            BlueprintDatasetsConfig,
+        > = {
+            use db::schema::bp_sled_omicron_datasets::dsl;
+
+            let mut blueprint_datasets = BTreeMap::new();
+            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::bp_sled_omicron_datasets,
+                    dsl::sled_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::blueprint_id.eq(blueprint_id))
+                .select(BpSledOmicronDatasets::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+                paginator = p.found_batch(&batch, &|s| s.sled_id);
+
+                for s in batch {
+                    let old = blueprint_datasets.insert(
+                        s.sled_id.into(),
+                        BlueprintDatasetsConfig {
+                            generation: *s.generation,
+                            datasets: BTreeMap::new(),
+                        },
+                    );
+                    bail_unless!(
+                        old.is_none(),
+                        "found duplicate sled ID in bp_sled_omicron_datasets: {}",
+                        s.sled_id
+                    );
+                }
+            }
+
+            blueprint_datasets
+        };
+
         // Assemble a mutable map of all the NICs found, by NIC id.  As we
         // match these up with the corresponding zone below, we'll remove items
         // from this set.  That way we can tell if the same NIC was used twice
@@ -685,6 +846,58 @@ impl DataStore {
             }
         }
 
+        // Load all the datasets for each sled
+        {
+            use db::schema::bp_omicron_dataset::dsl;
+
+            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            while let Some(p) = paginator.next() {
+                // `paginated` implicitly orders by our `id`, which is also
+                // handy for testing: the datasets are always consistently ordered
+                let batch = paginated(
+                    dsl::bp_omicron_dataset,
+                    dsl::id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::blueprint_id.eq(blueprint_id))
+                .select(BpOmicronDataset::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+                paginator = p.found_batch(&batch, &|d| d.id);
+
+                for d in batch {
+                    let sled_datasets = blueprint_datasets
+                        .get_mut(&d.sled_id.into())
+                        .ok_or_else(|| {
+                            // This error means that we found a row in
+                            // bp_omicron_dataset with no associated record in
+                            // bp_sled_omicron_datasets.  This should be
+                            // impossible and reflects either a bug or database
+                            // corruption.
+                            Error::internal_error(&format!(
+                                "dataset {}: unknown sled: {}",
+                                d.id, d.sled_id
+                            ))
+                        })?;
+
+                    let dataset_id = d.id;
+                    sled_datasets.datasets.insert(
+                        dataset_id.into(),
+                        d.try_into().map_err(|e| {
+                            Error::internal_error(&format!(
+                                "Cannot parse dataset {}: {e}",
+                                dataset_id
+                            ))
+                        })?,
+                    );
+                }
+            }
+        }
+
         // Sort all disks to match what blueprint builders do.
         for (_, disks_config) in blueprint_disks.iter_mut() {
             disks_config.disks.sort_unstable_by_key(|d| d.id);
@@ -844,6 +1057,7 @@ impl DataStore {
             id: blueprint_id,
             blueprint_zones,
             blueprint_disks,
+            blueprint_datasets,
             sled_state,
             parent_blueprint_id,
             internal_dns_version,
@@ -879,6 +1093,8 @@ impl DataStore {
             nsled_states,
             nsled_physical_disks,
             nphysical_disks,
+            nsled_datasets,
+            ndatasets,
             nsled_agent_zones,
             nzones,
             nnics,
@@ -890,7 +1106,7 @@ impl DataStore {
                 // Ensure that blueprint we're about to delete is not the
                 // current target.
                 let current_target =
-                    self.blueprint_current_target_only(&conn).await?;
+                    Self::blueprint_current_target_only(&conn).await?;
                 if current_target.target_id == blueprint_id {
                     return Err(TransactionError::CustomError(
                         Error::conflict(format!(
@@ -944,6 +1160,26 @@ impl DataStore {
                     use db::schema::bp_omicron_physical_disk::dsl;
                     diesel::delete(
                         dsl::bp_omicron_physical_disk
+                            .filter(dsl::blueprint_id.eq(blueprint_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
+                // Remove rows associated with Omicron datasets
+                let nsled_datasets = {
+                    use db::schema::bp_sled_omicron_datasets::dsl;
+                    diesel::delete(
+                        dsl::bp_sled_omicron_datasets
+                            .filter(dsl::blueprint_id.eq(blueprint_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+                let ndatasets = {
+                    use db::schema::bp_omicron_dataset::dsl;
+                    diesel::delete(
+                        dsl::bp_omicron_dataset
                             .filter(dsl::blueprint_id.eq(blueprint_id)),
                     )
                     .execute_async(&conn)
@@ -1014,6 +1250,8 @@ impl DataStore {
                     nsled_states,
                     nsled_physical_disks,
                     nphysical_disks,
+                    nsled_datasets,
+                    ndatasets,
                     nsled_agent_zones,
                     nzones,
                     nnics,
@@ -1036,6 +1274,8 @@ impl DataStore {
             "nsled_states" => nsled_states,
             "nsled_physical_disks" => nsled_physical_disks,
             "nphysical_disks" => nphysical_disks,
+            "nsled_datasets" => nsled_datasets,
+            "ndatasets" => ndatasets,
             "nsled_agent_zones" => nsled_agent_zones,
             "nzones" => nzones,
             "nnics" => nnics,
@@ -1102,15 +1342,17 @@ impl DataStore {
 
             async move {
                 // Bail out if `blueprint` isn't the current target.
-                let current_target = self
-                    .blueprint_current_target_only(&conn)
+                let current_target = Self::blueprint_current_target_only(&conn)
                     .await
                     .map_err(|e| err.bail(e))?;
                 if current_target.target_id != blueprint.id {
-                    return Err(err.bail(Error::invalid_request(format!(
+                    return Err(err.bail(
+                        Error::invalid_request(format!(
                         "blueprint {} is not the current target blueprint ({})",
                         blueprint.id, current_target.target_id
-                    ))));
+                    ))
+                        .into(),
+                    ));
                 }
 
                 // See the comment on this method; this lets us notify our test
@@ -1151,7 +1393,7 @@ impl DataStore {
                         .map(|(_sled_id, zone)| zone),
                 )
                 .await
-                .map_err(|e| err.bail(e))?;
+                .map_err(|e| err.bail(e.into()))?;
                 self.ensure_zone_external_networking_allocated_on_connection(
                     &conn,
                     opctx,
@@ -1162,7 +1404,7 @@ impl DataStore {
                         .map(|(_sled_id, zone)| zone),
                 )
                 .await
-                .map_err(|e| err.bail(e))?;
+                .map_err(|e| err.bail(e.into()))?;
 
                 Ok(())
             }
@@ -1170,7 +1412,7 @@ impl DataStore {
         .await
         .map_err(|e| {
             if let Some(err) = err.take() {
-                err
+                err.into()
             } else {
                 public_error_from_diesel(e, ErrorHandler::Server)
             }
@@ -1320,7 +1562,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let target = self.blueprint_current_target_only(&conn).await?;
+        let target = Self::blueprint_current_target_only(&conn).await?;
 
         // The blueprint for the current target cannot be deleted while it is
         // the current target, but it's possible someone else (a) made a new
@@ -1335,13 +1577,22 @@ impl DataStore {
     }
 
     /// Get the current target blueprint, if one exists
+    pub async fn blueprint_target_get_current_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        opctx: &OpContext,
+    ) -> Result<BlueprintTarget, TransactionError<Error>> {
+        opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
+        Self::blueprint_current_target_only(&conn).await
+    }
+
+    /// Get the current target blueprint, if one exists
     pub async fn blueprint_target_get_current(
         &self,
         opctx: &OpContext,
     ) -> Result<BlueprintTarget, Error> {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.blueprint_current_target_only(&conn).await
+        Self::blueprint_current_target_only(&conn).await.map_err(|e| e.into())
     }
 
     // Helper to fetch the current blueprint target (without fetching the entire
@@ -1349,9 +1600,8 @@ impl DataStore {
     //
     // Caller is responsible for checking authz for this operation.
     async fn blueprint_current_target_only(
-        &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<BlueprintTarget, Error> {
+    ) -> Result<BlueprintTarget, TransactionError<Error>> {
         use db::schema::bp_target::dsl;
 
         let current_target = dsl::bp_target
@@ -1730,7 +1980,7 @@ impl RunQueryDsl<DbConnection> for InsertTargetQuery {}
 mod tests {
     use super::*;
 
-    use crate::db::datastore::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::QueryBuilder;
     use nexus_inventory::now_db_precision;
     use nexus_inventory::CollectionBuilder;
@@ -1821,6 +2071,12 @@ mod tests {
 
         for (table_name, result) in [
             query_count!(blueprint, id),
+            query_count!(bp_sled_state, blueprint_id),
+            query_count!(bp_sled_omicron_datasets, blueprint_id),
+            query_count!(bp_sled_omicron_physical_disks, blueprint_id),
+            query_count!(bp_sled_omicron_zones, blueprint_id),
+            query_count!(bp_omicron_dataset, blueprint_id),
+            query_count!(bp_omicron_physical_disk, blueprint_id),
             query_count!(bp_omicron_zone, blueprint_id),
             query_count!(bp_omicron_zone_nic, blueprint_id),
         ] {
@@ -1840,16 +2096,20 @@ mod tests {
             .map(|i| {
                 (
                     ZpoolUuid::new_v4(),
-                    SledDisk {
-                        disk_identity: DiskIdentity {
-                            vendor: String::from("v"),
-                            serial: format!("s-{i}"),
-                            model: String::from("m"),
+                    (
+                        SledDisk {
+                            disk_identity: DiskIdentity {
+                                vendor: String::from("v"),
+                                serial: format!("s-{i}"),
+                                model: String::from("m"),
+                            },
+                            disk_id: PhysicalDiskUuid::new_v4(),
+                            policy: PhysicalDiskPolicy::InService,
+                            state: PhysicalDiskState::Active,
                         },
-                        disk_id: PhysicalDiskUuid::new_v4(),
-                        policy: PhysicalDiskPolicy::InService,
-                        state: PhysicalDiskState::Active,
-                    },
+                        // Datasets
+                        vec![],
+                    ),
                 )
             })
             .collect();
@@ -2074,7 +2334,12 @@ mod tests {
                         .resources,
                 )
                 .unwrap(),
-            EnsureMultiple::Changed { added: 4, removed: 0 }
+            EnsureMultiple::Changed {
+                added: 4,
+                updated: 0,
+                expunged: 0,
+                removed: 0
+            }
         );
 
         // Add zones to our new sled.
@@ -2532,7 +2797,6 @@ mod tests {
                 zones: vec![BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: zone_id,
-                    underlay_address: Ipv6Addr::LOCALHOST,
                     filesystem_pool: None,
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {

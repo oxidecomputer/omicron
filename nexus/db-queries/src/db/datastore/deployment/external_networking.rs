@@ -408,7 +408,7 @@ impl DataStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::TestDatabase;
     use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use anyhow::Context as _;
     use async_bb8_diesel::AsyncSimpleConnection;
@@ -440,7 +440,6 @@ mod tests {
     use omicron_uuid_kinds::ZpoolUuid;
     use oxnet::IpNet;
     use std::net::IpAddr;
-    use std::net::Ipv6Addr;
     use std::net::SocketAddr;
     use uuid::Uuid;
 
@@ -581,7 +580,6 @@ mod tests {
                 BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: self.nexus_id,
-                    underlay_address: Ipv6Addr::LOCALHOST,
                     filesystem_pool: Some(ZpoolName::new_external(
                         ZpoolUuid::new_v4(),
                     )),
@@ -598,7 +596,6 @@ mod tests {
                 BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: self.dns_id,
-                    underlay_address: Ipv6Addr::LOCALHOST,
                     filesystem_pool: Some(ZpoolName::new_external(
                         ZpoolUuid::new_v4(),
                     )),
@@ -618,7 +615,6 @@ mod tests {
                 BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: self.ntp_id,
-                    underlay_address: Ipv6Addr::LOCALHOST,
                     filesystem_pool: Some(ZpoolName::new_external(
                         ZpoolUuid::new_v4(),
                     )),

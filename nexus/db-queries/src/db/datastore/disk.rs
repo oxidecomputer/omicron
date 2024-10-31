@@ -843,7 +843,7 @@ impl DataStore {
 mod tests {
     use super::*;
 
-    use crate::db::datastore::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::TestDatabase;
     use nexus_types::external_api::params;
     use omicron_common::api::external;
     use omicron_test_utils::dev;

@@ -259,7 +259,9 @@ pub struct InstanceAutoRestart {
     ///
     /// This indicates whether the instance should be automatically restarted by
     /// the control plane on failure. If this is `NULL`, no auto-restart policy
-    /// has been configured for this instance by the user.
+    /// has been configured for this instance by the user. In that case, the
+    /// control plane will use the default policy when determining whether
+    /// this instance can be automatically restarted.
     #[diesel(column_name = auto_restart_policy)]
     #[serde(default)]
     pub policy: Option<InstanceAutoRestartPolicy>,

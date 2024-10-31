@@ -383,6 +383,7 @@ mod test {
                 id,
                 blueprint_zones,
                 blueprint_disks: BTreeMap::new(),
+                blueprint_datasets: BTreeMap::new(),
                 sled_state: BTreeMap::new(),
                 cockroachdb_setting_preserve_downgrade:
                     CockroachDbPreserveDowngrade::DoNotModify,
@@ -442,7 +443,6 @@ mod test {
                 zones: vec![BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: OmicronZoneUuid::new_v4(),
-                    underlay_address: "::1".parse().unwrap(),
                     filesystem_pool: Some(zpool.clone()),
                     zone_type: BlueprintZoneType::InternalDns(
                         blueprint_zone_type::InternalDns {
@@ -545,7 +545,6 @@ mod test {
             zones.zones.push(BlueprintZoneConfig {
                 disposition,
                 id: OmicronZoneUuid::new_v4(),
-                underlay_address: "::1".parse().unwrap(),
                 filesystem_pool: Some(ZpoolName::new_external(
                     ZpoolUuid::new_v4(),
                 )),
@@ -612,7 +611,6 @@ mod test {
         let crdb_zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::Expunged,
             id: OmicronZoneUuid::new_v4(),
-            underlay_address: "::1".parse().unwrap(),
             filesystem_pool: Some(ZpoolName::new_external(ZpoolUuid::new_v4())),
             zone_type: BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb {

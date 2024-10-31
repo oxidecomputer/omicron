@@ -84,9 +84,12 @@ impl backend::Connector for PantryConnector {
 pub(crate) fn make_pantry_connection_pool(
     qorb_resolver: &QorbResolver,
 ) -> pool::Pool<PooledPantryClient> {
-    pool::Pool::new(
+    match pool::Pool::new(
         qorb_resolver.for_service(ServiceName::CruciblePantry),
         Arc::new(PantryConnector),
         qorb::policy::Policy::default(),
-    )
+    ) {
+        Ok(pool) => pool,
+        Err(e) => e.into_inner(),
+    }
 }

@@ -4,6 +4,7 @@
 
 //! Sled agent implementation
 
+use crate::artifact_store::ArtifactStore;
 use crate::boot_disk_os_writer::BootDiskOsWriter;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::early_networking::EarlyNetworkSetupError;
@@ -167,6 +168,9 @@ pub enum Error {
 
     #[error("Expected revision to fit in a u32, but found {0}")]
     UnexpectedRevision(i64),
+
+    #[error(transparent)]
+    RepoDepotStart(#[from] crate::artifact_store::StartError),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -186,11 +190,21 @@ impl From<Error> for omicron_common::api::external::Error {
 impl From<Error> for dropshot::HttpError {
     fn from(err: Error) -> Self {
         const NO_SUCH_INSTANCE: &str = "NO_SUCH_INSTANCE";
+        const INSTANCE_CHANNEL_FULL: &str = "INSTANCE_CHANNEL_FULL";
         match err {
             Error::Instance(crate::instance_manager::Error::Instance(
                 instance_error,
             )) => {
                 match instance_error {
+                    // The instance's request channel is full, so it cannot
+                    // currently process this request. Shed load, but indicate
+                    // to the client that it can try again later.
+                    err @ crate::instance::Error::FailedSendChannelFull => {
+                        HttpError::for_unavail(
+                            Some(INSTANCE_CHANNEL_FULL.to_string()),
+                            err.to_string(),
+                        )
+                    }
                     crate::instance::Error::Propolis(propolis_error) => {
                         // Work around dropshot#693: HttpError::for_status
                         // only accepts client errors and asserts on server
@@ -350,6 +364,9 @@ struct SledAgentInner {
 
     // Component of Sled Agent responsible for managing instrumentation probes.
     probes: ProbeManager,
+
+    // Component of Sled Agent responsible for managing the artifact store.
+    repo_depot: dropshot::HttpServer<ArtifactStore<StorageHandle>>,
 }
 
 impl SledAgentInner {
@@ -582,6 +599,10 @@ impl SledAgent {
             log.new(o!("component" => "ProbeManager")),
         );
 
+        let repo_depot = ArtifactStore::new(&log, storage_manager.clone())
+            .start(sled_address, &config.dropshot)
+            .await?;
+
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
                 id: request.body.id,
@@ -604,6 +625,7 @@ impl SledAgent {
                 bootstore: long_running_task_handles.bootstore.clone(),
                 _metrics_manager: metrics_manager,
                 boot_disk_os_writer: BootDiskOsWriter::new(&parent_log),
+                repo_depot,
             }),
             log: log.clone(),
             sprockets: config.sprockets.clone(),
@@ -1079,6 +1101,8 @@ impl SledAgent {
     }
 
     /// Downloads and applies an artifact.
+    // TODO: This is being split into "download" (i.e. store an artifact in the
+    // artifact store) and "apply" (perform an update using an artifact).
     pub async fn update_artifact(
         &self,
         artifact: UpdateArtifactId,
@@ -1088,6 +1112,10 @@ impl SledAgent {
             .download_artifact(artifact, &self.inner.nexus_client)
             .await?;
         Ok(())
+    }
+
+    pub fn artifact_store(&self) -> &ArtifactStore<StorageHandle> {
+        &self.inner.repo_depot.app_private()
     }
 
     /// Issue a snapshot request for a Crucible disk attached to an instance

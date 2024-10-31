@@ -9,6 +9,7 @@ use crate::cargo::Workspace;
 use crate::ClientPackageName;
 use anyhow::{anyhow, ensure, Context, Result};
 use camino::Utf8Path;
+use cargo_metadata::CargoOpt;
 use cargo_metadata::Package;
 use cargo_metadata::PackageId;
 use std::collections::BTreeMap;
@@ -35,8 +36,12 @@ impl Workspaces {
         // First, load information about the "omicron" workspace.  This is the
         // current workspace so we don't need to provide the path to it.
         let ignored_non_clients = api_metadata.ignored_non_clients();
-        let omicron =
-            Arc::new(Workspace::load("omicron", None, ignored_non_clients)?);
+        let omicron = Arc::new(Workspace::load(
+            "omicron",
+            None,
+            None,
+            ignored_non_clients,
+        )?);
 
         // In order to assemble this metadata, Cargo already has a clone of most
         // of the other workspaces that we care about.  We'll use those clones
@@ -55,17 +60,36 @@ impl Workspaces {
         // concurrency.
         let handles: Vec<_> = [
             // To find this repo ... look up this package in Omicron
-            //   v                       v
-            ("crucible", "crucible-agent-client"),
-            ("propolis", "propolis-client"),
-            ("maghemite", "mg-admin-client"),
+            //   |                       |         +---- and enable these extra
+            //   |                       |         |     features when loading
+            //   v                       v         v
+            ("crucible", "crucible-agent-client", None),
+            (
+                "propolis",
+                "propolis-client",
+                // The artifacts shipped from the Propolis repo (particularly,
+                // `propolis-server`) are built with the `omicron-build`
+                // feature, which is not enabled by default.  Enable this
+                // feature when loading the Propolis repo metadata so that we
+                // see the dependency tree that a shipping system will have.
+                Some(CargoOpt::SomeFeatures(vec![String::from(
+                    "omicron-build",
+                )])),
+            ),
+            ("maghemite", "mg-admin-client", None),
         ]
         .into_iter()
-        .map(|(repo, omicron_pkg)| {
+        .map(|(repo, omicron_pkg, extra_features)| {
             let mine = omicron.clone();
             let my_ignored = ignored_non_clients.clone();
             std::thread::spawn(move || {
-                load_dependent_repo(&mine, repo, omicron_pkg, my_ignored)
+                load_dependent_repo(
+                    &mine,
+                    repo,
+                    omicron_pkg,
+                    extra_features,
+                    my_ignored,
+                )
             })
         })
         .collect();
@@ -97,6 +121,7 @@ impl Workspaces {
                 &maghemite,
                 "dendrite",
                 "dpd-client",
+                None,
                 ignored_non_clients.clone(),
             )?,
         );
@@ -231,6 +256,7 @@ fn load_dependent_repo(
     workspace: &Workspace,
     repo: &str,
     pkgname: &str,
+    extra_features: Option<CargoOpt>,
     ignored_non_clients: BTreeSet<ClientPackageName>,
 ) -> Result<Workspace> {
     // `Workspace` doesn't let us look up a non-workspace package by name
@@ -288,5 +314,10 @@ fn load_dependent_repo(
             )
         })?;
     let workspace_manifest = Utf8Path::new(output.trim_end());
-    Workspace::load(repo, Some(workspace_manifest), &ignored_non_clients)
+    Workspace::load(
+        repo,
+        Some(workspace_manifest),
+        extra_features,
+        &ignored_non_clients,
+    )
 }

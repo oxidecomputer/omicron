@@ -22,10 +22,17 @@ use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::ZoneKind;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
+use omicron_common::api::internal::shared::DatasetKind;
+use omicron_common::disk::CompressionAlgorithm;
+use omicron_common::disk::DatasetConfig;
+use omicron_common::disk::DatasetName;
+use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
@@ -35,6 +42,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::net::Ipv6Addr;
+use std::net::SocketAddrV6;
 use strum::EnumIter;
 use strum::IntoEnumIterator;
 use uuid::Uuid;
@@ -149,6 +157,9 @@ pub struct Blueprint {
     /// A map of sled id -> disks in use on each sled.
     pub blueprint_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
 
+    /// A map of sled id -> datasets in use on each sled
+    pub blueprint_datasets: BTreeMap<SledUuid, BlueprintDatasetsConfig>,
+
     /// which blueprint this blueprint is based on
     pub parent_blueprint_id: Option<Uuid>,
 
@@ -224,6 +235,17 @@ impl Blueprint {
                 .filter(move |z| z.disposition.matches(filter))
                 .map(|z| (*sled_id, z))
         })
+    }
+
+    /// Iterate over the [`BlueprintDatasetsConfig`] instances in the blueprint.
+    pub fn all_omicron_datasets(
+        &self,
+        filter: BlueprintDatasetFilter,
+    ) -> impl Iterator<Item = &BlueprintDatasetConfig> {
+        self.blueprint_datasets
+            .iter()
+            .flat_map(move |(_, datasets)| datasets.datasets.values())
+            .filter(move |d| d.disposition.matches(filter))
     }
 
     /// Iterate over the [`BlueprintZoneConfig`] instances in the blueprint
@@ -371,7 +393,7 @@ impl BpSledSubtableData for BlueprintOrCollectionZonesConfig {
                     zone.kind().report_str().to_string(),
                     zone.id().to_string(),
                     zone.disposition().to_string(),
-                    zone.underlay_address().to_string(),
+                    zone.underlay_ip().to_string(),
                 ],
             )
         })
@@ -646,17 +668,25 @@ pub struct BlueprintZoneConfig {
     pub disposition: BlueprintZoneDisposition,
 
     pub id: OmicronZoneUuid,
-    pub underlay_address: Ipv6Addr,
     /// zpool used for the zone's (transient) root filesystem
     pub filesystem_pool: Option<ZpoolName>,
     pub zone_type: BlueprintZoneType,
+}
+
+impl BlueprintZoneConfig {
+    /// Returns the underlay IP address associated with this zone.
+    ///
+    /// Assumes all zone have exactly one underlay IP address (which is
+    /// currently true).
+    pub fn underlay_ip(&self) -> Ipv6Addr {
+        self.zone_type.underlay_ip()
+    }
 }
 
 impl From<BlueprintZoneConfig> for OmicronZoneConfig {
     fn from(z: BlueprintZoneConfig) -> Self {
         Self {
             id: z.id,
-            underlay_address: z.underlay_address,
             filesystem_pool: z.filesystem_pool,
             zone_type: z.zone_type.into(),
         }
@@ -792,6 +822,22 @@ pub enum BlueprintZoneFilter {
     ShouldDeployVpcFirewallRules,
 }
 
+/// Filters that apply to blueprint datasets.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum BlueprintDatasetFilter {
+    // ---
+    // Prefer to keep this list in alphabetical order.
+    // ---
+    /// All datasets
+    All,
+
+    /// Datasets that have been expunged.
+    Expunged,
+
+    /// Datasets that are in-service.
+    InService,
+}
+
 /// Information about an Omicron physical disk as recorded in a blueprint.
 ///
 /// Part of [`Blueprint`].
@@ -800,6 +846,95 @@ pub type BlueprintPhysicalDisksConfig =
 
 pub type BlueprintPhysicalDiskConfig =
     omicron_common::disk::OmicronPhysicalDiskConfig;
+
+/// Information about Omicron datasets as recorded in a blueprint.
+#[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+pub struct BlueprintDatasetsConfig {
+    pub generation: Generation,
+    pub datasets: BTreeMap<DatasetUuid, BlueprintDatasetConfig>,
+}
+
+impl From<BlueprintDatasetsConfig> for DatasetsConfig {
+    fn from(config: BlueprintDatasetsConfig) -> Self {
+        Self {
+            generation: config.generation,
+            datasets: config
+                .datasets
+                .into_iter()
+                .map(|(id, d)| (id, d.into()))
+                .collect(),
+        }
+    }
+}
+
+/// The desired state of an Omicron-managed dataset in a blueprint.
+///
+/// Part of [`BlueprintDatasetConfig`].
+#[derive(
+    Debug,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    JsonSchema,
+    Deserialize,
+    Serialize,
+    EnumIter,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum BlueprintDatasetDisposition {
+    /// The dataset is in-service.
+    InService,
+
+    /// The dataset is permanently gone.
+    Expunged,
+}
+
+impl BlueprintDatasetDisposition {
+    pub fn matches(self, filter: BlueprintDatasetFilter) -> bool {
+        match self {
+            Self::InService => match filter {
+                BlueprintDatasetFilter::All => true,
+                BlueprintDatasetFilter::Expunged => false,
+                BlueprintDatasetFilter::InService => true,
+            },
+            Self::Expunged => match filter {
+                BlueprintDatasetFilter::All => true,
+                BlueprintDatasetFilter::Expunged => true,
+                BlueprintDatasetFilter::InService => false,
+            },
+        }
+    }
+}
+
+/// Information about a dataset as recorded in a blueprint
+#[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+pub struct BlueprintDatasetConfig {
+    pub disposition: BlueprintDatasetDisposition,
+
+    pub id: DatasetUuid,
+    pub pool: ZpoolName,
+    pub kind: DatasetKind,
+    pub address: Option<SocketAddrV6>,
+    pub quota: Option<ByteCount>,
+    pub reservation: Option<ByteCount>,
+    pub compression: CompressionAlgorithm,
+}
+
+impl From<BlueprintDatasetConfig> for DatasetConfig {
+    fn from(config: BlueprintDatasetConfig) -> Self {
+        Self {
+            id: config.id,
+            name: DatasetName::new(config.pool, config.kind),
+            quota: config.quota,
+            reservation: config.reservation,
+            compression: config.compression,
+        }
+    }
+}
 
 /// Describe high-level metadata about a blueprint
 // These fields are a subset of [`Blueprint`], and include only the data we can
@@ -969,7 +1104,7 @@ impl PartialEq<BlueprintZoneConfig> for BlueprintOrCollectionZoneConfig {
     fn eq(&self, other: &BlueprintZoneConfig) -> bool {
         self.kind() == other.kind()
             && self.disposition() == other.disposition
-            && self.underlay_address() == other.underlay_address
+            && self.underlay_ip() == other.underlay_ip()
             && self.is_zone_type_equal(&other.zone_type)
     }
 }
@@ -999,12 +1134,10 @@ impl BlueprintOrCollectionZoneConfig {
         }
     }
 
-    pub fn underlay_address(&self) -> Ipv6Addr {
+    pub fn underlay_ip(&self) -> Ipv6Addr {
         match self {
-            BlueprintOrCollectionZoneConfig::Collection(z) => {
-                z.underlay_address
-            }
-            BlueprintOrCollectionZoneConfig::Blueprint(z) => z.underlay_address,
+            BlueprintOrCollectionZoneConfig::Collection(z) => z.underlay_ip(),
+            BlueprintOrCollectionZoneConfig::Blueprint(z) => z.underlay_ip(),
         }
     }
 

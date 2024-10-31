@@ -70,7 +70,12 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
                 .context("adding Nexus zone")?;
             assert_matches!(
                 count,
-                EnsureMultiple::Changed { added: 1, removed: 0 }
+                EnsureMultiple::Changed {
+                    added: 1,
+                    removed: 0,
+                    updated: 0,
+                    expunged: 0
+                }
             );
             Ok(())
         },
@@ -90,7 +95,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
         .first()
         .expect("at least one added zone on that sled");
     assert_eq!(new_zone.kind(), ZoneKind::Nexus);
-    let new_zone_addr = new_zone.underlay_address();
+    let new_zone_addr = new_zone.underlay_ip();
     let new_zone_sockaddr =
         SocketAddrV6::new(new_zone_addr, NEXUS_INTERNAL_PORT, 0, 0);
     let new_zone_client = lc.specific_internal_nexus_client(new_zone_sockaddr);

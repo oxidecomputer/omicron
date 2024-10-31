@@ -10,6 +10,149 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/artifacts": {
+      "get": {
+        "operationId": "artifact_list",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Map_of_uint",
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer",
+                    "format": "uint",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/artifacts/{sha256}": {
+      "put": {
+        "operationId": "artifact_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sha256",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "hex string (32 bytes)"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactPutResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "artifact_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sha256",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "hex string (32 bytes)"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/artifacts/{sha256}/copy-from-depot": {
+      "post": {
+        "operationId": "artifact_copy_from_depot",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sha256",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "hex string (32 bytes)"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactCopyFromDepotBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactCopyFromDepotResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/boot-disk/{boot_disk}/os/write": {
       "post": {
         "summary": "Write a new host OS image to the specified boot disk",
@@ -1417,6 +1560,41 @@
           "start_request"
         ]
       },
+      "ArtifactCopyFromDepotBody": {
+        "type": "object",
+        "properties": {
+          "depot_base_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "depot_base_url"
+        ]
+      },
+      "ArtifactCopyFromDepotResponse": {
+        "type": "object"
+      },
+      "ArtifactPutResponse": {
+        "type": "object",
+        "properties": {
+          "datasets": {
+            "description": "The number of valid M.2 artifact datasets we found on the sled. There is typically one of these datasets for each functional M.2.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "successful_writes": {
+            "description": "The number of valid writes to the M.2 artifact datasets. This should be less than or equal to the number of artifact datasets.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "datasets",
+          "successful_writes"
+        ]
+      },
       "Baseboard": {
         "description": "Describes properties that should uniquely identify a Gimlet.",
         "oneOf": [
@@ -1883,11 +2061,11 @@
         ]
       },
       "BootOrderEntry": {
-        "description": "An entry in a list of boot options.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"An entry in a list of boot options.\", \"type\": \"object\", \"required\": [ \"name\" ], \"properties\": { \"name\": { \"description\": \"The name of the device to attempt booting from.\", \"type\": \"string\" } } } ``` </details>",
+        "description": "An entry in the boot order stored in a [`BootSettings`] component.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"An entry in the boot order stored in a [`BootSettings`] component.\", \"type\": \"object\", \"required\": [ \"name\" ], \"properties\": { \"name\": { \"description\": \"The name of another component in the spec that Propolis should try to boot from.\\n\\nCurrently, only disk device components are supported.\", \"type\": \"string\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "name": {
-            "description": "The name of the device to attempt booting from.",
+            "description": "The name of another component in the spec that Propolis should try to boot from.\n\nCurrently, only disk device components are supported.",
             "type": "string"
           }
         },
@@ -1896,10 +2074,11 @@
         ]
       },
       "BootSettings": {
-        "description": "BootSettings\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"order\" ], \"properties\": { \"order\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/BootOrderEntry\" } } } } ``` </details>",
+        "description": "Settings supplied to the guest's firmware image that specify the order in which it should consider its options when selecting a device to try to boot from.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Settings supplied to the guest's firmware image that specify the order in which it should consider its options when selecting a device to try to boot from.\", \"type\": \"object\", \"required\": [ \"order\" ], \"properties\": { \"order\": { \"description\": \"An ordered list of components to attempt to boot from.\", \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/BootOrderEntry\" } } }, \"additionalProperties\": false } ``` </details>",
         "type": "object",
         "properties": {
           "order": {
+            "description": "An ordered list of components to attempt to boot from.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BootOrderEntry"
@@ -1908,7 +2087,8 @@
         },
         "required": [
           "order"
-        ]
+        ],
+        "additionalProperties": false
       },
       "BootstoreStatus": {
         "type": "object",
@@ -3999,17 +4179,12 @@
           "id": {
             "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
           },
-          "underlay_address": {
-            "type": "string",
-            "format": "ipv6"
-          },
           "zone_type": {
             "$ref": "#/components/schemas/OmicronZoneType"
           }
         },
         "required": [
           "id",
-          "underlay_address",
           "zone_type"
         ]
       },
