@@ -1937,13 +1937,6 @@ pub struct BgpConfigCreate {
     pub checker: Option<String>,
 }
 
-/// Select a BGP status information by BGP config id.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct BgpStatusSelector {
-    /// A name or id of the BGP configuration to get status for
-    pub name_or_id: NameOrId,
-}
-
 /// Information about a bidirectional forwarding detection (BFD) session.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct BfdSessionEnable {
@@ -2246,13 +2239,6 @@ pub struct ProbeCreate {
     pub identity: IdentityMetadataCreateParams,
     pub sled: Uuid,
     pub ip_pool: Option<NameOrId>,
-}
-
-/// List probes with an optional name or id.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct ProbeListSelector {
-    /// A name or id to use when selecting a probe.
-    pub name_or_id: Option<NameOrId>,
 }
 
 /// A timeseries query string, written in the Oximeter query language.
