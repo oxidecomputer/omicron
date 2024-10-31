@@ -173,7 +173,7 @@ impl PlanningInput {
     pub fn all_sleds(
         &self,
         filter: SledFilter,
-    ) -> impl Iterator<Item = (SledUuid, &SledDetails)> + '_ {
+    ) -> impl Iterator<Item = (SledUuid, &SledDetails)> + Clone + '_ {
         self.sleds.iter().filter_map(move |(&sled_id, details)| {
             filter
                 .matches_policy_and_state(details.policy, details.state)
@@ -184,7 +184,7 @@ impl PlanningInput {
     pub fn all_sled_ids(
         &self,
         filter: SledFilter,
-    ) -> impl Iterator<Item = SledUuid> + '_ {
+    ) -> impl Iterator<Item = SledUuid> + Clone + '_ {
         self.all_sleds(filter).map(|(sled_id, _)| sled_id)
     }
 

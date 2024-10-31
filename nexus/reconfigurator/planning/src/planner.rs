@@ -12,6 +12,7 @@ use crate::blueprint_builder::EnsureMultiple;
 use crate::blueprint_builder::Error;
 use crate::blueprint_builder::Operation;
 use crate::planner::omicron_zone_placement::PlacementError;
+use disks_editor::BlueprintDisksEditor;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneConfig;
@@ -39,12 +40,14 @@ pub(crate) use self::omicron_zone_placement::DiscretionaryOmicronZone;
 use self::omicron_zone_placement::OmicronZonePlacement;
 use self::omicron_zone_placement::OmicronZonePlacementSledState;
 
+pub(crate) mod disks_editor;
 mod omicron_zone_placement;
 pub(crate) mod rng;
 
 pub struct Planner<'a> {
     log: Logger,
     input: &'a PlanningInput,
+    disks_editor: BlueprintDisksEditor<'a>,
     blueprint: BlueprintBuilder<'a>,
     // latest inventory collection
     //
@@ -75,7 +78,13 @@ impl<'a> Planner<'a> {
             inventory,
             creator,
         )?;
-        Ok(Planner { log, input, blueprint, inventory })
+        Ok(Planner {
+            log,
+            input,
+            disks_editor: BlueprintDisksEditor::new(parent_blueprint),
+            blueprint,
+            inventory,
+        })
     }
 
     /// Within tests, set a seeded RNG for deterministic results.
@@ -91,7 +100,7 @@ impl<'a> Planner<'a> {
 
     pub fn plan(mut self) -> Result<Blueprint, Error> {
         self.do_plan()?;
-        Ok(self.blueprint.build())
+        Ok(self.blueprint.build(self.disks_editor))
     }
 
     fn do_plan(&mut self) -> Result<(), Error> {
@@ -237,7 +246,7 @@ impl<'a> Planner<'a> {
                 updated,
                 expunged: _,
                 removed,
-            } = self.blueprint.sled_ensure_disks(sled_id, &sled_resources)?
+            } = self.disks_editor.sled_ensure_disks(sled_id, &sled_resources)
             {
                 info!(
                     &self.log,
@@ -368,9 +377,12 @@ impl<'a> Planner<'a> {
                 updated,
                 expunged,
                 removed,
-            } =
-                self.blueprint.sled_ensure_datasets(sled_id, &sled_resources)?
-            {
+            } = self.disks_editor.sled_ensure_datasets(
+                sled_id,
+                &sled_resources,
+                &self.blueprint.zones,
+                &self.log,
+            )? {
                 info!(
                     &self.log,
                     "altered datasets";
@@ -869,6 +881,7 @@ mod test {
     use crate::blueprint_builder::EnsureMultiple;
     use crate::example::example;
     use crate::example::ExampleSystemBuilder;
+    use crate::planner::disks_editor::BlueprintDisksEditor;
     use crate::system::SledBuilder;
     use chrono::NaiveDateTime;
     use chrono::TimeZone;
@@ -1560,7 +1573,8 @@ mod test {
             }
         ));
 
-        let blueprint1a = blueprint_builder.build();
+        let blueprint1a =
+            blueprint_builder.build(BlueprintDisksEditor::new(&blueprint1));
         assert_eq!(
             blueprint1a
                 .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)

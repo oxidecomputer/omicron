@@ -8,6 +8,7 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 
 use crate::blueprint_builder::BlueprintBuilder;
+use crate::planner::disks_editor::BlueprintDisksEditor;
 use crate::system::SledBuilder;
 use crate::system::SystemDescription;
 use nexus_types::deployment::Blueprint;
@@ -280,6 +281,8 @@ impl ExampleSystemBuilder {
         .unwrap();
         builder.set_rng_seed((&self.test_name, "ExampleSystem make_zones"));
 
+        let mut disks_editor = BlueprintDisksEditor::new(&initial_blueprint);
+
         // Add as many external IPs as is necessary for external DNS zones. We
         // pick addresses in the TEST-NET-2 (RFC 5737) range.
         for i in 0..self.external_dns_count.0 {
@@ -335,8 +338,7 @@ impl ExampleSystemBuilder {
                     .unwrap();
             }
             if self.create_disks_in_blueprint {
-                let _ =
-                    builder.sled_ensure_disks(sled_id, sled_resources).unwrap();
+                let _ = disks_editor.sled_ensure_disks(sled_id, sled_resources);
             }
             if self.create_zones {
                 for pool_name in sled_resources.zpools.keys() {
@@ -345,10 +347,17 @@ impl ExampleSystemBuilder {
                         .unwrap();
                 }
             }
-            builder.sled_ensure_datasets(sled_id, &sled_resources).unwrap();
+            disks_editor
+                .sled_ensure_datasets(
+                    sled_id,
+                    &sled_resources,
+                    &builder.zones,
+                    &self.log,
+                )
+                .unwrap();
         }
 
-        let blueprint = builder.build();
+        let blueprint = builder.build(disks_editor);
         for sled_id in blueprint.sleds() {
             let Some(zones) = blueprint.blueprint_zones.get(&sled_id) else {
                 continue;

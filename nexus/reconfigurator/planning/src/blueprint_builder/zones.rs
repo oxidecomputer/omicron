@@ -14,7 +14,7 @@ use thiserror::Error;
 
 #[derive(Debug)]
 #[must_use]
-pub(super) struct BuilderZonesConfig {
+pub(crate) struct BuilderZonesConfig {
     // The current generation -- this is bumped at blueprint build time and is
     // otherwise not exposed to callers.
     generation: Generation,
@@ -97,7 +97,7 @@ impl BuilderZonesConfig {
         Ok(())
     }
 
-    pub(super) fn expunge_zones(
+    pub(crate) fn expunge_zones(
         &mut self,
         mut zones: BTreeSet<OmicronZoneUuid>,
     ) -> Result<(), BuilderZonesConfigError> {
@@ -194,14 +194,14 @@ impl BuilderZoneConfig {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub(super) enum BuilderZoneState {
+pub(crate) enum BuilderZoneState {
     Unchanged,
     Modified,
     Added,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
-pub(super) enum BuilderZonesConfigError {
+pub(crate) enum BuilderZonesConfigError {
     #[error("attempted to add zone that already exists: {zone_id}")]
     AddExistingZone { zone_id: OmicronZoneUuid },
     #[error(
@@ -243,6 +243,7 @@ mod tests {
     use crate::{
         blueprint_builder::{test::verify_blueprint, BlueprintBuilder, Ensure},
         example::ExampleSystemBuilder,
+        planner::disks_editor::BlueprintDisksEditor,
     };
 
     use super::*;
@@ -426,15 +427,24 @@ mod tests {
         );
 
         // Ensure all datasets are created for the zones we've provisioned
+        let mut disks_editor = BlueprintDisksEditor::new(&blueprint_initial);
         for (sled_id, resources) in
             input2.all_sled_resources(SledFilter::Commissioned)
         {
-            builder.sled_ensure_datasets(sled_id, resources).unwrap();
+            disks_editor.sled_ensure_disks(sled_id, resources);
+            disks_editor
+                .sled_ensure_datasets(
+                    sled_id,
+                    resources,
+                    &builder.zones,
+                    &logctx.log,
+                )
+                .unwrap();
         }
 
         // Now build the blueprint and ensure that all the changes we described
         // above are present.
-        let blueprint = builder.build();
+        let blueprint = builder.build(disks_editor);
         verify_blueprint(&blueprint);
         let diff = blueprint.diff_since_blueprint(&blueprint_initial);
         println!("expecting new NTP and Oximeter zones:\n{}", diff.display());
@@ -491,7 +501,8 @@ mod tests {
             // This call by itself shouldn't bump the generation number.
             builder.zones.change_sled_zones(existing_sled_id);
 
-            let blueprint_noop = builder.build();
+            let blueprint_noop =
+                builder.build(BlueprintDisksEditor::new(&blueprint));
             verify_blueprint(&blueprint_noop);
             let diff = blueprint_noop.diff_since_blueprint(&blueprint);
             println!("expecting a noop:\n{}", diff.display());
