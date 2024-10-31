@@ -4459,7 +4459,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor",
- "qorb 0.2.0",
+ "qorb",
  "reqwest 0.12.8",
  "serde",
  "serde_json",
@@ -5534,7 +5534,7 @@ dependencies = [
  "pq-sys",
  "predicates",
  "pretty_assertions",
- "qorb 0.2.0",
+ "qorb",
  "rand",
  "rcgen",
  "ref-cast",
@@ -6639,7 +6639,7 @@ dependencies = [
  "pretty_assertions",
  "progenitor-client",
  "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=86101eaf80b55e7f405b5cafe9b0de0e9f331656)",
- "qorb 0.2.0",
+ "qorb",
  "rand",
  "rcgen",
  "ref-cast",
@@ -7078,7 +7078,7 @@ dependencies = [
  "postgres-types",
  "predicates",
  "proc-macro2",
- "qorb 0.1.2",
+ "qorb",
  "quote",
  "rand",
  "regex",
@@ -7470,7 +7470,7 @@ dependencies = [
  "oximeter-api",
  "oximeter-client",
  "oximeter-db",
- "qorb 0.2.0",
+ "qorb",
  "rand",
  "reqwest 0.12.8",
  "schemars",
@@ -7525,7 +7525,7 @@ dependencies = [
  "oximeter-test-utils",
  "oxql-types",
  "peg",
- "qorb 0.2.0",
+ "qorb",
  "reedline",
  "regex",
  "reqwest 0.12.8",
@@ -8717,30 +8717,6 @@ checksum = "96a8c1bda5ae1af7f99a2962e49df150414a43d62404644d98dd5c3a93d07457"
 dependencies = [
  "idna 0.3.0",
  "psl-types",
-]
-
-[[package]]
-name = "qorb"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d25f71eb7c5ba56a99f0721fd771b2503aa6de4ec73f0891f9b7ac115ca34723"
-dependencies = [
- "anyhow",
- "async-trait",
- "debug-ignore",
- "derive-where",
- "dropshot",
- "futures",
- "hickory-resolver",
- "rand",
- "schemars",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "tokio-stream",
- "tokio-tungstenite 0.24.0",
- "tracing",
 ]
 
 [[package]]
