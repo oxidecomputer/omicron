@@ -10,6 +10,7 @@ use crate::disk::RawDisk;
 use crate::error::Error;
 use crate::resources::{AllDisks, StorageResources};
 use anyhow::anyhow;
+use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
 use futures::future::FutureExt;
@@ -19,8 +20,7 @@ use key_manager::StorageKeyRequester;
 use omicron_common::disk::{
     DatasetConfig, DatasetManagementStatus, DatasetName, DatasetsConfig,
     DatasetsManagementResult, DiskIdentity, DiskVariant, DisksManagementResult,
-    NestedDatasetConfig, NestedDatasetLocation, OmicronPhysicalDisksConfig,
-    SharedDatasetConfig,
+    OmicronPhysicalDisksConfig, SharedDatasetConfig,
 };
 use omicron_common::ledger::Ledger;
 use omicron_uuid_kinds::DatasetUuid;
@@ -106,6 +106,57 @@ pub enum NestedDatasetListOptions {
     ChildrenOnly,
     /// Returns both the requested dataset as well as all children.
     SelfAndChildren,
+}
+
+/// Configuration information necessary to request a single nested dataset.
+///
+/// These datasets must be placed within one of the top-level datasets
+/// managed directly by Nexus.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct NestedDatasetConfig {
+    /// Location of this nested dataset
+    pub name: NestedDatasetLocation,
+
+    /// Configuration of this dataset
+    pub inner: SharedDatasetConfig,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct NestedDatasetLocation {
+    /// A path, within the dataset root, which is being requested.
+    pub path: String,
+
+    /// The root in which this dataset is being requested
+    pub root: DatasetName,
+}
+
+impl NestedDatasetLocation {
+    pub fn mountpoint(&self, root: &Utf8Path) -> Utf8PathBuf {
+        let mut path = Utf8Path::new(&self.path);
+
+        // This path must be nested, so we need it to be relative to
+        // "self.root". However, joining paths in Rust is quirky,
+        // as it chooses to replace the path entirely if the argument
+        // to `.join(...)` is absolute.
+        //
+        // Here, we "fix" the path to make non-absolute before joining
+        // the paths.
+        while path.is_absolute() {
+            path = path
+                .strip_prefix("/")
+                .expect("Path is absolute, but we cannot strip '/' character");
+        }
+
+        self.root.mountpoint(root).join(path)
+    }
+
+    pub fn full_name(&self) -> String {
+        if self.path.is_empty() {
+            self.root.full_name().to_string()
+        } else {
+            format!("{}/{}", self.root.full_name(), self.path)
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -1976,11 +2027,8 @@ mod tests {
 
         let dataset = datasets
             .iter()
-            .find_map(|dataset| {
-                if dataset.name.contains(&DatasetKind::Debug.to_string()) {
-                    return Some(dataset);
-                }
-                None
+            .find(|dataset| {
+                dataset.name.contains(&DatasetKind::Debug.to_string())
             })
             .expect("Debug dataset not found");
 
