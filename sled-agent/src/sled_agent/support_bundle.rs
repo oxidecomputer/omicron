@@ -12,13 +12,11 @@ use dropshot::StreamingBody;
 use futures::StreamExt;
 use omicron_common::api::external::Error as ExternalError;
 use omicron_common::disk::CompressionAlgorithm;
-use omicron_common::disk::DatasetKind;
-use omicron_common::disk::DatasetName;
+use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::NestedDatasetConfig;
 use omicron_common::disk::NestedDatasetLocation;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_common::update::ArtifactHash;
-use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -47,6 +45,9 @@ pub enum Error {
     #[error("Not a file")]
     NotAFile,
 
+    #[error("Dataset not found")]
+    DatasetNotFound,
+
     #[error(transparent)]
     Storage(#[from] sled_storage::error::Error),
 
@@ -66,6 +67,9 @@ impl From<Error> for HttpError {
             Error::HttpError(err) => err,
             Error::HashMismatch => {
                 HttpError::for_internal_error("Hash mismatch".to_string())
+            }
+            Error::DatasetNotFound => {
+                HttpError::for_not_found(None, "Dataset not found".to_string())
             }
             Error::NotAFile => {
                 HttpError::for_bad_request(None, "Not a file".to_string())
@@ -183,18 +187,33 @@ fn stream_zip_entry(
 }
 
 impl SledAgent {
+    /// Returns a dataset that the sled has been explicitly configured to use.
+    pub async fn get_configured_dataset(
+        &self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+    ) -> Result<DatasetConfig, Error> {
+        let datasets_config = self.storage().datasets_config_list().await?;
+        let dataset = datasets_config
+            .datasets
+            .get(&dataset_id)
+            .ok_or_else(|| Error::DatasetNotFound)?;
+
+        if dataset.id != dataset_id || dataset.name.pool().id() != zpool_id {
+            return Err(Error::DatasetNotFound);
+        }
+        Ok(dataset.clone())
+    }
+
     pub async fn support_bundle_list(
         &self,
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
     ) -> Result<Vec<SupportBundleMetadata>, Error> {
-        let root = DatasetName::new(
-            ZpoolName::new_external(zpool_id),
-            DatasetKind::Debug,
-        );
+        let root =
+            self.get_configured_dataset(zpool_id, dataset_id).await?.name;
         let dataset_location = omicron_common::disk::NestedDatasetLocation {
             path: String::from(""),
-            id: dataset_id,
             root,
         };
         let datasets = self
@@ -302,15 +321,10 @@ impl SledAgent {
             "dataset_id" => dataset_id.to_string(),
             "bundle_id" => support_bundle_id.to_string(),
         ));
-
-        let dataset = NestedDatasetLocation {
-            path: support_bundle_id.to_string(),
-            id: dataset_id,
-            root: DatasetName::new(
-                ZpoolName::new_external(zpool_id),
-                DatasetKind::Debug,
-            ),
-        };
+        let root =
+            self.get_configured_dataset(zpool_id, dataset_id).await?.name;
+        let dataset =
+            NestedDatasetLocation { path: support_bundle_id.to_string(), root };
         // The mounted root of the support bundle dataset
         let support_bundle_dir = dataset
             .mountpoint(illumos_utils::zpool::ZPOOL_MOUNTPOINT_ROOT.into());
@@ -394,14 +408,12 @@ impl SledAgent {
             "bundle_id" => support_bundle_id.to_string(),
         ));
         info!(log, "Destroying support bundle");
+        let root =
+            self.get_configured_dataset(zpool_id, dataset_id).await?.name;
         self.storage()
             .nested_dataset_destroy(NestedDatasetLocation {
                 path: support_bundle_id.to_string(),
-                id: dataset_id,
-                root: DatasetName::new(
-                    ZpoolName::new_external(zpool_id),
-                    DatasetKind::Debug,
-                ),
+                root,
             })
             .await?;
 
@@ -414,14 +426,10 @@ impl SledAgent {
         dataset_id: DatasetUuid,
         support_bundle_id: SupportBundleUuid,
     ) -> Result<tokio::fs::File, Error> {
-        let dataset = NestedDatasetLocation {
-            path: support_bundle_id.to_string(),
-            id: dataset_id,
-            root: DatasetName::new(
-                ZpoolName::new_external(zpool_id),
-                DatasetKind::Debug,
-            ),
-        };
+        let root =
+            self.get_configured_dataset(zpool_id, dataset_id).await?.name;
+        let dataset =
+            NestedDatasetLocation { path: support_bundle_id.to_string(), root };
         // The mounted root of the support bundle dataset
         let support_bundle_dir = dataset
             .mountpoint(illumos_utils::zpool::ZPOOL_MOUNTPOINT_ROOT.into());

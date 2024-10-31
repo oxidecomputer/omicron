@@ -319,9 +319,6 @@ pub struct NestedDatasetLocation {
     /// A path, within the dataset root, which is being requested.
     pub path: String,
 
-    /// The UUID within which the dataset being requested
-    pub id: DatasetUuid,
-
     /// The root in which this dataset is being requested
     pub root: DatasetName,
 }
