@@ -11882,7 +11882,7 @@ dependencies = [
  "toml 0.8.19",
  "tough",
  "url",
- "zip 2.2.0",
+ "zip 2.1.2",
 ]
 
 [[package]]
@@ -13221,9 +13221,9 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "2.2.0"
+version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc5e4288ea4057ae23afc69a4472434a87a2495cafce6632fd1c4ec9f5cf3494"
+checksum = "098d5d7737fb0b70814faa73c17df84f047d38dd31d13bbf2ec3fb354b5abf45"
 dependencies = [
  "arbitrary",
  "bzip2",
