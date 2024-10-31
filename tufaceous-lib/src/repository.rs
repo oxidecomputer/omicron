@@ -373,7 +373,7 @@ mod tests {
             &logctx.log,
             tempdir.path(),
             "0.0.0".parse().unwrap(),
-            vec![Key::generate_ed25519()],
+            vec![Key::generate_ed25519().unwrap()],
             Utc::now() + Days::new(1),
         )
         .await

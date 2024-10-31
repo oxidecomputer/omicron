@@ -44,7 +44,7 @@ impl Args {
 
         match self.command {
             Command::Init { system_version, no_generate_key } => {
-                let keys = maybe_generate_keys(self.keys, no_generate_key);
+                let keys = maybe_generate_keys(self.keys, no_generate_key)?;
 
                 let repo = OmicronRepo::initialize(
                     &log,
@@ -161,7 +161,7 @@ impl Args {
                     manifest.verify_all_present()?;
                 }
 
-                let keys = maybe_generate_keys(self.keys, no_generate_key);
+                let keys = maybe_generate_keys(self.keys, no_generate_key)?;
                 let mut assembler = OmicronRepoAssembler::new(
                     &log,
                     manifest,
@@ -245,12 +245,15 @@ enum Command {
     },
 }
 
-fn maybe_generate_keys(keys: Vec<Key>, no_generate_key: bool) -> Vec<Key> {
-    if !no_generate_key && keys.is_empty() {
-        let key = Key::generate_ed25519();
+fn maybe_generate_keys(
+    keys: Vec<Key>,
+    no_generate_key: bool,
+) -> Result<Vec<Key>> {
+    Ok(if !no_generate_key && keys.is_empty() {
+        let key = Key::generate_ed25519()?;
         crate::hint::generated_key(&key);
         vec![key]
     } else {
         keys
-    }
+    })
 }

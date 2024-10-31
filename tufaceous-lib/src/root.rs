@@ -1,12 +1,11 @@
 use crate::key::Key;
 use anyhow::Result;
+use aws_lc_rs::rand::SystemRandom;
 use chrono::{DateTime, Utc};
-use ring::rand::SystemRandom;
 use std::collections::HashMap;
 use std::num::NonZeroU64;
 use tough::editor::signed::SignedRole;
 use tough::schema::{KeyHolder, RoleKeys, RoleType, Root};
-use tough::sign::Sign;
 
 pub(crate) async fn new_root(
     keys: Vec<Key>,
@@ -22,7 +21,7 @@ pub(crate) async fn new_root(
         _extra: HashMap::new(),
     };
     for key in &keys {
-        let key = key.as_sign().tuf_key();
+        let key = key.as_tuf_key()?;
         root.keys.insert(key.key_id()?, key);
     }
     for kind in [
