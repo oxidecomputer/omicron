@@ -279,7 +279,108 @@ impl FromStr for CompressionAlgorithm {
     }
 }
 
-/// Configuration information necessary to request a single dataset
+/// Shared configuration information to request a dataset.
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+)]
+pub struct SharedDatasetConfig {
+    /// The compression mode to be used by the dataset
+    pub compression: CompressionAlgorithm,
+
+    /// The upper bound on the amount of storage used by this dataset
+    pub quota: Option<ByteCount>,
+
+    /// The lower bound on the amount of storage usable by this dataset
+    pub reservation: Option<ByteCount>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+)]
+pub struct NestedDatasetLocation {
+    /// A path, within the dataset root, which is being requested.
+    pub path: String,
+
+    /// The root in which this dataset is being requested
+    pub root: DatasetName,
+}
+
+impl NestedDatasetLocation {
+    pub fn mountpoint(&self, root: &Utf8Path) -> Utf8PathBuf {
+        let mut path = Utf8Path::new(&self.path);
+
+        // This path must be nested, so we need it to be relative to
+        // "self.root". However, joining paths in Rust is quirky,
+        // as it chooses to replace the path entirely if the argument
+        // to `.join(...)` is absolute.
+        //
+        // Here, we "fix" the path to make non-absolute before joining
+        // the paths.
+        while path.is_absolute() {
+            path = path
+                .strip_prefix("/")
+                .expect("Path is absolute, but we cannot strip '/' character");
+        }
+
+        self.root.mountpoint(root).join(path)
+    }
+
+    pub fn full_name(&self) -> String {
+        if self.path.is_empty() {
+            self.root.full_name().to_string()
+        } else {
+            format!("{}/{}", self.root.full_name(), self.path)
+        }
+    }
+}
+
+// TODO: Does this need to be here? Feels a little like an internal detail...
+/// Configuration information necessary to request a single nested dataset.
+///
+/// These datasets must be placed within one of the top-level datasets
+/// managed directly by Nexus.
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+)]
+pub struct NestedDatasetConfig {
+    /// Location of this nested dataset
+    pub name: NestedDatasetLocation,
+
+    /// Configuration of this dataset
+    #[serde(flatten)]
+    pub inner: SharedDatasetConfig,
+}
+
+/// Configuration information necessary to request a single dataset.
+///
+/// These datasets are tracked directly by Nexus.
 #[derive(
     Clone,
     Debug,
@@ -299,14 +400,8 @@ pub struct DatasetConfig {
     /// The dataset's name
     pub name: DatasetName,
 
-    /// The compression mode to be used by the dataset
-    pub compression: CompressionAlgorithm,
-
-    /// The upper bound on the amount of storage used by this dataset
-    pub quota: Option<ByteCount>,
-
-    /// The lower bound on the amount of storage usable by this dataset
-    pub reservation: Option<ByteCount>,
+    #[serde(flatten)]
+    pub inner: SharedDatasetConfig,
 }
 
 #[derive(

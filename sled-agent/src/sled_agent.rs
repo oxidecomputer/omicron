@@ -74,7 +74,6 @@ use sled_agent_types::zone_bundle::{
 use sled_hardware::{underlay, HardwareManager};
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_hardware_types::Baseboard;
-use sled_storage::dataset::{CRYPT_DATASET, ZONE_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use sprockets_tls::keys::SprocketsConfig;
@@ -1321,32 +1320,8 @@ impl SledAgent {
                 total_size: ByteCount::try_from(info.size())?,
             });
 
-            // We do care about the total space usage within zpools, but mapping
-            // the layering back to "datasets we care about" is a little
-            // awkward.
-            //
-            // We could query for all datasets within a pool, but the sled agent
-            // doesn't really care about the children of datasets that it
-            // allocates. As an example: Sled Agent might provision a "crucible"
-            // dataset, but how region allocation occurs within that dataset
-            // is a detail for Crucible to care about, not the Sled Agent.
-            //
-            // To balance this effort, we ask for information about datasets
-            // that the Sled Agent is directly resopnsible for managing.
-            let datasets_of_interest = [
-                // We care about the zpool itself, and all direct children.
-                zpool.to_string(),
-                // Likewise, we care about the encrypted dataset, and all
-                // direct children.
-                format!("{zpool}/{CRYPT_DATASET}"),
-                // The zone dataset gives us additional context on "what zones
-                // have datasets provisioned".
-                format!("{zpool}/{ZONE_DATASET}"),
-            ];
             let inv_props =
-                match illumos_utils::zfs::Zfs::get_dataset_properties(
-                    datasets_of_interest.as_slice(),
-                ) {
+                match self.storage().datasets_list(zpool.clone()).await {
                     Ok(props) => props
                         .into_iter()
                         .map(|prop| InventoryDataset::from(prop)),

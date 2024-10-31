@@ -717,6 +717,7 @@ mod test {
     use hex_literal::hex;
     use omicron_common::disk::{
         DatasetConfig, DatasetKind, DatasetName, DatasetsConfig,
+        SharedDatasetConfig,
     };
     use omicron_common::update::ArtifactHash;
     use omicron_common::zpool_name::ZpoolName;
@@ -747,9 +748,11 @@ mod test {
                         ZpoolName::new_external(ZpoolUuid::new_v4()),
                         DatasetKind::Update,
                     ),
-                    compression: Default::default(),
-                    quota: None,
-                    reservation: None,
+                    inner: SharedDatasetConfig {
+                        compression: Default::default(),
+                        quota: None,
+                        reservation: None,
+                    },
                 };
                 let mountpoint =
                     dataset.name.mountpoint(mountpoint_root.path());

@@ -161,6 +161,9 @@ pub enum DatasetError {
     },
     #[error("Failed to make datasets encrypted")]
     EncryptionMigration(#[from] DatasetEncryptionMigrationError),
+
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
 }
 
 /// Ensure that the zpool contains all the datasets we would like it to

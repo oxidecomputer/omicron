@@ -557,9 +557,15 @@ mod tests {
             .expect("Couldn't find dataset we tried to update?");
         let observed_dataset: DatasetConfig =
             observed_dataset.try_into().unwrap();
-        assert_eq!(observed_dataset.quota, first_dataset.quota);
-        assert_eq!(observed_dataset.reservation, first_dataset.reservation);
-        assert_eq!(observed_dataset.compression, first_dataset.compression);
+        assert_eq!(observed_dataset.inner.quota, first_dataset.quota);
+        assert_eq!(
+            observed_dataset.inner.reservation,
+            first_dataset.reservation
+        );
+        assert_eq!(
+            observed_dataset.inner.compression,
+            first_dataset.compression
+        );
     }
 
     #[nexus_test]

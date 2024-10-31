@@ -4,28 +4,29 @@
 
 //! The storage manager task
 
-use std::collections::HashSet;
-
 use crate::config::MountConfig;
-use crate::dataset::CONFIG_DATASET;
+use crate::dataset::{CONFIG_DATASET, CRYPT_DATASET, ZONE_DATASET};
 use crate::disk::RawDisk;
 use crate::error::Error;
 use crate::resources::{AllDisks, StorageResources};
+use anyhow::anyhow;
 use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
 use futures::future::FutureExt;
-use illumos_utils::zfs::{Mountpoint, Zfs};
+use illumos_utils::zfs::{DatasetProperties, Mountpoint, Zfs};
 use illumos_utils::zpool::{ZpoolName, ZPOOL_MOUNTPOINT_ROOT};
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::{
     DatasetConfig, DatasetManagementStatus, DatasetName, DatasetsConfig,
     DatasetsManagementResult, DiskIdentity, DiskVariant, DisksManagementResult,
-    OmicronPhysicalDisksConfig,
+    NestedDatasetConfig, NestedDatasetLocation, OmicronPhysicalDisksConfig,
+    SharedDatasetConfig,
 };
 use omicron_common::ledger::Ledger;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use slog::{error, info, o, warn, Logger};
+use std::collections::HashSet;
 use std::future::Future;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{interval, Duration, MissedTickBehavior};
@@ -100,6 +101,14 @@ pub(crate) struct NewFilesystemRequest {
 }
 
 #[derive(Debug)]
+pub enum NestedDatasetListOptions {
+    /// Returns children of the requested dataset, but not the dataset itself.
+    ChildrenOnly,
+    /// Returns both the requested dataset as well as all children.
+    SelfAndChildren,
+}
+
+#[derive(Debug)]
 pub(crate) enum StorageRequest {
     // Requests to manage which devices the sled considers active.
     // These are manipulated by hardware management.
@@ -126,8 +135,28 @@ pub(crate) enum StorageRequest {
             oneshot::Sender<Result<DatasetsManagementResult, Error>>,
         >,
     },
-    DatasetsList {
+    DatasetsConfigList {
         tx: DebugIgnore<oneshot::Sender<Result<DatasetsConfig, Error>>>,
+    },
+    DatasetsList {
+        zpool: ZpoolName,
+        tx: DebugIgnore<oneshot::Sender<Result<Vec<DatasetProperties>, Error>>>,
+    },
+
+    NestedDatasetEnsure {
+        config: NestedDatasetConfig,
+        tx: DebugIgnore<oneshot::Sender<Result<(), Error>>>,
+    },
+    NestedDatasetDestroy {
+        name: NestedDatasetLocation,
+        tx: DebugIgnore<oneshot::Sender<Result<(), Error>>>,
+    },
+    NestedDatasetList {
+        name: NestedDatasetLocation,
+        options: NestedDatasetListOptions,
+        tx: DebugIgnore<
+            oneshot::Sender<Result<Vec<NestedDatasetConfig>, Error>>,
+        >,
     },
 
     // Requests to explicitly manage or stop managing a set of devices
@@ -152,6 +181,13 @@ pub(crate) enum StorageRequest {
     /// serializes through the `StorageManager` task after all prior requests.
     /// This serialization is particularly useful for tests.
     GetLatestResources(DebugIgnore<oneshot::Sender<AllDisks>>),
+}
+
+#[derive(Debug)]
+struct DatasetCreationDetails {
+    zoned: bool,
+    mountpoint: Mountpoint,
+    full_name: String,
 }
 
 /// A mechanism for interacting with the [`StorageManager`]
@@ -274,7 +310,68 @@ impl StorageHandle {
     pub async fn datasets_config_list(&self) -> Result<DatasetsConfig, Error> {
         let (tx, rx) = oneshot::channel();
         self.tx
-            .send(StorageRequest::DatasetsList { tx: tx.into() })
+            .send(StorageRequest::DatasetsConfigList { tx: tx.into() })
+            .await
+            .unwrap();
+
+        rx.await.unwrap()
+    }
+
+    /// Lists the datasets contained within a zpool.
+    ///
+    /// Note that this might be distinct from the last configuration
+    /// the Sled Agent was told to use.
+    pub async fn datasets_list(
+        &self,
+        zpool: ZpoolName,
+    ) -> Result<Vec<DatasetProperties>, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(StorageRequest::DatasetsList { zpool, tx: tx.into() })
+            .await
+            .unwrap();
+
+        rx.await.unwrap()
+    }
+
+    pub async fn nested_dataset_ensure(
+        &self,
+        config: NestedDatasetConfig,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(StorageRequest::NestedDatasetEnsure { config, tx: tx.into() })
+            .await
+            .unwrap();
+
+        rx.await.unwrap()
+    }
+
+    pub async fn nested_dataset_destroy(
+        &self,
+        name: NestedDatasetLocation,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(StorageRequest::NestedDatasetDestroy { name, tx: tx.into() })
+            .await
+            .unwrap();
+
+        rx.await.unwrap()
+    }
+
+    pub async fn nested_dataset_list(
+        &self,
+        name: NestedDatasetLocation,
+        options: NestedDatasetListOptions,
+    ) -> Result<Vec<NestedDatasetConfig>, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(StorageRequest::NestedDatasetList {
+                name,
+                options,
+                tx: tx.into(),
+            })
             .await
             .unwrap();
 
@@ -476,8 +573,21 @@ impl StorageManager {
             StorageRequest::DatasetsEnsure { config, tx } => {
                 let _ = tx.0.send(self.datasets_ensure(config).await);
             }
-            StorageRequest::DatasetsList { tx } => {
+            StorageRequest::DatasetsConfigList { tx } => {
                 let _ = tx.0.send(self.datasets_config_list().await);
+            }
+            StorageRequest::DatasetsList { zpool, tx } => {
+                let _ = tx.0.send(self.datasets_list(&zpool).await);
+            }
+            StorageRequest::NestedDatasetEnsure { config, tx } => {
+                let _ = tx.0.send(self.nested_dataset_ensure(config).await);
+            }
+            StorageRequest::NestedDatasetDestroy { name, tx } => {
+                let _ = tx.0.send(self.nested_dataset_destroy(name).await);
+            }
+            StorageRequest::NestedDatasetList { name, options, tx } => {
+                let _ =
+                    tx.0.send(self.nested_dataset_list(name, options).await);
             }
             StorageRequest::OmicronPhysicalDisksEnsure { config, tx } => {
                 let _ =
@@ -787,7 +897,23 @@ impl StorageManager {
             err: None,
         };
 
-        if let Err(err) = self.ensure_dataset(config).await {
+        let mountpoint_path =
+            config.name.mountpoint(ZPOOL_MOUNTPOINT_ROOT.into());
+        let details = DatasetCreationDetails {
+            zoned: config.name.dataset().zoned(),
+            mountpoint: Mountpoint::Path(mountpoint_path),
+            full_name: config.name.full_name(),
+        };
+
+        if let Err(err) = self
+            .ensure_dataset_with_id(
+                config.name.pool(),
+                config.id,
+                &config.inner,
+                &details,
+            )
+            .await
+        {
             warn!(log, "Failed to ensure dataset"; "dataset" => ?status.dataset_name, "err" => ?err);
             status.err = Some(err.to_string());
         };
@@ -813,6 +939,131 @@ impl StorageManager {
                 return Err(Error::LedgerNotFound);
             }
         }
+    }
+
+    // Lists datasets that this zpool contains
+    async fn datasets_list(
+        &self,
+        zpool: &ZpoolName,
+    ) -> Result<Vec<DatasetProperties>, Error> {
+        let log = self.log.new(o!("request" => "datasets_list"));
+
+        let datasets_of_interest = [
+            // We care about the zpool itself, and all direct children.
+            zpool.to_string(),
+            // Likewise, we care about the encrypted dataset, and all
+            // direct children.
+            format!("{zpool}/{CRYPT_DATASET}"),
+            // The zone dataset gives us additional context on "what zones
+            // have datasets provisioned".
+            format!("{zpool}/{ZONE_DATASET}"),
+        ];
+
+        info!(log, "Listing datasets within zpool"; "zpool" => zpool.to_string());
+        illumos_utils::zfs::Zfs::get_dataset_properties(
+            datasets_of_interest.as_slice(),
+        )
+        .map_err(Error::Other)
+    }
+
+    // Ensures that a dataset exists, nested somewhere arbitrary within
+    // a Nexus-controlled dataset.
+    async fn nested_dataset_ensure(
+        &mut self,
+        config: NestedDatasetConfig,
+    ) -> Result<(), Error> {
+        let log = self.log.new(o!("request" => "nested_dataset_ensure"));
+        info!(log, "Ensuring nested dataset");
+
+        let mountpoint_path =
+            config.name.mountpoint(ZPOOL_MOUNTPOINT_ROOT.into());
+
+        let details = DatasetCreationDetails {
+            zoned: false,
+            mountpoint: Mountpoint::Path(mountpoint_path),
+            full_name: config.name.full_name(),
+        };
+
+        self.ensure_dataset(config.name.root.pool(), &config.inner, &details)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn nested_dataset_destroy(
+        &mut self,
+        name: NestedDatasetLocation,
+    ) -> Result<(), Error> {
+        let log = self.log.new(o!("request" => "nested_dataset_destroy"));
+        let full_name = name.full_name();
+        info!(log, "Destroying nested dataset"; "name" => full_name.clone());
+
+        if name.path.is_empty() {
+            let msg = "Cannot destroy nested dataset with empty name";
+            warn!(log, "{msg}");
+            return Err(anyhow!(msg).into());
+        }
+
+        Zfs::destroy_dataset(&full_name).map_err(|e| anyhow!(e))?;
+        Ok(())
+    }
+
+    // Lists the properties of 'name' and all children within
+    async fn nested_dataset_list(
+        &mut self,
+        name: NestedDatasetLocation,
+        options: NestedDatasetListOptions,
+    ) -> Result<Vec<NestedDatasetConfig>, Error> {
+        let log = self.log.new(o!("request" => "nested_dataset_list"));
+        info!(log, "Listing nested datasets");
+
+        let full_name = name.full_name();
+        let properties =
+            illumos_utils::zfs::Zfs::get_dataset_properties(&[full_name])
+                .map_err(|e| {
+                    warn!(
+                        log,
+                        "Failed to access nested dataset";
+                        "name" => ?name
+                    );
+                    crate::dataset::DatasetError::Other(e)
+                })?;
+
+        let root_path = name.root.full_name();
+        Ok(properties
+            .into_iter()
+            .filter_map(|prop| {
+                let path = if prop.name == root_path {
+                    match options {
+                        NestedDatasetListOptions::ChildrenOnly => return None,
+                        NestedDatasetListOptions::SelfAndChildren => {
+                            String::new()
+                        }
+                    }
+                } else {
+                    prop.name
+                        .strip_prefix(&root_path)?
+                        .strip_prefix("/")?
+                        .to_string()
+                };
+
+                Some(NestedDatasetConfig {
+                    // The output of our "zfs list" command could be nested away
+                    // from the root - so we actually copy our input to our
+                    // output here, and update the path relative to the input
+                    // root.
+                    name: NestedDatasetLocation {
+                        path,
+                        root: name.root.clone(),
+                    },
+                    inner: SharedDatasetConfig {
+                        compression: prop.compression.parse().ok()?,
+                        quota: prop.quota,
+                        reservation: prop.reservation,
+                    },
+                })
+            })
+            .collect())
     }
 
     // Makes an U.2 disk managed by the control plane within [`StorageResources`].
@@ -986,12 +1237,49 @@ impl StorageManager {
         }
     }
 
-    // Ensures a dataset exists within a zpool, according to `config`.
+    // Invokes [Self::ensure_dataset] and also ensures the dataset has an
+    // expected UUID as a ZFS property.
+    async fn ensure_dataset_with_id(
+        &mut self,
+        zpool: &ZpoolName,
+        id: DatasetUuid,
+        config: &SharedDatasetConfig,
+        details: &DatasetCreationDetails,
+    ) -> Result<(), Error> {
+        self.ensure_dataset(zpool, config, details).await?;
+
+        // Ensure the dataset has a usable UUID.
+        if let Ok(id_str) = Zfs::get_oxide_value(&details.full_name, "uuid") {
+            if let Ok(found_id) = id_str.parse::<DatasetUuid>() {
+                if found_id != id {
+                    return Err(Error::UuidMismatch {
+                        name: details.full_name.clone(),
+                        old: found_id.into_untyped_uuid(),
+                        new: id.into_untyped_uuid(),
+                    });
+                }
+                return Ok(());
+            }
+        }
+        Zfs::set_oxide_value(&details.full_name, "uuid", &id.to_string())?;
+        Ok(())
+    }
+
+    // Ensures a dataset exists within a zpool.
+    //
+    // Confirms that the zpool exists and is managed by this sled.
     async fn ensure_dataset(
         &mut self,
-        config: &DatasetConfig,
+        zpool: &ZpoolName,
+        config: &SharedDatasetConfig,
+        details: &DatasetCreationDetails,
     ) -> Result<(), Error> {
-        info!(self.log, "ensure_dataset"; "config" => ?config);
+        info!(
+            self.log,
+            "ensure_dataset";
+            "config" => ?config,
+            "details" => ?details,
+        );
 
         // We can only place datasets within managed disks.
         // If a disk is attached to this sled, but not a part of the Control
@@ -1000,22 +1288,14 @@ impl StorageManager {
             .resources
             .disks()
             .iter_managed()
-            .any(|(_, disk)| disk.zpool_name() == config.name.pool())
+            .any(|(_, disk)| disk.zpool_name() == zpool)
         {
-            return Err(Error::ZpoolNotFound(format!(
-                "{}",
-                config.name.pool(),
-            )));
+            warn!(self.log, "Failed to find zpool");
+            return Err(Error::ZpoolNotFound(format!("{}", zpool)));
         }
 
-        let zoned = config.name.dataset().zoned();
-        let mountpoint_path =
-            config.name.mountpoint(ZPOOL_MOUNTPOINT_ROOT.into());
-        let mountpoint = Mountpoint::Path(mountpoint_path);
-
-        let fs_name = &config.name.full_name();
+        let DatasetCreationDetails { zoned, mountpoint, full_name } = details;
         let do_format = true;
-
         // The "crypt" dataset needs these details, but should already exist
         // by the time we're creating datasets inside.
         let encryption_details = None;
@@ -1025,28 +1305,14 @@ impl StorageManager {
             compression: config.compression,
         });
         Zfs::ensure_filesystem(
-            fs_name,
-            mountpoint,
-            zoned,
+            &full_name,
+            mountpoint.clone(),
+            *zoned,
             do_format,
             encryption_details,
             size_details,
             None,
         )?;
-        // Ensure the dataset has a usable UUID.
-        if let Ok(id_str) = Zfs::get_oxide_value(&fs_name, "uuid") {
-            if let Ok(id) = id_str.parse::<DatasetUuid>() {
-                if id != config.id {
-                    return Err(Error::UuidMismatch {
-                        name: Box::new(config.name.clone()),
-                        old: id.into_untyped_uuid(),
-                        new: config.id.into_untyped_uuid(),
-                    });
-                }
-                return Ok(());
-            }
-        }
-        Zfs::set_oxide_value(&fs_name, "uuid", &config.id.to_string())?;
 
         Ok(())
     }
@@ -1088,7 +1354,7 @@ impl StorageManager {
             if let Ok(id) = id_str.parse::<Uuid>() {
                 if id != request.dataset_id {
                     return Err(Error::UuidMismatch {
-                        name: Box::new(request.dataset_name.clone()),
+                        name: request.dataset_name.full_name(),
                         old: id,
                         new: request.dataset_id,
                     });
@@ -1123,6 +1389,7 @@ mod tests {
     use omicron_test_utils::dev::test_setup_log;
     use sled_hardware::DiskFirmware;
     use std::collections::BTreeMap;
+    use std::str::FromStr;
     use std::sync::atomic::Ordering;
     use uuid::Uuid;
 
@@ -1628,9 +1895,11 @@ mod tests {
             DatasetConfig {
                 id,
                 name,
-                compression: CompressionAlgorithm::Off,
-                quota: None,
-                reservation: None,
+                inner: SharedDatasetConfig {
+                    compression: CompressionAlgorithm::Off,
+                    quota: None,
+                    reservation: None,
+                },
             },
         )]);
         // "Generation = 1" is reserved as "no requests seen yet", so we jump
@@ -1664,7 +1933,7 @@ mod tests {
         // However, calling it with a different input and the same generation
         // number should fail.
         config.generation = current_config_generation;
-        config.datasets.values_mut().next().unwrap().reservation =
+        config.datasets.values_mut().next().unwrap().inner.reservation =
             Some(1024.into());
         let err =
             harness.handle().datasets_ensure(config.clone()).await.unwrap_err();
@@ -1676,6 +1945,172 @@ mod tests {
         let status =
             harness.handle().datasets_ensure(config.clone()).await.unwrap();
         assert!(!status.has_error());
+
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn nested_dataset() {
+        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
+        let logctx = test_setup_log("nested_dataset");
+        let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
+
+        // Test setup: Add a U.2 and M.2, adopt them into the "control plane"
+        // for usage.
+        harness.handle().key_manager_ready().await;
+        let raw_disks =
+            harness.add_vdevs(&["u2_under_test.vdev", "m2_helping.vdev"]).await;
+        let config = harness.make_config(1, &raw_disks);
+        let result = harness
+            .handle()
+            .omicron_physical_disks_ensure(config.clone())
+            .await
+            .expect("Ensuring disks should work after key manager is ready");
+        assert!(!result.has_error(), "{:?}", result);
+
+        // Use the dataset on the newly formatted U.2
+        let all_disks = harness.handle().get_latest_disks().await;
+        let zpool = all_disks.all_u2_zpools()[0].clone();
+        let datasets = harness.handle().datasets_list(zpool).await.unwrap();
+
+        let dataset = datasets
+            .iter()
+            .find_map(|dataset| {
+                if dataset.name.contains(&DatasetKind::Debug.to_string()) {
+                    return Some(dataset);
+                }
+                None
+            })
+            .expect("Debug dataset not found");
+
+        // This is a little magic; we can infer the zpool name from the "raw
+        // string" dataset name.
+        let zpool =
+            ZpoolName::from_str(dataset.name.split('/').next().unwrap())
+                .unwrap();
+        let dataset_name = DatasetName::new(zpool, DatasetKind::Debug);
+
+        // Start querying the state of nested datasets.
+        //
+        // When we ask about the root of a dataset, we only get information
+        // about the dataset we're asking for.
+        let root_location = NestedDatasetLocation {
+            path: String::new(),
+            root: dataset_name.clone(),
+        };
+        let nested_datasets = harness
+            .handle()
+            .nested_dataset_list(
+                root_location.clone(),
+                NestedDatasetListOptions::SelfAndChildren,
+            )
+            .await
+            .unwrap();
+        assert_eq!(nested_datasets.len(), 1);
+        assert_eq!(nested_datasets[0].name, root_location);
+
+        // If we ask about children of this dataset, we see nothing.
+        let nested_datasets = harness
+            .handle()
+            .nested_dataset_list(
+                root_location.clone(),
+                NestedDatasetListOptions::ChildrenOnly,
+            )
+            .await
+            .unwrap();
+        assert_eq!(nested_datasets.len(), 0);
+
+        // We can't destroy non-nested datasets through this API
+        let err = harness
+            .handle()
+            .nested_dataset_destroy(root_location.clone())
+            .await
+            .expect_err("Should not be able to delete dataset root");
+        assert!(
+            err.to_string()
+                .contains("Cannot destroy nested dataset with empty name"),
+            "{err:?}"
+        );
+
+        // Create a nested dataset within the root one
+        let nested_location = NestedDatasetLocation {
+            path: "nested".to_string(),
+            ..root_location.clone()
+        };
+        let nested_config = SharedDatasetConfig {
+            compression: CompressionAlgorithm::On,
+            quota: None,
+            reservation: None,
+        };
+        harness
+            .handle()
+            .nested_dataset_ensure(NestedDatasetConfig {
+                name: nested_location.clone(),
+                inner: nested_config.clone(),
+            })
+            .await
+            .unwrap();
+
+        // We can re-send the ensure request
+        harness
+            .handle()
+            .nested_dataset_ensure(NestedDatasetConfig {
+                name: nested_location.clone(),
+                inner: nested_config.clone(),
+            })
+            .await
+            .expect("Ensuring nested datasets should be idempotent");
+
+        // We can observe the nested dataset
+        let nested_datasets = harness
+            .handle()
+            .nested_dataset_list(
+                root_location.clone(),
+                NestedDatasetListOptions::SelfAndChildren,
+            )
+            .await
+            .unwrap();
+        assert_eq!(nested_datasets.len(), 2);
+        assert_eq!(nested_datasets[0].name, root_location);
+        assert_eq!(nested_datasets[1].name, nested_location);
+        let nested_datasets = harness
+            .handle()
+            .nested_dataset_list(
+                root_location.clone(),
+                NestedDatasetListOptions::ChildrenOnly,
+            )
+            .await
+            .unwrap();
+        assert_eq!(nested_datasets.len(), 1);
+        assert_eq!(nested_datasets[0].name, nested_location);
+
+        // We can also destroy the nested dataset
+        harness
+            .handle()
+            .nested_dataset_destroy(nested_location.clone())
+            .await
+            .expect("Should have been able to destroy nested dataset");
+
+        let err = harness
+            .handle()
+            .nested_dataset_destroy(nested_location.clone())
+            .await
+            .expect_err(
+                "Should not be able to destroy nested dataset a second time",
+            );
+        assert!(err.to_string().contains("Dataset not found"), "{err:?}");
+
+        // The nested dataset should now be gone
+        let nested_datasets = harness
+            .handle()
+            .nested_dataset_list(
+                root_location.clone(),
+                NestedDatasetListOptions::ChildrenOnly,
+            )
+            .await
+            .unwrap();
+        assert_eq!(nested_datasets.len(), 0);
 
         harness.cleanup().await;
         logctx.cleanup_successful();
