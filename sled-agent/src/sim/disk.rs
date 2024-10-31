@@ -18,7 +18,6 @@ use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
-use propolis_client::types::DiskAttachmentState as PropolisDiskState;
 use sled_agent_types::disk::DiskStateRequested;
 use std::net::{Ipv6Addr, SocketAddr};
 use std::sync::Arc;
@@ -222,18 +221,13 @@ impl Simulatable for SimDisk {
 
     fn execute_desired_transition(&mut self) -> Option<DiskAction> {
         if let Some(desired) = self.state.desired() {
-            // These operations would typically be triggered via responses from
-            // Propolis, but for a simulated sled agent, this does not exist.
-            //
-            // Instead, we make transitions to new states based entirely on the
-            // value of "desired".
             let observed = match desired {
                 DiskStateRequested::Attached(uuid) => {
-                    PropolisDiskState::Attached(*uuid)
+                    DiskState::Attached(*uuid)
                 }
-                DiskStateRequested::Detached => PropolisDiskState::Detached,
-                DiskStateRequested::Destroyed => PropolisDiskState::Destroyed,
-                DiskStateRequested::Faulted => PropolisDiskState::Faulted,
+                DiskStateRequested::Detached => DiskState::Detached,
+                DiskStateRequested::Destroyed => DiskState::Destroyed,
+                DiskStateRequested::Faulted => DiskState::Faulted,
             };
             self.state.observe_transition(&observed)
         } else {
