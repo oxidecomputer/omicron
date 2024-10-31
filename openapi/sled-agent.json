@@ -1578,11 +1578,13 @@
         "type": "object",
         "properties": {
           "datasets": {
+            "description": "The number of valid M.2 artifact datasets we found on the sled. There is typically one of these datasets for each functional M.2.",
             "type": "integer",
             "format": "uint",
             "minimum": 0
           },
           "successful_writes": {
+            "description": "The number of valid writes to the M.2 artifact datasets. This should be less than or equal to the number of artifact datasets.",
             "type": "integer",
             "format": "uint",
             "minimum": 0

@@ -602,7 +602,12 @@ pub struct ArtifactCopyFromDepotResponse {}
 
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ArtifactPutResponse {
+    /// The number of valid M.2 artifact datasets we found on the sled. There is
+    /// typically one of these datasets for each functional M.2.
     pub datasets: usize,
+
+    /// The number of valid writes to the M.2 artifact datasets. This should be
+    /// less than or equal to the number of artifact datasets.
     pub successful_writes: usize,
 }
 
