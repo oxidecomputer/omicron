@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::buffer;
-use crate::server;
 use crate::Reporter;
 use omicron_common::FileKv;
 use slog::debug;
@@ -13,7 +12,6 @@ use slog::Logger;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc;
-use tokio::sync::watch;
 use uuid::Uuid;
 
 // Our public interface depends directly or indirectly on these types; we
@@ -45,8 +43,6 @@ pub(crate) struct RegistryInner {
     buffer_capacity: usize,
     // Used for registering reporters as they are inserted.
     pub(crate) log: slog::Logger,
-    pub(crate) server_tx: watch::Sender<Option<server::State>>,
-    server_state: watch::Receiver<Option<server::State>>,
 }
 
 impl ReporterRegistry {
@@ -71,13 +67,10 @@ impl ReporterRegistry {
             "a 0-capacity ereport buffer is nonsensical"
         );
 
-        let (server_tx, server_state) = tokio::sync::watch::channel(None);
         Ok(Self(Arc::new(RegistryInner {
             reporters: RwLock::new(HashMap::new()),
             buffer_capacity,
             log,
-            server_tx,
-            server_state,
         })))
     }
 
@@ -90,7 +83,6 @@ impl ReporterRegistry {
                     id,
                     &self.0.log,
                     self.0.buffer_capacity,
-                    self.0.server_state.clone(),
                 )
             })
             .ereports

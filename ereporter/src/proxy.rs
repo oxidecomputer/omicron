@@ -6,7 +6,7 @@ use ereporter_api::Entry;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use std::future::Future;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 pub trait ReporterProxy {
@@ -31,7 +31,6 @@ pub(crate) struct ProxyWorker<P> {
     proxy: P,
     log: slog::Logger,
     id: Uuid,
-    server: watch::Receiver<Option<crate::server::State>>,
     server_reqs: mpsc::Receiver<crate::buffer::ServerReq>,
     seqs: mpsc::Receiver<Generation>,
 }

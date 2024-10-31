@@ -4,8 +4,10 @@
 
 use chrono::DateTime;
 use chrono::Utc;
+use omicron_common::api::external::Error;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
+use uuid::Uuid;
 
 mod buffer;
 pub mod proxy;
@@ -83,4 +85,39 @@ pub(crate) struct EreportData {
     pub(crate) class: String,
     pub(crate) facts: HashMap<String, String>,
     pub(crate) time_created: DateTime<Utc>,
+}
+
+#[derive(Debug, thiserror::Error)]
+
+pub enum ReporterError {
+    #[error(transparent)]
+    Other(#[from] Error),
+    #[error(transparent)]
+    Unregistered(#[from] ereporter_api::UnregisteredReporterError),
+}
+
+impl ReporterError {
+    pub fn unregistered(generation_id: Uuid) -> Self {
+        Self::Unregistered(ereporter_api::UnregisteredReporterError {
+            generation_id,
+        })
+    }
+}
+
+impl From<ReporterError> for dropshot::HttpError {
+    fn from(e: ReporterError) -> Self {
+        match e {
+            ReporterError::Other(e) => e.into(),
+            ReporterError::Unregistered(e) => {
+                let error_code = serde_json::to_string(&e).expect(
+                    "unregistered reporter error should be valid JSON!",
+                );
+                dropshot::HttpError::for_client_error(
+                    Some(error_code),
+                    http::StatusCode::FAILED_DEPENDENCY,
+                    "ereporter not yet registered at this generation".into(),
+                )
+            }
+        }
+    }
 }

@@ -2749,11 +2749,11 @@ dependencies = [
  "clap",
  "dropshot",
  "ereporter-api",
- "internal-dns",
- "nexus-client",
+ "http 1.1.0",
  "omicron-common",
  "omicron-workspace-hack",
  "serde",
+ "serde_json",
  "slog",
  "slog-async",
  "slog-dtrace",
@@ -2770,6 +2770,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dropshot",
+ "ereporter-types",
  "omicron-common",
  "omicron-workspace-hack",
  "schemars",
@@ -2782,13 +2783,28 @@ name = "ereporter-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "ereporter-types",
  "futures",
  "omicron-common",
  "omicron-workspace-hack",
  "progenitor",
  "reqwest 0.12.7",
  "serde",
+ "serde_json",
  "slog",
+ "uuid",
+]
+
+[[package]]
+name = "ereporter-types"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
  "uuid",
 ]
 

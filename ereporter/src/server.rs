@@ -2,27 +2,17 @@ use crate::buffer;
 use crate::registry::ReporterRegistry;
 use dropshot::{
     ConfigDropshot, EmptyScanParams, HttpError, HttpResponseDeleted,
-    HttpResponseOk, PaginationParams, Path, Query, RequestContext, ResultsPage,
-    WhichPage,
+    HttpResponseOk, HttpResponseUpdatedNoContent, PaginationParams, Path,
+    Query, RequestContext, ResultsPage, TypedBody, WhichPage,
 };
-use internal_dns::resolver::Resolver;
-use internal_dns::ServiceName;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
-use omicron_common::backoff;
-use omicron_common::backoff::BackoffError;
-use slog::{debug, info, warn};
-use slog_error_chain::SlogInlineError;
-use std::net::IpAddr;
 use std::net::SocketAddr;
 use tokio::sync::oneshot;
-use uuid::Uuid;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Config {
     pub server_address: SocketAddr,
-    /// How to discover the Nexus API to register the reporter.
-    pub registration_address: Option<SocketAddr>,
     // /// The maximum size of Dropshot requests.
     pub request_body_max_bytes: usize,
 }
@@ -31,17 +21,10 @@ pub struct RunningServer {
     _server: dropshot::HttpServer<ReporterRegistry>,
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct State {
-    server_address: SocketAddr,
-    nexus: NexusDiscovery,
-}
-
 impl ReporterRegistry {
     pub fn start_server(
         &self,
         config: Config,
-        dns_resolver: Option<Resolver>,
     ) -> anyhow::Result<RunningServer> {
         let log = &self.0.log;
 
@@ -68,61 +51,6 @@ impl ReporterRegistry {
             .start()
         };
 
-        // Create a resolver if needed, or use Nexus's address directly.
-        let nexus = match (config.registration_address, dns_resolver) {
-            (Some(addr), _) => {
-                if addr.port() == 0 {
-                    anyhow::bail!(
-                        "Nexus registration address must have a real port"
-                    );
-                }
-                debug!(
-                    self.0.log,
-                    "Nexus IP provided explicitly, registering with it";
-                    "addr" => %addr,
-                );
-                NexusDiscovery::Addr(addr)
-            }
-            (None, None) => {
-                // Ensure that we've been provided with an IPv6 address if we're
-                // using DNS to resolve Nexus. That's required because we need
-                // to use the /48 to find our DNS server itself.
-                let IpAddr::V6(our_addr) = config.server_address.ip() else {
-                    anyhow::bail!("server address must be IPv6 in order to resolve Nexus from DNS")
-                };
-                debug!(
-                    self.0.log,
-                    "Nexus IP not provided, will create an internal \
-                     DNS resolver to resolve it"
-                );
-
-                let resolver = Resolver::new_from_ip(
-                    self.0
-                        .log
-                        .new(slog::o!("component" => "internal-dns-resolver")),
-                    our_addr,
-                )?;
-                NexusDiscovery::Dns(resolver)
-            }
-            (None, Some(resolver)) => {
-                debug!(
-                    self.0.log,
-                    "Nexus IP not provided, will use DNS to resolve it"
-                );
-                NexusDiscovery::Dns(resolver)
-            }
-        };
-
-        self.0
-            .server_tx
-            .send(Some(State {
-                // Use the server's actual address once it has been bound,
-                // rather than the configured address, since the configured port
-                // may be :0.
-                server_address: server.local_addr(),
-                nexus,
-            }))
-            .expect("receivers should never be dropped");
         Ok(RunningServer { _server: server })
     }
 }
@@ -201,7 +129,7 @@ impl ereporter_api::EreporterApi for EreporterApiImpl {
             ))?;
         let (tx, rx) = oneshot::channel();
         worker
-            .send(buffer::ServerReq::TruncateTo { seq, generation, tx })
+            .send(buffer::ServerReq::Ack { seq, generation, tx })
             .await
             .map_err(|_| Error::internal_error("server shutting down"))?;
         rx.await.map_err(|_| {
@@ -210,96 +138,38 @@ impl ereporter_api::EreporterApi for EreporterApiImpl {
         })??;
         Ok(HttpResponseDeleted())
     }
-}
 
-/// How to discover Nexus' IP for registration.
-#[derive(Clone)]
-enum NexusDiscovery {
-    Addr(SocketAddr),
-    Dns(Resolver),
-}
+    async fn ereporter_put_generation(
+        reqctx: RequestContext<Self::Context>,
+        path: Path<ereporter_api::PutGenerationPathParams>,
+        body: TypedBody<ereporter_api::PutGenerationBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let registry = reqctx.context();
+        let ereporter_api::PutGenerationPathParams { id } = path.into_inner();
+        let ereporter_api::PutGenerationBody { generation, generation_id } =
+            body.into_inner();
+        slog::debug!(
+            reqctx.log,
+            "received ereporter register request";
+            "reporter_id" => %id,
+            "reporter_generation" => %generation,
+            "reporter_generation_id" => %generation_id,
+        );
 
-impl State {
-    pub(crate) async fn register_reporter(
-        &self,
-        log: &slog::Logger,
-        reporter_id: Uuid,
-    ) -> nexus_client::types::EreporterRegistered {
-        #[derive(Debug, thiserror::Error, SlogInlineError)]
-        enum RegistrationError {
-            #[error(transparent)]
-            Dns(#[from] internal_dns::resolver::ResolveError),
-            #[error(transparent)]
-            Client(#[from] nexus_client::Error<nexus_client::types::Error>),
-        }
-
-        let info = nexus_client::types::EreporterInfo {
-            reporter_id,
-            address: self.server_address.to_string(),
-        };
-        let do_register = || async {
-            let nexus_addr = self.nexus.nexus_addr().await.map_err(|e| {
-                BackoffError::transient(RegistrationError::from(e))
-            })?;
-            let nexus_client = nexus_client::Client::new(
-                &format!("http://{nexus_addr}"),
-                log.clone(),
-            );
-            let registration = nexus_client
-                .cpapi_ereporters_post(&info)
-                .await
-                .map_err(|e| {
-                    BackoffError::transient(RegistrationError::from(e))
-                })?
-                .into_inner();
-            info!(
-                log,
-                "ereporter registered";
-                "reporter_id" => %reporter_id,
-                "reporter_gen" => %registration.reporter_gen,
-                "seq" => %registration.seq,
-            );
-            Ok(registration)
-        };
-        let log_failure = |error: RegistrationError, delay| {
-            warn!(
-                log,
-                "failed to register ereporter with Nexus; retrying...";
-                "reporter_id" => %reporter_id,
-                "reporter_address" => %self.server_address,
-                "error" => error,
-                "delay" => ?delay,
-            );
-        };
-        backoff::retry_notify(
-            backoff::retry_policy_internal_service(),
-            do_register,
-            log_failure,
-        )
-        .await
-        .expect("Expected infinite retry loop registering ereporter")
-    }
-}
-
-impl NexusDiscovery {
-    async fn nexus_addr(
-        &self,
-    ) -> Result<SocketAddr, internal_dns::resolver::ResolveError> {
-        match self {
-            NexusDiscovery::Addr(addr) => Ok(*addr),
-            NexusDiscovery::Dns(resolver) => resolver
-                .lookup_socket_v6(ServiceName::Nexus)
-                .await
-                .map(Into::into),
-        }
-    }
-}
-
-impl std::fmt::Debug for NexusDiscovery {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Addr(addr) => f.debug_tuple("Addr").field(&addr).finish(),
-            Self::Dns(_) => f.debug_tuple("Dns").finish(),
-        }
+        let worker =
+            registry.get_worker(&id).ok_or(HttpError::for_not_found(
+                Some("NO_REPORTER".to_string()),
+                format!("no reporter with ID {id}"),
+            ))?;
+        let (tx, rx) = oneshot::channel();
+        worker
+            .send(buffer::ServerReq::Register { generation, generation_id, tx })
+            .await
+            .map_err(|_| Error::internal_error("server shutting down"))?;
+        rx.await.map_err(|_| {
+            // This shouldn't happen!
+            Error::internal_error("buffer canceled request rudely!")
+        })??;
+        Ok(HttpResponseUpdatedNoContent())
     }
 }

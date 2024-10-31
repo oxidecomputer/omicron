@@ -14,13 +14,6 @@ struct Args {
     /// The address for the mock Nexus server used to register.
     #[arg(
         long,
-        default_value_t = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 12345)
-    )]
-    nexus_address: SocketAddr,
-
-    /// The address for the mock Nexus server used to register.
-    #[arg(
-        long,
         default_value_t = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 0),
     )]
     server_address: SocketAddr,
@@ -28,7 +21,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let Args { uuid, nexus_address, server_address } = Args::parse();
+    let Args { uuid, server_address } = Args::parse();
     let log = {
         use omicron_common::FileKv;
         use slog::Drain;
@@ -43,14 +36,10 @@ async fn main() -> anyhow::Result<()> {
         128,
     )?;
     let reporter = registry.register_reporter(uuid);
-    let _server = registry.start_server(
-        ereporter::server::Config {
-            server_address,
-            registration_address: Some(nexus_address),
-            request_body_max_bytes: 1024 * 8,
-        },
-        None,
-    )?;
+    let _server = registry.start_server(ereporter::server::Config {
+        server_address,
+        request_body_max_bytes: 1024 * 8,
+    })?;
 
     let mut report = reporter
         .report("list.suspect")

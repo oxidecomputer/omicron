@@ -21,12 +21,25 @@ progenitor::generate_api!(
     }),
 
     replace = {
+        Entry = ereporter_types::Entry,
+        EntryKind = ereporter_types::EntryKind,
+        Ereport = ereporter_types::Ereport,
+        ReporterId = ereporter_types::ReporterId,
         Generation = omicron_common::api::external::Generation,
     },
 );
 
+pub use ereporter_types::UnregisteredReporterError;
+
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {
         self.message.clone()
+    }
+}
+
+impl types::Error {
+    pub fn unregistered_reporter(&self) -> Option<UnregisteredReporterError> {
+        let code = self.error_code.as_ref()?;
+        serde_json::from_str::<UnregisteredReporterError>(&code).ok()
     }
 }

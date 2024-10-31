@@ -1,17 +1,18 @@
 [package]
-name = "ereporter-api"
+name = "ereporter-types"
 version = "0.1.0"
 edition = "2021"
 
-[lints]
-workspace = true
-
 [dependencies]
+anyhow.workspace = true
 chrono.workspace = true
-dropshot.workspace = true
-ereporter-types.workspace = true
 omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
-schemars.workspace = true
 serde.workspace = true
+schemars.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+
+[lints]
+workspace = true
