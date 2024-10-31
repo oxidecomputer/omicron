@@ -29,6 +29,7 @@ pub const MIN_PORT: u16 = u16::MIN;
 pub const DNS_PORT: u16 = 53;
 pub const DNS_HTTP_PORT: u16 = 5353;
 pub const SLED_AGENT_PORT: u16 = 12345;
+pub const REPO_DEPOT_PORT: u16 = 12348;
 
 pub const COCKROACH_PORT: u16 = 32221;
 pub const COCKROACH_ADMIN_PORT: u16 = 32222;

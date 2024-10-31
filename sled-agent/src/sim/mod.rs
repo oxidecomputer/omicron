@@ -4,6 +4,7 @@
 
 //! Simulated sled agent implementation
 
+mod artifact_store;
 mod collection;
 mod config;
 mod disk;

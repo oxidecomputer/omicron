@@ -91,7 +91,7 @@ pkcs8 = { version = "0.10.2", default-features = false, features = ["encryption"
 postgres-types = { version = "0.2.8", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 predicates = { version = "3.1.2" }
 proc-macro2 = { version = "1.0.87" }
-qorb = { version = "0.1.2", features = ["qtop"] }
+qorb = { version = "0.2.0", features = ["qtop"] }
 quote = { version = "1.0.37" }
 rand = { version = "0.8.5", features = ["small_rng"] }
 regex = { version = "1.11.0" }
@@ -131,7 +131,6 @@ uuid = { version = "1.10.0", features = ["serde", "v4"] }
 x509-cert = { version = "0.2.5" }
 zerocopy = { version = "0.7.35", features = ["derive", "simd"] }
 zeroize = { version = "1.8.1", features = ["std", "zeroize_derive"] }
-zip = { version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
 
 [build-dependencies]
 ahash = { version = "0.8.11" }
@@ -208,7 +207,7 @@ pkcs8 = { version = "0.10.2", default-features = false, features = ["encryption"
 postgres-types = { version = "0.2.8", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 predicates = { version = "3.1.2" }
 proc-macro2 = { version = "1.0.87" }
-qorb = { version = "0.1.2", features = ["qtop"] }
+qorb = { version = "0.2.0", features = ["qtop"] }
 quote = { version = "1.0.37" }
 rand = { version = "0.8.5", features = ["small_rng"] }
 regex = { version = "1.11.0" }
@@ -251,7 +250,6 @@ uuid = { version = "1.10.0", features = ["serde", "v4"] }
 x509-cert = { version = "0.2.5" }
 zerocopy = { version = "0.7.35", features = ["derive", "simd"] }
 zeroize = { version = "1.8.1", features = ["std", "zeroize_derive"] }
-zip = { version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
 
 [target.x86_64-unknown-linux-gnu.dependencies]
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }

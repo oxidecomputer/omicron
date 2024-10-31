@@ -2,13 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{collections::BTreeMap, time::Duration};
+use std::collections::BTreeMap;
+use std::time::Duration;
 
 use camino::Utf8PathBuf;
 use dropshot::{
-    Body, FreeformBody, HttpError, HttpResponseCreated, HttpResponseDeleted,
-    HttpResponseHeaders, HttpResponseOk, HttpResponseUpdatedNoContent, Path,
-    Query, RequestContext, StreamingBody, TypedBody,
+    Body, FreeformBody, HttpError, HttpResponseAccepted, HttpResponseCreated,
+    HttpResponseDeleted, HttpResponseHeaders, HttpResponseOk,
+    HttpResponseUpdatedNoContent, Path, Query, RequestContext, StreamingBody,
+    TypedBody,
 };
 use nexus_sled_agent_shared::inventory::{
     Inventory, OmicronZonesConfig, SledRole,
@@ -358,6 +360,43 @@ pub trait SledAgentApi {
         artifact: TypedBody<UpdateArtifactId>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    #[endpoint {
+        method = GET,
+        path = "/artifacts"
+    }]
+    async fn artifact_list(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<BTreeMap<ArtifactHash, usize>>, HttpError>;
+
+    #[endpoint {
+        method = POST,
+        path = "/artifacts/{sha256}/copy-from-depot"
+    }]
+    async fn artifact_copy_from_depot(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<ArtifactPathParam>,
+        body: TypedBody<ArtifactCopyFromDepotBody>,
+    ) -> Result<HttpResponseAccepted<ArtifactCopyFromDepotResponse>, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/artifacts/{sha256}"
+    }]
+    async fn artifact_put(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<ArtifactPathParam>,
+        body: StreamingBody,
+    ) -> Result<HttpResponseOk<ArtifactPutResponse>, HttpError>;
+
+    #[endpoint {
+        method = DELETE,
+        path = "/artifacts/{sha256}"
+    }]
+    async fn artifact_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<ArtifactPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
     /// Take a snapshot of a disk that is attached to an instance
     #[endpoint {
         method = POST,
@@ -675,6 +714,30 @@ pub struct SupportBundleMetadata {
 #[derive(Deserialize, JsonSchema)]
 pub struct DiskPathParam {
     pub disk_id: Uuid,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ArtifactPathParam {
+    pub sha256: ArtifactHash,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ArtifactCopyFromDepotBody {
+    pub depot_base_url: String,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct ArtifactCopyFromDepotResponse {}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ArtifactPutResponse {
+    /// The number of valid M.2 artifact datasets we found on the sled. There is
+    /// typically one of these datasets for each functional M.2.
+    pub datasets: usize,
+
+    /// The number of valid writes to the M.2 artifact datasets. This should be
+    /// less than or equal to the number of artifact datasets.
+    pub successful_writes: usize,
 }
 
 #[derive(Deserialize, JsonSchema)]
