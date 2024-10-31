@@ -65,8 +65,15 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactPutResponse"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -127,8 +134,15 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactCopyFromDepotResponse"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1555,6 +1569,28 @@
         },
         "required": [
           "depot_base_url"
+        ]
+      },
+      "ArtifactCopyFromDepotResponse": {
+        "type": "object"
+      },
+      "ArtifactPutResponse": {
+        "type": "object",
+        "properties": {
+          "datasets": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "successful_writes": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "datasets",
+          "successful_writes"
         ]
       },
       "Baseboard": {

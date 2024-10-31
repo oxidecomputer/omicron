@@ -7,9 +7,10 @@ use std::time::Duration;
 
 use camino::Utf8PathBuf;
 use dropshot::{
-    FreeformBody, HttpError, HttpResponseCreated, HttpResponseDeleted,
-    HttpResponseHeaders, HttpResponseOk, HttpResponseUpdatedNoContent, Path,
-    Query, RequestContext, StreamingBody, TypedBody,
+    FreeformBody, HttpError, HttpResponseAccepted, HttpResponseCreated,
+    HttpResponseDeleted, HttpResponseHeaders, HttpResponseOk,
+    HttpResponseUpdatedNoContent, Path, Query, RequestContext, StreamingBody,
+    TypedBody,
 };
 use nexus_sled_agent_shared::inventory::{
     Inventory, OmicronZonesConfig, SledRole,
@@ -319,7 +320,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<ArtifactPathParam>,
         body: TypedBody<ArtifactCopyFromDepotBody>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+    ) -> Result<HttpResponseAccepted<ArtifactCopyFromDepotResponse>, HttpError>;
 
     #[endpoint {
         method = PUT,
@@ -329,7 +330,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<ArtifactPathParam>,
         body: StreamingBody,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+    ) -> Result<HttpResponseOk<ArtifactPutResponse>, HttpError>;
 
     #[endpoint {
         method = DELETE,
@@ -594,6 +595,15 @@ pub struct ArtifactPathParam {
 #[derive(Deserialize, JsonSchema)]
 pub struct ArtifactCopyFromDepotBody {
     pub depot_base_url: String,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct ArtifactCopyFromDepotResponse {}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ArtifactPutResponse {
+    pub datasets: usize,
+    pub successful_writes: usize,
 }
 
 #[derive(Deserialize, JsonSchema)]

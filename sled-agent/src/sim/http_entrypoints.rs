@@ -10,6 +10,7 @@ use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::FreeformBody;
 use dropshot::HttpError;
+use dropshot::HttpResponseAccepted;
 use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseDeleted;
 use dropshot::HttpResponseHeaders;
@@ -192,7 +193,8 @@ impl SledAgentApi for SledAgentSimImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<ArtifactPathParam>,
         body: TypedBody<ArtifactCopyFromDepotBody>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    ) -> Result<HttpResponseAccepted<ArtifactCopyFromDepotResponse>, HttpError>
+    {
         let sha256 = path_params.into_inner().sha256;
         let depot_base_url = body.into_inner().depot_base_url;
         rqctx
@@ -200,17 +202,18 @@ impl SledAgentApi for SledAgentSimImpl {
             .artifact_store()
             .copy_from_depot(sha256, &depot_base_url)
             .await?;
-        Ok(HttpResponseUpdatedNoContent())
+        Ok(HttpResponseAccepted(ArtifactCopyFromDepotResponse {}))
     }
 
     async fn artifact_put(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<ArtifactPathParam>,
         body: StreamingBody,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    ) -> Result<HttpResponseOk<ArtifactPutResponse>, HttpError> {
         let sha256 = path_params.into_inner().sha256;
-        rqctx.context().artifact_store().put_body(sha256, body).await?;
-        Ok(HttpResponseUpdatedNoContent())
+        Ok(HttpResponseOk(
+            rqctx.context().artifact_store().put_body(sha256, body).await?,
+        ))
     }
 
     async fn artifact_delete(

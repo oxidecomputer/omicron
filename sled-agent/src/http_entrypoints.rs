@@ -11,10 +11,10 @@ use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
 use display_error_chain::DisplayErrorChain;
 use dropshot::{
-    ApiDescription, Body, FreeformBody, HttpError, HttpResponseCreated,
-    HttpResponseDeleted, HttpResponseHeaders, HttpResponseOk,
-    HttpResponseUpdatedNoContent, Path, Query, RequestContext, StreamingBody,
-    TypedBody,
+    ApiDescription, Body, FreeformBody, HttpError, HttpResponseAccepted,
+    HttpResponseCreated, HttpResponseDeleted, HttpResponseHeaders,
+    HttpResponseOk, HttpResponseUpdatedNoContent, Path, Query, RequestContext,
+    StreamingBody, TypedBody,
 };
 use nexus_sled_agent_shared::inventory::{
     Inventory, OmicronZonesConfig, SledRole,
@@ -412,7 +412,8 @@ impl SledAgentApi for SledAgentImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<ArtifactPathParam>,
         body: TypedBody<ArtifactCopyFromDepotBody>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    ) -> Result<HttpResponseAccepted<ArtifactCopyFromDepotResponse>, HttpError>
+    {
         let sha256 = path_params.into_inner().sha256;
         let depot_base_url = body.into_inner().depot_base_url;
         rqctx
@@ -420,17 +421,18 @@ impl SledAgentApi for SledAgentImpl {
             .artifact_store()
             .copy_from_depot(sha256, &depot_base_url)
             .await?;
-        Ok(HttpResponseUpdatedNoContent())
+        Ok(HttpResponseAccepted(ArtifactCopyFromDepotResponse {}))
     }
 
     async fn artifact_put(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<ArtifactPathParam>,
         body: StreamingBody,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    ) -> Result<HttpResponseOk<ArtifactPutResponse>, HttpError> {
         let sha256 = path_params.into_inner().sha256;
-        rqctx.context().artifact_store().put_body(sha256, body).await?;
-        Ok(HttpResponseUpdatedNoContent())
+        Ok(HttpResponseOk(
+            rqctx.context().artifact_store().put_body(sha256, body).await?,
+        ))
     }
 
     async fn artifact_delete(
