@@ -70,7 +70,12 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
                 .context("adding Nexus zone")?;
             assert_matches!(
                 count,
-                EnsureMultiple::Changed { added: 1, removed: 0 }
+                EnsureMultiple::Changed {
+                    added: 1,
+                    removed: 0,
+                    updated: 0,
+                    expunged: 0
+                }
             );
             Ok(())
         },

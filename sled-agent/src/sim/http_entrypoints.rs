@@ -74,7 +74,6 @@ pub fn api() -> SledApiDescription {
         api.register(instance_poke_single_step_post)?;
         api.register(instance_post_sim_migration_source)?;
         api.register(disk_poke_post)?;
-
         Ok(api)
     }
 

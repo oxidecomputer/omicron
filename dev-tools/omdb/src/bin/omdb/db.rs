@@ -3161,10 +3161,14 @@ async fn cmd_db_instance_info(
     );
     match can_reincarnate {
         Reincarnatability::WillReincarnate => {
-            println!("    {KARMIC_STATUS:>WIDTH$}: bound to saṃsāra");
+            println!(
+                "    {KARMIC_STATUS:>WIDTH$}: saṃsāra (reincarnation enabled)"
+            );
         }
         Reincarnatability::Nirvana => {
-            println!("    {KARMIC_STATUS:>WIDTH$}: attained nirvāṇa");
+            println!(
+                "    {KARMIC_STATUS:>WIDTH$}: nirvāṇa (reincarnation disabled)"
+            );
         }
         Reincarnatability::CoolingDown(remaining) => {
             println!(

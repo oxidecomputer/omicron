@@ -236,10 +236,9 @@ mod tests {
     use httptest::responders::json_encoded;
     use httptest::responders::status_code;
     use httptest::Expectation;
-    use nexus_db_queries::db::datastore::pub_test_utils::datastore_test;
+    use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-    use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use omicron_common::zpool_name::ZpoolName;
@@ -249,7 +248,6 @@ mod tests {
     use std::collections::BTreeMap;
     use std::iter;
     use std::net::SocketAddr;
-    use uuid::Uuid;
 
     // The `CockroachAdminFromBlueprintViaFixedPort` type above is the standard
     // way to map from a blueprint to an iterator of cockroach-admin addresses.
@@ -345,9 +343,8 @@ mod tests {
     #[tokio::test]
     async fn test_activate_fails_if_no_blueprint() {
         let logctx = dev::test_setup_log("test_activate_fails_if_no_blueprint");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) =
-            datastore_test(&logctx.log, &db, Uuid::new_v4()).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let (_tx_blueprint, rx_blueprint) = watch::channel(None);
         let mut collector =
@@ -356,8 +353,7 @@ mod tests {
 
         assert_eq!(result, json!({"error": "no blueprint"}));
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -377,9 +373,8 @@ mod tests {
     async fn test_activate_with_no_unknown_node_ids() {
         let logctx =
             dev::test_setup_log("test_activate_with_no_unknown_node_ids");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) =
-            datastore_test(&logctx.log, &db, Uuid::new_v4()).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let blueprint = BlueprintBuilder::build_empty_with_sleds(
             iter::once(SledUuid::new_v4()),
@@ -433,8 +428,7 @@ mod tests {
             .await;
         assert_eq!(result, json!({"nsuccess": crdb_zones.len()}));
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -442,9 +436,8 @@ mod tests {
     async fn test_activate_with_unknown_node_ids() {
         // Test setup.
         let logctx = dev::test_setup_log("test_activate_with_unknown_node_ids");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) =
-            datastore_test(&logctx.log, &db, Uuid::new_v4()).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let blueprint = BlueprintBuilder::build_empty_with_sleds(
             iter::once(SledUuid::new_v4()),
@@ -573,8 +566,7 @@ mod tests {
         assert!(crdb_err3.contains(&crdb_zone_id3));
         assert!(crdb_err3.contains(&crdb_zone_id4));
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

@@ -14,7 +14,7 @@ mod coverage;
 mod resource_builder;
 mod resources;
 
-use crate::db::datastore::pub_test_utils::TestDatabase;
+use crate::db::pub_test_utils::TestDatabase;
 use coverage::Coverage;
 use futures::StreamExt;
 use nexus_auth::authn;

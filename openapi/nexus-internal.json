@@ -1907,6 +1907,13 @@
         "description": "Describes a complete set of software and configuration for the system",
         "type": "object",
         "properties": {
+          "blueprint_datasets": {
+            "description": "A map of sled id -> datasets in use on each sled",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BlueprintDatasetsConfig"
+            }
+          },
           "blueprint_disks": {
             "description": "A map of sled id -> disks in use on each sled.",
             "type": "object",
@@ -1991,6 +1998,7 @@
           }
         },
         "required": [
+          "blueprint_datasets",
           "blueprint_disks",
           "blueprint_zones",
           "cockroachdb_fingerprint",
@@ -2002,6 +2010,92 @@
           "internal_dns_version",
           "sled_state",
           "time_created"
+        ]
+      },
+      "BlueprintDatasetConfig": {
+        "description": "Information about a dataset as recorded in a blueprint",
+        "type": "object",
+        "properties": {
+          "address": {
+            "nullable": true,
+            "type": "string"
+          },
+          "compression": {
+            "$ref": "#/components/schemas/CompressionAlgorithm"
+          },
+          "disposition": {
+            "$ref": "#/components/schemas/BlueprintDatasetDisposition"
+          },
+          "id": {
+            "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DatasetKind"
+          },
+          "pool": {
+            "$ref": "#/components/schemas/ZpoolName"
+          },
+          "quota": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "reservation": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          }
+        },
+        "required": [
+          "compression",
+          "disposition",
+          "id",
+          "kind",
+          "pool"
+        ]
+      },
+      "BlueprintDatasetDisposition": {
+        "description": "The desired state of an Omicron-managed dataset in a blueprint.\n\nPart of [`BlueprintDatasetConfig`].",
+        "oneOf": [
+          {
+            "description": "The dataset is in-service.",
+            "type": "string",
+            "enum": [
+              "in_service"
+            ]
+          },
+          {
+            "description": "The dataset is permanently gone.",
+            "type": "string",
+            "enum": [
+              "expunged"
+            ]
+          }
+        ]
+      },
+      "BlueprintDatasetsConfig": {
+        "description": "Information about Omicron datasets as recorded in a blueprint.",
+        "type": "object",
+        "properties": {
+          "datasets": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BlueprintDatasetConfig"
+            }
+          },
+          "generation": {
+            "$ref": "#/components/schemas/Generation"
+          }
+        },
+        "required": [
+          "datasets",
+          "generation"
         ]
       },
       "BlueprintMetadata": {
@@ -2830,6 +2924,112 @@
           }
         ]
       },
+      "CompressionAlgorithm": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "on"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "off"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "gzip"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "level": {
+                "$ref": "#/components/schemas/GzipLevel"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "gzip_n"
+                ]
+              }
+            },
+            "required": [
+              "level",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "lz4"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "lzjb"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "zle"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
       "CurrentStatus": {
         "description": "Describes the current status of a background task",
         "oneOf": [
@@ -3475,6 +3675,11 @@
         "format": "uint64",
         "minimum": 0
       },
+      "GzipLevel": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 0
+      },
       "ImportExportPolicy": {
         "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
         "oneOf": [
@@ -3532,7 +3737,7 @@
           },
           "auto_restart_policy": {
             "nullable": true,
-            "description": "The auto-restart policy configured for this instance, or `None` if no explicit policy is configured.\n\nIf this is not present, then this instance uses the default auto-restart policy, which may or may not allow it to be restarted. The `auto_restart_enabled` field indicates whether the instance will be automatically restarted.",
+            "description": "The auto-restart policy configured for this instance, or `null` if no explicit policy has been configured.\n\nThis policy determines whether the instance should be automatically restarted by the control plane on failure. If this is `null`, the control plane will use the default policy when determining whether or not to automatically restart this instance, which may or may not allow it to be restarted. The value of the `auto_restart_enabled` field indicates whether the instance will be auto-restarted, based on its current policy or the default if it has no configured policy.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceAutoRestartPolicy"
@@ -5540,6 +5745,10 @@
       },
       "SwitchPutResponse": {
         "type": "object"
+      },
+      "TypedUuidForDatasetKind": {
+        "type": "string",
+        "format": "uuid"
       },
       "TypedUuidForDemoSagaKind": {
         "type": "string",

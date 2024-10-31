@@ -1619,8 +1619,8 @@ async fn do_switch_port_settings_delete(
 
 #[cfg(test)]
 mod test {
-    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::UpdatePrecondition;
+    use crate::db::pub_test_utils::TestDatabase;
     use nexus_types::external_api::params::{
         BgpAnnounceSetCreate, BgpConfigCreate, BgpPeerConfig,
         SwitchPortConfigCreate, SwitchPortGeometry, SwitchPortSettingsCreate,
