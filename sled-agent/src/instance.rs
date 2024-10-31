@@ -418,6 +418,8 @@ struct InstanceRunner {
 
     // Properties visible to Propolis
     properties: propolis_client::types::InstanceProperties,
+    vcpus: u8,
+    memory_mib: u64,
 
     // The ID of the Propolis server (and zone) running this instance
     propolis_id: PropolisUuid,
@@ -911,6 +913,8 @@ impl InstanceRunner {
 
         let request = propolis_client::types::InstanceEnsureRequest {
             properties: self.properties.clone(),
+            vcpus: self.vcpus,
+            memory: self.memory_mib,
             nics,
             disks: self
                 .requested_disks
@@ -1366,15 +1370,13 @@ impl Instance {
                 id: id.into_untyped_uuid(),
                 name: hardware.properties.hostname.to_string(),
                 description: "Test description".to_string(),
-                image_id: Uuid::nil(),
-                bootrom_id: Uuid::nil(),
-                // TODO: Align the byte type w/propolis.
-                memory: hardware.properties.memory.to_whole_mebibytes(),
-                // TODO: we should probably make propolis aligned with
-                // InstanceCpuCount here, to avoid any casting...
-                vcpus: hardware.properties.ncpus.0 as u8,
                 metadata,
             },
+            // TODO: we should probably make propolis aligned with
+            // InstanceCpuCount here, to avoid any casting...
+            vcpus: hardware.properties.ncpus.0 as u8,
+            // TODO: Align the byte type w/propolis.
+            memory_mib: hardware.properties.memory.to_whole_mebibytes(),
             propolis_id,
             propolis_addr,
             vnic_allocator,

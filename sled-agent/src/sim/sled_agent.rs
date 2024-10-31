@@ -338,14 +338,12 @@ impl SledAgent {
                     id: propolis_id.into_untyped_uuid(),
                     name: hardware.properties.hostname.to_string(),
                     description: "sled-agent-sim created instance".to_string(),
-                    image_id: Uuid::default(),
-                    bootrom_id: Uuid::default(),
-                    memory: hardware.properties.memory.to_whole_mebibytes(),
-                    vcpus: hardware.properties.ncpus.0 as u8,
                     metadata,
                 };
                 let body = propolis_client::types::InstanceEnsureRequest {
                     properties,
+                    memory: hardware.properties.memory.to_whole_mebibytes(),
+                    vcpus: hardware.properties.ncpus.0 as u8,
                     nics: vec![],
                     disks: vec![],
                     boot_settings: None,
