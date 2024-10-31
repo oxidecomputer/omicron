@@ -13,8 +13,6 @@ use futures::StreamExt;
 use omicron_common::api::external::Error as ExternalError;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
-use omicron_common::disk::NestedDatasetConfig;
-use omicron_common::disk::NestedDatasetLocation;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::DatasetUuid;
@@ -24,7 +22,9 @@ use range_requests::PotentialRange;
 use range_requests::SingleRange;
 use sha2::{Digest, Sha256};
 use sled_agent_api::*;
+use sled_storage::manager::NestedDatasetConfig;
 use sled_storage::manager::NestedDatasetListOptions;
+use sled_storage::manager::NestedDatasetLocation;
 use std::io::Read;
 use std::io::Seek;
 use std::io::Write;
@@ -212,10 +212,8 @@ impl SledAgent {
     ) -> Result<Vec<SupportBundleMetadata>, Error> {
         let root =
             self.get_configured_dataset(zpool_id, dataset_id).await?.name;
-        let dataset_location = omicron_common::disk::NestedDatasetLocation {
-            path: String::from(""),
-            root,
-        };
+        let dataset_location =
+            NestedDatasetLocation { path: String::from(""), root };
         let datasets = self
             .storage()
             .nested_dataset_list(
