@@ -746,6 +746,59 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      },
+      "head": {
+        "summary": "Fetch a service bundle from a particular dataset",
+        "operationId": "support_bundle_head",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "description": "The dataset on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "support_bundle_id",
+            "description": "The ID of the support bundle itself",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "zpool_id",
+            "description": "The zpool on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupportBundleGetQueryParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
       }
     },
     "/switch-ports": {
