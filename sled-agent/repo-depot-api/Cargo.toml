@@ -1,0 +1,15 @@
+[package]
+name = "repo-depot-api"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+dropshot.workspace = true
+omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
+schemars.workspace = true
+serde.workspace = true

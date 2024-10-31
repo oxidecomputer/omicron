@@ -30,6 +30,7 @@ pub const CLUSTER_DATASET: &'static str = "cluster";
 pub const CONFIG_DATASET: &'static str = "config";
 pub const M2_DEBUG_DATASET: &'static str = "debug";
 pub const M2_BACKING_DATASET: &'static str = "backing";
+pub const M2_ARTIFACT_DATASET: &'static str = "update";
 
 pub const DEBUG_DATASET_QUOTA: ByteCount =
     if cfg!(any(test, feature = "testing")) {
@@ -46,6 +47,10 @@ pub const DUMP_DATASET_QUOTA: ByteCount = ByteCount::from_gibibytes_u32(100);
 // passed to zfs create -o compression=
 pub const DUMP_DATASET_COMPRESSION: CompressionAlgorithm =
     CompressionAlgorithm::GzipN { level: GzipLevel::new::<9>() };
+// TODO-correctness: This value of 20 GiB is a wild guess -- given TUF repo
+// sizes as of Oct 2024, it would be capable of storing about 10 distinct system
+// versions.
+pub const ARTIFACT_DATASET_QUOTA: ByteCount = ByteCount::from_gibibytes_u32(20);
 
 // U.2 datasets live under the encrypted dataset and inherit encryption
 pub const ZONE_DATASET: &'static str = "crypt/zone";
@@ -65,7 +70,7 @@ const U2_EXPECTED_DATASETS: [ExpectedDataset; U2_EXPECTED_DATASET_COUNT] = [
         .compression(DUMP_DATASET_COMPRESSION),
 ];
 
-const M2_EXPECTED_DATASET_COUNT: usize = 6;
+const M2_EXPECTED_DATASET_COUNT: usize = 7;
 const M2_EXPECTED_DATASETS: [ExpectedDataset; M2_EXPECTED_DATASET_COUNT] = [
     // Stores software images.
     //
@@ -90,6 +95,9 @@ const M2_EXPECTED_DATASETS: [ExpectedDataset; M2_EXPECTED_DATASET_COUNT] = [
     ExpectedDataset::new(CONFIG_DATASET),
     // Store debugging data, such as service bundles.
     ExpectedDataset::new(M2_DEBUG_DATASET).quota(DEBUG_DATASET_QUOTA),
+    // Stores software artifacts (zones, OS images, Hubris images, etc.)
+    // extracted from TUF repos by Nexus.
+    ExpectedDataset::new(M2_ARTIFACT_DATASET).quota(ARTIFACT_DATASET_QUOTA),
 ];
 
 // Helper type for describing expected datasets and their optional quota.
