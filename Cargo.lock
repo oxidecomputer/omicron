@@ -7170,6 +7170,7 @@ dependencies = [
  "x509-cert",
  "zerocopy 0.7.35",
  "zeroize",
+ "zip 0.6.6",
 ]
 
 [[package]]
