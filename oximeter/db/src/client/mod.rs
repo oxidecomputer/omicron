@@ -3746,7 +3746,6 @@ mod tests {
         _: &ClickHouseDeployment,
         client: Client,
     ) {
-        usdt::register_probes().unwrap();
         let samples = [oximeter_test_utils::make_sample()];
         client.insert_samples(&samples).await.unwrap();
 
@@ -3806,7 +3805,6 @@ mod tests {
         client: Client,
     ) {
         use strum::IntoEnumIterator;
-        usdt::register_probes().unwrap();
         // Attempt to select all schema with each datum type.
         for ty in oximeter::DatumType::iter() {
             let sql = format!(
@@ -3847,7 +3845,6 @@ mod tests {
         db: &ClickHouseDeployment,
         client: Client,
     ) {
-        usdt::register_probes().unwrap();
         let samples = [oximeter_test_utils::make_sample()];
 
         // We're using the components of the `insert_samples()` method here,
@@ -4453,7 +4450,6 @@ mod tests {
     #[tokio::test]
     async fn test_select_all_field_types() {
         use strum::IntoEnumIterator;
-        usdt::register_probes().unwrap();
         let logctx = test_setup_log("test_select_all_field_types");
         let log = &logctx.log;
 
@@ -4872,7 +4868,6 @@ mod tests {
         native_address: SocketAddr,
         replicated: bool,
     ) {
-        usdt::register_probes().unwrap();
         let client = Client::new(http_address, native_address, &log);
 
         const STARTING_VERSION: u64 = 1;

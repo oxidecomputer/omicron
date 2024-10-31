@@ -869,8 +869,7 @@ mod tests {
     #[tokio::test]
     async fn test_allocate_external_networking() {
         // Set up.
-        usdt::register_probes().unwrap();
-        let logctx = dev::test_setup_log("test_service_ip_list");
+        let logctx = dev::test_setup_log("test_allocate_external_networking");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -1130,8 +1129,7 @@ mod tests {
     #[tokio::test]
     async fn test_deallocate_external_networking() {
         // Set up.
-        usdt::register_probes().unwrap();
-        let logctx = dev::test_setup_log("test_service_ip_list");
+        let logctx = dev::test_setup_log("test_deallocate_external_networking");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 

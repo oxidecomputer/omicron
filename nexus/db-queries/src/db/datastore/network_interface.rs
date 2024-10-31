@@ -920,7 +920,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_service_network_interfaces_list() {
-        usdt::register_probes().unwrap();
         let logctx =
             dev::test_setup_log("test_service_network_interfaces_list");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;

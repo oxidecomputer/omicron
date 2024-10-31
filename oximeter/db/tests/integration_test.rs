@@ -123,7 +123,7 @@ async fn test_schemas_disjoint() -> anyhow::Result<()> {
 /// doesn't make much sense in an integration test.
 #[tokio::test]
 async fn test_cluster() -> anyhow::Result<()> {
-    usdt::register_probes().unwrap();
+    usdt::register_probes().expect("Failed to register USDT probes");
     let request_timeout = Duration::from_secs(15);
     let start = tokio::time::Instant::now();
     let logctx = test_setup_log("test_cluster");

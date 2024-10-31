@@ -2792,7 +2792,6 @@ mod tests {
     // `project_create_vpc_raw` call.
     #[tokio::test]
     async fn test_project_create_vpc_raw_returns_none_on_vni_exhaustion() {
-        usdt::register_probes().unwrap();
         let logctx = dev::test_setup_log(
             "test_project_create_vpc_raw_returns_none_on_vni_exhaustion",
         );
@@ -2898,7 +2897,6 @@ mod tests {
     // and then check that we correctly retry
     #[tokio::test]
     async fn test_project_create_vpc_retries() {
-        usdt::register_probes().unwrap();
         let logctx = dev::test_setup_log("test_project_create_vpc_retries");
         let log = &logctx.log;
         let db = TestDatabase::new_with_datastore(log).await;
@@ -3042,7 +3040,6 @@ mod tests {
     #[tokio::test]
     async fn test_vpc_resolve_to_sleds_uses_current_target_blueprint() {
         // Test setup.
-        usdt::register_probes().unwrap();
         let logctx = dev::test_setup_log(
             "test_vpc_resolve_to_sleds_uses_current_target_blueprint",
         );
@@ -3404,7 +3401,6 @@ mod tests {
     // and that these resolve to the v4/6 subnets of each.
     #[tokio::test]
     async fn test_vpc_system_router_sync_to_subnets() {
-        usdt::register_probes().unwrap();
         let logctx =
             dev::test_setup_log("test_vpc_system_router_sync_to_subnets");
         let log = &logctx.log;
@@ -3631,7 +3627,6 @@ mod tests {
     // of an instance NIC.
     #[tokio::test]
     async fn test_vpc_router_rule_instance_resolve() {
-        usdt::register_probes().unwrap();
         let logctx =
             dev::test_setup_log("test_vpc_router_rule_instance_resolve");
         let log = &logctx.log;

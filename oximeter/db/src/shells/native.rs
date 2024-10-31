@@ -16,7 +16,6 @@ use tabled::{builder::Builder, settings::Style};
 
 /// Run the native SQL shell.
 pub async fn shell(addr: IpAddr, port: u16) -> anyhow::Result<()> {
-    usdt::register_probes()?;
     let addr = SocketAddr::new(addr, port);
     let mut conn = native::Connection::new(addr)
         .await
