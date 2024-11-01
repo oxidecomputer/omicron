@@ -5,10 +5,16 @@
 use dropshot::Body;
 use dropshot::HttpError;
 use futures::TryStreamExt;
+use http::HeaderValue;
 use hyper::{
     header::{ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE},
     Response, StatusCode,
 };
+
+const ACCEPT_RANGES_BYTES: http::HeaderValue =
+    http::HeaderValue::from_static("bytes");
+const CONTENT_TYPE_OCTET_STREAM: http::HeaderValue =
+    http::HeaderValue::from_static("application/octet-stream");
 
 /// Errors which may be returned when processing range requests
 #[derive(thiserror::Error, Debug)]
@@ -16,7 +22,16 @@ pub enum Error {
     #[error("Using multiple ranges is not supported")]
     MultipleRangesUnsupported,
 
-    #[error("Failed to parse range")]
+    #[error("Range would overflow (start + length is too large)")]
+    RangeOverflow,
+
+    #[error("Range would underflow (total content length < start)")]
+    RangeUnderflow,
+
+    #[error("Empty Range")]
+    EmptyRange,
+
+    #[error("Failed to parse range: {0:?}")]
     Parse(http_range::HttpRangeParseError),
 
     #[error(transparent)]
@@ -26,9 +41,21 @@ pub enum Error {
 impl From<Error> for HttpError {
     fn from(err: Error) -> Self {
         match err {
-            Error::MultipleRangesUnsupported | Error::Parse(_) => {
+            Error::MultipleRangesUnsupported => {
                 HttpError::for_bad_request(None, err.to_string())
             }
+            Error::RangeUnderflow
+            | Error::RangeOverflow
+            | Error::EmptyRange => HttpError::for_client_error(
+                None,
+                http::StatusCode::RANGE_NOT_SATISFIABLE,
+                "Range was parseable, but invalid".to_string(),
+            ),
+            Error::Parse(_) => HttpError::for_client_error(
+                None,
+                http::StatusCode::RANGE_NOT_SATISFIABLE,
+                "Range cannot be parsed".to_string(),
+            ),
             Error::Http(err) => err.into(),
         }
     }
@@ -37,10 +64,10 @@ impl From<Error> for HttpError {
 fn bad_range_response(file_size: u64) -> Response<Body> {
     hyper::Response::builder()
         .status(StatusCode::RANGE_NOT_SATISFIABLE)
-        .header(ACCEPT_RANGES, "bytes")
+        .header(ACCEPT_RANGES, ACCEPT_RANGES_BYTES)
         .header(CONTENT_RANGE, format!("bytes */{file_size}"))
         .body(Body::empty())
-        .unwrap()
+        .expect("'bad range response' creation should be infallible")
 }
 
 /// Generate a GET response, optionally for a HTTP range request.  The total
@@ -53,7 +80,7 @@ fn bad_range_response(file_size: u64) -> Response<Body> {
 pub fn make_get_response<E, S, D>(
     range: Option<SingleRange>,
     file_length: u64,
-    content_type: Option<&str>,
+    content_type: Option<impl Into<HeaderValue>>,
     rx: S,
 ) -> Result<Response<Body>, Error>
 where
@@ -74,7 +101,7 @@ where
 pub fn make_head_response(
     range: Option<SingleRange>,
     file_length: u64,
-    content_type: Option<&str>,
+    content_type: Option<impl Into<HeaderValue>>,
 ) -> Result<Response<Body>, Error> {
     Ok(make_response_common(range, file_length, content_type)
         .body(Body::empty())?)
@@ -83,13 +110,13 @@ pub fn make_head_response(
 fn make_response_common(
     range: Option<SingleRange>,
     file_length: u64,
-    content_type: Option<&str>,
+    content_type: Option<impl Into<HeaderValue>>,
 ) -> hyper::http::response::Builder {
     let mut res = Response::builder();
-    res = res.header(ACCEPT_RANGES, "bytes");
+    res = res.header(ACCEPT_RANGES, ACCEPT_RANGES_BYTES);
     res = res.header(
         CONTENT_TYPE,
-        content_type.unwrap_or("application/octet-stream"),
+        content_type.map(|t| t.into()).unwrap_or(CONTENT_TYPE_OCTET_STREAM),
     );
 
     if let Some(range) = range {
@@ -157,16 +184,13 @@ impl SingleRange {
     ) -> Result<Self, Error> {
         let http_range::HttpRange { start, mut length } = range;
 
-        const INVALID_RANGE: Error =
-            Error::Parse(http_range::HttpRangeParseError::InvalidRange);
-
         // Clip the length to avoid going beyond the end of the total range
-        if start.checked_add(length).ok_or(INVALID_RANGE)? >= total {
-            length = total.checked_sub(start).ok_or(INVALID_RANGE)?;
+        if start.checked_add(length).ok_or(Error::RangeOverflow)? >= total {
+            length = total.checked_sub(start).ok_or(Error::RangeUnderflow)?;
         }
         // If the length is zero, we cannot satisfy the range request
         if length == 0 {
-            return Err(INVALID_RANGE);
+            return Err(Error::EmptyRange);
         }
 
         Ok(Self { range: http_range::HttpRange { start, length }, total })
@@ -184,26 +208,32 @@ impl SingleRange {
         self.range
             .start
             .checked_add(self.range.length)
-            .unwrap()
+            .expect("start + length overflowed, but should have been checked in 'SingleRange::new'")
             .checked_sub(1)
-            .unwrap()
+            .expect("start + length underflowed, but should have been checked in 'SingleRange::new'")
     }
 
     /// Generate the Content-Range header for inclusion in a HTTP 206 partial
     /// content response using this range.
-    pub fn to_content_range(&self) -> String {
-        format!(
+    pub fn to_content_range(&self) -> HeaderValue {
+        HeaderValue::from_str(&format!(
             "bytes {}-{}/{}",
             self.range.start,
             self.end_inclusive(),
             self.total
-        )
+        ))
+        .expect("Content-Range value should have been ASCII string")
     }
 
     /// Generate a Range header for inclusion in another HTTP request; e.g.,
     /// to a backend object store.
-    pub fn to_range(&self) -> String {
-        format!("bytes={}-{}", self.range.start, self.end_inclusive())
+    pub fn to_range(&self) -> HeaderValue {
+        HeaderValue::from_str(&format!(
+            "bytes={}-{}",
+            self.range.start,
+            self.end_inclusive()
+        ))
+        .expect("Range bounds should have been ASCII string")
     }
 
     pub fn content_length(&self) -> u64 {
@@ -240,8 +270,66 @@ mod test {
     use bytes::Bytes;
     use futures::stream::once;
     use http_body_util::BodyExt;
+    use proptest::prelude::*;
     use std::convert::Infallible;
     use tokio_util::io::ReaderStream;
+
+    proptest! {
+        #[test]
+        fn potential_range_parsing_does_not_crash(
+            bytes: Vec<u8>,
+            len in 0_u64..=u64::MAX,
+        ) {
+            let result = PotentialRange(bytes).parse(len);
+            let Ok(range) = result else { return Ok(()); };
+            let _ = range.start();
+            let _ = range.end_inclusive();
+            let _ = range.to_content_range();
+            let _ = range.to_range();
+        }
+
+        #[test]
+        fn single_range_parsing_does_not_crash(
+            start in 0_u64..=u64::MAX,
+            length in 0_u64..=u64::MAX,
+            total in 0_u64..=u64::MAX
+        ) {
+            let result = SingleRange::new(http_range::HttpRange {
+                start, length
+            }, total);
+
+            let Ok(range) = result else { return Ok(()); };
+
+            assert_eq!(range.start(), start);
+            let _ = range.end_inclusive();
+            let _ = range.to_content_range();
+            let _ = range.to_range();
+        }
+    }
+
+    #[test]
+    fn invalid_ranges() {
+        assert!(matches!(
+            SingleRange::new(
+                http_range::HttpRange { start: u64::MAX, length: 1 },
+                1
+            ),
+            Err(Error::RangeOverflow)
+        ));
+
+        assert!(matches!(
+            SingleRange::new(
+                http_range::HttpRange { start: 100, length: 0 },
+                10
+            ),
+            Err(Error::RangeUnderflow)
+        ));
+
+        assert!(matches!(
+            SingleRange::new(http_range::HttpRange { start: 0, length: 0 }, 1),
+            Err(Error::EmptyRange)
+        ));
+    }
 
     #[test]
     fn parse_range_valid() {
@@ -298,7 +386,7 @@ mod test {
         let response = make_get_response(
             None,
             bytes.len() as u64,
-            None,
+            None::<HeaderValue>,
             ReaderStream::new(bytes.as_slice()),
         )
         .expect("Should have made response");
@@ -340,7 +428,7 @@ mod test {
         let response = make_get_response(
             Some(range.clone()),
             total_length.into(),
-            None,
+            None::<HeaderValue>,
             once(async move { Ok::<_, Infallible>(b) }),
         )
         .expect("Should have made response");
@@ -435,7 +523,7 @@ mod test {
                 64
             )
             .expect_err("Should have thrown an error"),
-            Error::Parse(http_range::HttpRangeParseError::InvalidRange)
+            Error::EmptyRange,
         ));
     }
 }

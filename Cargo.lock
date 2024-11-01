@@ -8920,6 +8920,7 @@ dependencies = [
  "http-range",
  "hyper 1.4.1",
  "omicron-workspace-hack",
+ "proptest",
  "thiserror",
  "tokio",
  "tokio-util",
