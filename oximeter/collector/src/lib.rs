@@ -344,11 +344,20 @@ impl Oximeter {
                     ))
                 };
 
-            qorb::pool::Pool::new(
+            match qorb::pool::Pool::new(
                 nexus_resolver,
                 Arc::new(NexusConnector { log: log.clone() }),
                 qorb::policy::Policy::default(),
-            )
+            ) {
+                Ok(pool) => {
+                    debug!(log, "registered USDT probes");
+                    pool
+                }
+                Err(err) => {
+                    error!(log, "failed to register USDT probes");
+                    err.into_inner()
+                }
+            }
         };
 
         let notify_nexus = || async {

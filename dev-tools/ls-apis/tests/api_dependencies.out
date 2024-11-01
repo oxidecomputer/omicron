@@ -71,6 +71,9 @@ Propolis (client: propolis-client)
 Crucible Repair (client: repair-client)
     consumed by: crucible-downstairs (crucible/downstairs) via 1 path
 
+Repo Depot API (client: repo-depot-client)
+    consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
+
 Sled Agent (client: sled-agent-client)
     consumed by: dpd (dendrite/dpd) via 1 path
     consumed by: omicron-nexus (omicron/nexus) via 7 paths

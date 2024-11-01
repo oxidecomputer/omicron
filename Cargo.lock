@@ -152,9 +152,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.89"
+version = "1.0.92"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86fdf8605db99b54d3cd748a44c6d04df638eb5dafb219b135d0149bd0db01f6"
+checksum = "74f37166d7d48a0284b99dd824694c26119c700b53bf0d1540cdb147dbdaaf13"
 dependencies = [
  "backtrace",
 ]
@@ -4805,7 +4805,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -6871,6 +6871,7 @@ dependencies = [
  "glob",
  "guppy",
  "hex",
+ "hex-literal",
  "http 1.1.0",
  "hyper 1.4.1",
  "hyper-staticfile",
@@ -6905,12 +6906,15 @@ dependencies = [
  "propolis_api_types",
  "rand",
  "rcgen",
+ "repo-depot-api",
+ "repo-depot-client",
  "reqwest 0.12.8",
  "schemars",
  "semver 1.0.23",
  "serde",
  "serde_human_bytes",
  "serde_json",
+ "sha2",
  "sha3",
  "sled-agent-api",
  "sled-agent-client",
@@ -7214,6 +7218,7 @@ dependencies = [
  "openapiv3",
  "owo-colors",
  "oximeter-api",
+ "repo-depot-api",
  "serde_json",
  "similar",
  "sled-agent-api",
@@ -7873,9 +7878,9 @@ dependencies = [
 
 [[package]]
 name = "parse-size"
-version = "1.0.0"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "944553dd59c802559559161f9816429058b869003836120e262e8caec061b7ae"
+checksum = "487f2ccd1e17ce8c1bfab3a65c89525af41cfad4c8659021a1e9a2aacd73b89b"
 
 [[package]]
 name = "parse-zoneinfo"
@@ -8721,9 +8726,9 @@ dependencies = [
 
 [[package]]
 name = "qorb"
-version = "0.1.2"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d25f71eb7c5ba56a99f0721fd771b2503aa6de4ec73f0891f9b7ac115ca34723"
+checksum = "9cd19ad8fae9abd8da01d8f435b633b567d53835cf3bce89d6f616617d10583c"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8741,6 +8746,7 @@ dependencies = [
  "tokio-stream",
  "tokio-tungstenite 0.24.0",
  "tracing",
+ "usdt",
 ]
 
 [[package]]
@@ -9127,6 +9133,29 @@ name = "relative-path"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba39f3699c378cd8970968dcbff9c43159ea4cfbd88d43c00b22f2ef10a435d2"
+
+[[package]]
+name = "repo-depot-api"
+version = "0.1.0"
+dependencies = [
+ "dropshot",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
+]
+
+[[package]]
+name = "repo-depot-client"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "progenitor",
+ "reqwest 0.12.8",
+ "schemars",
+ "serde",
+ "slog",
+]
 
 [[package]]
 name = "reqwest"
