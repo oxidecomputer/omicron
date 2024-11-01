@@ -236,10 +236,11 @@ impl SingleRange {
         .expect("Range bounds should have been ASCII string")
     }
 
-    pub fn content_length(&self) -> u64 {
-        assert!(self.range.length > 0);
-
-        self.range.length
+    /// Returns the content length for this range
+    pub fn content_length(&self) -> std::num::NonZeroU64 {
+        self.range.length.try_into().expect(
+            "Length should be more than zero, validated in SingleRange::new",
+        )
     }
 }
 
