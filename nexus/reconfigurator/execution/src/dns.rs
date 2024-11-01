@@ -317,6 +317,7 @@ mod test {
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
+    use nexus_reconfigurator_planning::planner::disks_editor::BlueprintDisksEditor;
     use nexus_reconfigurator_preparation::PlanningInputFromDb;
     use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
     use nexus_sled_agent_shared::inventory::OmicronZoneType;
@@ -1408,7 +1409,7 @@ mod test {
                 removed: 0
             }
         );
-        let blueprint2 = builder.build();
+        let blueprint2 = builder.build(BlueprintDisksEditor::new(&blueprint));
         eprintln!("blueprint2: {}", blueprint2.display());
         // Figure out the id of the new zone.
         let zones_before = blueprint
