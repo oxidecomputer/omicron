@@ -17,6 +17,7 @@ use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
 use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
+use nexus_reconfigurator_planning::planner::disks_editor::BlueprintDisksEditor;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
     SledBuilder, SledHwInventory, SystemDescription,
@@ -830,6 +831,13 @@ fn cmd_blueprint_edit(
     )
     .context("creating blueprint builder")?;
 
+    let mut disks_editor = BlueprintDisksEditor::new(&blueprint);
+    for (sled_id, sled_resources) in
+        planning_input.all_sled_resources(SledFilter::InService)
+    {
+        disks_editor.sled_ensure_disks(sled_id, sled_resources);
+    }
+
     if let Some(comment) = args.comment {
         builder.comment(comment);
     }
@@ -877,7 +885,20 @@ fn cmd_blueprint_edit(
         }
     };
 
-    let mut new_blueprint = builder.build();
+    for (sled_id, sled_resources) in
+        planning_input.all_sled_resources(SledFilter::InService)
+    {
+        disks_editor
+            .sled_ensure_datasets(
+                sled_id,
+                sled_resources,
+                builder.zones(),
+                &sim.log,
+            )
+            .context("ensured datasets for sled")?;
+    }
+
+    let mut new_blueprint = builder.build(disks_editor);
 
     // Normally `builder.build()` would construct the cockroach fingerprint
     // based on what we read from CRDB and put into the planning input, but

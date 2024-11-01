@@ -7,7 +7,8 @@
 use anyhow::{ensure, Context};
 use nexus_client::types::BlueprintTargetSet;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
-use nexus_types::deployment::{Blueprint, PlanningInput};
+use nexus_reconfigurator_planning::planner::disks_editor::BlueprintDisksEditor;
+use nexus_types::deployment::{Blueprint, PlanningInput, SledFilter};
 use nexus_types::inventory::Collection;
 use slog::{debug, info};
 
@@ -75,10 +76,23 @@ pub async fn blueprint_edit_current_target(
     )
     .context("creating BlueprintBuilder")?;
 
+    let mut disks_editor = BlueprintDisksEditor::new(&blueprint1);
+    for (sled_id, sled_resources) in
+        planning_input.all_sled_resources(SledFilter::InService)
+    {
+        disks_editor.sled_ensure_disks(sled_id, sled_resources);
+    }
     edit_fn(&mut builder)?;
+    for (sled_id, sled_resources) in
+        planning_input.all_sled_resources(SledFilter::InService)
+    {
+        disks_editor
+            .sled_ensure_datasets(sled_id, sled_resources, builder.zones(), log)
+            .context("ensured datasets for sled")?;
+    }
 
     // Assemble the new blueprint, import it, and make it the new target.
-    let blueprint2 = builder.build();
+    let blueprint2 = builder.build(disks_editor);
     info!(log, "assembled new blueprint based on target";
         "current_target_id" => %target_blueprint.target_id,
         "new_blueprint_id" => %blueprint2.id,

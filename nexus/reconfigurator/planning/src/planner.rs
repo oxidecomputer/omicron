@@ -40,7 +40,7 @@ pub(crate) use self::omicron_zone_placement::DiscretionaryOmicronZone;
 use self::omicron_zone_placement::OmicronZonePlacement;
 use self::omicron_zone_placement::OmicronZonePlacementSledState;
 
-pub(crate) mod disks_editor;
+pub mod disks_editor;
 mod omicron_zone_placement;
 pub(crate) mod rng;
 

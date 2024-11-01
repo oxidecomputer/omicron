@@ -43,7 +43,7 @@ pub enum EditDatasetsError {
     LeftoverUpdates(usize),
 }
 
-pub(crate) struct BlueprintDisksEditor<'a> {
+pub struct BlueprintDisksEditor<'a> {
     disks: BlueprintDisksBuilder<'a>,
     datasets: BlueprintDatasetsBuilder<'a>,
 }

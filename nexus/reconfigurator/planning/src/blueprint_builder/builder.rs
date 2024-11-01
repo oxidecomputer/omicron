@@ -497,8 +497,12 @@ impl<'a> BlueprintBuilder<'a> {
         self.zones.current_sled_zones(sled_id, filter).map(|(config, _)| config)
     }
 
+    pub fn zones(&self) -> &BlueprintZonesBuilder<'a> {
+        &self.zones
+    }
+
     /// Assemble a final [`Blueprint`] based on the contents of the builder
-    pub(crate) fn build(
+    pub fn build(
         mut self,
         disks_editor: BlueprintDisksEditor<'_>,
     ) -> Blueprint {
@@ -1756,7 +1760,7 @@ impl<'a> BlueprintBuilder<'a> {
 /// blueprint.  We do this by keeping a copy of any [`BlueprintZonesConfig`]
 /// that we've changed and a _reference_ to the parent blueprint's zones.  This
 /// struct makes it easy for callers iterate over the right set of zones.
-pub(crate) struct BlueprintZonesBuilder<'a> {
+pub struct BlueprintZonesBuilder<'a> {
     changed_zones: BTreeMap<SledUuid, BuilderZonesConfig>,
     parent_zones: &'a BTreeMap<SledUuid, BlueprintZonesConfig>,
 }
