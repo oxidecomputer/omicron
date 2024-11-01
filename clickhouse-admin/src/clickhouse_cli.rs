@@ -5,7 +5,8 @@
 use anyhow::Result;
 use camino::Utf8PathBuf;
 use clickhouse_admin_types::{
-    ClickhouseKeeperClusterMembership, KeeperConf, KeeperId, Lgif, RaftConfig,
+    ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
+    KeeperId, Lgif, RaftConfig, OXIMETER_CLUSTER,
 };
 use dropshot::HttpError;
 use illumos_utils::{output_to_exec_error, ExecutionError};
@@ -13,6 +14,7 @@ use slog::Logger;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
+use std::fmt::Display;
 use std::io;
 use std::net::SocketAddrV6;
 use tokio::process::Command;
@@ -56,6 +58,21 @@ impl From<ClickhouseCliError> for HttpError {
     }
 }
 
+enum ClickhouseClientType {
+    Server,
+    Keeper,
+}
+
+impl Display for ClickhouseClientType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            ClickhouseClientType::Server => "client",
+            ClickhouseClientType::Keeper => "keeper-client",
+        };
+        write!(f, "{s}")
+    }
+}
+
 #[derive(Debug)]
 pub struct ClickhouseCli {
     /// Path to where the clickhouse binary is located
@@ -76,7 +93,8 @@ impl ClickhouseCli {
     }
 
     pub async fn lgif(&self) -> Result<Lgif, ClickhouseCliError> {
-        self.keeper_client_non_interactive(
+        self.client_non_interactive(
+            ClickhouseClientType::Keeper,
             "lgif",
             "Retrieve logically grouped information file",
             Lgif::parse,
@@ -86,7 +104,8 @@ impl ClickhouseCli {
     }
 
     pub async fn raft_config(&self) -> Result<RaftConfig, ClickhouseCliError> {
-        self.keeper_client_non_interactive(
+        self.client_non_interactive(
+            ClickhouseClientType::Keeper,
             "get /keeper/config",
             "Retrieve raft configuration information",
             RaftConfig::parse,
@@ -96,7 +115,8 @@ impl ClickhouseCli {
     }
 
     pub async fn keeper_conf(&self) -> Result<KeeperConf, ClickhouseCliError> {
-        self.keeper_client_non_interactive(
+        self.client_non_interactive(
+            ClickhouseClientType::Keeper,
             "conf",
             "Retrieve keeper node configuration information",
             KeeperConf::parse,
@@ -121,8 +141,25 @@ impl ClickhouseCli {
         })
     }
 
-    async fn keeper_client_non_interactive<F, T>(
+    pub async fn distributed_ddl_queue(
         &self,
+    ) -> Result<DistributedDdlQueue, ClickhouseCliError> {
+        self.client_non_interactive(
+            ClickhouseClientType::Server,
+            format!(
+                "SELECT * FROM system.distributed_ddl_queue WHERE cluster = '{}' FORMAT JSON", OXIMETER_CLUSTER
+            ).as_str(),
+            "Retrieve information about distributed ddl queries (ON CLUSTER clause) 
+            that were executed on a cluster",
+            DistributedDdlQueue::parse,
+            self.log.clone().unwrap(),
+        )
+        .await
+    }
+
+    async fn client_non_interactive<F, T>(
+        &self,
+        client: ClickhouseClientType,
         query: &str,
         subcommand_description: &'static str,
         parse: F,
@@ -133,7 +170,7 @@ impl ClickhouseCli {
     {
         let mut command = Command::new(&self.binary_path);
         command
-            .arg("keeper-client")
+            .arg(client.to_string())
             .arg("--host")
             .arg(&format!("[{}]", self.listen_address.ip()))
             .arg("--port")

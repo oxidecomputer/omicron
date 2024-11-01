@@ -965,6 +965,28 @@ pub struct ClickhouseKeeperClusterMembership {
     pub raft_config: BTreeSet<KeeperId>,
 }
 
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct DistributedDdlQueue {
+    pub data: String,
+}
+
+impl DistributedDdlQueue {
+    pub fn parse(_log: &Logger, _data: &[u8]) -> Result<Self> {
+        Ok(Self { data: "dummy data".to_string() })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use camino::Utf8PathBuf;

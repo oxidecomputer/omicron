@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use clickhouse_admin_types::{
-    ClickhouseKeeperClusterMembership, KeeperConf, KeeperConfig,
-    KeeperConfigurableSettings, Lgif, RaftConfig, ReplicaConfig,
+    ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
+    KeeperConfig, KeeperConfigurableSettings, Lgif, RaftConfig, ReplicaConfig,
     ServerConfigurableSettings,
 };
 use dropshot::{
@@ -105,4 +105,14 @@ pub trait ClickhouseAdminServerApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<ServerConfigurableSettings>,
     ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError>;
+
+    /// Contains information about distributed ddl queries (ON CLUSTER clause)
+    /// that were executed on a cluster.
+    #[endpoint {
+        method = GET,
+        path = "/distributed-ddl-queue",
+    }]
+    async fn distributed_ddl_queue(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<DistributedDdlQueue>, HttpError>;
 }

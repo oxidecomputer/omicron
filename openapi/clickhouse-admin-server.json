@@ -44,6 +44,31 @@
           }
         }
       }
+    },
+    "/distributed-ddl-queue": {
+      "get": {
+        "summary": "Contains information about distributed ddl queries (ON CLUSTER clause)",
+        "description": "that were executed on a cluster.",
+        "operationId": "distributed_ddl_queue",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DistributedDdlQueue"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -88,6 +113,17 @@
             ],
             "additionalProperties": false
           }
+        ]
+      },
+      "DistributedDdlQueue": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "data"
         ]
       },
       "Error": {

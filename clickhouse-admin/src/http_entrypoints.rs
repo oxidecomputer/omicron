@@ -5,8 +5,8 @@
 use crate::context::ServerContext;
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::{
-    ClickhouseKeeperClusterMembership, KeeperConf, KeeperConfig,
-    KeeperConfigurableSettings, Lgif, RaftConfig, ReplicaConfig,
+    ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
+    KeeperConfig, KeeperConfigurableSettings, Lgif, RaftConfig, ReplicaConfig,
     ServerConfigurableSettings,
 };
 use dropshot::{
@@ -46,6 +46,14 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         Svcadm::enable_service(fmri)?;
 
         Ok(HttpResponseCreated(output))
+    }
+
+    async fn distributed_ddl_queue(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<DistributedDdlQueue>, HttpError> {
+        let ctx = rqctx.context();
+        let output = ctx.clickhouse_cli().distributed_ddl_queue().await?;
+        Ok(HttpResponseOk(output))
     }
 }
 
