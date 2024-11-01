@@ -300,6 +300,7 @@ pub mod back_compat {
                 bgp_peers: v1.bgp_peers.clone(),
                 autoneg: v1.autoneg,
                 lldp: None,
+                tx_eq: None,
             }
         }
     }
@@ -347,6 +348,7 @@ pub mod back_compat {
                 bgp_peers: vec![],
                 autoneg: false,
                 lldp: None,
+                tx_eq: None,
             }
         }
     }
@@ -520,6 +522,7 @@ mod tests {
                         autoneg: false,
                         bgp_peers: vec![],
                         lldp: None,
+                        tx_eq: None,
                     }],
                     bgp: vec![],
                     bfd: vec![],
@@ -602,6 +605,7 @@ mod tests {
                         autoneg: false,
                         bgp_peers: vec![],
                         lldp: None,
+                        tx_eq: None,
                     }],
                     bgp: vec![],
                     bfd: vec![],
