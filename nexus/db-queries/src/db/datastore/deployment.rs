@@ -1988,6 +1988,7 @@ mod tests {
     use nexus_reconfigurator_planning::blueprint_builder::Ensure;
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::example;
+    use nexus_reconfigurator_planning::planner::disks_editor::BlueprintDisksEditor;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
@@ -2322,18 +2323,17 @@ mod tests {
             "test",
         )
         .expect("failed to create builder");
+        let mut disks_editor = BlueprintDisksEditor::new(&blueprint1);
 
         // Ensure disks on our sled
         assert_eq!(
-            builder
-                .sled_ensure_disks(
-                    new_sled_id,
-                    &planning_input
-                        .sled_lookup(SledFilter::Commissioned, new_sled_id)
-                        .unwrap()
-                        .resources,
-                )
-                .unwrap(),
+            disks_editor.sled_ensure_disks(
+                new_sled_id,
+                &planning_input
+                    .sled_lookup(SledFilter::Commissioned, new_sled_id)
+                    .unwrap()
+                    .resources,
+            ),
             EnsureMultiple::Changed {
                 added: 4,
                 updated: 0,
@@ -2360,7 +2360,7 @@ mod tests {
         let num_new_crucible_zones = new_sled_zpools.len();
         let num_new_sled_zones = num_new_ntp_zones + num_new_crucible_zones;
 
-        let blueprint2 = builder.build();
+        let blueprint2 = builder.build(disks_editor);
         let authz_blueprint2 = authz_blueprint_from_id(blueprint2.id);
 
         let diff = blueprint2.diff_since_blueprint(&blueprint1);
@@ -2514,7 +2514,7 @@ mod tests {
             "test2",
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintDisksEditor::new(&blueprint1));
         let blueprint3 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
@@ -2523,7 +2523,7 @@ mod tests {
             "test3",
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintDisksEditor::new(&blueprint1));
         assert_eq!(blueprint1.parent_blueprint_id, None);
         assert_eq!(blueprint2.parent_blueprint_id, Some(blueprint1.id));
         assert_eq!(blueprint3.parent_blueprint_id, Some(blueprint1.id));
@@ -2623,7 +2623,7 @@ mod tests {
             "test3",
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintDisksEditor::new(&blueprint3));
         assert_eq!(blueprint4.parent_blueprint_id, Some(blueprint3.id));
         datastore.blueprint_insert(&opctx, &blueprint4).await.unwrap();
         let bp4_target = BlueprintTarget {
@@ -2668,7 +2668,7 @@ mod tests {
             "test2",
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintDisksEditor::new(&blueprint1));
         assert_eq!(blueprint1.parent_blueprint_id, None);
         assert_eq!(blueprint2.parent_blueprint_id, Some(blueprint1.id));
 
@@ -2896,7 +2896,7 @@ mod tests {
             "test2",
         )
         .expect("failed to create builder")
-        .build();
+        .build(BlueprintDisksEditor::new(&blueprint1));
 
         // Insert both into the blueprint table.
         datastore.blueprint_insert(&opctx, &blueprint1).await.unwrap();

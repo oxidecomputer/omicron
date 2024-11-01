@@ -2766,6 +2766,7 @@ mod tests {
     use nexus_db_model::IncompleteNetworkInterface;
     use nexus_db_model::SledUpdate;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_reconfigurator_planning::planner::disks_editor::BlueprintDisksEditor;
     use nexus_reconfigurator_planning::system::SledBuilder;
     use nexus_reconfigurator_planning::system::SystemDescription;
     use nexus_types::deployment::Blueprint;
@@ -3129,7 +3130,7 @@ mod tests {
                     Vec::new(),
                 )
                 .expect("added nexus to third sled");
-            builder.build()
+            builder.build(BlueprintDisksEditor::new(&bp0))
         };
         bp_insert_and_make_target(&opctx, &datastore, &bp1).await;
 
@@ -3201,7 +3202,7 @@ mod tests {
                     )
                     .expect("added nexus to third sled");
             }
-            builder.build()
+            builder.build(BlueprintDisksEditor::new(&bp2))
         };
 
         // Insert the service NIC records for all the Nexuses.

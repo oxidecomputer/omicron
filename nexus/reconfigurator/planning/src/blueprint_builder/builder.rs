@@ -1827,7 +1827,7 @@ impl<'a> BlueprintZonesBuilder<'a> {
     /// Iterates over the list of Omicron zones currently configured for this
     /// sled in the blueprint that's being built, along with each zone's state
     /// in the builder.
-    pub fn current_sled_zones(
+    pub(crate) fn current_sled_zones(
         &self,
         sled_id: SledUuid,
         filter: BlueprintZoneFilter,
