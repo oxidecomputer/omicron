@@ -53,7 +53,7 @@ use sled_agent_client::types::{
     BgpConfig as SledBgpConfig, BgpPeerConfig as SledBgpPeerConfig,
     EarlyNetworkConfig, EarlyNetworkConfigBody, HostPortConfig,
     LldpAdminStatus, LldpPortConfig, PortConfigV2, RackNetworkConfigV2,
-    RouteConfig as SledRouteConfig, UplinkAddressConfig,
+    RouteConfig as SledRouteConfig, TxEqConfig, UplinkAddressConfig,
 };
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
@@ -935,6 +935,19 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         },
                     };
 
+		    // TODO https://github.com/oxidecomputer/omicron/issues/3062 
+		    let tx_eq = if let Some(Some(c)) = info.tx_eq.get(0) {
+			Some(TxEqConfig {
+			    pre1: c.pre1.map(Into::into),
+			    pre2: c.pre2.map(Into::into),
+			    main: c.main.map(Into::into),
+			    post2: c.post2.map(Into::into),
+			    post1: c.post1.map(Into::into),
+			})
+		    } else {
+			None
+		    };
+
                     let mut port_config = PortConfigV2 {
                         addresses: info.addresses.iter().map(|a|
 			    UplinkAddressConfig {
@@ -1012,7 +1025,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
 				system_name: c.system_name.clone(),
 				system_description: c.system_description.clone(),
 				management_addrs:c.management_ip.map(|a| vec![a.ip()]),
-			    })
+			    }),
+			    tx_eq,
 		    }
                     ;
 
@@ -1456,6 +1470,18 @@ fn uplinks(
             })
         };
 
+        let tx_eq = if let Some(Some(c)) = config.tx_eq.get(0) {
+            Some(TxEqConfig {
+                pre1: c.pre1,
+                pre2: c.pre2,
+                main: c.main,
+                post2: c.post2,
+                post1: c.post1,
+            })
+        } else {
+            None
+        };
+
         let config = HostPortConfig {
             port: port.port_name.clone(),
             addrs: config
@@ -1467,6 +1493,7 @@ fn uplinks(
                 })
                 .collect(),
             lldp,
+            tx_eq,
         };
 
         match uplinks.entry(*location) {

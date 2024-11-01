@@ -5,6 +5,7 @@
 //! Low-level facility for generating Blueprints
 
 use crate::ip_allocator::IpAllocator;
+use crate::planner::rng::PlannerRng;
 use crate::planner::zone_needs_expungement;
 use crate::planner::ZoneExpungeReason;
 use anyhow::anyhow;
@@ -59,16 +60,12 @@ use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::DatasetUuid;
-use omicron_uuid_kinds::ExternalIpKind;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::OmicronZoneKind;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use once_cell::unsync::OnceCell;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
 use slog::debug;
 use slog::error;
 use slog::info;
@@ -84,8 +81,6 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use thiserror::Error;
-use typed_rng::TypedUuidRng;
-use typed_rng::UuidRng;
 
 use super::clickhouse::ClickhouseAllocator;
 use super::external_networking::BuilderExternalNetworking;
@@ -296,7 +291,7 @@ pub struct BlueprintBuilder<'a> {
     comments: Vec<String>,
 
     // Random number generator for new UUIDs
-    rng: BlueprintBuilderRng,
+    rng: PlannerRng,
 }
 
 impl<'a> BlueprintBuilder<'a> {
@@ -306,11 +301,7 @@ impl<'a> BlueprintBuilder<'a> {
         sled_ids: impl Iterator<Item = SledUuid>,
         creator: &str,
     ) -> Blueprint {
-        Self::build_empty_with_sleds_impl(
-            sled_ids,
-            creator,
-            BlueprintBuilderRng::new(),
-        )
+        Self::build_empty_with_sleds_impl(sled_ids, creator, PlannerRng::new())
     }
 
     /// A version of [`Self::build_empty_with_sleds`] that allows the
@@ -320,7 +311,7 @@ impl<'a> BlueprintBuilder<'a> {
         creator: &str,
         seed: H,
     ) -> Blueprint {
-        let mut rng = BlueprintBuilderRng::new();
+        let mut rng = PlannerRng::new();
         rng.set_seed(seed);
         Self::build_empty_with_sleds_impl(sled_ids, creator, rng)
     }
@@ -328,7 +319,7 @@ impl<'a> BlueprintBuilder<'a> {
     fn build_empty_with_sleds_impl(
         sled_ids: impl Iterator<Item = SledUuid>,
         creator: &str,
-        mut rng: BlueprintBuilderRng,
+        mut rng: PlannerRng,
     ) -> Blueprint {
         let blueprint_zones = sled_ids
             .map(|sled_id| {
@@ -347,7 +338,7 @@ impl<'a> BlueprintBuilder<'a> {
             .collect();
 
         Blueprint {
-            id: rng.blueprint_rng.next(),
+            id: rng.next_blueprint(),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
             blueprint_datasets: BTreeMap::new(),
@@ -459,7 +450,7 @@ impl<'a> BlueprintBuilder<'a> {
             creator: creator.to_owned(),
             operations: Vec::new(),
             comments: Vec::new(),
-            rng: BlueprintBuilderRng::new(),
+            rng: PlannerRng::new(),
         })
     }
 
@@ -552,7 +543,7 @@ impl<'a> BlueprintBuilder<'a> {
             }
         });
         Blueprint {
-            id: self.rng.blueprint_rng.next(),
+            id: self.rng.next_blueprint(),
             blueprint_zones,
             blueprint_disks,
             blueprint_datasets,
@@ -1065,7 +1056,7 @@ impl<'a> BlueprintBuilder<'a> {
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
-            id: self.rng.zone_rng.next(),
+            id: self.rng.next_zone(),
             filesystem_pool: Some(zpool),
             zone_type,
         };
@@ -1115,7 +1106,7 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
     ) -> Result<Ensure, Error> {
-        let id = self.rng.zone_rng.next();
+        let id = self.rng.next_zone();
         let ExternalNetworkingChoice {
             external_ip,
             nic_ip,
@@ -1123,7 +1114,7 @@ impl<'a> BlueprintBuilder<'a> {
             nic_mac,
         } = self.external_networking()?.for_new_external_dns()?;
         let nic = NetworkInterface {
-            id: self.rng.network_interface_rng.next(),
+            id: self.rng.next_network_interface(),
             kind: NetworkInterfaceKind::Service { id: id.into_untyped_uuid() },
             name: format!("external-dns-{id}").parse().unwrap(),
             ip: nic_ip,
@@ -1139,7 +1130,7 @@ impl<'a> BlueprintBuilder<'a> {
         let http_address =
             SocketAddrV6::new(underlay_address, DNS_HTTP_PORT, 0, 0);
         let dns_address = OmicronZoneExternalFloatingAddr {
-            id: self.rng.external_ip_rng.next(),
+            id: self.rng.next_external_ip(),
             addr: SocketAddr::new(external_ip, DNS_PORT),
         };
         let pool_name =
@@ -1231,7 +1222,7 @@ impl<'a> BlueprintBuilder<'a> {
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
-            id: self.rng.zone_rng.next(),
+            id: self.rng.next_zone(),
             filesystem_pool: Some(filesystem_pool),
             zone_type,
         };
@@ -1287,7 +1278,7 @@ impl<'a> BlueprintBuilder<'a> {
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
-            id: self.rng.zone_rng.next(),
+            id: self.rng.next_zone(),
             filesystem_pool: Some(filesystem_pool),
             zone_type,
         };
@@ -1371,7 +1362,7 @@ impl<'a> BlueprintBuilder<'a> {
         };
 
         for _ in 0..num_nexus_to_add {
-            let nexus_id = self.rng.zone_rng.next();
+            let nexus_id = self.rng.next_zone();
             let ExternalNetworkingChoice {
                 external_ip,
                 nic_ip,
@@ -1379,12 +1370,12 @@ impl<'a> BlueprintBuilder<'a> {
                 nic_mac,
             } = self.external_networking()?.for_new_nexus()?;
             let external_ip = OmicronZoneExternalFloatingIp {
-                id: self.rng.external_ip_rng.next(),
+                id: self.rng.next_external_ip(),
                 ip: external_ip,
             };
 
             let nic = NetworkInterface {
-                id: self.rng.network_interface_rng.next(),
+                id: self.rng.next_network_interface(),
                 kind: NetworkInterfaceKind::Service {
                     id: nexus_id.into_untyped_uuid(),
                 },
@@ -1451,7 +1442,7 @@ impl<'a> BlueprintBuilder<'a> {
             };
 
         for _ in 0..num_oximeter_to_add {
-            let oximeter_id = self.rng.zone_rng.next();
+            let oximeter_id = self.rng.next_zone();
             let ip = self.sled_alloc_ip(sled_id)?;
             let port = omicron_common::address::OXIMETER_PORT;
             let address = SocketAddrV6::new(ip, port, 0, 0);
@@ -1501,7 +1492,7 @@ impl<'a> BlueprintBuilder<'a> {
             };
 
         for _ in 0..num_pantry_to_add {
-            let pantry_id = self.rng.zone_rng.next();
+            let pantry_id = self.rng.next_zone();
             let ip = self.sled_alloc_ip(sled_id)?;
             let port = omicron_common::address::CRUCIBLE_PANTRY_PORT;
             let address = SocketAddrV6::new(ip, port, 0, 0);
@@ -1555,7 +1546,7 @@ impl<'a> BlueprintBuilder<'a> {
             }
         };
         for _ in 0..num_crdb_to_add {
-            let zone_id = self.rng.zone_rng.next();
+            let zone_id = self.rng.next_zone();
             let underlay_ip = self.sled_alloc_ip(sled_id)?;
             let pool_name =
                 self.sled_select_zpool(sled_id, ZoneKind::CockroachDb)?;
@@ -1592,7 +1583,7 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
     ) -> Result<Ensure, Error> {
-        let id = self.rng.zone_rng.next();
+        let id = self.rng.next_zone();
         let underlay_address = self.sled_alloc_ip(sled_id)?;
         let address =
             SocketAddrV6::new(underlay_address, CLICKHOUSE_HTTP_PORT, 0, 0);
@@ -1667,7 +1658,7 @@ impl<'a> BlueprintBuilder<'a> {
                 }
             };
         for _ in 0..num_clickhouse_servers_to_add {
-            let zone_id = self.rng.zone_rng.next();
+            let zone_id = self.rng.next_zone();
             let underlay_ip = self.sled_alloc_ip(sled_id)?;
             let pool_name =
                 self.sled_select_zpool(sled_id, ZoneKind::ClickhouseServer)?;
@@ -1724,7 +1715,7 @@ impl<'a> BlueprintBuilder<'a> {
             };
 
         for _ in 0..num_clickhouse_keepers_to_add {
-            let zone_id = self.rng.zone_rng.next();
+            let zone_id = self.rng.next_zone();
             let underlay_ip = self.sled_alloc_ip(sled_id)?;
             let pool_name =
                 self.sled_select_zpool(sled_id, ZoneKind::ClickhouseKeeper)?;
@@ -1835,7 +1826,7 @@ impl<'a> BlueprintBuilder<'a> {
         })?;
 
         // Add the new boundary NTP zone.
-        let new_zone_id = self.rng.zone_rng.next();
+        let new_zone_id = self.rng.next_zone();
         let ExternalSnatNetworkingChoice {
             snat_cfg,
             nic_ip,
@@ -1843,11 +1834,11 @@ impl<'a> BlueprintBuilder<'a> {
             nic_mac,
         } = self.external_networking()?.for_new_boundary_ntp()?;
         let external_ip = OmicronZoneExternalSnatIp {
-            id: self.rng.external_ip_rng.next(),
+            id: self.rng.next_external_ip(),
             snat_cfg,
         };
         let nic = NetworkInterface {
-            id: self.rng.network_interface_rng.next(),
+            id: self.rng.next_network_interface(),
             kind: NetworkInterfaceKind::Service {
                 id: new_zone_id.into_untyped_uuid(),
             },
@@ -2053,49 +2044,6 @@ impl<'a> BlueprintBuilder<'a> {
         addr: IpAddr,
     ) -> Result<(), Error> {
         self.external_networking()?.add_external_dns_ip(addr)
-    }
-}
-
-#[derive(Debug)]
-struct BlueprintBuilderRng {
-    // Have separate RNGs for the different kinds of UUIDs we might add,
-    // generated from the main RNG. This is so that e.g. adding a new network
-    // interface doesn't alter the blueprint or sled UUID.
-    //
-    // In the future, when we switch to typed UUIDs, each of these will be
-    // associated with a specific `TypedUuidKind`.
-    blueprint_rng: UuidRng,
-    zone_rng: TypedUuidRng<OmicronZoneKind>,
-    network_interface_rng: UuidRng,
-    external_ip_rng: TypedUuidRng<ExternalIpKind>,
-}
-
-impl BlueprintBuilderRng {
-    fn new() -> Self {
-        Self::new_from_parent(StdRng::from_entropy())
-    }
-
-    fn new_from_parent(mut parent: StdRng) -> Self {
-        let blueprint_rng = UuidRng::from_parent_rng(&mut parent, "blueprint");
-        let zone_rng = TypedUuidRng::from_parent_rng(&mut parent, "zone");
-        let network_interface_rng =
-            UuidRng::from_parent_rng(&mut parent, "network_interface");
-        let external_ip_rng =
-            TypedUuidRng::from_parent_rng(&mut parent, "external_ip");
-
-        BlueprintBuilderRng {
-            blueprint_rng,
-            zone_rng,
-            network_interface_rng,
-            external_ip_rng,
-        }
-    }
-
-    fn set_seed<H: Hash>(&mut self, seed: H) {
-        // Important to add some more bytes here, so that builders with the
-        // same seed but different purposes don't end up with the same UUIDs.
-        const SEED_EXTRA: &str = "blueprint-builder";
-        *self = Self::new_from_parent(typed_rng::from_seed(seed, SEED_EXTRA));
     }
 }
 

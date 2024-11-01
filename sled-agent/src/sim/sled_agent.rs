@@ -4,12 +4,14 @@
 
 //! Simulated sled agent implementation
 
+use super::artifact_store::SimArtifactStorage;
 use super::collection::{PokeMode, SimCollection};
 use super::config::Config;
 use super::disk::SimDisk;
 use super::instance::{self, SimInstance};
 use super::storage::CrucibleData;
 use super::storage::Storage;
+use crate::artifact_store::ArtifactStore;
 use crate::nexus::NexusClient;
 use crate::sim::simulatable::Simulatable;
 use crate::updates::UpdateManager;
@@ -72,7 +74,7 @@ pub struct SledAgent {
     vmms: Arc<SimCollection<SimInstance>>,
     /// collection of simulated disks, indexed by disk uuid
     disks: Arc<SimCollection<SimDisk>>,
-    storage: Mutex<Storage>,
+    storage: Arc<Mutex<Storage>>,
     updates: UpdateManager,
     nexus_address: SocketAddr,
     pub nexus_client: Arc<NexusClient>,
@@ -88,6 +90,7 @@ pub struct SledAgent {
     fake_zones: Mutex<OmicronZonesConfig>,
     instance_ensure_state_error: Mutex<Option<Error>>,
     pub bootstore_network_config: Mutex<EarlyNetworkConfig>,
+    artifacts: ArtifactStore<SimArtifactStorage>,
     pub log: Logger,
 }
 
@@ -165,6 +168,14 @@ impl SledAgent {
             },
         });
 
+        let storage = Arc::new(Mutex::new(Storage::new(
+            id.into_untyped_uuid(),
+            config.storage.ip,
+            storage_log,
+        )));
+        let artifacts =
+            ArtifactStore::new(&log, SimArtifactStorage::new(storage.clone()));
+
         Arc::new(SledAgent {
             id,
             ip: config.dropshot.bind_address.ip(),
@@ -178,11 +189,7 @@ impl SledAgent {
                 disk_log,
                 sim_mode,
             )),
-            storage: Mutex::new(Storage::new(
-                id.into_untyped_uuid(),
-                config.storage.ip,
-                storage_log,
-            )),
+            storage,
             updates: UpdateManager::new(config.updates.clone()),
             nexus_address,
             nexus_client,
@@ -197,6 +204,7 @@ impl SledAgent {
                 zones: vec![],
             }),
             instance_ensure_state_error: Mutex::new(None),
+            artifacts,
             log,
             bootstore_network_config,
         })
@@ -556,6 +564,10 @@ impl SledAgent {
 
     pub fn updates(&self) -> &UpdateManager {
         &self.updates
+    }
+
+    pub(super) fn artifact_store(&self) -> &ArtifactStore<SimArtifactStorage> {
+        &self.artifacts
     }
 
     pub async fn vmm_count(&self) -> usize {
