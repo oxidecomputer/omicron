@@ -624,7 +624,7 @@ tufaceous = { path = "tufaceous" }
 tufaceous-lib = { path = "tufaceous-lib" }
 tui-tree-widget = "0.22.0"
 typed-rng = { path = "typed-rng" }
-unicode-width = "0.1.13"
+unicode-width = "0.2.0"
 update-common = { path = "update-common" }
 update-engine = { path = "update-engine" }
 url = "2.5.2"
