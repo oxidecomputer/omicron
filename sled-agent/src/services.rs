@@ -378,6 +378,63 @@ fn display_zone_init_errors(errors: &[(String, Box<Error>)]) -> String {
     output
 }
 
+/// Helper function to add properties to a PropertyGroupBuilder for a sled
+/// agent centered around rack and sled identifiers.
+fn add_sled_ident_properties(
+    config: PropertyGroupBuilder,
+    info: &SledAgentInfo,
+) -> PropertyGroupBuilder {
+    config
+        .add_property("rack_id", "astring", &info.rack_id.to_string())
+        .add_property(
+            "sled_id",
+            "astring",
+            &info.config.sled_identifiers.sled_id.to_string(),
+        )
+        .add_property(
+            "sled_model",
+            "astring",
+            &info.config.sled_identifiers.model.to_string(),
+        )
+        .add_property(
+            "sled_serial",
+            "astring",
+            &info.config.sled_identifiers.serial.to_string(),
+        )
+        .add_property(
+            "sled_revision",
+            "astring",
+            &info.config.sled_identifiers.revision.to_string(),
+        )
+}
+
+/// Helper function to set properties on a SmfHelper for a sled agent centered
+/// around rack and sled identifiers.
+fn setprop_sled_ident_properties(
+    smfh: &SmfHelper,
+    info: &SledAgentInfo,
+) -> Result<(), Error> {
+    smfh.setprop_default_instance("config/rack_id", info.rack_id)?;
+    smfh.setprop_default_instance(
+        "config/sled_id",
+        info.config.sled_identifiers.sled_id,
+    )?;
+    smfh.setprop_default_instance(
+        "config/sled_model",
+        info.config.sled_identifiers.model.to_string(),
+    )?;
+    smfh.setprop_default_instance(
+        "config/sled_revision",
+        info.config.sled_identifiers.revision,
+    )?;
+    smfh.setprop_default_instance(
+        "config/sled_serial",
+        info.config.sled_identifiers.serial.to_string(),
+    )?;
+
+    Ok(())
+}
+
 /// Configuration parameters which modify the [`ServiceManager`]'s behavior.
 pub struct Config {
     /// Identifies the sled being configured
@@ -2682,45 +2739,11 @@ impl ServiceManager {
                                 PropertyGroupBuilder::new("config");
 
                             if let Some(i) = info {
-                                dendrite_config = dendrite_config
-                                    .add_property(
-                                        "rack_id",
-                                        "astring",
-                                        &i.rack_id.to_string(),
-                                    )
-                                    .add_property(
-                                        "sled_id",
-                                        "astring",
-                                        &i.config
-                                            .sled_identifiers
-                                            .sled_id
-                                            .to_string(),
-                                    )
-                                    .add_property(
-                                        "sled_model",
-                                        "astring",
-                                        &i.config
-                                            .sled_identifiers
-                                            .model
-                                            .to_string(),
-                                    )
-                                    .add_property(
-                                        "sled_serial",
-                                        "astring",
-                                        &i.config
-                                            .sled_identifiers
-                                            .serial
-                                            .to_string(),
-                                    )
-                                    .add_property(
-                                        "sled_revision",
-                                        "astring",
-                                        &i.config
-                                            .sled_identifiers
-                                            .revision
-                                            .to_string(),
-                                    );
-                            }
+                                dendrite_config = add_sled_ident_properties(
+                                    dendrite_config,
+                                    i,
+                                )
+                            };
 
                             for address in addresses {
                                 dendrite_config = dendrite_config.add_property(
@@ -2845,64 +2868,30 @@ impl ServiceManager {
                         }
                         SwitchService::Tfport { pkt_source, asic } => {
                             info!(self.inner.log, "Setting up tfport service");
+
                             let mut tfport_config =
                                 PropertyGroupBuilder::new("config");
 
                             tfport_config = tfport_config
                                 .add_property(
-                                    "host",
+                                    "dpd_host",
                                     "astring",
                                     &format!("[{}]", Ipv6Addr::LOCALHOST),
                                 )
                                 .add_property(
-                                    "port",
+                                    "dpd_port",
                                     "astring",
                                     &format!("{}", DENDRITE_PORT),
                                 );
+
                             if let Some(i) = info {
-                                tfport_config = tfport_config
-                                    .add_property(
-                                        "rack_id",
-                                        "astring",
-                                        &i.rack_id.to_string(),
-                                    )
-                                    .add_property(
-                                        "sled_id",
-                                        "astring",
-                                        &i.config
-                                            .sled_identifiers
-                                            .sled_id
-                                            .to_string(),
-                                    )
-                                    .add_property(
-                                        "sled_model",
-                                        "astring",
-                                        &i.config
-                                            .sled_identifiers
-                                            .model
-                                            .to_string(),
-                                    )
-                                    .add_property(
-                                        "sled_revision",
-                                        "astring",
-                                        &i.config
-                                            .sled_identifiers
-                                            .revision
-                                            .to_string(),
-                                    )
-                                    .add_property(
-                                        "sled_serial",
-                                        "astring",
-                                        &i.config
-                                            .sled_identifiers
-                                            .serial
-                                            .to_string(),
-                                    );
+                                tfport_config =
+                                    add_sled_ident_properties(tfport_config, i);
                             }
 
                             for address in addresses {
                                 tfport_config = tfport_config.add_property(
-                                    "address",
+                                    "listen_address",
                                     "astring",
                                     &format!("[{}]:{}", address, TFPORTD_PORT),
                                 );
@@ -4493,32 +4482,7 @@ impl ServiceManager {
                                 "configuring dendrite service"
                             );
                             if let Some(info) = self.inner.sled_info.get() {
-                                smfh.setprop_default_instance(
-                                    "config/rack_id",
-                                    info.rack_id,
-                                )?;
-                                smfh.setprop_default_instance(
-                                    "config/sled_id",
-                                    info.config.sled_identifiers.sled_id,
-                                )?;
-                                smfh.setprop_default_instance(
-                                    "config/sled_model",
-                                    info.config
-                                        .sled_identifiers
-                                        .model
-                                        .to_string(),
-                                )?;
-                                smfh.setprop_default_instance(
-                                    "config/sled_revision",
-                                    info.config.sled_identifiers.revision,
-                                )?;
-                                smfh.setprop_default_instance(
-                                    "config/sled_serial",
-                                    info.config
-                                        .sled_identifiers
-                                        .serial
-                                        .to_string(),
-                                )?;
+                                setprop_sled_ident_properties(&smfh, info)?;
                             } else {
                                 info!(
                                     self.inner.log,
@@ -4599,32 +4563,7 @@ impl ServiceManager {
                         SwitchService::Tfport { pkt_source, asic } => {
                             info!(self.inner.log, "configuring tfport service");
                             if let Some(info) = self.inner.sled_info.get() {
-                                smfh.setprop_default_instance(
-                                    "config/rack_id",
-                                    info.rack_id,
-                                )?;
-                                smfh.setprop_default_instance(
-                                    "config/sled_id",
-                                    info.config.sled_identifiers.sled_id,
-                                )?;
-                                smfh.setprop_default_instance(
-                                    "config/sled_model",
-                                    info.config
-                                        .sled_identifiers
-                                        .model
-                                        .to_string(),
-                                )?;
-                                smfh.setprop_default_instance(
-                                    "config/sled_revision",
-                                    info.config.sled_identifiers.revision,
-                                )?;
-                                smfh.setprop_default_instance(
-                                    "config/sled_serial",
-                                    info.config
-                                        .sled_identifiers
-                                        .serial
-                                        .to_string(),
-                                )?;
+                                setprop_sled_ident_properties(&smfh, info)?;
                             } else {
                                 info!(
                                     self.inner.log,
@@ -4632,12 +4571,12 @@ impl ServiceManager {
                                 );
                             }
                             smfh.delpropvalue_default_instance(
-                                "config/address",
+                                "config/listen_address",
                                 "*",
                             )?;
                             for address in &request.addresses {
                                 smfh.addpropvalue_type_default_instance(
-                                    "config/address",
+                                    "config/listen_address",
                                     &format!("[{}]:{}", address, TFPORTD_PORT),
                                     "astring",
                                 )?;
