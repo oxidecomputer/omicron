@@ -505,7 +505,7 @@ oxql-types = { path = "oximeter/oxql-types" }
 p256 = "0.13"
 parse-display = "0.10.0"
 partial-io = { version = "0.5.4", features = ["proptest1", "tokio1"] }
-parse-size = "1.1.0"
+parse-size = "1.0.0"
 paste = "1.0.15"
 percent-encoding = "2.3.1"
 peg = "0.8.4"
@@ -624,7 +624,7 @@ tufaceous = { path = "tufaceous" }
 tufaceous-lib = { path = "tufaceous-lib" }
 tui-tree-widget = "0.22.0"
 typed-rng = { path = "typed-rng" }
-unicode-width = "0.2.0"
+unicode-width = "0.1.13"
 update-common = { path = "update-common" }
 update-engine = { path = "update-engine" }
 url = "2.5.2"
