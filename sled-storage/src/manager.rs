@@ -372,6 +372,10 @@ impl StorageHandle {
     ///
     /// Note that this might be distinct from the last configuration
     /// the Sled Agent was told to use.
+    ///
+    /// Although this operation is basically doing "zfs list", by issuing
+    /// it over a [StorageHandle] it is serialized with other storage
+    /// management operations.
     pub async fn datasets_list(
         &self,
         zpool: ZpoolName,
@@ -992,7 +996,9 @@ impl StorageManager {
         }
     }
 
-    // Lists datasets that this zpool contains
+    // Lists datasets that this zpool contains.
+    //
+    // See also: [StorageHandle::datasets_list]
     async fn datasets_list(
         &self,
         zpool: &ZpoolName,
@@ -1011,10 +1017,8 @@ impl StorageManager {
         ];
 
         info!(log, "Listing datasets within zpool"; "zpool" => zpool.to_string());
-        illumos_utils::zfs::Zfs::get_dataset_properties(
-            datasets_of_interest.as_slice(),
-        )
-        .map_err(Error::Other)
+        Zfs::get_dataset_properties(datasets_of_interest.as_slice())
+            .map_err(Error::Other)
     }
 
     // Ensures that a dataset exists, nested somewhere arbitrary within
@@ -1070,15 +1074,14 @@ impl StorageManager {
 
         let full_name = name.full_name();
         let properties =
-            illumos_utils::zfs::Zfs::get_dataset_properties(&[full_name])
-                .map_err(|e| {
-                    warn!(
-                        log,
-                        "Failed to access nested dataset";
-                        "name" => ?name
-                    );
-                    crate::dataset::DatasetError::Other(e)
-                })?;
+            Zfs::get_dataset_properties(&[full_name]).map_err(|e| {
+                warn!(
+                    log,
+                    "Failed to access nested dataset";
+                    "name" => ?name
+                );
+                crate::dataset::DatasetError::Other(e)
+            })?;
 
         let root_path = name.root.full_name();
         Ok(properties
