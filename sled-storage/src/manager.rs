@@ -1943,15 +1943,7 @@ mod tests {
         let name = DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
         let datasets = BTreeMap::from([(
             id,
-            DatasetConfig {
-                id,
-                name,
-                inner: SharedDatasetConfig {
-                    compression: CompressionAlgorithm::Off,
-                    quota: None,
-                    reservation: None,
-                },
-            },
+            DatasetConfig { id, name, inner: SharedDatasetConfig::default() },
         )]);
         // "Generation = 1" is reserved as "no requests seen yet", so we jump
         // past it.
@@ -2088,8 +2080,7 @@ mod tests {
         };
         let nested_config = SharedDatasetConfig {
             compression: CompressionAlgorithm::On,
-            quota: None,
-            reservation: None,
+            ..Default::default()
         };
         harness
             .handle()

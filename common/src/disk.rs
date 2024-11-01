@@ -283,6 +283,7 @@ impl FromStr for CompressionAlgorithm {
 #[derive(
     Clone,
     Debug,
+    Default,
     Deserialize,
     Serialize,
     JsonSchema,

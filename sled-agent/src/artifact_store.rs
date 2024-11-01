@@ -748,11 +748,7 @@ mod test {
                         ZpoolName::new_external(ZpoolUuid::new_v4()),
                         DatasetKind::Update,
                     ),
-                    inner: SharedDatasetConfig {
-                        compression: Default::default(),
-                        quota: None,
-                        reservation: None,
-                    },
+                    inner: SharedDatasetConfig::default(),
                 };
                 let mountpoint =
                     dataset.name.mountpoint(mountpoint_root.path());
