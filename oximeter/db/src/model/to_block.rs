@@ -66,8 +66,6 @@ impl ToBlock for TimeseriesSchema {
         Ok(Block {
             name: String::new(),
             info: Default::default(),
-            n_columns: 6,
-            n_rows: u64::try_from(n_items).map_err(|_| Error::BlockTooLarge)?,
             columns: IndexMap::from([
                 (
                     String::from("timeseries_name"),
