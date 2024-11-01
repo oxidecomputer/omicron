@@ -12,6 +12,12 @@
   <service_fmri value='svc:/milestone/network:default' />
   </dependency>
 
+  <!-- Run after the NDP daemon is online.. -->
+  <dependency name='ndp' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/network/routing/ndp:default' />
+  </dependency>
+
   <!-- The zone-setup binary is not ready to run until its initial properties
           have been set by the sled-agent, which happens after the
           `manifest-import` service is running.
