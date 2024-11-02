@@ -265,11 +265,11 @@ type = "u8"
 description = "Wafer number of the switch the link is on"
 
 [fields.switch_wafer_loc_x]
-type = "i8"
+type = "i16"
 description = "X-coordinate wafer location of the switch the link is on"
 
 [fields.switch_wafer_loc_y]
-type = "i8"
+type = "i16"
 description = "Y-coordinate wafer location of the switch the link is on"
 
 [fields.switch_model]
