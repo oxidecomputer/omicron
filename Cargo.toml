@@ -399,7 +399,7 @@ httptest = "0.16.1"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
 humantime = "2.1.0"
 hyper = "1.4.1"
-hyper-util = "0.1.9"
+hyper-util = "0.1.10"
 hyper-rustls = "0.26.0"
 hyper-staticfile = "0.10.0"
 illumos-utils = { path = "illumos-utils" }
