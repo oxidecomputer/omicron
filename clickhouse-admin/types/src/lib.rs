@@ -15,7 +15,7 @@ use schemars::{
 };
 use serde::{Deserialize, Serialize};
 use slog::{info, Logger};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::create_dir;
 use std::io::{ErrorKind, Write};
 use std::net::Ipv6Addr;
@@ -978,12 +978,40 @@ pub struct ClickhouseKeeperClusterMembership {
 )]
 #[serde(rename_all = "snake_case")]
 pub struct DistributedDdlQueue {
-    pub data: String,
+    entry: String,
+    entry_version: u64,
+    initiator_host: String,
+    initiator_port: u16,
+    cluster: String,
+    query: String,
+    settings: BTreeMap<String,String>,
+    // TODO: Find a way to parse time better if possible
+    query_create_time: String,
+    host: Ipv6Addr,
+    port: u16,
+    exception_code: u64,
+    exception_text: String,
+    query_finish_time: String,
+    query_duration_ms: String,
 }
 
 impl DistributedDdlQueue {
-    pub fn parse(_log: &Logger, _data: &[u8]) -> Result<Self> {
-        Ok(Self { data: "dummy data".to_string() })
+    pub fn parse(log: &Logger, data: &[u8]) -> Result<Vec<Self>> {
+        let s = String::from_utf8_lossy(data);
+        info!(
+            log,
+            "Retrieved data from `system.distributed_ddl_queue`";
+            "output" => ?s
+        );
+
+        let mut ddl = vec![];
+
+        for line in s.lines() {
+            let item: DistributedDdlQueue = serde_json::from_str(line)?;
+            ddl.push(item); 
+        }
+
+        Ok(ddl)
     }
 }
 

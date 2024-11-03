@@ -143,11 +143,11 @@ impl ClickhouseCli {
 
     pub async fn distributed_ddl_queue(
         &self,
-    ) -> Result<DistributedDdlQueue, ClickhouseCliError> {
+    ) -> Result<Vec<DistributedDdlQueue>, ClickhouseCliError> {
         self.client_non_interactive(
             ClickhouseClientType::Server,
             format!(
-                "SELECT * FROM system.distributed_ddl_queue WHERE cluster = '{}' FORMAT JSON", OXIMETER_CLUSTER
+                "SELECT * FROM system.distributed_ddl_queue WHERE cluster = '{}' FORMAT JSONEachRow", OXIMETER_CLUSTER
             ).as_str(),
             "Retrieve information about distributed ddl queries (ON CLUSTER clause) 
             that were executed on a cluster",

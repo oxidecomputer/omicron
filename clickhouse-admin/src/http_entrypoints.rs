@@ -50,7 +50,7 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
 
     async fn distributed_ddl_queue(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<DistributedDdlQueue>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<DistributedDdlQueue>>, HttpError> {
         let ctx = rqctx.context();
         let output = ctx.clickhouse_cli().distributed_ddl_queue().await?;
         Ok(HttpResponseOk(output))

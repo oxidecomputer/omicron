@@ -114,5 +114,5 @@ pub trait ClickhouseAdminServerApi {
     }]
     async fn distributed_ddl_queue(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<DistributedDdlQueue>, HttpError>;
+    ) -> Result<HttpResponseOk<Vec<DistributedDdlQueue>>, HttpError>;
 }
