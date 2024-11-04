@@ -5,11 +5,12 @@
 //! Dropshot server for configuring DNS namespace
 
 use crate::storage::{self, UpdateError};
-use dns_server_api::{DnsConfig, DnsConfigParams, DnsServerApi};
+use dns_server_api::DnsServerApi;
 use dns_service_client::{
     ERROR_CODE_BAD_UPDATE_GENERATION, ERROR_CODE_UPDATE_IN_PROGRESS,
 };
 use dropshot::RequestContext;
+use internal_dns_types::config::{DnsConfig, DnsConfigParams};
 
 pub struct Context {
     store: storage::Store,

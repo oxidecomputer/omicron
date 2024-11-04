@@ -31,7 +31,6 @@ pub use omicron_common::api::internal::shared::SourceNatConfig;
 pub use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
-use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
@@ -117,14 +116,30 @@ pub struct Collection {
     /// Sled Agent information, by *sled* id
     pub sled_agents: BTreeMap<SledUuid, SledAgent>,
 
-    /// Omicron zones found, by *sled* id
-    pub omicron_zones: BTreeMap<SledUuid, OmicronZonesFound>,
-
     /// The raft configuration (cluster membership) of the clickhouse keeper
     /// cluster as returned from each available keeper via `clickhouse-admin` in
     /// the `ClickhouseKeeper` zone
+    ///
+    /// Each clickhouse keeper is uniquely identified by its `KeeperId`
+    /// and deployed to a separate omicron zone. The uniqueness of IDs and
+    /// deployments is guaranteed by the reconfigurator. DNS is used to find
+    /// `clickhouse-admin-keeper` servers running in the same zone as keepers
+    /// and retrieve their local knowledge of the raft cluster. Each keeper
+    /// reports its own unique ID along with its membership information. We use
+    /// this information to decide upon the most up to date state (which will
+    /// eventually be reflected to other keepers), so that we can choose how to
+    /// reconfigure our keeper cluster if needed.
+    ///
+    /// All this data is directly reported from the `clickhouse-keeper-admin`
+    /// servers in this format. While we could also cache the zone ID
+    /// in the `ClickhouseKeeper` zones, return that along with the
+    /// `ClickhouseKeeperClusterMembership`,  and map by zone ID here, the
+    /// information would be superfluous. It would be filtered out by the
+    /// reconfigurator planner downstream. It is not necessary for the planners
+    /// to use this since the blueprints already contain the zone ID/ KeeperId
+    /// mappings and guarantee unique pairs.
     pub clickhouse_keeper_cluster_membership:
-        BTreeMap<OmicronZoneUuid, ClickhouseKeeperClusterMembership>,
+        BTreeSet<ClickhouseKeeperClusterMembership>,
 }
 
 impl Collection {
@@ -152,7 +167,7 @@ impl Collection {
     pub fn all_omicron_zones(
         &self,
     ) -> impl Iterator<Item = &OmicronZoneConfig> {
-        self.omicron_zones.values().flat_map(|z| z.zones.zones.iter())
+        self.sled_agents.values().flat_map(|sa| sa.omicron_zones.zones.iter())
     }
 
     /// Iterate over the sled ids of sleds identified as Scrimlets
@@ -170,8 +185,8 @@ impl Collection {
     ) -> Option<ClickhouseKeeperClusterMembership> {
         self.clickhouse_keeper_cluster_membership
             .iter()
-            .max_by_key(|(_, membership)| membership.leader_committed_log_index)
-            .map(|(_, membership)| (membership.clone()))
+            .max_by_key(|membership| membership.leader_committed_log_index)
+            .map(|membership| (membership.clone()))
     }
 }
 
@@ -500,15 +515,8 @@ pub struct SledAgent {
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,
+    pub omicron_zones: OmicronZonesConfig,
     pub disks: Vec<PhysicalDisk>,
     pub zpools: Vec<Zpool>,
     pub datasets: Vec<Dataset>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct OmicronZonesFound {
-    pub time_collected: DateTime<Utc>,
-    pub source: String,
-    pub sled_id: SledUuid,
-    pub zones: OmicronZonesConfig,
 }

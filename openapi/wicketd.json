@@ -3136,18 +3136,18 @@
               }
             ]
           },
-          "local_pref": {
-            "nullable": true,
-            "description": "The local preference associated with this route.",
-            "default": null,
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
           "nexthop": {
             "description": "The nexthop/gateway address.",
             "type": "string",
             "format": "ip"
+          },
+          "rib_priority": {
+            "nullable": true,
+            "description": "The RIB priority (i.e. Admin Distance) associated with this route.",
+            "default": null,
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
           },
           "vlan_id": {
             "nullable": true,
@@ -5991,6 +5991,42 @@
           }
         ]
       },
+      "TxEqConfig": {
+        "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",
+        "type": "object",
+        "properties": {
+          "main": {
+            "nullable": true,
+            "description": "Main tap",
+            "type": "integer",
+            "format": "int32"
+          },
+          "post1": {
+            "nullable": true,
+            "description": "Post-cursor tap1",
+            "type": "integer",
+            "format": "int32"
+          },
+          "post2": {
+            "nullable": true,
+            "description": "Post-cursor tap2",
+            "type": "integer",
+            "format": "int32"
+          },
+          "pre1": {
+            "nullable": true,
+            "description": "Pre-cursor tap1",
+            "type": "integer",
+            "format": "int32"
+          },
+          "pre2": {
+            "nullable": true,
+            "description": "Pre-cursor tap2",
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
       "TypedUuidForRackInitKind": {
         "type": "string",
         "format": "uuid"
@@ -6629,6 +6665,15 @@
             "items": {
               "$ref": "#/components/schemas/RouteConfig"
             }
+          },
+          "tx_eq": {
+            "nullable": true,
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TxEqConfig"
+              }
+            ]
           },
           "uplink_port_fec": {
             "$ref": "#/components/schemas/PortFec"

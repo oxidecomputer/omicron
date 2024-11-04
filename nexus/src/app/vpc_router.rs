@@ -341,7 +341,6 @@ impl super::Nexus {
 /// - mixed explicit v4 and v6 are disallowed.
 /// - users cannot specify 'Vpc' as a custom/default router dest/target.
 /// - users cannot specify 'Subnet' as a custom/default router target.
-/// - the only internet gateway we support today is 'outbound'.
 fn validate_user_route_targets(
     dest: &RouteDestination,
     target: &RouteTarget,
@@ -365,10 +364,6 @@ fn validate_user_route_targets(
 
         (_, RouteTarget::Subnet(_)) => return Err(Error::invalid_request(
             format!("subnets cannot be used as a target in {route_type} routers")
-            )),
-
-        (_, RouteTarget::InternetGateway(n)) if n.as_str() != "outbound" => return Err(Error::invalid_request(
-            "'outbound' is currently the only valid internet gateway"
             )),
 
         _ => {},

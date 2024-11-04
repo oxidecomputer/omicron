@@ -16,9 +16,8 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
-use omicron_test_utils::dev::test_cmds::redact_extra;
 use omicron_test_utils::dev::test_cmds::run_command;
-use omicron_test_utils::dev::test_cmds::ExtraRedactions;
+use omicron_test_utils::dev::test_cmds::Redactor;
 use slog_error_chain::InlineErrorChain;
 use std::fmt::Write;
 use std::net::IpAddr;
@@ -203,19 +202,21 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         // ControlPlaneTestContext.
     ];
 
-    let mut redactions = ExtraRedactions::new();
-    redactions
-        .variable_length("tmp_path", tmppath.as_str())
-        .fixed_length("blueprint_id", &initial_blueprint_id)
-        .variable_length(
+    let mut redactor = Redactor::default();
+    redactor
+        .extra_variable_length("tmp_path", tmppath.as_str())
+        .extra_fixed_length("blueprint_id", &initial_blueprint_id)
+        .extra_variable_length(
             "cockroachdb_fingerprint",
             &initial_blueprint.cockroachdb_fingerprint,
         );
+
     let crdb_version =
         initial_blueprint.cockroachdb_setting_preserve_downgrade.to_string();
     if initial_blueprint.cockroachdb_setting_preserve_downgrade.is_set() {
-        redactions.variable_length("cockroachdb_version", &crdb_version);
+        redactor.extra_variable_length("cockroachdb_version", &crdb_version);
     }
+
     for args in invocations {
         println!("running commands with args: {:?}", args);
         let p = postgres_url.to_string();
@@ -234,7 +235,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
             },
             &cmd_path,
             args,
-            Some(&redactions),
+            &redactor,
         )
         .await;
     }
@@ -444,14 +445,7 @@ async fn do_run<F>(
 ) where
     F: FnOnce(Exec) -> Exec + Send + 'static,
 {
-    do_run_extra(
-        output,
-        modexec,
-        cmd_path,
-        args,
-        Some(&ExtraRedactions::new()),
-    )
-    .await;
+    do_run_extra(output, modexec, cmd_path, args, &Redactor::default()).await;
 }
 
 async fn do_run_no_redactions<F>(
@@ -462,7 +456,7 @@ async fn do_run_no_redactions<F>(
 ) where
     F: FnOnce(Exec) -> Exec + Send + 'static,
 {
-    do_run_extra(output, modexec, cmd_path, args, None).await;
+    do_run_extra(output, modexec, cmd_path, args, &Redactor::noop()).await;
 }
 
 async fn do_run_extra<F>(
@@ -470,7 +464,7 @@ async fn do_run_extra<F>(
     modexec: F,
     cmd_path: &Path,
     args: &[&str],
-    extra_redactions: Option<&ExtraRedactions<'_>>,
+    redactor: &Redactor<'_>,
 ) where
     F: FnOnce(Exec) -> Exec + Send + 'static,
 {
@@ -478,14 +472,7 @@ async fn do_run_extra<F>(
         output,
         "EXECUTING COMMAND: {} {:?}\n",
         cmd_path.file_name().expect("missing command").to_string_lossy(),
-        args.iter()
-            .map(|r| {
-                extra_redactions.map_or_else(
-                    || r.to_string(),
-                    |redactions| redact_extra(r, redactions),
-                )
-            })
-            .collect::<Vec<_>>()
+        args.iter().map(|r| redactor.do_redact(r)).collect::<Vec<_>>()
     )
     .unwrap();
 
@@ -521,21 +508,11 @@ async fn do_run_extra<F>(
     write!(output, "termination: {:?}\n", exit_status).unwrap();
     write!(output, "---------------------------------------------\n").unwrap();
     write!(output, "stdout:\n").unwrap();
-
-    if let Some(extra_redactions) = extra_redactions {
-        output.push_str(&redact_extra(&stdout_text, extra_redactions));
-    } else {
-        output.push_str(&stdout_text);
-    }
+    output.push_str(&redactor.do_redact(&stdout_text));
 
     write!(output, "---------------------------------------------\n").unwrap();
     write!(output, "stderr:\n").unwrap();
-
-    if let Some(extra_redactions) = extra_redactions {
-        output.push_str(&redact_extra(&stderr_text, extra_redactions));
-    } else {
-        output.push_str(&stderr_text);
-    }
+    output.push_str(&redactor.do_redact(&stderr_text));
 
     write!(output, "=============================================\n").unwrap();
 }

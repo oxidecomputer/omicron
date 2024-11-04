@@ -12,8 +12,8 @@ use cockroach_admin_client::types::NodeDecommission;
 use cockroach_admin_client::types::NodeId;
 use futures::stream;
 use futures::StreamExt;
-use internal_dns::resolver::Resolver;
-use internal_dns::ServiceName;
+use internal_dns_resolver::Resolver;
+use internal_dns_types::names::ServiceName;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::CollectorReassignment;
 use nexus_db_queries::db::DataStore;
@@ -62,7 +62,7 @@ pub(crate) async fn deploy_zones(
 
             let client = nexus_networking::sled_client_from_address(
                 sled_id.into_untyped_uuid(),
-                db_sled.sled_agent_address,
+                db_sled.sled_agent_address(),
                 &opctx.log,
             );
             let omicron_zones = config
@@ -350,7 +350,7 @@ mod test {
     use httptest::responders::{json_encoded, status_code};
     use httptest::Expectation;
     use nexus_sled_agent_shared::inventory::{
-        OmicronZoneDataset, OmicronZonesConfig,
+        OmicronZoneDataset, OmicronZonesConfig, SledRole,
     };
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
@@ -383,6 +383,7 @@ mod test {
                 id,
                 blueprint_zones,
                 blueprint_disks: BTreeMap::new(),
+                blueprint_datasets: BTreeMap::new(),
                 sled_state: BTreeMap::new(),
                 cockroachdb_setting_preserve_downgrade:
                     CockroachDbPreserveDowngrade::DoNotModify,
@@ -420,11 +421,7 @@ mod test {
                     let SocketAddr::V6(addr) = server.addr() else {
                         panic!("Expected Ipv6 address. Got {}", server.addr());
                     };
-                    let sled = Sled {
-                        id: sled_id,
-                        sled_agent_address: addr,
-                        is_scrimlet: false,
-                    };
+                    let sled = Sled::new(sled_id, addr, SledRole::Gimlet);
                     (sled_id, sled)
                 })
                 .collect();
@@ -446,7 +443,6 @@ mod test {
                 zones: vec![BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: OmicronZoneUuid::new_v4(),
-                    underlay_address: "::1".parse().unwrap(),
                     filesystem_pool: Some(zpool.clone()),
                     zone_type: BlueprintZoneType::InternalDns(
                         blueprint_zone_type::InternalDns {
@@ -549,7 +545,6 @@ mod test {
             zones.zones.push(BlueprintZoneConfig {
                 disposition,
                 id: OmicronZoneUuid::new_v4(),
-                underlay_address: "::1".parse().unwrap(),
                 filesystem_pool: Some(ZpoolName::new_external(
                     ZpoolUuid::new_v4(),
                 )),
@@ -616,7 +611,6 @@ mod test {
         let crdb_zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::Expunged,
             id: OmicronZoneUuid::new_v4(),
-            underlay_address: "::1".parse().unwrap(),
             filesystem_pool: Some(ZpoolName::new_external(ZpoolUuid::new_v4())),
             zone_type: BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb {

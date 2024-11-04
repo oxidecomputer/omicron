@@ -7,8 +7,8 @@
 use crate::app::background::BackgroundTask;
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use internal_dns::names::ServiceName;
-use internal_dns::resolver::Resolver;
+use internal_dns_resolver::Resolver;
+use internal_dns_types::names::ServiceName;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use serde::Serialize;

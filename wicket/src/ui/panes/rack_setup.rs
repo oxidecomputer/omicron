@@ -774,6 +774,7 @@ fn rss_config_text<'a>(
                 autoneg,
                 bgp_peers,
                 lldp,
+                tx_eq,
             } = uplink;
 
             let mut items = vec![
@@ -804,34 +805,39 @@ fn rss_config_text<'a>(
                 ],
             ];
 
-            let routes = routes.iter().map(|r| {
-                let RouteConfig { destination, nexthop, vlan_id, local_pref } =
-                    r;
+            let routes =
+                routes.iter().map(|r| {
+                    let RouteConfig {
+                        destination,
+                        nexthop,
+                        vlan_id,
+                        rib_priority,
+                    } = r;
 
-                let mut items = vec![
-                    Span::styled("  • Route         : ", label_style),
-                    Span::styled(
-                        format!("{} -> {}", destination, nexthop),
-                        ok_style,
-                    ),
-                ];
-                if let Some(vlan_id) = vlan_id {
-                    items.extend([
-                        Span::styled(" (vlan_id=", label_style),
-                        Span::styled(vlan_id.to_string(), ok_style),
-                        Span::styled(")", label_style),
-                    ]);
-                }
-                if let Some(local_pref) = local_pref {
-                    items.extend([
-                        Span::styled(" (local_pref=", label_style),
-                        Span::styled(local_pref.to_string(), ok_style),
-                        Span::styled(")", label_style),
-                    ]);
-                }
+                    let mut items = vec![
+                        Span::styled("  • Route         : ", label_style),
+                        Span::styled(
+                            format!("{} -> {}", destination, nexthop),
+                            ok_style,
+                        ),
+                    ];
+                    if let Some(vlan_id) = vlan_id {
+                        items.extend([
+                            Span::styled(" (vlan_id=", label_style),
+                            Span::styled(vlan_id.to_string(), ok_style),
+                            Span::styled(")", label_style),
+                        ]);
+                    }
+                    if let Some(rib_priority) = rib_priority {
+                        items.extend([
+                            Span::styled(" (rib_priority=", label_style),
+                            Span::styled(rib_priority.to_string(), ok_style),
+                            Span::styled(")", label_style),
+                        ]);
+                    }
 
-                items
-            });
+                    items
+                });
 
             let addresses = addresses.iter().map(|a| {
                 let mut items = vec![
@@ -1129,6 +1135,45 @@ fn rss_config_text<'a>(
                     }
                 }
                 items.extend(lldp);
+            }
+
+            if let Some(t) = tx_eq {
+                let mut tx_eq = vec![vec![Span::styled(
+                    "  • TxEq port settings: ",
+                    label_style,
+                )]];
+
+                if let Some(x) = t.pre1 {
+                    tx_eq.push(vec![
+                        Span::styled("    • Precursor 1:  ", label_style),
+                        Span::styled(x.to_string(), ok_style),
+                    ])
+                }
+                if let Some(x) = t.pre2 {
+                    tx_eq.push(vec![
+                        Span::styled("    • Precursor 2:  ", label_style),
+                        Span::styled(x.to_string(), ok_style),
+                    ])
+                }
+                if let Some(x) = t.main {
+                    tx_eq.push(vec![
+                        Span::styled("    • Main cursor:  ", label_style),
+                        Span::styled(x.to_string(), ok_style),
+                    ])
+                }
+                if let Some(x) = t.post2 {
+                    tx_eq.push(vec![
+                        Span::styled("    • Postcursor 2: ", label_style),
+                        Span::styled(x.to_string(), ok_style),
+                    ])
+                }
+                if let Some(x) = t.post1 {
+                    tx_eq.push(vec![
+                        Span::styled("    • Postcursor 1: ", label_style),
+                        Span::styled(x.to_string(), ok_style),
+                    ])
+                }
+                items.extend(tx_eq);
             }
 
             append_list(

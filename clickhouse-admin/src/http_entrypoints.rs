@@ -4,49 +4,68 @@
 
 use crate::context::ServerContext;
 use clickhouse_admin_api::*;
-use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
 use clickhouse_admin_types::{
-    ClickhouseKeeperClusterMembership, KeeperConf, Lgif, RaftConfig,
+    ClickhouseKeeperClusterMembership, KeeperConf, KeeperConfig,
+    KeeperConfigurableSettings, Lgif, RaftConfig, ReplicaConfig,
+    ServerConfigurableSettings,
 };
 use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
 };
+use illumos_utils::svcadm::Svcadm;
 use std::sync::Arc;
 
 type ClickhouseApiDescription = dropshot::ApiDescription<Arc<ServerContext>>;
 
-pub fn api() -> ClickhouseApiDescription {
-    clickhouse_admin_api_mod::api_description::<ClickhouseAdminImpl>()
+pub fn clickhouse_admin_server_api() -> ClickhouseApiDescription {
+    clickhouse_admin_server_api_mod::api_description::<ClickhouseAdminServerImpl>()
         .expect("registered entrypoints")
 }
 
-enum ClickhouseAdminImpl {}
+pub fn clickhouse_admin_keeper_api() -> ClickhouseApiDescription {
+    clickhouse_admin_keeper_api_mod::api_description::<ClickhouseAdminKeeperImpl>()
+        .expect("registered entrypoints")
+}
 
-impl ClickhouseAdminApi for ClickhouseAdminImpl {
+enum ClickhouseAdminServerImpl {}
+
+impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
     type Context = Arc<ServerContext>;
 
-    async fn generate_server_config(
+    async fn generate_config(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<ServerConfigurableSettings>,
     ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError> {
         let ctx = rqctx.context();
         let replica_server = body.into_inner();
-        // TODO(https://github.com/oxidecomputer/omicron/issues/5999): Do something
-        // with the generation number `replica_server.generation`
         let output =
             ctx.clickward().generate_server_config(replica_server.settings)?;
+
+        // Once we have generated the client we can safely enable the clickhouse_server service
+        let fmri = "svc:/oxide/clickhouse_server:default".to_string();
+        Svcadm::enable_service(fmri)?;
+
         Ok(HttpResponseCreated(output))
     }
+}
 
-    async fn generate_keeper_config(
+enum ClickhouseAdminKeeperImpl {}
+
+impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
+    type Context = Arc<ServerContext>;
+
+    async fn generate_config(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<KeeperConfigurableSettings>,
     ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError> {
         let ctx = rqctx.context();
         let keeper = body.into_inner();
-        // TODO(https://github.com/oxidecomputer/omicron/issues/5999): Do something
-        // with the generation number `keeper.generation`
         let output = ctx.clickward().generate_keeper_config(keeper.settings)?;
+
+        // Once we have generated the client we can safely enable the clickhouse_keeper service
+        let fmri = "svc:/oxide/clickhouse_keeper:default".to_string();
+        Svcadm::enable_service(fmri)?;
+
         Ok(HttpResponseCreated(output))
     }
 

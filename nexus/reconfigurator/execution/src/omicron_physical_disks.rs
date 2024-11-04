@@ -44,7 +44,7 @@ pub(crate) async fn deploy_disks(
 
             let client = nexus_networking::sled_client_from_address(
                 sled_id.into_untyped_uuid(),
-                db_sled.sled_agent_address,
+                db_sled.sled_agent_address(),
                 &log,
             );
             let result =
@@ -66,7 +66,7 @@ pub(crate) async fn deploy_disks(
                     if !errs.is_empty() {
                         warn!(
                             log,
-                            "Failed to deploy storage for sled agent";
+                            "Failed to deploy physical disk for sled agent";
                             "successfully configured disks" => successes.len(),
                             "failed disk configurations" => errs.len(),
                         );
@@ -81,7 +81,7 @@ pub(crate) async fn deploy_disks(
 
                     info!(
                         log,
-                        "Successfully deployed storage for sled agent";
+                        "Successfully deployed physical disks for sled agent";
                         "successfully configured disks" => successes.len(),
                     );
                     None
@@ -143,6 +143,7 @@ mod test {
     use nexus_db_model::Zpool;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db;
+    use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
@@ -180,6 +181,7 @@ mod test {
                 id,
                 blueprint_zones: BTreeMap::new(),
                 blueprint_disks,
+                blueprint_datasets: BTreeMap::new(),
                 sled_state: BTreeMap::new(),
                 cockroachdb_setting_preserve_downgrade:
                     CockroachDbPreserveDowngrade::DoNotModify,
@@ -217,11 +219,7 @@ mod test {
                     let SocketAddr::V6(addr) = server.addr() else {
                         panic!("Expected Ipv6 address. Got {}", server.addr());
                     };
-                    let sled = Sled {
-                        id: sled_id,
-                        sled_agent_address: addr,
-                        is_scrimlet: false,
-                    };
+                    let sled = Sled::new(sled_id, addr, SledRole::Gimlet);
                     (sled_id, sled)
                 })
                 .collect();

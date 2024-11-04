@@ -306,9 +306,9 @@ pub struct RouteConfig {
     /// The VLAN id associated with this route.
     #[serde(default)]
     pub vlan_id: Option<u16>,
-    /// The local preference associated with this route.
+    /// The RIB priority (i.e. Admin Distance) associated with this route.
     #[serde(default)]
-    pub local_pref: Option<u32>,
+    pub rib_priority: Option<u8>,
 }
 
 #[derive(
@@ -458,6 +458,24 @@ pub struct LldpPortConfig {
     pub management_addrs: Option<Vec<IpAddr>>,
 }
 
+/// Per-port tx-eq overrides.  This can be used to fine-tune the transceiver
+/// equalization settings to improve signal integrity.
+#[derive(
+    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema,
+)]
+pub struct TxEqConfig {
+    /// Pre-cursor tap1
+    pub pre1: Option<i32>,
+    /// Pre-cursor tap2
+    pub pre2: Option<i32>,
+    /// Main tap
+    pub main: Option<i32>,
+    /// Post-cursor tap2
+    pub post2: Option<i32>,
+    /// Post-cursor tap1
+    pub post1: Option<i32>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct PortConfigV2 {
     /// The set of routes associated with this port.
@@ -479,6 +497,8 @@ pub struct PortConfigV2 {
     pub autoneg: bool,
     /// LLDP configuration for this port
     pub lldp: Option<LldpPortConfig>,
+    /// TX-EQ configuration for this port
+    pub tx_eq: Option<TxEqConfig>,
 }
 
 /// A set of switch uplinks.
@@ -497,11 +517,17 @@ pub struct HostPortConfig {
     pub addrs: Vec<UplinkAddressConfig>,
 
     pub lldp: Option<LldpPortConfig>,
+    pub tx_eq: Option<TxEqConfig>,
 }
 
 impl From<PortConfigV2> for HostPortConfig {
     fn from(x: PortConfigV2) -> Self {
-        Self { port: x.port, addrs: x.addresses, lldp: x.lldp.clone() }
+        Self {
+            port: x.port,
+            addrs: x.addresses,
+            lldp: x.lldp.clone(),
+            tx_eq: x.tx_eq,
+        }
     }
 }
 
@@ -777,7 +803,7 @@ pub struct DhcpConfig {
 #[serde(tag = "type", rename_all = "snake_case", content = "value")]
 pub enum RouterTarget {
     Drop,
-    InternetGateway,
+    InternetGateway(Option<Uuid>),
     Ip(IpAddr),
     VpcSubnet(IpNet),
 }
@@ -837,6 +863,13 @@ pub struct ResolvedVpcRouteSet {
     pub routes: HashSet<ResolvedVpcRoute>,
 }
 
+/// Per-NIC mappings from external IP addresses to the Internet Gateways
+/// which can choose them as a source.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct ExternalIpGatewayMap {
+    pub mappings: HashMap<Uuid, HashMap<IpAddr, HashSet<Uuid>>>,
+}
+
 /// Describes the purpose of the dataset.
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, EnumCount)]
 pub enum DatasetKind {
@@ -853,8 +886,8 @@ pub enum DatasetKind {
     InternalDns,
 
     // Zone filesystems
-    ZoneRoot,
-    Zone {
+    TransientZoneRoot,
+    TransientZone {
         name: String,
     },
 
@@ -922,7 +955,7 @@ impl DatasetKind {
         match self {
             Cockroach | Crucible | Clickhouse | ClickhouseKeeper
             | ClickhouseServer | ExternalDns | InternalDns => true,
-            ZoneRoot | Zone { .. } | Debug | Update => false,
+            TransientZoneRoot | TransientZone { .. } | Debug | Update => false,
         }
     }
 
@@ -930,7 +963,7 @@ impl DatasetKind {
     ///
     /// Otherwise, returns "None".
     pub fn zone_name(&self) -> Option<&str> {
-        if let DatasetKind::Zone { name } = self {
+        if let DatasetKind::TransientZone { name } = self {
             Some(name)
         } else {
             None
@@ -954,8 +987,8 @@ impl fmt::Display for DatasetKind {
             ClickhouseServer => "clickhouse_server",
             ExternalDns => "external_dns",
             InternalDns => "internal_dns",
-            ZoneRoot => "zone",
-            Zone { name } => {
+            TransientZoneRoot => "zone",
+            TransientZone { name } => {
                 write!(f, "zone/{}", name)?;
                 return Ok(());
             }
@@ -985,12 +1018,12 @@ impl FromStr for DatasetKind {
             "clickhouse_server" => ClickhouseServer,
             "external_dns" => ExternalDns,
             "internal_dns" => InternalDns,
-            "zone" => ZoneRoot,
+            "zone" => TransientZoneRoot,
             "debug" => Debug,
             "update" => Update,
             other => {
                 if let Some(name) = other.strip_prefix("zone/") {
-                    Zone { name: name.to_string() }
+                    TransientZone { name: name.to_string() }
                 } else {
                     return Err(DatasetKindParseError::UnknownDataset(
                         s.to_string(),
@@ -1080,8 +1113,8 @@ mod tests {
             DatasetKind::ClickhouseServer,
             DatasetKind::ExternalDns,
             DatasetKind::InternalDns,
-            DatasetKind::ZoneRoot,
-            DatasetKind::Zone { name: String::from("myzone") },
+            DatasetKind::TransientZoneRoot,
+            DatasetKind::TransientZone { name: String::from("myzone") },
             DatasetKind::Debug,
             DatasetKind::Update,
         ];

@@ -25,6 +25,12 @@ pub const OXIMETER_REDUNDANCY: usize = 1;
 /// Reconfigurator (to know whether to add new crdb zones)
 pub const COCKROACHDB_REDUNDANCY: usize = 5;
 
+/// The amount of redundancy for Crucible Pantry services.
+///
+/// This is used by both RSS (to distribute the initial set of services) and the
+/// Reconfigurator (to know whether to add new pantry zones)
+pub const CRUCIBLE_PANTRY_REDUNDANCY: usize = 3;
+
 /// The amount of redundancy for internal DNS servers.
 ///
 /// Must be less than or equal to RESERVED_INTERNAL_DNS_REDUNDANCY.
@@ -39,6 +45,10 @@ pub const INTERNAL_DNS_REDUNDANCY: usize = 3;
 /// space where we could increase `INTERNAL_DNS_REDUNDANCY` up to at most this
 /// value.
 pub const RESERVED_INTERNAL_DNS_REDUNDANCY: usize = 5;
+
+/// The amount of redundancy for single-node ClickHouse servers
+/// (*not* replicated aka multi-node clusters).
+pub const SINGLE_NODE_CLICKHOUSE_REDUNDANCY: usize = 1;
 
 /// The amount of redundancy for clickhouse servers
 ///

@@ -138,7 +138,7 @@ impl ServerContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_test_utils::db::test_setup_database;
+    use nexus_test_utils::db::TestDatabase;
     use omicron_test_utils::dev;
     use std::net::SocketAddrV6;
     use url::Url;
@@ -146,10 +146,11 @@ mod tests {
     #[tokio::test]
     async fn test_node_id() {
         let logctx = dev::test_setup_log("test_node_id");
-        let mut db = test_setup_database(&logctx.log).await;
+        let db = TestDatabase::new_populate_nothing(&logctx.log).await;
+        let crdb = db.crdb();
 
         // Construct a `ServerContext`.
-        let db_url = db.listen_url().to_string();
+        let db_url = crdb.listen_url().to_string();
         let url: Url = db_url.parse().expect("valid url");
         let cockroach_address: SocketAddrV6 = format!(
             "{}:{}",
@@ -173,7 +174,7 @@ mod tests {
 
         // The `OnceCell` should be populated now; even if we shut down the DB,
         // we can still fetch the node ID.
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         let node_id =
             context.node_id().await.expect("successfully read node ID");
         assert_eq!(node_id, "1");

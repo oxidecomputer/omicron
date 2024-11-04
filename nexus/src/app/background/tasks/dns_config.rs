@@ -5,9 +5,9 @@
 //! Background task for keeping track of DNS configuration
 
 use crate::app::background::BackgroundTask;
-use dns_service_client::types::DnsConfigParams;
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use internal_dns_types::config::DnsConfigParams;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -53,7 +53,7 @@ impl BackgroundTask for DnsConfigWatcher {
             let log = match &self.last {
                 None => opctx.log.clone(),
                 Some(old) => opctx.log.new(o!(
-                    "current_generation" => old.generation,
+                    "current_generation" => u64::from(old.generation),
                     "current_time_created" => old.time_created.to_string(),
                 )),
             };
@@ -87,7 +87,7 @@ impl BackgroundTask for DnsConfigWatcher {
                     info!(
                         &log,
                         "found latest generation (first find)";
-                        "generation" => new_config.generation
+                        "generation" => u64::from(new_config.generation),
                     );
                     self.last = Some(new_config.clone());
                     self.tx.send_replace(Some(new_config));
@@ -128,7 +128,7 @@ impl BackgroundTask for DnsConfigWatcher {
                             debug!(
                                 &log,
                                 "found latest DNS generation (unchanged)";
-                                "generation" => new.generation,
+                                "generation" => u64::from(new.generation),
                             );
                             json!({ "generation": new.generation })
                         }
@@ -139,9 +139,9 @@ impl BackgroundTask for DnsConfigWatcher {
                         info!(
                             &log,
                             "found latest DNS generation (newer than we had)";
-                            "generation" => new.generation,
+                            "generation" => u64::from(new.generation),
                             "time_created" => new.time_created.to_string(),
-                            "old_generation" => old.generation,
+                            "old_generation" => u64::from(old.generation),
                             "old_time_created" => old.time_created.to_string(),
                         );
                         self.last = Some(new.clone());
@@ -168,6 +168,7 @@ mod test {
     use nexus_db_model::DnsGroup;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
+    use omicron_common::api::external::Generation;
     use serde_json::json;
 
     type ControlPlaneTestContext =
@@ -191,20 +192,32 @@ mod test {
         // The datastore from the ControlPlaneTestContext is initialized with a
         // DNS config with generation 1.
         let value = task.activate(&opctx).await;
-        assert_eq!(watcher.borrow().as_ref().unwrap().generation, 1);
+        assert_eq!(
+            watcher.borrow().as_ref().unwrap().generation,
+            Generation::from_u32(1)
+        );
         assert_eq!(value, json!({ "generation": 1 }));
 
         // Now write generation 2, activate again, and verify that the update
         // was sent to the watcher.
         write_test_dns_generation(&opctx, &datastore).await;
-        assert_eq!(watcher.borrow().as_ref().unwrap().generation, 1);
+        assert_eq!(
+            watcher.borrow().as_ref().unwrap().generation,
+            Generation::from_u32(1)
+        );
         let value = task.activate(&opctx).await;
-        assert_eq!(watcher.borrow().as_ref().unwrap().generation, 2);
+        assert_eq!(
+            watcher.borrow().as_ref().unwrap().generation,
+            Generation::from_u32(2),
+        );
         assert_eq!(value, json!({ "generation": 2 }));
 
         // Activate again and make sure it does nothing.
         let value = task.activate(&opctx).await;
-        assert_eq!(watcher.borrow().as_ref().unwrap().generation, 2);
+        assert_eq!(
+            watcher.borrow().as_ref().unwrap().generation,
+            Generation::from_u32(2),
+        );
         assert_eq!(value, json!({ "generation": 2 }));
 
         // Simulate the configuration going backwards.  This should not be
@@ -219,7 +232,10 @@ mod test {
                 .unwrap();
         }
         let value = task.activate(&opctx).await;
-        assert_eq!(watcher.borrow().as_ref().unwrap().generation, 2);
+        assert_eq!(
+            watcher.borrow().as_ref().unwrap().generation,
+            Generation::from_u32(2),
+        );
         assert_eq!(
             value,
             json!({
@@ -263,7 +279,10 @@ mod test {
             .unwrap();
 
         let _ = task.activate(&opctx).await;
-        assert_eq!(watcher.borrow().as_ref().unwrap().generation, 2);
+        assert_eq!(
+            watcher.borrow().as_ref().unwrap().generation,
+            Generation::from_u32(2),
+        );
 
         // Verify that a new watcher also handles this okay. (i.e., that we can
         // come up with no state in the database).

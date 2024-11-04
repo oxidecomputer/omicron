@@ -318,7 +318,7 @@ async fn make_project(
     builder.new_resource(vpc1.clone());
     // Test a resource nested two levels below Project
     builder.new_resource(authz::VpcSubnet::new(
-        vpc1,
+        vpc1.clone(),
         Uuid::new_v4(),
         LookupType::ByName(format!("{}-subnet1", vpc1_name)),
     ));
@@ -341,6 +341,28 @@ async fn make_project(
         project.clone(),
         Uuid::new_v4(),
         LookupType::ByName(floating_ip_name),
+    ));
+
+    let igw_name = format!("{project_name}-igw1");
+    let igw = authz::InternetGateway::new(
+        vpc1.clone(),
+        Uuid::new_v4(),
+        LookupType::ByName(igw_name.clone()),
+    );
+    builder.new_resource(igw.clone());
+
+    let igw_ip_pool_name = format!("{igw_name}-pool1");
+    builder.new_resource(authz::InternetGatewayIpPool::new(
+        igw.clone(),
+        Uuid::new_v4(),
+        LookupType::ByName(igw_ip_pool_name),
+    ));
+
+    let igw_ip_address_name = format!("{igw_name}-address1");
+    builder.new_resource(authz::InternetGatewayIpAddress::new(
+        igw.clone(),
+        Uuid::new_v4(),
+        LookupType::ByName(igw_ip_address_name),
     ));
 }
 
@@ -378,6 +400,11 @@ pub fn exempted_authz_classes() -> BTreeSet<String> {
         // to this list, modify `make_resources()` to test it instead.  This
         // should be pretty straightforward in most cases.  Adding a new
         // class to this list makes it harder to catch security flaws!
+        //
+        // NOTE: in order to add a resource to the aforementioned tests, you
+        // need to call the macro `impl_dyn_authorized_resource_for_resource!`
+        // for the type you are implementing the test for. See
+        // resource_builder.rs for examples.
         authz::IpPool::get_polar_class(),
         authz::VpcRouter::get_polar_class(),
         authz::RouterRoute::get_polar_class(),

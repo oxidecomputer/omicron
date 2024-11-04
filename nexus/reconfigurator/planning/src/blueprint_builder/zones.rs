@@ -241,11 +241,8 @@ mod tests {
     use omicron_uuid_kinds::ZpoolUuid;
 
     use crate::{
-        blueprint_builder::{
-            test::{verify_blueprint, DEFAULT_N_SLEDS},
-            BlueprintBuilder, Ensure,
-        },
-        example::ExampleSystem,
+        blueprint_builder::{test::verify_blueprint, BlueprintBuilder, Ensure},
+        example::ExampleSystemBuilder,
     };
 
     use super::*;
@@ -255,9 +252,8 @@ mod tests {
     fn test_builder_zones() {
         static TEST_NAME: &str = "blueprint_test_builder_zones";
         let logctx = test_setup_log(TEST_NAME);
-        let mut example =
-            ExampleSystem::new(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-        let blueprint_initial = example.blueprint;
+        let (mut example, blueprint_initial) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
 
         // Add a completely bare sled to the input.
         let (new_sled_id, input2) = {
@@ -275,16 +271,20 @@ mod tests {
                             ),
                             zpools: BTreeMap::from([(
                                 ZpoolUuid::new_v4(),
-                                SledDisk {
-                                    disk_identity: DiskIdentity {
-                                        vendor: String::from("fake-vendor"),
-                                        serial: String::from("fake-serial"),
-                                        model: String::from("fake-model"),
+                                (
+                                    SledDisk {
+                                        disk_identity: DiskIdentity {
+                                            vendor: String::from("fake-vendor"),
+                                            serial: String::from("fake-serial"),
+                                            model: String::from("fake-model"),
+                                        },
+                                        disk_id: PhysicalDiskUuid::new_v4(),
+                                        policy: PhysicalDiskPolicy::InService,
+                                        state: PhysicalDiskState::Active,
                                     },
-                                    disk_id: PhysicalDiskUuid::new_v4(),
-                                    policy: PhysicalDiskPolicy::InService,
-                                    state: PhysicalDiskState::Active,
-                                },
+                                    // Datasets: Leave empty
+                                    vec![],
+                                ),
                             )]),
                         },
                     },
@@ -344,7 +344,6 @@ mod tests {
             .add_zone(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: new_zone_id,
-                underlay_address: Ipv6Addr::UNSPECIFIED,
                 filesystem_pool: Some(filesystem_pool),
                 zone_type: BlueprintZoneType::Oximeter(
                     blueprint_zone_type::Oximeter {
@@ -425,6 +424,13 @@ mod tests {
                 state: BuilderZoneState::Added
             }
         );
+
+        // Ensure all datasets are created for the zones we've provisioned
+        for (sled_id, resources) in
+            input2.all_sled_resources(SledFilter::Commissioned)
+        {
+            builder.sled_ensure_datasets(sled_id, resources).unwrap();
+        }
 
         // Now build the blueprint and ensure that all the changes we described
         // above are present.

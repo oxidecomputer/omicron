@@ -236,7 +236,6 @@
       "type": "object",
       "required": [
         "id",
-        "underlay_address",
         "zone_type"
       ],
       "properties": {
@@ -253,10 +252,6 @@
         },
         "id": {
           "$ref": "#/definitions/TypedUuidForOmicronZoneKind"
-        },
-        "underlay_address": {
-          "type": "string",
-          "format": "ipv6"
         },
         "zone_type": {
           "$ref": "#/definitions/OmicronZoneType"

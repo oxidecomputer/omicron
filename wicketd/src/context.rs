@@ -12,7 +12,7 @@ use crate::MgsHandle;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Result;
-use internal_dns::resolver::Resolver;
+use internal_dns_resolver::Resolver;
 use sled_hardware_types::Baseboard;
 use slog::info;
 use std::net::Ipv6Addr;

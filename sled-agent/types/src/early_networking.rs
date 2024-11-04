@@ -300,6 +300,7 @@ pub mod back_compat {
                 bgp_peers: v1.bgp_peers.clone(),
                 autoneg: v1.autoneg,
                 lldp: None,
+                tx_eq: None,
             }
         }
     }
@@ -323,8 +324,8 @@ pub mod back_compat {
         pub uplink_cidr: Ipv4Net,
         /// VLAN id to use for uplink
         pub uplink_vid: Option<u16>,
-        /// Local preference
-        pub local_pref: Option<u32>,
+        /// RIB Priority
+        pub rib_priority: Option<u8>,
     }
 
     impl From<UplinkConfig> for PortConfigV2 {
@@ -334,7 +335,7 @@ pub mod back_compat {
                     destination: "0.0.0.0/0".parse().unwrap(),
                     nexthop: value.gateway_ip.into(),
                     vlan_id: value.uplink_vid,
-                    local_pref: value.local_pref,
+                    rib_priority: value.rib_priority,
                 }],
                 addresses: vec![UplinkAddressConfig {
                     address: value.uplink_cidr.into(),
@@ -347,6 +348,7 @@ pub mod back_compat {
                 bgp_peers: vec![],
                 autoneg: false,
                 lldp: None,
+                tx_eq: None,
             }
         }
     }
@@ -477,7 +479,7 @@ mod tests {
                     uplink_port_fec: PortFec::None,
                     uplink_cidr: "192.168.0.1/16".parse().unwrap(),
                     uplink_vid: None,
-                    local_pref: None,
+                    rib_priority: None,
                 }],
             }),
         };
@@ -507,7 +509,7 @@ mod tests {
                             destination: "0.0.0.0/0".parse().unwrap(),
                             nexthop: uplink.gateway_ip.into(),
                             vlan_id: None,
-                            local_pref: None,
+                            rib_priority: None,
                         }],
                         addresses: vec![UplinkAddressConfig {
                             address: uplink.uplink_cidr.into(),
@@ -520,6 +522,7 @@ mod tests {
                         autoneg: false,
                         bgp_peers: vec![],
                         lldp: None,
+                        tx_eq: None,
                     }],
                     bgp: vec![],
                     bfd: vec![],
@@ -553,7 +556,7 @@ mod tests {
                             destination: "0.0.0.0/0".parse().unwrap(),
                             nexthop: "192.168.0.2".parse().unwrap(),
                             vlan_id: None,
-                            local_pref: None,
+                            rib_priority: None,
                         }],
                         addresses: vec!["192.168.0.1/16".parse().unwrap()],
                         switch: SwitchLocation::Switch0,
@@ -602,6 +605,7 @@ mod tests {
                         autoneg: false,
                         bgp_peers: vec![],
                         lldp: None,
+                        tx_eq: None,
                     }],
                     bgp: vec![],
                     bfd: vec![],

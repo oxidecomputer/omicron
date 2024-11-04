@@ -7,20 +7,14 @@
 use crate::external_api::params::ResourceMetrics;
 use crate::internal_api::params::OximeterInfo;
 use dropshot::PaginationParams;
-use internal_dns::resolver::{ResolveError, Resolver};
-use internal_dns::ServiceName;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
-use omicron_common::address::CLICKHOUSE_HTTP_PORT;
-use omicron_common::api::external::{DataPageParams, ListResultVec};
-use omicron_common::api::external::{Error, LookupType, ResourceType};
+use omicron_common::api::external::{DataPageParams, Error, ListResultVec};
 use omicron_common::api::internal::nexus::{self, ProducerEndpoint};
 use oximeter_client::Client as OximeterClient;
 use oximeter_db::query::Timestamp;
 use oximeter_db::Measurement;
-use slog::Logger;
-use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
 use std::time::Duration;
@@ -31,47 +25,6 @@ use uuid::Uuid;
 /// Producers are expected to renew their registration lease periodically, at
 /// some interval of this overall duration.
 pub const PRODUCER_LEASE_DURATION: Duration = Duration::from_secs(10 * 60);
-
-/// A client which knows how to connect to Clickhouse, but does so
-/// only when a request is actually made.
-///
-/// This allows callers to set up the mechanism of connection (by address
-/// or DNS) separately from actually making that connection. This
-/// is particularly useful in situations where configurations are parsed
-/// prior to Clickhouse existing.
-pub struct LazyTimeseriesClient {
-    log: Logger,
-    source: ClientSource,
-}
-
-enum ClientSource {
-    FromDns { resolver: Resolver },
-    FromIp { address: SocketAddr },
-}
-
-impl LazyTimeseriesClient {
-    pub fn new_from_dns(log: Logger, resolver: Resolver) -> Self {
-        Self { log, source: ClientSource::FromDns { resolver } }
-    }
-
-    pub fn new_from_address(log: Logger, address: SocketAddr) -> Self {
-        Self { log, source: ClientSource::FromIp { address } }
-    }
-
-    pub(crate) async fn get(
-        &self,
-    ) -> Result<oximeter_db::Client, ResolveError> {
-        let address = match &self.source {
-            ClientSource::FromIp { address } => *address,
-            ClientSource::FromDns { resolver } => SocketAddr::new(
-                resolver.lookup_ip(ServiceName::Clickhouse).await?,
-                CLICKHOUSE_HTTP_PORT,
-            ),
-        };
-
-        Ok(oximeter_db::Client::new(address, &self.log))
-    }
-}
 
 impl super::Nexus {
     /// Insert a new record of an Oximeter collector server.
@@ -108,60 +61,26 @@ impl super::Nexus {
     }
 
     /// Assign a newly-registered metric producer to an oximeter collector server.
+    ///
+    /// Note that we don't send the registration to the collector, the collector
+    /// polls for its list of producers periodically.
     pub(crate) async fn assign_producer(
         &self,
         opctx: &OpContext,
         producer_info: nexus::ProducerEndpoint,
     ) -> Result<(), Error> {
-        for attempt in 0.. {
-            let (collector, id) = self.next_collector(opctx).await?;
-            let db_info = db::model::ProducerEndpoint::new(&producer_info, id);
+        let collector_info = self
+            .db_datastore
+            .producer_endpoint_upsert_and_assign(opctx, &producer_info)
+            .await?;
+        info!(
+            self.log,
+            "assigned collector to new producer";
+            "producer_id" => %producer_info.id,
+            "collector_id" => %collector_info.id,
+        );
 
-            // We chose the collector in `self.next_collector` above; if we get
-            // an "Oximeter not found" error when we try to create a producer
-            // assigned to that collector, we've lost an extremely rare race
-            // where the collector we chose was deleted in between when we chose
-            // it and when we tried to assign it. If we hit this, we should just
-            // pick another collector and try again.
-            //
-            // To safeguard against some other bug forcing us into an infinite
-            // loop here, we'll only retry once. Losing this particular race
-            // once is exceedingly unlikely; losing it twice probably means
-            // something else is wrong, so we'll just return the error.
-            match self
-                .db_datastore
-                .producer_endpoint_create(opctx, &db_info)
-                .await
-            {
-                Ok(()) => (), // fallthrough
-                Err(Error::ObjectNotFound {
-                    type_name: ResourceType::Oximeter,
-                    lookup_type: LookupType::ById(bad_id),
-                }) if id == bad_id && attempt == 0 => {
-                    // We lost the race on our first try; try again.
-                    continue;
-                }
-                // Any other error or we lost the race twice; fail.
-                Err(err) => return Err(err),
-            }
-
-            collector
-                .producers_post(
-                    &oximeter_client::types::ProducerEndpoint::from(
-                        &producer_info,
-                    ),
-                )
-                .await
-                .map_err(Error::from)?;
-            info!(
-                self.log,
-                "assigned collector to new producer";
-                "producer_id" => ?producer_info.id,
-                "collector_id" => ?id,
-            );
-            return Ok(());
-        }
-        unreachable!("for loop always returns after at most two iterations")
+        Ok(())
     }
 
     /// Returns a results from the timeseries DB based on the provided query
@@ -215,14 +134,6 @@ impl super::Nexus {
 
         let timeseries_list = self
             .timeseries_client
-            .get()
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "Cannot access timeseries DB: {}",
-                    e
-                ))
-            })?
             .select_timeseries_with(
                 timeseries_name,
                 criteria,
@@ -271,27 +182,6 @@ impl super::Nexus {
             },
         )
         .unwrap())
-    }
-
-    // Return an oximeter collector to assign a newly-registered producer
-    async fn next_collector(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<(OximeterClient, Uuid), Error> {
-        // TODO-robustness Replace with a real load-balancing strategy.
-        let page_params = DataPageParams {
-            marker: None,
-            direction: dropshot::PaginationOrder::Ascending,
-            limit: std::num::NonZeroU32::new(1).unwrap(),
-        };
-        let oxs = self.db_datastore.oximeter_list(opctx, &page_params).await?;
-        let info = oxs.first().ok_or_else(|| Error::ServiceUnavailable {
-            internal_message: String::from("no oximeter collectors available"),
-        })?;
-        let address =
-            SocketAddr::from((info.ip.ip(), info.port.try_into().unwrap()));
-        let id = info.id;
-        Ok((build_oximeter_client(&self.log, &id, address), id))
     }
 }
 

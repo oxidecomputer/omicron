@@ -16,7 +16,6 @@ use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::SERVICE_IP_POOL_NAME;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
-use nexus_db_queries::db::fixed_data::silo::INTERNAL_SILO_ID;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -53,6 +52,7 @@ use nexus_types::external_api::views::IpPoolSiloLink;
 use nexus_types::external_api::views::Silo;
 use nexus_types::external_api::views::SiloIpPool;
 use nexus_types::identity::Resource;
+use nexus_types::silo::INTERNAL_SILO_ID;
 use omicron_common::address::Ipv6Range;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::InstanceState;
@@ -431,11 +431,11 @@ async fn test_ip_pool_service_no_cud(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, not_found_id);
 
     // unlink not allowed by name or ID
-    let url = format!("{}/silos/{}", internal_pool_id_url, *INTERNAL_SILO_ID);
+    let url = format!("{}/silos/{}", internal_pool_id_url, INTERNAL_SILO_ID);
     let error = object_delete_error(client, &url, StatusCode::NOT_FOUND).await;
     assert_eq!(error.message, not_found_id);
 
-    let url = format!("{}/silos/{}", internal_pool_name_url, *INTERNAL_SILO_ID);
+    let url = format!("{}/silos/{}", internal_pool_name_url, INTERNAL_SILO_ID);
     let error = object_delete_error(client, &url, StatusCode::NOT_FOUND).await;
     assert_eq!(error.message, not_found_name);
 }

@@ -47,6 +47,9 @@ set -o errexit
 set -o pipefail
 set -o xtrace
 
+# shellcheck source=/dev/null
+source .github/buildomat/ci-env.sh
+
 cargo --version
 rustc --version
 
