@@ -14,7 +14,7 @@ use omicron_common::api::external::{
     IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
     InstanceAutoRestartPolicy, InstanceCpuCount, LinkFec, LinkSpeed, Name,
     NameOrId, PaginationOrder, RouteDestination, RouteTarget, SemverVersion,
-    UserId,
+    TxEqConfig, UserId,
 };
 use omicron_common::disk::DiskVariant;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
@@ -1723,6 +1723,9 @@ pub struct LinkConfigCreate {
 
     /// Whether or not to set autonegotiation
     pub autoneg: bool,
+
+    /// Optional tx_eq settings
+    pub tx_eq: Option<TxEqConfig>,
 }
 
 /// The LLDP configuration associated with a port.

@@ -89,12 +89,18 @@ impl Pool {
 
         let resolver = resolver.for_service(ServiceName::Cockroach);
         let connector = make_postgres_connector(log);
-
         let policy = Policy::default();
-        Pool {
-            inner: qorb::pool::Pool::new(resolver, connector, policy),
-            terminated: std::sync::atomic::AtomicBool::new(false),
-        }
+        let inner = match qorb::pool::Pool::new(resolver, connector, policy) {
+            Ok(pool) => {
+                debug!(log, "registered USDT probes");
+                pool
+            }
+            Err(err) => {
+                error!(log, "failed to register USDT probes");
+                err.into_inner()
+            }
+        };
+        Pool { inner, terminated: std::sync::atomic::AtomicBool::new(false) }
     }
 
     /// Creates a new qorb-backed connection pool to a single instance of the
@@ -110,12 +116,18 @@ impl Pool {
 
         let resolver = make_single_host_resolver(db_config);
         let connector = make_postgres_connector(log);
-
         let policy = Policy::default();
-        Pool {
-            inner: qorb::pool::Pool::new(resolver, connector, policy),
-            terminated: std::sync::atomic::AtomicBool::new(false),
-        }
+        let inner = match qorb::pool::Pool::new(resolver, connector, policy) {
+            Ok(pool) => {
+                debug!(log, "registered USDT probes");
+                pool
+            }
+            Err(err) => {
+                error!(log, "failed to register USDT probes");
+                err.into_inner()
+            }
+        };
+        Pool { inner, terminated: std::sync::atomic::AtomicBool::new(false) }
     }
 
     /// Creates a new qorb-backed connection pool which returns an error
@@ -134,15 +146,21 @@ impl Pool {
 
         let resolver = make_single_host_resolver(db_config);
         let connector = make_postgres_connector(log);
-
         let policy = Policy {
             claim_timeout: tokio::time::Duration::from_millis(1),
             ..Default::default()
         };
-        Pool {
-            inner: qorb::pool::Pool::new(resolver, connector, policy),
-            terminated: std::sync::atomic::AtomicBool::new(false),
-        }
+        let inner = match qorb::pool::Pool::new(resolver, connector, policy) {
+            Ok(pool) => {
+                debug!(log, "registered USDT probes");
+                pool
+            }
+            Err(err) => {
+                error!(log, "failed to register USDT probes");
+                err.into_inner()
+            }
+        };
+        Pool { inner, terminated: std::sync::atomic::AtomicBool::new(false) }
     }
 
     /// Returns a connection from the pool
