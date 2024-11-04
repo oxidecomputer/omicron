@@ -981,33 +981,35 @@ pub struct ClickhouseKeeperClusterMembership {
 /// executed on a cluster.
 pub struct DistributedDdlQueue {
     /// Query id
-    entry: String,
+    pub entry: String,
     /// Version of the entry
-    entry_version: u64,
+    pub entry_version: u64,
     /// Host that initiated the DDL operation
-    initiator_host: String,
+    pub initiator_host: String,
     /// Port used by the initiator
-    initiator_port: u16,
+    pub initiator_port: u16,
     /// Cluster name
-    cluster: String,
+    pub cluster: String,
     /// Query executed
-    query: String,
+    pub query: String,
     /// Settings used in the DDL operation
-    settings: BTreeMap<String,String>,
+    pub settings: BTreeMap<String, String>,
     /// Query created time
-    query_create_time: String,
+    pub query_create_time: String,
     /// Hostname
-    host: Ipv6Addr,
+    pub host: Ipv6Addr,
     /// Host Port
-    port: u16,
+    pub port: u16,
     /// Status of the query
-    exception_code: u64,
+    pub status: String,
     /// Exception code
-    exception_text: String,
+    pub exception_code: u64,
     /// Exception message
-    query_finish_time: String,
+    pub exception_text: String,
+    /// Query finish time
+    pub query_finish_time: String,
     /// Duration of query execution (in milliseconds)
-    query_duration_ms: String,
+    pub query_duration_ms: String,
 }
 
 impl DistributedDdlQueue {
@@ -1023,7 +1025,7 @@ impl DistributedDdlQueue {
 
         for line in s.lines() {
             let item: DistributedDdlQueue = serde_json::from_str(line)?;
-            ddl.push(item); 
+            ddl.push(item);
         }
 
         Ok(ddl)
@@ -1041,7 +1043,9 @@ mod tests {
     use std::str::FromStr;
 
     use crate::{
-        ClickhouseHost, DistributedDdlQueue, KeeperConf, KeeperId, KeeperServerInfo, KeeperServerType, KeeperSettings, Lgif, LogLevel, RaftConfig, RaftServerSettings, ServerId, ServerSettings
+        ClickhouseHost, DistributedDdlQueue, KeeperConf, KeeperId,
+        KeeperServerInfo, KeeperServerType, KeeperSettings, Lgif, LogLevel,
+        RaftConfig, RaftServerSettings, ServerId, ServerSettings,
     };
 
     fn log() -> slog::Logger {
@@ -1825,9 +1829,9 @@ snapshot_storage_disk=LocalSnapshotDisk
                 query_create_time: "2024-11-01 16:16:45".to_string(),
                 host: Ipv6Addr::from_str("::1").unwrap(),
                 port: 22001,
-                // TODO: Missing status
                 exception_code: 0,
                 exception_text: "".to_string(),
+                status: "Finished".to_string(),
                 query_finish_time: "2024-11-01 16:16:45".to_string(),
                 query_duration_ms: "4".to_string(),
             },
@@ -1846,10 +1850,39 @@ snapshot_storage_disk=LocalSnapshotDisk
                 port: 22002,
                 exception_code: 0,
                 exception_text: "".to_string(),
+                status: "Finished".to_string(),
                 query_finish_time: "2024-11-01 16:16:45".to_string(),
                 query_duration_ms: "4".to_string(),
             },
             ];
         assert!(ddl == expected_result);
+    }
+
+    #[test]
+    fn test_empty_distributed_ddl_queries_parse_success() {
+        let log = log();
+        let data = "".as_bytes();
+        let ddl = DistributedDdlQueue::parse(&log, data).unwrap();
+
+        let expected_result = vec![];
+        assert!(ddl == expected_result);
+    }
+
+    #[test]
+    fn test_misshapen_distributed_ddl_queries_parse_fail() {
+        let log = log();
+        let data =
+        "{\"entry\":\"query-0000000000\",\"initiator_host\":\"ixchel\",\"initiator_port\":22001,\"cluster\":\"oximeter_cluster\",\"query\":\"CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster\",\"settings\":{\"load_balancing\":\"random\"},\"query_create_time\":\"2024-11-01 16:16:45\",\"host\":\"::1\",\"port\":22001,\"status\":\"Finished\",\"exception_code\":0,\"exception_text\":\"\",\"query_finish_time\":\"2024-11-01 16:16:45\",\"query_duration_ms\":\"4\"}
+"
+.as_bytes();
+        let result = DistributedDdlQueue::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+            "missing field `entry_version` at line 1 column 454",
+        );
     }
 }
