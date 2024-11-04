@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use dropshot::Body;
-use dropshot::HttpError;
 use futures::TryStreamExt;
 use http::HeaderValue;
 use hyper::{
@@ -38,36 +37,34 @@ pub enum Error {
     Http(#[from] http::Error),
 }
 
-impl From<Error> for HttpError {
-    fn from(err: Error) -> Self {
-        match err {
-            Error::MultipleRangesUnsupported => {
-                HttpError::for_bad_request(None, err.to_string())
-            }
-            Error::RangeUnderflow
-            | Error::RangeOverflow
-            | Error::EmptyRange => HttpError::for_client_error(
-                None,
-                http::StatusCode::RANGE_NOT_SATISFIABLE,
-                "Range was parseable, but invalid".to_string(),
-            ),
-            Error::Parse(_) => HttpError::for_client_error(
-                None,
-                http::StatusCode::RANGE_NOT_SATISFIABLE,
-                "Range cannot be parsed".to_string(),
-            ),
-            Error::Http(err) => err.into(),
-        }
-    }
+// TODO(https://github.com/oxidecomputer/dropshot/issues/39): Return a dropshot
+// type here (HttpError?) to e.g. include the RequestID in the response.
+//
+// Same for the other functions returning "Response<Body>" below - we're doing
+// this so the "RANGE_NOT_SATISFIABLE" response can attach extra info, but it's
+// currently happening at the expense of headers that Dropshot wants to supply.
+
+fn bad_request_response() -> Response<Body> {
+    hyper::Response::builder()
+        .status(StatusCode::BAD_REQUEST)
+        .body(Body::empty())
+        .expect("'bad request response' creation should be infallible")
 }
 
-fn bad_range_response(file_size: u64) -> Response<Body> {
+fn internal_error_response() -> Response<Body> {
+    hyper::Response::builder()
+        .status(StatusCode::INTERNAL_SERVER_ERROR)
+        .body(Body::empty())
+        .expect("'internal error response' creation should be infallible")
+}
+
+fn not_satisfiable_response(file_size: u64) -> Response<Body> {
     hyper::Response::builder()
         .status(StatusCode::RANGE_NOT_SATISFIABLE)
         .header(ACCEPT_RANGES, ACCEPT_RANGES_BYTES)
         .header(CONTENT_RANGE, format!("bytes */{file_size}"))
         .body(Body::empty())
-        .expect("'bad range response' creation should be infallible")
+        .expect("'not satisfiable response' creation should be infallible")
 }
 
 /// Generate a GET response, optionally for a HTTP range request.  The total
@@ -142,7 +139,15 @@ impl PotentialRange {
     /// On failure, returns a range response with the appropriate headers
     /// to inform the caller how to make a correct range request.
     pub fn parse(&self, len: u64) -> Result<SingleRange, Response<Body>> {
-        self.single_range(len).map_err(|_err| bad_range_response(len))
+        self.single_range(len).map_err(|err| match err {
+            Error::MultipleRangesUnsupported | Error::Parse(_) => {
+                bad_request_response()
+            }
+            Error::RangeOverflow
+            | Error::RangeUnderflow
+            | Error::EmptyRange => not_satisfiable_response(len),
+            Error::Http(_err) => internal_error_response(),
+        })
     }
 
     fn single_range(&self, len: u64) -> Result<SingleRange, Error> {
@@ -178,10 +183,7 @@ impl PartialEq for SingleRange {
 }
 
 impl SingleRange {
-    pub fn new(
-        range: http_range::HttpRange,
-        total: u64,
-    ) -> Result<Self, Error> {
+    fn new(range: http_range::HttpRange, total: u64) -> Result<Self, Error> {
         let http_range::HttpRange { start, mut length } = range;
 
         // Clip the length to avoid going beyond the end of the total range
