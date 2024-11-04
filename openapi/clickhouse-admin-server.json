@@ -56,7 +56,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DistributedDdlQueue"
+                  "title": "Array_of_DistributedDdlQueue",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DistributedDdlQueue"
+                  }
                 }
               }
             }
@@ -118,12 +122,76 @@
       "DistributedDdlQueue": {
         "type": "object",
         "properties": {
-          "data": {
+          "cluster": {
             "type": "string"
+          },
+          "entry": {
+            "type": "string"
+          },
+          "entry_version": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "exception_code": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "exception_text": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "initiator_host": {
+            "type": "string"
+          },
+          "initiator_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "query": {
+            "type": "string"
+          },
+          "query_create_time": {
+            "type": "string"
+          },
+          "query_duration_ms": {
+            "type": "string"
+          },
+          "query_finish_time": {
+            "type": "string"
+          },
+          "settings": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         },
         "required": [
-          "data"
+          "cluster",
+          "entry",
+          "entry_version",
+          "exception_code",
+          "exception_text",
+          "host",
+          "initiator_host",
+          "initiator_port",
+          "port",
+          "query",
+          "query_create_time",
+          "query_duration_ms",
+          "query_finish_time",
+          "settings"
         ]
       },
       "Error": {

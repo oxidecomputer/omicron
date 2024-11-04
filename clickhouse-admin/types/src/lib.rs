@@ -977,21 +977,36 @@ pub struct ClickhouseKeeperClusterMembership {
     JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
+/// Contains information about distributed ddl queries (ON CLUSTER clause) that were
+/// executed on a cluster.
 pub struct DistributedDdlQueue {
+    /// Query id
     entry: String,
+    /// Version of the entry
     entry_version: u64,
+    /// Host that initiated the DDL operation
     initiator_host: String,
+    /// Port used by the initiator
     initiator_port: u16,
+    /// Cluster name
     cluster: String,
+    /// Query executed
     query: String,
+    /// Settings used in the DDL operation
     settings: BTreeMap<String,String>,
-    // TODO: Find a way to parse time better if possible
+    /// Query created time
     query_create_time: String,
+    /// Hostname
     host: Ipv6Addr,
+    /// Host Port
     port: u16,
+    /// Status of the query
     exception_code: u64,
+    /// Exception code
     exception_text: String,
+    /// Exception message
     query_finish_time: String,
+    /// Duration of query execution (in milliseconds)
     query_duration_ms: String,
 }
 
@@ -1021,13 +1036,12 @@ mod tests {
     use camino_tempfile::Builder;
     use slog::{o, Drain};
     use slog_term::{FullFormat, PlainDecorator, TestStdoutWriter};
+    use std::collections::BTreeMap;
     use std::net::{Ipv4Addr, Ipv6Addr};
     use std::str::FromStr;
 
     use crate::{
-        ClickhouseHost, KeeperConf, KeeperId, KeeperServerInfo,
-        KeeperServerType, KeeperSettings, Lgif, LogLevel, RaftConfig,
-        RaftServerSettings, ServerId, ServerSettings,
+        ClickhouseHost, DistributedDdlQueue, KeeperConf, KeeperId, KeeperServerInfo, KeeperServerType, KeeperSettings, Lgif, LogLevel, RaftConfig, RaftServerSettings, ServerId, ServerSettings
     };
 
     fn log() -> slog::Logger {
@@ -1785,5 +1799,57 @@ snapshot_storage_disk=LocalSnapshotDisk
             format!("{}", root_cause),
             "Extracted key `\"session_timeout_fake\"` from output differs from expected key `session_timeout_ms`"
         );
+    }
+
+    #[test]
+    fn test_distributed_ddl_queries_parse_success() {
+        let log = log();
+        let data =
+            "{\"entry\":\"query-0000000000\",\"entry_version\":5,\"initiator_host\":\"ixchel\",\"initiator_port\":22001,\"cluster\":\"oximeter_cluster\",\"query\":\"CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster\",\"settings\":{\"load_balancing\":\"random\"},\"query_create_time\":\"2024-11-01 16:16:45\",\"host\":\"::1\",\"port\":22001,\"status\":\"Finished\",\"exception_code\":0,\"exception_text\":\"\",\"query_finish_time\":\"2024-11-01 16:16:45\",\"query_duration_ms\":\"4\"}
+{\"entry\":\"query-0000000000\",\"entry_version\":5,\"initiator_host\":\"ixchel\",\"initiator_port\":22001,\"cluster\":\"oximeter_cluster\",\"query\":\"CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster\",\"settings\":{\"load_balancing\":\"random\"},\"query_create_time\":\"2024-11-01 16:16:45\",\"host\":\"::1\",\"port\":22002,\"status\":\"Finished\",\"exception_code\":0,\"exception_text\":\"\",\"query_finish_time\":\"2024-11-01 16:16:45\",\"query_duration_ms\":\"4\"}
+"
+            .as_bytes();
+        let ddl = DistributedDdlQueue::parse(&log, data).unwrap();
+
+        let expected_result = vec![
+            DistributedDdlQueue{
+                entry: "query-0000000000".to_string(),
+                entry_version: 5,
+                initiator_host: "ixchel".to_string(),
+                initiator_port: 22001,
+                cluster: "oximeter_cluster".to_string(),
+                query: "CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster".to_string(),
+                settings: BTreeMap::from([
+    ("load_balancing".to_string(), "random".to_string()),
+]),
+                query_create_time: "2024-11-01 16:16:45".to_string(),
+                host: Ipv6Addr::from_str("::1").unwrap(),
+                port: 22001,
+                // TODO: Missing status
+                exception_code: 0,
+                exception_text: "".to_string(),
+                query_finish_time: "2024-11-01 16:16:45".to_string(),
+                query_duration_ms: "4".to_string(),
+            },
+            DistributedDdlQueue{
+                entry: "query-0000000000".to_string(),
+                entry_version: 5,
+                initiator_host: "ixchel".to_string(),
+                initiator_port: 22001,
+                cluster: "oximeter_cluster".to_string(),
+                query: "CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster".to_string(),
+                settings: BTreeMap::from([
+    ("load_balancing".to_string(), "random".to_string()),
+]),
+                query_create_time: "2024-11-01 16:16:45".to_string(),
+                host: Ipv6Addr::from_str("::1").unwrap(),
+                port: 22002,
+                exception_code: 0,
+                exception_text: "".to_string(),
+                query_finish_time: "2024-11-01 16:16:45".to_string(),
+                query_duration_ms: "4".to_string(),
+            },
+            ];
+        assert!(ddl == expected_result);
     }
 }
