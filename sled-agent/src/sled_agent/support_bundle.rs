@@ -99,7 +99,7 @@ fn stream_zip_entry_helper(
     let mut reader: Box<dyn std::io::Read> = match range {
         Some(range) => {
             reader.seek(std::io::SeekFrom::Start(range.start()))?;
-            Box::new(reader.take(range.content_length()))
+            Box::new(reader.take(range.content_length().get()))
         }
         None => Box::new(reader),
     };
@@ -455,7 +455,9 @@ impl SledAgent {
         match query {
             SupportBundleQueryType::Whole => {
                 let len = file.metadata().await?.len();
-                let content_type = Some("application/zip");
+                const CONTENT_TYPE: http::HeaderValue =
+                    http::HeaderValue::from_static("application/zip");
+                let content_type = Some(CONTENT_TYPE);
 
                 if head_only {
                     return Ok(range_requests::make_head_response(
@@ -474,7 +476,9 @@ impl SledAgent {
                     };
 
                     file.seek(std::io::SeekFrom::Start(range.start())).await?;
-                    let limit = range.content_length() as usize;
+                    let limit: usize = std::num::NonZeroUsize::try_from(
+                        range.content_length()
+                    ).expect("Cannot convert u64 to usize; are you on a 64-bit machine?").get();
                     return Ok(range_requests::make_get_response(
                         Some(range),
                         len,
@@ -497,7 +501,9 @@ impl SledAgent {
                 let all_names = names.join("\n");
                 let all_names_bytes = all_names.as_bytes();
                 let len = all_names_bytes.len() as u64;
-                let content_type = Some("text/plain");
+                const CONTENT_TYPE: http::HeaderValue =
+                    http::HeaderValue::from_static("text/plain");
+                let content_type = Some(CONTENT_TYPE);
 
                 if head_only {
                     return Ok(range_requests::make_head_response(
@@ -548,14 +554,14 @@ impl SledAgent {
                     return Ok(range_requests::make_head_response(
                         None,
                         entry_stream.size,
-                        None,
+                        None::<http::HeaderValue>,
                     )?);
                 }
 
                 return Ok(range_requests::make_get_response(
                     entry_stream.range,
                     entry_stream.size,
-                    None,
+                    None::<http::HeaderValue>,
                     entry_stream.stream,
                 )?);
             }
