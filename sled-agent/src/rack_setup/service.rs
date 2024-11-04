@@ -844,6 +844,15 @@ impl ServiceInner {
                                 management_addrs: lp.management_addrs.clone(),
                             }
                         }),
+                        tx_eq: config.tx_eq.as_ref().map(|tx_eq| {
+                            NexusTypes::TxEqConfig {
+                                pre1: tx_eq.pre1,
+                                pre2: tx_eq.pre2,
+                                main: tx_eq.main,
+                                post2: tx_eq.post2,
+                                post1: tx_eq.post1,
+                            }
+                        }),
                     })
                     .collect(),
                 bgp: config

@@ -13,7 +13,7 @@ use omicron_common::{
         external::AllowedSourceIps,
         internal::shared::{
             BgpConfig, BgpPeerConfig, LldpAdminStatus, LldpPortConfig, PortFec,
-            PortSpeed, RouteConfig,
+            PortSpeed, RouteConfig, TxEqConfig,
         },
     },
 };
@@ -177,6 +177,14 @@ impl ExampleRackSetupData {
             management_addrs: None,
         });
 
+        let tx_eq = Some(TxEqConfig {
+            pre1: Some(0),
+            pre2: Some(0),
+            main: Some(26),
+            post2: Some(0),
+            post1: Some(0),
+        });
+
         let switch1_port0_lldp = Some(LldpPortConfig {
             status: LldpAdminStatus::Enabled,
             chassis_id: Some("chassid id override".to_string()),
@@ -190,10 +198,11 @@ impl ExampleRackSetupData {
         let rack_network_config = UserSpecifiedRackNetworkConfig {
             infra_ip_first: "172.30.0.1".parse().unwrap(),
             infra_ip_last: "172.30.0.10".parse().unwrap(),
+            #[rustfmt::skip]
             switch0: btreemap! {
-                "port0".to_owned() => UserSpecifiedPortConfig {
-                addresses: vec!["172.30.0.1/24".parse().unwrap()],
-            routes: vec![RouteConfig {
+		"port0".to_owned() => UserSpecifiedPortConfig {
+		    addresses: vec!["172.30.0.1/24".parse().unwrap()],
+                    routes: vec![RouteConfig {
                         destination: "0.0.0.0/0".parse().unwrap(),
                         nexthop: "172.30.0.10".parse().unwrap(),
                         vlan_id: Some(1),
@@ -202,10 +211,12 @@ impl ExampleRackSetupData {
                     bgp_peers: switch0_port0_bgp_peers,
                     uplink_port_speed: PortSpeed::Speed400G,
                     uplink_port_fec: PortFec::Firecode,
-            lldp: switch0_port0_lldp,
-                    autoneg: true,
-                },
-             },
+		    lldp: switch0_port0_lldp,
+		    tx_eq,
+		    autoneg: true,
+		},
+	    },
+            #[rustfmt::skip]
             switch1: btreemap! {
                 // Use the same port name as in switch0 to test that it doesn't
                 // collide.
@@ -221,6 +232,7 @@ impl ExampleRackSetupData {
                     uplink_port_speed: PortSpeed::Speed400G,
                     uplink_port_fec: PortFec::Firecode,
                     lldp: switch1_port0_lldp,
+		    tx_eq,
                     autoneg: true,
                 },
             },

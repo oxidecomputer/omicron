@@ -650,12 +650,15 @@ impl super::Nexus {
                     },
                 },
             };
+
             let link = LinkConfigCreate {
-                mtu: 1500, //TODO https://github.com/oxidecomputer/omicron/issues/2274
+                //TODO https://github.com/oxidecomputer/omicron/issues/2274
+                mtu: 1500,
                 fec: uplink_config.uplink_port_fec.into(),
                 speed: uplink_config.uplink_port_speed.into(),
                 autoneg: uplink_config.autoneg,
                 lldp,
+                tx_eq: uplink_config.tx_eq.map(|t| t.into()),
             };
 
             port_settings_params.links.insert("phy".to_string(), link);
