@@ -1022,7 +1022,7 @@ pub struct IdentityMetadata {
     /// unique, mutable, user-controlled identifier for each resource
     pub name: Name,
     /// human-readable free-form text about a resource
-    pub description: String,
+    pub description: Option<String>,
     /// timestamp when this resource was created
     pub time_created: DateTime<Utc>,
     /// timestamp when this resource was last modified
