@@ -96,6 +96,9 @@ pub enum PlanError {
     #[error("Ran out of sleds / U2 storage pools")]
     NotEnoughSleds,
 
+    #[error("Unexpected dataset kind: {0}")]
+    UnexpectedDataset(String),
+
     #[error("Found only v1 service plan")]
     FoundV1,
 
@@ -115,7 +118,6 @@ pub struct SledConfig {
     pub disks: BlueprintPhysicalDisksConfig,
 
     /// Datasets configured for this sled
-    // XXX: When are we populating the debug / zone root filesystems?
     pub datasets: DatasetsConfig,
 
     /// zones configured for this sled
@@ -523,6 +525,41 @@ impl Plan {
                 .iter()
                 .map(|disk| ZpoolName::new_external(disk.pool_id))
                 .collect();
+
+            // Add all non-discretionary datasets, self-provisioned on the U.2, to the blueprint.
+            for zpool in &sled_info.u2_zpools {
+                for intrinsic_dataset in
+                    sled_storage::dataset::U2_EXPECTED_DATASETS
+                {
+                    let name = intrinsic_dataset.get_name();
+                    let kind = match name {
+                        sled_storage::dataset::ZONE_DATASET => {
+                            DatasetKind::TransientZoneRoot
+                        }
+                        sled_storage::dataset::U2_DEBUG_DATASET => {
+                            DatasetKind::Debug
+                        }
+                        _ => {
+                            return Err(PlanError::UnexpectedDataset(
+                                name.to_string(),
+                            ))
+                        }
+                    };
+
+                    let config = DatasetConfig {
+                        id: DatasetUuid::new_v4(),
+                        name: DatasetName::new(zpool.clone(), kind),
+                        compression: intrinsic_dataset.get_compression(),
+                        quota: intrinsic_dataset.get_quota(),
+                        reservation: None,
+                    };
+                    sled_info
+                        .request
+                        .datasets
+                        .datasets
+                        .insert(config.id, config);
+                }
+            }
         }
 
         // We'll stripe most services across all available Sleds, round-robin

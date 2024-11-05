@@ -826,12 +826,11 @@ impl ServiceInner {
         // Convert all the information we have about datasets into a format
         // which can be stored in CockroachDB once they make their way to Nexus.
         //
+        // TODO(https://github.com/oxidecomputer/omicron/issues/6998): Remove me!
         // This is somewhat redundant with the information we're supplying in
         // the initial blueprint, and could be de-duplicated if we can fully
         // migrate to a world where "datasets exist in the blueprint, but not
         // in CockroachDB".
-        //
-        // TODO: There might be "non-service" datasets needing xlation
         let mut datasets = HashMap::<
             (ZpoolUuid, DatasetKind),
             NexusTypes::DatasetCreateRequest,
