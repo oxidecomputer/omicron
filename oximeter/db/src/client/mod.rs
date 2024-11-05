@@ -3039,7 +3039,7 @@ mod tests {
         client: &Client,
     ) -> Result<(), Error> {
         let field = FieldValue::Bool(true);
-        let as_json = serde_json::Value::from(1_u64);
+        let as_json = serde_json::Value::from(true);
         test_recall_field_value_impl(field, as_json, client).await?;
         Ok(())
     }
