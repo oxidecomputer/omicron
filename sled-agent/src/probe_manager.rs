@@ -16,6 +16,7 @@ use omicron_common::api::external::{
 use omicron_common::api::internal::shared::{
     NetworkInterface, ResolvedVpcFirewallRule,
 };
+use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
 use rand::prelude::IteratorRandom;
 use rand::SeedableRng;
 use sled_storage::dataset::ZONE_DATASET;
@@ -330,7 +331,7 @@ impl ProbeManagerInner {
             .with_zone_root_path(zone_root_path)
             .with_zone_image_paths(&["/opt/oxide".into()])
             .with_zone_type("probe")
-            .with_unique_name(probe.id)
+            .with_unique_name(OmicronZoneUuid::from_untyped_uuid(probe.id))
             .with_datasets(&[])
             .with_filesystems(&[])
             .with_data_links(&[])

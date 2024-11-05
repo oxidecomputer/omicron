@@ -496,7 +496,7 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::TestDatabase;
     use camino::Utf8Path;
     use camino_tempfile::Utf8TempDir;
     use nexus_db_model::SCHEMA_VERSION;

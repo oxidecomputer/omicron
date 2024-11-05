@@ -130,6 +130,9 @@ Commands:
   snapshots                    Print information about snapshots
   validate                     Validate the contents of the database
   volumes                      Print information about volumes
+  vmm                          Print information about Propolis virtual machine manager (VMM)
+                               processes
+  vmms                         Alias to `omdb db vmm list`
   help                         Print this message or the help of the given subcommand(s)
 
 Options:
@@ -178,6 +181,9 @@ Commands:
   snapshots                    Print information about snapshots
   validate                     Validate the contents of the database
   volumes                      Print information about volumes
+  vmm                          Print information about Propolis virtual machine manager (VMM)
+                               processes
+  vmms                         Alias to `omdb db vmm list`
   help                         Print this message or the help of the given subcommand(s)
 
 Options:

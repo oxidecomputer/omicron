@@ -585,7 +585,8 @@ impl Sled {
                     policy: PhysicalDiskPolicy::InService,
                     state: PhysicalDiskState::Active,
                 };
-                (zpool, disk)
+                let datasets = vec![];
+                (zpool, (disk, datasets))
             })
             .collect();
         let inventory_sp = match hardware {
@@ -648,8 +649,8 @@ impl Sled {
                 disks: zpools
                     .values()
                     .enumerate()
-                    .map(|(i, d)| InventoryDisk {
-                        identity: d.disk_identity.clone(),
+                    .map(|(i, (disk, _datasets))| InventoryDisk {
+                        identity: disk.disk_identity.clone(),
                         variant: DiskVariant::U2,
                         slot: i64::try_from(i).unwrap(),
                         active_firmware_slot: 1,

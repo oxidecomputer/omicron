@@ -1061,7 +1061,7 @@ where
                 let lo = base.pow(lo as _);
                 let hi = base.pow(hi as _);
                 let distance = hi - lo;
-                distance.is_multiple_of(&count)
+                Integer::is_multiple_of(&distance, &count)
             })
         }
 

@@ -31,6 +31,7 @@ progenitor::generate_api!(
         BgpConfig = { derives = [Eq, Hash] },
         BgpPeerConfig = { derives = [Eq, Hash] },
         LldpPortConfig = { derives = [Eq, Hash, PartialOrd, Ord] },
+        TxEqConfig = { derives = [Eq, Hash] },
         OmicronPhysicalDiskConfig = { derives = [Eq, Hash, PartialOrd, Ord] },
         PortConfigV2 = { derives = [Eq, Hash] },
         RouteConfig = { derives = [Eq, Hash] },
@@ -43,6 +44,7 @@ progenitor::generate_api!(
     replace = {
         Baseboard = nexus_sled_agent_shared::inventory::Baseboard,
         ByteCount = omicron_common::api::external::ByteCount,
+        DatasetsConfig = omicron_common::disk::DatasetsConfig,
         DatasetKind = omicron_common::api::internal::shared::DatasetKind,
         DiskIdentity = omicron_common::disk::DiskIdentity,
         DiskVariant = omicron_common::disk::DiskVariant,

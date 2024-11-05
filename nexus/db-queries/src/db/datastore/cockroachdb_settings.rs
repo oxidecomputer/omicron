@@ -134,7 +134,7 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::CockroachDbSettings;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::TestDatabase;
     use nexus_types::deployment::CockroachDbClusterVersion;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;

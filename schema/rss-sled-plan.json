@@ -751,6 +751,17 @@
             }
           ]
         },
+        "tx_eq": {
+          "description": "TX-EQ configuration for this port",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TxEqConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "uplink_port_fec": {
           "description": "Port forward error correction type.",
           "allOf": [
@@ -1090,6 +1101,52 @@
           ]
         }
       ]
+    },
+    "TxEqConfig": {
+      "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",
+      "type": "object",
+      "properties": {
+        "main": {
+          "description": "Main tap",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32"
+        },
+        "post1": {
+          "description": "Post-cursor tap1",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32"
+        },
+        "post2": {
+          "description": "Post-cursor tap2",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32"
+        },
+        "pre1": {
+          "description": "Pre-cursor tap1",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32"
+        },
+        "pre2": {
+          "description": "Pre-cursor tap2",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32"
+        }
+      }
     },
     "TypedUuidForSledKind": {
       "type": "string",

@@ -865,13 +865,13 @@ impl RunQueryDsl<DbConnection> for NextExternalIp {}
 #[cfg(test)]
 mod tests {
     use crate::authz;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::SERVICE_IP_POOL_NAME;
     use crate::db::identity::Resource;
     use crate::db::lookup::LookupPath;
     use crate::db::model::IpKind;
     use crate::db::model::IpPool;
     use crate::db::model::IpPoolRange;
+    use crate::db::pub_test_utils::TestDatabase;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::LogContext;

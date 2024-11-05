@@ -169,7 +169,7 @@ pub enum Error {
     Oxql(oxql::Error),
 
     #[error("Native protocol error")]
-    Native(#[source] crate::native::Error),
+    Native(#[from] crate::native::Error),
 }
 
 #[cfg(any(feature = "oxql", test))]
