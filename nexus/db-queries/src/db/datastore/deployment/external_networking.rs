@@ -408,7 +408,7 @@ impl DataStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::TestDatabase;
     use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use anyhow::Context as _;
     use async_bb8_diesel::AsyncSimpleConnection;

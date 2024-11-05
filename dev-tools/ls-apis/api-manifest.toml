@@ -279,6 +279,11 @@ label = "Sled Agent"
 server_package_name = "sled-agent-api"
 
 [[apis]]
+client_package_name = "repo-depot-client"
+label = "Repo Depot API"
+server_package_name = "repo-depot-api"
+
+[[apis]]
 client_package_name = "wicketd-client"
 label = "Wicketd"
 server_package_name = "wicketd-api"

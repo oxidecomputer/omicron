@@ -357,7 +357,7 @@ mod test {
     use nexus_db_queries::authz;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db;
-    use nexus_test_utils::db::test_setup_database;
+    use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
     use std::sync::Arc;
@@ -378,8 +378,8 @@ mod test {
         p: &dyn Populator,
     ) {
         let logctx = dev::test_setup_log("test_populator");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
+        let db = TestDatabase::new_populate_schema_only(&logctx.log).await;
+        let cfg = db::Config { url: db.crdb().pg_config().clone() };
         let pool = Arc::new(db::Pool::new_single_host(&logctx.log, &cfg));
         let datastore = Arc::new(
             db::DataStore::new(&logctx.log, pool, None).await.unwrap(),
@@ -443,7 +443,7 @@ mod test {
         );
 
         info!(&log, "cleaning up database");
-        db.cleanup().await.unwrap();
+        db.terminate().await;
 
         info!(&log, "populator {:?}, with database offline", p);
         match p.populate(&opctx, &datastore, &args).await {

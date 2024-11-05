@@ -15,6 +15,7 @@ use omicron_common::api::internal::shared::LldpPortConfig;
 use omicron_common::api::internal::shared::PortFec;
 use omicron_common::api::internal::shared::PortSpeed;
 use omicron_common::api::internal::shared::RouteConfig;
+use omicron_common::api::internal::shared::TxEqConfig;
 use omicron_common::api::internal::shared::UplinkAddressConfig;
 use omicron_common::update::ArtifactHash;
 use owo_colors::OwoColorize;
@@ -188,6 +189,8 @@ pub struct UserSpecifiedPortConfig {
     pub bgp_peers: Vec<UserSpecifiedBgpPeerConfig>,
     #[serde(default)]
     pub lldp: Option<LldpPortConfig>,
+    #[serde(default)]
+    pub tx_eq: Option<TxEqConfig>,
 }
 
 /// User-specified version of [`BgpPeerConfig`].

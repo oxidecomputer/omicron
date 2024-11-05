@@ -1132,7 +1132,7 @@ impl DataStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::TestDatabase;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::external_api::shared::IpRange;

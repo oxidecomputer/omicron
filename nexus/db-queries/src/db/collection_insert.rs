@@ -405,8 +405,8 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::identity::Resource as IdentityResource;
+    use crate::db::pub_test_utils::TestDatabase;
     use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use chrono::{DateTime, Utc};
     use db_macros::Resource;

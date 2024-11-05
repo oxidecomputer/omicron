@@ -83,8 +83,8 @@ impl super::DataStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::fixed_data::allow_list::USER_FACING_SERVICES_ALLOW_LIST_ID;
+    use crate::db::pub_test_utils::TestDatabase;
     use omicron_common::api::external;
     use omicron_test_utils::dev;
 

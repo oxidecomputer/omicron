@@ -12,6 +12,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
+use std::str::FromStr;
 use uuid::Uuid;
 
 use crate::{
@@ -186,6 +187,18 @@ impl GzipLevel {
     }
 }
 
+impl FromStr for GzipLevel {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let level = s.parse::<u8>()?;
+        if level < GZIP_LEVEL_MIN || level > GZIP_LEVEL_MAX {
+            bail!("Invalid gzip compression level: {level}");
+        }
+        Ok(Self(level))
+    }
+}
+
 #[derive(
     Copy,
     Clone,
@@ -224,6 +237,7 @@ pub enum CompressionAlgorithm {
     Zle,
 }
 
+/// These match the arguments which can be passed to "zfs set compression=..."
 impl fmt::Display for CompressionAlgorithm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use CompressionAlgorithm::*;
@@ -239,6 +253,29 @@ impl fmt::Display for CompressionAlgorithm {
             Zle => "zle",
         };
         write!(f, "{}", s)
+    }
+}
+
+impl FromStr for CompressionAlgorithm {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use CompressionAlgorithm::*;
+        let c = match s {
+            "on" => On,
+            "" | "off" => Off,
+            "gzip" => Gzip,
+            "lz4" => Lz4,
+            "lzjb" => Lzjb,
+            "zle" => Zle,
+            _ => {
+                let Some(suffix) = s.strip_prefix("gzip-") else {
+                    bail!("Unknown compression algorithm {s}");
+                };
+                GzipN { level: suffix.parse()? }
+            }
+        };
+        Ok(c)
     }
 }
 
