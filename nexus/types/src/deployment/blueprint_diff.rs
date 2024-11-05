@@ -12,6 +12,7 @@ use super::blueprint_display::{
     BpSledSubtableRow, KvListWithHeading, KvPair,
 };
 use super::{zone_sort_key, CockroachDbPreserveDowngrade};
+use itertools::Itertools;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
@@ -579,16 +580,25 @@ impl BpSledSubtableData for DiffDatasetsDetails {
         &self,
         state: BpDiffState,
     ) -> impl Iterator<Item = BpSledSubtableRow> {
-        self.datasets.iter().map(move |d| {
-            BpSledSubtableRow::from_strings(
-                state,
-                vec![
-                    d.id.map(|id| id.to_string())
-                        .unwrap_or_else(|| "none".to_string()),
-                    d.name.clone(),
-                ],
-            )
-        })
+        self.datasets
+            .iter()
+            .sorted_by(|a, b| {
+                // NOTE: We're doing this sorting because it's nice to see all
+                // datasets that are on the same pool grouped together - but it
+                // might be nice to auto-sort all columns alphabetically for other
+                // uses of the blueprint diff too?
+                Ord::cmp(&a.name, &b.name)
+            })
+            .map(move |d| {
+                BpSledSubtableRow::from_strings(
+                    state,
+                    vec![
+                        d.name.clone(),
+                        d.id.map(|id| id.to_string())
+                            .unwrap_or_else(|| "none".to_string()),
+                    ],
+                )
+            })
     }
 }
 

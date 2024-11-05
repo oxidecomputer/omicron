@@ -22,6 +22,7 @@ futures.workspace = true
 http.workspace = true
 humantime.workspace = true
 ipnetwork.workspace = true
+itertools.workspace = true
 newtype_derive.workspace = true
 omicron-uuid-kinds.workspace = true
 openssl.workspace = true
