@@ -311,8 +311,6 @@ async fn query(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    usdt::register_probes().context("Failed to register USDT probes")?;
-
     let args = OxDb::parse();
     let decorator = slog_term::TermDecorator::new().build();
     let drain = slog_term::FullFormat::new(decorator)
