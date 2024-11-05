@@ -40,6 +40,7 @@ use self::omicron_zone_placement::OmicronZonePlacement;
 use self::omicron_zone_placement::OmicronZonePlacementSledState;
 
 mod omicron_zone_placement;
+pub(crate) mod rng;
 
 pub struct Planner<'a> {
     log: Logger,

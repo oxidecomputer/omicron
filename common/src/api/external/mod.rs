@@ -2358,6 +2358,10 @@ pub struct SwitchPortSettingsView {
     /// Link-layer discovery protocol (LLDP) settings.
     pub link_lldp: Vec<LldpLinkConfig>,
 
+    /// TX equalization settings.  These are optional, and most links will not
+    /// need them.
+    pub tx_eq: Vec<Option<TxEqConfig>>,
+
     /// Layer 3 interface settings.
     pub interfaces: Vec<SwitchInterfaceConfig>,
 
@@ -2500,6 +2504,9 @@ pub struct SwitchPortLinkConfig {
     /// link.
     pub lldp_link_config_id: Option<Uuid>,
 
+    /// The tx_eq configuration id for this link.
+    pub tx_eq_config_id: Option<Uuid>,
+
     /// The name of this link.
     pub link_name: String,
 
@@ -2542,6 +2549,34 @@ pub struct LldpLinkConfig {
 
     /// The LLDP management IP TLV.
     pub management_ip: Option<oxnet::IpNet>,
+}
+
+/// Per-port tx-eq overrides.  This can be used to fine-tune the transceiver
+/// equalization settings to improve signal integrity.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct TxEqConfig {
+    /// Pre-cursor tap1
+    pub pre1: Option<i32>,
+    /// Pre-cursor tap2
+    pub pre2: Option<i32>,
+    /// Main tap
+    pub main: Option<i32>,
+    /// Post-cursor tap2
+    pub post2: Option<i32>,
+    /// Post-cursor tap1
+    pub post1: Option<i32>,
+}
+
+impl From<crate::api::internal::shared::TxEqConfig> for TxEqConfig {
+    fn from(x: crate::api::internal::shared::TxEqConfig) -> TxEqConfig {
+        TxEqConfig {
+            pre1: x.pre1,
+            pre2: x.pre2,
+            main: x.main,
+            post2: x.post2,
+            post1: x.post1,
+        }
+    }
 }
 
 /// Describes the kind of an switch interface.

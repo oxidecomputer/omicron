@@ -11,6 +11,7 @@ use crate::schema::{
     switch_port_settings_group, switch_port_settings_groups,
     switch_port_settings_interface_config, switch_port_settings_link_config,
     switch_port_settings_port_config, switch_port_settings_route_config,
+    tx_eq_config,
 };
 use crate::{impl_enum_type, SqlU32};
 use crate::{SqlU16, SqlU8};
@@ -387,9 +388,11 @@ pub struct SwitchPortLinkConfig {
     pub fec: SwitchLinkFec,
     pub speed: SwitchLinkSpeed,
     pub autoneg: bool,
+    pub tx_eq_config_id: Option<Uuid>,
 }
 
 impl SwitchPortLinkConfig {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         port_settings_id: Uuid,
         lldp_link_config_id: Uuid,
@@ -398,6 +401,7 @@ impl SwitchPortLinkConfig {
         fec: SwitchLinkFec,
         speed: SwitchLinkSpeed,
         autoneg: bool,
+        tx_eq_config_id: Option<Uuid>,
     ) -> Self {
         Self {
             port_settings_id,
@@ -407,6 +411,7 @@ impl SwitchPortLinkConfig {
             speed,
             autoneg,
             mtu: mtu.into(),
+            tx_eq_config_id,
         }
     }
 }
@@ -416,6 +421,7 @@ impl Into<external::SwitchPortLinkConfig> for SwitchPortLinkConfig {
         external::SwitchPortLinkConfig {
             port_settings_id: self.port_settings_id,
             lldp_link_config_id: self.lldp_link_config_id,
+            tx_eq_config_id: self.tx_eq_config_id,
             link_name: self.link_name.clone(),
             mtu: self.mtu.into(),
             fec: self.fec.into(),
@@ -490,6 +496,52 @@ impl Into<external::LldpLinkConfig> for LldpLinkConfig {
             system_name: self.system_name.clone(),
             system_description: self.system_description.clone(),
             management_ip: self.management_ip.map(|a| a.into()),
+        }
+    }
+}
+
+#[derive(
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    AsChangeset,
+)]
+#[diesel(table_name = tx_eq_config)]
+pub struct TxEqConfig {
+    pub id: Uuid,
+    pub pre1: Option<i32>,
+    pub pre2: Option<i32>,
+    pub main: Option<i32>,
+    pub post2: Option<i32>,
+    pub post1: Option<i32>,
+}
+
+impl TxEqConfig {
+    pub fn new(
+        pre1: Option<i32>,
+        pre2: Option<i32>,
+        main: Option<i32>,
+        post2: Option<i32>,
+        post1: Option<i32>,
+    ) -> Self {
+        Self { id: Uuid::new_v4(), pre1, pre2, main, post2, post1 }
+    }
+}
+
+// This converts the internal database version of the config into the
+// user-facing version.
+impl Into<external::TxEqConfig> for TxEqConfig {
+    fn into(self) -> external::TxEqConfig {
+        external::TxEqConfig {
+            pre1: self.pre1,
+            pre2: self.pre2,
+            main: self.main,
+            post2: self.post2,
+            post1: self.post1,
         }
     }
 }

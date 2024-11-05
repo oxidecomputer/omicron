@@ -3619,6 +3619,7 @@ impl ServiceManager {
                 illumos_utils::zfs::Zfs::get_values(
                     &dataset.full_name(),
                     &["zoned", "canmount", "encryption"],
+                    None,
                 )
                 .map_err(|err| Error::GetZfsValue {
                     zone: zone.zone_name(),

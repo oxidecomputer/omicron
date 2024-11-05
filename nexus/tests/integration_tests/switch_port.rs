@@ -130,6 +130,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
             fec: LinkFec::None,
             speed: LinkSpeed::Speed100G,
             autoneg: false,
+            tx_eq: None,
         },
     );
     // interfaces

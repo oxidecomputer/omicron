@@ -6,7 +6,7 @@
 
 use anyhow::{anyhow, Context};
 use dpd_client::types::{
-    LinkCreate, LinkId, LinkSettings, PortId, PortSettings,
+    LinkCreate, LinkId, LinkSettings, PortId, PortSettings, TxEq,
 };
 use dpd_client::Client as DpdClient;
 use futures::future;
@@ -702,6 +702,13 @@ impl<'a> EarlyNetworkSetup<'a> {
                 fec: convert_fec(&port_config.uplink_port_fec),
                 speed: convert_speed(&port_config.uplink_port_speed),
                 lane: Some(LinkId(0)),
+                tx_eq: port_config.tx_eq.map(|x| TxEq {
+                    pre1: x.pre1,
+                    pre2: x.pre2,
+                    main: x.main,
+                    post2: x.post2,
+                    post1: x.post1,
+                }),
             },
             addrs,
         };
