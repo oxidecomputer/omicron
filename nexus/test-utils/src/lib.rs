@@ -249,7 +249,7 @@ impl RackInitRequestBuilder {
         self.datasets.push(DatasetCreateRequest {
             zpool_id: zpool_id.into_untyped_uuid(),
             dataset_id,
-            request: DatasetPutRequest { address, kind },
+            request: DatasetPutRequest { address: Some(address), kind },
         });
         let zone = self
             .internal_dns_config
@@ -276,7 +276,7 @@ impl RackInitRequestBuilder {
             zpool_id: zpool_id.into_untyped_uuid(),
             dataset_id,
             request: DatasetPutRequest {
-                address,
+                address: Some(address),
                 kind: DatasetKind::Clickhouse,
             },
         });

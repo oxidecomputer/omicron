@@ -107,6 +107,7 @@ impl DatasetName {
         &self.pool_name
     }
 
+    // TODO: Maybe rename this to "kind"?
     pub fn dataset(&self) -> &DatasetKind {
         &self.kind
     }

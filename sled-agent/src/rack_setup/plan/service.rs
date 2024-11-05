@@ -34,8 +34,9 @@ use omicron_common::backoff::{
     retry_notify_ext, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::disk::{
-    DatasetKind, DatasetName, DatasetsConfig, DiskVariant,
-    OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig,
+    CompressionAlgorithm, DatasetConfig, DatasetKind, DatasetName,
+    DatasetsConfig, DiskVariant, OmicronPhysicalDiskConfig,
+    OmicronPhysicalDisksConfig,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_common::policy::{
@@ -45,7 +46,8 @@ use omicron_common::policy::{
     SINGLE_NODE_CLICKHOUSE_REDUNDANCY,
 };
 use omicron_uuid_kinds::{
-    ExternalIpUuid, GenericUuid, OmicronZoneUuid, SledUuid, ZpoolUuid,
+    DatasetUuid, ExternalIpUuid, GenericUuid, OmicronZoneUuid, SledUuid,
+    ZpoolUuid,
 };
 use rand::prelude::SliceRandom;
 use schemars::JsonSchema;
@@ -113,10 +115,59 @@ pub struct SledConfig {
     pub disks: BlueprintPhysicalDisksConfig,
 
     /// Datasets configured for this sled
+    // XXX: When are we populating the debug / zone root filesystems?
     pub datasets: DatasetsConfig,
 
     /// zones configured for this sled
     pub zones: Vec<BlueprintZoneConfig>,
+}
+
+impl SledConfig {
+    /// Adds a zone to the Sled's configuration, as well as any number of
+    /// durable datasets.
+    pub fn add_zone_and_datasets(&mut self, zone: BlueprintZoneConfig) {
+        let fs_dataset_name = DatasetName::new(
+            zone.filesystem_pool.clone().expect("Missing pool"),
+            DatasetKind::TransientZone {
+                name: illumos_utils::zone::zone_name(
+                    zone.zone_type.kind().zone_prefix(),
+                    Some(zone.id),
+                ),
+            },
+        );
+
+        // Always add a transient filesystem dataset.
+        let fs_dataset = DatasetConfig {
+            id: DatasetUuid::new_v4(),
+            name: fs_dataset_name,
+            compression: CompressionAlgorithm::Off,
+            quota: None,
+            reservation: None,
+        };
+        self.datasets.datasets.insert(fs_dataset.id, fs_dataset);
+
+        // If a durable dataset exists, add it.
+        if let Some(dataset) = zone.zone_type.durable_dataset() {
+            let id = DatasetUuid::new_v4();
+            self.datasets.datasets.insert(
+                id,
+                DatasetConfig {
+                    id,
+                    name: dataset.into(),
+                    compression: CompressionAlgorithm::Off,
+                    quota: None,
+                    reservation: None,
+                },
+            );
+        }
+
+        // Add the zone.
+        //
+        // Currently this is pushing back to a Vec; we could inspect to
+        // ensure this function is idempotent, but it currently is not
+        // re-callable.
+        self.zones.push(zone);
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -509,7 +560,7 @@ impl Plan {
                 sled.alloc_dataset_from_u2s(DatasetKind::InternalDns)?;
             let filesystem_pool = Some(dataset_name.pool().clone());
 
-            sled.request.zones.push(BlueprintZoneConfig {
+            sled.request.add_zone_and_datasets(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id,
                 filesystem_pool,
@@ -544,7 +595,7 @@ impl Plan {
             let dataset_name =
                 sled.alloc_dataset_from_u2s(DatasetKind::Cockroach)?;
             let filesystem_pool = Some(dataset_name.pool().clone());
-            sled.request.zones.push(BlueprintZoneConfig {
+            sled.request.add_zone_and_datasets(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id,
                 zone_type: BlueprintZoneType::CockroachDb(
@@ -592,7 +643,7 @@ impl Plan {
             let dataset_name = sled.alloc_dataset_from_u2s(dataset_kind)?;
             let filesystem_pool = Some(dataset_name.pool().clone());
 
-            sled.request.zones.push(BlueprintZoneConfig {
+            sled.request.add_zone_and_datasets(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id,
                 zone_type: BlueprintZoneType::ExternalDns(
@@ -629,7 +680,7 @@ impl Plan {
                 .unwrap();
             let (nic, external_ip) = svc_port_builder.next_nexus(id)?;
             let filesystem_pool = Some(sled.alloc_zpool_from_u2s()?);
-            sled.request.zones.push(BlueprintZoneConfig {
+            sled.request.add_zone_and_datasets(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id,
                 zone_type: BlueprintZoneType::Nexus(
@@ -673,7 +724,7 @@ impl Plan {
                 .host_zone_with_one_backend(id, ServiceName::Oximeter, address)
                 .unwrap();
             let filesystem_pool = Some(sled.alloc_zpool_from_u2s()?);
-            sled.request.zones.push(BlueprintZoneConfig {
+            sled.request.add_zone_and_datasets(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id,
                 zone_type: BlueprintZoneType::Oximeter(
@@ -701,7 +752,7 @@ impl Plan {
             let dataset_name =
                 sled.alloc_dataset_from_u2s(DatasetKind::Clickhouse)?;
             let filesystem_pool = Some(dataset_name.pool().clone());
-            sled.request.zones.push(BlueprintZoneConfig {
+            sled.request.add_zone_and_datasets(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id,
                 zone_type: BlueprintZoneType::Clickhouse(
@@ -736,7 +787,7 @@ impl Plan {
                     address,
                 )
                 .unwrap();
-            sled.request.zones.push(BlueprintZoneConfig {
+            sled.request.add_zone_and_datasets(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id,
                 zone_type: BlueprintZoneType::CruciblePantry(
@@ -762,7 +813,7 @@ impl Plan {
                     )
                     .unwrap();
 
-                sled.request.zones.push(BlueprintZoneConfig {
+                sled.request.add_zone_and_datasets(BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id,
                     zone_type: BlueprintZoneType::Crucible(
@@ -823,7 +874,7 @@ impl Plan {
                 .host_zone_with_one_backend(id, svcname, ntp_address)
                 .unwrap();
 
-            sled.request.zones.push(BlueprintZoneConfig {
+            sled.request.add_zone_and_datasets(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id,
                 zone_type,
