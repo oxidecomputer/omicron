@@ -834,7 +834,7 @@ impl ServiceInner {
                     (dataset.name.pool().id(), dataset.name.dataset().clone()),
                     NexusTypes::DatasetCreateRequest {
                         zpool_id: dataset.name.pool().id().into_untyped_uuid(),
-                        dataset_id: dataset.id.into_untyped_uuid(),
+                        dataset_id: dataset.id,
                         request: NexusTypes::DatasetPutRequest {
                             address: None,
                             kind: dataset.name.dataset().clone(),

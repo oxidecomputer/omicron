@@ -42,6 +42,7 @@ use omicron_common::api::internal::shared::{
     AllowedSourceIps, ExternalPortDiscovery, RackNetworkConfig, SwitchLocation,
 };
 use omicron_common::FileKv;
+use omicron_uuid_kinds::DatasetUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_producer::Server as ProducerServer;
 use slog::Logger;
@@ -370,7 +371,7 @@ impl nexus_test_interface::NexusServer for Server {
         &self,
         physical_disk: PhysicalDiskPutRequest,
         zpool: ZpoolPutRequest,
-        dataset_id: Uuid,
+        dataset_id: DatasetUuid,
         address: SocketAddrV6,
     ) {
         let opctx = self.apictx.context.nexus.opctx_for_internal_api();

@@ -3102,8 +3102,7 @@
         "type": "object",
         "properties": {
           "dataset_id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/TypedUuidForDatasetKind"
           },
           "request": {
             "$ref": "#/components/schemas/DatasetPutRequest"

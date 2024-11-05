@@ -3,6 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::schema::region_snapshot;
+use crate::typed_uuid::DbTypedUuid;
+use omicron_uuid_kinds::DatasetKind;
+use omicron_uuid_kinds::DatasetUuid;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -23,7 +26,7 @@ use uuid::Uuid;
 #[diesel(table_name = region_snapshot)]
 pub struct RegionSnapshot {
     // unique identifier of this region snapshot
-    pub dataset_id: Uuid,
+    pub dataset_id: DbTypedUuid<DatasetKind>,
     pub region_id: Uuid,
     pub snapshot_id: Uuid,
 
@@ -43,13 +46,13 @@ pub struct RegionSnapshot {
 
 impl RegionSnapshot {
     pub fn new(
-        dataset_id: Uuid,
+        dataset_id: DatasetUuid,
         region_id: Uuid,
         snapshot_id: Uuid,
         snapshot_addr: String,
     ) -> Self {
         RegionSnapshot {
-            dataset_id,
+            dataset_id: dataset_id.into(),
             region_id,
             snapshot_id,
             snapshot_addr,
@@ -57,5 +60,9 @@ impl RegionSnapshot {
             volume_references: 0,
             deleting: false,
         }
+    }
+
+    pub fn dataset_id(&self) -> DatasetUuid {
+        self.dataset_id.into()
     }
 }

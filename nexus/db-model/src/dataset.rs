@@ -2,7 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{ByteCount, DatasetKind, Generation, Region, SqlU16};
+use super::DatasetKind as DbDatasetKind;
+use super::{ByteCount, Generation, Region, SqlU16};
 use crate::collection::DatastoreCollectionConfig;
 use crate::ipv6;
 use crate::schema::{dataset, region};
@@ -34,6 +35,7 @@ use uuid::Uuid;
     PartialEq,
 )]
 #[diesel(table_name = dataset)]
+#[asset(uuid_kind = DatasetKind)]
 pub struct Dataset {
     #[diesel(embed)]
     identity: DatasetIdentity,
@@ -45,7 +47,7 @@ pub struct Dataset {
     ip: Option<ipv6::Ipv6Addr>,
     port: Option<SqlU16>,
 
-    pub kind: DatasetKind,
+    pub kind: DbDatasetKind,
     pub size_used: Option<i64>,
     zone_name: Option<String>,
 
@@ -62,12 +64,12 @@ pub struct Dataset {
 
 impl Dataset {
     pub fn new(
-        id: Uuid,
+        id: DatasetUuid,
         pool_id: Uuid,
         addr: Option<SocketAddrV6>,
         api_kind: ApiDatasetKind,
     ) -> Self {
-        let kind = DatasetKind::from(&api_kind);
+        let kind = DbDatasetKind::from(&api_kind);
         let (size_used, zone_name) = match api_kind {
             ApiDatasetKind::Crucible => (Some(0), None),
             ApiDatasetKind::TransientZone { name } => (None, Some(name)),
@@ -101,7 +103,7 @@ impl Dataset {
 
 impl From<BlueprintDatasetConfig> for Dataset {
     fn from(bp: BlueprintDatasetConfig) -> Self {
-        let kind = DatasetKind::from(&bp.kind);
+        let kind = DbDatasetKind::from(&bp.kind);
         let zone_name = bp.kind.zone_name().map(|s| s.to_string());
         // Only Crucible uses this "size_used" field.
         let size_used = match bp.kind {
@@ -119,7 +121,7 @@ impl From<BlueprintDatasetConfig> for Dataset {
         };
         let addr = bp.address;
         Self {
-            identity: DatasetIdentity::new(bp.id.into_untyped_uuid()),
+            identity: DatasetIdentity::new(bp.id),
             time_deleted: None,
             rcgen: Generation::new(),
             pool_id: bp.pool.id().into_untyped_uuid(),
@@ -148,7 +150,7 @@ impl TryFrom<Dataset> for omicron_common::disk::DatasetConfig {
         };
 
         Ok(Self {
-            id: DatasetUuid::from_untyped_uuid(dataset.identity.id),
+            id: dataset.identity.id.into(),
             name: omicron_common::disk::DatasetName::new(
                 omicron_common::zpool_name::ZpoolName::new_external(
                     ZpoolUuid::from_untyped_uuid(dataset.pool_id),

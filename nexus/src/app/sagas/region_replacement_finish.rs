@@ -218,6 +218,7 @@ pub(crate) mod test {
     use nexus_db_queries::authn::saga::Serialized;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
+    use omicron_uuid_kinds::DatasetUuid;
     use sled_agent_client::types::CrucibleOpts;
     use sled_agent_client::types::VolumeConstructionRequest;
     use uuid::Uuid;
@@ -241,7 +242,7 @@ pub(crate) mod test {
         let new_volume_id = Uuid::new_v4();
 
         let replaced_region = {
-            let dataset_id = Uuid::new_v4();
+            let dataset_id = DatasetUuid::new_v4();
             Region::new(
                 dataset_id,
                 old_region_volume_id,

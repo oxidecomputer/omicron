@@ -473,6 +473,7 @@ mod test {
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CollectionUuid;
+    use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::SledUuid;
     use std::collections::HashMap;
@@ -820,12 +821,12 @@ mod test {
         ineligible: SledToDatasetMap,
 
         // A map from eligible dataset IDs to their corresponding sled IDs.
-        eligible_dataset_ids: HashMap<Uuid, SledUuid>,
-        ineligible_dataset_ids: HashMap<Uuid, IneligibleSledKind>,
+        eligible_dataset_ids: HashMap<DatasetUuid, SledUuid>,
+        ineligible_dataset_ids: HashMap<DatasetUuid, IneligibleSledKind>,
     }
 
     // Map of sled IDs to dataset IDs.
-    type SledToDatasetMap = HashMap<SledUuid, Vec<Uuid>>;
+    type SledToDatasetMap = HashMap<SledUuid, Vec<DatasetUuid>>;
 
     impl TestDatasets {
         pub(crate) async fn create(
@@ -962,7 +963,7 @@ mod test {
                     let zpool_iter: Vec<Zpool> =
                         (0..3).map(|_| zpool).collect();
                     stream::iter(zpool_iter).then(|zpool| {
-                        let dataset_id = Uuid::new_v4();
+                        let dataset_id = DatasetUuid::new_v4();
                         let dataset = Dataset::new(
                             dataset_id,
                             zpool.pool_id,
@@ -1043,7 +1044,8 @@ mod test {
 
             for (dataset, region) in dataset_and_regions {
                 // Must be 3 unique datasets
-                assert!(disk_datasets.insert(dataset.id()));
+                let dataset_id = dataset.id();
+                assert!(disk_datasets.insert(*dataset_id.as_untyped_uuid()));
                 // All regions should be unique
                 assert!(regions.insert(region.id()));
 
@@ -1052,7 +1054,7 @@ mod test {
                 // This is a little goofy, but it catches a bug that has
                 // happened before. The returned columns share names (like
                 // "id"), so we need to process them in-order.
-                assert!(!regions.contains(&dataset.id()));
+                assert!(!regions.contains(dataset_id.as_untyped_uuid()));
                 assert!(!disk_datasets.contains(&region.id()));
 
                 // Dataset must not be eligible for provisioning.
@@ -1334,7 +1336,7 @@ mod test {
         // 1 dataset per zpool
         stream::iter(zpool_ids.clone())
             .then(|zpool_id| {
-                let id = Uuid::new_v4();
+                let id = DatasetUuid::new_v4();
                 let dataset = Dataset::new(
                     id,
                     zpool_id,
@@ -1434,7 +1436,7 @@ mod test {
         // 1 dataset per zpool
         stream::iter(zpool_ids)
             .then(|zpool_id| {
-                let id = Uuid::new_v4();
+                let id = DatasetUuid::new_v4();
                 let dataset = Dataset::new(
                     id,
                     zpool_id,
@@ -1511,7 +1513,7 @@ mod test {
             let bogus_addr =
                 Some(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0));
             let dataset = Dataset::new(
-                Uuid::new_v4(),
+                DatasetUuid::new_v4(),
                 zpool_id,
                 bogus_addr,
                 DatasetKind::Crucible,

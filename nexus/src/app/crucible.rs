@@ -22,6 +22,7 @@ use omicron_common::api::external::Error;
 use omicron_common::backoff::{self, BackoffError};
 use omicron_common::progenitor_operation_retry::ProgenitorOperationRetry;
 use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
+use omicron_uuid_kinds::DatasetUuid;
 use slog::Logger;
 
 // Arbitrary limit on concurrency, for operations issued on multiple regions
@@ -90,7 +91,7 @@ impl super::Nexus {
     /// ProgenitorOperationRetry loop.
     async fn crucible_agent_gone_check(
         &self,
-        dataset_id: Uuid,
+        dataset_id: DatasetUuid,
     ) -> Result<bool, Error> {
         let on_in_service_physical_disk = self
             .datastore()
