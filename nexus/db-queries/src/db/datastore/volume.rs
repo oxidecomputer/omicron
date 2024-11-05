@@ -31,6 +31,7 @@ use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
 use crate::db::DbConnection;
 use crate::transaction_retry::OptionalError;
+use anyhow::anyhow;
 use anyhow::bail;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -2771,8 +2772,64 @@ impl DataStore {
             };
 
         if !old_region_in_vcr && new_region_in_vcr {
-            // It does seem like the replacement happened
+            // It does seem like the replacement happened - if this function is
+            // called twice in a row then this can happen.
             return Ok(VolumeReplaceResult::AlreadyHappened);
+        } else if old_region_in_vcr && !new_region_in_vcr {
+            // The replacement hasn't happened yet, but can proceed
+        } else if old_region_in_vcr && new_region_in_vcr {
+            // Both the old region and new region exist in this VCR. Regions are
+            // not reused, so this is an illegal state: if the replacement of
+            // the old region occurred, then the new region would be present
+            // multiple times in the volume. We have to bail out here.
+            //
+            // The guards against this happening are:
+            //
+            // - only one replacement can occur for a volume at a time (due to
+            //   the volume repair lock), and
+            //
+            // - region replacement does not delete the old region until the
+            //   "region replacement finish" saga, which happens at the very end
+            //   of the process. If it eagerly deleted the region, the crucible
+            //   agent would be free to reuse the port for another region
+            //   allocation, and an identical target (read: ip and port) could
+            //   be confusing. Most of the time, we assume that the dataset
+            //   containing that agent has been expunged, so the agent is gone,
+            //   so this port reuse cannot occur
+            return Err(err.bail(ReplaceRegionError::RegionReplacementError(
+                anyhow!("old_region_in_vcr && new_region_in_vcr"),
+            )));
+        } else if !old_region_in_vcr && !new_region_in_vcr {
+            // Neither the region we've been asked to replace or the new region
+            // is in the VCR. This is an illegal state, as this function would
+            // be performing a no-op. We have to bail out here.
+            //
+            // The guard against this happening is again that only one
+            // replacement can occur for a volume at a time: if it was possible
+            // for multiple region replacements to occur, then both would be
+            // attempting to swap out the same old region for different new
+            // regions:
+            //
+            // region replacement one:
+            //
+            //   volume_replace_region_in_txn(
+            //     ..,
+            //     existing = [fd00:1122:3344:145::10]:40001,
+            //     replacement = [fd00:1122:3344:322::4]:3956,
+            //   )
+            //
+            // region replacement two:
+            //
+            //   volume_replace_region_in_txn(
+            //     ..,
+            //     existing = [fd00:1122:3344:145::10]:40001,
+            //     replacement = [fd00:1122:3344:fd1::123]:27001,
+            //   )
+            //
+            // The one that replaced second would always land in this branch.
+            return Err(err.bail(ReplaceRegionError::RegionReplacementError(
+                anyhow!("!old_region_in_vcr && !new_region_in_vcr"),
+            )));
         }
 
         use db::schema::region::dsl as region_dsl;
