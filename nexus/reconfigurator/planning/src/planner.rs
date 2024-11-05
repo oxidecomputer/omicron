@@ -1163,7 +1163,6 @@ mod test {
         assert_eq!(diff.datasets.added.len(), 1);
         assert_eq!(diff.datasets.removed.len(), 0);
 
-
         let zones_added = diff.zones.added.get(changed_sled_id).unwrap();
         assert_eq!(
             zones_added.zones.len(),
