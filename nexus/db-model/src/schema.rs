@@ -10,7 +10,7 @@ table! {
     disk (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -34,7 +34,7 @@ table! {
     image (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -54,7 +54,7 @@ table! {
     project_image (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -74,7 +74,7 @@ table! {
     silo_image (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -104,7 +104,7 @@ table! {
         id -> Uuid,
         port_settings_id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -122,7 +122,7 @@ table! {
     switch_port_settings (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -258,7 +258,7 @@ table! {
     bgp_config (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -295,7 +295,7 @@ table! {
     bgp_announce_set (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -325,7 +325,7 @@ table! {
     address_lot (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -370,7 +370,7 @@ table! {
     global_image (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -388,7 +388,7 @@ table! {
     snapshot (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -410,7 +410,7 @@ table! {
     instance (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -510,7 +510,7 @@ table! {
     network_interface (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -530,7 +530,7 @@ table! {
     instance_network_interface (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -550,7 +550,7 @@ table! {
     service_network_interface (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -568,7 +568,7 @@ table! {
     ip_pool (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -666,7 +666,7 @@ table! {
     floating_ip (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -684,7 +684,7 @@ table! {
     silo (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -750,7 +750,7 @@ table! {
     identity_provider (silo_id, id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -764,7 +764,7 @@ table! {
     saml_identity_provider (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -788,7 +788,7 @@ table! {
     ssh_key (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -819,7 +819,7 @@ table! {
     project (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -969,7 +969,7 @@ table! {
     certificate (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -1113,7 +1113,7 @@ table! {
     vpc (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -1131,7 +1131,7 @@ table! {
     vpc_subnet (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -1147,7 +1147,7 @@ table! {
     vpc_router (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -1162,7 +1162,7 @@ table! {
     router_route (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -1177,7 +1177,7 @@ table! {
     internet_gateway(id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -1191,7 +1191,7 @@ table! {
     internet_gateway_ip_pool(id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -1204,7 +1204,7 @@ table! {
     internet_gateway_ip_address(id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -1219,7 +1219,7 @@ table! {
     vpc_firewall_rule (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -1268,7 +1268,7 @@ table! {
     user_builtin (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
@@ -1301,7 +1301,7 @@ table! {
     role_builtin (resource_type, role_name) {
         resource_type -> Text,
         role_name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
     }
 }
 
@@ -1819,7 +1819,7 @@ table! {
     probe (id) {
         id -> Uuid,
         name -> Text,
-        description -> Text,
+        description -> Nullable<Text>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,

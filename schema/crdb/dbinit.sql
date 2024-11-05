@@ -424,7 +424,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.certificate (
     -- Identity metadata (resource)
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
@@ -761,7 +761,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo (
     /* Identity metadata */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
@@ -862,7 +862,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.identity_provider (
     /* Identity metadata */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
@@ -890,7 +890,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.saml_identity_provider (
     /* Identity metadata */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
@@ -929,7 +929,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_saml_idp_by_silo_name ON omicron.public
 CREATE TABLE IF NOT EXISTS omicron.public.ssh_key (
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
@@ -1006,7 +1006,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.project (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
@@ -1094,7 +1094,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
@@ -1241,7 +1241,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.disk (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
@@ -1308,7 +1308,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.image (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
@@ -1398,7 +1398,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.snapshot (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
@@ -1501,7 +1501,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.vpc (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
@@ -1543,7 +1543,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.vpc_subnet (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
@@ -1578,7 +1578,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.network_interface (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
@@ -1754,7 +1754,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.vpc_firewall_rule (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
@@ -1789,7 +1789,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.vpc_router (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
@@ -1828,7 +1828,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.router_route (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     /* Indicates that the object has been deleted */
@@ -1850,7 +1850,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_route_by_router ON omicron.public.route
 CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway (
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
@@ -1868,7 +1868,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_internet_gateway_by_vpc ON omicron.publ
 CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway_ip_pool (
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
@@ -1884,7 +1884,7 @@ CREATE INDEX IF NOT EXISTS lookup_internet_gateway_ip_pool_by_igw_id ON omicron.
 CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway_ip_address (
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
@@ -1905,7 +1905,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
     /* Resource identity metadata */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
@@ -2513,7 +2513,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.user_builtin (
      */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ
@@ -2701,7 +2701,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.address_lot_kind AS ENUM (
 CREATE TABLE IF NOT EXISTS omicron.public.address_lot (
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
@@ -2785,7 +2785,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_group (
     /* port settings in this group */
     port_settings_id UUID NOT NULL,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ
@@ -2799,7 +2799,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_switch_port_settings_group_by_name ON o
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings (
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ
@@ -2970,7 +2970,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_a
 CREATE TABLE IF NOT EXISTS omicron.public.bgp_config (
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
@@ -2993,7 +2993,7 @@ CREATE INDEX IF NOT EXISTS lookup_bgp_config_by_asn ON omicron.public.bgp_config
 CREATE TABLE IF NOT EXISTS omicron.public.bgp_announce_set (
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ
@@ -4166,7 +4166,7 @@ FROM interleaved_versions;
 CREATE TABLE IF NOT EXISTS omicron.public.probe (
     id UUID NOT NULL PRIMARY KEY,
     name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
+    description STRING(512),
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
