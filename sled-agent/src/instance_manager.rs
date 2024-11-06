@@ -146,7 +146,7 @@ impl InstanceManager {
             .tx
             .send(InstanceManagerRequest::EnsureRegistered {
                 propolis_id,
-                instance,
+                instance: Box::new(instance),
                 sled_identifiers: Box::new(sled_identifiers),
                 tx,
             })
@@ -335,12 +335,12 @@ impl InstanceManager {
 enum InstanceManagerRequest {
     EnsureRegistered {
         propolis_id: PropolisUuid,
-        instance: InstanceEnsureBody,
         // These are boxed because they are, apparently, quite large, and Clippy
         // whinges about the overall size of this variant relative to the
         // others. Since we will generally send `EnsureRegistered` requests much
         // less frequently than most of the others, boxing this seems like a
         // reasonable choice...
+        instance: Box<InstanceEnsureBody>,
         sled_identifiers: Box<SledIdentifiers>,
         tx: oneshot::Sender<Result<SledVmmState, Error>>,
     },
@@ -462,7 +462,7 @@ impl InstanceManagerRunner {
                             sled_identifiers,
                             tx,
                         }) => {
-                            tx.send(self.ensure_registered(propolis_id, instance, *sled_identifiers).await).map_err(|_| Error::FailedSendClientClosed)
+                            tx.send(self.ensure_registered(propolis_id, *instance, *sled_identifiers).await).map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(EnsureUnregistered { propolis_id, tx }) => {
                             self.ensure_unregistered(tx, propolis_id)

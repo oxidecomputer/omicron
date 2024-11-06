@@ -892,7 +892,7 @@ impl DataStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::TestDatabase;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
@@ -920,7 +920,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_service_network_interfaces_list() {
-        usdt::register_probes().unwrap();
         let logctx =
             dev::test_setup_log("test_service_network_interfaces_list");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;

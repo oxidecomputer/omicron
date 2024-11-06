@@ -145,6 +145,7 @@ table! {
         speed -> crate::SwitchLinkSpeedEnum,
         autoneg -> Bool,
         lldp_link_config_id -> Nullable<Uuid>,
+        tx_eq_config_id -> Nullable<Uuid>,
     }
 }
 
@@ -161,6 +162,17 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
+    tx_eq_config (id) {
+        id -> Uuid,
+        pre1 -> Nullable<Int4>,
+        pre2 -> Nullable<Int4>,
+        main -> Nullable<Int4>,
+        post2 -> Nullable<Int4>,
+        post1 -> Nullable<Int4>,
     }
 }
 
@@ -1038,6 +1050,10 @@ table! {
         kind -> crate::DatasetKindEnum,
         size_used -> Nullable<Int8>,
         zone_name -> Nullable<Text>,
+
+        quota -> Nullable<Int8>,
+        reservation -> Nullable<Int8>,
+        compression -> Nullable<Text>,
     }
 }
 
@@ -1646,6 +1662,35 @@ table! {
 
         id -> Uuid,
         pool_id -> Uuid,
+    }
+}
+
+table! {
+    bp_sled_omicron_datasets (blueprint_id, sled_id) {
+        blueprint_id -> Uuid,
+        sled_id -> Uuid,
+
+        generation -> Int8,
+    }
+}
+
+table! {
+    bp_omicron_dataset (blueprint_id, id) {
+        blueprint_id -> Uuid,
+        sled_id -> Uuid,
+        id -> Uuid,
+
+        disposition -> crate::DbBpDatasetDispositionEnum,
+
+        pool_id -> Uuid,
+        kind -> crate::DatasetKindEnum,
+        zone_name -> Nullable<Text>,
+        ip -> Nullable<Inet>,
+        port -> Nullable<Int4>,
+
+        quota -> Nullable<Int8>,
+        reservation -> Nullable<Int8>,
+        compression -> Text,
     }
 }
 

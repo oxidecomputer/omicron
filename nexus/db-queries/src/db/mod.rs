@@ -36,6 +36,8 @@ mod update_and_check;
 // full table scans the same way pooled connections do.
 pub use pool_connection::DISALLOW_FULL_TABLE_SCAN_SQL;
 
+#[cfg(any(test, feature = "testing"))]
+pub mod pub_test_utils;
 pub mod test_utils;
 
 pub use nexus_db_fixed_data as fixed_data;

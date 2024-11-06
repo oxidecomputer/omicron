@@ -94,7 +94,7 @@ mod test {
     use super::*;
 
     use crate::db;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::TestDatabase;
     use async_bb8_diesel::AsyncSimpleConnection;
     use diesel::SelectableHelper;
     use expectorate::assert_contents;

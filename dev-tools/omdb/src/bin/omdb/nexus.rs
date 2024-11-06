@@ -35,6 +35,7 @@ use nexus_client::types::SagaState;
 use nexus_client::types::SledSelector;
 use nexus_client::types::UninitializedSledId;
 use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::db::DataStore;
 use nexus_inventory::now_db_precision;
 use nexus_saga_recovery::LastPass;
 use nexus_types::deployment::Blueprint;
@@ -64,6 +65,7 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::str::FromStr;
+use std::sync::Arc;
 use tabled::settings::object::Columns;
 use tabled::settings::Padding;
 use tabled::Tabled;
@@ -2709,6 +2711,27 @@ async fn cmd_nexus_sled_expunge(
     args: &SledExpungeArgs,
     omdb: &Omdb,
     log: &slog::Logger,
+    destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    let datastore = args.db_url_opts.connect(omdb, log).await?;
+    let result = cmd_nexus_sled_expunge_with_datastore(
+        &datastore,
+        client,
+        args,
+        log,
+        destruction_token,
+    )
+    .await;
+    datastore.terminate().await;
+    result
+}
+
+// `omdb nexus sleds expunge`, but borrowing a datastore
+async fn cmd_nexus_sled_expunge_with_datastore(
+    datastore: &Arc<DataStore>,
+    client: &nexus_client::Client,
+    args: &SledExpungeArgs,
+    log: &slog::Logger,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     // This is an extremely dangerous and irreversible operation. We put a
@@ -2720,7 +2743,6 @@ async fn cmd_nexus_sled_expunge(
     //    most recent inventory collection
     use nexus_db_queries::context::OpContext;
 
-    let datastore = args.db_url_opts.connect(omdb, log).await?;
     let opctx = OpContext::for_tests(log.clone(), datastore.clone());
     let opctx = &opctx;
 
@@ -2800,11 +2822,30 @@ async fn cmd_nexus_sled_expunge_disk(
     args: &DiskExpungeArgs,
     omdb: &Omdb,
     log: &slog::Logger,
+    destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    let datastore = args.db_url_opts.connect(omdb, log).await?;
+    let result = cmd_nexus_sled_expunge_disk_with_datastore(
+        &datastore,
+        client,
+        args,
+        log,
+        destruction_token,
+    )
+    .await;
+    datastore.terminate().await;
+    result
+}
+
+async fn cmd_nexus_sled_expunge_disk_with_datastore(
+    datastore: &Arc<DataStore>,
+    client: &nexus_client::Client,
+    args: &DiskExpungeArgs,
+    log: &slog::Logger,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     use nexus_db_queries::context::OpContext;
 
-    let datastore = args.db_url_opts.connect(omdb, log).await?;
     let opctx = OpContext::for_tests(log.clone(), datastore.clone());
     let opctx = &opctx;
 

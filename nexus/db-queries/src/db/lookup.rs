@@ -958,8 +958,8 @@ mod test {
     use super::Instance;
     use super::LookupPath;
     use super::Project;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::model::Name;
+    use crate::db::pub_test_utils::TestDatabase;
     use omicron_test_utils::dev;
 
     /* This is a smoke test that things basically appear to work. */

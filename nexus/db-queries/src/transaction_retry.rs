@@ -246,7 +246,7 @@ impl<E: std::fmt::Debug> OptionalError<E> {
 mod test {
     use super::*;
 
-    use crate::db::datastore::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::TestDatabase;
     use omicron_test_utils::dev;
     use oximeter::types::FieldValue;
 
