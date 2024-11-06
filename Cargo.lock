@@ -5539,6 +5539,7 @@ dependencies = [
  "nexus-config",
  "nexus-db-fixed-data",
  "nexus-db-model",
+ "nexus-defaults",
  "nexus-inventory",
  "nexus-reconfigurator-planning",
  "nexus-sled-agent-shared",

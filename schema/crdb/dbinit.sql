@@ -4074,6 +4074,53 @@ STORING (
     time_deleted
 );
 
+/** Utilization counts for the ASIC tables.
+ *
+ * The Tofino ASIC has limited resources. We divy those up in various ways for
+ * specific kinds of tables in the P4 program we load onto it. This table tracks
+ * the space in each kind of table consumed by a API resource.
+ *
+ * For example, external IP addresses for a guest instance are added to
+ * Dendrite's NAT tables, which are used to translate those external addresses
+ * into the addresses on the VPC Subnet that the guest sees itself.
+ */
+CREATE TYPE IF NOT EXISTS omicron.public.asic_table AS ENUM (
+    'ipv4_routing',
+    'ipv6_routing',
+    'ipv4_addresses',
+    'ipv6_addresses',
+    'ipv4_nat',
+    'ipv6_nat',
+    'ipv4_arp',
+    'ipv6_neighbor'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.asic_table_utilization (
+    -- ID of the API resource that consumes ASIC table space.
+    id UUID PRIMARY KEY,
+    -- The table on which the space is consumed.
+    asic_table omicron.public.asic_table,
+    -- The number of entries this resource consumes in the ASIC table.
+    n_entries INT8 NOT NULL,
+    -- The time this entry was added.
+    time_created TIMESTAMPTZ NOT NULL,
+    -- The time this entry was deleted.
+    time_deleted TIMESTAMPTZ,
+
+    -- Check that any row uses at least 1 entry in the ASIC table.
+    -- Violations of this constraint are used to fail the query if there is
+    -- insufficient space in the ASIC table, so the name of this constraint is
+    -- _load-bearing_. Please do not change it without also changing the
+    -- corresponding constant in 
+    -- `nexus/db-queries/db/datastore/asic_table_utilization.rs.
+    CONSTRAINT nonzero_utilization CHECK (n_entries > 0)
+);
+
+CREATE INDEX IF NOT EXISTS asic_table_utilization_lookup_by_table
+ON omicron.public.asic_table_utilization (asic_table)
+STORING (n_entries)
+WHERE time_deleted IS NULL;
+
 CREATE TYPE IF NOT EXISTS omicron.public.bfd_mode AS ENUM (
     'single_hop',
     'multi_hop'

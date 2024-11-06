@@ -11,6 +11,7 @@ extern crate newtype_derive;
 
 mod address_lot;
 mod allow_list;
+mod asic_table_utilization;
 mod bfd;
 mod bgp;
 mod block_size;
@@ -129,6 +130,7 @@ pub use self::macaddr::*;
 pub use self::unsigned::*;
 pub use address_lot::*;
 pub use allow_list::*;
+pub use asic_table_utilization::*;
 pub use bfd::*;
 pub use bgp::*;
 pub use block_size::*;

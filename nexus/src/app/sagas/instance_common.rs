@@ -8,13 +8,14 @@ use std::net::{IpAddr, Ipv6Addr};
 
 use crate::Nexus;
 use nexus_db_model::{
-    ByteCount, ExternalIp, InstanceState, IpAttachState, Ipv4NatEntry,
-    SledReservationConstraints, SledResource, VmmState,
+    AsicTableUtilization, ByteCount, ExternalIp, InstanceState, IpAttachState,
+    Ipv4NatEntry, SledReservationConstraints, SledResource, VmmState,
 };
 use nexus_db_queries::authz;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::{authn, context::OpContext, db, db::DataStore};
 use omicron_common::api::external::{Error, NameOrId};
+use omicron_common::api::internal::nexus::AsicTable;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use serde::{Deserialize, Serialize};
 use steno::ActionError;
@@ -323,6 +324,114 @@ pub(super) async fn instance_ip_get_instance_state(
     }
 
     Ok(propolis_and_sled_id)
+}
+
+/// Track the ASIC NAT table utilization for an external IP address.
+pub async fn track_asic_nat_table_utilization(
+    sagactx: &NexusActionContext,
+    serialized_authn: &authn::saga::Serialized,
+    target_ip: ModifyStateForExternalIp,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let opctx =
+        crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+    if !target_ip.do_saga {
+        return Ok(());
+    }
+    let Some(target_ip) = target_ip.external_ip else {
+        return Err(ActionError::action_failed(Error::internal_error(
+            "tried to `do_saga` without valid external IP",
+        )));
+    };
+    let table = if target_ip.ip.is_ipv4() {
+        AsicTable::Ipv4Nat
+    } else {
+        AsicTable::Ipv6Nat
+    };
+    let entry = AsicTableUtilization::one(target_ip.id, table.into());
+    datastore
+        .insert_asic_utilization_entry(&opctx, &entry)
+        .await
+        .map_err(ActionError::action_failed)
+}
+
+/// Remove the ASIC NAT table utilization for an external IP address.
+pub async fn remove_asic_nat_table_utilization(
+    sagactx: &NexusActionContext,
+    serialized_authn: &authn::saga::Serialized,
+    target_ip: ModifyStateForExternalIp,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let opctx =
+        crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+    if !target_ip.do_saga {
+        return Ok(());
+    }
+    let Some(target_ip) = target_ip.external_ip else {
+        return Err(ActionError::action_failed(Error::internal_error(
+            "tried to `do_saga` without valid external IP",
+        )));
+    };
+    datastore
+        .delete_asic_utilization_entry(&opctx, &target_ip.id)
+        .await
+        .map_err(ActionError::action_failed)
+}
+
+/// Track the ASIC address table utilization for an external IP address.
+pub async fn track_asic_address_table_utilization(
+    sagactx: &NexusActionContext,
+    serialized_authn: &authn::saga::Serialized,
+    target_ip: ModifyStateForExternalIp,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let opctx =
+        crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+    if !target_ip.do_saga {
+        return Ok(());
+    }
+    let Some(target_ip) = target_ip.external_ip else {
+        return Err(ActionError::action_failed(Error::internal_error(
+            "tried to `do_saga` without valid external IP",
+        )));
+    };
+    let table = if target_ip.ip.is_ipv4() {
+        AsicTable::Ipv4Addresses
+    } else {
+        AsicTable::Ipv6Addresses
+    };
+    let entry = AsicTableUtilization::one(target_ip.id, table.into());
+    datastore
+        .insert_asic_utilization_entry(&opctx, &entry)
+        .await
+        .map_err(ActionError::action_failed)
+}
+
+/// Remove the ASIC address table utilization for an external IP address.
+pub async fn remove_asic_address_table_utilization(
+    sagactx: &NexusActionContext,
+    serialized_authn: &authn::saga::Serialized,
+    target_ip: ModifyStateForExternalIp,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let opctx =
+        crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+    if !target_ip.do_saga {
+        return Ok(());
+    }
+    let Some(target_ip) = target_ip.external_ip else {
+        return Err(ActionError::action_failed(Error::internal_error(
+            "tried to `do_saga` without valid external IP",
+        )));
+    };
+    datastore
+        .delete_asic_utilization_entry(&opctx, &target_ip.id)
+        .await
+        .map_err(ActionError::action_failed)
 }
 
 /// Adds a NAT entry to DPD, routing packets bound for `target_ip` to a

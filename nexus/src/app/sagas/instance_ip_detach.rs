@@ -5,12 +5,14 @@
 use super::instance_common::{
     instance_ip_add_nat, instance_ip_add_opte, instance_ip_get_instance_state,
     instance_ip_move_state, instance_ip_remove_nat, instance_ip_remove_opte,
+    remove_asic_nat_table_utilization, track_asic_nat_table_utilization,
     ModifyStateForExternalIp, VmmAndSledIds,
 };
 use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use crate::external_api::params;
+use anyhow::Context as _;
 use nexus_db_model::IpAttachState;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::views;
@@ -41,7 +43,12 @@ declare_saga_actions! {
         - siid_nat_undo
     }
 
-    REMOVE_OPTE_PORT -> "no_result1" {
+    REMOVE_NAT_UTILIZATION -> "no_result1" {
+        + siid_remove_nat_utilization
+        - siid_remove_nat_utilization_undo
+    }
+
+    REMOVE_OPTE_PORT -> "no_result3" {
         + siid_update_opte
         - siid_update_opte_undo
     }
@@ -205,6 +212,35 @@ async fn siid_nat_undo(
     Ok(())
 }
 
+// Remove the ASIC NAT table utilization entry for this external IP address.
+async fn siid_remove_nat_utilization(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let params = sagactx.saga_params::<Params>()?;
+    let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
+    remove_asic_nat_table_utilization(
+        &sagactx,
+        &params.serialized_authn,
+        target_ip,
+    )
+    .await
+}
+
+// Re-add the ASIC NAT table utilization entry for this external IP address.
+async fn siid_remove_nat_utilization_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let params = sagactx.saga_params::<Params>()?;
+    let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
+    track_asic_nat_table_utilization(
+        &sagactx,
+        &params.serialized_authn,
+        target_ip,
+    )
+    .await
+    .context("failed to track ASIC NAT table utilization again")
+}
+
 async fn siid_update_opte(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
@@ -271,6 +307,7 @@ impl NexusSaga for SagaInstanceIpDetach {
         builder.append(detach_external_ip_action());
         builder.append(instance_state_action());
         builder.append(remove_nat_action());
+        builder.append(remove_nat_utilization_action());
         builder.append(remove_opte_port_action());
         builder.append(complete_detach_action());
         Ok(builder.build()?)
@@ -298,7 +335,10 @@ pub(crate) mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_instance;
     use nexus_test_utils_macros::nexus_test;
-    use omicron_common::api::external::{Name, SimpleIdentity};
+    use omicron_common::api::{
+        external::{Name, SimpleIdentity},
+        internal::nexus::AsicTable,
+    };
     use std::sync::Arc;
 
     type ControlPlaneTestContext =
@@ -389,6 +429,15 @@ pub(crate) mod test {
 
         attach_instance_ips(nexus, &opctx).await;
 
+        assert_eq!(
+            datastore
+                .asic_utilization(&opctx, AsicTable::Ipv4Nat.into())
+                .await
+                .unwrap(),
+            2, // 1 float, 1 ephemeral
+            "Failed to account for ASIC NAT table utilization"
+        );
+
         for use_float in [false, true] {
             let params = new_test_params(&opctx, datastore, use_float).await;
             nexus
@@ -416,6 +465,16 @@ pub(crate) mod test {
             .unwrap();
         assert_eq!(db_eips.len(), 1);
         assert!(db_eips.iter().any(|v| v.kind == IpKind::SNat));
+
+        // And we have removed the NAT utilization entry.
+        assert_eq!(
+            datastore
+                .asic_utilization(&opctx, AsicTable::Ipv4Nat.into())
+                .await
+                .unwrap(),
+            0,
+            "Failed to account for ASIC NAT table utilization"
+        );
     }
 
     pub(crate) async fn verify_clean_slate(

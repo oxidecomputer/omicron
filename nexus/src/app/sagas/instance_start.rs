@@ -16,9 +16,11 @@ use crate::app::instance::{
 };
 use crate::app::sagas::declare_saga_actions;
 use chrono::Utc;
+use nexus_db_model::AsicTableUtilization;
 use nexus_db_queries::db::{identity::Resource, lookup::LookupPath};
 use nexus_db_queries::{authn, authz, db};
 use omicron_common::api::external::Error;
+use omicron_common::api::internal::nexus::AsicTable;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use serde::{Deserialize, Serialize};
 use slog::info;
@@ -79,6 +81,11 @@ declare_saga_actions! {
         - sis_move_to_starting_undo
     }
 
+    TRACK_NAT_UTILIZATION -> "no_result0" {
+        + sis_track_nat_utilization
+        - sis_track_nat_utilization_undo
+    }
+
     // TODO(#3879) This can be replaced with an action that triggers the NAT RPW
     // once such an RPW is available.
     DPD_ENSURE -> "dpd_ensure" {
@@ -137,6 +144,7 @@ impl NexusSaga for SagaInstanceStart {
         builder.append(alloc_propolis_ip_action());
         builder.append(create_vmm_record_action());
         builder.append(mark_as_starting_action());
+        builder.append(track_nat_utilization_action());
         builder.append(dpd_ensure_action());
         builder.append(v2p_ensure_action());
         builder.append(ensure_registered_action());
@@ -468,6 +476,70 @@ async fn sis_account_virtual_resources_undo(
         )
         .await
         .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+// Track the ASIC NAT table utilization entry for this instance's external
+// addresses.
+async fn sis_track_nat_utilization(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let instance_id = InstanceUuid::from_untyped_uuid(params.db_instance.id());
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    let datastore = osagactx.datastore();
+
+    // Look up external IP addresses for this instance, and track the NAT table
+    // space for each one.
+    let eips = datastore
+        .instance_lookup_external_ips(&opctx, instance_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+    for eip in eips.into_iter() {
+        let table = if eip.ip.is_ipv4() {
+            AsicTable::Ipv4Nat
+        } else {
+            AsicTable::Ipv6Nat
+        };
+        let entry = AsicTableUtilization::one(eip.id, table.into());
+        datastore
+            .insert_asic_utilization_entry(&opctx, &entry)
+            .await
+            .map_err(ActionError::action_failed)?;
+    }
+    Ok(())
+}
+
+// Un-track the ASIC NAT table utilization entry for this instance's external
+// addresses.
+async fn sis_track_nat_utilization_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let instance_id = InstanceUuid::from_untyped_uuid(params.db_instance.id());
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    let datastore = osagactx.datastore();
+
+    // Look up external IP addresses for this instance, and remove the NAT table
+    // utilization for each one.
+    let eips = datastore
+        .instance_lookup_external_ips(&opctx, instance_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+    for eip in eips.into_iter() {
+        datastore
+            .delete_asic_utilization_entry(&opctx, &eip.id)
+            .await
+            .map_err(ActionError::action_failed)?;
+    }
     Ok(())
 }
 

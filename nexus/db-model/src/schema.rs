@@ -1979,6 +1979,16 @@ table! {
     }
 }
 
+table! {
+    asic_table_utilization (id) {
+        id -> Uuid,
+        asic_table -> crate::AsicTableEnum,
+        n_entries -> Int8,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
 allow_tables_to_appear_in_same_query!(instance, migration);
 allow_tables_to_appear_in_same_query!(migration, vmm);
 joinable!(instance -> migration (migration_id));

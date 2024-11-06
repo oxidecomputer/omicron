@@ -44,14 +44,7 @@ impl DataStore {
             .filter(dsl::vni.eq(nat_entry.vni))
             .filter(dsl::mac.eq(nat_entry.mac))
             .filter(dsl::version_removed.is_null())
-            .select((
-                dsl::external_address,
-                dsl::first_port,
-                dsl::last_port,
-                dsl::sled_address,
-                dsl::vni,
-                dsl::mac,
-            ));
+            .select(Ipv4NatValues::as_select());
 
         // SELECT exactly the values we're trying to INSERT, but only
         // if it does not already exist.

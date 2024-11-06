@@ -432,3 +432,53 @@ pub struct DownstairsClientStopped {
     pub time: DateTime<Utc>,
     pub reason: DownstairsClientStoppedReason,
 }
+
+/// A table on the Tofino ASIC whose capacity is tracked by Nexus to prevent
+/// overfilling.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Eq,
+    JsonSchema,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum AsicTable {
+    /// Table with IPv4 routing entries.
+    Ipv4Routing,
+    /// Table with IPv6 routing entries.
+    Ipv6Routing,
+    /// Table with IPv4 addresses owned by the ASIC>
+    Ipv4Addresses,
+    /// Table with IPv6 addresses owned by the ASIC>
+    Ipv6Addresses,
+    /// Table with IPv4 NAT entries.
+    Ipv4Nat,
+    /// Table with IPv6 NAT entries.
+    Ipv6Nat,
+    /// Table with IPv4 ARP entries.
+    Ipv4Arp,
+    /// Table with IPv6 neighbor (NDP) entries.
+    Ipv6Neighbor,
+}
+
+impl fmt::Display for AsicTable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            AsicTable::Ipv4Routing => "ipv4_routing",
+            AsicTable::Ipv6Routing => "ipv6_routing",
+            AsicTable::Ipv4Addresses => "ipv4_addresses",
+            AsicTable::Ipv6Addresses => "ipv6_addresses",
+            AsicTable::Ipv4Nat => "ipv4_nat",
+            AsicTable::Ipv6Nat => "ipv6_nat",
+            AsicTable::Ipv4Arp => "ipv6_arp",
+            AsicTable::Ipv6Neighbor => "ipv6_neighbor",
+        };
+        f.write_str(s)
+    }
+}

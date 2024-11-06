@@ -10,6 +10,7 @@ use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
+use std::num::NonZeroU32;
 
 /// The name provided for a default primary network interface for a guest
 /// instance.
@@ -75,6 +76,90 @@ pub fn random_vpc_ipv6_prefix() -> Result<Ipv6Net, external::Error> {
     )
     .unwrap())
 }
+
+/// Capacity limits for one table on the Tofino ASIC.
+///
+/// The ASIC uses a set of match-action tables to do its job, such as for
+/// routing packets out of the rack to customer networks. These tables have a
+/// size fixed by the P4 program loaded onto the ASIC at runtime.
+///
+/// The source for these values is `dendrite/p4/constants.p4`, which defines the
+/// _desired_ size for each table. However, the actual available size of each
+/// table may be slightly less, as some tables include default entries. The
+/// concrete values for these sizes that we actually get are defined in
+/// `dendrite/dpd-client/tests/integration_tests/table_tests.rs`, which are
+/// determined empirically after loading the P4 program.
+#[derive(Clone, Copy, Debug)]
+pub struct AsicTableCapacity {
+    // The total capacity of the ASIC table.
+    total_capacity: NonZeroU32,
+    // The number of entries reserved for the Oxide control plane.
+    n_reserved: u32,
+    // The number of entries left that can be consumed by API resources.
+    n_allocatable: u32,
+}
+
+impl AsicTableCapacity {
+    // Construct a new table size.
+    //
+    // # Panics
+    //
+    // This panics if `n_reserved` is greater than `size`, or if `size` is zero.
+    const fn new(size: u32, n_reserved: u32) -> Self {
+        assert!(size > 0, "`size` must be non-zero");
+        assert!(size >= n_reserved, "`size` must be >= `n_reserved");
+        Self {
+            total_capacity: unsafe { NonZeroU32::new_unchecked(size) },
+            n_reserved,
+            n_allocatable: size - n_reserved,
+        }
+    }
+
+    /// Return the total capacity of the table.
+    pub const fn total_capacity(&self) -> NonZeroU32 {
+        self.total_capacity
+    }
+
+    /// Return the number of entries reserved for the Oxide control plane.
+    pub const fn n_reserved(&self) -> u32 {
+        self.n_reserved
+    }
+
+    /// Return the number of entries that can be allocated and consumed by API
+    /// resources.
+    pub const fn n_allocatable(&self) -> u32 {
+        self.n_allocatable
+    }
+}
+
+/// Total size limit on the IPv4 routing table.
+pub static IPV4_ROUTING_TABLE: AsicTableCapacity =
+    AsicTableCapacity::new(4091, 0);
+
+/// Total size limit on the IPv6 routing table.
+pub static IPV6_ROUTING_TABLE: AsicTableCapacity =
+    AsicTableCapacity::new(1023, 0);
+
+/// Total size limit on the IPv4 address table.
+pub static IPV4_ADDRESS_TABLE: AsicTableCapacity =
+    AsicTableCapacity::new(511, 0);
+
+/// Total size limit on the IPv6 address table.
+pub static IPV6_ADDRESS_TABLE: AsicTableCapacity =
+    AsicTableCapacity::new(511, 0);
+
+/// Total size limit on the IPv4 NAT table.
+pub static IPV4_NAT_TABLE: AsicTableCapacity = AsicTableCapacity::new(1024, 16);
+
+/// Total size limit on the IPv6 NAT table.
+pub static IPV6_NAT_TABLE: AsicTableCapacity = AsicTableCapacity::new(1024, 16);
+
+/// Total size limit on the IPv4 ARP table.
+pub static IPV4_ARP_TABLE: AsicTableCapacity = AsicTableCapacity::new(512, 0);
+
+/// Total size limit on the IPv6 neighbor (NDP) table.
+pub static IPV6_NEIGHBOR_TABLE: AsicTableCapacity =
+    AsicTableCapacity::new(512, 0);
 
 #[cfg(test)]
 mod tests {
