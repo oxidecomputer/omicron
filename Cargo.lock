@@ -5970,7 +5970,6 @@ dependencies = [
  "humantime",
  "internal-dns-types",
  "ipnetwork",
- "itertools 0.13.0",
  "newtype-uuid",
  "newtype_derive",
  "nexus-sled-agent-shared",

@@ -353,8 +353,8 @@ impl Blueprint {
                         datasets: sa
                             .datasets
                             .iter()
-                            .map(|d| CollectionDatasetIdentifier::from(d))
-                            .collect::<BTreeSet<_>>(),
+                            .map(|d| (CollectionDatasetIdentifier::from(d), d.clone().into()))
+                            .collect::<BTreeMap<_, BlueprintDatasetConfigForDiff>>(),
                     }
                     .into(),
                 )
@@ -962,6 +962,59 @@ impl From<BlueprintDatasetConfig> for DatasetConfig {
     }
 }
 
+/// Information about a dataset as used for diffing collections and blueprints.
+///
+/// This struct acts as a "lowest common denominator" between the
+/// inventory and blueprint types, for the purposes of comparison.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct BlueprintDatasetConfigForDiff {
+    pub name: String,
+    pub id: Option<DatasetUuid>,
+    pub quota: Option<ByteCount>,
+    pub reservation: Option<ByteCount>,
+    pub compression: String,
+}
+
+fn unwrap_or_none<T: ToString>(opt: &Option<T>) -> String {
+    opt.as_ref().map(|v| v.to_string()).unwrap_or_else(|| "none".to_string())
+}
+
+impl BlueprintDatasetConfigForDiff {
+    fn as_strings(&self) -> Vec<String> {
+        vec![
+            self.name.clone(),
+            unwrap_or_none(&self.id),
+            unwrap_or_none(&self.quota),
+            unwrap_or_none(&self.reservation),
+            self.compression.clone(),
+        ]
+    }
+}
+
+impl From<crate::inventory::Dataset> for BlueprintDatasetConfigForDiff {
+    fn from(dataset: crate::inventory::Dataset) -> Self {
+        Self {
+            name: dataset.name,
+            id: dataset.id,
+            quota: dataset.quota,
+            reservation: dataset.reservation,
+            compression: dataset.compression,
+        }
+    }
+}
+
+impl From<BlueprintDatasetConfig> for BlueprintDatasetConfigForDiff {
+    fn from(dataset: BlueprintDatasetConfig) -> Self {
+        Self {
+            name: DatasetName::new(dataset.pool, dataset.kind).full_name(),
+            id: Some(dataset.id),
+            quota: dataset.quota,
+            reservation: dataset.reservation,
+            compression: dataset.compression.to_string(),
+        }
+    }
+}
+
 /// Describe high-level metadata about a blueprint
 // These fields are a subset of [`Blueprint`], and include only the data we can
 // quickly fetch from the main blueprint table (e.g., when listing all
@@ -1237,7 +1290,10 @@ impl BlueprintOrCollectionDatasetsConfig {
         }
     }
 
-    pub fn datasets(&self) -> BTreeSet<CollectionDatasetIdentifier> {
+    pub fn datasets(
+        &self,
+    ) -> BTreeMap<CollectionDatasetIdentifier, BlueprintDatasetConfigForDiff>
+    {
         match self {
             BlueprintOrCollectionDatasetsConfig::Collection(c) => {
                 c.datasets.clone()
@@ -1245,7 +1301,9 @@ impl BlueprintOrCollectionDatasetsConfig {
             BlueprintOrCollectionDatasetsConfig::Blueprint(c) => c
                 .datasets
                 .values()
-                .map(CollectionDatasetIdentifier::from)
+                .map(|d| {
+                    (CollectionDatasetIdentifier::from(d), d.clone().into())
+                })
                 .collect(),
         }
     }
@@ -1258,8 +1316,8 @@ impl BlueprintOrCollectionDatasetsConfig {
 /// be reported by the inventory collection subsystem.
 #[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
 pub struct CollectionDatasetIdentifier {
-    id: Option<DatasetUuid>,
     name: String,
+    id: Option<DatasetUuid>,
 }
 
 impl From<&BlueprintDatasetConfig> for CollectionDatasetIdentifier {
@@ -1280,7 +1338,8 @@ impl From<&crate::inventory::Dataset> for CollectionDatasetIdentifier {
 /// Single sled's dataset config for "before" version within a [`BlueprintDiff`].
 #[derive(Clone, Debug, From)]
 pub struct CollectionDatasetsConfig {
-    datasets: BTreeSet<CollectionDatasetIdentifier>,
+    datasets:
+        BTreeMap<CollectionDatasetIdentifier, BlueprintDatasetConfigForDiff>,
 }
 
 /// Encapsulates Reconfigurator state

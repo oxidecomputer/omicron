@@ -331,7 +331,7 @@ impl BpSledSubtableSchema for BpDatasetsSubtableSchema {
     }
 
     fn column_names(&self) -> &'static [&'static str] {
-        &["dataset id", "dataset name"]
+        &["dataset name", "dataset uuid", "quota", "reservation", "compression"]
     }
 }
 

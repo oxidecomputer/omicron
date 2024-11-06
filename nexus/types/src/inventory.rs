@@ -484,6 +484,7 @@ pub struct Dataset {
     pub compression: String,
 }
 
+// TODO: Rather than converting, I think these types can be de-duplicated
 impl From<InventoryDataset> for Dataset {
     fn from(disk: InventoryDataset) -> Self {
         Self {
