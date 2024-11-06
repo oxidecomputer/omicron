@@ -193,21 +193,39 @@ impl Client {
         ));
         let schema = Mutex::new(BTreeMap::new());
         let request_timeout = DEFAULT_REQUEST_TIMEOUT;
+        let pool = match Pool::new(
+            http_resolver,
+            Arc::new(ReqwestConnector {}),
+            qorb::policy::Policy::default(),
+        ) {
+            Ok(pool) => {
+                debug!(log, "registered USDT probes");
+                pool
+            }
+            Err(err) => {
+                error!(log, "failed to register USDT probes");
+                err.into_inner()
+            }
+        };
+        let native_pool = match Pool::new(
+            native_resolver,
+            Arc::new(native::connection::Connector),
+            qorb::policy::Policy::default(),
+        ) {
+            Ok(pool) => {
+                debug!(log, "registered USDT probes");
+                pool
+            }
+            Err(err) => {
+                error!(log, "failed to register USDT probes");
+                err.into_inner()
+            }
+        };
         Self {
             _id: id,
             log,
-            source: ClientSource::Pool {
-                pool: DebugIgnore(Pool::new(
-                    http_resolver,
-                    Arc::new(ReqwestConnector {}),
-                    qorb::policy::Policy::default(),
-                )),
-            },
-            native_pool: DebugIgnore(Pool::new(
-                native_resolver,
-                Arc::new(native::connection::Connector),
-                Default::default(),
-            )),
+            source: ClientSource::Pool { pool: DebugIgnore(pool) },
+            native_pool: DebugIgnore(native_pool),
             schema,
             request_timeout,
         }
@@ -243,15 +261,25 @@ impl Client {
         let client = reqwest::Client::new();
         let url = format!("http://{}", http_address);
         let schema = Mutex::new(BTreeMap::new());
+        let native_pool = match Pool::new(
+            Box::new(SingleHostResolver::new(native_address)),
+            Arc::new(native::connection::Connector),
+            Default::default(),
+        ) {
+            Ok(pool) => {
+                debug!(log, "registered USDT probes");
+                pool
+            }
+            Err(err) => {
+                error!(log, "failed to register USDT probes");
+                err.into_inner()
+            }
+        };
         Self {
             _id: id,
             log,
             source: ClientSource::Static(ReqwestClient { url, client }),
-            native_pool: DebugIgnore(Pool::new(
-                Box::new(SingleHostResolver::new(native_address)),
-                Arc::new(native::connection::Connector),
-                Default::default(),
-            )),
+            native_pool: DebugIgnore(native_pool),
             schema,
             request_timeout,
         }
@@ -1787,7 +1815,7 @@ mod tests {
             .ping()
             .await
             .expect_err("Should fail to ping non-existent server");
-        let Error::Connection(qorb::pool::Error::TimedOut) = &e else {
+        let Error::Connection(_) = &e else {
             panic!("Expected connection error, found {e:?}");
         };
         logctx.cleanup_successful();
@@ -3718,7 +3746,6 @@ mod tests {
         _: &ClickHouseDeployment,
         client: Client,
     ) {
-        usdt::register_probes().unwrap();
         let samples = [oximeter_test_utils::make_sample()];
         client.insert_samples(&samples).await.unwrap();
 
@@ -3778,7 +3805,6 @@ mod tests {
         client: Client,
     ) {
         use strum::IntoEnumIterator;
-        usdt::register_probes().unwrap();
         // Attempt to select all schema with each datum type.
         for ty in oximeter::DatumType::iter() {
             let sql = format!(
@@ -3819,7 +3845,6 @@ mod tests {
         db: &ClickHouseDeployment,
         client: Client,
     ) {
-        usdt::register_probes().unwrap();
         let samples = [oximeter_test_utils::make_sample()];
 
         // We're using the components of the `insert_samples()` method here,
@@ -4425,7 +4450,6 @@ mod tests {
     #[tokio::test]
     async fn test_select_all_field_types() {
         use strum::IntoEnumIterator;
-        usdt::register_probes().unwrap();
         let logctx = test_setup_log("test_select_all_field_types");
         let log = &logctx.log;
 
@@ -4844,7 +4868,6 @@ mod tests {
         native_address: SocketAddr,
         replicated: bool,
     ) {
-        usdt::register_probes().unwrap();
         let client = Client::new(http_address, native_address, &log);
 
         const STARTING_VERSION: u64 = 1;
