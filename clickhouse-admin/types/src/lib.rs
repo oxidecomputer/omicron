@@ -1011,7 +1011,9 @@ pub struct DistributedDdlQueue {
     pub query_finish_time: String,
     /// Duration of query execution (in milliseconds)
     pub query_duration_ms: String,
-    // TODO: Add formatted times here
+    /// Formatted query created time
+    pub formatted_query_create_time: NaiveDateTime,
+    /// Formatted query finish time
     pub formatted_query_finish_time: NaiveDateTime,
 }
 
@@ -1039,6 +1041,7 @@ impl DistributedDdlQueue {
 mod tests {
     use camino::Utf8PathBuf;
     use camino_tempfile::Builder;
+    use chrono::NaiveDateTime;
     use slog::{o, Drain};
     use slog_term::{FullFormat, PlainDecorator, TestStdoutWriter};
     use std::collections::BTreeMap;
@@ -1812,8 +1815,8 @@ snapshot_storage_disk=LocalSnapshotDisk
     fn test_distributed_ddl_queries_parse_success() {
         let log = log();
         let data =
-            "{\"entry\":\"query-0000000000\",\"entry_version\":5,\"initiator_host\":\"ixchel\",\"initiator_port\":22001,\"cluster\":\"oximeter_cluster\",\"query\":\"CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster\",\"settings\":{\"load_balancing\":\"random\"},\"query_create_time\":\"2024-11-01 16:16:45\",\"host\":\"::1\",\"port\":22001,\"status\":\"Finished\",\"exception_code\":0,\"exception_text\":\"\",\"query_finish_time\":\"2024-11-01 16:16:45\",\"query_duration_ms\":\"4\"}
-{\"entry\":\"query-0000000000\",\"entry_version\":5,\"initiator_host\":\"ixchel\",\"initiator_port\":22001,\"cluster\":\"oximeter_cluster\",\"query\":\"CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster\",\"settings\":{\"load_balancing\":\"random\"},\"query_create_time\":\"2024-11-01 16:16:45\",\"host\":\"::1\",\"port\":22002,\"status\":\"Finished\",\"exception_code\":0,\"exception_text\":\"\",\"query_finish_time\":\"2024-11-01 16:16:45\",\"query_duration_ms\":\"4\"}
+            "{\"entry\":\"query-0000000000\",\"entry_version\":5,\"initiator_host\":\"ixchel\",\"initiator_port\":22001,\"cluster\":\"oximeter_cluster\",\"query\":\"CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster\",\"settings\":{\"load_balancing\":\"random\"},\"query_create_time\":\"2024-11-01 16:16:45\",\"host\":\"::1\",\"port\":22001,\"status\":\"Finished\",\"exception_code\":0,\"exception_text\":\"\",\"query_finish_time\":\"2024-11-01 16:16:45\",\"query_duration_ms\":\"4\",\"formatted_query_create_time\":\"2024-11-01T16:16:45\",\"formatted_query_finish_time\":\"2024-11-01T16:16:45\"}
+{\"entry\":\"query-0000000000\",\"entry_version\":5,\"initiator_host\":\"ixchel\",\"initiator_port\":22001,\"cluster\":\"oximeter_cluster\",\"query\":\"CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster\",\"settings\":{\"load_balancing\":\"random\"},\"query_create_time\":\"2024-11-01 16:16:45\",\"host\":\"::1\",\"port\":22002,\"status\":\"Finished\",\"exception_code\":0,\"exception_text\":\"\",\"query_finish_time\":\"2024-11-01 16:16:45\",\"query_duration_ms\":\"4\",\"formatted_query_create_time\":\"2024-11-01T16:16:45\",\"formatted_query_finish_time\":\"2024-11-01T16:16:45\"}
 "
             .as_bytes();
         let ddl = DistributedDdlQueue::parse(&log, data).unwrap();
@@ -1837,6 +1840,8 @@ snapshot_storage_disk=LocalSnapshotDisk
                 status: "Finished".to_string(),
                 query_finish_time: "2024-11-01 16:16:45".to_string(),
                 query_duration_ms: "4".to_string(),
+                formatted_query_create_time: NaiveDateTime::parse_from_str("2024-11-01 16:16:45", "%Y-%m-%d %H:%M:%S").unwrap(),
+                formatted_query_finish_time: NaiveDateTime::parse_from_str("2024-11-01 16:16:45", "%Y-%m-%d %H:%M:%S").unwrap(),
             },
             DistributedDdlQueue{
                 entry: "query-0000000000".to_string(),
@@ -1856,8 +1861,10 @@ snapshot_storage_disk=LocalSnapshotDisk
                 status: "Finished".to_string(),
                 query_finish_time: "2024-11-01 16:16:45".to_string(),
                 query_duration_ms: "4".to_string(),
+                formatted_query_create_time: NaiveDateTime::parse_from_str("2024-11-01 16:16:45", "%Y-%m-%d %H:%M:%S").unwrap(),
+                formatted_query_finish_time: NaiveDateTime::parse_from_str("2024-11-01 16:16:45", "%Y-%m-%d %H:%M:%S").unwrap(),
             },
-            ];
+        ];
         assert!(ddl == expected_result);
     }
 

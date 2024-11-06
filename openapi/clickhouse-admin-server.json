@@ -147,6 +147,16 @@
             "description": "Exception message",
             "type": "string"
           },
+          "formatted_query_create_time": {
+            "description": "Formatted query created time",
+            "type": "string",
+            "format": "partial-date-time"
+          },
+          "formatted_query_finish_time": {
+            "description": "Formatted query finish time",
+            "type": "string",
+            "format": "partial-date-time"
+          },
           "host": {
             "description": "Hostname",
             "type": "string",
@@ -202,6 +212,8 @@
           "entry_version",
           "exception_code",
           "exception_text",
+          "formatted_query_create_time",
+          "formatted_query_finish_time",
           "host",
           "initiator_host",
           "initiator_port",
