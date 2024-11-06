@@ -171,8 +171,8 @@ pub enum Error {
     #[error("Unrecognized server packet, kind = {0}")]
     UnrecognizedServerPacket(u8),
 
-    #[error("Invalid data packet of kind '{0}'")]
-    InvalidPacket(&'static str),
+    #[error("Invalid data packet kind = '{kind}', msg = {msg}")]
+    InvalidPacket { kind: &'static str, msg: String },
 
     #[error("Encountered non-UTF8 string")]
     NonUtf8String,

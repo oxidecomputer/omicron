@@ -71,15 +71,23 @@ fn column_descriptions(
     ) {
         Ok((text, _match)) => text,
         Err(NomErr::Incomplete(_)) => return Ok(None),
-        Err(_) => return Err(Error::InvalidPacket("TableColumns (header)")),
+        Err(e) => {
+            return Err(Error::InvalidPacket {
+                kind: "TableColumns",
+                msg: format!("failed to parse header: {e}"),
+            })
+        }
     };
 
     // Match the number of columns.
     let (text, n_columns) = match column_count(text) {
         Ok(input) => input,
         Err(NomErr::Incomplete(_)) => return Ok(None),
-        Err(_) => {
-            return Err(Error::InvalidPacket("TableColumns (column count)"))
+        Err(e) => {
+            return Err(Error::InvalidPacket {
+                kind: "TableColumns",
+                msg: format!("failed to parse column count: {e}"),
+            });
         }
     };
 
@@ -91,8 +99,11 @@ fn column_descriptions(
         let col = match column_description(line) {
             Ok(out) => out.1,
             Err(NomErr::Incomplete(_)) => return Ok(None),
-            Err(_) => {
-                return Err(Error::InvalidPacket("TableColumns (description)"))
+            Err(e) => {
+                return Err(Error::InvalidPacket {
+                    kind: "TableColumns",
+                    msg: format!("failed to parse description: {e}"),
+                })
             }
         };
         out.push(col);

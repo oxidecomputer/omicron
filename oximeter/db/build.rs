@@ -10,6 +10,9 @@ use nom::IResult;
 /// Build script for generating native type representations from the
 /// ground-truth SQL definitions.
 fn main() -> anyhow::Result<()> {
+    // We're only parsing data types, specifically the enum variant-to-name
+    // mappings. These are the same for single-node and replicated databases, so
+    // use the former for simplicity.
     const INIT_FILE: &str =
         concat!(env!("CARGO_MANIFEST_DIR"), "/schema/single-node/db-init.sql");
     let contents = std::fs::read_to_string(INIT_FILE)

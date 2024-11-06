@@ -1058,6 +1058,16 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_array_enum8_with_bad_escapes() {
+        DataType::nom_parse(r#"Array(Enum8(\\'Bool\' = 1, \'I64\' = 2))"#)
+            .expect_err("Should fail to parse data type with bad escape");
+        DataType::nom_parse(r#"Array(Enum8(\t\'Bool\' = 1, \'I64\' = 2))"#)
+            .expect_err("Should fail to parse data type with bad escape");
+        DataType::nom_parse(r#"Array(Enum8(\"Bool\' = 1, \'I64\' = 2))"#)
+            .expect_err("Should fail to parse data type with bad escape");
+    }
+
+    #[test]
     fn test_parse_all_known_timezones() {
         for tz in chrono_tz::TZ_VARIANTS.iter() {
             let quoted = format!("'{}'", tz);
