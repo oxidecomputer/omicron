@@ -1299,10 +1299,10 @@ async fn lookup_project(
 #[derive(Tabled)]
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
 struct DiskIdentity {
-    name: String,
     id: Uuid,
     size: String,
     state: String,
+    name: String,
 }
 
 impl From<&'_ db::model::Disk> for DiskIdentity {
@@ -3325,17 +3325,14 @@ async fn cmd_db_instance_info(
         println!("\n{:=<80}", "== ATTACHED DISKS ");
 
         check_limit(&disks, fetch_opts.fetch_limit, ctx);
-        let table = if fetch_opts.include_deleted {
+        let mut table = if fetch_opts.include_deleted {
             tabled::Table::new(disks.iter().map(MaybeDeletedDiskRow::from))
-                .with(tabled::settings::Style::empty())
-                .with(tabled::settings::Padding::new(0, 1, 0, 0))
-                .to_string()
         } else {
             tabled::Table::new(disks.iter().map(DiskRow::from))
-                .with(tabled::settings::Style::empty())
-                .with(tabled::settings::Padding::new(0, 1, 0, 0))
-                .to_string()
         };
+        table
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0));
         println!("{table}");
     }
 
@@ -3502,11 +3499,11 @@ struct VmmStateRow {
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
 struct CustomerInstanceRow {
     id: String,
-    name: String,
     state: String,
     propolis_id: MaybePropolisId,
     sled_id: MaybeSledId,
     host_serial: String,
+    name: String,
 }
 
 /// Run `omdb db instances`: list data about customer VMs.
