@@ -147,10 +147,8 @@ impl ClickhouseCli {
         self.client_non_interactive(
             ClickhouseClientType::Server,
             format!(
-                "SELECT *, 
-                formatDateTime(query_create_time, '%Y-%m-%dT%H:%i:%s') AS formatted_query_create_time,
-                formatDateTime(query_finish_time, '%Y-%m-%dT%H:%i:%s') AS formatted_query_finish_time
-                FROM system.distributed_ddl_queue WHERE cluster = '{}' FORMAT JSONEachRow",
+                "SELECT * FROM system.distributed_ddl_queue WHERE cluster = '{}'
+                SETTINGS date_time_output_format = 'iso' FORMAT JSONEachRow",
                 OXIMETER_CLUSTER
             ).as_str(),
             "Retrieve information about distributed ddl queries (ON CLUSTER clause) 
