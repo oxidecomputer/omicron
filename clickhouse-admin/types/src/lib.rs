@@ -5,6 +5,7 @@
 use anyhow::{bail, Context, Error, Result};
 use atomicwrites::AtomicFile;
 use camino::Utf8PathBuf;
+use chrono::NaiveDateTime;
 use derive_more::{Add, AddAssign, Display, From};
 use itertools::Itertools;
 use omicron_common::api::external::Generation;
@@ -1010,6 +1011,8 @@ pub struct DistributedDdlQueue {
     pub query_finish_time: String,
     /// Duration of query execution (in milliseconds)
     pub query_duration_ms: String,
+    // TODO: Add formatted times here
+    pub formatted_query_finish_time: NaiveDateTime,
 }
 
 impl DistributedDdlQueue {
