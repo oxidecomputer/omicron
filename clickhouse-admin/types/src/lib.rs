@@ -1840,8 +1840,12 @@ snapshot_storage_disk=LocalSnapshotDisk
                 status: "Finished".to_string(),
                 query_finish_time: "2024-11-01 16:16:45".to_string(),
                 query_duration_ms: "4".to_string(),
-                formatted_query_create_time: NaiveDateTime::parse_from_str("2024-11-01 16:16:45", "%Y-%m-%d %H:%M:%S").unwrap(),
-                formatted_query_finish_time: NaiveDateTime::parse_from_str("2024-11-01 16:16:45", "%Y-%m-%d %H:%M:%S").unwrap(),
+                formatted_query_create_time: NaiveDateTime::parse_from_str(
+                    "2024-11-01 16:16:45", "%Y-%m-%d %H:%M:%S"
+                ).unwrap(),
+                formatted_query_finish_time: NaiveDateTime::parse_from_str(
+                    "2024-11-01 16:16:45", "%Y-%m-%d %H:%M:%S"
+                ).unwrap(),
             },
             DistributedDdlQueue{
                 entry: "query-0000000000".to_string(),
@@ -1861,8 +1865,12 @@ snapshot_storage_disk=LocalSnapshotDisk
                 status: "Finished".to_string(),
                 query_finish_time: "2024-11-01 16:16:45".to_string(),
                 query_duration_ms: "4".to_string(),
-                formatted_query_create_time: NaiveDateTime::parse_from_str("2024-11-01 16:16:45", "%Y-%m-%d %H:%M:%S").unwrap(),
-                formatted_query_finish_time: NaiveDateTime::parse_from_str("2024-11-01 16:16:45", "%Y-%m-%d %H:%M:%S").unwrap(),
+                formatted_query_create_time: NaiveDateTime::parse_from_str(
+                    "2024-11-01 16:16:45", "%Y-%m-%d %H:%M:%S"
+                ).unwrap(),
+                formatted_query_finish_time: NaiveDateTime::parse_from_str(
+                    "2024-11-01 16:16:45", "%Y-%m-%d %H:%M:%S"
+                ).unwrap(),
             },
         ];
         assert!(ddl == expected_result);
