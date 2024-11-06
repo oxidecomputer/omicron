@@ -7013,6 +7013,7 @@ dependencies = [
  "reqwest 0.12.8",
  "ring 0.17.8",
  "rustls 0.22.4",
+ "serde",
  "slog",
  "subprocess",
  "tar",

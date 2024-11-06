@@ -45,7 +45,7 @@ use uuid::Uuid;
 /// - [`crate::Client::initialize_db_with_version`]
 /// - [`crate::Client::ensure_schema`]
 /// - The `clickhouse-schema-updater` binary in this crate
-pub const OXIMETER_VERSION: u64 = 12;
+pub const OXIMETER_VERSION: u64 = 13;
 
 // Wrapper type to represent a boolean in the database.
 //
@@ -392,7 +392,7 @@ macro_rules! declare_field_row {
     }
 }
 
-declare_field_row! {BoolFieldRow, DbBool, "bool"}
+declare_field_row! {BoolFieldRow, bool, "bool"}
 declare_field_row! {I8FieldRow, i8, "i8"}
 declare_field_row! {U8FieldRow, u8, "u8"}
 declare_field_row! {I16FieldRow, i16, "i16"}
@@ -630,7 +630,7 @@ fn unroll_from_source(sample: &Sample) -> BTreeMap<String, Vec<String>> {
                     timeseries_name,
                     timeseries_key,
                     field_name,
-                    field_value: DbBool::from(*inner),
+                    field_value: *inner,
                 };
                 (row.table_name(), serde_json::to_string(&row).unwrap())
             }
@@ -1468,7 +1468,7 @@ trait FromDbScalar {
     const DATUM_TYPE: DatumType;
 }
 
-impl FromDbScalar for DbBool {
+impl FromDbScalar for bool {
     const DATUM_TYPE: DatumType = DatumType::Bool;
 }
 
@@ -1633,7 +1633,7 @@ pub(crate) fn parse_measurement_from_row(
 ) -> (TimeseriesKey, Measurement) {
     match datum_type {
         DatumType::Bool => {
-            parse_timeseries_scalar_gauge_measurement::<DbBool>(line)
+            parse_timeseries_scalar_gauge_measurement::<bool>(line)
         }
         DatumType::I8 => parse_timeseries_scalar_gauge_measurement::<i8>(line),
         DatumType::U8 => parse_timeseries_scalar_gauge_measurement::<u8>(line),
@@ -1757,11 +1757,11 @@ pub(crate) fn parse_field_select_row(
         // Parse the field value as the expected type
         let value = match expected_field.field_type {
             FieldType::Bool => {
-                FieldValue::Bool(bool::from(DbBool::from(
+                FieldValue::Bool(
                     actual_field_value
-                        .as_u64()
-                        .expect("Expected a u64 for a boolean field from the database")
-                )))
+                        .as_bool()
+                        .expect("Expected a boolean field from the database")
+                )
             }
             FieldType::I8 => {
                 let wide = actual_field_value
@@ -2071,7 +2071,7 @@ mod tests {
             assert_eq!(measurement.datum(), datum);
         }
 
-        let line = r#"{"timeseries_key": 12, "timestamp": "2021-01-01 00:00:00.123456789", "datum": 1 }"#;
+        let line = r#"{"timeseries_key": 12, "timestamp": "2021-01-01 00:00:00.123456789", "datum": true }"#;
         let datum = Datum::from(true);
         run_test(line, &datum, timestamp);
 

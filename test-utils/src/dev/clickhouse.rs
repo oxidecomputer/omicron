@@ -387,6 +387,9 @@ pub enum ClickHouseError {
     Timeout,
 }
 
+const SINGLE_NODE_CONFIG_FILE: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../smf/clickhouse/config.xml");
+
 impl ClickHouseProcess {
     /// Start a new single node ClickHouse server listening on the provided
     /// ports.
@@ -395,8 +398,22 @@ impl ClickHouseProcess {
         ports: ClickHousePorts,
     ) -> Result<ClickHouseReplica, anyhow::Error> {
         let data_dir = ClickHouseDataDir::new(logctx)?;
+
+        // Copy the configuration file into the test directory, so we don't
+        // leave the preprocessed config file hanging around.
+        tokio::fs::copy(SINGLE_NODE_CONFIG_FILE, data_dir.config_file_path())
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to copy config file from {} to test data path {}",
+                    SINGLE_NODE_CONFIG_FILE,
+                    data_dir.config_file_path(),
+                )
+            })?;
         let args = vec![
             "server".to_string(),
+            "--config-file".to_string(),
+            data_dir.config_file_path().to_string(),
             "--log-file".to_string(),
             data_dir.log_path().to_string(),
             "--errorlog-file".to_string(),
@@ -729,6 +746,10 @@ impl ClickHouseDataDir {
 
     fn root_path(&self) -> &Utf8Path {
         self.dir.path()
+    }
+
+    fn config_file_path(&self) -> Utf8PathBuf {
+        self.root_path().join("config.xml")
     }
 
     fn datastore_path(&self) -> Utf8PathBuf {
@@ -1299,10 +1320,11 @@ async fn clickhouse_ready_from_log(
 #[cfg(test)]
 mod tests {
     use super::{
-        discover_ready, wait_for_ports, ClickHouseError, ClickHousePorts,
-        CLICKHOUSE_HTTP_PORT_NEEDLE, CLICKHOUSE_READY,
+        discover_ready, wait_for_ports, ClickHouseDeployment, ClickHouseError,
+        ClickHousePorts, CLICKHOUSE_HTTP_PORT_NEEDLE, CLICKHOUSE_READY,
         CLICKHOUSE_TCP_PORT_NEEDLE, CLICKHOUSE_TIMEOUT,
     };
+    use crate::dev::test_setup_log;
     use camino_tempfile::NamedUtf8TempFile;
     use std::process::Stdio;
     use std::{io::Write, sync::Arc, time::Duration};
@@ -1457,5 +1479,40 @@ mod tests {
     fn test_clickhouse_ports_assert_consistent_panics_both_specified() {
         let second = ClickHousePorts { http: 1, native: 1 };
         ClickHousePorts { http: 2, native: 2 }.assert_consistent(&second);
+    }
+
+    #[derive(Debug, serde::Deserialize)]
+    struct Setting {
+        name: String,
+        value: String,
+        changed: u8,
+    }
+
+    #[tokio::test]
+    async fn sparse_serialization_is_disabled() {
+        let logctx = test_setup_log("sparse_serialization_is_disabled");
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = reqwest::Client::new();
+        let url = format!("http://{}", db.http_address());
+        let setting: Setting = client
+            .post(url)
+            .body(
+                "SELECT name, value, changed \
+                FROM system.merge_tree_settings \
+                WHERE name == 'ratio_of_defaults_for_sparse_serialization' \
+                FORMAT JSONEachRow",
+            )
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(setting.name, "ratio_of_defaults_for_sparse_serialization");
+        assert_eq!(setting.value, "1");
+        assert_eq!(setting.changed, 1);
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }
