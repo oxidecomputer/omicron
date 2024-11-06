@@ -1322,12 +1322,15 @@ impl ServicePortBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
     use omicron_common::address::IpRange;
+    use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::AllowedSourceIps;
     use omicron_common::api::internal::shared::RackNetworkConfig;
     use oxnet::Ipv6Net;
     use sled_agent_types::rack_init::BootstrapAddressDiscovery;
     use sled_agent_types::rack_init::RecoverySiloConfig;
+    use sled_hardware_types::Baseboard;
 
     const EXPECTED_RESERVED_ADDRESSES: u16 = 2;
     const EXPECTED_USABLE_ADDRESSES: u16 =
@@ -1382,23 +1385,8 @@ mod tests {
         assert!(allocator.next().is_none(), "Expected allocation to fail");
     }
 
-    #[test]
-    fn service_port_builder_skips_dns_ips() {
-        // Conjure up a config; only the internal services pools and
-        // external DNS IPs matter when constructing a ServicePortBuilder.
-        let ip_pools = [
-            ("192.168.1.10", "192.168.1.14"),
-            ("fd00::20", "fd00::23"),
-            ("fd01::100", "fd01::103"),
-        ];
-        let dns_ips = [
-            "192.168.1.10",
-            "192.168.1.13",
-            "fd00::22",
-            "fd01::100",
-            "fd01::103",
-        ];
-        let config = Config {
+    fn test_config(ip_pools: &[(&str, &str)], dns_ips: &[&str]) -> Config {
+        Config {
             trust_quorum_peers: None,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
             ntp_servers: Vec::new(),
@@ -1431,7 +1419,26 @@ mod tests {
                 bfd: Vec::new(),
             },
             allowed_source_ips: AllowedSourceIps::Any,
-        };
+        }
+    }
+
+    #[test]
+    fn service_port_builder_skips_dns_ips() {
+        // Conjure up a config; only the internal services pools and
+        // external DNS IPs matter when constructing a ServicePortBuilder.
+        let ip_pools = [
+            ("192.168.1.10", "192.168.1.14"),
+            ("fd00::20", "fd00::23"),
+            ("fd01::100", "fd01::103"),
+        ];
+        let dns_ips = [
+            "192.168.1.10",
+            "192.168.1.13",
+            "fd00::22",
+            "fd01::100",
+            "fd01::103",
+        ];
+        let config = test_config(&ip_pools, &dns_ips);
 
         let mut svp = ServicePortBuilder::new(&config);
 
@@ -1474,6 +1481,116 @@ mod tests {
         expectorate::assert_contents(
             "../schema/rss-service-plan-v5.json",
             &serde_json::to_string_pretty(&schema).unwrap(),
+        );
+    }
+
+    #[test]
+    fn test_dataset_and_zone_count() {
+        // We still need these values to provision external services
+        let ip_pools = [
+            ("192.168.1.10", "192.168.1.14"),
+            ("fd00::20", "fd00::23"),
+            ("fd01::100", "fd01::103"),
+        ];
+        let dns_ips = [
+            "192.168.1.10",
+            "192.168.1.13",
+            "fd00::22",
+            "fd01::100",
+            "fd01::103",
+        ];
+
+        let config = test_config(&ip_pools, &dns_ips);
+
+        // Confirm that this fails with no sleds
+        let sleds = vec![];
+        Plan::create_transient(&config, sleds)
+            .expect_err("Should have failed to create plan");
+
+        // Try again, with a sled that has ten U.2 disks
+        let sled_id = SledUuid::new_v4();
+        let address = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0);
+        let subnet = Ipv6Subnet::<SLED_PREFIX>::new(address);
+        let sled_address = get_sled_address(subnet);
+        let is_scrimlet = true;
+
+        const DISK_COUNT: usize = 10;
+        let disks: Vec<_> = (0..DISK_COUNT)
+            .map(|i| nexus_sled_agent_shared::inventory::InventoryDisk {
+                identity: omicron_common::disk::DiskIdentity {
+                    vendor: "vendor".to_string(),
+                    model: "model".to_string(),
+                    serial: format!("test-{i}"),
+                },
+                variant: DiskVariant::U2,
+                slot: i as i64,
+                active_firmware_slot: 0,
+                next_active_firmware_slot: None,
+                number_of_firmware_slots: 8,
+                slot1_is_read_only: false,
+                slot_firmware_versions: vec![],
+            })
+            .collect();
+
+        let sleds = vec![SledInfo::new(
+            sled_id,
+            subnet,
+            sled_address,
+            Inventory {
+                sled_id,
+                sled_agent_address: sled_address,
+                sled_role: SledRole::Scrimlet,
+                baseboard: Baseboard::Unknown,
+                usable_hardware_threads: 32,
+                usable_physical_ram: ByteCount::try_from(1_u64 << 40).unwrap(),
+                reservoir_size: ByteCount::try_from(1_u64 << 40).unwrap(),
+                omicron_zones: OmicronZonesConfig {
+                    generation: OmicronZonesConfig::INITIAL_GENERATION,
+                    zones: vec![],
+                },
+                disks,
+                zpools: vec![],
+                datasets: vec![],
+            },
+            is_scrimlet,
+        )];
+
+        let plan = Plan::create_transient(&config, sleds)
+            .expect("Should have created plan");
+
+        assert_eq!(plan.services.len(), 1);
+
+        let sled_config = plan.services.iter().next().unwrap().1;
+        assert_eq!(sled_config.disks.disks.len(), DISK_COUNT);
+
+        let zone_count = sled_config.zones.len();
+
+        let expected_zone_count = INTERNAL_DNS_REDUNDANCY
+            + COCKROACHDB_REDUNDANCY
+            + dns_ips.len()
+            + NEXUS_REDUNDANCY
+            + OXIMETER_REDUNDANCY
+            + SINGLE_NODE_CLICKHOUSE_REDUNDANCY
+            + CRUCIBLE_PANTRY_REDUNDANCY
+            + DISK_COUNT // (Crucible)
+            + 1; // (NTP)
+        assert_eq!(
+            zone_count, expected_zone_count,
+            "Saw: {:#?}, expected {expected_zone_count}",
+            sled_config.zones
+        );
+
+        let expected_dataset_count = expected_zone_count // Transient zones
+            + INTERNAL_DNS_REDUNDANCY
+            + COCKROACHDB_REDUNDANCY
+            + SINGLE_NODE_CLICKHOUSE_REDUNDANCY
+            + dns_ips.len()
+            + DISK_COUNT * 3; // (Debug, Root, Crucible)
+        assert_eq!(
+            sled_config.datasets.datasets.len(),
+            expected_dataset_count,
+            "Saw: {:#?}, expected {expected_dataset_count}",
+            sled_config.datasets
         );
     }
 }
