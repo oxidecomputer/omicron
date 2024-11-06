@@ -1884,7 +1884,7 @@ snapshot_storage_disk=LocalSnapshotDisk
 
         assert_eq!(
             format!("{}", root_cause),
-            "missing field `entry_version` at line 1 column 454",
+            "missing field `entry_version` at line 1 column 456",
         );
     }
 }
