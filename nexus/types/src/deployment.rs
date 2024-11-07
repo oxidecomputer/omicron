@@ -288,10 +288,16 @@ impl Blueprint {
                 .iter()
                 .map(|(sled_id, disks)| (*sled_id, disks.clone().into()))
                 .collect(),
+            before
+                .blueprint_datasets
+                .iter()
+                .map(|(sled_id, datasets)| (*sled_id, datasets.clone().into()))
+                .collect(),
             self.metadata(),
             self.sled_state.clone(),
             self.blueprint_zones.clone(),
             self.blueprint_disks.clone(),
+            self.blueprint_datasets.clone(),
         )
     }
 
@@ -337,15 +343,35 @@ impl Blueprint {
             })
             .collect();
 
+        let before_datasets = before
+            .sled_agents
+            .iter()
+            .map(|(sled_id, sa)| {
+                (
+                    *sled_id,
+                    CollectionDatasetsConfig {
+                        datasets: sa
+                            .datasets
+                            .iter()
+                            .map(|d| (CollectionDatasetIdentifier::from(d), d.clone().into()))
+                            .collect::<BTreeMap<_, BlueprintDatasetConfigForDiff>>(),
+                    }
+                    .into(),
+                )
+            })
+            .collect();
+
         BlueprintDiff::new(
             DiffBeforeMetadata::Collection { id: before.id },
             before_state,
             before_zones,
             before_disks,
+            before_datasets,
             self.metadata(),
             self.sled_state.clone(),
             self.blueprint_zones.clone(),
             self.blueprint_disks.clone(),
+            self.blueprint_datasets.clone(),
         )
     }
 
@@ -936,6 +962,59 @@ impl From<BlueprintDatasetConfig> for DatasetConfig {
     }
 }
 
+/// Information about a dataset as used for diffing collections and blueprints.
+///
+/// This struct acts as a "lowest common denominator" between the
+/// inventory and blueprint types, for the purposes of comparison.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct BlueprintDatasetConfigForDiff {
+    pub name: String,
+    pub id: Option<DatasetUuid>,
+    pub quota: Option<ByteCount>,
+    pub reservation: Option<ByteCount>,
+    pub compression: String,
+}
+
+fn unwrap_or_none<T: ToString>(opt: &Option<T>) -> String {
+    opt.as_ref().map(|v| v.to_string()).unwrap_or_else(|| "none".to_string())
+}
+
+impl BlueprintDatasetConfigForDiff {
+    fn as_strings(&self) -> Vec<String> {
+        vec![
+            self.name.clone(),
+            unwrap_or_none(&self.id),
+            unwrap_or_none(&self.quota),
+            unwrap_or_none(&self.reservation),
+            self.compression.clone(),
+        ]
+    }
+}
+
+impl From<crate::inventory::Dataset> for BlueprintDatasetConfigForDiff {
+    fn from(dataset: crate::inventory::Dataset) -> Self {
+        Self {
+            name: dataset.name,
+            id: dataset.id,
+            quota: dataset.quota,
+            reservation: dataset.reservation,
+            compression: dataset.compression,
+        }
+    }
+}
+
+impl From<BlueprintDatasetConfig> for BlueprintDatasetConfigForDiff {
+    fn from(dataset: BlueprintDatasetConfig) -> Self {
+        Self {
+            name: DatasetName::new(dataset.pool, dataset.kind).full_name(),
+            id: Some(dataset.id),
+            quota: dataset.quota,
+            reservation: dataset.reservation,
+            compression: dataset.compression.to_string(),
+        }
+    }
+}
+
 /// Describe high-level metadata about a blueprint
 // These fields are a subset of [`Blueprint`], and include only the data we can
 // quickly fetch from the main blueprint table (e.g., when listing all
@@ -1190,6 +1269,77 @@ impl BlueprintOrCollectionDisksConfig {
 #[derive(Clone, Debug, From)]
 pub struct CollectionPhysicalDisksConfig {
     disks: BTreeSet<DiskIdentity>,
+}
+
+/// Single sled's datasets config for "before" version within a [`BlueprintDiff`].
+#[derive(Clone, Debug, From)]
+pub enum BlueprintOrCollectionDatasetsConfig {
+    /// The diff was made from a collection.
+    Collection(CollectionDatasetsConfig),
+    /// The diff was made from a blueprint.
+    Blueprint(BlueprintDatasetsConfig),
+}
+
+impl BlueprintOrCollectionDatasetsConfig {
+    pub fn generation(&self) -> Option<Generation> {
+        match self {
+            BlueprintOrCollectionDatasetsConfig::Collection(_) => None,
+            BlueprintOrCollectionDatasetsConfig::Blueprint(c) => {
+                Some(c.generation)
+            }
+        }
+    }
+
+    pub fn datasets(
+        &self,
+    ) -> BTreeMap<CollectionDatasetIdentifier, BlueprintDatasetConfigForDiff>
+    {
+        match self {
+            BlueprintOrCollectionDatasetsConfig::Collection(c) => {
+                c.datasets.clone()
+            }
+            BlueprintOrCollectionDatasetsConfig::Blueprint(c) => c
+                .datasets
+                .values()
+                .map(|d| {
+                    (CollectionDatasetIdentifier::from(d), d.clone().into())
+                })
+                .collect(),
+        }
+    }
+}
+
+/// A unique identifier for a dataset within a collection.
+///
+/// If a UUID is known for the dataset, it should be used.
+/// However, some datasets exist without UUIDs, and should still
+/// be reported by the inventory collection subsystem.
+#[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
+pub struct CollectionDatasetIdentifier {
+    name: String,
+    id: Option<DatasetUuid>,
+}
+
+impl From<&BlueprintDatasetConfig> for CollectionDatasetIdentifier {
+    fn from(d: &BlueprintDatasetConfig) -> Self {
+        Self {
+            id: Some(d.id),
+            name: DatasetName::new(d.pool.clone(), d.kind.clone()).full_name(),
+        }
+    }
+}
+
+impl From<&crate::inventory::Dataset> for CollectionDatasetIdentifier {
+    fn from(d: &crate::inventory::Dataset) -> Self {
+        Self { id: d.id, name: d.name.clone() }
+    }
+}
+
+/// Single sled's dataset config for "before" version within a [`BlueprintDiff`].
+#[derive(Clone, Debug, From)]
+pub struct CollectionDatasetsConfig {
+    datasets:
+        BTreeMap<CollectionDatasetIdentifier, BlueprintDatasetConfigForDiff>,
 }
 
 /// Encapsulates Reconfigurator state

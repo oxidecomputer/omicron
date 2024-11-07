@@ -410,6 +410,20 @@ impl ExampleSystemBuilder {
             }
         }
 
+        // We just ensured that a handful of datasets should exist in
+        // the blueprint, but they don't yet exist in the SystemDescription.
+        //
+        // Go back and add them so that the blueprint is consistent with
+        // inventory.
+        for (sled_id, datasets) in &blueprint.blueprint_datasets {
+            let sled = system.get_sled_mut(*sled_id).unwrap();
+
+            for dataset_config in datasets.datasets.values() {
+                let config = dataset_config.clone().try_into().unwrap();
+                sled.add_synthetic_dataset(config);
+            }
+        }
+
         let mut builder =
             system.to_collection_builder().expect("failed to build collection");
         builder.set_rng_seed((&self.test_name, "ExampleSystem collection"));
