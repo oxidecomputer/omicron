@@ -1,0 +1,16 @@
+[package]
+name = "clickhouse-cluster-dev"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+dropshot.workspace = true
+slog.workspace = true
+tokio.workspace = true
+omicron-workspace-hack.workspace = true
