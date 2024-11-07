@@ -81,7 +81,7 @@ use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::address::{BOOTSTRAP_ARTIFACT_PORT, COCKROACH_ADMIN_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::{
-    HostPortConfig, RackNetworkConfig,
+    HostPortConfig, RackNetworkConfig, SledIdentifiers,
 };
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
@@ -373,15 +373,18 @@ fn display_zone_init_errors(errors: &[(String, Box<Error>)]) -> String {
 /// Configuration parameters which modify the [`ServiceManager`]'s behavior.
 pub struct Config {
     /// Identifies the sled being configured
-    pub sled_id: Uuid,
+    pub sled_identifiers: SledIdentifiers,
 
     /// Identifies the revision of the sidecar to be used.
     pub sidecar_revision: SidecarRevision,
 }
 
 impl Config {
-    pub fn new(sled_id: Uuid, sidecar_revision: SidecarRevision) -> Self {
-        Self { sled_id, sidecar_revision }
+    pub fn new(
+        sled_identifiers: SledIdentifiers,
+        sidecar_revision: SidecarRevision,
+    ) -> Self {
+        Self { sled_identifiers, sidecar_revision }
     }
 }
 
@@ -967,6 +970,7 @@ impl ServiceManager {
             .get()
             .expect("sled agent not started")
             .config
+            .sled_identifiers
             .sled_id
     }
 
@@ -2671,14 +2675,41 @@ impl ServiceManager {
                             if let Some(i) = info {
                                 dendrite_config = dendrite_config
                                     .add_property(
-                                        "sled_id",
-                                        "astring",
-                                        &i.config.sled_id.to_string(),
-                                    )
-                                    .add_property(
                                         "rack_id",
                                         "astring",
                                         &i.rack_id.to_string(),
+                                    )
+                                    .add_property(
+                                        "sled_id",
+                                        "astring",
+                                        &i.config
+                                            .sled_identifiers
+                                            .sled_id
+                                            .to_string(),
+                                    )
+                                    .add_property(
+                                        "sled_model",
+                                        "astring",
+                                        &i.config
+                                            .sled_identifiers
+                                            .model
+                                            .to_string(),
+                                    )
+                                    .add_property(
+                                        "sled_serial",
+                                        "astring",
+                                        &i.config
+                                            .sled_identifiers
+                                            .serial
+                                            .to_string(),
+                                    )
+                                    .add_property(
+                                        "sled_revision",
+                                        "astring",
+                                        &i.config
+                                            .sled_identifiers
+                                            .revision
+                                            .to_string(),
                                     );
                             }
 
@@ -2970,7 +3001,10 @@ impl ServiceManager {
                                     .add_property(
                                         "sled_uuid",
                                         "astring",
-                                        &i.config.sled_id.to_string(),
+                                        &i.config
+                                            .sled_identifiers
+                                            .sled_id
+                                            .to_string(),
                                     )
                                     .add_property(
                                         "rack_uuid",
@@ -3016,7 +3050,10 @@ impl ServiceManager {
                                     .add_property(
                                         "sled_uuid",
                                         "astring",
-                                        &i.config.sled_id.to_string(),
+                                        &i.config
+                                            .sled_identifiers
+                                            .sled_id
+                                            .to_string(),
                                     )
                                     .add_property(
                                         "rack_uuid",
@@ -4352,7 +4389,25 @@ impl ServiceManager {
                                 )?;
                                 smfh.setprop_default_instance(
                                     "config/sled_id",
-                                    info.config.sled_id,
+                                    info.config.sled_identifiers.sled_id,
+                                )?;
+                                smfh.setprop_default_instance(
+                                    "config/sled_model",
+                                    info.config
+                                        .sled_identifiers
+                                        .model
+                                        .to_string(),
+                                )?;
+                                smfh.setprop_default_instance(
+                                    "config/sled_revision",
+                                    info.config.sled_identifiers.revision,
+                                )?;
+                                smfh.setprop_default_instance(
+                                    "config/sled_serial",
+                                    info.config
+                                        .sled_identifiers
+                                        .serial
+                                        .to_string(),
                                 )?;
                             } else {
                                 info!(
@@ -4461,7 +4516,7 @@ impl ServiceManager {
                                 )?;
                                 smfh.setprop_default_instance(
                                     "config/sled_uuid",
-                                    info.config.sled_id,
+                                    info.config.sled_identifiers.sled_id,
                                 )?;
                             }
                             for address in &request.addresses {
@@ -4504,7 +4559,7 @@ impl ServiceManager {
                                 )?;
                                 smfh.setprop_default_instance(
                                     "config/sled_uuid",
-                                    info.config.sled_id,
+                                    info.config.sled_identifiers.sled_id,
                                 )?;
                             }
                             smfh.delpropvalue_default_instance(
@@ -4945,7 +5000,13 @@ mod illumos_tests {
 
         fn make_config(&self) -> Config {
             Config {
-                sled_id: Uuid::new_v4(),
+                sled_identifiers: SledIdentifiers {
+                    rack_id: Uuid::new_v4(),
+                    sled_id: Uuid::new_v4(),
+                    model: "fake-gimlet".to_string(),
+                    revision: 1,
+                    serial: "fake-serial".to_string(),
+                },
                 sidecar_revision: SidecarRevision::Physical(
                     "rev_whatever_its_a_test".to_string(),
                 ),
