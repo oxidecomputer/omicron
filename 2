@@ -44,9 +44,7 @@ use omicron_uuid_kinds::{
     SupportBundleUuid, ZpoolUuid,
 };
 use oxnet::Ipv6Net;
-use propolis_client::types::{
-    Board, Chipset, ComponentV0, SerialPort, SerialPortNumber,
-};
+use propolis_client::types::{Board, Chipset, ComponentV0, SerialPort, SerialPortNumber};
 use propolis_client::{
     types::{InstanceInitializationMethod, InstanceSpecV0},
     Client as PropolisClient, VolumeConstructionRequest,
@@ -368,14 +366,7 @@ impl SledAgent {
                                     .to_whole_mebibytes(),
                                 cpuid: None,
                             },
-                            components: [(
-                                "com1".to_string(),
-                                ComponentV0::SerialPort(SerialPort {
-                                    num: SerialPortNumber::Com1,
-                                }),
-                            )]
-                            .into_iter()
-                            .collect(),
+                            components: ["com1".to_string(), ComponentV0::SerialPort(SerialPort { num: SerialPortNumber::Com1 })].collect(),
                         },
                     },
                 };

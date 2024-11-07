@@ -443,8 +443,8 @@ struct InstanceRunner {
     dhcp_config: DhcpCfg,
 
     // Disk related properties
-    requested_disks: Vec<propolis_client::types::DiskRequest>,
-    boot_settings: Option<propolis_client::types::BootSettings>,
+    requested_disks: Vec<InstanceDisk>,
+    boot_settings: Option<InstanceBootSettings>,
     cloud_init_bytes: Option<NoDebug<String>>,
 
     // Internal State management
@@ -854,10 +854,79 @@ impl InstanceRunner {
         running_zone: &RunningZone,
         migrate: Option<InstanceMigrationTargetParams>,
     ) -> Result<(), Error> {
-        let nics = running_zone
+        use propolis_client::{
+            types::{
+                BlobStorageBackend, Board, BootOrderEntry, BootSettings,
+                Chipset, ComponentV0, CrucibleStorageBackend,
+                InstanceInitializationMethod, NvmeDisk, QemuPvpanic,
+                ReplacementComponent, SerialPort, SerialPortNumber, VirtioDisk,
+                VirtioNetworkBackend, VirtioNic,
+            },
+            PciPath, SpecKey,
+        };
+
+        struct DiskComponents {
+            id: Uuid,
+            device: NvmeDisk,
+            backend: CrucibleStorageBackend,
+        }
+
+        struct NicComponents {
+            id: Uuid,
+            device: VirtioNic,
+            backend: VirtioNetworkBackend,
+        }
+
+        // Construct the lists of disks and NICs that will need to be sent to
+        // Propolis.
+        //
+        // N.B. When initializing a VM via live migration, the caller may
+        // replace the descriptions of some kinds of backend components. This is
+        // used here to pass new Crucible VCRs and OPTE port names to the new
+        // Propolis. This replacement requires that the source and target agree
+        // on the IDs of the backend components being replaced. To provide this
+        // stability, identify disk and NIC backends using the corresponding
+        // disk and interface UUIDs.
+        let disks: Vec<DiskComponents> = self
+            .requested_disks
+            .iter()
+            .map(|disk| -> Result<DiskComponents, std::io::Error> {
+                // NVMe disk serial numbers are supposed to be left-justified
+                // and padded with spaces (see version 1.2.1 of the spec,
+                // section 1.5). However, some versions of Propolis padded
+                // serial numbers with zeroes instead. Disk serial numbers can
+                // be persisted into a VM's nonvolatile EFI variables,
+                // specifically its saved boot order, such that changing a
+                // disk's serial number can prevent its VM from booting to it.
+                //
+                // Explicitly pad with zeroes to avoid changing the serial
+                // numbers of existing disks that may have had their zero-padded
+                // serial numbers persisted this way.
+                let serial_number =
+                    propolis_client::support::nvme_serial_from_str(
+                        &disk.name, 0,
+                    );
+
+                Ok(DiskComponents {
+                    id: disk.disk_id,
+                    device: NvmeDisk {
+                        backend_id: SpecKey::Uuid(disk.disk_id),
+                        pci_path: PciPath::new(0, disk.slot + 0x10, 0)?,
+                        serial_number,
+                    },
+                    backend: CrucibleStorageBackend {
+                        readonly: disk.read_only,
+                        request_json: disk.vcr_json.0.clone(),
+                    },
+                })
+            })
+            .collect::<Result<Vec<DiskComponents>, _>>()?;
+
+        let nics: Vec<NicComponents> = running_zone
             .opte_ports()
-            .map(|port| {
-                self.requested_nics
+            .map(|port| -> Result<NicComponents, Error> {
+                let pos = self
+                    .requested_nics
                     .iter()
                     // We expect to match NIC slots to OPTE port slots.
                     // Error out if we can't find a NIC for a port.
@@ -867,64 +936,188 @@ impl InstanceRunner {
                             port.name().into(),
                             port.slot().into(),
                         ),
-                    ))
-                    .map(|pos| {
-                        let nic = &self.requested_nics[pos];
-                        propolis_client::types::NetworkInterfaceRequest {
-                            interface_id: nic.id,
-                            name: port.name().to_string(),
-                            slot: propolis_client::types::Slot(port.slot()),
-                        }
-                    })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+                    ))?;
 
-        let migrate = match migrate {
-            Some(params) => {
-                let migration_id = self.state
-                    .migration_in()
-                    // TODO(eliza): This is a bit of an unfortunate dance: the
-                    // initial instance-ensure-registered request is what sends
-                    // the migration ID, but it's the subsequent
-                    // instance-ensure-state request (which we're handling here)
-                    // that includes migration the source VMM's UUID and IP
-                    // address. Because the API currently splits the migration
-                    // IDs between the instance-ensure-registered and
-                    // instance-ensure-state requests, we have to stash the
-                    // migration ID in an `Option` and `expect()` it here,
-                    // panicking if we get an instance-ensure-state request with
-                    // a source Propolis ID if the instance wasn't registered
-                    // with a migration in ID.
-                    //
-                    // This is kind of a shame. Eventually, we should consider
-                    // reworking the API ensure-state request contains the
-                    // migration ID, and we don't have to unwrap here. See:
-                    // https://github.com/oxidecomputer/omicron/issues/6073
-                    .expect("if we have migration target params, we should also have a migration in")
-                    .migration_id;
-                Some(propolis_client::types::InstanceMigrateInitiateRequest {
-                    src_addr: params.src_propolis_addr.to_string(),
-                    src_uuid: params.src_propolis_id,
-                    migration_id,
+                let nic = &self.requested_nics[pos];
+                Ok(NicComponents {
+                    id: nic.id,
+                    device: VirtioNic {
+                        backend_id: SpecKey::Uuid(nic.id),
+                        interface_id: nic.id,
+                        pci_path: PciPath::new(0, nic.slot + 8, 0)?,
+                    },
+                    backend: VirtioNetworkBackend {
+                        vnic_name: port.name().to_string(),
+                    },
                 })
-            }
-            None => None,
-        };
+            })
+            .collect::<Result<Vec<NicComponents>, _>>()?;
 
-        let request = propolis_client::types::InstanceEnsureRequest {
-            properties: self.properties.clone(),
-            vcpus: self.vcpus,
-            memory: self.memory_mib,
-            nics,
-            disks: self
-                .requested_disks
-                .iter()
-                .cloned()
-                .map(Into::into)
-                .collect(),
-            boot_settings: self.boot_settings.clone(),
-            migrate,
-            cloud_init_bytes: self.cloud_init_bytes.clone().map(|x| x.0),
+        let request = if let Some(params) = migrate {
+            // TODO(#6073): The migration ID is sent in the VMM registration
+            // request and isn't part of the migration target params (despite
+            // being known when the migration-start request is sent). If it were
+            // sent here it would no longer be necessary to read the ID back
+            // from the saved VMM/instance state.
+            let migration_id = self
+                .state
+                .migration_in()
+                .expect("migration ensure request entails migration in")
+                .migration_id;
+
+            let mut replace_components: std::collections::HashMap<_, _> = disks
+                .into_iter()
+                .map(|disk| {
+                    (
+                        // N.B. This ID must match the one supplied when the
+                        // instance was started.
+                        disk.id.to_string(),
+                        ReplacementComponent::CrucibleStorageBackend(
+                            disk.backend,
+                        ),
+                    )
+                })
+                .collect();
+
+            replace_components.extend(nics.into_iter().map(|nic| {
+                (
+                    // N.B. This ID must match the one supplied when the
+                    // instance was started.
+                    nic.id.to_string(),
+                    ReplacementComponent::VirtioNetworkBackend(nic.backend),
+                )
+            }));
+
+            propolis_client::types::InstanceEnsureRequest {
+                properties: self.properties.clone(),
+                init: InstanceInitializationMethod::MigrationTarget {
+                    migration_id,
+                    replace_components,
+                    src_addr: params.src_propolis_addr.to_string(),
+                },
+            }
+        } else {
+            fn id_to_device_name(id: &Uuid) -> String {
+                format!("{id}:device")
+            }
+
+            // The basic spec enables COM1-COM4 by default. Everything else
+            // needs to be added manually.
+            let mut spec = propolis_client::types::InstanceSpecV0 {
+                board: Board {
+                    chipset: Chipset::default(),
+                    cpus: self.vcpus,
+                    memory_mb: self.memory_mib,
+                    cpuid: None,
+                },
+                components: Default::default(),
+            };
+
+            for (name, num) in [
+                ("com1", SerialPortNumber::Com1),
+                ("com2", SerialPortNumber::Com2),
+                ("com3", SerialPortNumber::Com3),
+                ("com4", SerialPortNumber::Com4),
+            ] {
+                spec.components.insert(
+                    name.to_string(),
+                    ComponentV0::SerialPort(SerialPort { num }),
+                );
+            }
+
+            for DiskComponents { id, device, backend } in disks.into_iter() {
+                assert!(spec
+                    .components
+                    .insert(
+                        id_to_device_name(&id),
+                        ComponentV0::NvmeDisk(device),
+                    )
+                    .is_none());
+
+                assert!(spec
+                    .components
+                    .insert(
+                        id.to_string(),
+                        ComponentV0::CrucibleStorageBackend(backend)
+                    )
+                    .is_none());
+            }
+
+            for NicComponents { id, device, backend } in nics.into_iter() {
+                assert!(spec
+                    .components
+                    .insert(
+                        id_to_device_name(&id),
+                        ComponentV0::VirtioNic(device)
+                    )
+                    .is_none());
+
+                assert!(spec
+                    .components
+                    .insert(
+                        id.to_string(),
+                        ComponentV0::VirtioNetworkBackend(backend)
+                    )
+                    .is_none());
+            }
+
+            assert!(spec
+                .components
+                .insert(
+                    "pvpanic".to_owned(),
+                    ComponentV0::QemuPvpanic(QemuPvpanic { enable_isa: true })
+                )
+                .is_none());
+
+            if let Some(settings) = &self.boot_settings {
+                // The boot order contains a list of disk IDs. Propolis matches
+                // boot order entries based on device component names, so pass
+                // the ID through `id_to_device_name` when generating the
+                // Propolis boot order.
+                assert!(spec
+                    .components
+                    .insert(
+                        "boot_settings".to_string(),
+                        ComponentV0::BootSettings(BootSettings {
+                            order: settings
+                                .order
+                                .iter()
+                                .map(|id| {
+                                    BootOrderEntry {
+                                        id: SpecKey::Name(id_to_device_name(
+                                            &id,
+                                        )),
+                                    }
+                                })
+                                .collect(),
+                        }),
+                    )
+                    .is_none());
+            }
+
+            if let Some(cloud_init) = &self.cloud_init_bytes {
+                spec.components.insert(
+                    "cloud-init-dev".to_string(),
+                    ComponentV0::VirtioDisk(VirtioDisk {
+                        backend_id: SpecKey::Name(
+                            "cloud-init-backend".to_string(),
+                        ),
+                        pci_path: PciPath::new(0, 0x18, 0).unwrap(),
+                    }),
+                );
+                spec.components.insert(
+                    "cloud-init-backend".to_string(),
+                    ComponentV0::BlobStorageBackend(BlobStorageBackend {
+                        base64: cloud_init.0.clone(),
+                        readonly: true,
+                    }),
+                );
+            }
+
+            propolis_client::types::InstanceEnsureRequest {
+                properties: self.properties.clone(),
+                init: InstanceInitializationMethod::Spec { spec },
+            }
         };
 
         debug!(self.log, "Sending ensure request to propolis: {:?}", request);

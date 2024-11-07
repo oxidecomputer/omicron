@@ -1107,6 +1107,7 @@ impl super::Nexus {
             });
         }
 
+        // TODO(gjc) do this by ID instead
         let boot_settings = if let Some(boot_disk_name) = boot_disk_name {
             Some(BootSettings {
                 order: vec![BootOrderEntry { name: boot_disk_name }],
