@@ -31,6 +31,7 @@ progenitor::generate_api!(
         BgpConfig = { derives = [Eq, Hash] },
         BgpPeerConfig = { derives = [Eq, Hash] },
         LldpPortConfig = { derives = [Eq, Hash, PartialOrd, Ord] },
+        TxEqConfig = { derives = [Eq, Hash] },
         OmicronPhysicalDiskConfig = { derives = [Eq, Hash, PartialOrd, Ord] },
         PortConfigV2 = { derives = [Eq, Hash] },
         RouteConfig = { derives = [Eq, Hash] },
@@ -386,36 +387,6 @@ impl From<omicron_common::api::internal::shared::NetworkInterfaceKind>
             Instance { id } => Self::Instance(id),
             Service { id } => Self::Service(id),
             Probe { id } => Self::Probe(id),
-        }
-    }
-}
-
-impl From<omicron_common::api::internal::shared::SledIdentifiers>
-    for types::SledIdentifiers
-{
-    fn from(
-        value: omicron_common::api::internal::shared::SledIdentifiers,
-    ) -> Self {
-        Self {
-            model: value.model,
-            rack_id: value.rack_id,
-            revision: value.revision,
-            serial: value.serial,
-            sled_id: value.sled_id,
-        }
-    }
-}
-
-impl From<types::SledIdentifiers>
-    for omicron_common::api::internal::shared::SledIdentifiers
-{
-    fn from(value: types::SledIdentifiers) -> Self {
-        Self {
-            model: value.model,
-            rack_id: value.rack_id,
-            revision: value.revision,
-            serial: value.serial,
-            sled_id: value.sled_id,
         }
     }
 }

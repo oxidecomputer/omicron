@@ -1385,7 +1385,6 @@ mod tests {
     // fetching different sets of fields at different times.
     #[tokio::test]
     async fn test_get_entire_timeseries_and_part_of_another() {
-        usdt::register_probes().unwrap();
         let ctx =
             setup_oxql_test("test_get_entire_timeseries_and_part_of_another")
                 .await;

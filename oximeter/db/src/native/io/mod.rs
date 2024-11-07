@@ -13,4 +13,5 @@ pub mod packet;
 pub mod profile_info;
 pub mod progress;
 pub mod string;
+pub mod table_columns;
 pub mod varuint;

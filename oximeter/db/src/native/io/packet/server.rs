@@ -161,6 +161,20 @@ impl tokio_util::codec::Decoder for Decoder {
                 };
                 Packet::ProfileInfo(info)
             }
+            Packet::TABLE_COLUMNS => {
+                match io::table_columns::decode(&mut buf) {
+                    Ok(Some(columns)) => Packet::TableColumns(columns),
+                    Ok(None) => return Ok(None),
+                    Err(e) => {
+                        probes::invalid__packet!(|| (
+                            "TableColumns",
+                            src.len()
+                        ));
+                        src.clear();
+                        return Err(e);
+                    }
+                }
+            }
             Packet::PROFILE_EVENTS => match io::block::decode(&mut buf) {
                 // Profile events are encoded as a data block.
                 Ok(Some(block)) => Packet::ProfileEvents(block),

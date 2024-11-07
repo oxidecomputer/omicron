@@ -289,6 +289,28 @@ impl FromStr for DatasetProperties {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+pub enum PropertySource {
+    Local,
+    Default,
+    Inherited,
+    Temporary,
+    None,
+}
+
+impl fmt::Display for PropertySource {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let ps = match self {
+            PropertySource::Local => "local",
+            PropertySource::Default => "default",
+            PropertySource::Inherited => "inherited",
+            PropertySource::Temporary => "temporary",
+            PropertySource::None => "none",
+        };
+        write!(f, "{ps}")
+    }
+}
+
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zfs {
     /// Lists all datasets within a pool or existing dataset.
@@ -646,7 +668,13 @@ impl Zfs {
         filesystem_name: &str,
         name: &str,
     ) -> Result<String, GetValueError> {
-        Zfs::get_value(filesystem_name, &format!("oxide:{}", name))
+        let property = format!("oxide:{name}");
+        let [value] = Self::get_values(
+            filesystem_name,
+            &[&property],
+            Some(PropertySource::Local),
+        )?;
+        Ok(value)
     }
 
     /// Calls "zfs get" with a single value
@@ -654,7 +682,7 @@ impl Zfs {
         filesystem_name: &str,
         name: &str,
     ) -> Result<String, GetValueError> {
-        let [value] = Self::get_values(filesystem_name, &[name])?;
+        let [value] = Self::get_values(filesystem_name, &[name], None)?;
         Ok(value)
     }
 
@@ -722,14 +750,24 @@ impl Zfs {
 // These methods don't work with mockall, so they exist in a separate impl block
 impl Zfs {
     /// Calls "zfs get" to acquire multiple values
+    ///
+    /// - `names`: The properties being acquired
+    /// - `source`: The optioanl property source (origin of the property)
+    /// Defaults to "all sources" when unspecified.
     pub fn get_values<const N: usize>(
         filesystem_name: &str,
         names: &[&str; N],
+        source: Option<PropertySource>,
     ) -> Result<[String; N], GetValueError> {
         let mut cmd = std::process::Command::new(PFEXEC);
         let all_names =
             names.into_iter().map(|n| *n).collect::<Vec<&str>>().join(",");
-        cmd.args(&[ZFS, "get", "-Ho", "value", &all_names, filesystem_name]);
+
+        cmd.args(&[ZFS, "get", "-Ho", "value", &all_names]);
+        if let Some(source) = source {
+            cmd.args(&["-s", &source.to_string()]);
+        }
+        cmd.arg(filesystem_name);
         let output = execute(&mut cmd).map_err(|err| GetValueError {
             filesystem: filesystem_name.to_string(),
             name: format!("{:?}", names),

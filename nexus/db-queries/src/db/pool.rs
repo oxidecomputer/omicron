@@ -84,17 +84,20 @@ impl Pool {
     /// Creating this pool does not necessarily wait for connections to become
     /// available, as backends may shift over time.
     pub fn new(log: &Logger, resolver: &QorbResolver) -> Self {
-        // Make sure diesel-dtrace's USDT probes are enabled.
-        usdt::register_probes().expect("Failed to register USDT DTrace probes");
-
         let resolver = resolver.for_service(ServiceName::Cockroach);
         let connector = make_postgres_connector(log);
-
         let policy = Policy::default();
-        Pool {
-            inner: qorb::pool::Pool::new(resolver, connector, policy),
-            terminated: std::sync::atomic::AtomicBool::new(false),
-        }
+        let inner = match qorb::pool::Pool::new(resolver, connector, policy) {
+            Ok(pool) => {
+                debug!(log, "registered USDT probes");
+                pool
+            }
+            Err(err) => {
+                error!(log, "failed to register USDT probes");
+                err.into_inner()
+            }
+        };
+        Pool { inner, terminated: std::sync::atomic::AtomicBool::new(false) }
     }
 
     /// Creates a new qorb-backed connection pool to a single instance of the
@@ -105,17 +108,20 @@ impl Pool {
     ///
     /// In production, [Self::new] should be preferred.
     pub fn new_single_host(log: &Logger, db_config: &DbConfig) -> Self {
-        // Make sure diesel-dtrace's USDT probes are enabled.
-        usdt::register_probes().expect("Failed to register USDT DTrace probes");
-
         let resolver = make_single_host_resolver(db_config);
         let connector = make_postgres_connector(log);
-
         let policy = Policy::default();
-        Pool {
-            inner: qorb::pool::Pool::new(resolver, connector, policy),
-            terminated: std::sync::atomic::AtomicBool::new(false),
-        }
+        let inner = match qorb::pool::Pool::new(resolver, connector, policy) {
+            Ok(pool) => {
+                debug!(log, "registered USDT probes");
+                pool
+            }
+            Err(err) => {
+                error!(log, "failed to register USDT probes");
+                err.into_inner()
+            }
+        };
+        Pool { inner, terminated: std::sync::atomic::AtomicBool::new(false) }
     }
 
     /// Creates a new qorb-backed connection pool which returns an error
@@ -129,20 +135,23 @@ impl Pool {
         log: &Logger,
         db_config: &DbConfig,
     ) -> Self {
-        // Make sure diesel-dtrace's USDT probes are enabled.
-        usdt::register_probes().expect("Failed to register USDT DTrace probes");
-
         let resolver = make_single_host_resolver(db_config);
         let connector = make_postgres_connector(log);
-
         let policy = Policy {
             claim_timeout: tokio::time::Duration::from_millis(1),
             ..Default::default()
         };
-        Pool {
-            inner: qorb::pool::Pool::new(resolver, connector, policy),
-            terminated: std::sync::atomic::AtomicBool::new(false),
-        }
+        let inner = match qorb::pool::Pool::new(resolver, connector, policy) {
+            Ok(pool) => {
+                debug!(log, "registered USDT probes");
+                pool
+            }
+            Err(err) => {
+                error!(log, "failed to register USDT probes");
+                err.into_inner()
+            }
+        };
+        Pool { inner, terminated: std::sync::atomic::AtomicBool::new(false) }
     }
 
     /// Returns a connection from the pool

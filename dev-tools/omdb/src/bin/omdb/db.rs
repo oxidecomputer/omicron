@@ -50,6 +50,7 @@ use indicatif::ProgressDrawTarget;
 use indicatif::ProgressStyle;
 use internal_dns_types::names::ServiceName;
 use ipnetwork::IpNetwork;
+use itertools::Itertools;
 use nexus_config::PostgresConfigWithUrl;
 use nexus_db_model::Dataset;
 use nexus_db_model::Disk;
@@ -1299,10 +1300,10 @@ async fn lookup_project(
 #[derive(Tabled)]
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
 struct DiskIdentity {
-    name: String,
     id: Uuid,
     size: String,
     state: String,
+    name: String,
 }
 
 impl From<&'_ db::model::Disk> for DiskIdentity {
@@ -3325,17 +3326,14 @@ async fn cmd_db_instance_info(
         println!("\n{:=<80}", "== ATTACHED DISKS ");
 
         check_limit(&disks, fetch_opts.fetch_limit, ctx);
-        let table = if fetch_opts.include_deleted {
+        let mut table = if fetch_opts.include_deleted {
             tabled::Table::new(disks.iter().map(MaybeDeletedDiskRow::from))
-                .with(tabled::settings::Style::empty())
-                .with(tabled::settings::Padding::new(0, 1, 0, 0))
-                .to_string()
         } else {
             tabled::Table::new(disks.iter().map(DiskRow::from))
-                .with(tabled::settings::Style::empty())
-                .with(tabled::settings::Padding::new(0, 1, 0, 0))
-                .to_string()
         };
+        table
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0));
         println!("{table}");
     }
 
@@ -3502,11 +3500,11 @@ struct VmmStateRow {
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
 struct CustomerInstanceRow {
     id: String,
-    name: String,
     state: String,
     propolis_id: MaybePropolisId,
     sled_id: MaybeSledId,
     host_serial: String,
+    name: String,
 }
 
 /// Run `omdb db instances`: list data about customer VMs.
@@ -5192,6 +5190,7 @@ async fn cmd_db_inventory_collections_show(
     let nerrors = inv_collection_print_errors(&collection).await?;
     inv_collection_print_devices(&collection, &long_string_formatter).await?;
     inv_collection_print_sleds(&collection);
+    inv_collection_print_keeper_membership(&collection);
 
     if nerrors > 0 {
         eprintln!(
@@ -5515,6 +5514,24 @@ fn inv_collection_print_sleds(collection: &Collection) {
             );
         }
     }
+}
+
+fn inv_collection_print_keeper_membership(collection: &Collection) {
+    println!("\nKEEPER MEMBERSHIP");
+    for k in &collection.clickhouse_keeper_cluster_membership {
+        println!("\n    queried keeper: {}", k.queried_keeper);
+        println!(
+            "    leader_committed_log_index: {}",
+            k.leader_committed_log_index
+        );
+
+        let s = k.raft_config.iter().join(", ");
+        println!("    raft config: {s}");
+    }
+    if collection.clickhouse_keeper_cluster_membership.is_empty() {
+        println!("No membership retrieved.");
+    }
+    println!("");
 }
 
 #[derive(Debug)]

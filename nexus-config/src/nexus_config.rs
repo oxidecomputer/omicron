@@ -250,8 +250,12 @@ pub struct SchemaConfig {
 /// Optional configuration for the timeseries database.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct TimeseriesDbConfig {
+    /// The HTTP address of the ClickHouse server.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub address: Option<SocketAddr>,
+    /// The native TCP address of the ClickHouse server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_address: Option<SocketAddr>,
 }
 
 /// Configuration for the `Dendrite` dataplane daemon.
@@ -774,7 +778,9 @@ impl std::fmt::Display for SchemeName {
 mod test {
     use super::*;
 
-    use omicron_common::address::{Ipv6Subnet, RACK_PREFIX};
+    use omicron_common::address::{
+        Ipv6Subnet, CLICKHOUSE_HTTP_PORT, CLICKHOUSE_TCP_PORT, RACK_PREFIX,
+    };
     use omicron_common::api::internal::shared::SwitchLocation;
 
     use camino::{Utf8Path, Utf8PathBuf};
@@ -784,7 +790,7 @@ mod test {
     use dropshot::ConfigLoggingLevel;
     use std::collections::HashMap;
     use std::fs;
-    use std::net::{Ipv6Addr, SocketAddr};
+    use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
     use std::str::FromStr;
     use std::time::Duration;
 
@@ -889,6 +895,7 @@ mod test {
             if_exists = "fail"
             [timeseries_db]
             address = "[::1]:8123"
+            native_address = "[::1]:9000"
             [updates]
             trusted_root = "/path/to/root.json"
             [tunables]
@@ -1007,7 +1014,20 @@ mod test {
                         path: "/nonexistent/path".into()
                     },
                     timeseries_db: TimeseriesDbConfig {
-                        address: Some("[::1]:8123".parse().unwrap())
+                        address: Some(SocketAddr::V6(SocketAddrV6::new(
+                            Ipv6Addr::LOCALHOST,
+                            CLICKHOUSE_HTTP_PORT,
+                            0,
+                            0,
+                        ))),
+                        native_address: Some(SocketAddr::V6(
+                            SocketAddrV6::new(
+                                Ipv6Addr::LOCALHOST,
+                                CLICKHOUSE_TCP_PORT,
+                                0,
+                                0,
+                            )
+                        )),
                     },
                     updates: Some(UpdatesConfig {
                         trusted_root: Utf8PathBuf::from("/path/to/root.json"),
