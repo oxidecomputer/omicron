@@ -36,7 +36,7 @@ use omicron_common::backoff::{
 use omicron_common::disk::{
     CompressionAlgorithm, DatasetConfig, DatasetKind, DatasetName,
     DatasetsConfig, DiskVariant, OmicronPhysicalDiskConfig,
-    OmicronPhysicalDisksConfig,
+    OmicronPhysicalDisksConfig, SharedDatasetConfig
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_common::policy::{
@@ -142,9 +142,11 @@ impl SledConfig {
         let fs_dataset = DatasetConfig {
             id: DatasetUuid::new_v4(),
             name: fs_dataset_name,
-            compression: CompressionAlgorithm::Off,
-            quota: None,
-            reservation: None,
+            inner: SharedDatasetConfig {
+                compression: CompressionAlgorithm::Off,
+                quota: None,
+                reservation: None,
+            },
         };
         self.datasets.datasets.insert(fs_dataset.id, fs_dataset);
 
@@ -156,9 +158,11 @@ impl SledConfig {
                 DatasetConfig {
                     id,
                     name: dataset.into(),
-                    compression: CompressionAlgorithm::Off,
-                    quota: None,
-                    reservation: None,
+                    inner: SharedDatasetConfig {
+                        compression: CompressionAlgorithm::Off,
+                        quota: None,
+                        reservation: None,
+                    }
                 },
             );
         }
@@ -549,9 +553,11 @@ impl Plan {
                     let config = DatasetConfig {
                         id: DatasetUuid::new_v4(),
                         name: DatasetName::new(zpool.clone(), kind),
-                        compression: intrinsic_dataset.get_compression(),
-                        quota: intrinsic_dataset.get_quota(),
-                        reservation: None,
+                        inner: SharedDatasetConfig {
+                            compression: intrinsic_dataset.get_compression(),
+                            quota: intrinsic_dataset.get_quota(),
+                            reservation: None,
+                        }
                     };
                     sled_info
                         .request

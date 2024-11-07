@@ -155,9 +155,11 @@ impl TryFrom<Dataset> for omicron_common::disk::DatasetConfig {
                 ),
                 dataset.kind.try_into_api(dataset.zone_name)?,
             ),
-            quota: dataset.quota.map(|q| q.into()),
-            reservation: dataset.reservation.map(|r| r.into()),
-            compression,
+            inner: omicron_common::disk::SharedDatasetConfig {
+                quota: dataset.quota.map(|q| q.into()),
+                reservation: dataset.reservation.map(|r| r.into()),
+                compression,
+            },
         })
     }
 }

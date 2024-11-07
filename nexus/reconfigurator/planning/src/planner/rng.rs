@@ -5,6 +5,8 @@
 //! RNG for blueprint planning to allow reproducibility (particularly for
 //! tests).
 
+use omicron_uuid_kinds::DatasetKind;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ExternalIpKind;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::OmicronZoneKind;
@@ -26,6 +28,7 @@ pub(crate) struct PlannerRng {
     // associated with a specific `TypedUuidKind`.
     blueprint_rng: UuidRng,
     zone_rng: TypedUuidRng<OmicronZoneKind>,
+    dataset_rng: TypedUuidRng<DatasetKind>,
     network_interface_rng: UuidRng,
     external_ip_rng: TypedUuidRng<ExternalIpKind>,
 }
@@ -38,12 +41,19 @@ impl PlannerRng {
     pub fn new_from_parent(mut parent: StdRng) -> Self {
         let blueprint_rng = UuidRng::from_parent_rng(&mut parent, "blueprint");
         let zone_rng = TypedUuidRng::from_parent_rng(&mut parent, "zone");
+        let dataset_rng = TypedUuidRng::from_parent_rng(&mut parent, "dataset");
         let network_interface_rng =
             UuidRng::from_parent_rng(&mut parent, "network_interface");
         let external_ip_rng =
             TypedUuidRng::from_parent_rng(&mut parent, "external_ip");
 
-        Self { blueprint_rng, zone_rng, network_interface_rng, external_ip_rng }
+        Self {
+            blueprint_rng,
+            zone_rng,
+            dataset_rng,
+            network_interface_rng,
+            external_ip_rng,
+        }
     }
 
     pub fn set_seed<H: Hash>(&mut self, seed: H) {
@@ -59,6 +69,10 @@ impl PlannerRng {
 
     pub fn next_zone(&mut self) -> OmicronZoneUuid {
         self.zone_rng.next()
+    }
+
+    pub fn next_dataset(&mut self) -> DatasetUuid {
+        self.dataset_rng.next()
     }
 
     pub fn next_network_interface(&mut self) -> Uuid {
