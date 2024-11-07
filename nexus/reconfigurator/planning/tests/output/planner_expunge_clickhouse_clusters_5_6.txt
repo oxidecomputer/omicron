@@ -243,7 +243,7 @@ to:   blueprint df68d4d4-5af4-4b56-95bb-1654a6957d4f
     max used server id:::::::::::::::::::::::::::::   2 (unchanged)
 *   max used keeper id:::::::::::::::::::::::::::::   3 -> 4
     cluster name:::::::::::::::::::::::::::::::::::   oximeter_cluster (unchanged)
-    cluster secret:::::::::::::::::::::::::::::::::   1d73a59c-d623-4d22-8e55-ba9031bdc7d5 (unchanged)
+    cluster secret:::::::::::::::::::::::::::::::::   9b56c0da-33d7-41a6-b411-6d00e71bea9b (unchanged)
 *   highest seen keeper leader committed log index:   1 -> 3
 
     clickhouse keepers generation 3 -> 4:
