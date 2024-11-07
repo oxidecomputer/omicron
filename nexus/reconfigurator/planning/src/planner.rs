@@ -952,6 +952,7 @@ mod test {
         assert_eq!(diff.physical_disks.removed.len(), 0);
         assert_eq!(diff.datasets.added.len(), 0);
         assert_eq!(diff.datasets.removed.len(), 0);
+        assert_eq!(diff.datasets.modified.len(), 0);
         assert_eq!(diff.datasets.unchanged.len(), 3);
         verify_blueprint(&blueprint2);
 
@@ -1161,6 +1162,7 @@ mod test {
         assert_eq!(diff.physical_disks.added.len(), 0);
         assert_eq!(diff.physical_disks.removed.len(), 0);
         assert_eq!(diff.datasets.added.len(), 1);
+        assert_eq!(diff.datasets.modified.len(), 0);
         assert_eq!(diff.datasets.removed.len(), 0);
 
         let zones_added = diff.zones.added.get(changed_sled_id).unwrap();
@@ -1756,6 +1758,7 @@ mod test {
         assert_eq!(diff.physical_disks.added.len(), 1);
         assert_eq!(diff.physical_disks.removed.len(), 0);
         assert_eq!(diff.datasets.added.len(), 1);
+        assert_eq!(diff.datasets.modified.len(), 0);
         assert_eq!(diff.datasets.removed.len(), 0);
 
         // Test a no-op planning iteration.
@@ -1765,6 +1768,79 @@ mod test {
             &input,
             TEST_NAME,
         );
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_dataset_settings_modified_in_place() {
+        static TEST_NAME: &str = "planner_dataset_settings_modified_in_place";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Create an example system with a single sled
+        let (example, mut blueprint1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(1).build();
+        let collection = example.collection;
+        let input = example.input;
+
+        let mut builder = input.into_builder();
+
+        // Avoid churning on the quantity of Nexus and internal DNS zones -
+        // we're okay staying at one each.
+        builder.policy_mut().target_nexus_zone_count = 1;
+        builder.policy_mut().target_internal_dns_zone_count = 1;
+
+        // Manually update the blueprint to report an abnormal "Debug dataset"
+        let (_sled_id, datasets_config) =
+            blueprint1.blueprint_datasets.iter_mut().next().unwrap();
+        let (_dataset_id, dataset_config) = datasets_config
+            .datasets
+            .iter_mut()
+            .find(|(_, config)| {
+                matches!(config.kind, omicron_common::disk::DatasetKind::Debug)
+            })
+            .expect("No debug dataset found");
+
+        // These values are out-of-sync with what the blueprint will typically
+        // enforce.
+        dataset_config.quota = None;
+        dataset_config.reservation = Some(
+            omicron_common::api::external::ByteCount::from_gibibytes_u32(1),
+        );
+
+        let input = builder.build();
+
+        let blueprint2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint1,
+            &input,
+            "test: fix a dataset",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
+        .plan()
+        .expect("failed to plan");
+
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        println!("1 -> 2 (modify a dataset):\n{}", diff.display());
+        assert_contents(
+            "tests/output/planner_dataset_settings_modified_in_place_1_2.txt",
+            &diff.display().to_string(),
+        );
+
+        assert_eq!(diff.sleds_added.len(), 0);
+        assert_eq!(diff.sleds_removed.len(), 0);
+        assert_eq!(diff.sleds_modified.len(), 1);
+
+        assert_eq!(diff.zones.added.len(), 0);
+        assert_eq!(diff.zones.removed.len(), 0);
+        assert_eq!(diff.zones.modified.len(), 0);
+        assert_eq!(diff.physical_disks.added.len(), 0);
+        assert_eq!(diff.physical_disks.removed.len(), 0);
+        assert_eq!(diff.datasets.added.len(), 0);
+        assert_eq!(diff.datasets.removed.len(), 0);
+        assert_eq!(diff.datasets.modified.len(), 1);
 
         logctx.cleanup_successful();
     }
@@ -1848,6 +1924,7 @@ mod test {
         // NOTE: Expunging a disk doesn't immediately delete datasets; see the
         // "decommissioned_disk_cleaner" background task for more context.
         assert_eq!(diff.datasets.removed.len(), 0);
+        assert_eq!(diff.datasets.modified.len(), 0);
 
         let (_zone_id, modified_zones) =
             diff.zones.modified.iter().next().unwrap();
