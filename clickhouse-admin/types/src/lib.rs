@@ -5,6 +5,7 @@
 use anyhow::{bail, Context, Error, Result};
 use atomicwrites::AtomicFile;
 use camino::Utf8PathBuf;
+use chrono::{DateTime, Utc};
 use derive_more::{Add, AddAssign, Display, From};
 use itertools::Itertools;
 use omicron_common::api::external::Generation;
@@ -995,7 +996,7 @@ pub struct DistributedDdlQueue {
     /// Settings used in the DDL operation
     pub settings: BTreeMap<String, String>,
     /// Query created time
-    pub query_create_time: String,
+    pub query_create_time: DateTime<Utc>,
     /// Hostname
     pub host: Ipv6Addr,
     /// Host Port
@@ -1007,9 +1008,9 @@ pub struct DistributedDdlQueue {
     /// Exception message
     pub exception_text: String,
     /// Query finish time
-    pub query_finish_time: String,
+    pub query_finish_time: DateTime<Utc>,
     /// Duration of query execution (in milliseconds)
-    pub query_duration_ms: String,
+    pub query_duration_ms: u64,
 }
 
 impl DistributedDdlQueue {
@@ -1036,6 +1037,7 @@ impl DistributedDdlQueue {
 mod tests {
     use camino::Utf8PathBuf;
     use camino_tempfile::Builder;
+    use chrono::{DateTime, Utc};
     use slog::{o, Drain};
     use slog_term::{FullFormat, PlainDecorator, TestStdoutWriter};
     use std::collections::BTreeMap;
@@ -1809,8 +1811,8 @@ snapshot_storage_disk=LocalSnapshotDisk
     fn test_distributed_ddl_queries_parse_success() {
         let log = log();
         let data =
-            "{\"entry\":\"query-0000000000\",\"entry_version\":5,\"initiator_host\":\"ixchel\",\"initiator_port\":22001,\"cluster\":\"oximeter_cluster\",\"query\":\"CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster\",\"settings\":{\"load_balancing\":\"random\"},\"query_create_time\":\"2024-11-01 16:16:45\",\"host\":\"::1\",\"port\":22001,\"status\":\"Finished\",\"exception_code\":0,\"exception_text\":\"\",\"query_finish_time\":\"2024-11-01 16:16:45\",\"query_duration_ms\":\"4\"}
-{\"entry\":\"query-0000000000\",\"entry_version\":5,\"initiator_host\":\"ixchel\",\"initiator_port\":22001,\"cluster\":\"oximeter_cluster\",\"query\":\"CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster\",\"settings\":{\"load_balancing\":\"random\"},\"query_create_time\":\"2024-11-01 16:16:45\",\"host\":\"::1\",\"port\":22002,\"status\":\"Finished\",\"exception_code\":0,\"exception_text\":\"\",\"query_finish_time\":\"2024-11-01 16:16:45\",\"query_duration_ms\":\"4\"}
+            "{\"entry\":\"query-0000000000\",\"entry_version\":5,\"initiator_host\":\"ixchel\",\"initiator_port\":22001,\"cluster\":\"oximeter_cluster\",\"query\":\"CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster\",\"settings\":{\"load_balancing\":\"random\"},\"query_create_time\":\"2024-11-01T16:16:45Z\",\"host\":\"::1\",\"port\":22001,\"status\":\"Finished\",\"exception_code\":0,\"exception_text\":\"\",\"query_finish_time\":\"2024-11-01T16:16:45Z\",\"query_duration_ms\":4}
+{\"entry\":\"query-0000000000\",\"entry_version\":5,\"initiator_host\":\"ixchel\",\"initiator_port\":22001,\"cluster\":\"oximeter_cluster\",\"query\":\"CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster\",\"settings\":{\"load_balancing\":\"random\"},\"query_create_time\":\"2024-11-01T16:16:45Z\",\"host\":\"::1\",\"port\":22002,\"status\":\"Finished\",\"exception_code\":0,\"exception_text\":\"\",\"query_finish_time\":\"2024-11-01T16:16:45Z\",\"query_duration_ms\":4}
 "
             .as_bytes();
         let ddl = DistributedDdlQueue::parse(&log, data).unwrap();
@@ -1826,14 +1828,14 @@ snapshot_storage_disk=LocalSnapshotDisk
                 settings: BTreeMap::from([
     ("load_balancing".to_string(), "random".to_string()),
 ]),
-                query_create_time: "2024-11-01 16:16:45".to_string(),
+                query_create_time: "2024-11-01T16:16:45Z".parse::<DateTime::<Utc>>().unwrap(),
                 host: Ipv6Addr::from_str("::1").unwrap(),
                 port: 22001,
                 exception_code: 0,
                 exception_text: "".to_string(),
                 status: "Finished".to_string(),
-                query_finish_time: "2024-11-01 16:16:45".to_string(),
-                query_duration_ms: "4".to_string(),
+                query_finish_time: "2024-11-01T16:16:45Z".parse::<DateTime::<Utc>>().unwrap(),
+                query_duration_ms: 4,
             },
             DistributedDdlQueue{
                 entry: "query-0000000000".to_string(),
@@ -1845,16 +1847,16 @@ snapshot_storage_disk=LocalSnapshotDisk
                 settings: BTreeMap::from([
     ("load_balancing".to_string(), "random".to_string()),
 ]),
-                query_create_time: "2024-11-01 16:16:45".to_string(),
+                query_create_time: "2024-11-01T16:16:45Z".parse::<DateTime::<Utc>>().unwrap(),
                 host: Ipv6Addr::from_str("::1").unwrap(),
                 port: 22002,
                 exception_code: 0,
                 exception_text: "".to_string(),
                 status: "Finished".to_string(),
-                query_finish_time: "2024-11-01 16:16:45".to_string(),
-                query_duration_ms: "4".to_string(),
+                query_finish_time: "2024-11-01T16:16:45Z".parse::<DateTime::<Utc>>().unwrap(),
+                query_duration_ms: 4,
             },
-            ];
+        ];
         assert!(ddl == expected_result);
     }
 
@@ -1872,7 +1874,7 @@ snapshot_storage_disk=LocalSnapshotDisk
     fn test_misshapen_distributed_ddl_queries_parse_fail() {
         let log = log();
         let data =
-        "{\"entry\":\"query-0000000000\",\"initiator_host\":\"ixchel\",\"initiator_port\":22001,\"cluster\":\"oximeter_cluster\",\"query\":\"CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster\",\"settings\":{\"load_balancing\":\"random\"},\"query_create_time\":\"2024-11-01 16:16:45\",\"host\":\"::1\",\"port\":22001,\"status\":\"Finished\",\"exception_code\":0,\"exception_text\":\"\",\"query_finish_time\":\"2024-11-01 16:16:45\",\"query_duration_ms\":\"4\"}
+        "{\"entry\":\"query-0000000000\",\"initiator_host\":\"ixchel\",\"initiator_port\":22001,\"cluster\":\"oximeter_cluster\",\"query\":\"CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster\",\"settings\":{\"load_balancing\":\"random\"},\"query_create_time\":\"2024-11-01T16:16:45Z\",\"host\":\"::1\",\"port\":22001,\"status\":\"Finished\",\"exception_code\":0,\"exception_text\":\"\",\"query_finish_time\":\"2024-11-01T16:16:45Z\",\"query_duration_ms\":4}
 "
 .as_bytes();
         let result = DistributedDdlQueue::parse(&log, data);
