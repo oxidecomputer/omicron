@@ -338,6 +338,7 @@ crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", re
 crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "b7b9d5660b28ca5e865242b2bdecd032c0852d40" }
 crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "b7b9d5660b28ca5e865242b2bdecd032c0852d40" }
 csv = "1.3.0"
+ctor = "0.2.8"
 curve25519-dalek = "4"
 datatest-stable = "0.2.9"
 display-error-chain = "0.2.2"
