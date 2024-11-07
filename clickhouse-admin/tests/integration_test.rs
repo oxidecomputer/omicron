@@ -21,12 +21,15 @@ use std::str::FromStr;
 use ctor::{ctor, dtor};
 use std::sync::Once;
 
-//static TEARDOWN: Once = Once::new();
+static SETUP: Once = Once::new();
 
-//#[ctor]  // This is executed before any test function runs
-//fn before_tests() {
-//    println!("Before any tests");
-//}
+// TODO: Do setup with nextest. It does setup twice with nextest
+// for some reson, but with cargo test it only does setup once
+fn setup() {
+    SETUP.call_once(|| {
+        println!("Setup before tests: test"); 
+    });
+}
 
 fn teardown() {
     println!("Teardown after all tests: test");
@@ -36,13 +39,15 @@ fn teardown() {
 mod tests {
     use super::*;
     
-    #[test]
-    fn test_1() {
+    #[tokio::test]
+    async fn test_1() {
+        setup();
         println!("Running test 1...");
     }
 
-    #[test]
-    fn test_2() {
+    #[tokio::test]
+    async fn test_2() {
+        setup();
         println!("Running test 2...");
     }
 
