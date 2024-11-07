@@ -2435,7 +2435,7 @@
         ]
       },
       "DatasetConfig": {
-        "description": "Configuration information necessary to request a single dataset",
+        "description": "Configuration information necessary to request a single dataset.\n\nThese datasets are tracked directly by Nexus.",
         "type": "object",
         "properties": {
           "compression": {
