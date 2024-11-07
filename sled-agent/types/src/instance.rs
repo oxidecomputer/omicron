@@ -47,6 +47,39 @@ pub struct InstanceEnsureBody {
     pub metadata: InstanceMetadata,
 }
 
+/// A request to attach a disk to an instance.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct InstanceDisk {
+    /// The disk's UUID.
+    pub disk_id: Uuid,
+    /// The logical slot number assigned to the disk in its database record.
+    pub slot: u8,
+    /// True if the disk is read-only.
+    pub read_only: bool,
+    /// A JSON representation of the Crucible volume construction request for
+    /// this attachment.
+    //
+    // This is marked as `NoDebug` because the VCR contains the volume's
+    // encryption keys.
+    pub vcr_json: NoDebug<String>,
+
+    /// The disk's name, used to generate the serial number for the virtual disk
+    /// exposed to the guest.
+    //
+    // TODO(#7153): Making this depend on the disk name means that a disk's ID
+    // may change if it is renamed or if a snapshot of it is used to create a
+    // new disk.
+    pub name: String,
+}
+
+/// Configures how an instance is told to try to boot.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct InstanceBootSettings {
+    /// Propolis should tell guest firmware to try to boot from devices in this
+    /// order.
+    pub order: Vec<Uuid>,
+}
+
 /// Describes the instance hardware.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct InstanceHardware {
@@ -59,9 +92,8 @@ pub struct InstanceHardware {
     pub floating_ips: Vec<IpAddr>,
     pub firewall_rules: Vec<ResolvedVpcFirewallRule>,
     pub dhcp_config: DhcpConfig,
-    // TODO: replace `propolis_client::*` with locally-modeled request type
-    pub disks: Vec<propolis_client::types::DiskRequest>,
-    pub boot_settings: Option<propolis_client::types::BootSettings>,
+    pub disks: Vec<InstanceDisk>,
+    pub boot_settings: Option<InstanceBootSettings>,
     pub cloud_init_bytes: Option<NoDebug<String>>,
 }
 
@@ -153,6 +185,7 @@ pub struct VmmUnregisterResponse {
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceMigrationTargetParams {
     /// The Propolis ID of the migration source.
+    // TODO(gjc) try to get rid of this, migration targets don't use it anymore
     pub src_propolis_id: Uuid,
 
     /// The address of the Propolis server that will serve as the migration
