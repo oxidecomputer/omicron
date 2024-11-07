@@ -33,7 +33,7 @@ pub trait ClickhouseAdminKeeperApi {
     /// configuration set via this endpoint.
     #[endpoint {
         method = PUT,
-        path = "/gen-config-and-enable",
+        path = "/config",
     }]
     async fn generate_config_and_enable_svc(
         rqctx: RequestContext<Self::Context>,
@@ -45,7 +45,7 @@ pub trait ClickhouseAdminKeeperApi {
     /// and logs for consistency and recovery.
     #[endpoint {
         method = GET,
-        path = "/lgif",
+        path = "/4lw-lgif",
     }]
     async fn lgif(
         rqctx: RequestContext<Self::Context>,
@@ -64,7 +64,7 @@ pub trait ClickhouseAdminKeeperApi {
     /// Retrieve configuration information from a keeper node.
     #[endpoint {
         method = GET,
-        path = "/conf",
+        path = "/4lw-conf",
     }]
     async fn keeper_conf(
         rqctx: RequestContext<Self::Context>,
