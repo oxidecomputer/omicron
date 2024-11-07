@@ -31,6 +31,7 @@ pub(crate) struct PlannerRng {
     dataset_rng: TypedUuidRng<DatasetKind>,
     network_interface_rng: UuidRng,
     external_ip_rng: TypedUuidRng<ExternalIpKind>,
+    clickhouse_rng: UuidRng,
 }
 
 impl PlannerRng {
@@ -46,6 +47,8 @@ impl PlannerRng {
             UuidRng::from_parent_rng(&mut parent, "network_interface");
         let external_ip_rng =
             TypedUuidRng::from_parent_rng(&mut parent, "external_ip");
+        let clickhouse_rng =
+            UuidRng::from_parent_rng(&mut parent, "clickhouse");
 
         Self {
             blueprint_rng,
@@ -53,6 +56,7 @@ impl PlannerRng {
             dataset_rng,
             network_interface_rng,
             external_ip_rng,
+            clickhouse_rng,
         }
     }
 
@@ -81,5 +85,9 @@ impl PlannerRng {
 
     pub fn next_external_ip(&mut self) -> ExternalIpUuid {
         self.external_ip_rng.next()
+    }
+
+    pub fn next_clickhouse(&mut self) -> Uuid {
+        self.clickhouse_rng.next()
     }
 }

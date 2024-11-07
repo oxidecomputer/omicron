@@ -370,6 +370,8 @@ impl<'a> BlueprintBuilder<'a> {
             "parent_id" => parent_blueprint.id.to_string(),
         ));
 
+        let mut rng = PlannerRng::new();
+
         // Prefer the sled state from our parent blueprint for sleds
         // that were in it; there may be new sleds in `input`, in which
         // case we'll use their current state as our starting point.
@@ -411,7 +413,10 @@ impl<'a> BlueprintBuilder<'a> {
                             "and 'ClickhouseAllocator'"
                         )
                     );
-                    ClickhouseClusterConfig::new(OXIMETER_CLUSTER.to_string())
+                    ClickhouseClusterConfig::new(
+                        OXIMETER_CLUSTER.to_string(),
+                        rng.next_clickhouse().to_string(),
+                    )
                 });
             Some(ClickhouseAllocator::new(
                 log.clone(),
@@ -450,7 +455,7 @@ impl<'a> BlueprintBuilder<'a> {
             creator: creator.to_owned(),
             operations: Vec::new(),
             comments: Vec::new(),
-            rng: PlannerRng::new(),
+            rng,
         })
     }
 
