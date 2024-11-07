@@ -6002,7 +6002,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn support_bundle_list(
         rqctx: RequestContext<ApiContext>,
         _query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<shared::SupportBundleInfo>>, HttpError> {
+    ) -> Result<HttpResponseOk<ResultsPage<shared::SupportBundleInfo>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -6010,7 +6011,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
-            Err(nexus.unimplemented_todo(&opctx, crate::app::Unimpl::Public).await.into())
+            Err(nexus
+                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
+                .await
+                .into())
         };
         apictx
             .context
@@ -6030,7 +6034,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
-            Err(nexus.unimplemented_todo(&opctx, crate::app::Unimpl::Public).await.into())
+            Err(nexus
+                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
+                .await
+                .into())
         };
         apictx
             .context
@@ -6050,7 +6057,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
-            Err(nexus.unimplemented_todo(&opctx, crate::app::Unimpl::Public).await.into())
+            Err(nexus
+                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
+                .await
+                .into())
         };
         apictx
             .context
@@ -6069,7 +6079,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
-            Err(nexus.unimplemented_todo(&opctx, crate::app::Unimpl::Public).await.into())
+            Err(nexus
+                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
+                .await
+                .into())
         };
         apictx
             .context
@@ -6089,7 +6102,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
-            Err(nexus.unimplemented_todo(&opctx, crate::app::Unimpl::Public).await.into())
+            Err(nexus
+                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
+                .await
+                .into())
         };
         apictx
             .context
