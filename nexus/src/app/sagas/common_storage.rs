@@ -61,7 +61,7 @@ pub(super) async fn is_pantry_gone(
         Ok(entries) => entries,
         Err(err) => {
             warn!(
-                log, "Failed to resolve Crucible pantry in DNS";
+                log, "Failed to query DNS for Crucible pantry";
                 InlineErrorChain::new(&err),
             );
             return false;
