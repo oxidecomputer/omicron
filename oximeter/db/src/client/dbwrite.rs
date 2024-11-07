@@ -8,18 +8,19 @@
 
 use crate::client::Client;
 use crate::model;
+use crate::model::to_block::ToBlock as _;
 use crate::Error;
 use camino::Utf8PathBuf;
 use oximeter::Sample;
-use oximeter::TimeseriesName;
+use oximeter::TimeseriesSchema;
 use slog::debug;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 #[derive(Debug)]
 pub(super) struct UnrolledSampleRows {
-    /// The timeseries schema rows, keyed by timeseries name.
-    pub new_schema: BTreeMap<TimeseriesName, String>,
+    /// The timeseries schema rows.
+    pub new_schema: Vec<TimeseriesSchema>,
     /// The rows to insert in all the other tables, keyed by the table name.
     pub rows: BTreeMap<String, Vec<String>>,
 }
@@ -182,14 +183,14 @@ impl Client {
                     continue;
                 }
                 Ok(None) => {}
-                Ok(Some((name, schema))) => {
+                Ok(Some(schema)) => {
                     debug!(
                         self.log,
                         "new timeseries schema";
-                        "timeseries_name" => %name,
-                        "schema" => %schema
+                        "timeseries_name" => %schema.timeseries_name,
+                        "schema" => ?schema,
                     );
-                    new_schema.insert(name, schema);
+                    new_schema.insert(schema.timeseries_name.clone(), schema);
                 }
             }
 
@@ -217,6 +218,7 @@ impl Client {
             seen_timeseries.insert(key);
         }
 
+        let new_schema = new_schema.into_values().collect();
         UnrolledSampleRows { new_schema, rows }
     }
 
@@ -268,7 +270,7 @@ impl Client {
     // receive a sample with a new schema, and both would then try to insert that schema.
     pub(super) async fn save_new_schema_or_remove(
         &self,
-        new_schema: BTreeMap<TimeseriesName, String>,
+        new_schema: Vec<TimeseriesSchema>,
     ) -> Result<(), Error> {
         if !new_schema.is_empty() {
             debug!(
@@ -276,17 +278,11 @@ impl Client {
                 "inserting {} new timeseries schema",
                 new_schema.len()
             );
-            const APPROX_ROW_SIZE: usize = 64;
-            let mut body = String::with_capacity(
-                APPROX_ROW_SIZE + APPROX_ROW_SIZE * new_schema.len(),
+            let body = const_format::formatcp!(
+                "INSERT INTO {}.timeseries_schema FORMAT Native",
+                crate::DATABASE_NAME
             );
-            body.push_str("INSERT INTO ");
-            body.push_str(crate::DATABASE_NAME);
-            body.push_str(".timeseries_schema FORMAT JSONEachRow\n");
-            for row_data in new_schema.values() {
-                body.push_str(row_data);
-                body.push('\n');
-            }
+            let block = TimeseriesSchema::to_block(&new_schema)?;
 
             // Try to insert the schema.
             //
@@ -294,16 +290,16 @@ impl Client {
             // internal cache. Since we check the internal cache first for
             // schema, if we fail here but _don't_ remove the schema, we'll
             // never end up inserting the schema, but we will insert samples.
-            if let Err(e) = self.execute(body).await {
+            if let Err(e) = self.insert_native(&body, block).await {
                 debug!(
                     self.log,
                     "failed to insert new schema, removing from cache";
                     "error" => ?e,
                 );
                 let mut schema = self.schema.lock().await;
-                for name in new_schema.keys() {
+                for schema_to_remove in new_schema.iter() {
                     schema
-                        .remove(name)
+                        .remove(&schema_to_remove.timeseries_name)
                         .expect("New schema should have been cached");
                 }
                 return Err(e);

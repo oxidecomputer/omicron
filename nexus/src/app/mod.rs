@@ -24,6 +24,7 @@ use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use omicron_common::address::CLICKHOUSE_HTTP_PORT;
 use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGD_PORT;
@@ -411,13 +412,12 @@ impl Nexus {
             .map_err(|e| e.to_string())?;
 
         // Client to the ClickHouse database.
-        let timeseries_client =
-            if let Some(http_address) = &config.pkg.timeseries_db.address {
-                let native_address =
-                    SocketAddr::new(http_address.ip(), CLICKHOUSE_TCP_PORT);
-                oximeter_db::Client::new(*http_address, native_address, &log)
-            } else {
-                // TODO-cleanup: Remove this when we remove the HTTP client.
+        // TODO-cleanup: Simplify this when we remove the HTTP client.
+        let timeseries_client = match (
+            &config.pkg.timeseries_db.address,
+            &config.pkg.timeseries_db.native_address,
+        ) {
+            (None, None) => {
                 let http_resolver =
                     qorb_resolver.for_service(ServiceName::Clickhouse);
                 let native_resolver =
@@ -427,7 +427,24 @@ impl Nexus {
                     native_resolver,
                     &log,
                 )
-            };
+            }
+            (maybe_http, maybe_native) => {
+                let (http_address, native_address) =
+                    match (maybe_http, maybe_native) {
+                        (None, None) => unreachable!("handled above"),
+                        (None, Some(native)) => (
+                            SocketAddr::new(native.ip(), CLICKHOUSE_HTTP_PORT),
+                            *native,
+                        ),
+                        (Some(http), None) => (
+                            *http,
+                            SocketAddr::new(http.ip(), CLICKHOUSE_TCP_PORT),
+                        ),
+                        (Some(http), Some(native)) => (*http, *native),
+                    };
+                oximeter_db::Client::new(http_address, native_address, &log)
+            }
+        };
 
         // TODO-cleanup We may want to make the populator a first-class
         // background task.

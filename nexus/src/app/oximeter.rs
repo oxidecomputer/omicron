@@ -241,7 +241,8 @@ pub(crate) async fn unassign_producer(
 
 fn map_oximeter_err(error: oximeter_db::Error) -> Error {
     match error {
-        oximeter_db::Error::DatabaseUnavailable(_) => {
+        oximeter_db::Error::DatabaseUnavailable(_)
+        | oximeter_db::Error::Connection(_) => {
             Error::ServiceUnavailable { internal_message: error.to_string() }
         }
         _ => Error::InternalError { internal_message: error.to_string() },

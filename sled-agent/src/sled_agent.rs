@@ -468,7 +468,7 @@ impl SledAgent {
             serial: baseboard.identifier().to_string(),
         };
         let metrics_manager =
-            MetricsManager::new(&log, identifiers, *sled_address.ip())?;
+            MetricsManager::new(&log, identifiers.clone(), *sled_address.ip())?;
 
         // Start tracking the underlay physical links.
         for link in underlay::find_chelsio_links(&config.data_links)? {
@@ -514,10 +514,8 @@ impl SledAgent {
         };
         let updates = UpdateManager::new(update_config);
 
-        let svc_config = services::Config::new(
-            request.body.id.into_untyped_uuid(),
-            config.sidecar_revision.clone(),
-        );
+        let svc_config =
+            services::Config::new(identifiers, config.sidecar_revision.clone());
 
         // Get our rack network config from the bootstore; we cannot proceed
         // until we have this, as we need to know which switches have uplinks to
