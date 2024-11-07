@@ -1174,13 +1174,13 @@ impl DataStore {
         for (dataset, region, region_snapshot, volume) in
             unfiltered_deleted_regions
         {
-            // only operate on soft or hard deleted volumes
-            let deleted = match &volume {
+            // only operate on soft deleted volumes
+            let soft_deleted = match &volume {
                 Some(volume) => volume.time_deleted.is_some(),
-                None => true,
+                None => false,
             };
 
-            if !deleted {
+            if !soft_deleted {
                 continue;
             }
 
@@ -5388,5 +5388,53 @@ mod tests {
                 read_only_parent: Some(Box::new(rop)),
             }
         );
+    }
+
+    /// Assert that there are no "deleted" r/w regions found when the associated
+    /// volume hasn't been created yet.
+    #[tokio::test]
+    async fn test_no_find_deleted_region_for_no_volume() {
+        let logctx =
+            dev::test_setup_log("test_no_find_deleted_region_for_no_volume");
+        let log = logctx.log.new(o!());
+        let db = TestDatabase::new_with_datastore(&log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let _test_datasets = TestDatasets::create(
+            &opctx,
+            datastore.clone(),
+            REGION_REDUNDANCY_THRESHOLD,
+        )
+        .await;
+
+        let volume_id = Uuid::new_v4();
+
+        // Assert that allocating regions without creating the volume does not
+        // cause them to be returned as "deleted" regions, as this can cause
+        // sagas that allocate regions to race with the volume delete saga and
+        // cause premature region deletion.
+
+        let _datasets_and_regions = datastore
+            .disk_region_allocate(
+                &opctx,
+                volume_id,
+                &DiskSource::Blank { block_size: 512.try_into().unwrap() },
+                ByteCount::from_gibibytes_u32(1),
+                &&RegionAllocationStrategy::RandomWithDistinctSleds {
+                    seed: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let deleted_regions = datastore
+            .find_deleted_volume_regions()
+            .await
+            .expect("find_deleted_volume_regions");
+
+        assert!(deleted_regions.is_empty());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 }
