@@ -42,6 +42,46 @@ ALTER DEFAULT PRIVILEGES GRANT INSERT, SELECT, UPDATE, DELETE ON TABLES to omicr
  */
 ALTER RANGE default CONFIGURE ZONE USING num_replicas = 5;
 
+
+/*
+ * The deployment strategy for clickhouse 
+ */
+CREATE TYPE IF NOT EXISTS omicron.public.clickhouse_mode AS ENUM (
+   -- Only deploy a single node clickhouse 
+   'single_node_only',
+
+   -- Only deploy a clickhouse cluster without any single node deployments 
+   'cluster_only',
+
+   -- Deploy both a single node and cluster deployment.
+   -- This is the strategy for stage 1 described in RFD 468
+   'both'
+);
+
+/*
+ * A planning policy for clickhouse for a single multirack setup
+ *
+ * We currently implicitly tie this policy to a rack, as we don't yet support
+ * multirack. Multiple parts of this database schema are going to have to change
+ * to support multirack, so we add one more for now.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.clickhouse_policy (
+    -- Monotonically increasing version for all policies
+    --
+    -- This is similar to `bp_target` which will also require being changed for
+    -- multirack to associate with some sort of rack group ID.
+    version INT8 PRIMARY KEY,
+
+    clickhouse_mode omicron.public.clickhouse_mode NOT NULL,
+
+    -- Only greater than 0 when clickhouse cluster is enabled
+    clickhouse_cluster_target_servers INT2 NOT NULL,
+    -- Only greater than 0 when clickhouse cluster is enabled
+    clickhouse_cluster_target_keepers INT2 NOT NULL,
+
+    time_created TIMESTAMPTZ NOT NULL
+);
+
 /*
  * Racks
  */
@@ -541,6 +581,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.dataset (
 
     /* Only valid if kind = zone -- the name of this zone */
     zone_name TEXT,
+
+    quota INT8,
+    reservation INT8,
+    compression TEXT,
 
     /* Crucible must make use of 'size_used'; other datasets manage their own storage */
     CONSTRAINT size_used_column_set_for_crucible CHECK (
@@ -2803,6 +2847,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_link_config (
     speed omicron.public.switch_link_speed,
     autoneg BOOL NOT NULL DEFAULT false,
     lldp_link_config_id UUID,
+    tx_eq_config_id UUID,
 
     PRIMARY KEY (port_settings_id, link_name)
 );
@@ -2819,6 +2864,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.lldp_link_config (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.tx_eq_config (
+    id UUID PRIMARY KEY,
+    pre1 INT4,
+    pre2 INT4,
+    main INT4,
+    post2 INT4,
+    post1 INT4
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.switch_interface_kind AS ENUM (
@@ -3439,7 +3493,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
 
     -- unique id for this zone
     id UUID NOT NULL,
-    underlay_address INET NOT NULL,
     zone_type omicron.public.zone_type NOT NULL,
 
     -- SocketAddr of the "primary" service for this zone
@@ -3561,6 +3614,11 @@ CREATE TYPE IF NOT EXISTS omicron.public.bp_zone_disposition AS ENUM (
     'expunged'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.bp_dataset_disposition AS ENUM (
+    'in_service',
+    'expunged'
+);
+
 -- list of all blueprints
 CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     id UUID PRIMARY KEY,
@@ -3662,6 +3720,52 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_physical_disk  (
     PRIMARY KEY (blueprint_id, id)
 );
 
+-- description of a collection of omicron datasets stored in a blueprint
+CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_datasets (
+    -- foreign key into the `blueprint` table
+    blueprint_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    generation INT8 NOT NULL,
+
+    PRIMARY KEY (blueprint_id, sled_id)
+);
+
+-- description of an omicron dataset specified in a blueprint.
+CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_dataset (
+    -- foreign key into the `blueprint` table
+    blueprint_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    id UUID NOT NULL,
+
+    -- Dataset disposition
+    disposition omicron.public.bp_dataset_disposition NOT NULL,
+
+    pool_id UUID NOT NULL,
+    kind omicron.public.dataset_kind NOT NULL,
+    -- Only valid if kind = zone
+    zone_name TEXT,
+
+    -- Only valid if kind = crucible
+    ip INET,
+    port INT4 CHECK (port BETWEEN 0 AND 65535),
+
+    quota INT8,
+    reservation INT8,
+    compression TEXT NOT NULL,
+
+    CONSTRAINT zone_name_for_zone_kind CHECK (
+      (kind != 'zone') OR
+      (kind = 'zone' AND zone_name IS NOT NULL)
+    ),
+
+    CONSTRAINT ip_and_port_set_for_crucible CHECK (
+      (kind != 'crucible') OR
+      (kind = 'crucible' AND ip IS NOT NULL and port IS NOT NULL)
+    ),
+
+    PRIMARY KEY (blueprint_id, id)
+);
+
 -- see inv_sled_omicron_zones, which is identical except it references a
 -- collection whereas this table references a blueprint
 CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_zones (
@@ -3690,7 +3794,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
 
     -- unique id for this zone
     id UUID NOT NULL,
-    underlay_address INET NOT NULL,
     zone_type omicron.public.zone_type NOT NULL,
 
     -- SocketAddr of the "primary" service for this zone
@@ -4498,7 +4601,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '109.0.0', NULL)
+    (TRUE, NOW(), NOW(), '113.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

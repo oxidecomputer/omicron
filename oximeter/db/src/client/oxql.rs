@@ -1259,7 +1259,11 @@ mod tests {
         let db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let client = Client::new(db.http_address().into(), &logctx.log);
+        let client = Client::new(
+            db.http_address().into(),
+            db.native_address().into(),
+            &logctx.log,
+        );
         client
             .init_single_node_db()
             .await
@@ -1381,7 +1385,6 @@ mod tests {
     // fetching different sets of fields at different times.
     #[tokio::test]
     async fn test_get_entire_timeseries_and_part_of_another() {
-        usdt::register_probes().unwrap();
         let ctx =
             setup_oxql_test("test_get_entire_timeseries_and_part_of_another")
                 .await;

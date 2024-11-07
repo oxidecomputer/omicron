@@ -24,7 +24,6 @@
       "required": [
         "disposition",
         "id",
-        "underlay_address",
         "zone_type"
       ],
       "properties": {
@@ -49,10 +48,6 @@
         },
         "id": {
           "$ref": "#/definitions/TypedUuidForOmicronZoneKind"
-        },
-        "underlay_address": {
-          "type": "string",
-          "format": "ipv6"
         },
         "zone_type": {
           "$ref": "#/definitions/BlueprintZoneType"
@@ -467,9 +462,7 @@
       ],
       "properties": {
         "generation": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
+          "$ref": "#/definitions/Generation"
         },
         "time_created": {
           "type": "string",

@@ -19,7 +19,7 @@ use crate::db::model::{
     SwitchPortAddressConfig, SwitchPortBgpPeerConfig, SwitchPortConfig,
     SwitchPortLinkConfig, SwitchPortRouteConfig, SwitchPortSettings,
     SwitchPortSettingsGroup, SwitchPortSettingsGroups,
-    SwitchVlanInterfaceConfig,
+    SwitchVlanInterfaceConfig, TxEqConfig,
 };
 use crate::db::pagination::paginated;
 use crate::transaction_retry::OptionalError;
@@ -102,6 +102,7 @@ pub struct SwitchPortSettingsCombinedResult {
     pub port: SwitchPortConfig,
     pub links: Vec<SwitchPortLinkConfig>,
     pub link_lldp: Vec<LldpLinkConfig>,
+    pub tx_eq: Vec<Option<TxEqConfig>>,
     pub interfaces: Vec<SwitchInterfaceConfig>,
     pub vlan_interfaces: Vec<SwitchVlanInterfaceConfig>,
     pub routes: Vec<SwitchPortRouteConfig>,
@@ -117,6 +118,7 @@ impl SwitchPortSettingsCombinedResult {
             groups: Vec::new(),
             links: Vec::new(),
             link_lldp: Vec::new(),
+            tx_eq: Vec::new(),
             interfaces: Vec::new(),
             vlan_interfaces: Vec::new(),
             routes: Vec::new(),
@@ -136,6 +138,11 @@ impl Into<external::SwitchPortSettingsView>
             groups: self.groups.into_iter().map(Into::into).collect(),
             links: self.links.into_iter().map(Into::into).collect(),
             link_lldp: self.link_lldp.into_iter().map(Into::into).collect(),
+            tx_eq: self
+                .tx_eq
+                .into_iter()
+                .map(|t| if let Some(t) = t { Some(t.into()) } else { None })
+                .collect(),
             interfaces: self.interfaces.into_iter().map(Into::into).collect(),
             vlan_interfaces: self
                 .vlan_interfaces
@@ -465,6 +472,31 @@ impl DataStore {
                     .limit(1)
                     .load_async::<LldpLinkConfig>(&conn)
                     .await?;
+
+                let tx_eq_ids_and_nulls :Vec<Option<Uuid>>= result
+                    .links
+                    .iter()
+                    .map(|link| link.tx_eq_config_id)
+                    .collect();
+                let tx_eq_ids: Vec<Uuid> = tx_eq_ids_and_nulls
+                    .iter()
+		    .cloned()
+                    .flatten()
+                    .collect();
+
+                use db::schema::tx_eq_config;
+                let configs = tx_eq_config::dsl::tx_eq_config
+                    .filter(tx_eq_config::id.eq_any(tx_eq_ids))
+                    .select(TxEqConfig::as_select())
+                    .limit(1)
+                    .load_async::<TxEqConfig>(&conn)
+                    .await?;
+		    result.tx_eq = tx_eq_ids_and_nulls.iter().map(|x|
+			    if let Some(id) = x {
+				    configs.iter().find(|c| c.id == *id).cloned()
+			    } else {
+				    None
+			    }).collect();
 
                 // get the interface configs
                 use db::schema::switch_port_settings_interface_config::{
@@ -887,12 +919,15 @@ impl DataStore {
                                 Ok(v) => Ok(Some(v)),
                                 Err(e) => {
                                     let msg = "failed to check if bgp peer exists in switch port settings";
-                                    error!(opctx.log, "{msg}"; "error" => ?e);
                                     match e {
                                         diesel::result::Error::NotFound => {
+					    debug!(opctx.log, "{msg}"; "error" => ?e);
                                             Ok(None)
-                                        }
-                                        _ => Err(err.bail(Error::internal_error(msg))),
+                                        },
+                                        _ => {
+					    error!(opctx.log, "{msg}"; "error" => ?e);
+					    Err(err.bail(Error::internal_error(msg)))
+					}
                                     }
                                 }
                             }?;
@@ -1112,6 +1147,7 @@ async fn do_switch_port_settings_create(
         switch_port_settings_port_config::dsl as port_config_dsl,
         switch_port_settings_route_config::dsl as route_config_dsl,
         switch_vlan_interface_config::dsl as vlan_config_dsl,
+        tx_eq_config::dsl as tx_eq_config_dsl,
     };
 
     // create the top level port settings object
@@ -1146,6 +1182,7 @@ async fn do_switch_port_settings_create(
         port: db_port_config,
         links: Vec::new(),
         link_lldp: Vec::new(),
+        tx_eq: Vec::new(),
         interfaces: Vec::new(),
         vlan_interfaces: Vec::new(),
         routes: Vec::new(),
@@ -1158,6 +1195,7 @@ async fn do_switch_port_settings_create(
 
     let mut lldp_config = Vec::with_capacity(params.links.len());
     let mut link_config = Vec::with_capacity(params.links.len());
+    let mut tx_eq_config = Vec::with_capacity(params.links.len());
 
     for (link_name, c) in &params.links {
         let lldp_link_config = LldpLinkConfig::new(
@@ -1172,6 +1210,20 @@ async fn do_switch_port_settings_create(
         let lldp_config_id = lldp_link_config.id;
         lldp_config.push(lldp_link_config);
 
+        let tx_eq_config_id = match &c.tx_eq {
+            Some(t) => {
+                let config =
+                    TxEqConfig::new(t.pre1, t.pre2, t.main, t.post2, t.post1);
+                let tx_eq_config_id = config.id;
+                tx_eq_config.push(Some(config));
+                Some(tx_eq_config_id)
+            }
+            _ => {
+                tx_eq_config.push(None);
+                None
+            }
+        };
+
         link_config.push(SwitchPortLinkConfig::new(
             psid,
             lldp_config_id,
@@ -1180,6 +1232,7 @@ async fn do_switch_port_settings_create(
             c.fec.into(),
             c.speed.into(),
             c.autoneg,
+            tx_eq_config_id,
         ));
     }
     result.link_lldp =
@@ -1188,6 +1241,16 @@ async fn do_switch_port_settings_create(
             .returning(LldpLinkConfig::as_returning())
             .get_results_async(conn)
             .await?;
+
+    // We want to insert the Some(config) values into the table, but preserve the
+    // full vector of None/Some values.
+    let v: Vec<TxEqConfig> = tx_eq_config.iter().flatten().cloned().collect();
+    let _ = diesel::insert_into(tx_eq_config_dsl::tx_eq_config)
+        .values(v)
+        .returning(TxEqConfig::as_returning())
+        .get_results_async(conn)
+        .await?;
+    result.tx_eq = tx_eq_config;
 
     result.links =
         diesel::insert_into(link_config_dsl::switch_port_settings_link_config)
@@ -1517,6 +1580,15 @@ async fn do_switch_port_settings_delete(
         .execute_async(conn)
         .await?;
 
+    // delete tx_eq configs
+    use db::schema::tx_eq_config;
+    let tx_eq_ids: Vec<Uuid> =
+        links.iter().filter_map(|link| link.tx_eq_config_id).collect();
+    diesel::delete(tx_eq_config::dsl::tx_eq_config)
+        .filter(tx_eq_config::id.eq_any(tx_eq_ids))
+        .execute_async(conn)
+        .await?;
+
     // delete interface configs
     use db::schema::switch_port_settings_interface_config::{
         self as sps_interface_config, dsl as interface_config_dsl,
@@ -1619,9 +1691,8 @@ async fn do_switch_port_settings_delete(
 
 #[cfg(test)]
 mod test {
-    use crate::db::datastore::test_utils::datastore_test;
     use crate::db::datastore::UpdatePrecondition;
-    use nexus_test_utils::db::test_setup_database;
+    use crate::db::pub_test_utils::TestDatabase;
     use nexus_types::external_api::params::{
         BgpAnnounceSetCreate, BgpConfigCreate, BgpPeerConfig,
         SwitchPortConfigCreate, SwitchPortGeometry, SwitchPortSettingsCreate,
@@ -1637,8 +1708,8 @@ mod test {
     #[tokio::test]
     async fn test_bgp_boundary_switches() {
         let logctx = dev::test_setup_log("test_bgp_boundary_switches");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let rack_id: Uuid =
             nexus_test_utils::RACK_UUID.parse().expect("parse uuid");
@@ -1738,7 +1809,7 @@ mod test {
 
         assert_eq!(uplink_ports.len(), 1);
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

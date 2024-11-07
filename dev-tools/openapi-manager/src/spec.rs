@@ -93,7 +93,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
         },
         ApiSpec {
             title: "Oxide Region API",
-            version: "20241009.0",
+            version: "20241204.0",
             description: "API for interacting with the Oxide control plane",
             boundary: ApiBoundary::External,
             api_description:
@@ -119,6 +119,15 @@ pub fn all_apis() -> Vec<ApiSpec> {
             api_description:
                 oximeter_api::oximeter_api_mod::stub_api_description,
             filename: "oximeter.json",
+            extra_validation: None,
+        },
+        ApiSpec {
+            title: "Oxide TUF Repo Depot API",
+            version: "0.0.1",
+            description: "API for fetching update artifacts",
+            boundary: ApiBoundary::Internal,
+            api_description: repo_depot_api::repo_depot_api_mod::stub_api_description,
+            filename: "repo-depot.json",
             extra_validation: None,
         },
         ApiSpec {

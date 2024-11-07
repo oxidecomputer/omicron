@@ -340,7 +340,7 @@ E2E_TLS_CERT="/opt/oxide/sled-agent/pkg/initial-tls-cert.pem"
 #
 pfexec mkdir -p /usr/oxide
 pfexec curl -sSfL -o /usr/oxide/oxide \
-	http://catacomb.eng.oxide.computer:12346/oxide-v0.1.0
+	http://catacomb.eng.oxide.computer:12346/oxide-v0.1.1
 pfexec chmod +x /usr/oxide/oxide
 
 curl -sSfL -o debian-11-genericcloud-amd64.raw \
@@ -418,7 +418,9 @@ done
 
 /usr/oxide/oxide --resolve "$OXIDE_RESOLVE" --cacert "$E2E_TLS_CERT" \
 	project create --name images --description "some images"
-/usr/oxide/oxide --resolve "$OXIDE_RESOLVE" --cacert "$E2E_TLS_CERT" \
+/usr/oxide/oxide \
+    --resolve "$OXIDE_RESOLVE" \
+    --cacert "$E2E_TLS_CERT" \
 	disk import \
 	--path debian-11-genericcloud-amd64.raw \
 	--disk debian11-boot \
@@ -428,7 +430,8 @@ done
 	--image debian11 \
 	--image-description "debian 11 original base image" \
 	--image-os debian \
-	--image-version "11"
+	--image-version "11" \
+	--parallelism 1
 /usr/oxide/oxide --resolve "$OXIDE_RESOLVE" --cacert "$E2E_TLS_CERT" \
 	image promote --project images --image debian11
 

@@ -727,8 +727,15 @@ impl From<ByteCount> for i64 {
 
 /// Generation numbers stored in the database, used for optimistic concurrency
 /// control
-// Because generation numbers are stored in the database, we represent them as
-// i64.
+//
+// A generation is a value between 0 and 2**63-1, i.e. equivalent to a u63.
+// The reason is that we store it as an i64 in the database, and we want to
+// disallow negative values. (We could potentially use two's complement to
+// store values greater than that as negative values, but surely 2**63 is
+// enough.)
+//
+// TODO: This allows deserialization into a value that's out of range. That's
+// not correct. See <https://github.com/oxidecomputer/omicron/issues/6865>.
 #[derive(
     Copy,
     Clone,
@@ -1218,13 +1225,16 @@ pub struct InstanceAutoRestartStatus {
     #[serde(rename = "auto_restart_enabled")]
     pub enabled: bool,
 
-    /// The auto-restart policy configured for this instance, or `None` if no
-    /// explicit policy is configured.
+    /// The auto-restart policy configured for this instance, or `null` if no
+    /// explicit policy has been configured.
     ///
-    /// If this is not present, then this instance uses the default auto-restart
-    /// policy, which may or may not allow it to be restarted. The
-    /// `auto_restart_enabled` field indicates whether the instance will be
-    /// automatically restarted.
+    /// This policy determines whether the instance should be automatically
+    /// restarted by the control plane on failure. If this is `null`, the
+    /// control plane will use the default policy when determining whether or
+    /// not to automatically restart this instance, which may or may not allow
+    /// it to be restarted. The value of the `auto_restart_enabled` field
+    /// indicates whether the instance will be auto-restarted, based on its
+    /// current policy or the default if it has no configured policy.
     //
     // Rename this field, as the struct is `#[serde(flatten)]`ed into the
     // `Instance` type, and we would like the field to be prefixed with
@@ -2348,6 +2358,10 @@ pub struct SwitchPortSettingsView {
     /// Link-layer discovery protocol (LLDP) settings.
     pub link_lldp: Vec<LldpLinkConfig>,
 
+    /// TX equalization settings.  These are optional, and most links will not
+    /// need them.
+    pub tx_eq: Vec<Option<TxEqConfig>>,
+
     /// Layer 3 interface settings.
     pub interfaces: Vec<SwitchInterfaceConfig>,
 
@@ -2490,6 +2504,9 @@ pub struct SwitchPortLinkConfig {
     /// link.
     pub lldp_link_config_id: Option<Uuid>,
 
+    /// The tx_eq configuration id for this link.
+    pub tx_eq_config_id: Option<Uuid>,
+
     /// The name of this link.
     pub link_name: String,
 
@@ -2532,6 +2549,34 @@ pub struct LldpLinkConfig {
 
     /// The LLDP management IP TLV.
     pub management_ip: Option<oxnet::IpNet>,
+}
+
+/// Per-port tx-eq overrides.  This can be used to fine-tune the transceiver
+/// equalization settings to improve signal integrity.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct TxEqConfig {
+    /// Pre-cursor tap1
+    pub pre1: Option<i32>,
+    /// Pre-cursor tap2
+    pub pre2: Option<i32>,
+    /// Main tap
+    pub main: Option<i32>,
+    /// Post-cursor tap2
+    pub post2: Option<i32>,
+    /// Post-cursor tap1
+    pub post1: Option<i32>,
+}
+
+impl From<crate::api::internal::shared::TxEqConfig> for TxEqConfig {
+    fn from(x: crate::api::internal::shared::TxEqConfig) -> TxEqConfig {
+        TxEqConfig {
+            pre1: x.pre1,
+            pre2: x.pre2,
+            main: x.main,
+            post2: x.post2,
+            post1: x.post1,
+        }
+    }
 }
 
 /// Describes the kind of an switch interface.

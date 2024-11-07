@@ -6,11 +6,13 @@
 
 //! Packets sent from client to server.
 
-use super::server::{ProfileInfo, Progress};
+use super::server::ProfileInfo;
+use super::server::Progress;
 use crate::native::block::Block;
-use std::{
-    borrow::Cow, collections::BTreeMap, net::SocketAddr, sync::LazyLock,
-};
+use std::borrow::Cow;
+use std::collections::BTreeMap;
+use std::net::SocketAddr;
+use std::sync::LazyLock;
 use uuid::Uuid;
 
 /// A packet sent from client to server in the native protocol.

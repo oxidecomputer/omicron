@@ -573,36 +573,20 @@ impl<'a> Downloader<'a> {
         let destination_dir = self.output_dir.join("cockroachdb");
 
         let checksums_path = self.versions_dir.join("cockroachdb_checksums");
-        let [checksum] = get_values_from_file(
-            [&format!("CIDL_SHA256_{}", os.env_name())],
+        let [commit, checksum] = get_values_from_file(
+            ["COCKROACH_COMMIT", &format!("CIDL_SHA256_{}", os.env_name())],
             &checksums_path,
         )
         .await?;
 
-        let versions_path = self.versions_dir.join("cockroachdb_version");
-        let version = tokio::fs::read_to_string(&versions_path)
-            .await
-            .context("Failed to read version from {versions_path}")?;
-        let version = version.trim();
-
-        let (url_base, suffix) = match os {
-            Os::Illumos => (
-                "https://oxide-cockroachdb-build.s3.us-west-2.amazonaws.com",
-                "tar.gz",
-            ),
-            Os::Linux | Os::Mac => ("https://binaries.cockroachdb.com", "tgz"),
-        };
         let build = match os {
-            Os::Illumos => "illumos",
+            Os::Illumos => "illumos-amd64",
             Os::Linux => "linux-amd64",
-            Os::Mac => "darwin-10.9-amd64",
+            Os::Mac => "darwin-amd64",
         };
 
-        let version_directory = format!("cockroach-{version}");
-        let tarball_name = format!("{version_directory}.{build}");
-        let tarball_filename = format!("{tarball_name}.{suffix}");
-        let tarball_url = format!("{url_base}/{tarball_filename}");
-
+        let tarball_filename = "cockroach.tgz";
+        let tarball_url = format!("{BUILDOMAT_URL}/oxidecomputer/cockroach/{build}/{commit}/{tarball_filename}");
         let tarball_path = download_dir.join(tarball_filename);
 
         tokio::fs::create_dir_all(&download_dir).await?;
@@ -631,19 +615,8 @@ impl<'a> Downloader<'a> {
         // the Cockroach package differently.
         let binary_dir = destination_dir.join("bin");
         tokio::fs::create_dir_all(&binary_dir).await?;
-        match os {
-            Os::Illumos => {
-                let src = tarball_path.with_file_name(version_directory);
-                let dst = &destination_dir;
-                info!(self.log, "Copying from {src} to {dst}");
-                copy_dir_all(&src, &dst)?;
-            }
-            Os::Linux | Os::Mac => {
-                let src =
-                    tarball_path.with_file_name(tarball_name).join("cockroach");
-                tokio::fs::copy(src, &cockroach_binary).await?;
-            }
-        }
+        let src = tarball_path.with_file_name("cockroach").join("cockroach");
+        tokio::fs::copy(src, &cockroach_binary).await?;
 
         info!(self.log, "Checking that binary works");
         cockroach_confirm_binary_works(&cockroach_binary).await?;

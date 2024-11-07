@@ -6,7 +6,8 @@
 
 //! Decode progress packets from the server.
 
-use crate::native::{io, packets::server::Progress};
+use crate::native::io;
+use crate::native::packets::server::Progress;
 use std::time::Duration;
 
 /// Decode a progress packet from the server, if possible.

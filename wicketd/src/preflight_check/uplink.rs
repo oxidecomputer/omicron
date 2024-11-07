@@ -778,6 +778,7 @@ fn build_port_settings(
                 fec,
                 speed,
                 lane: Some(LinkId(0)),
+                tx_eq: None,
             },
         },
     );

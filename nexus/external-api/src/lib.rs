@@ -23,7 +23,7 @@ use omicron_common::api::external::{
 use openapi_manager_types::ValidationContext;
 use openapiv3::OpenAPI;
 
-pub const API_VERSION: &str = "20241009.0";
+pub const API_VERSION: &str = "20241204.0";
 
 // API ENDPOINT FUNCTION NAMING CONVENTIONS
 //

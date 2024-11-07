@@ -41,6 +41,21 @@ mkdir -p "$OUTPUT_DIR"
 banner prerequisites
 ptime -m bash ./tools/install_builder_prerequisites.sh -y
 
+# Do some test runs of the `ls-apis` command.
+#
+# This may require cloning some dependent private repos.  We do this before the
+# main battery of tests because the GitHub tokens required for this only last
+# for an hour so we want to get this done early.
+#
+# (TODO: This makes the build timings we record inaccurate.)
+banner ls-apis
+(
+    source ./tools/include/force-git-over-https.sh;
+    ptime -m cargo xtask ls-apis apis &&
+        ptime -m cargo xtask ls-apis deployment-units &&
+        ptime -m cargo xtask ls-apis servers
+)
+
 #
 # We build with:
 #
@@ -81,19 +96,6 @@ export RUSTC_BOOTSTRAP=1
 # Build all the packages and tests, and keep track of how long each took to build.
 # We report build progress to stderr, and the "--timings=json" output goes to stdout.
 ptime -m cargo build -Z unstable-options --timings=json --workspace --tests --locked --verbose 1> "$OUTPUT_DIR/crate-build-timings.json"
-
-# Do some test runs of the `ls-apis` command.
-#
-# This may require cloning some dependent private repos.  We do this before the
-# main battery of tests because the GitHub tokens required for this only last
-# for an hour so we want to get this done early.
-banner ls-apis
-(
-    source ./tools/include/force-git-over-https.sh;
-    ptime -m cargo xtask ls-apis apis &&
-        ptime -m cargo xtask ls-apis deployment-units &&
-        ptime -m cargo xtask ls-apis servers
-)
 
 #
 # We apply our own timeout to ensure that we get a normal failure on timeout
