@@ -280,7 +280,34 @@ impl FromStr for CompressionAlgorithm {
     }
 }
 
-/// Configuration information necessary to request a single dataset
+/// Shared configuration information to request a dataset.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+)]
+pub struct SharedDatasetConfig {
+    /// The compression mode to be used by the dataset
+    pub compression: CompressionAlgorithm,
+
+    /// The upper bound on the amount of storage used by this dataset
+    pub quota: Option<ByteCount>,
+
+    /// The lower bound on the amount of storage usable by this dataset
+    pub reservation: Option<ByteCount>,
+}
+
+/// Configuration information necessary to request a single dataset.
+///
+/// These datasets are tracked directly by Nexus.
 #[derive(
     Clone,
     Debug,
@@ -300,14 +327,8 @@ pub struct DatasetConfig {
     /// The dataset's name
     pub name: DatasetName,
 
-    /// The compression mode to be used by the dataset
-    pub compression: CompressionAlgorithm,
-
-    /// The upper bound on the amount of storage used by this dataset
-    pub quota: Option<ByteCount>,
-
-    /// The lower bound on the amount of storage usable by this dataset
-    pub reservation: Option<ByteCount>,
+    #[serde(flatten)]
+    pub inner: SharedDatasetConfig,
 }
 
 #[derive(

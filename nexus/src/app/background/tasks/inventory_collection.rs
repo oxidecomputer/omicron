@@ -9,6 +9,7 @@ use anyhow::ensure;
 use anyhow::Context;
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use internal_dns_resolver::ResolveError;
 use internal_dns_types::names::ServiceName;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -132,19 +133,55 @@ async fn inventory_activate(
         })
         .collect::<Vec<_>>();
 
-    // Find clickhouse-admin-keeper clients
-    let keeper_admin_clients = resolver
-        .lookup_socket_v6(ServiceName::ClickhouseAdminKeeper)
+    // Find clickhouse-admin-keeper servers if there are any.
+    let keeper_admin_clients = match resolver
+        .lookup_all_socket_v6(ServiceName::ClickhouseAdminKeeper)
         .await
-        .context("looking up ClickhouseAdminKeeper addresses")
-        .into_iter()
-        .map(|sockaddr| {
-            let url = format!("http://{}", sockaddr);
-            let log =
-                opctx.log.new(o!("clickhouse_admin_keeper_url" => url.clone()));
-            clickhouse_admin_keeper_client::Client::new(&url, log)
-        })
-        .collect::<Vec<_>>();
+    {
+        Ok(sockaddrs) => sockaddrs
+            .into_iter()
+            .map(|sockaddr| {
+                let url = format!("http://{}", sockaddr);
+                let log = opctx
+                    .log
+                    .new(o!("clickhouse_admin_keeper_url" => url.clone()));
+                clickhouse_admin_keeper_client::Client::new(&url, log)
+            })
+            .collect::<Vec<_>>(),
+        Err(err) => match err {
+            // When DNS resolution fails because no clickhouse-keeper-admin
+            // servers have been found, we allow this and move on. This is
+            // because multi-node clickhouse may not be enabled, and therefore
+            // there will not be any clickhouse-keeper-admin servers to find.
+            //
+            // In the long term, we expect multi-node clickhouse to always
+            // be enabled, and therefore we may want to bubble up any error
+            // we find, including `NotFound`. However, since we must enable
+            // multi-node clickhouse via reconfigurator, and not RSS, we may
+            // find ourselves with a small gap early on where the names don't
+            // yet exist. This would block the rest of inventory collection if
+            // we early return. We may be able to resolve this problem at rack
+            // handoff time, but it's worth considering whether we want to error
+            // here in case a gap remains.
+            //
+            // See https://github.com/oxidecomputer/omicron/issues/7005
+            ResolveError::NotFound(_) | ResolveError::NotFoundByString(_) => {
+                vec![]
+            }
+            ResolveError::Resolve(hickory_err)
+                if matches!(
+                    hickory_err.kind(),
+                    hickory_resolver::error::ResolveErrorKind::NoRecordsFound { .. }
+                ) =>
+            {
+                vec![]
+            }
+            _ => {
+                return Err(err)
+                    .context("looking up clickhouse-admin-keeper addresses");
+            }
+        },
+    };
 
     // Create an enumerator to find sled agents.
     let sled_enum = DbSledAgentEnumerator { opctx, datastore };
