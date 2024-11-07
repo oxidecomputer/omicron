@@ -115,7 +115,8 @@ impl super::Nexus {
             .timeseries_schema_list(&pagination.page, limit)
             .await
             .map_err(|e| match e {
-                oximeter_db::Error::DatabaseUnavailable(_) => {
+                oximeter_db::Error::DatabaseUnavailable(_)
+                | oximeter_db::Error::Connection(_) => {
                     Error::ServiceUnavailable {
                         internal_message: e.to_string(),
                     }
@@ -150,7 +151,8 @@ impl super::Nexus {
                 result.tables
             })
             .map_err(|e| match e {
-                oximeter_db::Error::DatabaseUnavailable(_) => {
+                oximeter_db::Error::DatabaseUnavailable(_)
+                | oximeter_db::Error::Connection(_) => {
                     Error::ServiceUnavailable {
                         internal_message: e.to_string(),
                     }

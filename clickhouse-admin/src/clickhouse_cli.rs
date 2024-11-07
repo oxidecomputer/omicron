@@ -147,7 +147,10 @@ impl ClickhouseCli {
         self.client_non_interactive(
             ClickhouseClientType::Server,
             format!(
-                "SELECT * FROM system.distributed_ddl_queue WHERE cluster = '{}' FORMAT JSONEachRow",
+                "SELECT * FROM system.distributed_ddl_queue WHERE cluster = '{}'
+                SETTINGS date_time_output_format = 'iso',
+                output_format_json_quote_64bit_integers = '0'
+                FORMAT JSONEachRow",
                 OXIMETER_CLUSTER
             ).as_str(),
             "Retrieve information about distributed ddl queries (ON CLUSTER clause) 
