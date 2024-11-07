@@ -149,6 +149,22 @@ async fn inventory_activate(
             })
             .collect::<Vec<_>>(),
         Err(err) => match err {
+            // When DNS resolution fails because no clickhouse-keeper-admin
+            // servers have been found, we allow this and move on. This is
+            // because multi-node clickhouse may not be enabled, and therefore
+            // there will not be any clickhouse-keeper-admin servers to find.
+            //
+            // In the long term, we expect multi-node clickhouse to always
+            // be enabled, and therefore we may want to bubble up any error
+            // we find, including `NotFound`. However, since we must enable
+            // multi-node clickhouse via reconfigurator, and not RSS, we may
+            // find ourselves with a small gap early on where the names don't
+            // yet exist. This would block the rest of inventory collection if
+            // we early return. We may be able to resolve this problem at rack
+            // handoff time, but it's worth considering whether we want to error
+            // here in case a gap remains.
+            //
+            // See https://github.com/oxidecomputer/omicron/issues/7005
             ResolveError::NotFound(_) | ResolveError::NotFoundByString(_) => {
                 vec![]
             }

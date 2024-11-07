@@ -50,6 +50,7 @@ use indicatif::ProgressDrawTarget;
 use indicatif::ProgressStyle;
 use internal_dns_types::names::ServiceName;
 use ipnetwork::IpNetwork;
+use itertools::Itertools;
 use nexus_config::PostgresConfigWithUrl;
 use nexus_db_model::Dataset;
 use nexus_db_model::Disk;
@@ -5526,12 +5527,8 @@ fn inv_collection_print_keeper_membership(collection: &Collection) {
             "    leader_committed_log_index: {}",
             k.leader_committed_log_index
         );
-        let raft_config =
-            k.raft_config.iter().fold("".to_string(), |mut acc, id| {
-                acc.push_str(&format!("{id}, "));
-                acc
-            });
-        let s = raft_config.trim_end_matches(", ");
+
+        let s = k.raft_config.iter().join(", ");
         println!("    raft config: {s}");
     }
     if collection.clickhouse_keeper_cluster_membership.is_empty() {
