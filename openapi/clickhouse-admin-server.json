@@ -179,7 +179,9 @@
           },
           "query_duration_ms": {
             "description": "Duration of query execution (in milliseconds)",
-            "type": "string"
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           },
           "query_finish_time": {
             "description": "Query finish time",

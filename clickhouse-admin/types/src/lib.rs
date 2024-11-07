@@ -1010,7 +1010,7 @@ pub struct DistributedDdlQueue {
     /// Query finish time
     pub query_finish_time: DateTime<Utc>,
     /// Duration of query execution (in milliseconds)
-    pub query_duration_ms: String,
+    pub query_duration_ms: u64,
 }
 
 impl DistributedDdlQueue {
@@ -1811,8 +1811,8 @@ snapshot_storage_disk=LocalSnapshotDisk
     fn test_distributed_ddl_queries_parse_success() {
         let log = log();
         let data =
-            "{\"entry\":\"query-0000000000\",\"entry_version\":5,\"initiator_host\":\"ixchel\",\"initiator_port\":22001,\"cluster\":\"oximeter_cluster\",\"query\":\"CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster\",\"settings\":{\"load_balancing\":\"random\"},\"query_create_time\":\"2024-11-01T16:16:45Z\",\"host\":\"::1\",\"port\":22001,\"status\":\"Finished\",\"exception_code\":0,\"exception_text\":\"\",\"query_finish_time\":\"2024-11-01T16:16:45Z\",\"query_duration_ms\":\"4\"}
-{\"entry\":\"query-0000000000\",\"entry_version\":5,\"initiator_host\":\"ixchel\",\"initiator_port\":22001,\"cluster\":\"oximeter_cluster\",\"query\":\"CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster\",\"settings\":{\"load_balancing\":\"random\"},\"query_create_time\":\"2024-11-01T16:16:45Z\",\"host\":\"::1\",\"port\":22002,\"status\":\"Finished\",\"exception_code\":0,\"exception_text\":\"\",\"query_finish_time\":\"2024-11-01T16:16:45Z\",\"query_duration_ms\":\"4\"}
+            "{\"entry\":\"query-0000000000\",\"entry_version\":5,\"initiator_host\":\"ixchel\",\"initiator_port\":22001,\"cluster\":\"oximeter_cluster\",\"query\":\"CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster\",\"settings\":{\"load_balancing\":\"random\"},\"query_create_time\":\"2024-11-01T16:16:45Z\",\"host\":\"::1\",\"port\":22001,\"status\":\"Finished\",\"exception_code\":0,\"exception_text\":\"\",\"query_finish_time\":\"2024-11-01T16:16:45Z\",\"query_duration_ms\":4}
+{\"entry\":\"query-0000000000\",\"entry_version\":5,\"initiator_host\":\"ixchel\",\"initiator_port\":22001,\"cluster\":\"oximeter_cluster\",\"query\":\"CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster\",\"settings\":{\"load_balancing\":\"random\"},\"query_create_time\":\"2024-11-01T16:16:45Z\",\"host\":\"::1\",\"port\":22002,\"status\":\"Finished\",\"exception_code\":0,\"exception_text\":\"\",\"query_finish_time\":\"2024-11-01T16:16:45Z\",\"query_duration_ms\":4}
 "
             .as_bytes();
         let ddl = DistributedDdlQueue::parse(&log, data).unwrap();
@@ -1835,7 +1835,7 @@ snapshot_storage_disk=LocalSnapshotDisk
                 exception_text: "".to_string(),
                 status: "Finished".to_string(),
                 query_finish_time: "2024-11-01T16:16:45Z".parse::<DateTime::<Utc>>().unwrap(),
-                query_duration_ms: "4".to_string(),
+                query_duration_ms: 4,
             },
             DistributedDdlQueue{
                 entry: "query-0000000000".to_string(),
@@ -1854,7 +1854,7 @@ snapshot_storage_disk=LocalSnapshotDisk
                 exception_text: "".to_string(),
                 status: "Finished".to_string(),
                 query_finish_time: "2024-11-01T16:16:45Z".parse::<DateTime::<Utc>>().unwrap(),
-                query_duration_ms: "4".to_string(),
+                query_duration_ms: 4,
             },
         ];
         assert!(ddl == expected_result);
@@ -1874,7 +1874,7 @@ snapshot_storage_disk=LocalSnapshotDisk
     fn test_misshapen_distributed_ddl_queries_parse_fail() {
         let log = log();
         let data =
-        "{\"entry\":\"query-0000000000\",\"initiator_host\":\"ixchel\",\"initiator_port\":22001,\"cluster\":\"oximeter_cluster\",\"query\":\"CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster\",\"settings\":{\"load_balancing\":\"random\"},\"query_create_time\":\"2024-11-01T16:16:45Z\",\"host\":\"::1\",\"port\":22001,\"status\":\"Finished\",\"exception_code\":0,\"exception_text\":\"\",\"query_finish_time\":\"2024-11-01T16:16:45Z\",\"query_duration_ms\":\"4\"}
+        "{\"entry\":\"query-0000000000\",\"initiator_host\":\"ixchel\",\"initiator_port\":22001,\"cluster\":\"oximeter_cluster\",\"query\":\"CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster\",\"settings\":{\"load_balancing\":\"random\"},\"query_create_time\":\"2024-11-01T16:16:45Z\",\"host\":\"::1\",\"port\":22001,\"status\":\"Finished\",\"exception_code\":0,\"exception_text\":\"\",\"query_finish_time\":\"2024-11-01T16:16:45Z\",\"query_duration_ms\":4}
 "
 .as_bytes();
         let result = DistributedDdlQueue::parse(&log, data);
@@ -1884,7 +1884,7 @@ snapshot_storage_disk=LocalSnapshotDisk
 
         assert_eq!(
             format!("{}", root_cause),
-            "missing field `entry_version` at line 1 column 456",
+            "missing field `entry_version` at line 1 column 454",
         );
     }
 }
