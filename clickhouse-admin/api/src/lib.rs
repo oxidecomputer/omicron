@@ -33,9 +33,9 @@ pub trait ClickhouseAdminKeeperApi {
     /// configuration set via this endpoint.
     #[endpoint {
         method = PUT,
-        path = "/config",
+        path = "/gen-config-and-enable",
     }]
-    async fn generate_config(
+    async fn generate_config_and_enable_svc(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<KeeperConfigurableSettings>,
     ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError>;
@@ -45,7 +45,7 @@ pub trait ClickhouseAdminKeeperApi {
     /// and logs for consistency and recovery.
     #[endpoint {
         method = GET,
-        path = "/keeper/lgif",
+        path = "/lgif",
     }]
     async fn lgif(
         rqctx: RequestContext<Self::Context>,
@@ -55,7 +55,7 @@ pub trait ClickhouseAdminKeeperApi {
     /// contains last committed cluster configuration.
     #[endpoint {
         method = GET,
-        path = "/keeper/raft-config",
+        path = "/raft-config",
     }]
     async fn raft_config(
         rqctx: RequestContext<Self::Context>,
@@ -64,7 +64,7 @@ pub trait ClickhouseAdminKeeperApi {
     /// Retrieve configuration information from a keeper node.
     #[endpoint {
         method = GET,
-        path = "/keeper/conf",
+        path = "/conf",
     }]
     async fn keeper_conf(
         rqctx: RequestContext<Self::Context>,
@@ -73,7 +73,7 @@ pub trait ClickhouseAdminKeeperApi {
     /// Retrieve cluster membership information from a keeper node.
     #[endpoint {
         method = GET,
-        path = "/keeper/cluster-membership",
+        path = "/cluster-membership",
     }]
     async fn keeper_cluster_membership(
         rqctx: RequestContext<Self::Context>,
@@ -99,9 +99,9 @@ pub trait ClickhouseAdminServerApi {
     /// directory and enable the SMF service.
     #[endpoint {
         method = PUT,
-        path = "/config"
+        path = "/gen-config-and-enable"
     }]
-    async fn generate_config(
+    async fn generate_config_and_enable_svc(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<ServerConfigurableSettings>,
     ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError>;

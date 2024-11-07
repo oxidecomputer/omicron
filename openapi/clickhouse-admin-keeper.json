@@ -10,11 +10,59 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/config": {
+    "/cluster-membership": {
+      "get": {
+        "summary": "Retrieve cluster membership information from a keeper node.",
+        "operationId": "keeper_cluster_membership",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClickhouseKeeperClusterMembership"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/conf": {
+      "get": {
+        "summary": "Retrieve configuration information from a keeper node.",
+        "operationId": "keeper_conf",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeeperConf"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/gen-config-and-enable": {
       "put": {
         "summary": "Generate a ClickHouse configuration file for a keeper node on a specified",
         "description": "directory and enable the SMF service if not currently enabled.\n\nNote that we cannot start the keeper service until there is an initial configuration set via this endpoint.",
-        "operationId": "generate_config",
+        "operationId": "generate_config_and_enable_svc",
         "requestBody": {
           "content": {
             "application/json": {
@@ -45,55 +93,7 @@
         }
       }
     },
-    "/keeper/cluster-membership": {
-      "get": {
-        "summary": "Retrieve cluster membership information from a keeper node.",
-        "operationId": "keeper_cluster_membership",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ClickhouseKeeperClusterMembership"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/keeper/conf": {
-      "get": {
-        "summary": "Retrieve configuration information from a keeper node.",
-        "operationId": "keeper_conf",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/KeeperConf"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/keeper/lgif": {
+    "/lgif": {
       "get": {
         "summary": "Retrieve a logically grouped information file from a keeper node.",
         "description": "This information is used internally by ZooKeeper to manage snapshots and logs for consistency and recovery.",
@@ -118,7 +118,7 @@
         }
       }
     },
-    "/keeper/raft-config": {
+    "/raft-config": {
       "get": {
         "summary": "Retrieve information from ClickHouse virtual node /keeper/config which",
         "description": "contains last committed cluster configuration.",
