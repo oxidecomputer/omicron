@@ -6,6 +6,8 @@
 
 use std::net::IpAddr;
 
+use chrono::DateTime;
+use chrono::Utc;
 use omicron_common::api::external::Name;
 use omicron_common::api::internal::shared::NetworkInterface;
 use parse_display::FromStr;
@@ -412,6 +414,41 @@ mod test {
             "invalid length 65, expected a list of at most 64 role assignments"
         );
     }
+}
+
+#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SupportBundleState {
+    /// Support Bundle still actively being collected.
+    ///
+    /// This is the initial state for a Support Bundle, and it will
+    /// automatically transition to either "Failed" or "Active".
+    ///
+    /// If a user no longer wants to access a Support Bundle, they can
+    /// request cancellation, which will transition to the "Cancelling" state.
+    Collecting,
+
+    /// Support Bundle has been cancelled, and will be deleted shortly.
+    Cancelling,
+
+    /// Support Bundle was not created successfully, or was created and has lost
+    /// backing storage.
+    ///
+    /// The record of the bundle still exists for readability, but the only
+    /// valid operation on these bundles is to delete them.
+    Failed,
+
+    /// Support Bundle has been processed, and is ready for usage.
+    Active,
+}
+
+#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
+pub struct SupportBundleInfo {
+    // XXX: Strongly-typed Support Bundle UUID?
+    pub id: Uuid,
+    pub time_created: DateTime<Utc>,
+    pub reason_for_creation: String,
+    pub state: SupportBundleState,
 }
 
 #[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]

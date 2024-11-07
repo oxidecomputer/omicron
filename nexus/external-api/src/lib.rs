@@ -2760,6 +2760,65 @@ pub trait NexusExternalApi {
         path_params: Path<params::SshKeyPath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
+    // Support bundles (experimental)
+
+    /// List all support bundles
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/system/support-bundles",
+        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+    }]
+    async fn support_bundle_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<shared::SupportBundleInfo>>, HttpError>;
+
+    /// View a single support bundle
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/system/support-bundles/{support_bundle}",
+        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+    }]
+    async fn support_bundle_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+    ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError>;
+
+    /// Download the contents of a single support bundle
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/system/support-bundles/{support_bundle}/download",
+        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+    }]
+    async fn support_bundle_download(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Create a new support bundle
+    #[endpoint {
+        method = POST,
+        path = "/experimental/v1/system/support-bundles",
+        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+    }]
+    async fn support_bundle_create(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError>;
+
+    /// Delete an existing support bundle
+    ///
+    /// May also be used to cancel a support bundle which is currently being
+    /// collected, or to remove metadata for a support bundle that has failed.
+    #[endpoint {
+        method = DELETE,
+        path = "/experimental/v1/system/support-bundles/{support_bundle}",
+        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+    }]
+    async fn support_bundle_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+    ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError>;
+
     // Probes (experimental)
 
     /// List instrumentation probes

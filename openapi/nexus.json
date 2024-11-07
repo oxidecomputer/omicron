@@ -301,6 +301,195 @@
         }
       }
     },
+    "/experimental/v1/system/support-bundles": {
+      "get": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "List all support bundles",
+        "operationId": "support_bundle_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleInfoResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
+      "post": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Create a new support bundle",
+        "operationId": "support_bundle_create",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleInfo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/experimental/v1/system/support-bundles/{support_bundle}": {
+      "get": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "View a single support bundle",
+        "operationId": "support_bundle_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "support_bundle",
+            "description": "Name or ID of the support bundle",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleInfo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Delete an existing support bundle",
+        "description": "May also be used to cancel a support bundle which is currently being collected, or to remove metadata for a support bundle that has failed.",
+        "operationId": "support_bundle_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "support_bundle",
+            "description": "Name or ID of the support bundle",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleInfo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/experimental/v1/system/support-bundles/{support_bundle}/download": {
+      "get": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Download the contents of a single support bundle",
+        "operationId": "support_bundle_download",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "support_bundle",
+            "description": "Name or ID of the support bundle",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/login/{silo_name}/saml/{provider_name}": {
       "post": {
         "tags": [
@@ -19990,6 +20179,84 @@
           "items"
         ]
       },
+      "SupportBundleInfo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason_for_creation": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SupportBundleState"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "reason_for_creation",
+          "state",
+          "time_created"
+        ]
+      },
+      "SupportBundleInfoResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SupportBundleInfo"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SupportBundleState": {
+        "oneOf": [
+          {
+            "description": "Support Bundle still actively being collected.\n\nThis is the initial state for a Support Bundle, and it will automatically transition to either \"Failed\" or \"Active\".\n\nIf a user no longer wants to access a Support Bundle, they can request cancellation, which will transition to the \"Cancelling\" state.",
+            "type": "string",
+            "enum": [
+              "collecting"
+            ]
+          },
+          {
+            "description": "Support Bundle has been cancelled, and will be deleted shortly.",
+            "type": "string",
+            "enum": [
+              "cancelling"
+            ]
+          },
+          {
+            "description": "Support Bundle was not created successfully, or was created and has lost backing storage.\n\nThe record of the bundle still exists for readability, but the only valid operation on these bundles is to delete them.",
+            "type": "string",
+            "enum": [
+              "failed"
+            ]
+          },
+          {
+            "description": "Support Bundle has been processed, and is ready for usage.",
+            "type": "string",
+            "enum": [
+              "active"
+            ]
+          }
+        ]
+      },
       "Switch": {
         "description": "An operator's view of a Switch.",
         "type": "object",
@@ -22440,6 +22707,18 @@
           }
         ]
       },
+      "IdSortMode": {
+        "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
+        "oneOf": [
+          {
+            "description": "sort in increasing order of \"id\"",
+            "type": "string",
+            "enum": [
+              "id_ascending"
+            ]
+          }
+        ]
+      },
       "DiskMetricName": {
         "type": "string",
         "enum": [
@@ -22457,18 +22736,6 @@
         "enum": [
           "ascending",
           "descending"
-        ]
-      },
-      "IdSortMode": {
-        "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
-        "oneOf": [
-          {
-            "description": "sort in increasing order of \"id\"",
-            "type": "string",
-            "enum": [
-              "id_ascending"
-            ]
-          }
         ]
       },
       "SystemMetricName": {
