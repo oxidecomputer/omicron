@@ -10,36 +10,7 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/distributed-ddl-queue": {
-      "get": {
-        "summary": "Contains information about distributed ddl queries (ON CLUSTER clause)",
-        "description": "that were executed on a cluster.",
-        "operationId": "distributed_ddl_queue",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Array_of_DistributedDdlQueue",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/DistributedDdlQueue"
-                  }
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/gen-config-and-enable": {
+    "/config": {
       "put": {
         "summary": "Generate a ClickHouse configuration file for a server node on a specified",
         "description": "directory and enable the SMF service.",
@@ -61,6 +32,35 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ReplicaConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/distributed-ddl-queue": {
+      "get": {
+        "summary": "Contains information about distributed ddl queries (ON CLUSTER clause)",
+        "description": "that were executed on a cluster.",
+        "operationId": "distributed_ddl_queue",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_DistributedDdlQueue",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DistributedDdlQueue"
+                  }
                 }
               }
             }

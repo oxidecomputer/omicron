@@ -99,7 +99,7 @@ pub trait ClickhouseAdminServerApi {
     /// directory and enable the SMF service.
     #[endpoint {
         method = PUT,
-        path = "/gen-config-and-enable"
+        path = "/config"
     }]
     async fn generate_config_and_enable_svc(
         rqctx: RequestContext<Self::Context>,
