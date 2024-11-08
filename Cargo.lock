@@ -10697,6 +10697,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=d6dd7c72b515c9a06e848a12b0e3d028f0371ab3)",
  "regress 0.9.1",
  "reqwest",
  "schemars",

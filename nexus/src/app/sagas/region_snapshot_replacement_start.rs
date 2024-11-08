@@ -67,8 +67,8 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::CrucibleOpts;
-use sled_agent_client::types::VolumeConstructionRequest;
+use sled_agent_client::CrucibleOpts;
+use sled_agent_client::VolumeConstructionRequest;
 use std::net::SocketAddrV6;
 use steno::ActionError;
 use steno::Node;
@@ -818,7 +818,7 @@ pub(crate) mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::views;
     use nexus_types::identity::Asset;
-    use sled_agent_client::types::VolumeConstructionRequest;
+    use sled_agent_client::VolumeConstructionRequest;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
