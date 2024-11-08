@@ -63,8 +63,7 @@ use propolis_client::support::WebSocketStream;
 use sagas::instance_common::ExternalIpAttach;
 use sagas::instance_start;
 use sagas::instance_update;
-use sled_agent_client::types::BootOrderEntry;
-use sled_agent_client::types::BootSettings;
+use sled_agent_client::types::InstanceBootSettings;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::InstanceProperties;
 use sled_agent_client::types::VmmPutStateBody;
@@ -1053,8 +1052,7 @@ impl super::Nexus {
             )
             .await?;
 
-        let mut boot_disk_name = None;
-
+        let mut found_boot_disk = None;
         let mut disk_reqs = vec![];
         for disk in &disks {
             // Disks that are attached to an instance should always have a slot
@@ -1089,29 +1087,23 @@ impl super::Nexus {
                 )
                 .await?;
 
-            // Propolis wants the name of the boot disk rather than ID, because we send names
-            // rather than IDs in the disk requsts as assembled below.
-            if db_instance.boot_disk_id == Some(disk.id()) {
-                boot_disk_name = Some(disk.name().to_string());
+            if let Some(wanted_id) = &db_instance.boot_disk_id {
+                if disk.id() == *wanted_id {
+                    found_boot_disk = Some(*wanted_id);
+                }
             }
 
-            disk_reqs.push(sled_agent_client::types::DiskRequest {
+            disk_reqs.push(sled_agent_client::types::InstanceDisk {
+                disk_id: disk.id(),
                 name: disk.name().to_string(),
-                slot: sled_agent_client::types::Slot(slot.0),
+                slot: slot.0,
                 read_only: false,
-                device: "nvme".to_string(),
-                volume_construction_request: serde_json::from_str(
-                    &volume.data(),
-                )
-                .map_err(Error::from)?,
+                vcr_json: volume.data().to_owned(),
             });
         }
 
-        // TODO(gjc) do this by ID instead
-        let boot_settings = if let Some(boot_disk_name) = boot_disk_name {
-            Some(BootSettings {
-                order: vec![BootOrderEntry { name: boot_disk_name }],
-            })
+        let boot_settings = if let Some(boot_disk_id) = found_boot_disk {
+            Some(InstanceBootSettings { order: vec![boot_disk_id] })
         } else {
             if let Some(instance_boot_disk_id) =
                 db_instance.boot_disk_id.as_ref()
@@ -1125,7 +1117,7 @@ impl super::Nexus {
                 // look up a name when assembling the Propolis request, we might as well
                 // remove this check; we can just pass the ID and rely on Propolis' own
                 // check that the boot disk is attached.
-                if boot_disk_name.is_none() {
+                if found_boot_disk.is_none() {
                     error!(self.log, "instance boot disk is not attached";
                        "boot_disk_id" => ?instance_boot_disk_id,
                        "instance id" => %db_instance.id());

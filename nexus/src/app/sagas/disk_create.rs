@@ -20,8 +20,8 @@ use omicron_common::api::external::Error;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::{CrucibleOpts, VolumeConstructionRequest};
-use std::collections::VecDeque;
+use sled_agent_client::{CrucibleOpts, VolumeConstructionRequest};
+use std::{collections::VecDeque, net::SocketAddr};
 use std::convert::TryFrom;
 use std::net::SocketAddrV6;
 use steno::ActionError;
@@ -506,7 +506,7 @@ async fn sdc_regions_ensure(
                                     )),
                                 )
                             })
-                            .map(|addr| addr.to_string())
+                            .map(SocketAddr::V6)
                     })
                     .collect::<Result<Vec<_>, ActionError>>()?,
 

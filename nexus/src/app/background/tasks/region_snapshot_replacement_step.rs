@@ -566,8 +566,8 @@ mod test {
     use nexus_db_model::Volume;
     use nexus_test_utils_macros::nexus_test;
     use omicron_uuid_kinds::DatasetUuid;
-    use sled_agent_client::types::CrucibleOpts;
-    use sled_agent_client::types::VolumeConstructionRequest;
+    use sled_agent_client::CrucibleOpts;
+    use sled_agent_client::VolumeConstructionRequest;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -604,7 +604,7 @@ mod test {
                     gen: 0,
                     opts: CrucibleOpts {
                         id: Uuid::new_v4(),
-                        target: vec![snapshot_addr],
+                        target: vec![snapshot_addr.parse().unwrap()],
                         lossy: false,
                         flush_timeout: None,
                         key: None,
