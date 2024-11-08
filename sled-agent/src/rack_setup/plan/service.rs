@@ -36,7 +36,7 @@ use omicron_common::backoff::{
 use omicron_common::disk::{
     CompressionAlgorithm, DatasetConfig, DatasetKind, DatasetName,
     DatasetsConfig, DiskVariant, OmicronPhysicalDiskConfig,
-    OmicronPhysicalDisksConfig, SharedDatasetConfig
+    OmicronPhysicalDisksConfig, SharedDatasetConfig,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_common::policy::{
@@ -162,7 +162,7 @@ impl SledConfig {
                         compression: CompressionAlgorithm::Off,
                         quota: None,
                         reservation: None,
-                    }
+                    },
                 },
             );
         }
@@ -557,7 +557,7 @@ impl Plan {
                             compression: intrinsic_dataset.get_compression(),
                             quota: intrinsic_dataset.get_quota(),
                             reservation: None,
-                        }
+                        },
                     };
                     sled_info
                         .request
