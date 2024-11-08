@@ -71,6 +71,7 @@ impl From<SupportBundle> for SupportBundleView {
             id: bundle.id,
             time_created: bundle.time_created,
             reason_for_creation: bundle.reason_for_creation,
+            reason_for_failure: bundle.reason_for_failure,
             state: bundle.state.into(),
         }
     }
