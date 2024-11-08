@@ -147,6 +147,7 @@ impl ExampleSystemRng {
 ///
 /// The components of this struct are generated together and match each other.
 /// The planning input and collection represent database input and inventory
+/// that would be collected from a system matching the system description.
 #[derive(Clone, Debug)]
 pub struct ExampleSystem {
     pub system: SystemDescription,
