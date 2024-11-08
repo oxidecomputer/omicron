@@ -4,8 +4,8 @@
 
 use anyhow::{Context, Result};
 use clickward::{BasePorts, Deployment, DeploymentConfig};
-use dropshot::{ConfigLogging, ConfigLoggingLevel};
 use dropshot::test_util::{log_prefix_for_test, LogContext};
+use dropshot::{ConfigLogging, ConfigLoggingLevel};
 use oximeter_test_utils::wait_for_keepers;
 
 #[tokio::main]
@@ -20,12 +20,9 @@ async fn main() -> Result<()> {
     let path = parent_dir.join(format!("clickward_test"));
     std::fs::create_dir(&path)?;
 
-    slog::info!(
-        logctx.log,
-        "Setting up a ClickHouse cluster"
-    );
+    slog::info!(logctx.log, "Setting up a ClickHouse cluster");
 
-     // We spin up several replicated clusters and must use a
+    // We spin up several replicated clusters and must use a
     // separate set of ports in case the tests run concurrently.
     let base_ports = BasePorts {
         keeper: 29000,
@@ -51,7 +48,8 @@ async fn main() -> Result<()> {
         .context("failed to generate config")?;
     deployment.deploy().context("failed to deploy")?;
 
-    wait_for_keepers(&logctx.log, &deployment, vec![clickward::KeeperId(1)]).await?;
+    wait_for_keepers(&logctx.log, &deployment, vec![clickward::KeeperId(1)])
+        .await?;
 
     // TODO: Also wait for replicas
 
