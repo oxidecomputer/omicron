@@ -1437,9 +1437,34 @@ impl Client {
         if replicated {
             sql.push_str(" AND engine = 'ReplicatedMergeTree'");
         }
-        self.execute_with_body(sql).await.map(|(_summary, body)| {
-            body.lines().map(ToString::to_string).collect()
-        })
+        let col = self
+            .execute_with_block(&sql)
+            .await
+            .and_then(|result| {
+                result.data.ok_or_else(|| {
+                    Error::Database(String::from(
+                        "Query for database tables should have returned \
+                            a data block, but none was found",
+                    ))
+                })
+            })?
+            .columns
+            .swap_remove("name")
+            .ok_or_else(|| {
+                Error::Database(String::from(
+                    "Query for database tables should have returned \
+                    a column with name 'names', but none was found",
+                ))
+            })?;
+        let ValueArray::String(names) = col.values else {
+            return Err(Error::Database(format!(
+                "Query for database tables should have returned \
+                an array of string table names, but the column \
+                has type: '{}'",
+                col.data_type,
+            )));
+        };
+        Ok(names)
     }
 }
 

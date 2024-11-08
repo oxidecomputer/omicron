@@ -126,7 +126,7 @@ pub(crate) async fn build_tuf_repo(
     let manifest = ArtifactManifest::from_deserialized(&output_dir, manifest)?;
     manifest.verify_all_present()?;
     // Assemble the repo.
-    let keys = vec![Key::generate_ed25519()];
+    let keys = vec![Key::generate_ed25519()?];
     let expiry = Utc::now().with_nanosecond(0).unwrap() + Duration::weeks(1);
     OmicronRepoAssembler::new(
         &logger,
