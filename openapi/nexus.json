@@ -20189,6 +20189,10 @@
           "reason_for_creation": {
             "type": "string"
           },
+          "reason_for_failure": {
+            "nullable": true,
+            "type": "string"
+          },
           "state": {
             "$ref": "#/components/schemas/SupportBundleState"
           },
