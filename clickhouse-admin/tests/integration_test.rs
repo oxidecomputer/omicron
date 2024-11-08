@@ -75,9 +75,11 @@ mod tests {
         // The first log index from a newly created cluster should always be 1
         assert_eq!(lgif.first_log_idx, 1);
 
+        // TODO: Move this code to teardown function.
+        // For now moving it to that function results in a PoisonError
+
         info!(&logctx.log, "Cleaning up test");
 
-        // TODO: Move this code to teardown function
         // TODO: Find another way to retrieve deployment
 
         // We spin up several replicated clusters and must use a
