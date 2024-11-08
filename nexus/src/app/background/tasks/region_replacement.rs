@@ -306,8 +306,8 @@ mod test {
     use nexus_db_model::RegionReplacement;
     use nexus_db_model::Volume;
     use nexus_test_utils_macros::nexus_test;
-    use sled_agent_client::types::CrucibleOpts;
-    use sled_agent_client::types::VolumeConstructionRequest;
+    use sled_agent_client::CrucibleOpts;
+    use sled_agent_client::VolumeConstructionRequest;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =

@@ -12,6 +12,8 @@ use serde::Serialize;
 use std::convert::TryFrom;
 use uuid::Uuid;
 
+pub use propolis_client::{CrucibleOpts, VolumeConstructionRequest};
+
 progenitor::generate_api!(
     spec = "../../openapi/sled-agent.json",
     derives = [schemars::JsonSchema, PartialEq],

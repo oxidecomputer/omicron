@@ -112,13 +112,14 @@ use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid};
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::CrucibleOpts;
 use sled_agent_client::types::VmmIssueDiskSnapshotRequestBody;
-use sled_agent_client::types::VolumeConstructionRequest;
+use sled_agent_client::CrucibleOpts;
+use sled_agent_client::VolumeConstructionRequest;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
+use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use steno::ActionError;
 use steno::Node;
@@ -539,7 +540,7 @@ async fn ssc_regions_ensure(
                                     )),
                                 )
                             })
-                            .map(|addr| addr.to_string())
+                            .map(SocketAddr::V6)
                     })
                     .collect::<Result<Vec<_>, ActionError>>()?,
 
@@ -1383,7 +1384,7 @@ async fn ssc_detach_disk_from_pantry(
 
 async fn ssc_start_running_snapshot(
     sagactx: NexusActionContext,
-) -> Result<BTreeMap<String, String>, ActionError> {
+) -> Result<BTreeMap<SocketAddr, SocketAddr>, ActionError> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
@@ -1409,7 +1410,7 @@ async fn ssc_start_running_snapshot(
         .await
         .map_err(ActionError::action_failed)?;
 
-    let mut map: BTreeMap<String, String> = BTreeMap::new();
+    let mut map: BTreeMap<SocketAddr, SocketAddr> = BTreeMap::new();
 
     for (dataset, region) in datasets_and_regions {
         let Some(dataset_addr) = dataset.address() else {
@@ -1438,25 +1439,19 @@ async fn ssc_start_running_snapshot(
         );
 
         // Map from the region to the snapshot
-        let region_addr = format!(
-            "{}",
-            SocketAddrV6::new(
-                *dataset_addr.ip(),
-                crucible_region.port_number,
-                0,
-                0
-            )
-        );
+        let region_addr = SocketAddr::V6(SocketAddrV6::new(
+            *dataset_addr.ip(),
+            crucible_region.port_number,
+            0,
+            0,
+        ));
 
-        let snapshot_addr = format!(
-            "{}",
-            SocketAddrV6::new(
-                *dataset_addr.ip(),
-                crucible_running_snapshot.port_number,
-                0,
-                0
-            )
-        );
+        let snapshot_addr = SocketAddr::V6(SocketAddrV6::new(
+            *dataset_addr.ip(),
+            crucible_running_snapshot.port_number,
+            0,
+            0,
+        ));
 
         info!(log, "map {} to {}", region_addr, snapshot_addr);
         map.insert(region_addr, snapshot_addr.clone());
@@ -1470,7 +1465,7 @@ async fn ssc_start_running_snapshot(
                 dataset_id: dataset.id().into(),
                 region_id: region.id(),
                 snapshot_id,
-                snapshot_addr,
+                snapshot_addr: snapshot_addr.to_string(),
                 volume_references: 0, // to be filled later
                 deleting: false,
             })
@@ -1569,8 +1564,8 @@ async fn ssc_create_volume_record(
     // The volume construction request must then be modified to point to the
     // read-only crucible agent downstairs (corresponding to this snapshot)
     // launched through this saga.
-    let replace_sockets_map =
-        sagactx.lookup::<BTreeMap<String, String>>("replace_sockets_map")?;
+    let replace_sockets_map = sagactx
+        .lookup::<BTreeMap<SocketAddr, SocketAddr>>("replace_sockets_map")?;
     let snapshot_volume_construction_request: VolumeConstructionRequest =
         create_snapshot_from_disk(
             &disk_volume_construction_request,
@@ -1694,7 +1689,7 @@ async fn ssc_release_volume_lock(
 /// VolumeConstructionRequest and modifying it accordingly.
 fn create_snapshot_from_disk(
     disk: &VolumeConstructionRequest,
-    socket_map: &BTreeMap<String, String>,
+    socket_map: &BTreeMap<SocketAddr, SocketAddr>,
 ) -> anyhow::Result<VolumeConstructionRequest> {
     // When copying a disk's VolumeConstructionRequest to turn it into a
     // snapshot:
@@ -1756,9 +1751,9 @@ fn create_snapshot_from_disk(
 
                 if work.socket_modification_required {
                     for target in &mut opts.target {
-                        target.clone_from(socket_map.get(target).ok_or_else(
-                            || anyhow!("target {} not found in map!", target),
-                        )?);
+                        *target = *socket_map.get(target).ok_or_else(|| {
+                            anyhow!("target {} not found in map!", target)
+                        })?;
                     }
                 }
             }
@@ -1799,7 +1794,7 @@ mod test {
     use omicron_common::api::external::InstanceCpuCount;
     use omicron_common::api::external::Name;
     use omicron_common::api::external::NameOrId;
-    use sled_agent_client::types::CrucibleOpts;
+    use sled_agent_client::CrucibleOpts;
     use sled_agent_client::TestInterfaces as SledAgentTestInterfaces;
     use std::str::FromStr;
 
@@ -1834,9 +1829,9 @@ mod test {
                                 lossy: false,
                                 read_only: true,
                                 target: vec![
-                                    "[fd00:1122:3344:101::8]:19001".into(),
-                                    "[fd00:1122:3344:101::7]:19001".into(),
-                                    "[fd00:1122:3344:101::6]:19001".into(),
+                                    "[fd00:1122:3344:101::8]:19001".parse().unwrap(),
+                                    "[fd00:1122:3344:101::7]:19001".parse().unwrap(),
+                                    "[fd00:1122:3344:101::6]:19001".parse().unwrap(),
                                 ],
                                 cert_pem: None,
                                 key_pem: None,
@@ -1860,34 +1855,35 @@ mod test {
                         lossy: false,
                         read_only: false,
                         target: vec![
-                            "[fd00:1122:3344:101::8]:19002".into(),
-                            "[fd00:1122:3344:101::7]:19002".into(),
-                            "[fd00:1122:3344:101::6]:19002".into(),
+                            "[fd00:1122:3344:101::8]:19002".parse().unwrap(),
+                            "[fd00:1122:3344:101::7]:19002".parse().unwrap(),
+                            "[fd00:1122:3344:101::6]:19002".parse().unwrap(),
                         ],
                         cert_pem: None,
                         key_pem: None,
                         root_cert_pem: None,
                         flush_timeout: None,
-                        control: Some("127.0.0.1:12345".into()),
+                        control: Some("127.0.0.1:12345".parse().unwrap()),
                     }
                 },
             ],
         };
 
-        let mut replace_sockets: BTreeMap<String, String> = BTreeMap::new();
+        let mut replace_sockets: BTreeMap<SocketAddr, SocketAddr> =
+            BTreeMap::new();
 
         // Replacements for top level Region only
         replace_sockets.insert(
-            "[fd00:1122:3344:101::6]:19002".into(),
-            "[XXXX:1122:3344:101::6]:9000".into(),
+            "[fd00:1122:3344:101::6]:19002".parse().unwrap(),
+            "[fd01:1122:3344:101::6]:9000".parse().unwrap(),
         );
         replace_sockets.insert(
-            "[fd00:1122:3344:101::7]:19002".into(),
-            "[XXXX:1122:3344:101::7]:9000".into(),
+            "[fd00:1122:3344:101::7]:19002".parse().unwrap(),
+            "[fd01:1122:3344:101::7]:9000".parse().unwrap(),
         );
         replace_sockets.insert(
-            "[fd00:1122:3344:101::8]:19002".into(),
-            "[XXXX:1122:3344:101::8]:9000".into(),
+            "[fd00:1122:3344:101::8]:19002".parse().unwrap(),
+            "[fd01:1122:3344:101::8]:9000".parse().unwrap(),
         );
 
         let snapshot =
