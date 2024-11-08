@@ -1123,15 +1123,28 @@ impl Client {
     ) -> Result<QueryResult, Error> {
         trace!(
             self.log,
-            "executing SQL query";
+            "inserting data";
             "sql" => sql,
+            "n_rows" => block.n_rows(),
+            "n_columns" => block.n_columns(),
         );
         let mut handle = self.native_pool.claim().await?;
         let id = usdt::UniqueId::new();
-        probes::sql__query__start!(|| (&id, &sql));
-        let result = handle.insert(sql, block).await.map_err(Error::from);
+        probes::sql__query__start!(|| (&id, sql));
+        let now = tokio::time::Instant::now();
+        let result = tokio::time::timeout(
+            self.request_timeout,
+            handle.insert(sql, block),
+        )
+        .await;
+        let elapsed = now.elapsed();
         probes::sql__query__done!(|| (&id));
-        result
+        match result {
+            Ok(result) => result.map_err(Error::from),
+            Err(_) => Err(Error::DatabaseUnavailable(format!(
+                "SQL query timed out after {elapsed:?}"
+            ))),
+        }
     }
 
     // Execute a generic SQL statement, using the native TCP interface.
@@ -1155,10 +1168,18 @@ impl Client {
 
         let mut handle = self.native_pool.claim().await?;
         let id = usdt::UniqueId::new();
-        probes::sql__query__start!(|| (&id, &sql));
-        let result = handle.query(sql).await.map_err(Error::from);
+        probes::sql__query__start!(|| (&id, sql));
+        let now = tokio::time::Instant::now();
+        let result =
+            tokio::time::timeout(self.request_timeout, handle.query(sql)).await;
+        let elapsed = now.elapsed();
         probes::sql__query__done!(|| (&id));
-        result
+        match result {
+            Ok(result) => result.map_err(Error::from),
+            Err(_) => Err(Error::DatabaseUnavailable(format!(
+                "SQL query timed out after {elapsed:?}"
+            ))),
+        }
     }
 
     // Execute a generic SQL statement, awaiting the response as text
