@@ -76,7 +76,6 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::fmt;
-use std::hash::Hash;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
@@ -302,18 +301,20 @@ impl<'a> BlueprintBuilder<'a> {
         sled_ids: impl Iterator<Item = SledUuid>,
         creator: &str,
     ) -> Blueprint {
-        Self::build_empty_with_sleds_impl(sled_ids, creator, PlannerRng::new())
+        Self::build_empty_with_sleds_impl(
+            sled_ids,
+            creator,
+            PlannerRng::from_entropy(),
+        )
     }
 
     /// A version of [`Self::build_empty_with_sleds`] that allows the
-    /// blueprint ID to be generated from a random seed.
-    pub fn build_empty_with_sleds_seeded<H: Hash>(
+    /// blueprint ID to be generated from a deterministic RNG.
+    pub fn build_empty_with_sleds_seeded(
         sled_ids: impl Iterator<Item = SledUuid>,
         creator: &str,
-        seed: H,
+        rng: PlannerRng,
     ) -> Blueprint {
-        let mut rng = PlannerRng::new();
-        rng.set_seed(seed);
         Self::build_empty_with_sleds_impl(sled_ids, creator, rng)
     }
 
@@ -451,7 +452,7 @@ impl<'a> BlueprintBuilder<'a> {
             creator: creator.to_owned(),
             operations: Vec::new(),
             comments: Vec::new(),
-            rng: PlannerRng::new(),
+            rng: PlannerRng::from_entropy(),
         })
     }
 
@@ -580,12 +581,12 @@ impl<'a> BlueprintBuilder<'a> {
         self.sled_state.insert(sled_id, desired_state);
     }
 
-    /// Within tests, set a seeded RNG for deterministic results.
+    /// Within tests, set an RNG for deterministic results.
     ///
     /// This will ensure that tests that use this builder will produce the same
     /// results each time they are run.
-    pub fn set_rng_seed<H: Hash>(&mut self, seed: H) -> &mut Self {
-        self.rng.set_seed(seed);
+    pub fn set_rng(&mut self, rng: PlannerRng) -> &mut Self {
+        self.rng = rng;
         self
     }
 
@@ -2618,6 +2619,7 @@ pub mod test {
     use super::*;
     use crate::example::example;
     use crate::example::ExampleSystemBuilder;
+    use crate::example::SimRngState;
     use crate::system::SledBuilder;
     use expectorate::assert_contents;
     use nexus_inventory::CollectionBuilder;
@@ -2844,8 +2846,13 @@ pub mod test {
     fn test_basic() {
         static TEST_NAME: &str = "blueprint_builder_test_basic";
         let logctx = test_setup_log(TEST_NAME);
-        let (mut example, blueprint1) =
-            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
+
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+        let (mut example, blueprint1) = ExampleSystemBuilder::new_with_rng(
+            &logctx.log,
+            rng.next_system_rng(),
+        )
+        .build();
         verify_blueprint(&blueprint1);
 
         let mut builder = BlueprintBuilder::new_based_on(
@@ -2881,7 +2888,9 @@ pub mod test {
         assert_eq!(diff.sleds_modified.len(), 0);
 
         // The next step is adding these zones to a new sled.
-        let new_sled_id = example.sled_rng.next();
+        let mut sled_id_rng = rng.next_sled_id_rng();
+        let new_sled_id = sled_id_rng.next();
+
         let _ =
             example.system.sled(SledBuilder::new().id(new_sled_id)).unwrap();
         let input = example.system.to_planning_input_builder().unwrap().build();

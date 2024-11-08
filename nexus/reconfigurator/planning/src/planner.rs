@@ -28,11 +28,11 @@ use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
+use rng::PlannerRng;
 use slog::error;
 use slog::{info, warn, Logger};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::hash::Hash;
 use std::str::FromStr;
 
 pub(crate) use self::omicron_zone_placement::DiscretionaryOmicronZone;
@@ -82,10 +82,10 @@ impl<'a> Planner<'a> {
     ///
     /// This will ensure that tests that use this builder will produce the same
     /// results each time they are run.
-    pub fn with_rng_seed<H: Hash>(mut self, seed: H) -> Self {
-        // This is an owned builder because it is almost never going to be
-        // conditional.
-        self.blueprint.set_rng_seed(seed);
+    pub fn with_rng(mut self, rng: PlannerRng) -> Self {
+        // This is an owned builder (self rather than &mut self) because it is
+        // almost never going to be conditional.
+        self.blueprint.set_rng(rng);
         self
     }
 
@@ -869,6 +869,8 @@ mod test {
     use crate::blueprint_builder::EnsureMultiple;
     use crate::example::example;
     use crate::example::ExampleSystemBuilder;
+    use crate::example::SimRngState;
+    use crate::planner::rng::PlannerRng;
     use crate::system::SledBuilder;
     use chrono::NaiveDateTime;
     use chrono::TimeZone;
@@ -918,8 +920,12 @@ mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system.
-        let (mut example, blueprint1) =
-            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+        let (mut example, blueprint1) = ExampleSystemBuilder::new_with_rng(
+            &logctx.log,
+            rng.next_system_rng(),
+        )
+        .build();
         verify_blueprint(&blueprint1);
 
         println!("{}", blueprint1.display());
@@ -935,7 +941,7 @@ mod test {
             &example.collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp2"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
 
@@ -957,7 +963,8 @@ mod test {
         verify_blueprint(&blueprint2);
 
         // Now add a new sled.
-        let new_sled_id = example.sled_rng.next();
+        let mut sled_id_rng = rng.next_sled_id_rng();
+        let new_sled_id = sled_id_rng.next();
         let _ =
             example.system.sled(SledBuilder::new().id(new_sled_id)).unwrap();
         let input = example.system.to_planning_input_builder().unwrap().build();
@@ -971,7 +978,7 @@ mod test {
             &example.collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp3"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
         .plan()
         .expect("failed to plan");
 
@@ -1011,7 +1018,7 @@ mod test {
             &example.collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp4"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp4")))
         .plan()
         .expect("failed to plan");
         let diff = blueprint4.diff_since_blueprint(&blueprint3);
@@ -1050,7 +1057,7 @@ mod test {
             &collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp5"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp5")))
         .plan()
         .expect("failed to plan");
 
@@ -1145,7 +1152,7 @@ mod test {
             &collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp2"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
 
@@ -1223,7 +1230,7 @@ mod test {
             &collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp2"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
 
@@ -1333,7 +1340,7 @@ mod test {
             &collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp2"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
 
@@ -1411,7 +1418,7 @@ mod test {
             &collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp2"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
 
@@ -1445,7 +1452,7 @@ mod test {
             &collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp3"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
         .plan()
         .expect("failed to plan");
 
@@ -1593,7 +1600,7 @@ mod test {
             &collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp2"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
 
@@ -1628,7 +1635,7 @@ mod test {
             &collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp3"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
         .plan()
         .expect("failed to re-plan");
 
@@ -1740,7 +1747,7 @@ mod test {
             &collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp2"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
 
@@ -1818,7 +1825,7 @@ mod test {
             &collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp2"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
 
@@ -1903,7 +1910,7 @@ mod test {
             &collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp2"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
 
@@ -2032,7 +2039,7 @@ mod test {
             &collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp2"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
 
@@ -2169,7 +2176,7 @@ mod test {
             &collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp2"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
 
@@ -2395,7 +2402,7 @@ mod test {
             &collection,
         )
         .expect("created planner")
-        .with_rng_seed((TEST_NAME, "bp2"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
 
@@ -2441,7 +2448,7 @@ mod test {
             &collection,
         )
         .expect("created planner")
-        .with_rng_seed((TEST_NAME, "bp3"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
         .plan()
         .expect("succeeded in planner");
 
@@ -2491,7 +2498,7 @@ mod test {
             &collection,
         )
         .expect("created planner")
-        .with_rng_seed((TEST_NAME, "bp4"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp4")))
         .plan()
         .expect("succeeded in planner");
 
@@ -2550,7 +2557,7 @@ mod test {
             &collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp2"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to plan");
         assert_eq!(bp2.cockroachdb_fingerprint, "bp2");
@@ -2577,7 +2584,7 @@ mod test {
             &collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp3"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
         .plan()
         .expect("failed to plan");
         assert_eq!(bp3.cockroachdb_fingerprint, "bp3");
@@ -2602,7 +2609,7 @@ mod test {
             &collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp4"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp4")))
         .plan()
         .expect("failed to plan");
         assert_eq!(bp4.cockroachdb_fingerprint, "bp4");
@@ -2631,7 +2638,10 @@ mod test {
                 &collection,
             )
             .expect("failed to create planner")
-            .with_rng_seed((TEST_NAME, format!("bp5-{}", preserve_downgrade)))
+            .with_rng(PlannerRng::from_seed((
+                TEST_NAME,
+                format!("bp5-{}", preserve_downgrade),
+            )))
             .plan()
             .expect("failed to plan");
             assert_eq!(bp5.cockroachdb_fingerprint, "bp5");
@@ -2687,7 +2697,7 @@ mod test {
             &collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp2"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to re-plan");
 
@@ -2756,7 +2766,7 @@ mod test {
             &collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp2"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("failed to re-plan");
 
@@ -2819,7 +2829,7 @@ mod test {
             &collection,
         )
         .expect("created planner")
-        .with_rng_seed((TEST_NAME, "bp2"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("plan");
 
@@ -2887,7 +2897,7 @@ mod test {
             &collection,
         )
         .expect("created planner")
-        .with_rng_seed((TEST_NAME, "bp3"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
         .plan()
         .expect("plan");
 
@@ -2928,7 +2938,7 @@ mod test {
             &collection,
         )
         .expect("created planner")
-        .with_rng_seed((TEST_NAME, "bp4"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp4")))
         .plan()
         .expect("plan");
 
@@ -2970,7 +2980,7 @@ mod test {
             &collection,
         )
         .expect("created planner")
-        .with_rng_seed((TEST_NAME, "bp5"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp5")))
         .plan()
         .expect("plan");
 
@@ -3011,7 +3021,7 @@ mod test {
             &collection,
         )
         .expect("created planner")
-        .with_rng_seed((TEST_NAME, "bp6"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp6")))
         .plan()
         .expect("plan");
 
@@ -3042,7 +3052,7 @@ mod test {
             &collection,
         )
         .expect("created planner")
-        .with_rng_seed((TEST_NAME, "bp7"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp7")))
         .plan()
         .expect("plan");
 
@@ -3085,7 +3095,7 @@ mod test {
             &collection,
         )
         .expect("created planner")
-        .with_rng_seed((TEST_NAME, "bp8"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp8")))
         .plan()
         .expect("plan");
 
@@ -3138,7 +3148,7 @@ mod test {
             &collection,
         )
         .expect("created planner")
-        .with_rng_seed((TEST_NAME, "bp2"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("plan");
 
@@ -3196,7 +3206,7 @@ mod test {
             &collection,
         )
         .expect("created planner")
-        .with_rng_seed((TEST_NAME, "bp3"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
         .plan()
         .expect("plan");
 
@@ -3234,7 +3244,7 @@ mod test {
             &collection,
         )
         .expect("created planner")
-        .with_rng_seed((TEST_NAME, "bp4"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp4")))
         .plan()
         .expect("plan");
 
@@ -3259,7 +3269,7 @@ mod test {
             &collection,
         )
         .expect("created planner")
-        .with_rng_seed((TEST_NAME, "bp5"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp5")))
         .plan()
         .expect("plan");
 
@@ -3292,7 +3302,7 @@ mod test {
             &collection,
         )
         .expect("created planner")
-        .with_rng_seed((TEST_NAME, "bp6"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp6")))
         .plan()
         .expect("plan");
 
@@ -3346,7 +3356,7 @@ mod test {
             &collection,
         )
         .expect("created planner")
-        .with_rng_seed((TEST_NAME, "bp2"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
         .plan()
         .expect("plan");
 
@@ -3393,7 +3403,7 @@ mod test {
             &collection,
         )
         .expect("created planner")
-        .with_rng_seed((TEST_NAME, "bp3"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
         .plan()
         .expect("plan");
 
@@ -3421,7 +3431,7 @@ mod test {
             &collection,
         )
         .expect("created planner")
-        .with_rng_seed((TEST_NAME, "bp4"))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp4")))
         .plan()
         .expect("plan");
 
