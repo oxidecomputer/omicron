@@ -361,12 +361,6 @@ impl ServiceInner {
 
     /// Requests that the specified sled configure storage as described
     /// by `storage_config`.
-    ///
-    /// This function succeeds if either the configuration is supplied, or if
-    /// the configuration on the target sled is newer than what we're supplying.
-    // This function shares a lot of implementation details with
-    // [Self::initialize_zones_on_sled]. Although it has a different meaning,
-    // the usage (and expectations around generation numbers) are similar.
     async fn initialize_disks_on_sled(
         &self,
         sled_address: SocketAddrV6,
@@ -393,10 +387,7 @@ impl ServiceInner {
                 .omicron_physical_disks_put(&storage_config.clone())
                 .await;
             let Err(error) = result else {
-                return Ok::<
-                    (),
-                    BackoffError<SledAgentError<SledAgentTypes::Error>>,
-                >(());
+                return Ok(());
             };
 
             if let sled_agent_client::Error::ErrorResponse(response) = &error {
@@ -410,17 +401,20 @@ impl ServiceInner {
                         "server_message" => &response.message,
                     );
 
-                    // If we attempt to initialize storage at generation X, and
-                    // the server refuses because it's at some generation newer
-                    // than X, then we treat that as success.  See the doc
-                    // comment on this function.
-                    return Ok(());
+                    return Err(BackoffError::permanent(
+                        SetupServiceError::SledInitialization(format!(
+                            "Conflict initializing disks: {}",
+                            response.message
+                        )),
+                    ));
                 }
             }
 
             // TODO Many other codes here should not be retried.  See
             // omicron#4578.
-            return Err(BackoffError::transient(error));
+            return Err(BackoffError::transient(SetupServiceError::SledApi(
+                error,
+            )));
         };
         let log_failure = |error, delay| {
             warn!(
@@ -440,14 +434,8 @@ impl ServiceInner {
         Ok(())
     }
 
-    /// Requests that the specified sled configure storage as described
+    /// Requests that the specified sled configure datasets as described
     /// by `storage_config`.
-    ///
-    /// This function succeeds if either the configuration is supplied, or if
-    /// the configuration on the target sled is newer than what we're supplying.
-    // This function shares a lot of implementation details with
-    // [Self::initialize_zones_on_sled]. Although it has a different meaning,
-    // the usage (and expectations around generation numbers) are similar.
     async fn initialize_datasets_on_sled(
         &self,
         sled_address: SocketAddrV6,
@@ -472,10 +460,7 @@ impl ServiceInner {
             );
             let result = client.datasets_put(&storage_config.clone()).await;
             let Err(error) = result else {
-                return Ok::<
-                    (),
-                    BackoffError<SledAgentError<SledAgentTypes::Error>>,
-                >(());
+                return Ok(());
             };
 
             if let sled_agent_client::Error::ErrorResponse(response) = &error {
@@ -489,17 +474,20 @@ impl ServiceInner {
                         "server_message" => &response.message,
                     );
 
-                    // If we attempt to initialize storage at generation X, and
-                    // the server refuses because it's at some generation newer
-                    // than X, then we treat that as success.  See the doc
-                    // comment on this function.
-                    return Ok(());
+                    return Err(BackoffError::permanent(
+                        SetupServiceError::SledInitialization(format!(
+                            "Conflict initializing datasets {}",
+                            response.message
+                        )),
+                    ));
                 }
             }
 
             // TODO Many other codes here should not be retried.  See
             // omicron#4578.
-            return Err(BackoffError::transient(error));
+            return Err(BackoffError::transient(SetupServiceError::SledApi(
+                error,
+            )));
         };
         let log_failure = |error, delay| {
             warn!(
