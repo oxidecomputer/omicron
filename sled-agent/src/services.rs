@@ -3507,20 +3507,23 @@ impl ServiceManager {
         }
 
         // These datasets are configured to be part of the control plane.
-        //
-        // Ensure
         let datasets_config = self.inner.storage.datasets_config_list().await?;
         let existing_datasets: HashSet<_> = datasets_config
             .datasets
             .into_values()
             .map(|config| config.name)
             .collect();
+
+        // Check that the request is no larger than the configured set.
+        //
+        // (It's fine to have "existing_datasets" not contained in the
+        // request set).
         let missing_datasets: HashSet<_> = requested_datasets
             .difference(&existing_datasets)
             .cloned()
             .collect();
         if !missing_datasets.is_empty() {
-            warn!(self.inner.log, "Missing dataset: {missing_datasets:?}");
+            warn!(self.inner.log, "Missing datasets: {missing_datasets:?}");
             return Err(Error::MissingDatasets { datasets: missing_datasets });
         }
         Ok(())
