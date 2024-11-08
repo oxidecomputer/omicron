@@ -275,6 +275,12 @@ pub enum Error {
     #[error("Error querying simnet devices")]
     Simnet(#[from] GetSimnetError),
 
+    #[error("Failed to access storage")]
+    Storage(#[from] sled_storage::error::Error),
+
+    #[error("Missing datasets: {datasets:?}")]
+    MissingDatasets { datasets: HashSet<DatasetName> },
+
     #[error(
         "Requested generation ({requested}) is older than current ({current})"
     )]
@@ -3470,6 +3476,56 @@ impl ServiceManager {
         Ok(())
     }
 
+    // Compares the incoming set of zones with the datasets this sled is
+    // configured to use.
+    //
+    // If the requested zones contain any datasets not configured on this sled,
+    // an error is returned.
+    async fn check_requested_zone_datasets_exist(
+        &self,
+        request: &OmicronZonesConfig,
+    ) -> Result<(), Error> {
+        // Before we provision these zones, inspect the request, and
+        // check all the datasets we're trying to make.
+        let mut requested_datasets = HashSet::new();
+        for zone in &request.zones {
+            if let Some(dataset) = zone.dataset_name() {
+                requested_datasets.insert(dataset);
+            }
+
+            if let Some(pool) = zone.filesystem_pool.as_ref() {
+                requested_datasets.insert(DatasetName::new(
+                    pool.clone(),
+                    DatasetKind::TransientZone {
+                        name: illumos_utils::zone::zone_name(
+                            zone.zone_type.kind().zone_prefix(),
+                            Some(zone.id),
+                        ),
+                    },
+                ));
+            }
+        }
+
+        // These datasets are configured to be part of the control plane.
+        //
+        // Ensure
+        let datasets_config = self.inner.storage.datasets_config_list().await?;
+        let existing_datasets: HashSet<_> = datasets_config
+            .datasets
+            .into_values()
+            .map(|config| config.name)
+            .collect();
+        let missing_datasets: HashSet<_> = requested_datasets
+            .difference(&existing_datasets)
+            .cloned()
+            .collect();
+        if !missing_datasets.is_empty() {
+            warn!(self.inner.log, "Missing dataset: {missing_datasets:?}");
+            return Err(Error::MissingDatasets { datasets: missing_datasets });
+        }
+        Ok(())
+    }
+
     // Ensures that only the following Omicron zones are running.
     //
     // This method strives to be idempotent.
@@ -3493,6 +3549,8 @@ impl ServiceManager {
         new_request: OmicronZonesConfig,
         fake_install_dir: Option<&String>,
     ) -> Result<(), Error> {
+        self.check_requested_zone_datasets_exist(&new_request).await?;
+
         // Do some data-normalization to ensure we can compare the "requested
         // set" vs the "existing set" as HashSets.
         let old_zone_configs: HashSet<OmicronZoneConfig> = existing_zones
