@@ -2570,36 +2570,6 @@
           }
         ]
       },
-      "BootOrderEntry": {
-        "description": "An entry in the boot order stored in a [`BootSettings`] component.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"An entry in the boot order stored in a [`BootSettings`] component.\", \"type\": \"object\", \"required\": [ \"name\" ], \"properties\": { \"name\": { \"description\": \"The name of another component in the spec that Propolis should try to boot from.\\n\\nCurrently, only disk device components are supported.\", \"type\": \"string\" } } } ``` </details>",
-        "type": "object",
-        "properties": {
-          "name": {
-            "description": "The name of another component in the spec that Propolis should try to boot from.\n\nCurrently, only disk device components are supported.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name"
-        ]
-      },
-      "BootSettings": {
-        "description": "Settings supplied to the guest's firmware image that specify the order in which it should consider its options when selecting a device to try to boot from.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Settings supplied to the guest's firmware image that specify the order in which it should consider its options when selecting a device to try to boot from.\", \"type\": \"object\", \"required\": [ \"order\" ], \"properties\": { \"order\": { \"description\": \"An ordered list of components to attempt to boot from.\", \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/BootOrderEntry\" } } }, \"additionalProperties\": false } ``` </details>",
-        "type": "object",
-        "properties": {
-          "order": {
-            "description": "An ordered list of components to attempt to boot from.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BootOrderEntry"
-            }
-          }
-        },
-        "required": [
-          "order"
-        ],
-        "additionalProperties": false
-      },
       "BootstoreStatus": {
         "type": "object",
         "properties": {
@@ -2889,59 +2859,6 @@
               "type"
             ]
           }
-        ]
-      },
-      "CrucibleOpts": {
-        "description": "CrucibleOpts\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"id\", \"lossy\", \"read_only\", \"target\" ], \"properties\": { \"cert_pem\": { \"type\": [ \"string\", \"null\" ] }, \"control\": { \"type\": [ \"string\", \"null\" ] }, \"flush_timeout\": { \"type\": [ \"number\", \"null\" ], \"format\": \"float\" }, \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"key\": { \"type\": [ \"string\", \"null\" ] }, \"key_pem\": { \"type\": [ \"string\", \"null\" ] }, \"lossy\": { \"type\": \"boolean\" }, \"read_only\": { \"type\": \"boolean\" }, \"root_cert_pem\": { \"type\": [ \"string\", \"null\" ] }, \"target\": { \"type\": \"array\", \"items\": { \"type\": \"string\" } } } } ``` </details>",
-        "type": "object",
-        "properties": {
-          "cert_pem": {
-            "nullable": true,
-            "type": "string"
-          },
-          "control": {
-            "nullable": true,
-            "type": "string"
-          },
-          "flush_timeout": {
-            "nullable": true,
-            "type": "number",
-            "format": "float"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "key": {
-            "nullable": true,
-            "type": "string"
-          },
-          "key_pem": {
-            "nullable": true,
-            "type": "string"
-          },
-          "lossy": {
-            "type": "boolean"
-          },
-          "read_only": {
-            "type": "boolean"
-          },
-          "root_cert_pem": {
-            "nullable": true,
-            "type": "string"
-          },
-          "target": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "id",
-          "lossy",
-          "read_only",
-          "target"
         ]
       },
       "DatasetConfig": {
@@ -3248,34 +3165,6 @@
         },
         "required": [
           "identity"
-        ]
-      },
-      "DiskRequest": {
-        "description": "DiskRequest\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"device\", \"name\", \"read_only\", \"slot\", \"volume_construction_request\" ], \"properties\": { \"device\": { \"type\": \"string\" }, \"name\": { \"type\": \"string\" }, \"read_only\": { \"type\": \"boolean\" }, \"slot\": { \"$ref\": \"#/components/schemas/Slot\" }, \"volume_construction_request\": { \"$ref\": \"#/components/schemas/VolumeConstructionRequest\" } } } ``` </details>",
-        "type": "object",
-        "properties": {
-          "device": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "read_only": {
-            "type": "boolean"
-          },
-          "slot": {
-            "$ref": "#/components/schemas/Slot"
-          },
-          "volume_construction_request": {
-            "$ref": "#/components/schemas/VolumeConstructionRequest"
-          }
-        },
-        "required": [
-          "device",
-          "name",
-          "read_only",
-          "slot",
-          "volume_construction_request"
         ]
       },
       "DiskRuntimeState": {
@@ -3866,11 +3755,64 @@
           }
         ]
       },
+      "InstanceBootSettings": {
+        "description": "Configures how an instance is told to try to boot.",
+        "type": "object",
+        "properties": {
+          "order": {
+            "description": "Propolis should tell guest firmware to try to boot from devices in this order.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": [
+          "order"
+        ]
+      },
       "InstanceCpuCount": {
         "description": "The number of CPUs in an Instance",
         "type": "integer",
         "format": "uint16",
         "minimum": 0
+      },
+      "InstanceDisk": {
+        "description": "A request to attach a disk to an instance.",
+        "type": "object",
+        "properties": {
+          "disk_id": {
+            "description": "The disk's UUID.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "The disk's name, used to generate the serial number for the virtual disk exposed to the guest.",
+            "type": "string"
+          },
+          "read_only": {
+            "description": "True if the disk is read-only.",
+            "type": "boolean"
+          },
+          "slot": {
+            "description": "The logical slot number assigned to the disk in its database record.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "vcr_json": {
+            "description": "A JSON representation of the Crucible volume construction request for this attachment.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "disk_id",
+          "name",
+          "read_only",
+          "slot",
+          "vcr_json"
+        ]
       },
       "InstanceEnsureBody": {
         "description": "The body of a request to ensure that a instance and VMM are known to a sled agent.",
@@ -3978,7 +3920,7 @@
             "nullable": true,
             "allOf": [
               {
-                "$ref": "#/components/schemas/BootSettings"
+                "$ref": "#/components/schemas/InstanceBootSettings"
               }
             ]
           },
@@ -3992,7 +3934,7 @@
           "disks": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/DiskRequest"
+              "$ref": "#/components/schemas/InstanceDisk"
             }
           },
           "ephemeral_ip": {
@@ -5682,12 +5624,6 @@
           "vmm_state"
         ]
       },
-      "Slot": {
-        "description": "A stable index which is translated by Propolis into a PCI BDF, visible to the guest.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"A stable index which is translated by Propolis into a PCI BDF, visible to the guest.\", \"type\": \"integer\", \"format\": \"uint8\", \"minimum\": 0.0 } ``` </details>",
-        "type": "integer",
-        "format": "uint8",
-        "minimum": 0
-      },
       "SourceNatConfig": {
         "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
         "type": "object",
@@ -6268,151 +6204,6 @@
         "type": "integer",
         "format": "uint32",
         "minimum": 0
-      },
-      "VolumeConstructionRequest": {
-        "description": "VolumeConstructionRequest\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"block_size\", \"id\", \"sub_volumes\", \"type\" ], \"properties\": { \"block_size\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"read_only_parent\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/VolumeConstructionRequest\" } ] }, \"sub_volumes\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/VolumeConstructionRequest\" } }, \"type\": { \"type\": \"string\", \"enum\": [ \"volume\" ] } } }, { \"type\": \"object\", \"required\": [ \"block_size\", \"id\", \"type\", \"url\" ], \"properties\": { \"block_size\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"url\" ] }, \"url\": { \"type\": \"string\" } } }, { \"type\": \"object\", \"required\": [ \"block_size\", \"blocks_per_extent\", \"extent_count\", \"gen\", \"opts\", \"type\" ], \"properties\": { \"block_size\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"blocks_per_extent\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"extent_count\": { \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"gen\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"opts\": { \"$ref\": \"#/components/schemas/CrucibleOpts\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"region\" ] } } }, { \"type\": \"object\", \"required\": [ \"block_size\", \"id\", \"path\", \"type\" ], \"properties\": { \"block_size\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"path\": { \"type\": \"string\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"file\" ] } } } ] } ``` </details>",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "block_size": {
-                "type": "integer",
-                "format": "uint64",
-                "minimum": 0
-              },
-              "id": {
-                "type": "string",
-                "format": "uuid"
-              },
-              "read_only_parent": {
-                "nullable": true,
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/VolumeConstructionRequest"
-                  }
-                ]
-              },
-              "sub_volumes": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/VolumeConstructionRequest"
-                }
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "volume"
-                ]
-              }
-            },
-            "required": [
-              "block_size",
-              "id",
-              "sub_volumes",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "block_size": {
-                "type": "integer",
-                "format": "uint64",
-                "minimum": 0
-              },
-              "id": {
-                "type": "string",
-                "format": "uuid"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "url"
-                ]
-              },
-              "url": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "block_size",
-              "id",
-              "type",
-              "url"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "block_size": {
-                "type": "integer",
-                "format": "uint64",
-                "minimum": 0
-              },
-              "blocks_per_extent": {
-                "type": "integer",
-                "format": "uint64",
-                "minimum": 0
-              },
-              "extent_count": {
-                "type": "integer",
-                "format": "uint32",
-                "minimum": 0
-              },
-              "gen": {
-                "type": "integer",
-                "format": "uint64",
-                "minimum": 0
-              },
-              "opts": {
-                "$ref": "#/components/schemas/CrucibleOpts"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "region"
-                ]
-              }
-            },
-            "required": [
-              "block_size",
-              "blocks_per_extent",
-              "extent_count",
-              "gen",
-              "opts",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "block_size": {
-                "type": "integer",
-                "format": "uint64",
-                "minimum": 0
-              },
-              "id": {
-                "type": "string",
-                "format": "uuid"
-              },
-              "path": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "file"
-                ]
-              }
-            },
-            "required": [
-              "block_size",
-              "id",
-              "path",
-              "type"
-            ]
-          }
-        ]
       },
       "VpcFirewallRuleAction": {
         "type": "string",
