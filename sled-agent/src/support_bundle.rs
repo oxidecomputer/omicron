@@ -58,21 +58,22 @@ impl SupportBundleCommandHttpOutput
 }
 
 /// Takes a given `Command` and returns a lossy representation of the program
-// and it's arguments.
+// and its arguments.
 fn command_to_string(command: &Command) -> String {
-    // Grab the command arguments
-    let mut res = command
-        .get_args()
-        .map(|a| a.to_string_lossy().into())
-        .collect::<Vec<String>>();
+    use std::fmt::Write;
 
     // Grab the command itself
-    res.insert(0, command.get_program().to_string_lossy().into());
-    res.join(" ")
+    let mut res: String = command.get_program().to_string_lossy().into();
+    // Grab the command arguments
+    for arg in command.get_args() {
+        let arg = arg.to_string_lossy();
+        write!(&mut res, " {arg}").expect("write! to strings never fails");
+    }
+    res
 }
 
-/// Spawn a command asynchronously and collect it's output by interleaving
-/// stdout and stderr as they occur.
+/// Spawn a command asynchronously and collect its output by interleaving stdout
+/// and stderr as they occur.
 async fn execute(
     cmd: Command,
 ) -> Result<SupportBundleCmdOutput, SupportBundleCmdError> {
