@@ -98,7 +98,10 @@ async fn execute(
         command: cmd_string.clone(),
         error: e,
     })?;
-    // XXX MTZ: add note here
+    // NB: This drop call is load-bearing and prevents a deadlock. The command
+    // struct holds onto the write half of the pipe preventing the read side
+    // from ever closing. To prevent this we drop the command now that we have
+    // spawned the process successfully.
     drop(cmd);
 
     let mut stdio = String::new();
