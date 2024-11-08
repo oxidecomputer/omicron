@@ -11,6 +11,8 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 dropshot.workspace = true
+clickward.workspace = true
 slog.workspace = true
 tokio.workspace = true
 omicron-workspace-hack.workspace = true
+oximeter-test-utils.workspace = true
