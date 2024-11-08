@@ -72,6 +72,7 @@ pub mod instance;
 mod inventory;
 mod ip_pool;
 mod ipv4_nat_entry;
+mod lldp;
 mod migration;
 mod network_interface;
 mod oximeter;

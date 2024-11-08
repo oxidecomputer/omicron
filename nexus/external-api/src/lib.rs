@@ -1486,6 +1486,43 @@ pub trait NexusExternalApi {
         query_params: Query<params::SwitchPortSelector>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    /// Fetch the LLDP configuration for a switch port
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/switch-port/{port}/lldp/config",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_lldp_config_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortPathSelector>,
+        query_params: Query<params::SwitchPortSelector>,
+    ) -> Result<HttpResponseOk<LldpLinkConfig>, HttpError>;
+
+    /// Update the LLDP configuration for a switch port
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/hardware/switch-port/{port}/lldp/config",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_lldp_config_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortPathSelector>,
+        query_params: Query<params::SwitchPortSelector>,
+        config: TypedBody<LldpLinkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Fetch the LLDP neighbors seen on a switch port
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/rack-switch-port/{rack_id}/{switch_location}/{port}/lldp/neighbors",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_lldp_neighbors(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::LldpPortPathSelector>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<LldpNeighbor>>, HttpError>;
+
     /// Create new BGP configuration
     #[endpoint {
         method = POST,

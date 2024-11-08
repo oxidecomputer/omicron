@@ -33,7 +33,7 @@ use nexus_types::external_api::views::VpcSubnet;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::NameOrId;
-use omicron_common::api::external::SimpleIdentity;
+use omicron_common::api::external::SimpleIdentityOrName;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::RouterTarget;
 use omicron_uuid_kinds::GenericUuid;

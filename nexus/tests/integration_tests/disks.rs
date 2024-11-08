@@ -42,7 +42,7 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
-use omicron_common::api::external::{ByteCount, SimpleIdentity as _};
+use omicron_common::api::external::{ByteCount, SimpleIdentityOrName as _};
 use omicron_nexus::app::{MAX_DISK_SIZE_BYTES, MIN_DISK_SIZE_BYTES};
 use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
