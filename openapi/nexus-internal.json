@@ -153,6 +153,55 @@
         }
       }
     },
+    "/clickhouse/policy": {
+      "get": {
+        "summary": "Get the current clickhouse policy",
+        "operationId": "clickhouse_policy_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClickhousePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Set the new clickhouse policy",
+        "operationId": "clickhouse_policy_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClickhousePolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stop-request": {
       "post": {
         "summary": "An Upstairs will update this endpoint if a Downstairs client task is",
@@ -1858,6 +1907,13 @@
         "description": "Describes a complete set of software and configuration for the system",
         "type": "object",
         "properties": {
+          "blueprint_datasets": {
+            "description": "A map of sled id -> datasets in use on each sled",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BlueprintDatasetsConfig"
+            }
+          },
           "blueprint_disks": {
             "description": "A map of sled id -> disks in use on each sled.",
             "type": "object",
@@ -1942,6 +1998,7 @@
           }
         },
         "required": [
+          "blueprint_datasets",
           "blueprint_disks",
           "blueprint_zones",
           "cockroachdb_fingerprint",
@@ -1953,6 +2010,92 @@
           "internal_dns_version",
           "sled_state",
           "time_created"
+        ]
+      },
+      "BlueprintDatasetConfig": {
+        "description": "Information about a dataset as recorded in a blueprint",
+        "type": "object",
+        "properties": {
+          "address": {
+            "nullable": true,
+            "type": "string"
+          },
+          "compression": {
+            "$ref": "#/components/schemas/CompressionAlgorithm"
+          },
+          "disposition": {
+            "$ref": "#/components/schemas/BlueprintDatasetDisposition"
+          },
+          "id": {
+            "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DatasetKind"
+          },
+          "pool": {
+            "$ref": "#/components/schemas/ZpoolName"
+          },
+          "quota": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "reservation": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          }
+        },
+        "required": [
+          "compression",
+          "disposition",
+          "id",
+          "kind",
+          "pool"
+        ]
+      },
+      "BlueprintDatasetDisposition": {
+        "description": "The desired state of an Omicron-managed dataset in a blueprint.\n\nPart of [`BlueprintDatasetConfig`].",
+        "oneOf": [
+          {
+            "description": "The dataset is in-service.",
+            "type": "string",
+            "enum": [
+              "in_service"
+            ]
+          },
+          {
+            "description": "The dataset is permanently gone.",
+            "type": "string",
+            "enum": [
+              "expunged"
+            ]
+          }
+        ]
+      },
+      "BlueprintDatasetsConfig": {
+        "description": "Information about Omicron datasets as recorded in a blueprint.",
+        "type": "object",
+        "properties": {
+          "datasets": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BlueprintDatasetConfig"
+            }
+          },
+          "generation": {
+            "$ref": "#/components/schemas/Generation"
+          }
+        },
+        "required": [
+          "datasets",
+          "generation"
         ]
       },
       "BlueprintMetadata": {
@@ -2110,10 +2253,6 @@
           "id": {
             "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
           },
-          "underlay_address": {
-            "type": "string",
-            "format": "ipv6"
-          },
           "zone_type": {
             "$ref": "#/components/schemas/BlueprintZoneType"
           }
@@ -2121,7 +2260,6 @@
         "required": [
           "disposition",
           "id",
-          "underlay_address",
           "zone_type"
         ]
       },
@@ -2616,6 +2754,115 @@
           "servers"
         ]
       },
+      "ClickhouseMode": {
+        "description": "How to deploy clickhouse nodes",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "single_node_only"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cluster_only"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "target_keepers": {
+                    "type": "integer",
+                    "format": "uint8",
+                    "minimum": 0
+                  },
+                  "target_servers": {
+                    "type": "integer",
+                    "format": "uint8",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "target_keepers",
+                  "target_servers"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "both"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "target_keepers": {
+                    "type": "integer",
+                    "format": "uint8",
+                    "minimum": 0
+                  },
+                  "target_servers": {
+                    "type": "integer",
+                    "format": "uint8",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "target_keepers",
+                  "target_servers"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
+      "ClickhousePolicy": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/ClickhouseMode"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "mode",
+          "time_created",
+          "version"
+        ]
+      },
       "CockroachDbClusterVersion": {
         "description": "CockroachDB cluster versions we are aware of.\n\nCockroachDB can be upgraded from one major version to the next, e.g. v22.1 -> v22.2. Each major version introduces changes in how it stores data on disk to support new features, and each major version has support for reading the previous version's data so that it can perform an upgrade. The version of the data format is called the \"cluster version\", which is distinct from but related to the software version that's being run.\n\nWhile software version v22.2 is using cluster version v22.1, it's possible to downgrade back to v22.1. Once the cluster version is upgraded, there's no going back.\n\nTo give us some time to evaluate new versions of the software while retaining a downgrade path, we currently deploy new versions of CockroachDB across two releases of the Oxide software, in a \"tick-tock\" model:\n\n- In \"tick\" releases, we upgrade the version of the CockroachDB software to a new major version, and update `CockroachDbClusterVersion::NEWLY_INITIALIZED`. On upgraded racks, the new version is running with the previous cluster version; on newly-initialized racks, the new version is running with the new cluser version. - In \"tock\" releases, we change `CockroachDbClusterVersion::POLICY` to the major version we upgraded to in the last \"tick\" release. This results in a new blueprint that upgrades the cluster version, destroying the downgrade path but allowing us to eventually upgrade to the next release.\n\nThese presently describe major versions of CockroachDB. The order of these must be maintained in the correct order (the first variant must be the earliest version).",
         "type": "string",
@@ -2673,6 +2920,112 @@
             "required": [
               "action",
               "data"
+            ]
+          }
+        ]
+      },
+      "CompressionAlgorithm": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "on"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "off"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "gzip"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "level": {
+                "$ref": "#/components/schemas/GzipLevel"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "gzip_n"
+                ]
+              }
+            },
+            "required": [
+              "level",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "lz4"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "lzjb"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "zle"
+                ]
+              }
+            },
+            "required": [
+              "type"
             ]
           }
         ]
@@ -3322,6 +3675,11 @@
         "format": "uint64",
         "minimum": 0
       },
+      "GzipLevel": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 0
+      },
       "ImportExportPolicy": {
         "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
         "oneOf": [
@@ -3379,7 +3737,7 @@
           },
           "auto_restart_policy": {
             "nullable": true,
-            "description": "The auto-restart policy configured for this instance, or `None` if no explicit policy is configured.\n\nIf this is not present, then this instance uses the default auto-restart policy, which may or may not allow it to be restarted. The `auto_restart_enabled` field indicates whether the instance will be automatically restarted.",
+            "description": "The auto-restart policy configured for this instance, or `null` if no explicit policy has been configured.\n\nThis policy determines whether the instance should be automatically restarted by the control plane on failure. If this is `null`, the control plane will use the default policy when determining whether or not to automatically restart this instance, which may or may not allow it to be restarted. The value of the `auto_restart_enabled` field indicates whether the instance will be auto-restarted, based on its current policy or the default if it has no configured policy.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceAutoRestartPolicy"
@@ -4316,6 +4674,15 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/SwitchLocation"
+              }
+            ]
+          },
+          "tx_eq": {
+            "nullable": true,
+            "description": "TX-EQ configuration for this port",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TxEqConfig"
               }
             ]
           },
@@ -5387,6 +5754,46 @@
       },
       "SwitchPutResponse": {
         "type": "object"
+      },
+      "TxEqConfig": {
+        "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",
+        "type": "object",
+        "properties": {
+          "main": {
+            "nullable": true,
+            "description": "Main tap",
+            "type": "integer",
+            "format": "int32"
+          },
+          "post1": {
+            "nullable": true,
+            "description": "Post-cursor tap1",
+            "type": "integer",
+            "format": "int32"
+          },
+          "post2": {
+            "nullable": true,
+            "description": "Post-cursor tap2",
+            "type": "integer",
+            "format": "int32"
+          },
+          "pre1": {
+            "nullable": true,
+            "description": "Pre-cursor tap1",
+            "type": "integer",
+            "format": "int32"
+          },
+          "pre2": {
+            "nullable": true,
+            "description": "Pre-cursor tap2",
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "TypedUuidForDatasetKind": {
+        "type": "string",
+        "format": "uuid"
       },
       "TypedUuidForDemoSagaKind": {
         "type": "string",

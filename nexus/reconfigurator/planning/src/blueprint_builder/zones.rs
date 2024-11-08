@@ -241,11 +241,9 @@ mod tests {
     use omicron_uuid_kinds::ZpoolUuid;
 
     use crate::{
-        blueprint_builder::{
-            test::verify_blueprint, BlueprintBuilder, BlueprintBuilderRng,
-            Ensure,
-        },
-        example::{ExampleRngState, ExampleSystemBuilder},
+        blueprint_builder::{test::verify_blueprint, BlueprintBuilder, Ensure},
+        example::{ExampleSystemBuilder, SimRngState},
+        planner::rng::PlannerRng,
     };
 
     use super::*;
@@ -256,7 +254,7 @@ mod tests {
         static TEST_NAME: &str = "blueprint_test_builder_zones";
         let logctx = test_setup_log(TEST_NAME);
 
-        let mut rng = ExampleRngState::from_seed(TEST_NAME);
+        let mut rng = SimRngState::from_seed(TEST_NAME);
         let (example, blueprint_initial) = ExampleSystemBuilder::new_with_rng(
             &logctx.log,
             rng.next_system_rng(),
@@ -282,16 +280,20 @@ mod tests {
                             ),
                             zpools: BTreeMap::from([(
                                 ZpoolUuid::new_v4(),
-                                SledDisk {
-                                    disk_identity: DiskIdentity {
-                                        vendor: String::from("fake-vendor"),
-                                        serial: String::from("fake-serial"),
-                                        model: String::from("fake-model"),
+                                (
+                                    SledDisk {
+                                        disk_identity: DiskIdentity {
+                                            vendor: String::from("fake-vendor"),
+                                            serial: String::from("fake-serial"),
+                                            model: String::from("fake-model"),
+                                        },
+                                        disk_id: PhysicalDiskUuid::new_v4(),
+                                        policy: PhysicalDiskPolicy::InService,
+                                        state: PhysicalDiskState::Active,
                                     },
-                                    disk_id: PhysicalDiskUuid::new_v4(),
-                                    policy: PhysicalDiskPolicy::InService,
-                                    state: PhysicalDiskState::Active,
-                                },
+                                    // Datasets: Leave empty
+                                    vec![],
+                                ),
                             )]),
                         },
                     },
@@ -315,7 +317,7 @@ mod tests {
             "the_test",
         )
         .expect("creating blueprint builder");
-        builder.set_rng(BlueprintBuilderRng::from_seed((TEST_NAME, "bp2")));
+        builder.set_rng(PlannerRng::from_seed((TEST_NAME, "bp2")));
 
         // Test adding a new sled with an NTP zone.
         assert_eq!(
@@ -351,7 +353,6 @@ mod tests {
             .add_zone(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: new_zone_id,
-                underlay_address: Ipv6Addr::UNSPECIFIED,
                 filesystem_pool: Some(filesystem_pool),
                 zone_type: BlueprintZoneType::Oximeter(
                     blueprint_zone_type::Oximeter {
@@ -433,6 +434,13 @@ mod tests {
             }
         );
 
+        // Ensure all datasets are created for the zones we've provisioned
+        for (sled_id, resources) in
+            input2.all_sled_resources(SledFilter::Commissioned)
+        {
+            builder.sled_ensure_datasets(sled_id, resources).unwrap();
+        }
+
         // Now build the blueprint and ensure that all the changes we described
         // above are present.
         let blueprint = builder.build();
@@ -487,7 +495,7 @@ mod tests {
                 "the_test",
             )
             .expect("creating blueprint builder");
-            builder.set_rng(BlueprintBuilderRng::from_seed((TEST_NAME, "bp2")));
+            builder.set_rng(PlannerRng::from_seed((TEST_NAME, "bp2")));
 
             // This call by itself shouldn't bump the generation number.
             builder.zones.change_sled_zones(existing_sled_id);

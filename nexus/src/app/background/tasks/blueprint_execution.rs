@@ -185,9 +185,10 @@ mod test {
     };
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::{
-        blueprint_zone_type, Blueprint, BlueprintPhysicalDisksConfig,
-        BlueprintTarget, BlueprintZoneConfig, BlueprintZoneDisposition,
-        BlueprintZoneType, BlueprintZonesConfig, CockroachDbPreserveDowngrade,
+        blueprint_zone_type, Blueprint, BlueprintDatasetsConfig,
+        BlueprintPhysicalDisksConfig, BlueprintTarget, BlueprintZoneConfig,
+        BlueprintZoneDisposition, BlueprintZoneType, BlueprintZonesConfig,
+        CockroachDbPreserveDowngrade,
     };
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external::Generation;
@@ -213,6 +214,7 @@ mod test {
         opctx: &OpContext,
         blueprint_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
         blueprint_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
+        blueprint_datasets: BTreeMap<SledUuid, BlueprintDatasetsConfig>,
         dns_version: Generation,
     ) -> (BlueprintTarget, Blueprint) {
         let id = Uuid::new_v4();
@@ -240,6 +242,7 @@ mod test {
             id,
             blueprint_zones,
             blueprint_disks,
+            blueprint_datasets,
             sled_state,
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
@@ -367,6 +370,7 @@ mod test {
                 &opctx,
                 BTreeMap::new(),
                 BTreeMap::new(),
+                BTreeMap::new(),
                 generation,
             )
             .await,
@@ -402,7 +406,6 @@ mod test {
                 zones: vec![BlueprintZoneConfig {
                     disposition,
                     id: OmicronZoneUuid::new_v4(),
-                    underlay_address: "::1".parse().unwrap(),
                     filesystem_pool: Some(ZpoolName::new_external(pool_id)),
                     zone_type: BlueprintZoneType::InternalDns(
                         blueprint_zone_type::InternalDns {
@@ -433,6 +436,7 @@ mod test {
                 (sled_id1, make_zones(BlueprintZoneDisposition::InService)),
                 (sled_id2, make_zones(BlueprintZoneDisposition::Quiesced)),
             ]),
+            BTreeMap::new(),
             BTreeMap::new(),
             generation,
         )

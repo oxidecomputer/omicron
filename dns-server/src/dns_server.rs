@@ -274,6 +274,19 @@ async fn handle_dns_message(
     let mut additional_records = vec![];
     let response_records = records
         .into_iter()
+        .filter(|record| {
+            let ty = query.query_type();
+            if ty == RecordType::ANY {
+                return true;
+            }
+
+            match (ty, record) {
+                (RecordType::A, DnsRecord::A(_)) => true,
+                (RecordType::AAAA, DnsRecord::Aaaa(_)) => true,
+                (RecordType::SRV, DnsRecord::Srv(_)) => true,
+                _ => false,
+            }
+        })
         .map(|record| {
             let record = dns_record_to_record(&name, record)?;
 

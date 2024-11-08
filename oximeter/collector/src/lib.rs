@@ -127,7 +127,7 @@ impl DbConfig {
 
 /// Default interval on which we refresh our list of producers from Nexus.
 pub const fn default_refresh_interval() -> Duration {
-    Duration::from_secs(60 * 10)
+    Duration::from_secs(15)
 }
 
 /// Configuration used to initialize an oximeter server
@@ -344,11 +344,20 @@ impl Oximeter {
                     ))
                 };
 
-            qorb::pool::Pool::new(
+            match qorb::pool::Pool::new(
                 nexus_resolver,
                 Arc::new(NexusConnector { log: log.clone() }),
                 qorb::policy::Policy::default(),
-            )
+            ) {
+                Ok(pool) => {
+                    debug!(log, "registered USDT probes");
+                    pool
+                }
+                Err(err) => {
+                    error!(log, "failed to register USDT probes");
+                    err.into_inner()
+                }
+            }
         };
 
         let notify_nexus = || async {

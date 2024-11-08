@@ -14,7 +14,9 @@ use ipnet::Ipv6Subnets;
 use nexus_inventory::CollectionBuilder;
 use nexus_sled_agent_shared::inventory::Baseboard;
 use nexus_sled_agent_shared::inventory::Inventory;
+use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
+use nexus_sled_agent_shared::inventory::InventoryZpool;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::deployment::ClickhousePolicy;
@@ -245,6 +247,16 @@ impl SystemDescription {
     pub fn clickhouse_policy(&mut self, policy: ClickhousePolicy) -> &mut Self {
         self.clickhouse_policy = Some(policy);
         self
+    }
+
+    pub fn get_sled_mut(
+        &mut self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<&mut Sled> {
+        let Some(sled) = self.sleds.get_mut(&sled_id) else {
+            bail!("Sled not found with id {sled_id}");
+        };
+        Ok(Arc::make_mut(sled))
     }
 
     /// Add a sled to the system, as described by a SledBuilder
@@ -537,7 +549,7 @@ pub struct SledHwInventory<'a> {
 /// This needs to be rich enough to generate a PlanningInput and inventory
 /// Collection.
 #[derive(Clone, Debug)]
-struct Sled {
+pub struct Sled {
     sled_id: SledUuid,
     inventory_sp: Option<(u16, SpState)>,
     inventory_sled_agent: Inventory,
@@ -585,7 +597,8 @@ impl Sled {
                     policy: PhysicalDiskPolicy::InService,
                     state: PhysicalDiskState::Active,
                 };
-                (zpool, disk)
+                let datasets = vec![];
+                (zpool, (disk, datasets))
             })
             .collect();
         let inventory_sp = match hardware {
@@ -648,8 +661,8 @@ impl Sled {
                 disks: zpools
                     .values()
                     .enumerate()
-                    .map(|(i, d)| InventoryDisk {
-                        identity: d.disk_identity.clone(),
+                    .map(|(i, (disk, _datasets))| InventoryDisk {
+                        identity: disk.disk_identity.clone(),
                         variant: DiskVariant::U2,
                         slot: i64::try_from(i).unwrap(),
                         active_firmware_slot: 1,
@@ -661,9 +674,13 @@ impl Sled {
                         )],
                     })
                     .collect(),
-                // Zpools & Datasets won't necessarily show up until our first
-                // request to provision storage, so we omit them.
-                zpools: vec![],
+                zpools: zpools
+                    .keys()
+                    .map(|id| InventoryZpool {
+                        id: *id,
+                        total_size: ByteCount::from_gibibytes_u32(100),
+                    })
+                    .collect(),
                 datasets: vec![],
             }
         };
@@ -813,6 +830,25 @@ impl Sled {
             state: sled_state,
             resources: sled_resources,
         }
+    }
+
+    /// Adds a dataset to the system description.
+    ///
+    /// The inventory values for "available space" and "used space" are
+    /// made up, since this is a synthetic dataset.
+    pub fn add_synthetic_dataset(
+        &mut self,
+        config: omicron_common::disk::DatasetConfig,
+    ) {
+        self.inventory_sled_agent.datasets.push(InventoryDataset {
+            id: Some(config.id),
+            name: config.name.full_name(),
+            available: ByteCount::from_gibibytes_u32(1),
+            used: ByteCount::from_gibibytes_u32(0),
+            quota: config.inner.quota,
+            reservation: config.inner.reservation,
+            compression: config.inner.compression.to_string(),
+        });
     }
 
     fn sp_state(&self) -> Option<&(u16, SpState)> {

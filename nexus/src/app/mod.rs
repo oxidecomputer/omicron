@@ -8,7 +8,6 @@ use self::external_endpoints::NexusCertResolver;
 use self::saga::SagaExecutor;
 use crate::app::background::BackgroundTasksData;
 use crate::app::background::SagaRecoveryHelpers;
-use crate::app::oximeter::LazyTimeseriesClient;
 use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
@@ -25,6 +24,8 @@ use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use omicron_common::address::CLICKHOUSE_HTTP_PORT;
+use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
@@ -36,6 +37,7 @@ use sagas::common_storage::make_pantry_connection_pool;
 use sagas::common_storage::PooledPantryClient;
 use slog::Logger;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
@@ -165,7 +167,7 @@ pub struct Nexus {
     reqwest_client: reqwest::Client,
 
     /// Client to the timeseries database.
-    timeseries_client: LazyTimeseriesClient,
+    timeseries_client: oximeter_db::Client,
 
     /// Contents of the trusted root role for the TUF repository.
     #[allow(dead_code)]
@@ -218,6 +220,8 @@ pub struct Nexus {
 
 impl Nexus {
     /// Create a new Nexus instance for the given rack id `rack_id`
+    ///
+    /// If this function fails, the pool remains unterminated.
     // TODO-polish revisit rack metadata
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn new_with_id(
@@ -225,12 +229,11 @@ impl Nexus {
         log: Logger,
         resolver: internal_dns_resolver::Resolver,
         qorb_resolver: internal_dns_resolver::QorbResolver,
-        pool: db::Pool,
+        pool: Arc<db::Pool>,
         producer_registry: &ProducerRegistry,
         config: &NexusConfig,
         authz: Arc<authz::Authz>,
     ) -> Result<Arc<Nexus>, String> {
-        let pool = Arc::new(pool);
         let all_versions = config
             .pkg
             .schema
@@ -239,8 +242,13 @@ impl Nexus {
             .transpose()
             .map_err(|error| format!("{error:#}"))?;
         let db_datastore = Arc::new(
-            db::DataStore::new(&log, Arc::clone(&pool), all_versions.as_ref())
-                .await?,
+            db::DataStore::new_with_timeout(
+                &log,
+                Arc::clone(&pool),
+                all_versions.as_ref(),
+                config.pkg.tunables.load_timeout,
+            )
+            .await?,
         );
         db_datastore.register_producers(producer_registry);
 
@@ -403,15 +411,39 @@ impl Nexus {
             .build()
             .map_err(|e| e.to_string())?;
 
-        // Connect to clickhouse - but do so lazily.
-        // Clickhouse may not be executing when Nexus starts.
-        let timeseries_client = if let Some(address) =
-            &config.pkg.timeseries_db.address
-        {
-            // If an address was provided, use it instead of DNS.
-            LazyTimeseriesClient::new_from_address(log.clone(), *address)
-        } else {
-            LazyTimeseriesClient::new_from_dns(log.clone(), resolver.clone())
+        // Client to the ClickHouse database.
+        // TODO-cleanup: Simplify this when we remove the HTTP client.
+        let timeseries_client = match (
+            &config.pkg.timeseries_db.address,
+            &config.pkg.timeseries_db.native_address,
+        ) {
+            (None, None) => {
+                let http_resolver =
+                    qorb_resolver.for_service(ServiceName::Clickhouse);
+                let native_resolver =
+                    qorb_resolver.for_service(ServiceName::ClickhouseNative);
+                oximeter_db::Client::new_with_pool(
+                    http_resolver,
+                    native_resolver,
+                    &log,
+                )
+            }
+            (maybe_http, maybe_native) => {
+                let (http_address, native_address) =
+                    match (maybe_http, maybe_native) {
+                        (None, None) => unreachable!("handled above"),
+                        (None, Some(native)) => (
+                            SocketAddr::new(native.ip(), CLICKHOUSE_HTTP_PORT),
+                            *native,
+                        ),
+                        (Some(http), None) => (
+                            *http,
+                            SocketAddr::new(http.ip(), CLICKHOUSE_TCP_PORT),
+                        ),
+                        (Some(http), Some(native)) => (*http, *native),
+                    };
+                oximeter_db::Client::new(http_address, native_address, &log)
+            }
         };
 
         // TODO-cleanup We may want to make the populator a first-class
@@ -647,30 +679,63 @@ impl Nexus {
         self.producer_server.lock().unwrap().replace(producer_server);
     }
 
+    /// Fully terminates Nexus.
+    ///
+    /// Closes all running servers and the connection to the datastore.
+    pub(crate) async fn terminate(&self) -> Result<(), String> {
+        let mut res = Ok(());
+        res = res.and(self.close_servers().await);
+        self.datastore().terminate().await;
+        res
+    }
+
+    /// Terminates all servers.
+    ///
+    /// This function also waits for the servers to shut down.
     pub(crate) async fn close_servers(&self) -> Result<(), String> {
         // NOTE: All these take the lock and swap out of the option immediately,
         // because they are synchronous mutexes, which cannot be held across the
         // await point these `close()` methods expose.
         let external_server = self.external_server.lock().unwrap().take();
+        let mut res = Ok(());
+
+        let extend_err =
+            |mut res: &mut Result<(), String>, mut new: Result<(), String>| {
+                match (&mut res, &mut new) {
+                    (Err(s), Err(new_err)) => {
+                        s.push_str(&format!(", {new_err}"))
+                    }
+                    (Ok(()), Err(_)) => *res = new,
+                    (_, Ok(())) => (),
+                }
+            };
+
         if let Some(server) = external_server {
-            server.close().await?;
+            extend_err(&mut res, server.close().await);
         }
         let techport_external_server =
             self.techport_external_server.lock().unwrap().take();
         if let Some(server) = techport_external_server {
-            server.close().await?;
+            extend_err(&mut res, server.close().await);
         }
         let internal_server = self.internal_server.lock().unwrap().take();
         if let Some(server) = internal_server {
-            server.close().await?;
+            extend_err(&mut res, server.close().await);
         }
         let producer_server = self.producer_server.lock().unwrap().take();
         if let Some(server) = producer_server {
-            server.close().await.map_err(|e| e.to_string())?;
+            extend_err(
+                &mut res,
+                server.close().await.map_err(|e| e.to_string()),
+            );
         }
-        Ok(())
+        res
     }
 
+    /// Awaits termination without triggering it.
+    ///
+    /// To trigger termination, see:
+    /// - [`Self::close_servers`] or [`Self::terminate`]
     pub(crate) async fn wait_for_shutdown(&self) -> Result<(), String> {
         // The internal server is the last server to be closed.
         //

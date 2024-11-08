@@ -155,7 +155,6 @@ async fn collection_task(
     let mut log = orig_log.new(o!("address" => producer.address));
     let client = reqwest::Client::new();
     let mut collection_timer = interval(producer.interval);
-    collection_timer.tick().await; // completes immediately
     debug!(
         log,
         "starting oximeter collection task";
@@ -885,8 +884,7 @@ mod tests {
     // Period these tests wait using `tokio::time::advance()` before checking
     // their test conditions.
     const TEST_WAIT_PERIOD: Duration = Duration::from_millis(
-        COLLECTION_INTERVAL.as_millis() as u64 * N_COLLECTIONS
-            + COLLECTION_INTERVAL.as_millis() as u64 / 2,
+        COLLECTION_INTERVAL.as_millis() as u64 * N_COLLECTIONS,
     );
 
     // Test that we count successful collections from a target correctly.

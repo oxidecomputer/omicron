@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_bool
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum Nullable(UInt8)
+    datum Nullable(Bool)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
@@ -518,7 +518,7 @@ CREATE TABLE IF NOT EXISTS oximeter.fields_bool
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value UInt8,
+    field_value Bool,
     last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplacingMergeTree()

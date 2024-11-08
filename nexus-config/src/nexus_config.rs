@@ -250,8 +250,12 @@ pub struct SchemaConfig {
 /// Optional configuration for the timeseries database.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct TimeseriesDbConfig {
+    /// The HTTP address of the ClickHouse server.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub address: Option<SocketAddr>,
+    /// The native TCP address of the ClickHouse server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_address: Option<SocketAddr>,
 }
 
 /// Configuration for the `Dendrite` dataplane daemon.
@@ -270,6 +274,7 @@ pub struct MgdConfig {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 struct UnvalidatedTunables {
     max_vpc_ipv4_subnet_prefix: u8,
+    load_timeout: Option<std::time::Duration>,
 }
 
 /// Tunable configuration parameters, intended for use in test environments or
@@ -282,6 +287,11 @@ pub struct Tunables {
     /// Note that this is the maximum _prefix_ size, which sets the minimum size
     /// of the subnet.
     pub max_vpc_ipv4_subnet_prefix: u8,
+
+    /// How long should we attempt to loop until the schema matches?
+    ///
+    /// If "None", nexus loops forever during initialization.
+    pub load_timeout: Option<std::time::Duration>,
 }
 
 // Convert from the unvalidated tunables, verifying each parameter as needed.
@@ -292,6 +302,7 @@ impl TryFrom<UnvalidatedTunables> for Tunables {
         Tunables::validate_ipv4_prefix(unvalidated.max_vpc_ipv4_subnet_prefix)?;
         Ok(Tunables {
             max_vpc_ipv4_subnet_prefix: unvalidated.max_vpc_ipv4_subnet_prefix,
+            load_timeout: unvalidated.load_timeout,
         })
     }
 }
@@ -341,7 +352,10 @@ pub const MAX_VPC_IPV4_SUBNET_PREFIX: u8 = 26;
 
 impl Default for Tunables {
     fn default() -> Self {
-        Tunables { max_vpc_ipv4_subnet_prefix: MAX_VPC_IPV4_SUBNET_PREFIX }
+        Tunables {
+            max_vpc_ipv4_subnet_prefix: MAX_VPC_IPV4_SUBNET_PREFIX,
+            load_timeout: None,
+        }
     }
 }
 
@@ -764,7 +778,9 @@ impl std::fmt::Display for SchemeName {
 mod test {
     use super::*;
 
-    use omicron_common::address::{Ipv6Subnet, RACK_PREFIX};
+    use omicron_common::address::{
+        Ipv6Subnet, CLICKHOUSE_HTTP_PORT, CLICKHOUSE_TCP_PORT, RACK_PREFIX,
+    };
     use omicron_common::api::internal::shared::SwitchLocation;
 
     use camino::{Utf8Path, Utf8PathBuf};
@@ -774,7 +790,7 @@ mod test {
     use dropshot::ConfigLoggingLevel;
     use std::collections::HashMap;
     use std::fs;
-    use std::net::{Ipv6Addr, SocketAddr};
+    use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
     use std::str::FromStr;
     use std::time::Duration;
 
@@ -879,6 +895,7 @@ mod test {
             if_exists = "fail"
             [timeseries_db]
             address = "[::1]:8123"
+            native_address = "[::1]:9000"
             [updates]
             trusted_root = "/path/to/root.json"
             [tunables]
@@ -997,13 +1014,29 @@ mod test {
                         path: "/nonexistent/path".into()
                     },
                     timeseries_db: TimeseriesDbConfig {
-                        address: Some("[::1]:8123".parse().unwrap())
+                        address: Some(SocketAddr::V6(SocketAddrV6::new(
+                            Ipv6Addr::LOCALHOST,
+                            CLICKHOUSE_HTTP_PORT,
+                            0,
+                            0,
+                        ))),
+                        native_address: Some(SocketAddr::V6(
+                            SocketAddrV6::new(
+                                Ipv6Addr::LOCALHOST,
+                                CLICKHOUSE_TCP_PORT,
+                                0,
+                                0,
+                            )
+                        )),
                     },
                     updates: Some(UpdatesConfig {
                         trusted_root: Utf8PathBuf::from("/path/to/root.json"),
                     }),
                     schema: None,
-                    tunables: Tunables { max_vpc_ipv4_subnet_prefix: 27 },
+                    tunables: Tunables {
+                        max_vpc_ipv4_subnet_prefix: 27,
+                        load_timeout: None
+                    },
                     dendrite: HashMap::from([(
                         SwitchLocation::Switch0,
                         DpdConfig {

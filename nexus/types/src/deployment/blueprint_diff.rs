@@ -5,8 +5,9 @@
 //! Types helpful for diffing blueprints.
 
 use super::blueprint_display::{
-    constants::*, linear_table_modified, linear_table_unchanged, BpDiffState,
-    BpGeneration, BpOmicronZonesSubtableSchema, BpPhysicalDisksSubtableSchema,
+    constants::*, linear_table_modified, linear_table_unchanged,
+    BpDatasetsSubtableSchema, BpDiffState, BpGeneration,
+    BpOmicronZonesSubtableSchema, BpPhysicalDisksSubtableSchema,
     BpSledSubtable, BpSledSubtableColumn, BpSledSubtableData,
     BpSledSubtableRow, KvListWithHeading, KvPair,
 };
@@ -20,11 +21,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::deployment::{
-    BlueprintMetadata, BlueprintOrCollectionDisksConfig,
+    BlueprintDatasetConfigForDiff, BlueprintDatasetsConfig, BlueprintMetadata,
+    BlueprintOrCollectionDatasetsConfig, BlueprintOrCollectionDisksConfig,
     BlueprintOrCollectionZoneConfig, BlueprintOrCollectionZonesConfig,
     BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
-    BlueprintZoneDisposition, BlueprintZonesConfig, DiffBeforeMetadata,
-    ZoneSortKey,
+    BlueprintZoneDisposition, BlueprintZonesConfig,
+    CollectionDatasetIdentifier, DiffBeforeMetadata, ZoneSortKey,
 };
 use crate::external_api::views::SledState;
 
@@ -55,7 +57,7 @@ impl BpSledSubtableData for BpDiffZoneDetails {
                     zone.kind().report_str().to_string(),
                     zone.id().to_string(),
                     zone.disposition().to_string(),
-                    zone.underlay_address().to_string(),
+                    zone.underlay_ip().to_string(),
                 ],
             )
         })
@@ -99,11 +101,11 @@ impl ModifiedZone {
             );
             reason.push_str(&msg);
         }
-        if before.underlay_address() != after.underlay_address {
+        if before.underlay_ip() != after.underlay_ip() {
             let msg = format!(
-                "mismatched underlay address: before: {}, after: {}\n",
-                before.underlay_address(),
-                after.underlay_address
+                "mismatched underlay IP: before: {}, after: {}\n",
+                before.underlay_ip(),
+                after.underlay_ip()
             );
             reason.push_str(&msg);
         }
@@ -162,7 +164,7 @@ impl BpSledSubtableData for BpDiffZonesModified {
                         zone.zone.disposition().to_string(),
                     ),
                     BpSledSubtableColumn::value(
-                        zone.zone.underlay_address().to_string(),
+                        zone.zone.underlay_ip().to_string(),
                     ),
                 ],
             )
@@ -553,6 +555,263 @@ impl BpDiffPhysicalDisks {
     }
 }
 
+#[derive(Debug)]
+pub struct DiffDatasetsDetails {
+    // Datasets that come from inventory don't have generation numbers
+    pub before_generation: Option<Generation>,
+
+    // Datasets that are removed don't have "after" generation numbers
+    pub after_generation: Option<Generation>,
+
+    // Datasets added, removed, modified, or unmodified
+    pub datasets:
+        BTreeMap<CollectionDatasetIdentifier, BlueprintDatasetConfigForDiff>,
+}
+
+impl BpSledSubtableData for DiffDatasetsDetails {
+    fn bp_generation(&self) -> BpGeneration {
+        BpGeneration::Diff {
+            before: self.before_generation,
+            after: self.after_generation,
+        }
+    }
+
+    fn rows(
+        &self,
+        state: BpDiffState,
+    ) -> impl Iterator<Item = BpSledSubtableRow> {
+        self.datasets.values().map(move |dataset| {
+            BpSledSubtableRow::from_strings(state, dataset.as_strings())
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct ModifiedDataset {
+    pub before: BlueprintDatasetConfigForDiff,
+    pub after: BlueprintDatasetConfigForDiff,
+}
+
+#[derive(Debug)]
+pub struct BpDiffDatasetsModified {
+    pub generation_before: Option<Generation>,
+    pub generation_after: Option<Generation>,
+    pub datasets: Vec<ModifiedDataset>,
+}
+
+impl BpSledSubtableData for BpDiffDatasetsModified {
+    fn bp_generation(&self) -> BpGeneration {
+        BpGeneration::Diff {
+            before: self.generation_before,
+            after: self.generation_after,
+        }
+    }
+
+    fn rows(
+        &self,
+        state: BpDiffState,
+    ) -> impl Iterator<Item = BpSledSubtableRow> {
+        self.datasets.iter().map(move |dataset| {
+            let before_strings = dataset.before.as_strings();
+            let after_strings = dataset.after.as_strings();
+
+            let mut columns = vec![];
+            for (before, after) in std::iter::zip(before_strings, after_strings)
+            {
+                let column = if before != after {
+                    BpSledSubtableColumn::diff(before, after)
+                } else {
+                    BpSledSubtableColumn::value(before)
+                };
+                columns.push(column);
+            }
+
+            BpSledSubtableRow::new(state, columns)
+        })
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct BpDiffDatasets {
+    pub added: BTreeMap<SledUuid, DiffDatasetsDetails>,
+    pub removed: BTreeMap<SledUuid, DiffDatasetsDetails>,
+    pub modified: BTreeMap<SledUuid, BpDiffDatasetsModified>,
+    pub unchanged: BTreeMap<SledUuid, DiffDatasetsDetails>,
+}
+
+impl BpDiffDatasets {
+    pub fn new(
+        before: BTreeMap<SledUuid, BlueprintOrCollectionDatasetsConfig>,
+        mut after: BTreeMap<SledUuid, BlueprintDatasetsConfig>,
+    ) -> Self {
+        let mut diffs = BpDiffDatasets::default();
+
+        // Observe the set of old sleds first
+        for (sled_id, before_datasets) in before {
+            let before_generation = before_datasets.generation();
+
+            // If the sled exists in both the old and new set, compare
+            // the set of datasets to identify which "grouping" they should
+            // land in.
+            if let Some(after_datasets) = after.remove(&sled_id) {
+                let after_generation = Some(after_datasets.generation);
+
+                let mut unchanged = BTreeMap::new();
+                let mut modified = BTreeMap::new();
+                let mut removed = BTreeMap::new();
+
+                // Normalize the "before" and "after" data to compare individual
+                // datasets.
+
+                let b = before_datasets.datasets();
+                let mut added: BTreeMap<
+                    CollectionDatasetIdentifier,
+                    BlueprintDatasetConfigForDiff,
+                > = after_datasets
+                    .datasets
+                    .values()
+                    .map(|d| {
+                        (CollectionDatasetIdentifier::from(d), d.clone().into())
+                    })
+                    .collect();
+
+                for (id, dataset_before) in b {
+                    if let Some(dataset_after) = added.remove(&id) {
+                        if dataset_before == dataset_after {
+                            unchanged.insert(id, dataset_after);
+                        } else {
+                            modified
+                                .insert(id, (dataset_before, dataset_after));
+                        }
+                    } else {
+                        removed.insert(id, dataset_before);
+                    }
+                }
+
+                if !added.is_empty() {
+                    diffs.added.insert(
+                        sled_id,
+                        DiffDatasetsDetails {
+                            before_generation,
+                            after_generation,
+                            datasets: added,
+                        },
+                    );
+                }
+                if !removed.is_empty() {
+                    diffs.removed.insert(
+                        sled_id,
+                        DiffDatasetsDetails {
+                            before_generation,
+                            after_generation,
+                            datasets: removed,
+                        },
+                    );
+                }
+                if !modified.is_empty() {
+                    diffs.modified.insert(
+                        sled_id,
+                        BpDiffDatasetsModified {
+                            generation_before: before_generation,
+                            generation_after: after_generation,
+                            datasets: modified
+                                .into_values()
+                                .map(|(before, after)| ModifiedDataset {
+                                    before,
+                                    after,
+                                })
+                                .collect(),
+                        },
+                    );
+                }
+                if !unchanged.is_empty() {
+                    diffs.unchanged.insert(
+                        sled_id,
+                        DiffDatasetsDetails {
+                            before_generation,
+                            after_generation,
+                            datasets: unchanged,
+                        },
+                    );
+                }
+            } else {
+                diffs.removed.insert(
+                    sled_id,
+                    DiffDatasetsDetails {
+                        before_generation,
+                        after_generation: None,
+                        datasets: before_datasets
+                            .datasets()
+                            .into_iter()
+                            .collect(),
+                    },
+                );
+            }
+        }
+
+        // Any sleds remaining in `after` have just been added, since we remove
+        // sleds from `after`, that were also in `before`, in the above loop.
+        for (sled_id, after_datasets) in after {
+            let added: BTreeMap<CollectionDatasetIdentifier, _> =
+                after_datasets
+                    .datasets
+                    .into_values()
+                    .map(|d| (CollectionDatasetIdentifier::from(&d), d.into()))
+                    .collect();
+            if !added.is_empty() {
+                diffs.added.insert(
+                    sled_id,
+                    DiffDatasetsDetails {
+                        before_generation: None,
+                        after_generation: Some(after_datasets.generation),
+                        datasets: added,
+                    },
+                );
+            }
+        }
+
+        diffs
+    }
+
+    /// Return a [`BpSledSubtable`] for the given `sled_id`
+    pub fn to_bp_sled_subtable(
+        &self,
+        sled_id: &SledUuid,
+    ) -> Option<BpSledSubtable> {
+        let mut generation = BpGeneration::Diff { before: None, after: None };
+        let mut rows = vec![];
+        if let Some(diff) = self.unchanged.get(sled_id) {
+            generation = diff.bp_generation();
+            rows.extend(diff.rows(BpDiffState::Unchanged));
+        }
+        if let Some(diff) = self.removed.get(sled_id) {
+            // Generations never vary for the same sled, so this is harmless
+            //
+            // (Same below, where we overwrite the "generation")
+            generation = diff.bp_generation();
+            rows.extend(diff.rows(BpDiffState::Removed));
+        }
+        if let Some(diff) = self.modified.get(sled_id) {
+            generation = diff.bp_generation();
+            rows.extend(diff.rows(BpDiffState::Modified));
+        }
+        if let Some(diff) = self.added.get(sled_id) {
+            generation = diff.bp_generation();
+            rows.extend(diff.rows(BpDiffState::Added));
+        }
+
+        if rows.is_empty() {
+            None
+        } else {
+            Some(BpSledSubtable::new(
+                BpDatasetsSubtableSchema {},
+                generation,
+                rows,
+            ))
+        }
+    }
+}
+
 /// Summarizes the differences between two blueprints
 #[derive(Debug)]
 pub struct BlueprintDiff {
@@ -562,6 +821,7 @@ pub struct BlueprintDiff {
     pub after_state: BTreeMap<SledUuid, SledState>,
     pub zones: BpDiffZones,
     pub physical_disks: BpDiffPhysicalDisks,
+    pub datasets: BpDiffDatasets,
     pub sleds_added: BTreeSet<SledUuid>,
     pub sleds_removed: BTreeSet<SledUuid>,
     pub sleds_unchanged: BTreeSet<SledUuid>,
@@ -577,10 +837,15 @@ impl BlueprintDiff {
         before_state: BTreeMap<SledUuid, SledState>,
         before_zones: BTreeMap<SledUuid, BlueprintOrCollectionZonesConfig>,
         before_disks: BTreeMap<SledUuid, BlueprintOrCollectionDisksConfig>,
+        before_datasets: BTreeMap<
+            SledUuid,
+            BlueprintOrCollectionDatasetsConfig,
+        >,
         after_meta: BlueprintMetadata,
         mut after_state: BTreeMap<SledUuid, SledState>,
         after_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
         after_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
+        after_datasets: BTreeMap<SledUuid, BlueprintDatasetsConfig>,
     ) -> Self {
         // Work around a quirk of sled decommissioning. If a sled has a before
         // state of `decommissioned`, it may or may not be present in
@@ -610,23 +875,25 @@ impl BlueprintDiff {
             .keys()
             .chain(before_zones.keys())
             .chain(before_disks.keys())
+            .chain(before_datasets.keys())
             .collect();
         let after_sleds: BTreeSet<_> = after_state
             .keys()
             .chain(after_zones.keys())
             .chain(after_disks.keys())
+            .chain(after_datasets.keys())
             .collect();
         let all_sleds: BTreeSet<_> =
             before_sleds.union(&after_sleds).map(|&sled_id| *sled_id).collect();
 
-        // All sleds that have state, zones, or disks in `after_*`, but not
+        // All sleds that have state, zones, disks or datasets in `after_*`, but not
         // `before_*` have been added.
         let sleds_added: BTreeSet<_> = after_sleds
             .difference(&before_sleds)
             .map(|&sled_id| *sled_id)
             .collect();
 
-        // All sleds that have state, zones, or disks in `before_*`, but not
+        // All sleds that have state, zones, disks or datasets in `before_*`, but not
         // `after_*` have been removed.
         let sleds_removed: BTreeSet<_> = before_sleds
             .difference(&after_sleds)
@@ -636,6 +903,7 @@ impl BlueprintDiff {
         let zones = BpDiffZones::new(before_zones, after_zones);
         let physical_disks =
             BpDiffPhysicalDisks::new(before_disks, after_disks);
+        let datasets = BpDiffDatasets::new(before_datasets, after_datasets);
 
         // Sleds that haven't been added or removed are either unchanged or
         // modified.
@@ -655,6 +923,9 @@ impl BlueprintDiff {
             before_state.get(sled_id) != after_state.get(sled_id)
                 || physical_disks.added.contains_key(sled_id)
                 || physical_disks.removed.contains_key(sled_id)
+                || datasets.added.contains_key(sled_id)
+                || datasets.modified.contains_key(sled_id)
+                || datasets.removed.contains_key(sled_id)
                 || zones.added.contains_key(sled_id)
                 || zones.removed.contains_key(sled_id)
                 || zones.modified.contains_key(sled_id)
@@ -674,6 +945,7 @@ impl BlueprintDiff {
             after_state,
             zones,
             physical_disks,
+            datasets,
             sleds_added,
             sleds_removed,
             sleds_unchanged: unchanged_sleds,
@@ -784,6 +1056,11 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
         if let Some(table) =
             self.diff.physical_disks.to_bp_sled_subtable(sled_id)
         {
+            writeln!(f, "{table}\n")?;
+        }
+
+        // Write the datasets table if it exists
+        if let Some(table) = self.diff.datasets.to_bp_sled_subtable(sled_id) {
             writeln!(f, "{table}\n")?;
         }
 

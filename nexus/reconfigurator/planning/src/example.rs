@@ -10,7 +10,7 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 
 use crate::blueprint_builder::BlueprintBuilder;
-use crate::blueprint_builder::BlueprintBuilderRng;
+use crate::planner::rng::PlannerRng;
 use crate::system::SledBuilder;
 use crate::system::SystemDescription;
 use nexus_inventory::CollectionBuilderRng;
@@ -27,9 +27,9 @@ use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::VnicUuid;
 use typed_rng::TypedUuidRng;
 
-/// Stateful PRNG for generating example systems.
+/// Stateful PRNG for generating simulated systems.
 ///
-/// When generating a succession of example systems, this stateful PRNG allows
+/// When generating a succession of simulated systems, this stateful PRNG allows
 /// for reproducible generation of those systems after setting an initial seed.
 /// The PRNGs are structured in tree form as much as possible, so that (for
 /// example) if one part of the system decides to change how many sleds are in
@@ -40,26 +40,25 @@ use typed_rng::TypedUuidRng;
 /// compatibility. Newer tests should use this struct to generate their RNGs
 /// instead, since it conveniently tracks generation numbers for each seed.
 #[derive(Clone, Debug)]
-pub struct ExampleRngState {
+pub struct SimRngState {
     seed: String,
     // Generation numbers for each RNG type.
     system_rng_gen: u64,
     collection_rng_gen: u64,
-    blueprint_rng_gen: u64,
+    planner_rng_gen: u64,
     // TODO: Currently, sled IDs are used to generate UUIDs to mutate the
-    // system. We should replace it with a more general way to mutate systems,
-    // e.g. by setting up a chained succession of `ExampleSystem` instances.
-    // Once we have that, we should no longer need this field.
+    // system. This should be replaced in the future with a richer simulation
+    // framework.
     sled_id_rng_gen: u64,
 }
 
-impl ExampleRngState {
+impl SimRngState {
     pub fn from_seed(seed: &str) -> Self {
         Self {
             seed: seed.to_string(),
             system_rng_gen: 0,
             collection_rng_gen: 0,
-            blueprint_rng_gen: 0,
+            planner_rng_gen: 0,
             sled_id_rng_gen: 0,
         }
     }
@@ -91,14 +90,11 @@ impl ExampleRngState {
         CollectionBuilderRng::from_seed(seed)
     }
 
-    pub fn next_blueprint_rng(&mut self) -> BlueprintBuilderRng {
-        self.blueprint_rng_gen += 1;
-        // We don't need to pass in extra bits unique to blueprints, because
-        // `BlueprintBuilderRng` adds its own.
-        BlueprintBuilderRng::from_seed((
-            self.seed.as_str(),
-            self.blueprint_rng_gen,
-        ))
+    pub fn next_planner_rng(&mut self) -> PlannerRng {
+        self.planner_rng_gen += 1;
+        // We don't need to pass in extra bits unique to the planner, because
+        // `PlannerRng` adds its own.
+        PlannerRng::from_seed((self.seed.as_str(), self.planner_rng_gen))
     }
 
     pub fn next_sled_id_rng(&mut self) -> TypedUuidRng<SledKind> {
@@ -116,8 +112,8 @@ pub struct ExampleSystemRng {
     sled_rng: TypedUuidRng<SledKind>,
     collection_rng: CollectionBuilderRng,
     // ExampleSystem instances generate two blueprints: create RNGs for both.
-    blueprint1_rng: BlueprintBuilderRng,
-    blueprint2_rng: BlueprintBuilderRng,
+    blueprint1_rng: PlannerRng,
+    blueprint2_rng: PlannerRng,
 }
 
 impl ExampleSystemRng {
@@ -126,18 +122,18 @@ impl ExampleSystemRng {
         // existing test fixtures.
         let sled_rng = TypedUuidRng::from_seed(&seed, "ExampleSystem");
         // We choose to make our own collection and blueprint RNGs rather than
-        // passing them in via `ExampleRngState`. This means that
-        // `ExampleRngState` is influenced as little as possible by the
-        // specifics of how `ExampleSystem` instances are generated, and RNG
-        // stability is maintained.
+        // passing them in via `SimRngState`. This means that `SimRngState` is
+        // influenced as little as possible by the specifics of how
+        // `ExampleSystem` instances are generated, and RNG stability is
+        // maintained.
         let collection_rng = CollectionBuilderRng::from_seed((
             &seed,
             "ExampleSystem collection",
         ));
         let blueprint1_rng =
-            BlueprintBuilderRng::from_seed((&seed, "ExampleSystem initial"));
+            PlannerRng::from_seed((&seed, "ExampleSystem initial"));
         let blueprint2_rng =
-            BlueprintBuilderRng::from_seed((&seed, "ExampleSystem make_zones"));
+            PlannerRng::from_seed((&seed, "ExampleSystem make_zones"));
         Self {
             seed: format!("{:?}", seed),
             sled_rng,
@@ -154,11 +150,13 @@ impl ExampleSystemRng {
 /// The components of this struct are generated together and match each other.
 /// The planning input and collection represent database input and inventory
 /// that would be collected from a system matching the system description.
-/// The initial blueprint is one with no zones.
+#[derive(Clone, Debug)]
 pub struct ExampleSystem {
     pub system: SystemDescription,
     pub input: PlanningInput,
     pub collection: Collection,
+    /// The initial blueprint that was used to describe the system. This
+    /// blueprint has sleds but no zones.
     pub initial_blueprint: Blueprint,
 }
 
@@ -468,6 +466,7 @@ impl ExampleSystemBuilder {
                         .unwrap();
                 }
             }
+            builder.sled_ensure_datasets(sled_id, &sled_resources).unwrap();
         }
 
         let blueprint = builder.build();
@@ -509,6 +508,41 @@ impl ExampleSystemBuilder {
                     ),
                 )
                 .unwrap();
+        }
+
+        // Ensure that our "input" contains the datasets we would have
+        // provisioned.
+        //
+        // This mimics them existing within the database.
+        let input_sleds = input_builder.sleds_mut();
+        for (sled_id, bp_datasets_config) in &blueprint.blueprint_datasets {
+            let sled = input_sleds.get_mut(sled_id).unwrap();
+            for (_, bp_dataset) in &bp_datasets_config.datasets {
+                let (_, datasets) = sled
+                    .resources
+                    .zpools
+                    .get_mut(&bp_dataset.pool.id())
+                    .unwrap();
+                let bp_config: omicron_common::disk::DatasetConfig =
+                    bp_dataset.clone().try_into().unwrap();
+                if !datasets.contains(&bp_config) {
+                    datasets.push(bp_config);
+                }
+            }
+        }
+
+        // We just ensured that a handful of datasets should exist in
+        // the blueprint, but they don't yet exist in the SystemDescription.
+        //
+        // Go back and add them so that the blueprint is consistent with
+        // inventory.
+        for (sled_id, datasets) in &blueprint.blueprint_datasets {
+            let sled = system.get_sled_mut(*sled_id).unwrap();
+
+            for dataset_config in datasets.datasets.values() {
+                let config = dataset_config.clone().try_into().unwrap();
+                sled.add_synthetic_dataset(config);
+            }
         }
 
         let mut builder =

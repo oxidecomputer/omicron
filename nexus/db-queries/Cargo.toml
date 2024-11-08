@@ -69,7 +69,7 @@ omicron-workspace-hack.workspace = true
 omicron-test-utils = { workspace = true, optional = true }
 
 [features]
-# Enable to export `datastore_test`
+# Enable to export `TestDatabase`
 testing = ["omicron-test-utils"]
 
 [dev-dependencies]

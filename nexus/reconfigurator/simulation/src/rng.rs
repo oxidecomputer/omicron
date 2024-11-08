@@ -6,8 +6,8 @@
 
 use nexus_inventory::CollectionBuilderRng;
 use nexus_reconfigurator_planning::{
-    blueprint_builder::BlueprintBuilderRng,
-    example::{ExampleRngState, ExampleSystemRng},
+    example::{ExampleSystemRng, SimRngState},
+    planner::PlannerRng,
 };
 use omicron_uuid_kinds::SledUuid;
 
@@ -18,21 +18,21 @@ use omicron_uuid_kinds::SledUuid;
 /// versioned.
 #[derive(Clone, Debug)]
 pub struct SimRng {
-    // ExampleRngState is cheap to clone (just a string and a bunch of
-    // integers), so there's no need for Arc.
-    state: ExampleRngState,
+    // SimRngState is cheap to clone (just a string and a bunch of integers), so
+    // there's no need for Arc.
+    state: SimRngState,
 }
 
 impl SimRng {
     /// Create a new RNG.
     pub fn from_entropy() -> Self {
         let seed = seed_from_entropy();
-        let state = ExampleRngState::from_seed(&seed);
+        let state = SimRngState::from_seed(&seed);
         Self { state }
     }
 
     pub fn from_seed(seed: String) -> Self {
-        let state = ExampleRngState::from_seed(&seed);
+        let state = SimRngState::from_seed(&seed);
         Self { state }
     }
 
@@ -108,9 +108,9 @@ impl SimRngBuilder {
     }
 
     /// Get the next blueprint RNG.
-    pub fn next_blueprint_rng(&mut self) -> BlueprintBuilderRng {
-        self.log.push(SimRngLogEntry::NextBlueprintRng);
-        self.rng.state.next_blueprint_rng()
+    pub fn next_planner_rng(&mut self) -> PlannerRng {
+        self.log.push(SimRngLogEntry::NextPlannerRng);
+        self.rng.state.next_planner_rng()
     }
 
     /// Get the next sled ID.
@@ -133,7 +133,7 @@ pub enum SimRngLogEntry {
     RegenerateSeedFromEntropy(String),
     NextExampleRng,
     NextCollectionRng,
-    NextBlueprintRng,
+    NextPlannerRng,
     NextSledId(SledUuid),
 }
 

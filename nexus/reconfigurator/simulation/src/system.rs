@@ -44,10 +44,10 @@ pub struct SimSystem {
     //    it's committed. This means that the mutable system would probably
     //    have to maintain a list of pending objects to add to the store. That
     //    complicates some of the internals, if not the API.
-    // 4. We'll have to figure out how to manage the store (so MutableSimStore
-    //    can access the blueprints/collections while they're). Storing a &mut
-    //    reference is not an option, and we probably want it to be
-    //    thread-safe, so the options seem to be either `&Mutex<Store>` or
+    // 4. We'll have to figure out how to manage the store (so SimSystemBuilder
+    //    can access existing blueprints/collections while it's in flight).
+    //    Storing a &mut reference is not an option, and we probably want it to
+    //    be thread-safe, so the options seem to be either `&Mutex<Store>` or
     //    `Arc<Mutex<Store>>`. Our current approach is more simplistic, but
     //    also lock-free.
     //
@@ -454,7 +454,7 @@ impl SimSystemBuilder {
 }
 
 /// A log entry corresponding to an individual operation on a
-/// [`MutableSimSystem`].
+/// [`SimSystemBuilder`].
 #[derive(Clone, Debug)]
 pub enum SimSystemLogEntry {
     LoadExample {

@@ -171,6 +171,9 @@ pub enum Error {
     #[error("Unrecognized server packet, kind = {0}")]
     UnrecognizedServerPacket(u8),
 
+    #[error("Invalid data packet kind = '{kind}', msg = {msg}")]
+    InvalidPacket { kind: &'static str, msg: String },
+
     #[error("Encountered non-UTF8 string")]
     NonUtf8String,
 
@@ -205,9 +208,38 @@ pub enum Error {
     )]
     Exception { exceptions: Vec<Exception> },
 
-    #[error("Cannot concatenate blocks with mismatched structure")]
+    #[error(
+        "Mismatched data block structure when concatenating blocks or \
+        inserting data blocks into the database"
+    )]
     MismatchedBlockStructure,
 
     #[error("Value out of range for corresponding ClickHouse type")]
     OutOfRange { type_name: String, min: String, max: String, value: String },
+
+    #[error("Failed to serialize / deserialize value from the database")]
+    Serde(String),
+
+    #[error("No column with name '{0}'")]
+    NoSuchColumn(String),
+
+    #[error("Too many rows to create block")]
+    TooManyRows,
+
+    #[error("Column has unexpected type")]
+    UnexpectedColumnType,
+
+    #[error("Data block is too large")]
+    BlockTooLarge,
+
+    #[error("Expected an empty data block")]
+    ExpectedEmptyDataBlock,
+}
+
+/// Error codes and related constants.
+///
+/// See `ClickHouse/src/Common/ErrorCodes.cpp` for reference.
+pub mod errors {
+    pub const UNKNOWN_TABLE: i32 = 60;
+    pub const UNKNOWN_DATABASE: i32 = 81;
 }

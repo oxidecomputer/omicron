@@ -372,7 +372,7 @@ impl SimStateBuilder {
 
         // TODO: log what happened here. This is a cross-cutting change so we
         // may want to log it as a single big entry (like
-        // MutableSimSystem::load_example) rather than lots of little ones.
+        // SimSystemBuilder::load_example) rather than lots of little ones.
     }
 
     /// Commit the current state to the store, returning the new state's UUID.

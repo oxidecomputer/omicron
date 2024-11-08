@@ -774,6 +774,7 @@ fn rss_config_text<'a>(
                 autoneg,
                 bgp_peers,
                 lldp,
+                tx_eq,
             } = uplink;
 
             let mut items = vec![
@@ -1134,6 +1135,45 @@ fn rss_config_text<'a>(
                     }
                 }
                 items.extend(lldp);
+            }
+
+            if let Some(t) = tx_eq {
+                let mut tx_eq = vec![vec![Span::styled(
+                    "  • TxEq port settings: ",
+                    label_style,
+                )]];
+
+                if let Some(x) = t.pre1 {
+                    tx_eq.push(vec![
+                        Span::styled("    • Precursor 1:  ", label_style),
+                        Span::styled(x.to_string(), ok_style),
+                    ])
+                }
+                if let Some(x) = t.pre2 {
+                    tx_eq.push(vec![
+                        Span::styled("    • Precursor 2:  ", label_style),
+                        Span::styled(x.to_string(), ok_style),
+                    ])
+                }
+                if let Some(x) = t.main {
+                    tx_eq.push(vec![
+                        Span::styled("    • Main cursor:  ", label_style),
+                        Span::styled(x.to_string(), ok_style),
+                    ])
+                }
+                if let Some(x) = t.post2 {
+                    tx_eq.push(vec![
+                        Span::styled("    • Postcursor 2: ", label_style),
+                        Span::styled(x.to_string(), ok_style),
+                    ])
+                }
+                if let Some(x) = t.post1 {
+                    tx_eq.push(vec![
+                        Span::styled("    • Postcursor 1: ", label_style),
+                        Span::styled(x.to_string(), ok_style),
+                    ])
+                }
+                items.extend(tx_eq);
             }
 
             append_list(
