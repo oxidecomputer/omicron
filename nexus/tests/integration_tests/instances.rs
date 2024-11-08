@@ -4378,13 +4378,16 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
 
     create_project_and_pool(&client).await;
 
+    let initial_ncpus = InstanceCpuCount::try_from(2).unwrap();
+    let initial_memory = ByteCount::from_gibibytes_u32(4);
+
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
             description: String::from("stuff"),
         },
-        ncpus: InstanceCpuCount::try_from(2).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(4),
+        ncpus: initial_ncpus,
+        memory: initial_memory,
         hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
@@ -4451,6 +4454,35 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     .await;
     assert_eq!(instance.ncpus.0, new_ncpus.0);
     assert_eq!(instance.memory, new_memory);
+
+    // No harm in reverting to the original size one field at a time though:
+    let instance = expect_instance_reconfigure_ok(
+        client,
+        &instance.identity.id,
+        params::InstanceUpdate {
+            auto_restart_policy,
+            boot_disk: boot_disk_nameorid.clone(),
+            ncpus: initial_ncpus,
+            memory: new_memory,
+        },
+    )
+    .await;
+    assert_eq!(instance.ncpus.0, initial_ncpus.0);
+    assert_eq!(instance.memory, new_memory);
+
+    let instance = expect_instance_reconfigure_ok(
+        client,
+        &instance.identity.id,
+        params::InstanceUpdate {
+            auto_restart_policy,
+            boot_disk: boot_disk_nameorid.clone(),
+            ncpus: initial_ncpus,
+            memory: initial_memory,
+        },
+    )
+    .await;
+    assert_eq!(instance.ncpus.0, initial_ncpus.0);
+    assert_eq!(instance.memory, initial_memory);
 
     // Now try a few invalid sizes. These all should fail for slightly different
     // reasons.

@@ -1146,22 +1146,43 @@ impl DataStore {
         use db::schema::disk::dsl as disk_dsl;
         use db::schema::instance::dsl as instance_dsl;
 
-        // * Allow setting the boot disk in NoVmm because there is no VMM to
-        //   contend with.
-        // * Allow setting the boot disk in Failed to allow changing the boot
-        //   disk of a failed instance and free its boot disk for detach.
-        // * Allow setting the boot disk in Creating because one of the last
-        //   steps of instance creation, while the instance is still in
-        //   Creating, is to reconfigure the instance to the desired boot disk.
-        const OK_TO_SET_BOOT_DISK_STATES: &'static [InstanceState] = &[
-            InstanceState::NoVmm,
-            InstanceState::Failed,
-            InstanceState::Creating,
-        ];
+        if let Some(disk_id) = boot_disk_id {
+            // Ensure the disk is currently attached before updating the
+            // database.
+            let expected_state =
+                api::external::DiskState::Attached(authz_instance.id());
 
-        let r = diesel::update(instance_dsl::instance)
+            let attached_disk: Option<Uuid> = disk_dsl::disk
+                .filter(disk_dsl::id.eq(disk_id))
+                .filter(disk_dsl::attach_instance_id.eq(authz_instance.id()))
+                .filter(disk_dsl::disk_state.eq(expected_state.label()))
+                .select(disk_dsl::id)
+                .first_async::<Uuid>(conn)
+                .await
+                .optional()?;
+
+            if attached_disk.is_none() {
+                return Err(
+                    err.bail(Error::conflict("boot disk must be attached"))
+                );
+            }
+        }
+
+        let query = diesel::update(instance_dsl::instance)
+            .into_boxed()
             .filter(instance_dsl::id.eq(authz_instance.id()))
-            .filter(instance_dsl::state.eq_any(OK_TO_SET_BOOT_DISK_STATES))
+            .filter(instance_dsl::state.eq_any(InstanceState::NO_VMM_STATES));
+        let query = if boot_disk_id.is_some() {
+            query.filter(
+                instance_dsl::boot_disk_id
+                    .ne(boot_disk_id)
+                    .or(instance_dsl::boot_disk_id.is_null()),
+            )
+        } else {
+            query.filter(instance_dsl::boot_disk_id.is_not_null())
+        };
+
+        let r = query
             .set(instance_dsl::boot_disk_id.eq(boot_disk_id))
             .check_if_exists::<Instance>(authz_instance.id())
             .execute_and_check(&conn)
@@ -1169,50 +1190,34 @@ impl DataStore {
         match r.status {
             UpdateStatus::NotUpdatedButExists => {
                 if r.found.boot_disk_id == boot_disk_id {
-                    Ok(())
-                } else {
-                    // This should be the only other reason the query would
-                    // fail...
-                    debug_assert!(!OK_TO_SET_BOOT_DISK_STATES
-                        .contains(&r.found.runtime().nexus_state));
-                    Err(err.bail(Error::conflict(
+                    // Not updated, because the update is no change..
+                    return Ok(());
+                }
+
+                if !InstanceState::NO_VMM_STATES
+                    .contains(&r.found.runtime().nexus_state)
+                {
+                    return Err(err.bail(Error::conflict(
                         "instance must be stopped to set boot disk",
-                    )))
-                }
-            }
-            UpdateStatus::Updated => {
-                if let Some(disk_id) = boot_disk_id {
-                    // Ensure the disk is currently attached before updating
-                    // the database.
-                    let expected_state =
-                        api::external::DiskState::Attached(authz_instance.id());
-
-                    let attached_disk: Option<Uuid> = disk_dsl::disk
-                        .filter(disk_dsl::id.eq(disk_id))
-                        .filter(
-                            disk_dsl::attach_instance_id
-                                .eq(authz_instance.id()),
-                        )
-                        .filter(disk_dsl::disk_state.eq(expected_state.label()))
-                        .select(disk_dsl::id)
-                        .first_async::<Uuid>(conn)
-                        .await
-                        .optional()?;
-
-                    if attached_disk.is_none() {
-                        return Err(err.bail(Error::conflict(
-                            "boot disk must be attached",
-                        )));
-                    }
+                    )));
                 }
 
-                Ok(())
+                // There should be no other reason the update fails on an
+                // existing instance.
+                return Err(err.bail(Error::internal_error(
+                    "unable to reconfigure instance boot disk",
+                )));
             }
+            UpdateStatus::Updated => Ok(()),
         }
     }
 
     /// Set an instance's CPU count and memory size to the provided values,
     /// within an existing transaction.
+    ///
+    /// Does not allow setting sizes of running instances to ensure that if an
+    /// instance is running, its resource reservation matches what we record in
+    /// the database.
     async fn instance_set_size_on_conn(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
@@ -1223,22 +1228,13 @@ impl DataStore {
     ) -> Result<(), diesel::result::Error> {
         use db::schema::instance::dsl as instance_dsl;
 
-        // Do not allow setting sizes of running instances to ensure that if an
-        // instance is running, its resource usage matches what we record in the
-        // database.
-        const OK_TO_SET_SIZE_STATES: &'static [InstanceState] = &[
-            InstanceState::NoVmm,
-            InstanceState::Failed,
-            InstanceState::Creating,
-        ];
-
         let r = diesel::update(instance_dsl::instance)
             .filter(instance_dsl::id.eq(authz_instance.id()))
-            .filter(instance_dsl::state.eq_any(OK_TO_SET_SIZE_STATES))
+            .filter(instance_dsl::state.eq_any(InstanceState::NO_VMM_STATES))
             .filter(
                 instance_dsl::ncpus
                     .ne(ncpus)
-                    .and(instance_dsl::memory.ne(memory)),
+                    .or(instance_dsl::memory.ne(memory)),
             )
             .set((
                 instance_dsl::ncpus.eq(ncpus),
@@ -1249,20 +1245,24 @@ impl DataStore {
             .await?;
         match r.status {
             UpdateStatus::NotUpdatedButExists => {
-                let noop_update =
-                    r.found.ncpus == ncpus && r.found.memory == memory;
-
-                if noop_update {
-                    Ok(())
-                } else {
-                    // This should be the only other reason the query would
-                    // fail...
-                    debug_assert!(!OK_TO_SET_SIZE_STATES
-                        .contains(&r.found.runtime().nexus_state));
-                    Err(err.bail(Error::conflict(
-                        "instance must be stopped to be resized",
-                    )))
+                if (r.found.ncpus, r.found.memory) == (ncpus, memory) {
+                    // Not updated, because the update is no change..
+                    return Ok(());
                 }
+
+                if !InstanceState::NO_VMM_STATES
+                    .contains(&r.found.runtime().nexus_state)
+                {
+                    return Err(err.bail(Error::conflict(
+                        "instance must be stopped to be resized",
+                    )));
+                }
+
+                // There should be no other reason the update fails on an
+                // existing instance.
+                return Err(err.bail(Error::internal_error(
+                    "unable to reconfigure instance size",
+                )));
             }
             UpdateStatus::Updated => Ok(()),
         }

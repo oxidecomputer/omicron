@@ -26,6 +26,11 @@ impl_enum_type!(
 );
 
 impl InstanceState {
+    /// Instance states where there is not currently a VMM incarnating this
+    /// instance, but might be in the future.
+    pub const NO_VMM_STATES: &'static [InstanceState] =
+        &[InstanceState::NoVmm, InstanceState::Creating, InstanceState::Failed];
+
     pub fn state(&self) -> external::InstanceState {
         external::InstanceState::from(*self)
     }
