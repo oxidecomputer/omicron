@@ -1,9 +1,9 @@
-use std::{io::Read, process::Command, time::Duration};
+use std::{process::Command, time::Duration};
 
 use futures::{stream::FuturesUnordered, StreamExt};
 use illumos_utils::{zone::IPADM, PFEXEC, ZONEADM};
 use thiserror::Error;
-use tokio::sync::oneshot;
+use tokio::io::AsyncReadExt;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -15,10 +15,12 @@ pub trait SupportBundleCommandHttpOutput {
 pub enum SupportBundleCmdError {
     #[error("Failed to duplicate pipe for command [{command}]: {error}")]
     Dup { command: String, error: std::io::Error },
-    #[error("Failed to join command [{command}]: {error}")]
-    Join { command: String, error: tokio::task::JoinError },
     #[error("Failed to proccess output for command [{command}]: {error}")]
     Output { command: String, error: std::io::Error },
+    #[error(
+        "Failed to convert pipe for command [{command}] to owned fd: {error}"
+    )]
+    OwnedFd { command: String, error: std::io::Error },
     #[error("Failed to create pipe for command [{command}]: {error}")]
     Pipe { command: String, error: std::io::Error },
     #[error("Failed to spawn command [{command}]: {error}")]
@@ -73,51 +75,37 @@ fn command_to_string(command: &Command) -> String {
 /// stdout and stderr as they occur.
 async fn execute(
     cmd: Command,
-    oneshot: oneshot::Sender<()>,
 ) -> Result<SupportBundleCmdOutput, SupportBundleCmdError> {
     let cmd_string = command_to_string(&cmd);
-    let (mut rx, tx) = os_pipe::pipe().map_err(|e| {
+    let (sender, mut rx) = tokio::net::unix::pipe::pipe().map_err(|e| {
         SupportBundleCmdError::Pipe { command: cmd_string.clone(), error: e }
     })?;
-    let tx_clone = tx.try_clone().map_err(|e| SupportBundleCmdError::Dup {
-        command: cmd_string.clone(),
-        error: e,
+    let pipe = sender.into_nonblocking_fd().map_err(|e| {
+        SupportBundleCmdError::OwnedFd { command: cmd_string.clone(), error: e }
+    })?;
+    let pipe_dup = pipe.try_clone().map_err(|e| {
+        SupportBundleCmdError::Dup { command: cmd_string.clone(), error: e }
     })?;
 
     // TODO MTZ: We may eventually want to reuse some of the process contract
     // bits from illumos_utils to wrap the command in.
     let mut cmd = tokio::process::Command::from(cmd);
     cmd.kill_on_drop(true);
-    cmd.stdout(tx);
-    cmd.stderr(tx_clone);
+    cmd.stdout(pipe);
+    cmd.stderr(pipe_dup);
 
     let mut child = cmd.spawn().map_err(|e| SupportBundleCmdError::Spawn {
         command: cmd_string.clone(),
         error: e,
     })?;
+    // XXX MTZ: add note here
     drop(cmd);
 
-    let output = tokio::task::spawn_blocking(
-        move || -> Result<String, std::io::Error> {
-            let mut out = String::new();
-            rx.read_to_string(&mut out)?;
-            // notify the oneshot receiver that we have finished reading from
-            // the pipe and the spawn_blocking task is returning.
-            let _ = oneshot.send(());
-            Ok(out)
-        },
-    );
+    let mut stdio = String::new();
+    rx.read_to_string(&mut stdio).await.map_err(|e| {
+        SupportBundleCmdError::Output { command: cmd_string.clone(), error: e }
+    })?;
 
-    let stdio = output
-        .await
-        .map_err(|e| SupportBundleCmdError::Join {
-            command: cmd_string.clone(),
-            error: e,
-        })?
-        .map_err(|e| SupportBundleCmdError::Output {
-            command: cmd_string.clone(),
-            error: e,
-        })?;
     let exit_status =
         child.wait().await.map(|es| format!("{es}")).map_err(|e| {
             SupportBundleCmdError::Wait {
@@ -129,16 +117,13 @@ async fn execute(
     Ok(SupportBundleCmdOutput { command: cmd_string, stdio, exit_status })
 }
 
-// This internal implementation method accepts a oneshot channel which is mostly
-// useful for unit tests so that we can ensure the blocking task has finished
-// appropriately when the spawned command has finished or has been killed.
-async fn execute_command_with_timeout_impl(
+/// Spawn a command that's allowed to execute within a given time limit.
+async fn execute_command_with_timeout(
     command: Command,
-    oneshot: oneshot::Sender<()>,
     duration: Duration,
 ) -> Result<SupportBundleCmdOutput, SupportBundleCmdError> {
     let cmd_string = command_to_string(&command);
-    let tokio_command = execute(command, oneshot);
+    let tokio_command = execute(command);
     match tokio::time::timeout(duration, tokio_command).await {
         Ok(res) => res,
         Err(_elapsed) => Err(SupportBundleCmdError::Timeout {
@@ -146,15 +131,6 @@ async fn execute_command_with_timeout_impl(
             duration,
         }),
     }
-}
-
-/// Spawn a command that's allowed to execute within a given time limit.
-async fn execute_command_with_timeout(
-    command: Command,
-    duration: Duration,
-) -> Result<SupportBundleCmdOutput, SupportBundleCmdError> {
-    let (tx, _rx) = oneshot::channel();
-    execute_command_with_timeout_impl(command, tx, duration).await
 }
 
 fn zoneadm_list() -> Command {
@@ -211,35 +187,11 @@ mod test {
     use crate::support_bundle::*;
 
     #[tokio::test]
-    async fn test_drop_cleans_up_spawn_blocking() {
-        let mut command = Command::new("sleep");
-        command.env_clear().arg("10");
-
-        let (tx, mut rx) = oneshot::channel();
-        let handle = tokio::spawn(async {
-            execute_command_with_timeout_impl(
-                command,
-                tx,
-                Duration::from_secs(5),
-            )
-            .await
-        });
-
-        tokio::time::sleep(Duration::from_millis(250)).await;
-        handle.abort();
-        tokio::time::sleep(Duration::from_millis(250)).await;
-
-        // Ensure that aborting a command results in no lingering spawn_blocking
-        // tasks.
-        assert_eq!(Ok(()), rx.try_recv(), "spawned task has finished");
-    }
-
-    #[tokio::test]
     async fn test_long_running_command_is_aborted() {
         let mut command = Command::new("sleep");
         command.env_clear().arg("10");
 
-        match execute_command_with_timeout(command, Duration::from_secs(5))
+        match execute_command_with_timeout(command, Duration::from_millis(500))
             .await
         {
             Err(SupportBundleCmdError::Timeout { .. }) => (),

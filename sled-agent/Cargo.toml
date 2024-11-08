@@ -56,7 +56,6 @@ omicron-common.workspace = true
 omicron-ddm-admin-client.workspace = true
 omicron-uuid-kinds.workspace = true
 once_cell.workspace = true
-os_pipe.workspace = true
 oximeter.workspace = true
 oximeter-instruments.workspace = true
 oximeter-producer.workspace = true

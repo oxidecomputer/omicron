@@ -6934,7 +6934,6 @@ dependencies = [
  "omicron-workspace-hack",
  "once_cell",
  "opte-ioctl",
- "os_pipe",
  "oximeter",
  "oximeter-instruments",
  "oximeter-producer",
@@ -7372,16 +7371,6 @@ dependencies = [
  "postcard",
  "serde",
  "thiserror",
-]
-
-[[package]]
-name = "os_pipe"
-version = "1.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ffd2b0a5634335b135d5728d84c5e0fd726954b87111f7506a61c502280d982"
-dependencies = [
- "libc",
- "windows-sys 0.59.0",
 ]
 
 [[package]]
