@@ -14,7 +14,7 @@
       "put": {
         "summary": "Generate a ClickHouse configuration file for a server node on a specified",
         "description": "directory and enable the SMF service.",
-        "operationId": "generate_config",
+        "operationId": "generate_config_and_enable_svc",
         "requestBody": {
           "content": {
             "application/json": {
