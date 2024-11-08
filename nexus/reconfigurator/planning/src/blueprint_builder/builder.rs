@@ -58,6 +58,7 @@ use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
+use omicron_common::disk::GzipLevel;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -893,7 +894,9 @@ impl<'a> BlueprintBuilder<'a> {
                     address,
                     Some(ByteCount::from_gibibytes_u32(DEBUG_QUOTA_SIZE_GB)),
                     None,
-                    CompressionAlgorithm::Off,
+                    CompressionAlgorithm::GzipN {
+                        level: GzipLevel::new::<9>(),
+                    },
                 );
                 datasets_builder.ensure(
                     DatasetName::new(zpool, DatasetKind::TransientZoneRoot),
