@@ -5,6 +5,7 @@
 [package]
 name = "omicron-workspace-hack"
 version = "0.1.0"
+edition = "2021"
 description = "workspace-hack package, managed by hakari"
 # You can choose to publish this crate: see https://docs.rs/cargo-hakari/latest/cargo_hakari/publishing.
 publish = false
@@ -19,7 +20,8 @@ workspace = true
 [dependencies]
 ahash = { version = "0.8.11" }
 aho-corasick = { version = "1.1.3" }
-anyhow = { version = "1.0.89", features = ["backtrace"] }
+anyhow = { version = "1.0.92", features = ["backtrace"] }
+aws-lc-rs = { version = "1.10.0", features = ["prebuilt-nasm"] }
 base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22.1" }
 base64ct = { version = "1.6.0", default-features = false, features = ["std"] }
@@ -90,15 +92,16 @@ pkcs8 = { version = "0.10.2", default-features = false, features = ["encryption"
 postgres-types = { version = "0.2.8", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 predicates = { version = "3.1.2" }
 proc-macro2 = { version = "1.0.87" }
-qorb = { version = "0.1.1", features = ["qtop"] }
+qorb = { version = "0.2.0", features = ["qtop"] }
 quote = { version = "1.0.37" }
 rand = { version = "0.8.5", features = ["small_rng"] }
 regex = { version = "1.11.0" }
 regex-automata = { version = "0.4.8", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.5" }
 reqwest = { version = "0.12.8", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
-ring = { version = "0.17.8", features = ["std"] }
 rsa = { version = "0.9.6", features = ["serde", "sha2"] }
+rustls = { version = "0.23.14", features = ["ring"] }
+rustls-webpki = { version = "0.102.8", default-features = false, features = ["aws_lc_rs", "ring", "std"] }
 schemars = { version = "0.8.21", features = ["bytes", "chrono", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.23", features = ["serde"] }
@@ -130,11 +133,13 @@ uuid = { version = "1.10.0", features = ["serde", "v4"] }
 x509-cert = { version = "0.2.5" }
 zerocopy = { version = "0.7.35", features = ["derive", "simd"] }
 zeroize = { version = "1.8.1", features = ["std", "zeroize_derive"] }
+zip = { version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
 
 [build-dependencies]
 ahash = { version = "0.8.11" }
 aho-corasick = { version = "1.1.3" }
-anyhow = { version = "1.0.89", features = ["backtrace"] }
+anyhow = { version = "1.0.92", features = ["backtrace"] }
+aws-lc-rs = { version = "1.10.0", features = ["prebuilt-nasm"] }
 base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22.1" }
 base64ct = { version = "1.6.0", default-features = false, features = ["std"] }
@@ -206,15 +211,16 @@ pkcs8 = { version = "0.10.2", default-features = false, features = ["encryption"
 postgres-types = { version = "0.2.8", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 predicates = { version = "3.1.2" }
 proc-macro2 = { version = "1.0.87" }
-qorb = { version = "0.1.1", features = ["qtop"] }
+qorb = { version = "0.2.0", features = ["qtop"] }
 quote = { version = "1.0.37" }
 rand = { version = "0.8.5", features = ["small_rng"] }
 regex = { version = "1.11.0" }
 regex-automata = { version = "0.4.8", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.5" }
 reqwest = { version = "0.12.8", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
-ring = { version = "0.17.8", features = ["std"] }
 rsa = { version = "0.9.6", features = ["serde", "sha2"] }
+rustls = { version = "0.23.14", features = ["ring"] }
+rustls-webpki = { version = "0.102.8", default-features = false, features = ["aws_lc_rs", "ring", "std"] }
 schemars = { version = "0.8.21", features = ["bytes", "chrono", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.23", features = ["serde"] }
@@ -249,6 +255,7 @@ uuid = { version = "1.10.0", features = ["serde", "v4"] }
 x509-cert = { version = "0.2.5" }
 zerocopy = { version = "0.7.35", features = ["derive", "simd"] }
 zeroize = { version = "1.8.1", features = ["std", "zeroize_derive"] }
+zip = { version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
 
 [target.x86_64-unknown-linux-gnu.dependencies]
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
@@ -259,7 +266,6 @@ linux-raw-sys = { version = "0.4.14", default-features = false, features = ["elf
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.20.2" }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
-rustls = { version = "0.23.14", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
@@ -271,7 +277,6 @@ linux-raw-sys = { version = "0.4.14", default-features = false, features = ["elf
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.20.2" }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
-rustls = { version = "0.23.14", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 
 [target.x86_64-apple-darwin.dependencies]
@@ -281,7 +286,6 @@ hyper-util = { version = "0.1.9", features = ["full"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.20.2" }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
-rustls = { version = "0.23.14", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 
 [target.x86_64-apple-darwin.build-dependencies]
@@ -291,7 +295,6 @@ hyper-util = { version = "0.1.9", features = ["full"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.20.2" }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
-rustls = { version = "0.23.14", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 
 [target.aarch64-apple-darwin.dependencies]
@@ -301,7 +304,6 @@ hyper-util = { version = "0.1.9", features = ["full"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.20.2" }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
-rustls = { version = "0.23.14", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 
 [target.aarch64-apple-darwin.build-dependencies]
@@ -311,7 +313,6 @@ hyper-util = { version = "0.1.9", features = ["full"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.20.2" }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
-rustls = { version = "0.23.14", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 
 [target.x86_64-unknown-illumos.dependencies]
@@ -323,7 +324,6 @@ indicatif = { version = "0.17.8", features = ["rayon"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.20.2" }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
-rustls = { version = "0.23.14", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 
@@ -336,7 +336,6 @@ indicatif = { version = "0.17.8", features = ["rayon"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.20.2" }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
-rustls = { version = "0.23.14", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 

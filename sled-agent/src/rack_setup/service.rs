@@ -17,7 +17,7 @@
 //! state files that get generated as RSS executes:
 //!
 //! - /pool/int/UUID/config/rss-sled-plan.json (Sled Plan)
-//! - /pool/int/UUID/config/rss-service-plan-v3.json (Service Plan)
+//! - /pool/int/UUID/config/rss-service-plan-v5.json (Service Plan)
 //! - /pool/int/UUID/config/rss-plan-completed.marker (Plan Execution Complete)
 //!
 //! These phases are described below.  As each phase completes, a corresponding
@@ -90,8 +90,9 @@ use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
 use nexus_types::deployment::{
-    blueprint_zone_type, Blueprint, BlueprintZoneType, BlueprintZonesConfig,
-    CockroachDbPreserveDowngrade,
+    blueprint_zone_type, Blueprint, BlueprintDatasetConfig,
+    BlueprintDatasetDisposition, BlueprintDatasetsConfig, BlueprintZoneType,
+    BlueprintZonesConfig, CockroachDbPreserveDowngrade,
 };
 use nexus_types::external_api::views::SledState;
 use omicron_common::address::get_sled_address;
@@ -843,6 +844,15 @@ impl ServiceInner {
                                 management_addrs: lp.management_addrs.clone(),
                             }
                         }),
+                        tx_eq: config.tx_eq.as_ref().map(|tx_eq| {
+                            NexusTypes::TxEqConfig {
+                                pre1: tx_eq.pre1,
+                                pre2: tx_eq.pre2,
+                                main: tx_eq.main,
+                                post2: tx_eq.post2,
+                                post1: tx_eq.post1,
+                            }
+                        }),
                     })
                     .collect(),
                 bgp: config
@@ -1442,6 +1452,47 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         .map(|(sled_id, sled_config)| (*sled_id, sled_config.disks.clone()))
         .collect();
 
+    let mut blueprint_datasets = BTreeMap::new();
+    for (sled_id, sled_config) in sled_configs_by_id {
+        let mut datasets = BTreeMap::new();
+        for d in sled_config.datasets.datasets.values() {
+            // Only the "Crucible" dataset needs to know the address
+            let address = sled_config.zones.iter().find_map(|z| {
+                if let BlueprintZoneType::Crucible(
+                    blueprint_zone_type::Crucible { address, dataset },
+                ) = &z.zone_type
+                {
+                    if &dataset.pool_name == d.name.pool() {
+                        return Some(*address);
+                    }
+                };
+                None
+            });
+
+            datasets.insert(
+                d.id,
+                BlueprintDatasetConfig {
+                    disposition: BlueprintDatasetDisposition::InService,
+                    id: d.id,
+                    pool: d.name.pool().clone(),
+                    kind: d.name.dataset().clone(),
+                    address,
+                    compression: d.inner.compression,
+                    quota: d.inner.quota,
+                    reservation: d.inner.reservation,
+                },
+            );
+        }
+
+        blueprint_datasets.insert(
+            *sled_id,
+            BlueprintDatasetsConfig {
+                generation: sled_config.datasets.generation,
+                datasets,
+            },
+        );
+    }
+
     let mut blueprint_zones = BTreeMap::new();
     let mut sled_state = BTreeMap::new();
     for (sled_id, sled_config) in sled_configs_by_id {
@@ -1468,6 +1519,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         id: Uuid::new_v4(),
         blueprint_zones,
         blueprint_disks,
+        blueprint_datasets,
         sled_state,
         parent_blueprint_id: None,
         internal_dns_version,

@@ -9,10 +9,14 @@ use anyhow::{anyhow, bail, ensure, Context};
 use gateway_client::types::RotState;
 use gateway_client::types::SpState;
 use indexmap::IndexMap;
+use ipnet::Ipv6Net;
+use ipnet::Ipv6Subnets;
 use nexus_inventory::CollectionBuilder;
 use nexus_sled_agent_shared::inventory::Baseboard;
 use nexus_sled_agent_shared::inventory::Inventory;
+use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
+use nexus_sled_agent_shared::inventory::InventoryZpool;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::deployment::ClickhousePolicy;
@@ -50,12 +54,7 @@ use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
-
-trait SubnetIterator: Iterator<Item = Ipv6Subnet<SLED_PREFIX>> + Debug {}
-impl<T> SubnetIterator for T where
-    T: Iterator<Item = Ipv6Subnet<SLED_PREFIX>> + Debug
-{
-}
+use std::sync::Arc;
 
 /// Describes an actual or synthetic Oxide rack for planning and testing
 ///
@@ -73,11 +72,15 @@ impl<T> SubnetIterator for T where
 ///    assign subnets and maybe even lay out the initial set of zones (which
 ///    does not exist here yet).  This way Reconfigurator and RSS are using the
 ///    same code to do this.
-#[derive(Debug)]
+///
+/// This is cheaply cloneable, and uses copy-on-write semantics for data inside.
+#[derive(Clone, Debug)]
 pub struct SystemDescription {
     collector: Option<String>,
-    sleds: IndexMap<SledUuid, Sled>,
-    sled_subnets: Box<dyn SubnetIterator>,
+    // Arc<Sled> to make cloning cheap. Mutating sleds is uncommon but
+    // possible, in which case we'll clone-on-write with Arc::make_mut.
+    sleds: IndexMap<SledUuid, Arc<Sled>>,
+    sled_subnets: SubnetIterator,
     available_non_scrimlet_slots: BTreeSet<u16>,
     available_scrimlet_slots: BTreeSet<u16>,
     target_boundary_ntp_zone_count: usize,
@@ -125,13 +128,7 @@ impl SystemDescription {
         // Skip the initial DNS subnet.
         // (The same behavior is replicated in RSS in `Plan::create()` in
         // sled-agent/src/rack_setup/plan/sled.rs.)
-        let sled_subnets = Box::new(
-            rack_subnet
-                .subnets(SLED_PREFIX)
-                .unwrap()
-                .skip(1)
-                .map(|s| Ipv6Subnet::new(s.network())),
-        );
+        let sled_subnets = SubnetIterator::new(rack_subnet);
 
         // Policy defaults
         let target_nexus_zone_count = NEXUS_REDUNDANCY;
@@ -252,6 +249,16 @@ impl SystemDescription {
         self
     }
 
+    pub fn get_sled_mut(
+        &mut self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<&mut Sled> {
+        let Some(sled) = self.sleds.get_mut(&sled_id) else {
+            bail!("Sled not found with id {sled_id}");
+        };
+        Ok(Arc::make_mut(sled))
+    }
+
     /// Add a sled to the system, as described by a SledBuilder
     pub fn sled(&mut self, sled: SledBuilder) -> anyhow::Result<&mut Self> {
         let sled_id = sled.id.unwrap_or_else(SledUuid::new_v4);
@@ -298,7 +305,7 @@ impl SystemDescription {
             sled.omicron_zones,
             sled.npools,
         );
-        self.sleds.insert(sled_id, sled);
+        self.sleds.insert(sled_id, Arc::new(sled));
         Ok(self)
     }
 
@@ -324,14 +331,14 @@ impl SystemDescription {
         );
         self.sleds.insert(
             sled_id,
-            Sled::new_full(
+            Arc::new(Sled::new_full(
                 sled_id,
                 sled_policy,
                 sled_state,
                 sled_resources,
                 inventory_sp,
                 inventory_sled_agent,
-            ),
+            )),
         );
         Ok(self)
     }
@@ -360,7 +367,7 @@ impl SystemDescription {
         let sled = self.sleds.get_mut(&sled_id).with_context(|| {
             format!("attempted to access sled {} not found in system", sled_id)
         })?;
-        sled.inventory_sled_agent.omicron_zones = omicron_zones;
+        Arc::make_mut(sled).inventory_sled_agent.omicron_zones = omicron_zones;
         Ok(self)
     }
 
@@ -542,7 +549,7 @@ pub struct SledHwInventory<'a> {
 /// This needs to be rich enough to generate a PlanningInput and inventory
 /// Collection.
 #[derive(Clone, Debug)]
-struct Sled {
+pub struct Sled {
     sled_id: SledUuid,
     inventory_sp: Option<(u16, SpState)>,
     inventory_sled_agent: Inventory,
@@ -590,7 +597,8 @@ impl Sled {
                     policy: PhysicalDiskPolicy::InService,
                     state: PhysicalDiskState::Active,
                 };
-                (zpool, disk)
+                let datasets = vec![];
+                (zpool, (disk, datasets))
             })
             .collect();
         let inventory_sp = match hardware {
@@ -653,8 +661,8 @@ impl Sled {
                 disks: zpools
                     .values()
                     .enumerate()
-                    .map(|(i, d)| InventoryDisk {
-                        identity: d.disk_identity.clone(),
+                    .map(|(i, (disk, _datasets))| InventoryDisk {
+                        identity: disk.disk_identity.clone(),
                         variant: DiskVariant::U2,
                         slot: i64::try_from(i).unwrap(),
                         active_firmware_slot: 1,
@@ -666,9 +674,13 @@ impl Sled {
                         )],
                     })
                     .collect(),
-                // Zpools & Datasets won't necessarily show up until our first
-                // request to provision storage, so we omit them.
-                zpools: vec![],
+                zpools: zpools
+                    .keys()
+                    .map(|id| InventoryZpool {
+                        id: *id,
+                        total_size: ByteCount::from_gibibytes_u32(100),
+                    })
+                    .collect(),
                 datasets: vec![],
             }
         };
@@ -820,11 +832,54 @@ impl Sled {
         }
     }
 
+    /// Adds a dataset to the system description.
+    ///
+    /// The inventory values for "available space" and "used space" are
+    /// made up, since this is a synthetic dataset.
+    pub fn add_synthetic_dataset(
+        &mut self,
+        config: omicron_common::disk::DatasetConfig,
+    ) {
+        self.inventory_sled_agent.datasets.push(InventoryDataset {
+            id: Some(config.id),
+            name: config.name.full_name(),
+            available: ByteCount::from_gibibytes_u32(1),
+            used: ByteCount::from_gibibytes_u32(0),
+            quota: config.inner.quota,
+            reservation: config.inner.reservation,
+            compression: config.inner.compression.to_string(),
+        });
+    }
+
     fn sp_state(&self) -> Option<&(u16, SpState)> {
         self.inventory_sp.as_ref()
     }
 
     fn sled_agent_inventory(&self) -> &Inventory {
         &self.inventory_sled_agent
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SubnetIterator {
+    subnets: Ipv6Subnets,
+}
+
+impl SubnetIterator {
+    fn new(rack_subnet: Ipv6Net) -> Self {
+        let mut subnets = rack_subnet.subnets(SLED_PREFIX).unwrap();
+        // Skip the initial DNS subnet.
+        // (The same behavior is replicated in RSS in `Plan::create()` in
+        // sled-agent/src/rack_setup/plan/sled.rs.)
+        subnets.next();
+        Self { subnets }
+    }
+}
+
+impl Iterator for SubnetIterator {
+    type Item = Ipv6Subnet<SLED_PREFIX>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.subnets.next().map(|s| Ipv6Subnet::new(s.network()))
     }
 }

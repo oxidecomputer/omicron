@@ -293,16 +293,17 @@
           name = "cockroachdb";
           binName = "cockroach";
           version = readVersionFile "${name}_version";
-          sha256 =
+          lines =
             let
               shaFile = builtins.readFile  ./tools/${name}_checksums;
-              shas = lib.strings.splitString "\n" shaFile;
             in
-            findSha shas "CIDL_SHA256_LINUX";
+            lib.strings.splitString "\n" shaFile;
+          commit = findSha lines "COCKROACH_COMMIT";
+          sha256 = findSha lines "CIDL_SHA256_LINUX";
           src = builtins.fetchurl
             {
               inherit sha256;
-              url = "https://binaries.cockroachdb.com/${binName}-v${version}.linux-amd64.tgz";
+              url = "https://buildomat.eng.oxide.computer/public/file/oxidecomputer/cockroach/linux-amd64/${commit}/cockroach.tgz";
             };
         in
         stdenv.mkDerivation
@@ -315,7 +316,8 @@
 
             buildInputs = [
               glibc
-              # gcc-unwrapped
+              gcc-unwrapped
+              ncurses6
             ];
             installPhase = ''
               mkdir -p $out/bin

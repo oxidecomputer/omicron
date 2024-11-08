@@ -4,7 +4,7 @@
 
 use db::datastore::SwitchPortSettingsCombinedResult;
 use dpd_client::types::{
-    LinkCreate, LinkId, LinkSettings, PortFec, PortSettings, PortSpeed,
+    LinkCreate, LinkId, LinkSettings, PortFec, PortSettings, PortSpeed, TxEq,
 };
 use nexus_db_model::{SwitchLinkFec, SwitchLinkSpeed};
 use nexus_db_queries::db;
@@ -63,7 +63,17 @@ pub(crate) fn api_to_dpd_port_settings(
 
     //TODO breakouts
     let link_id = LinkId(0);
-
+    let tx_eq = if let Some(Some(t)) = settings.tx_eq.get(0) {
+        Some(TxEq {
+            pre1: t.pre1.map(Into::into),
+            pre2: t.pre2.map(Into::into),
+            main: t.main.map(Into::into),
+            post2: t.post2.map(Into::into),
+            post1: t.post2.map(Into::into),
+        })
+    } else {
+        None
+    };
     for l in settings.links.iter() {
         dpd_port_settings.links.insert(
             link_id.to_string(),
@@ -72,6 +82,7 @@ pub(crate) fn api_to_dpd_port_settings(
                     autoneg: l.autoneg,
                     lane: Some(LinkId(0)),
                     kr: false,
+                    tx_eq: tx_eq.clone(),
                     fec: match l.fec {
                         SwitchLinkFec::Firecode => PortFec::Firecode,
                         SwitchLinkFec::Rs => PortFec::Rs,

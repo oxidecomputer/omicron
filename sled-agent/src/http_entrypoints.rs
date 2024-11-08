@@ -6,15 +6,16 @@
 
 use super::sled_agent::SledAgent;
 use crate::sled_agent::Error as SledAgentError;
+use crate::support_bundle::SupportBundleCommandHttpOutput;
 use crate::zone_bundle::BundleError;
 use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
 use display_error_chain::DisplayErrorChain;
 use dropshot::{
-    ApiDescription, Body, FreeformBody, HttpError, HttpResponseCreated,
-    HttpResponseDeleted, HttpResponseHeaders, HttpResponseOk,
-    HttpResponseUpdatedNoContent, Path, Query, RequestContext, StreamingBody,
-    TypedBody,
+    ApiDescription, Body, FreeformBody, HttpError, HttpResponseAccepted,
+    HttpResponseCreated, HttpResponseDeleted, HttpResponseHeaders,
+    HttpResponseOk, HttpResponseUpdatedNoContent, Path, Query, RequestContext,
+    StreamingBody, TypedBody,
 };
 use nexus_sled_agent_shared::inventory::{
     Inventory, OmicronZonesConfig, SledRole,
@@ -31,6 +32,7 @@ use omicron_common::disk::{
     DatasetsConfig, DatasetsManagementResult, DiskVariant,
     DisksManagementResult, M2Slot, OmicronPhysicalDisksConfig,
 };
+use omicron_common::update::ArtifactHash;
 use sled_agent_api::*;
 use sled_agent_types::boot_disk::{
     BootDiskOsWriteStatus, BootDiskPathParams, BootDiskUpdatePathParams,
@@ -401,6 +403,48 @@ impl SledAgentApi for SledAgentImpl {
         Ok(HttpResponseUpdatedNoContent())
     }
 
+    async fn artifact_list(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<BTreeMap<ArtifactHash, usize>>, HttpError> {
+        Ok(HttpResponseOk(rqctx.context().artifact_store().list().await?))
+    }
+
+    async fn artifact_copy_from_depot(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<ArtifactPathParam>,
+        body: TypedBody<ArtifactCopyFromDepotBody>,
+    ) -> Result<HttpResponseAccepted<ArtifactCopyFromDepotResponse>, HttpError>
+    {
+        let sha256 = path_params.into_inner().sha256;
+        let depot_base_url = body.into_inner().depot_base_url;
+        rqctx
+            .context()
+            .artifact_store()
+            .copy_from_depot(sha256, &depot_base_url)
+            .await?;
+        Ok(HttpResponseAccepted(ArtifactCopyFromDepotResponse {}))
+    }
+
+    async fn artifact_put(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<ArtifactPathParam>,
+        body: StreamingBody,
+    ) -> Result<HttpResponseOk<ArtifactPutResponse>, HttpError> {
+        let sha256 = path_params.into_inner().sha256;
+        Ok(HttpResponseOk(
+            rqctx.context().artifact_store().put_body(sha256, body).await?,
+        ))
+    }
+
+    async fn artifact_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<ArtifactPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let sha256 = path_params.into_inner().sha256;
+        rqctx.context().artifact_store().delete(sha256).await?;
+        Ok(HttpResponseDeleted())
+    }
+
     async fn vmm_issue_disk_snapshot_request(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmIssueDiskSnapshotRequestPathParam>,
@@ -726,5 +770,29 @@ impl SledAgentApi for SledAgentImpl {
         let sa = request_context.context();
         sa.set_eip_gateways(body.into_inner()).await?;
         Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn support_zoneadm_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+        let sa = request_context.context();
+        let res = sa.support_zoneadm_info().await;
+        Ok(HttpResponseOk(FreeformBody(res.get_output().into())))
+    }
+
+    async fn support_ipadm_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+        let sa = request_context.context();
+        let output = sa
+            .support_ipadm_info()
+            .await
+            .into_iter()
+            .map(|cmd| cmd.get_output())
+            .collect::<Vec<_>>()
+            .as_slice()
+            .join("\n\n");
+
+        Ok(HttpResponseOk(FreeformBody(output.into())))
     }
 }

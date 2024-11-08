@@ -15,7 +15,6 @@ use anyhow::Context;
 use anyhow::Result;
 use omicron_zone_package::config::Config;
 use omicron_zone_package::package::PackageSource;
-use progenitor::TypePatch;
 use quote::quote;
 use std::env;
 use std::fs;
@@ -89,22 +88,7 @@ fn main() -> Result<()> {
                     slog::debug!(state.log, "client response"; "result" => ?result);
                 }
             })
-            .with_patch("LinkId", &TypePatch::default()
-                .with_derive("Eq")
-                .with_derive("PartialEq")
-            )
-            .with_patch("LinkCreate", &TypePatch::default()
-                .with_derive("Eq")
-                .with_derive("PartialEq")
-            )
-            .with_patch("LinkSettings", &TypePatch::default()
-                .with_derive("Eq")
-                .with_derive("PartialEq")
-            )
-            .with_patch("PortSettings", &TypePatch::default()
-                .with_derive("Eq")
-                .with_derive("PartialEq")
-            )
+	    .with_derive("PartialEq")
     )
     .generate_tokens(&spec)
     .with_context(|| {

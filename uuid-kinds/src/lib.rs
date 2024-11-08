@@ -49,6 +49,7 @@ macro_rules! impl_typed_uuid_kind {
 // Please keep this list in alphabetical order.
 
 impl_typed_uuid_kind! {
+    Blueprint => "blueprint",
     Collection => "collection",
     Dataset => "dataset",
     DemoSaga => "demo_saga",
