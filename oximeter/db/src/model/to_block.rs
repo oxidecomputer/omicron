@@ -6,6 +6,7 @@
 
 //! Trait for serializing an array of values into a `Block`.
 
+use super::columns;
 use crate::native::block::Block;
 use crate::native::block::Column;
 use crate::native::block::DataType;
@@ -68,39 +69,39 @@ impl ToBlock for TimeseriesSchema {
             info: Default::default(),
             columns: IndexMap::from([
                 (
-                    String::from("timeseries_name"),
+                    String::from(columns::TIMESERIES_NAME),
                     Column::from(ValueArray::String(timeseries_names)),
                 ),
                 (
-                    String::from("fields.name"),
+                    String::from(columns::FIELDS_DOT_NAME),
                     Column::from(ValueArray::Array {
                         inner_type: DataType::String,
                         values: field_names,
                     }),
                 ),
                 (
-                    String::from("fields.type"),
+                    String::from(columns::FIELDS_DOT_TYPE),
                     Column::from(ValueArray::Array {
                         inner_type: TYPE_ENUM_DATA_TYPE.clone(),
                         values: field_types,
                     }),
                 ),
                 (
-                    String::from("fields.source"),
+                    String::from(columns::FIELDS_DOT_SOURCE),
                     Column::from(ValueArray::Array {
                         inner_type: SOURCE_ENUM_DATA_TYPE.clone(),
                         values: field_sources,
                     }),
                 ),
                 (
-                    String::from("datum_type"),
+                    String::from(columns::DATUM_TYPE),
                     Column::from(ValueArray::Enum8 {
                         variants: DATUM_TYPE_ENUM_MAP.clone(),
                         values: datum_types,
                     }),
                 ),
                 (
-                    String::from("created"),
+                    String::from(columns::CREATED),
                     Column::from(ValueArray::DateTime64 {
                         values: created,
                         precision: Precision::new(9).unwrap(),

@@ -37,6 +37,7 @@ use std::convert::TryFrom;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 
+pub mod columns;
 pub mod fields;
 pub mod from_block;
 pub mod measurements;

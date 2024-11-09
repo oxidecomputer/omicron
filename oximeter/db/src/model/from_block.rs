@@ -6,6 +6,7 @@
 
 //! Trait for deserializing an array of values from a `Block`.
 
+use super::columns;
 use crate::native::block::Block;
 use crate::native::block::DataType;
 use crate::native::block::ValueArray;
@@ -43,40 +44,40 @@ impl FromBlock for TimeseriesSchema {
         let n_rows = block.n_rows();
         let mut out = Vec::with_capacity(n_rows);
         let ValueArray::String(timeseries_names) =
-            block.column_values("timeseries_name")?
+            block.column_values(columns::TIMESERIES_NAME)?
         else {
             return Err(Error::UnexpectedColumnType);
         };
         let ValueArray::Array {
             values: field_names,
             inner_type: DataType::String,
-        } = block.column_values("fields.name")?
+        } = block.column_values(columns::FIELDS_DOT_NAME)?
         else {
             return Err(Error::UnexpectedColumnType);
         };
         let ValueArray::Array {
             values: field_types,
             inner_type: DataType::Enum8(field_type_variants),
-        } = block.column_values("fields.type")?
+        } = block.column_values(columns::FIELDS_DOT_TYPE)?
         else {
             return Err(Error::UnexpectedColumnType);
         };
         let ValueArray::Array {
             values: field_sources,
             inner_type: DataType::Enum8(field_source_variants),
-        } = block.column_values("fields.source")?
+        } = block.column_values(columns::FIELDS_DOT_SOURCE)?
         else {
             return Err(Error::UnexpectedColumnType);
         };
         let ValueArray::Enum8 {
             variants: datum_type_variants,
             values: datum_types,
-        } = block.column_values("datum_type")?
+        } = block.column_values(columns::DATUM_TYPE)?
         else {
             return Err(Error::UnexpectedColumnType);
         };
         let ValueArray::DateTime64 { values: created, .. } =
-            block.column_values("created")?
+            block.column_values(columns::CREATED)?
         else {
             return Err(Error::UnexpectedColumnType);
         };
@@ -152,7 +153,7 @@ impl FromBlock for Measurement {
     fn from_block(block: &Block) -> Result<Vec<Self>, Error> {
         let data = Datum::from_block(block)?;
         let ValueArray::DateTime64 { values: timestamps, .. } =
-            block.column_values("timestamp")?
+            block.column_values(columns::TIMESTAMP)?
         else {
             return Err(Error::UnexpectedColumnType);
         };
@@ -175,10 +176,11 @@ impl FromBlock for Datum {
         //
         // The presence of a `datum` column implies a scalar, since histograms
         // have `bins` and `counts` columns instead.
-        if let Ok(datum_col) = block.column_values("datum") {
+        if let Ok(datum_col) = block.column_values(columns::DATUM) {
             // The presense of a `start_time` column implies a cumulative
             // scalar, and anything else is a gauge.
-            if let Ok(start_time_col) = block.column_values("start_time") {
+            if let Ok(start_time_col) = block.column_values(columns::START_TIME)
+            {
                 extract_cumulative_scalar_from_block(datum_col, start_time_col)
             } else {
                 extract_gauge_from_block(datum_col)
@@ -212,14 +214,14 @@ macro_rules! extract_histogram_columns {
         $p99_desired_marker_positions:ident
     ) => {
         let mut out = Vec::with_capacity($n_rows);
-        let $bin_type(min) = $block.column_values("min")? else {
+        let $bin_type(min) = $block.column_values(columns::MIN)? else {
             return Err(Error::UnexpectedColumnType)?;
         };
-        let $bin_type(max) = $block.column_values("max")? else {
+        let $bin_type(max) = $block.column_values(columns::MAX)? else {
             return Err(Error::UnexpectedColumnType)?;
         };
         let $sum_type(sum_of_samples) =
-            $block.column_values("sum_of_samples")?
+            $block.column_values(columns::SUM_OF_SAMPLES)?
         else {
             return Err(Error::UnexpectedColumnType)?;
         };
@@ -335,80 +337,80 @@ macro_rules! extract_histogram_columns {
 fn extract_histogram_from_block(block: &Block) -> Result<Vec<Datum>, Error> {
     // Extract the fields that all share the same type.
     let ValueArray::Array { inner_type: DataType::UInt64, values: counts } =
-        block.column_values("counts")?
+        block.column_values(columns::COUNTS)?
     else {
         return Err(Error::UnexpectedColumnType);
     };
     let ValueArray::Float64(squared_mean) =
-        block.column_values("squared_mean")?
+        block.column_values(columns::SQUARED_MEAN)?
     else {
         return Err(Error::UnexpectedColumnType);
     };
     let ValueArray::Array {
         inner_type: DataType::Float64,
         values: p50_marker_heights,
-    } = block.column_values("p50_marker_heights")?
+    } = block.column_values(columns::P50_MARKER_HEIGHTS)?
     else {
         return Err(Error::UnexpectedColumnType);
     };
     let ValueArray::Array {
         inner_type: DataType::UInt64,
         values: p50_marker_positions,
-    } = block.column_values("p50_marker_positions")?
+    } = block.column_values(columns::P50_MARKER_POSITIONS)?
     else {
         return Err(Error::UnexpectedColumnType);
     };
     let ValueArray::Array {
         inner_type: DataType::Float64,
         values: p50_desired_marker_positions,
-    } = block.column_values("p50_desired_marker_positions")?
+    } = block.column_values(columns::P50_DESIRED_MARKER_POSITIONS)?
     else {
         return Err(Error::UnexpectedColumnType);
     };
     let ValueArray::Array {
         inner_type: DataType::Float64,
         values: p90_marker_heights,
-    } = block.column_values("p90_marker_heights")?
+    } = block.column_values(columns::P90_MARKER_HEIGHTS)?
     else {
         return Err(Error::UnexpectedColumnType);
     };
     let ValueArray::Array {
         inner_type: DataType::UInt64,
         values: p90_marker_positions,
-    } = block.column_values("p90_marker_positions")?
+    } = block.column_values(columns::P90_MARKER_POSITIONS)?
     else {
         return Err(Error::UnexpectedColumnType);
     };
     let ValueArray::Array {
         inner_type: DataType::Float64,
         values: p90_desired_marker_positions,
-    } = block.column_values("p90_desired_marker_positions")?
+    } = block.column_values(columns::P90_DESIRED_MARKER_POSITIONS)?
     else {
         return Err(Error::UnexpectedColumnType);
     };
     let ValueArray::Array {
         inner_type: DataType::Float64,
         values: p99_marker_heights,
-    } = block.column_values("p99_marker_heights")?
+    } = block.column_values(columns::P99_MARKER_HEIGHTS)?
     else {
         return Err(Error::UnexpectedColumnType);
     };
     let ValueArray::Array {
         inner_type: DataType::UInt64,
         values: p99_marker_positions,
-    } = block.column_values("p99_marker_positions")?
+    } = block.column_values(columns::P99_MARKER_POSITIONS)?
     else {
         return Err(Error::UnexpectedColumnType);
     };
     let ValueArray::Array {
         inner_type: DataType::Float64,
         values: p99_desired_marker_positions,
-    } = block.column_values("p99_desired_marker_positions")?
+    } = block.column_values(columns::P99_DESIRED_MARKER_POSITIONS)?
     else {
         return Err(Error::UnexpectedColumnType);
     };
     let ValueArray::DateTime64 { values: start_time, .. } =
-        block.column_values("start_time")?
+        block.column_values(columns::START_TIME)?
     else {
         return Err(Error::UnexpectedColumnType)?;
     };
@@ -416,7 +418,7 @@ fn extract_histogram_from_block(block: &Block) -> Result<Vec<Datum>, Error> {
     // Now extract the bins, from which we also learn the expected types of the
     // other columns.
     let ValueArray::Array { inner_type, values: bins } =
-        block.column_values("bins")?
+        block.column_values(columns::BINS)?
     else {
         return Err(Error::UnexpectedColumnType)?;
     };

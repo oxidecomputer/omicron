@@ -6,6 +6,7 @@
 
 // Copyright 2024 Oxide Computer Company
 
+use super::columns;
 use crate::native::block::Block;
 use crate::native::block::Column;
 use crate::native::block::DataType;
@@ -37,26 +38,26 @@ pub(crate) fn extract_fields_as_block(
 
         // Push the timeseries name, key, and field name.
         let Ok(ValueArray::String(timeseries_names)) =
-            entry.column_values_mut("timeseries_name")
+            entry.column_values_mut(columns::TIMESERIES_NAME)
         else {
             unreachable!();
         };
         timeseries_names.push(sample.timeseries_name.to_string());
         let Ok(ValueArray::UInt64(keys)) =
-            entry.column_values_mut("timeseries_key")
+            entry.column_values_mut(columns::TIMESERIES_KEY)
         else {
             unreachable!();
         };
         keys.push(timeseries_key);
         let Ok(ValueArray::String(field_names)) =
-            entry.column_values_mut("field_name")
+            entry.column_values_mut(columns::FIELD_NAME)
         else {
             unreachable!();
         };
         field_names.push(field.name.clone());
 
         // Push the field value, which depends on the type.
-        let values = entry.column_values_mut("field_value").unwrap();
+        let values = entry.column_values_mut(columns::FIELD_VALUE).unwrap();
         match (field.value, values) {
             (FieldValue::String(x), ValueArray::String(values)) => {
                 values.push(x.to_string())
@@ -88,19 +89,19 @@ pub(crate) fn extract_fields_as_block(
 fn empty_columns_for_field(field_type: FieldType) -> IndexMap<String, Column> {
     IndexMap::from([
         (
-            String::from("timeseries_name"),
+            String::from(columns::TIMESERIES_NAME),
             Column::from(ValueArray::empty(&DataType::String)),
         ),
         (
-            String::from("timeseries_key"),
+            String::from(columns::TIMESERIES_KEY),
             Column::from(ValueArray::empty(&DataType::UInt64)),
         ),
         (
-            String::from("field_name"),
+            String::from(columns::FIELD_NAME),
             Column::from(ValueArray::empty(&DataType::String)),
         ),
         (
-            String::from("field_value"),
+            String::from(columns::FIELD_VALUE),
             Column::from(ValueArray::empty(&DataType::from(field_type))),
         ),
     ])
@@ -108,6 +109,7 @@ fn empty_columns_for_field(field_type: FieldType) -> IndexMap<String, Column> {
 
 #[cfg(test)]
 mod tests {
+    use super::columns;
     use super::extract_fields_as_block;
     use crate::native::block::ValueArray;
     use oximeter::Sample;
@@ -151,7 +153,7 @@ mod tests {
         );
 
         let strings = block
-            .column_values("field_value")
+            .column_values(columns::FIELD_VALUE)
             .expect("Should have a column named `field_value`");
         let ValueArray::String(strings) = strings else {
             panic!("Expected an array of strings, found: {strings:?}");
@@ -178,7 +180,7 @@ mod tests {
             "Should have extracted 1 row for the UUID field table"
         );
         let ids = block
-            .column_values("field_value")
+            .column_values(columns::FIELD_VALUE)
             .expect("Should have a column named `field_value`");
         let ValueArray::Uuid(ids) = ids else {
             panic!("Expected an array of strings, found: {ids:?}");

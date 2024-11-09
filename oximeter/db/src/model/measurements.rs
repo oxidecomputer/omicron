@@ -6,6 +6,8 @@
 
 // Copyright 2024 Oxide Computer Company
 
+use super::columns;
+use crate::model::columns::Quantile;
 use crate::native::block::Block;
 use crate::native::block::Column;
 use crate::native::block::DataType;
@@ -21,6 +23,7 @@ use oximeter::types::MissingDatum;
 use oximeter::Datum;
 use oximeter::DatumType;
 use oximeter::Sample;
+use strum::IntoEnumIterator as _;
 
 /// Extract the table name and a data block for a sample's measurement.
 pub fn extract_measurement_as_block(sample: &Sample) -> (String, Block) {
@@ -45,15 +48,15 @@ pub(crate) fn extract_measurement_as_block_impl(
     // Construct the column arrays for those columns shared by all tables.
     let mut columns = IndexMap::from([
         (
-            String::from("timeseries_name"),
+            String::from(columns::TIMESERIES_NAME),
             Column::from(ValueArray::from(vec![timeseries_name])),
         ),
         (
-            String::from("timeseries_key"),
+            String::from(columns::TIMESERIES_KEY),
             Column::from(ValueArray::from(vec![timeseries_key])),
         ),
         (
-            String::from("timestamp"),
+            String::from(columns::TIMESTAMP),
             Column::from(ValueArray::DateTime64 {
                 precision: Precision::MAX,
                 tz: Tz::UTC,
@@ -66,7 +69,7 @@ pub(crate) fn extract_measurement_as_block_impl(
     // Insert an array of start times if needed.
     if let Some(start_time) = measurement.start_time() {
         columns.insert(
-            String::from("start_time"),
+            String::from(columns::START_TIME),
             Column::from(ValueArray::DateTime64 {
                 precision: Precision::MAX,
                 tz: Tz::UTC,
@@ -92,22 +95,22 @@ pub(crate) fn extract_measurement_as_block_impl(
 macro_rules! insert_missing_histogram {
     ($columns:ident, $data_type:path, $zero:literal, $sum:literal) => {
         $columns.insert(
-            String::from("bins"),
+            String::from(columns::BINS),
             Column::from(ValueArray::Array {
                 inner_type: $data_type,
                 values: vec![ValueArray::empty(&$data_type)],
             }),
         );
         $columns.insert(
-            String::from("min"),
+            String::from(columns::MIN),
             Column::from(ValueArray::from(vec![$zero])),
         );
         $columns.insert(
-            String::from("max"),
+            String::from(columns::MAX),
             Column::from(ValueArray::from(vec![$zero])),
         );
         $columns.insert(
-            String::from("sum_of_samples"),
+            String::from(columns::SUM_OF_SAMPLES),
             Column::from(ValueArray::from(vec![$sum])),
         );
     };
@@ -117,7 +120,7 @@ macro_rules! insert_missing_histogram {
 macro_rules! insert_datum_inner {
     ($columns:ident, $missing:literal, $datum:expr) => {
         $columns.insert(
-            String::from("datum"),
+            String::from(columns::DATUM),
             Column::from(ValueArray::Nullable {
                 is_null: vec![$missing],
                 values: Box::new(ValueArray::from(vec![$datum])),
@@ -186,7 +189,7 @@ fn insert_datum_columns(datum: &Datum, columns: &mut IndexMap<String, Column>) {
             };
             let data_type = values.data_type();
             let column = Column { values, data_type };
-            columns.insert(String::from("datum"), column);
+            columns.insert(String::from(columns::DATUM), column);
         }
         Datum::CumulativeI64(x) => {
             insert_datum!(columns, x.value());
@@ -319,33 +322,33 @@ fn build_missing_measurement_columns(
     // beyond the fact that this is a missing histogram.
     if missing.datum_type().is_histogram() {
         columns.insert(
-            String::from("counts"),
+            String::from(columns::COUNTS),
             Column::from(ValueArray::Array {
                 inner_type: DataType::UInt64,
                 values: vec![ValueArray::UInt64(vec![])],
             }),
         );
         columns.insert(
-            String::from("squared_mean"),
+            String::from(columns::SQUARED_MEAN),
             Column::from(ValueArray::Float64(vec![0f64])),
         );
-        for prefix in ["p50", "p90", "p99"] {
+        for p in Quantile::iter() {
             columns.insert(
-                format!("{prefix}_marker_heights"),
+                p.marker_heights().to_string(),
                 Column::from(ValueArray::Array {
                     inner_type: DataType::Float64,
                     values: vec![ValueArray::Float64(vec![])],
                 }),
             );
             columns.insert(
-                format!("{prefix}_marker_positions"),
+                p.marker_positions().to_string(),
                 Column::from(ValueArray::Array {
                     inner_type: DataType::UInt64,
                     values: vec![ValueArray::UInt64(vec![])],
                 }),
             );
             columns.insert(
-                format!("{prefix}_desired_marker_positions"),
+                p.desired_marker_positions().to_string(),
                 Column::from(ValueArray::Array {
                     inner_type: DataType::Float64,
                     values: vec![ValueArray::Float64(vec![])],
@@ -363,7 +366,7 @@ fn build_missing_measurement_columns(
             tz: Tz::UTC,
             values: vec![Tz::UTC.from_utc_datetime(&start_time.naive_utc())],
         };
-        columns.insert(String::from("start_time"), Column::from(values));
+        columns.insert(String::from(columns::START_TIME), Column::from(values));
     }
     columns.into_iter()
 }
@@ -420,41 +423,40 @@ where
     let mut columns = IndexMap::with_capacity(15);
     let (bins, counts) = hist.bins_and_counts();
     columns.insert(
-        String::from("bins"),
+        String::from(columns::BINS),
         Column::from(ValueArray::Array {
             inner_type: T::DATA_TYPE,
             values: vec![T::self_as_value_array(bins)],
         }),
     );
     columns.insert(
-        String::from("counts"),
+        String::from(columns::COUNTS),
         Column::from(ValueArray::Array {
             inner_type: DataType::UInt64,
             values: vec![ValueArray::from(counts)],
         }),
     );
     columns.insert(
-        String::from("min"),
+        String::from(columns::MIN),
         Column::from(T::self_as_value_array(vec![hist.min()])),
     );
     columns.insert(
-        String::from("max"),
+        String::from(columns::MAX),
         Column::from(T::self_as_value_array(vec![hist.max()])),
     );
     columns.insert(
-        String::from("sum_of_samples"),
+        String::from(columns::SUM_OF_SAMPLES),
         Column::from(T::width_as_value_array(vec![hist.sum_of_samples()])),
     );
     columns.insert(
-        String::from("squared_mean"),
+        String::from(columns::SQUARED_MEAN),
         Column::from(ValueArray::from(vec![hist.squared_mean()])),
     );
-    const QUANTILE_PREFIXES: [&str; 3] = ["p50", "p90", "p99"];
-    for (prefix, quantile) in
-        QUANTILE_PREFIXES.iter().zip([hist.p50q(), hist.p90q(), hist.p99q()])
+    for (p, quantile) in
+        Quantile::iter().zip([hist.p50q(), hist.p90q(), hist.p99q()])
     {
         columns.insert(
-            format!("{prefix}_marker_heights"),
+            p.marker_heights().to_string(),
             Column::from(ValueArray::Array {
                 inner_type: DataType::Float64,
                 values: vec![ValueArray::from(
@@ -463,7 +465,7 @@ where
             }),
         );
         columns.insert(
-            format!("{prefix}_marker_positions"),
+            p.marker_positions().to_string(),
             Column::from(ValueArray::Array {
                 inner_type: DataType::UInt64,
                 values: vec![ValueArray::from(
@@ -472,7 +474,7 @@ where
             }),
         );
         columns.insert(
-            format!("{prefix}_desired_marker_positions"),
+            p.desired_marker_positions().to_string(),
             Column::from(ValueArray::Array {
                 inner_type: DataType::Float64,
                 values: vec![ValueArray::from(
@@ -489,6 +491,8 @@ mod tests {
     use super::build_histogram_measurement_columns;
     use super::extract_measurement_as_block;
     use super::insert_datum_columns;
+    use crate::model::columns;
+    use crate::model::columns::Quantile;
     use crate::native::block::DataType;
     use crate::native::block::ValueArray;
     use bytes::Bytes;
@@ -528,7 +532,7 @@ mod tests {
                 1,
                 "Should only insert 1 column for a scalar datum"
             );
-            let values = &columns.get("datum").unwrap().values;
+            let values = &columns.get(columns::DATUM).unwrap().values;
             let data_type = DataType::column_type_for(datum.datum_type());
             assert_eq!(
                 values.data_type(),
@@ -546,8 +550,9 @@ mod tests {
             .collect::<IndexMap<_, _>>();
         assert_eq!(columns.len(), 15, "Incorrect number of histogram columns");
 
-        let bins =
-            columns.get("bins").expect("Should have inserted a `bins` column");
+        let bins = columns
+            .get(columns::BINS)
+            .expect("Should have inserted a `bins` column");
         let ValueArray::Array { inner_type, values } = &bins.values else {
             panic!("Expected an array column for `bins`, found {bins:#?}");
         };
@@ -565,7 +570,7 @@ mod tests {
         );
 
         let counts = columns
-            .get("counts")
+            .get(columns::COUNTS)
             .expect("Should have inserted a `counts` column");
         let ValueArray::Array { inner_type, values } = &counts.values else {
             panic!("Expected an array column for `counts`, found {counts:#?}");
@@ -631,7 +636,7 @@ mod tests {
         );
 
         let col = block
-            .column_values("timeseries_name")
+            .column_values(columns::TIMESERIES_NAME)
             .expect("Should have a `timeseries_name` column");
         let ValueArray::String(names) = col else {
             panic!("Expected a String column for the names, found {col:#?}");
@@ -639,7 +644,7 @@ mod tests {
         assert_eq!(names, &[sample.timeseries_name.to_string()]);
 
         let col = block
-            .column_values("timeseries_key")
+            .column_values(columns::TIMESERIES_KEY)
             .expect("Should have a `timeseries_key` column");
         let ValueArray::UInt64(keys) = col else {
             panic!("Expected a UInt64 column for the keys, found {col:#?}");
@@ -647,15 +652,16 @@ mod tests {
         assert_eq!(keys, &[crate::timeseries_key(&sample)]);
 
         let col = block
-            .column_values("timestamp")
+            .column_values(columns::TIMESTAMP)
             .expect("Should have a `timestamp` column");
         let ValueArray::DateTime64 { values, .. } = col else {
             panic!("Expected a DateTime64 column for the timestamps, found {col:#?}");
         };
         assert_eq!(values, &[sample.measurement.timestamp()]);
 
-        let col =
-            block.column_values("datum").expect("Should have a `datum` column");
+        let col = block
+            .column_values(columns::DATUM)
+            .expect("Should have a `datum` column");
         let ValueArray::Nullable { is_null, values } = col else {
             panic!(
                 "Expected a Nullable(Int32) column for datum, found {col:#?}"
@@ -695,7 +701,7 @@ mod tests {
         );
 
         let col = block
-            .column_values("timeseries_name")
+            .column_values(columns::TIMESERIES_NAME)
             .expect("Should have a `timeseries_name` column");
         let ValueArray::String(names) = col else {
             panic!("Expected a String column for the names, found {col:#?}");
@@ -703,7 +709,7 @@ mod tests {
         assert_eq!(names, &[sample.timeseries_name.to_string()]);
 
         let col = block
-            .column_values("timeseries_key")
+            .column_values(columns::TIMESERIES_KEY)
             .expect("Should have a `timeseries_key` column");
         let ValueArray::UInt64(keys) = col else {
             panic!("Expected a UInt64 column for the keys, found {col:#?}");
@@ -711,7 +717,7 @@ mod tests {
         assert_eq!(keys, &[crate::timeseries_key(&sample)]);
 
         let col = block
-            .column_values("start_time")
+            .column_values(columns::START_TIME)
             .expect("Should have a `start_time` column");
         let ValueArray::DateTime64 { values, .. } = col else {
             panic!("Expected a DateTime64 column for the start_time, found {col:#?}");
@@ -719,15 +725,16 @@ mod tests {
         assert_eq!(values, &[sample.measurement.start_time().unwrap()]);
 
         let col = block
-            .column_values("timestamp")
+            .column_values(columns::TIMESTAMP)
             .expect("Should have a `timestamp` column");
         let ValueArray::DateTime64 { values, .. } = col else {
             panic!("Expected a DateTime64 column for the timestamps, found {col:#?}");
         };
         assert_eq!(values, &[sample.measurement.timestamp()]);
 
-        let col =
-            block.column_values("datum").expect("Should have a `datum` column");
+        let col = block
+            .column_values(columns::DATUM)
+            .expect("Should have a `datum` column");
         let ValueArray::Nullable { is_null, values } = col else {
             panic!("Expected a Nullable(UInt64) column for the datum, found {col:#?}");
         };
@@ -762,7 +769,7 @@ mod tests {
         );
 
         let col = block
-            .column_values("timeseries_name")
+            .column_values(columns::TIMESERIES_NAME)
             .expect("Should have a `timeseries_name` column");
         let ValueArray::String(names) = col else {
             panic!("Expected a String column for the names, found {col:#?}");
@@ -770,7 +777,7 @@ mod tests {
         assert_eq!(names, &[sample.timeseries_name.to_string()]);
 
         let col = block
-            .column_values("timeseries_key")
+            .column_values(columns::TIMESERIES_KEY)
             .expect("Should have a `timeseries_key` column");
         let ValueArray::UInt64(keys) = col else {
             panic!("Expected a UInt64 column for the keys, found {col:#?}");
@@ -778,7 +785,7 @@ mod tests {
         assert_eq!(keys, &[crate::timeseries_key(&sample)]);
 
         let col = block
-            .column_values("start_time")
+            .column_values(columns::START_TIME)
             .expect("Should have a `start_time` column");
         let ValueArray::DateTime64 { values, .. } = col else {
             panic!("Expected a DateTime64 column for the start_time, found {col:#?}");
@@ -786,7 +793,7 @@ mod tests {
         assert_eq!(values, &[sample.measurement.start_time().unwrap()]);
 
         let col = block
-            .column_values("timestamp")
+            .column_values(columns::TIMESTAMP)
             .expect("Should have a `timestamp` column");
         let ValueArray::DateTime64 { values, .. } = col else {
             panic!("Expected a DateTime64 column for the timestamps, found {col:#?}");
@@ -794,23 +801,23 @@ mod tests {
         assert_eq!(values, &[sample.measurement.timestamp()]);
 
         for name in [
-            "bins",
-            "counts",
-            "min",
-            "max",
-            "sum_of_samples",
-            "squared_mean",
-            "p50_marker_positions",
-            "p50_marker_heights",
-            "p50_desired_marker_heights",
-            "p90_marker_positions",
-            "p90_marker_heights",
-            "p90_desired_marker_heights",
-            "p99_marker_positions",
-            "p99_marker_heights",
-            "p99_desired_marker_heights",
+            columns::BINS,
+            columns::COUNTS,
+            columns::MIN,
+            columns::MAX,
+            columns::SUM_OF_SAMPLES,
+            columns::SQUARED_MEAN,
+            Quantile::P50.marker_heights(),
+            Quantile::P50.marker_positions(),
+            Quantile::P50.desired_marker_positions(),
+            Quantile::P90.marker_heights(),
+            Quantile::P90.marker_positions(),
+            Quantile::P90.desired_marker_positions(),
+            Quantile::P99.marker_heights(),
+            Quantile::P99.marker_positions(),
+            Quantile::P99.desired_marker_positions(),
         ] {
-            let _ = block.column_values("bins").unwrap_or_else(|_| {
+            let _ = block.column_values(name).unwrap_or_else(|_| {
                 panic!("Should have a column named `{name}`")
             });
         }
