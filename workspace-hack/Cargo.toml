@@ -95,7 +95,7 @@ proc-macro2 = { version = "1.0.87" }
 qorb = { version = "0.2.0", features = ["qtop"] }
 quote = { version = "1.0.37" }
 rand = { version = "0.8.5", features = ["small_rng"] }
-regex = { version = "1.11.0" }
+regex = { version = "1.11.1" }
 regex-automata = { version = "0.4.8", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.5" }
 reqwest = { version = "0.12.8", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
@@ -214,7 +214,7 @@ proc-macro2 = { version = "1.0.87" }
 qorb = { version = "0.2.0", features = ["qtop"] }
 quote = { version = "1.0.37" }
 rand = { version = "0.8.5", features = ["small_rng"] }
-regex = { version = "1.11.0" }
+regex = { version = "1.11.1" }
 regex-automata = { version = "0.4.8", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.5" }
 reqwest = { version = "0.12.8", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
