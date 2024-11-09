@@ -516,7 +516,7 @@ postgres-protocol = "0.6.7"
 predicates = "3.1.2"
 pretty_assertions = "1.4.1"
 pretty-hex = "0.4.1"
-prettyplease = { version = "0.2.22", features = ["verbatim"] }
+prettyplease = { version = "0.2.25", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = "0.8.0"
 progenitor-client = "0.8.0"
