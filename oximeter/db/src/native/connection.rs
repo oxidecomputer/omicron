@@ -268,8 +268,8 @@ impl Connection {
                         ServerPacket::Data(block) => {
                             probes::data__packet__received!(|| {
                                 (
-                                    block.n_columns,
-                                    block.n_rows,
+                                    block.n_columns(),
+                                    block.n_rows(),
                                     block
                                         .columns
                                         .iter()
@@ -287,13 +287,13 @@ impl Connection {
                             // a block with zero rows that describes the table
                             // structure, so any block with a non-zero number of
                             // rows is an error here.
-                            if block.n_rows != 0 {
+                            if block.n_rows() != 0 {
                                 break Err(Error::ExpectedEmptyDataBlock);
                             }
 
                             // Don't concatenate the block, but check that its
                             // structure matches what we're about to insert.
-                            if !block.matches_structure(&block_to_insert) {
+                            if !block_to_insert.matches_structure(&block) {
                                 break Err(Error::MismatchedBlockStructure);
                             }
 
@@ -322,7 +322,7 @@ impl Connection {
                         }
                         ServerPacket::TableColumns(columns) => {
                             if !block_to_insert
-                                .matches_table_description(&columns)
+                                .insertable_into(&columns)
                             {
                                 break Err(Error::MismatchedBlockStructure);
                             }
@@ -355,8 +355,8 @@ impl Connection {
                     ServerPacket::Data(block) => {
                         probes::data__packet__received!(|| {
                             (
-                                block.n_columns,
-                                block.n_rows,
+                                block.n_columns(),
+                                block.n_rows(),
                                 block
                                     .columns
                                     .iter()
@@ -406,9 +406,12 @@ impl Connection {
 
 #[cfg(test)]
 mod tests {
+    use crate::native::block::Block;
+    use crate::native::block::Column;
     use crate::native::block::DataType;
     use crate::native::block::ValueArray;
     use crate::native::connection::Connection;
+    use indexmap::IndexMap;
     use omicron_test_utils::dev::clickhouse::ClickHouseDeployment;
     use omicron_test_utils::dev::test_setup_log;
     use std::sync::Arc;
@@ -440,8 +443,8 @@ mod tests {
             .expect("Should have run query");
         println!("{data:#?}");
         let block = data.data.as_ref().expect("Should have a data block");
-        assert_eq!(block.n_columns, 1);
-        assert_eq!(block.n_rows, 10);
+        assert_eq!(block.n_columns(), 1);
+        assert_eq!(block.n_rows(), 10);
         let (name, col) = block.columns.first().unwrap();
         assert_eq!(name, "number");
         let ValueArray::UInt64(values) = &col.values else {
@@ -467,8 +470,8 @@ mod tests {
             .expect("Should have run query");
         println!("{data:#?}");
         let block = data.data.as_ref().expect("Should have a data block");
-        assert_eq!(block.n_columns, 1);
-        assert_eq!(block.n_rows, 10);
+        assert_eq!(block.n_columns(), 1);
+        assert_eq!(block.n_rows(), 10);
         let (name, col) = block.columns.first().unwrap();
         assert_eq!(name, "number");
         assert_eq!(
@@ -503,8 +506,8 @@ mod tests {
             .expect("Should have run query");
         println!("{data:#?}");
         let block = data.data.as_ref().expect("Should have a data block");
-        assert_eq!(block.n_columns, 1);
-        assert_eq!(block.n_rows, 2);
+        assert_eq!(block.n_columns(), 1);
+        assert_eq!(block.n_rows(), 2);
         let (name, col) = block.columns.first().unwrap();
         assert_eq!(name, "arr");
         assert_eq!(col.data_type, DataType::Array(Box::new(DataType::UInt8)));
@@ -540,8 +543,8 @@ mod tests {
             .expect("Should have run query");
         println!("{data:#?}");
         let block = data.data.as_ref().expect("Should have a data block");
-        assert_eq!(block.n_columns, 1);
-        assert_eq!(block.n_rows, 1);
+        assert_eq!(block.n_columns(), 1);
+        assert_eq!(block.n_rows(), 1);
         let (name, col) = block.columns.first().unwrap();
         assert_eq!(name, "arr");
         assert_eq!(
@@ -655,11 +658,103 @@ mod tests {
         let Some(block) = &result.data else {
             panic!("Should have received data, but found None");
         };
-        assert_eq!(block.n_columns, 1);
-        assert_eq!(block.n_rows, 1);
+        assert_eq!(block.n_columns(), 1);
+        assert_eq!(block.n_rows(), 1);
         let (name, col) = block.columns.first().unwrap();
         assert_eq!(name, "timestamp");
         assert!(matches!(col.data_type, DataType::DateTime(_)));
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_insert_and_select_data() {
+        let logctx = test_setup_log("test_insert_and_select_data");
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
+            .await
+            .expect("Failed to start ClickHouse");
+        let mut conn =
+            Connection::new(db.native_address().into()).await.unwrap();
+        conn.query("CREATE TABLE tmp (x UInt8, name String) ENGINE = Memory")
+            .await
+            .expect("Failed to create test table");
+
+        let block = Block {
+            name: String::new(),
+            info: Default::default(),
+            columns: IndexMap::from([
+                (
+                    String::from("x"),
+                    Column::from(ValueArray::from(vec![0u8, 1, 2, 3])),
+                ),
+                (
+                    String::from("name"),
+                    Column::from(ValueArray::from(vec![
+                        String::from("a"),
+                        String::from("b"),
+                        String::from("c"),
+                        String::from("d"),
+                    ])),
+                ),
+            ]),
+        };
+        let _ = conn
+            .insert("INSERT INTO tmp FORMAT Native", block.clone())
+            .await
+            .expect("Should have inserted data");
+
+        let result = conn
+            .query("SELECT * FROM tmp")
+            .await
+            .expect("Failed to select data");
+        let actual_block =
+            result.data.as_ref().expect("Failed to select block");
+        assert_eq!(
+            &block, actual_block,
+            "Inserted and selected data do not match"
+        );
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_insert_and_select_uuid() {
+        let logctx = test_setup_log("test_insert_and_select_uuid");
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
+            .await
+            .expect("Failed to start ClickHouse");
+        let mut conn =
+            Connection::new(db.native_address().into()).await.unwrap();
+        conn.query("CREATE TABLE tmp (x UUID) ENGINE = Memory")
+            .await
+            .expect("Failed to create test table");
+
+        const ID: uuid::Uuid =
+            uuid::uuid!("00112233-4455-6677-8899-aabbccddeeff");
+        let block = Block {
+            name: String::new(),
+            info: Default::default(),
+            columns: IndexMap::from([(
+                String::from("x"),
+                Column::from(ValueArray::from(vec![ID])),
+            )]),
+        };
+        let _ = conn
+            .insert("INSERT INTO tmp FORMAT Native", block.clone())
+            .await
+            .expect("Should have inserted data");
+        let result = conn
+            .query("SELECT toString(x) AS x FROM tmp")
+            .await
+            .expect("Failed to select data");
+        let actual_block =
+            result.data.as_ref().expect("Failed to select block");
+        let ValueArray::String(ids) = actual_block.column_values("x").unwrap()
+        else {
+            panic!();
+        };
+        let id: uuid::Uuid = ids[0].parse().unwrap();
+        assert_eq!(id, ID, "UUID stored incorrectly in ClickHouse");
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

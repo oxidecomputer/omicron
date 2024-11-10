@@ -35,7 +35,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 mod client;
-pub mod model;
+pub(crate) mod model;
 pub mod native;
 #[cfg(any(feature = "oxql", test))]
 pub mod oxql;

@@ -30,6 +30,7 @@ use nom::sequence::preceded;
 use nom::sequence::separated_pair;
 use nom::sequence::tuple;
 use nom::IResult;
+use oximeter::DatumType;
 use std::fmt;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
@@ -51,10 +52,6 @@ pub struct Block {
     pub name: String,
     /// Details about the block.
     pub info: BlockInfo,
-    /// The number of columns in the block.
-    pub n_columns: u64,
-    /// The number of rows in the block.
-    pub n_rows: u64,
     /// Mapping from column names to the column data.
     pub columns: IndexMap<String, Column>,
 }
@@ -65,6 +62,16 @@ impl Block {
         self.columns.values().map(|col| &col.data_type)
     }
 
+    /// Return the number of columns in the block.
+    pub fn n_columns(&self) -> usize {
+        self.columns.len()
+    }
+
+    /// Return the number of rows in the block.
+    pub fn n_rows(&self) -> usize {
+        self.columns.first().map(|(_name, col)| col.len()).unwrap_or(0)
+    }
+
     /// Return true if the provided block is empty, meaning zero columns and
     /// rows.
     ///
@@ -72,7 +79,7 @@ impl Block {
     /// Blocks with zero rows are used to communicate the column names and
     /// types, and are _not_ considered empty.
     pub fn is_empty(&self) -> bool {
-        self.n_columns == 0 && self.n_rows == 0
+        self.n_columns() == 0 && self.n_rows() == 0
     }
 
     /// Create an empty block.
@@ -80,8 +87,6 @@ impl Block {
         Self {
             name: String::new(),
             info: BlockInfo::default(),
-            n_columns: 0,
-            n_rows: 0,
             columns: IndexMap::new(),
         }
     }
@@ -93,28 +98,25 @@ impl Block {
         if !self.matches_structure(&block) {
             return Err(Error::MismatchedBlockStructure);
         }
-        let n_new_rows = block.n_rows;
         for (our_col, their_col) in
             self.columns.values_mut().zip(block.columns.into_values())
         {
             our_col.concat(their_col).expect("Checked above");
         }
-        self.n_rows += n_new_rows;
         Ok(())
     }
 
-    /// Return true if this block matches the structure of the other.
-    ///
-    /// This means it has the same column names and types.
+    /// Return true if this block matches the names and types of the other
+    /// block.
     pub fn matches_structure(&self, block: &Block) -> bool {
-        if self.n_columns != block.n_columns {
+        if self.n_columns() != block.n_columns() {
             return false;
         }
-        for (us, them) in self.columns.iter().zip(block.columns.iter()) {
-            if us.0 != them.0 {
+        for (their_name, their_column) in block.columns.iter() {
+            let Some(our_column) = self.columns.get(their_name) else {
                 return false;
-            }
-            if us.1.data_type != them.1.data_type {
+            };
+            if our_column.data_type != their_column.data_type {
                 return false;
             }
         }
@@ -129,22 +131,68 @@ impl Block {
             .ok_or_else(|| Error::NoSuchColumn(name.to_string()))
     }
 
-    pub(crate) fn matches_table_description(
+    /// Return a mutable reference to values of the named column, if it exists.
+    pub fn column_values_mut(
+        &mut self,
+        name: &str,
+    ) -> Result<&mut ValueArray, Error> {
+        self.columns
+            .get_mut(name)
+            .map(|col| &mut col.values)
+            .ok_or_else(|| Error::NoSuchColumn(name.to_string()))
+    }
+
+    /// Return `true` if this block can be inserted into the described table.
+    ///
+    /// This checks that the block contains all the required columns, and that
+    /// they all have the correct types. For columns with a default expression,
+    /// the block _may_ include values for that column. For columns that are
+    /// `MATERIALIZED`, the block may _not_ include values for that column.
+    ///
+    /// See
+    /// <https://clickhouse.com/docs/en/sql-reference/statements/create/table#default_values>
+    /// for more details on these kinds of columns.
+    pub(crate) fn insertable_into(
         &self,
         columns: &[ColumnDescription],
     ) -> bool {
-        if self.n_columns != columns.len() as u64 {
-            return false;
-        }
-        for (our_col, their_col) in self.columns.iter().zip(columns.iter()) {
-            if our_col.0 != &their_col.name {
+        let mut n_insertable_columns = 0;
+        for description in columns.iter() {
+            // Ensure that the block does not have this column if it is
+            // materialized.
+            if description.defaults.has_materialized {
+                if self.columns.contains_key(&description.name) {
+                    return false;
+                }
+                continue;
+            }
+
+            // This column is "insertable", meaning the block may contain it.
+            n_insertable_columns += 1;
+
+            // If the column has a default, then the block may contain values for
+            // it. If it does, they need to match target type.
+            if description.defaults.has_default {
+                if let Some(col) = self.columns.get(&description.name) {
+                    if col.data_type != description.data_type {
+                        return false;
+                    }
+                }
+                continue;
+            }
+
+            // The column is required, ensure we have one of the right type.
+            let Some(col) = self.columns.get(&description.name) else {
+                return false;
+            };
+            if col.data_type != description.data_type {
                 return false;
             }
-            if our_col.1.data_type != their_col.data_type {
-                return false;
-            }
         }
-        true
+
+        // We cannot have more columns in the block than are "insertable" based
+        // on the provided column descriptions.
+        self.n_columns() <= n_insertable_columns
     }
 }
 
@@ -242,6 +290,7 @@ impl Column {
 /// An array of singly-typed data values from the server.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ValueArray {
+    Bool(Vec<bool>),
     UInt8(Vec<u8>),
     UInt16(Vec<u16>),
     UInt32(Vec<u32>),
@@ -269,6 +318,7 @@ pub enum ValueArray {
 impl ValueArray {
     pub fn len(&self) -> usize {
         match self {
+            ValueArray::Bool(inner) => inner.len(),
             ValueArray::UInt8(inner) => inner.len(),
             ValueArray::UInt16(inner) => inner.len(),
             ValueArray::UInt32(inner) => inner.len(),
@@ -297,6 +347,7 @@ impl ValueArray {
     /// Return an empty value array of the provided type.
     pub fn empty(data_type: &DataType) -> ValueArray {
         match data_type {
+            DataType::Bool => ValueArray::Bool(vec![]),
             DataType::UInt8 => ValueArray::UInt8(vec![]),
             DataType::UInt16 => ValueArray::UInt16(vec![]),
             DataType::UInt32 => ValueArray::UInt32(vec![]),
@@ -343,6 +394,9 @@ impl ValueArray {
     /// This panics if the two value arrays do not have the same types.
     fn concat(&mut self, rhs: ValueArray) {
         match (self, rhs) {
+            (ValueArray::Bool(us), ValueArray::Bool(mut them)) => {
+                us.append(&mut them)
+            }
             (ValueArray::UInt8(us), ValueArray::UInt8(mut them)) => {
                 us.append(&mut them)
             }
@@ -424,6 +478,7 @@ impl ValueArray {
     /// Return the data type for this array of values.
     pub fn data_type(&self) -> DataType {
         match self {
+            ValueArray::Bool(_) => DataType::Bool,
             ValueArray::UInt8(_) => DataType::UInt8,
             ValueArray::UInt16(_) => DataType::UInt16,
             ValueArray::UInt32(_) => DataType::UInt32,
@@ -468,6 +523,7 @@ macro_rules! impl_value_array_from_vec {
     };
 }
 
+impl_value_array_from_vec!(bool, Bool);
 impl_value_array_from_vec!(u8, UInt8);
 impl_value_array_from_vec!(u16, UInt16);
 impl_value_array_from_vec!(u32, UInt32);
@@ -511,7 +567,8 @@ macro_rules! precision_conversion_func {
     ($tz:expr, $precision:literal) => {{
         |tz, x| {
             const SCALE: i64 = 10i64.pow($precision);
-            const FACTOR: i64 = 10i64.pow(Precision::MAX as u32 - $precision);
+            const FACTOR: i64 =
+                10i64.pow(Precision::MAX_U8 as u32 - $precision);
             let seconds = x.div_euclid(SCALE);
             let nanos = (FACTOR * x.rem_euclid(SCALE)).try_into().unwrap();
             tz.timestamp_opt(seconds, nanos).unwrap()
@@ -520,10 +577,13 @@ macro_rules! precision_conversion_func {
 }
 
 impl Precision {
-    const MAX: u8 = 9;
+    const MAX_U8: u8 = 9;
+
+    /// The maximum supported precision.
+    pub const MAX: Self = Self(Self::MAX_U8);
 
     pub fn new(precision: u8) -> Option<Self> {
-        if precision <= Self::MAX {
+        if precision <= Self::MAX_U8 {
             Some(Self(precision))
         } else {
             None
@@ -590,6 +650,7 @@ impl fmt::Display for Precision {
 /// A type of a column of data.
 #[derive(Clone, Debug, PartialEq)]
 pub enum DataType {
+    Bool,
     UInt8,
     UInt16,
     UInt32,
@@ -612,6 +673,78 @@ pub enum DataType {
     Enum8(IndexMap<i8, String>),
     Nullable(Box<DataType>),
     Array(Box<DataType>),
+}
+
+impl From<oximeter::FieldType> for DataType {
+    fn from(value: oximeter::FieldType) -> Self {
+        match value {
+            oximeter::FieldType::String => DataType::String,
+            oximeter::FieldType::I8 => DataType::Int8,
+            oximeter::FieldType::U8 => DataType::UInt8,
+            oximeter::FieldType::I16 => DataType::Int16,
+            oximeter::FieldType::U16 => DataType::UInt16,
+            oximeter::FieldType::I32 => DataType::Int32,
+            oximeter::FieldType::U32 => DataType::UInt32,
+            oximeter::FieldType::I64 => DataType::Int64,
+            oximeter::FieldType::U64 => DataType::UInt64,
+            // NOTE: We always map IPv4 to IPv6 addresses for storage.
+            oximeter::FieldType::IpAddr => DataType::Ipv6,
+            oximeter::FieldType::Uuid => DataType::Uuid,
+            oximeter::FieldType::Bool => DataType::Bool,
+        }
+    }
+}
+
+impl From<DatumType> for DataType {
+    fn from(value: DatumType) -> Self {
+        match value {
+            DatumType::Bool => DataType::Bool,
+            DatumType::I8 => DataType::Int8,
+            DatumType::U8 => DataType::UInt8,
+            DatumType::I16 => DataType::Int16,
+            DatumType::U16 => DataType::UInt16,
+            DatumType::I32 => DataType::Int32,
+            DatumType::U32 => DataType::UInt32,
+            DatumType::I64 => DataType::Int64,
+            DatumType::U64 => DataType::UInt64,
+            DatumType::F32 => DataType::Float32,
+            DatumType::F64 => DataType::Float64,
+            DatumType::String => DataType::String,
+            DatumType::Bytes => DataType::Array(Box::new(DataType::UInt8)),
+            DatumType::CumulativeI64 => DataType::Int64,
+            DatumType::CumulativeU64 => DataType::UInt64,
+            DatumType::CumulativeF32 => DataType::Float32,
+            DatumType::CumulativeF64 => DataType::Float64,
+            DatumType::HistogramI8 => DataType::Array(Box::new(DataType::Int8)),
+            DatumType::HistogramU8 => {
+                DataType::Array(Box::new(DataType::UInt8))
+            }
+            DatumType::HistogramI16 => {
+                DataType::Array(Box::new(DataType::Int16))
+            }
+            DatumType::HistogramU16 => {
+                DataType::Array(Box::new(DataType::UInt16))
+            }
+            DatumType::HistogramI32 => {
+                DataType::Array(Box::new(DataType::Int32))
+            }
+            DatumType::HistogramU32 => {
+                DataType::Array(Box::new(DataType::UInt32))
+            }
+            DatumType::HistogramI64 => {
+                DataType::Array(Box::new(DataType::Int64))
+            }
+            DatumType::HistogramU64 => {
+                DataType::Array(Box::new(DataType::UInt64))
+            }
+            DatumType::HistogramF32 => {
+                DataType::Array(Box::new(DataType::Float32))
+            }
+            DatumType::HistogramF64 => {
+                DataType::Array(Box::new(DataType::Float64))
+            }
+        }
+    }
 }
 
 impl DataType {
@@ -640,6 +773,7 @@ impl DataType {
     /// around this.
     pub(super) fn nom_parse(s: &str) -> IResult<&str, Self> {
         alt((
+            value(DataType::Bool, tag("Bool")),
             value(DataType::UInt8, tag("UInt8")),
             value(DataType::UInt16, tag("UInt16")),
             value(DataType::UInt32, tag("UInt32")),
@@ -665,11 +799,58 @@ impl DataType {
             alt((datetime, datetime64, enum8, nullable, array)),
         ))(s)
     }
+
+    /// Return the expected database column type for a datum type.
+    ///
+    /// To support missing values, we used nullable types in most `datum`
+    /// columns in the measurement fields. That doesn't work for all types
+    /// though. ClickHouse does not support embedding arrays in nullables, so
+    /// for histograms, we use an empty array to signal a missing sample
+    /// instead. This works only because the `oximeter::Histogram` types does
+    /// _not_ allow an empty set of bins.
+    ///
+    /// So for most datum types, this just wraps the converted type into a
+    /// nullable value. Histograms and byte arrays are the exception.
+    #[cfg(test)]
+    pub(crate) fn column_type_for(datum_type: DatumType) -> DataType {
+        match datum_type {
+            DatumType::Bool
+            | DatumType::I8
+            | DatumType::U8
+            | DatumType::I16
+            | DatumType::U16
+            | DatumType::I32
+            | DatumType::U32
+            | DatumType::I64
+            | DatumType::U64
+            | DatumType::F32
+            | DatumType::F64
+            | DatumType::String
+            | DatumType::CumulativeI64
+            | DatumType::CumulativeU64
+            | DatumType::CumulativeF32
+            | DatumType::CumulativeF64 => {
+                DataType::Nullable(Box::new(DataType::from(datum_type)))
+            }
+            DatumType::Bytes
+            | DatumType::HistogramI8
+            | DatumType::HistogramU8
+            | DatumType::HistogramI16
+            | DatumType::HistogramU16
+            | DatumType::HistogramI32
+            | DatumType::HistogramU32
+            | DatumType::HistogramI64
+            | DatumType::HistogramU64
+            | DatumType::HistogramF32
+            | DatumType::HistogramF64 => DataType::from(datum_type),
+        }
+    }
 }
 
 impl fmt::Display for DataType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            DataType::Bool => write!(f, "Bool"),
             DataType::UInt8 => write!(f, "UInt8"),
             DataType::UInt16 => write!(f, "UInt16"),
             DataType::UInt32 => write!(f, "UInt32"),
@@ -910,7 +1091,7 @@ mod tests {
     #[test]
     fn test_datetime64_conversions() {
         let now = Utc::now();
-        for precision in 0..=Precision::MAX {
+        for precision in 0..=Precision::MAX_U8 {
             let prec = Precision(precision);
             let timestamp =
                 prec.scale(now).expect("Current time should fit in an i64");
@@ -1004,16 +1185,14 @@ mod tests {
         let mut block = Block {
             name: String::new(),
             info: BlockInfo::default(),
-            n_columns: 1,
-            n_rows: values.len() as u64,
             columns: IndexMap::from([(
                 String::from("a"),
                 Column { values: values.clone(), data_type: DataType::UInt64 },
             )]),
         };
         block.concat(block.clone()).unwrap();
-        assert_eq!(block.n_columns, 1);
-        assert_eq!(block.n_rows, values.len() as u64 * 2);
+        assert_eq!(block.n_columns(), 1);
+        assert_eq!(block.n_rows(), values.len() * 2);
         assert_eq!(
             block.columns["a"].values,
             ValueArray::UInt64([data.as_slice(), data.as_slice()].concat())

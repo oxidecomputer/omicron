@@ -117,6 +117,7 @@ fn decode_value_array(
     data_type: &DataType,
 ) -> Result<Option<ValueArray>, Error> {
     let values = match data_type {
+        DataType::Bool => copyin_pod_as_values!(bool, src, n_rows),
         DataType::UInt8 => copyin_pod_as_values!(u8, src, n_rows),
         DataType::UInt16 => copyin_pod_as_values!(u16, src, n_rows),
         DataType::UInt32 => copyin_pod_as_values!(u32, src, n_rows),
@@ -145,9 +146,14 @@ fn decode_value_array(
             ValueArray::from(values)
         }
         DataType::Uuid => {
-            // Similar to IPv6 addresses, ClickHouse encodes UUIDs directly
-            // as 16-octet arrays. We can just decode them as POD.
-            copyin_pod_as_values!(Uuid, src, n_rows)
+            // See notes on serialization method.
+            let mut values = Vec::with_capacity(n_rows);
+            for _ in 0..n_rows {
+                let a = src.get_u64_le();
+                let b = src.get_u64_le();
+                values.push(Uuid::from_u64_pair(a, b));
+            }
+            ValueArray::from(values)
         }
         DataType::Ipv4 => {
             // ClickHouse encodes IPv4 addresses as u32s, but they are
@@ -356,6 +362,7 @@ fn encode_value_array(
     mut dst: &mut BytesMut,
 ) -> Result<(), Error> {
     match values {
+        ValueArray::Bool(values) => copyout_pod_values!(bool, values, dst),
         ValueArray::UInt8(values) => dst.put(values.as_slice()),
         ValueArray::UInt16(values) => copyout_pod_values!(u16, values, dst),
         ValueArray::UInt32(values) => copyout_pod_values!(u32, values, dst),
@@ -378,7 +385,30 @@ fn encode_value_array(
                 io::string::encode(value, &mut dst);
             }
         }
-        ValueArray::Uuid(values) => copyout_pod_values!(Uuid, values, dst),
+        ValueArray::Uuid(values) => {
+            // According to
+            // <https://clickhouse.com/docs/en/native-protocol/columns#uuid>,
+            // UUIDs are serialized as 16-octet byte arrays, which is the native
+            // ABI of the `uuid` crate.
+            //
+            // This appears to be wrong, at least for our version of ClickHouse.
+            // Storing a UUID `0011223344-...` results in the UUID `44332211`
+            // stored in the database. It looks like our version uses two u64s
+            // to represent a UUID, and thus sending a "big-endian" byte array
+            // results in the two 8-octet chunks with swapped bytes.
+            //
+            // To account for this, we need to break the UUID into two 8-octet
+            // items and insert them as if they were LE u64s. That's annoying,
+            // given how prevalent UUIDs are in our system, but there's not much
+            // we can do if we want to have the DB store the right values. That
+            // seems important.
+            dst.reserve(values.len() * std::mem::size_of::<u64>() * 2);
+            for id in values.into_iter() {
+                let (a, b) = id.as_u64_pair();
+                dst.put_u64_le(a);
+                dst.put_u64_le(b);
+            }
+        }
         ValueArray::Ipv4(values) => {
             // IPv4 addresses are always little-endian u32s for some reason.
             dst.reserve(values.len() * std::mem::size_of::<u32>());
@@ -472,6 +502,16 @@ fn encode_value_array(
 // just inserting the running sum of the lengths of all the provided arrays.
 fn encode_array_offsets(arrays: &[ValueArray], dst: &mut BytesMut) {
     let mut current_offset = 0;
+
+    // Handle empty arrays.
+    //
+    // In this case, we still need to push an offset of zero.
+    if arrays.is_empty() {
+        dst.put_u64_le(current_offset);
+        return;
+    }
+
+    // Otherwise, we'll push each accumulated offset
     for arr in arrays {
         current_offset += u64::try_from(arr.len()).unwrap();
         dst.put_u64_le(current_offset);
@@ -575,8 +615,17 @@ mod tests {
             uuid::uuid!("cdf3b321-d349-4f97-9f74-761b3b9bca17"),
         ];
         let src = b"\x03foo\x04UUID\x00";
-        let src =
-            [&src[..], &ids[0].as_bytes()[..], &ids[1].as_bytes()[..]].concat();
+        // See notes in `encode_value_array` for details.
+        let (hi0, lo0) = ids[0].as_u64_pair();
+        let (hi1, lo1) = ids[1].as_u64_pair();
+        let src = [
+            &src[..],
+            &hi0.to_le_bytes(),
+            &lo0.to_le_bytes(),
+            &hi1.to_le_bytes(),
+            &lo1.to_le_bytes(),
+        ]
+        .concat();
         let (name, col) = decode(&mut src.as_slice(), ids.len())
             .expect("Should be infallible")
             .expect("Should have read data column");
@@ -607,6 +656,7 @@ mod tests {
         let now = now64.trunc_subsecs(0);
         let precision = Precision::new(9).unwrap();
         for (typ, values) in [
+            (DataType::Bool, ValueArray::Bool(vec![true, false])),
             (DataType::UInt8, ValueArray::UInt8(vec![0, 1, 2])),
             (DataType::UInt16, ValueArray::UInt16(vec![0, 1, 2])),
             (DataType::UInt32, ValueArray::UInt32(vec![0, 1, 2])),
