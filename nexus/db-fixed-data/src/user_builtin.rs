@@ -68,6 +68,24 @@ pub static USER_INTERNAL_READ: Lazy<UserBuiltinConfig> = Lazy::new(|| {
     )
 });
 
+/// Internal user used by OMDB
+pub static USER_OMDB: Lazy<UserBuiltinConfig> = Lazy::new(|| {
+    UserBuiltinConfig::new_static(
+        "001de000-05e4-4000-8000-0000000009db",
+        "omdb-user",
+        "used by OMDB",
+    )
+});
+
+/// Internal user used by OMDB to read privileged resources
+pub static USER_OMDB_READ: Lazy<UserBuiltinConfig> = Lazy::new(|| {
+    UserBuiltinConfig::new_static(
+        "001de000-05e4-4000-8000-0000000003db",
+        "omdb-read",
+        "used by OMDB",
+    )
+});
+
 /// Internal user used by Nexus when recovering sagas
 pub static USER_SAGA_RECOVERY: Lazy<UserBuiltinConfig> = Lazy::new(|| {
     UserBuiltinConfig::new_static(
@@ -94,6 +112,8 @@ mod test {
     use super::USER_EXTERNAL_AUTHN;
     use super::USER_INTERNAL_API;
     use super::USER_INTERNAL_READ;
+    use super::USER_OMDB;
+    use super::USER_OMDB_READ;
     use super::USER_SAGA_RECOVERY;
     use super::USER_SERVICE_BALANCER;
 
@@ -104,6 +124,8 @@ mod test {
         assert_valid_uuid(&USER_INTERNAL_API.id);
         assert_valid_uuid(&USER_EXTERNAL_AUTHN.id);
         assert_valid_uuid(&USER_INTERNAL_READ.id);
+        assert_valid_uuid(&USER_OMDB.id);
+        assert_valid_uuid(&USER_OMDB_READ.id);
         assert_valid_uuid(&USER_SAGA_RECOVERY.id);
     }
 }

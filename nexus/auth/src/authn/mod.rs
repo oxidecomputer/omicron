@@ -34,6 +34,8 @@ pub use nexus_db_fixed_data::user_builtin::USER_DB_INIT;
 pub use nexus_db_fixed_data::user_builtin::USER_EXTERNAL_AUTHN;
 pub use nexus_db_fixed_data::user_builtin::USER_INTERNAL_API;
 pub use nexus_db_fixed_data::user_builtin::USER_INTERNAL_READ;
+pub use nexus_db_fixed_data::user_builtin::USER_OMDB;
+pub use nexus_db_fixed_data::user_builtin::USER_OMDB_READ;
 pub use nexus_db_fixed_data::user_builtin::USER_SAGA_RECOVERY;
 pub use nexus_db_fixed_data::user_builtin::USER_SERVICE_BALANCER;
 
@@ -171,6 +173,16 @@ impl Context {
         Context::context_for_builtin_user(USER_INTERNAL_READ.id)
     }
 
+    /// Returns an authenticated context for use by the debugger
+    pub fn omdb_user() -> Context {
+        Context::context_for_builtin_user(USER_OMDB.id)
+    }
+
+    /// Returns an authenticated context for use by the debugger (read-only)
+    pub fn omdb_read() -> Context {
+        Context::context_for_builtin_user(USER_OMDB_READ.id)
+    }
+
     /// Returns an authenticated context for use for authenticating external
     /// requests
     pub fn external_authn() -> Context {
@@ -284,6 +296,8 @@ mod test {
     use super::USER_DB_INIT;
     use super::USER_INTERNAL_API;
     use super::USER_INTERNAL_READ;
+    use super::USER_OMDB;
+    use super::USER_OMDB_READ;
     use super::USER_SAGA_RECOVERY;
     use super::USER_SERVICE_BALANCER;
     use super::USER_TEST_PRIVILEGED;
@@ -311,6 +325,14 @@ mod test {
         let authn = Context::internal_read();
         let actor = authn.actor().unwrap();
         assert_eq!(actor.actor_id(), USER_INTERNAL_READ.id);
+
+        let authn = Context::omdb_user();
+        let actor = authn.actor().unwrap();
+        assert_eq!(actor.actor_id(), USER_OMDB.id);
+
+        let authn = Context::omdb_read();
+        let actor = authn.actor().unwrap();
+        assert_eq!(actor.actor_id(), USER_OMDB_READ.id);
 
         let authn = Context::external_authn();
         let actor = authn.actor().unwrap();

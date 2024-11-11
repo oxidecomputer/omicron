@@ -48,6 +48,26 @@ pub static BUILTIN_ROLE_ASSIGNMENTS: Lazy<Vec<RoleAssignment>> =
                 *FLEET_ID,
                 role_builtin::FLEET_VIEWER.role_name,
             ),
+            // The OMDB user gets the "admin" role on the Fleet.
+            // This is needed to access siloed resources from all silos instead
+            // of reimplementing authenticated queries specifically for OMDB's use
+            RoleAssignment::new(
+                IdentityType::UserBuiltin,
+                user_builtin::USER_OMDB.id,
+                role_builtin::FLEET_ADMIN.resource_type,
+                *FLEET_ID,
+                role_builtin::FLEET_ADMIN.role_name,
+            ),
+            // The "USER_OMDB_READ" user gets the "viewer" role on the fleet. This is
+            // needed as a user separate from the read-write OMDB to avoid destructive
+            // actions unless forced to.
+            RoleAssignment::new(
+                IdentityType::UserBuiltin,
+                user_builtin::USER_OMDB_READ.id,
+                role_builtin::FLEET_VIEWER.resource_type,
+                *FLEET_ID,
+                role_builtin::FLEET_VIEWER.role_name,
+            ),
             // The "external-authenticator" user gets the "authenticator" role
             // on the sole fleet.  This grants them the ability to create
             // sessions.
