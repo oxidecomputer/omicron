@@ -10,14 +10,13 @@ use crate::native::{self, block::ValueArray, QueryResult};
 use anyhow::Context as _;
 use crossterm::style::Stylize;
 use display_error_chain::DisplayErrorChain;
-use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
-use std::net::{Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, SocketAddr};
 use tabled::{builder::Builder, settings::Style};
 
 /// Run the native SQL shell.
-pub async fn shell() -> anyhow::Result<()> {
-    let addr = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), CLICKHOUSE_TCP_PORT);
+pub async fn shell(addr: IpAddr, port: u16) -> anyhow::Result<()> {
+    let addr = SocketAddr::new(addr, port);
     let mut conn = native::Connection::new(addr)
         .await
         .context("Trying to connect to ClickHouse server")?;
@@ -89,18 +88,14 @@ fn print_query_result(result: QueryResult) {
     if block.is_empty() {
         return;
     }
-    let n_rows = usize::try_from(block.n_rows).unwrap();
-    let mut builder = Builder::with_capacity(
-        n_rows,
-        usize::try_from(block.n_columns).unwrap(),
-    );
+    let mut builder = Builder::with_capacity(block.n_rows(), block.n_columns());
     let mut columns: Vec<_> = block
         .columns
         .values()
         .map(|col| values_to_string(&col.values))
         .collect();
     builder.push_record(block.columns.keys());
-    for _row in 0..n_rows {
+    for _row in 0..block.n_rows() {
         let row = columns.iter_mut().map(|col_iter| col_iter.next().unwrap());
         builder.push_record(row);
     }
@@ -114,6 +109,9 @@ fn values_to_string<'a>(
     values: &'a ValueArray,
 ) -> Box<dyn Iterator<Item = String> + 'a> {
     match values {
+        ValueArray::Bool(vals) => {
+            Box::new(vals.iter().map(ToString::to_string))
+        }
         ValueArray::UInt8(vals) => {
             Box::new(vals.iter().map(ToString::to_string))
         }
@@ -162,8 +160,11 @@ fn values_to_string<'a>(
         ValueArray::Ipv6(vals) => {
             Box::new(vals.iter().map(ToString::to_string))
         }
-        ValueArray::DateTime(vals) => {
+        ValueArray::Date(vals) => {
             Box::new(vals.iter().map(ToString::to_string))
+        }
+        ValueArray::DateTime { values, .. } => {
+            Box::new(values.iter().map(ToString::to_string))
         }
         ValueArray::DateTime64 { values, .. } => {
             Box::new(values.iter().map(ToString::to_string))

@@ -4,7 +4,7 @@
 
 //! Oximeter collector server HTTP API
 
-// Copyright 2023 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
 use crate::OximeterAgent;
 use dropshot::ApiDescription;
@@ -12,12 +12,10 @@ use dropshot::EmptyScanParams;
 use dropshot::HttpError;
 use dropshot::HttpResponseDeleted;
 use dropshot::HttpResponseOk;
-use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::PaginationParams;
 use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::ResultsPage;
-use dropshot::TypedBody;
 use dropshot::WhichPage;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use oximeter_api::*;
@@ -33,19 +31,6 @@ enum OximeterApiImpl {}
 
 impl OximeterApi for OximeterApiImpl {
     type Context = Arc<OximeterAgent>;
-
-    async fn producers_post(
-        request_context: RequestContext<Self::Context>,
-        body: TypedBody<ProducerEndpoint>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let agent = request_context.context();
-        let producer_info = body.into_inner();
-        agent
-            .register_producer(producer_info)
-            .await
-            .map_err(HttpError::from)
-            .map(|_| HttpResponseUpdatedNoContent())
-    }
 
     async fn producers_list(
         request_context: RequestContext<Arc<OximeterAgent>>,

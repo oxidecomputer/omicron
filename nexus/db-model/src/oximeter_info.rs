@@ -9,7 +9,9 @@ use nexus_types::internal_api;
 use uuid::Uuid;
 
 /// A record representing a registered `oximeter` collector.
-#[derive(Queryable, Insertable, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Queryable, Insertable, Selectable, Debug, Clone, Copy, PartialEq, Eq,
+)]
 #[diesel(table_name = oximeter)]
 pub struct OximeterInfo {
     /// The ID for this oximeter instance.

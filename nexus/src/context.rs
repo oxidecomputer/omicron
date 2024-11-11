@@ -210,8 +210,9 @@ impl ServerContext {
         // like console index.html. leaving that out for now so we don't break
         // nexus in dev for everyone
 
-        // Set up DNS Client
-        let (resolver, dns_addrs) = match config.deployment.internal_dns {
+        // Set up DNS Client (both traditional and qorb-based, until we've moved
+        // every consumer over to qorb)
+        let (resolver, qorb_resolver) = match config.deployment.internal_dns {
             nexus_config::InternalDns::FromSubnet { subnet } => {
                 let az_subnet =
                     Ipv6Subnet::<AZ_PREFIX>::new(subnet.net().addr());
@@ -221,20 +222,20 @@ impl ServerContext {
                     az_subnet
                 );
                 let resolver =
-                    internal_dns::resolver::Resolver::new_from_subnet(
+                    internal_dns_resolver::Resolver::new_from_subnet(
                         log.new(o!("component" => "DnsResolver")),
                         az_subnet,
                     )
                     .map_err(|e| {
                         format!("Failed to create DNS resolver: {}", e)
                     })?;
-
-                (
-                    resolver,
-                    internal_dns::resolver::Resolver::servers_from_subnet(
+                let qorb_resolver = internal_dns_resolver::QorbResolver::new(
+                    internal_dns_resolver::Resolver::servers_from_subnet(
                         az_subnet,
                     ),
-                )
+                );
+
+                (resolver, qorb_resolver)
             }
             nexus_config::InternalDns::FromAddress { address } => {
                 info!(
@@ -242,43 +243,62 @@ impl ServerContext {
                     "Setting up resolver using DNS address: {:?}", address
                 );
 
-                let resolver =
-                    internal_dns::resolver::Resolver::new_from_addrs(
-                        log.new(o!("component" => "DnsResolver")),
-                        &[address],
-                    )
-                    .map_err(|e| {
-                        format!("Failed to create DNS resolver: {}", e)
-                    })?;
+                let resolver = internal_dns_resolver::Resolver::new_from_addrs(
+                    log.new(o!("component" => "DnsResolver")),
+                    &[address],
+                )
+                .map_err(|e| format!("Failed to create DNS resolver: {}", e))?;
+                let qorb_resolver =
+                    internal_dns_resolver::QorbResolver::new(vec![address]);
 
-                (resolver, vec![address])
+                (resolver, qorb_resolver)
             }
         };
 
+        // Once this database pool is created, it spawns workers which will
+        // be continually attempting to access database backends.
+        //
+        // It must be explicitly terminated, so be cautious about returning
+        // results beyond this point.
         let pool = match &config.deployment.database {
             nexus_config::Database::FromUrl { url } => {
-                info!(log, "Setting up qorb pool from a single host"; "url" => #?url);
+                info!(
+                    log, "Setting up qorb database pool from a single host";
+                    "url" => #?url,
+                );
                 db::Pool::new_single_host(
                     &log,
                     &db::Config { url: url.clone() },
                 )
             }
             nexus_config::Database::FromDns => {
-                info!(log, "Setting up qorb pool from DNS"; "dns_addrs" => #?dns_addrs);
-                db::Pool::new(&log, dns_addrs)
+                info!(
+                    log, "Setting up qorb database pool from DNS";
+                    "dns_addrs" => ?qorb_resolver.bootstrap_dns_ips(),
+                );
+                db::Pool::new(&log, &qorb_resolver)
             }
         };
 
-        let nexus = Nexus::new_with_id(
+        let pool = Arc::new(pool);
+        let nexus = match Nexus::new_with_id(
             rack_id,
             log.new(o!("component" => "nexus")),
             resolver,
-            pool,
+            qorb_resolver,
+            pool.clone(),
             &producer_registry,
             config,
             Arc::clone(&authz),
         )
-        .await?;
+        .await
+        {
+            Ok(nexus) => nexus,
+            Err(err) => {
+                pool.terminate().await;
+                return Err(err);
+            }
+        };
 
         Ok(Arc::new(ServerContext {
             nexus,

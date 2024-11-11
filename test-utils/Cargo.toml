@@ -43,6 +43,7 @@ uuid.workspace = true
 chrono.workspace = true
 expectorate.workspace = true
 gethostname.workspace = true
+serde.workspace = true
 
 [features]
 seed-gen = ["dep:filetime"]

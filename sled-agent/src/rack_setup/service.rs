@@ -17,7 +17,7 @@
 //! state files that get generated as RSS executes:
 //!
 //! - /pool/int/UUID/config/rss-sled-plan.json (Sled Plan)
-//! - /pool/int/UUID/config/rss-service-plan-v3.json (Service Plan)
+//! - /pool/int/UUID/config/rss-service-plan-v5.json (Service Plan)
 //! - /pool/int/UUID/config/rss-plan-completed.marker (Plan Execution Complete)
 //!
 //! These phases are described below.  As each phase completes, a corresponding
@@ -70,7 +70,6 @@ use crate::bootstrap::early_networking::{
     EarlyNetworkSetup, EarlyNetworkSetupError,
 };
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
-use crate::nexus::d2n_params;
 use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
 };
@@ -81,8 +80,9 @@ use anyhow::{bail, Context};
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use chrono::Utc;
-use internal_dns::resolver::{DnsError, Resolver as DnsResolver};
-use internal_dns::ServiceName;
+use dns_service_client::DnsError;
+use internal_dns_resolver::Resolver as DnsResolver;
+use internal_dns_types::names::ServiceName;
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
@@ -90,8 +90,9 @@ use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
 use nexus_types::deployment::{
-    blueprint_zone_type, Blueprint, BlueprintZoneType, BlueprintZonesConfig,
-    CockroachDbPreserveDowngrade,
+    blueprint_zone_type, Blueprint, BlueprintDatasetConfig,
+    BlueprintDatasetDisposition, BlueprintDatasetsConfig, BlueprintZoneType,
+    BlueprintZonesConfig, CockroachDbPreserveDowngrade,
 };
 use nexus_types::external_api::views::SledState;
 use omicron_common::address::get_sled_address;
@@ -200,7 +201,7 @@ pub enum SetupServiceError {
     Dendrite(String),
 
     #[error("Error during DNS lookup: {0}")]
-    DnsResolver(#[from] internal_dns::resolver::ResolveError),
+    DnsResolver(#[from] internal_dns_resolver::ResolveError),
 
     #[error("Bootstore error: {0}")]
     Bootstore(#[from] bootstore::NodeRequestError),
@@ -714,8 +715,7 @@ impl ServiceInner {
         let blueprint = build_initial_blueprint_from_plan(
             &sled_configs_by_id,
             service_plan,
-        )
-        .map_err(SetupServiceError::ConvertPlanToBlueprint)?;
+        );
 
         info!(self.log, "Nexus address: {}", nexus_address.to_string());
 
@@ -778,7 +778,7 @@ impl ServiceInner {
                                 destination: r.destination,
                                 nexthop: r.nexthop,
                                 vlan_id: r.vlan_id,
-                                local_pref: r.local_pref,
+                                rib_priority: r.rib_priority,
                             })
                             .collect(),
                         addresses: config
@@ -842,6 +842,15 @@ impl ServiceInner {
                                     .clone(),
                                 port_description: lp.port_description.clone(),
                                 management_addrs: lp.management_addrs.clone(),
+                            }
+                        }),
+                        tx_eq: config.tx_eq.as_ref().map(|tx_eq| {
+                            NexusTypes::TxEqConfig {
+                                pre1: tx_eq.pre1,
+                                pre2: tx_eq.pre2,
+                                main: tx_eq.main,
+                                post2: tx_eq.post2,
+                                post1: tx_eq.post1,
                             }
                         }),
                     })
@@ -931,7 +940,7 @@ impl ServiceInner {
             datasets,
             internal_services_ip_pool_ranges,
             certs: config.external_certificates.clone(),
-            internal_dns_zone_config: d2n_params(&service_plan.dns_config),
+            internal_dns_zone_config: service_plan.dns_config.clone(),
             external_dns_zone_name: config.external_dns_zone_name.clone(),
             recovery_silo: config.recovery_silo.clone(),
             rack_network_config,
@@ -1427,17 +1436,11 @@ fn build_sled_configs_by_id(
 fn build_initial_blueprint_from_plan(
     sled_configs_by_id: &BTreeMap<SledUuid, SledConfig>,
     service_plan: &ServicePlan,
-) -> anyhow::Result<Blueprint> {
-    let internal_dns_version =
-        Generation::try_from(service_plan.dns_config.generation)
-            .context("invalid internal dns version")?;
-
-    let blueprint = build_initial_blueprint_from_sled_configs(
+) -> Blueprint {
+    build_initial_blueprint_from_sled_configs(
         sled_configs_by_id,
-        internal_dns_version,
-    );
-
-    Ok(blueprint)
+        service_plan.dns_config.generation,
+    )
 }
 
 pub(crate) fn build_initial_blueprint_from_sled_configs(
@@ -1448,6 +1451,47 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         .iter()
         .map(|(sled_id, sled_config)| (*sled_id, sled_config.disks.clone()))
         .collect();
+
+    let mut blueprint_datasets = BTreeMap::new();
+    for (sled_id, sled_config) in sled_configs_by_id {
+        let mut datasets = BTreeMap::new();
+        for d in sled_config.datasets.datasets.values() {
+            // Only the "Crucible" dataset needs to know the address
+            let address = sled_config.zones.iter().find_map(|z| {
+                if let BlueprintZoneType::Crucible(
+                    blueprint_zone_type::Crucible { address, dataset },
+                ) = &z.zone_type
+                {
+                    if &dataset.pool_name == d.name.pool() {
+                        return Some(*address);
+                    }
+                };
+                None
+            });
+
+            datasets.insert(
+                d.id,
+                BlueprintDatasetConfig {
+                    disposition: BlueprintDatasetDisposition::InService,
+                    id: d.id,
+                    pool: d.name.pool().clone(),
+                    kind: d.name.dataset().clone(),
+                    address,
+                    compression: d.inner.compression,
+                    quota: d.inner.quota,
+                    reservation: d.inner.reservation,
+                },
+            );
+        }
+
+        blueprint_datasets.insert(
+            *sled_id,
+            BlueprintDatasetsConfig {
+                generation: sled_config.datasets.generation,
+                datasets,
+            },
+        );
+    }
 
     let mut blueprint_zones = BTreeMap::new();
     let mut sled_state = BTreeMap::new();
@@ -1475,6 +1519,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         id: Uuid::new_v4(),
         blueprint_zones,
         blueprint_disks,
+        blueprint_datasets,
         sled_state,
         parent_blueprint_id: None,
         internal_dns_version,
@@ -1593,7 +1638,8 @@ mod test {
     use super::{Config, OmicronZonesConfigGenerator};
     use crate::rack_setup::plan::service::{Plan as ServicePlan, SledInfo};
     use nexus_sled_agent_shared::inventory::{
-        Baseboard, Inventory, InventoryDisk, OmicronZoneType, SledRole,
+        Baseboard, Inventory, InventoryDisk, OmicronZoneType,
+        OmicronZonesConfig, SledRole,
     };
     use omicron_common::{
         address::{get_sled_address, Ipv6Subnet, SLED_PREFIX},
@@ -1620,6 +1666,10 @@ mod test {
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::from_gibibytes_u32(16),
                 reservoir_size: ByteCount::from_gibibytes_u32(0),
+                omicron_zones: OmicronZonesConfig {
+                    generation: Generation::new(),
+                    zones: vec![],
+                },
                 disks: (0..u2_count)
                     .map(|i| InventoryDisk {
                         identity: DiskIdentity {

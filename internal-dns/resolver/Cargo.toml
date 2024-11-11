@@ -1,0 +1,35 @@
+[package]
+name = "internal-dns-resolver"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+futures.workspace = true
+hickory-resolver.workspace = true
+internal-dns-types.workspace = true
+omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
+qorb.workspace = true
+reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
+slog.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true
+assert_matches.workspace = true
+dropshot.workspace = true
+dns-server.workspace = true
+dns-service-client.workspace = true
+expectorate.workspace = true
+omicron-test-utils.workspace = true
+omicron-uuid-kinds.workspace = true
+progenitor.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sled.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = [ "full" ] }

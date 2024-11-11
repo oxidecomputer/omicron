@@ -9,7 +9,7 @@ use nexus_db_queries::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use nexus_db_queries::authz::{self};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::fixed_data::silo::{DEFAULT_SILO, DEFAULT_SILO_ID};
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
@@ -24,6 +24,7 @@ use nexus_types::external_api::views::{
     self, IdentityProvider, Project, SamlIdentityProvider, Silo,
 };
 use nexus_types::external_api::{params, shared};
+use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::address::{IpRange, Ipv4Range};
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, LookupType, Name,
@@ -919,12 +920,12 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
             views::User {
                 id: USER_TEST_PRIVILEGED.id(),
                 display_name: USER_TEST_PRIVILEGED.external_id.clone(),
-                silo_id: *DEFAULT_SILO_ID,
+                silo_id: DEFAULT_SILO_ID,
             },
             views::User {
                 id: USER_TEST_UNPRIVILEGED.id(),
                 display_name: USER_TEST_UNPRIVILEGED.external_id.clone(),
-                silo_id: *DEFAULT_SILO_ID,
+                silo_id: DEFAULT_SILO_ID,
             },
         ]
     );
@@ -953,17 +954,17 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
             views::User {
                 id: new_silo_user_id,
                 display_name: new_silo_user_external_id.into(),
-                silo_id: *DEFAULT_SILO_ID,
+                silo_id: DEFAULT_SILO_ID,
             },
             views::User {
                 id: USER_TEST_PRIVILEGED.id(),
                 display_name: USER_TEST_PRIVILEGED.external_id.clone(),
-                silo_id: *DEFAULT_SILO_ID,
+                silo_id: DEFAULT_SILO_ID,
             },
             views::User {
                 id: USER_TEST_UNPRIVILEGED.id(),
                 display_name: USER_TEST_UNPRIVILEGED.external_id.clone(),
-                silo_id: *DEFAULT_SILO_ID,
+                silo_id: DEFAULT_SILO_ID,
             },
         ]
     );

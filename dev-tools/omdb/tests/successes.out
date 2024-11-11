@@ -2,7 +2,7 @@ EXECUTING COMMAND: omdb ["db", "disks", "list"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-NAME ID SIZE STATE ATTACHED_TO 
+ID SIZE STATE NAME ATTACHED_TO 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -52,7 +52,7 @@ EXECUTING COMMAND: omdb ["db", "instances"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-ID NAME STATE PROPOLIS_ID SLED_ID HOST_SERIAL 
+ID STATE PROPOLIS_ID SLED_ID HOST_SERIAL NAME 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable

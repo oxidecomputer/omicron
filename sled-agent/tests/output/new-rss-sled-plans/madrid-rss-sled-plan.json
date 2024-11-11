@@ -129,7 +129,7 @@
               "destination": "0.0.0.0/0",
               "nexthop": "172.20.15.33",
               "vlan_id": null,
-              "local_pref": null
+              "rib_priority": null
             }
           ],
           "addresses": [
@@ -144,7 +144,8 @@
           "uplink_port_fec": "none",
           "bgp_peers": [],
           "autoneg": false,
-          "lldp": null
+          "lldp": null,
+          "tx_eq": null
         },
         {
           "routes": [
@@ -152,7 +153,7 @@
               "destination": "0.0.0.0/0",
               "nexthop": "172.20.15.33",
               "vlan_id": null,
-              "local_pref": null
+              "rib_priority": null
             }
           ],
           "addresses": [
@@ -167,7 +168,8 @@
           "uplink_port_fec": "none",
           "bgp_peers": [],
           "autoneg": false,
-          "lldp": null
+          "lldp": null,
+          "tx_eq": null
         }
       ],
       "bgp": [],

@@ -8,20 +8,23 @@
 
 use crate::client::Client;
 use crate::model;
+use crate::model::to_block::ToBlock as _;
+use crate::native::block::Block;
 use crate::Error;
 use camino::Utf8PathBuf;
 use oximeter::Sample;
-use oximeter::TimeseriesName;
+use oximeter::TimeseriesSchema;
 use slog::debug;
+use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 #[derive(Debug)]
 pub(super) struct UnrolledSampleRows {
-    /// The timeseries schema rows, keyed by timeseries name.
-    pub new_schema: BTreeMap<TimeseriesName, String>,
-    /// The rows to insert in all the other tables, keyed by the table name.
-    pub rows: BTreeMap<String, Vec<String>>,
+    /// The timeseries schema rows.
+    pub new_schema: Vec<TimeseriesSchema>,
+    /// The blocks to insert in all the other tables, keyed by the table name.
+    pub blocks: BTreeMap<String, Block>,
 }
 
 /// A trait allowing a [`Client`] to write data into the timeseries database.
@@ -53,10 +56,10 @@ impl DbWrite for Client {
     /// Insert the given samples into the database.
     async fn insert_samples(&self, samples: &[Sample]) -> Result<(), Error> {
         debug!(self.log, "unrolling {} total samples", samples.len());
-        let UnrolledSampleRows { new_schema, rows } =
+        let UnrolledSampleRows { new_schema, blocks } =
             self.unroll_samples(samples).await;
         self.save_new_schema_or_remove(new_schema).await?;
-        self.insert_unrolled_samples(rows).await
+        self.insert_unrolled_samples(blocks).await
     }
 
     /// Initialize the replicated telemetry database, creating tables as needed.
@@ -171,7 +174,7 @@ impl Client {
         samples: &[Sample],
     ) -> UnrolledSampleRows {
         let mut seen_timeseries = BTreeSet::new();
-        let mut rows = BTreeMap::new();
+        let mut table_blocks = BTreeMap::new();
         let mut new_schema = BTreeMap::new();
 
         for sample in samples.iter() {
@@ -182,14 +185,14 @@ impl Client {
                     continue;
                 }
                 Ok(None) => {}
-                Ok(Some((name, schema))) => {
+                Ok(Some(schema)) => {
                     debug!(
                         self.log,
                         "new timeseries schema";
-                        "timeseries_name" => %name,
-                        "schema" => %schema
+                        "timeseries_name" => %schema.timeseries_name,
+                        "schema" => ?schema,
                     );
-                    new_schema.insert(name, schema);
+                    new_schema.insert(schema.timeseries_name.clone(), schema);
                 }
             }
 
@@ -199,47 +202,61 @@ impl Client {
                 crate::timeseries_key(sample),
             );
             if !seen_timeseries.contains(&key) {
-                for (table_name, table_rows) in model::unroll_field_rows(sample)
+                for (table_name, block) in
+                    model::fields::extract_fields_as_block(sample)
                 {
-                    rows.entry(table_name)
-                        .or_insert_with(Vec::new)
-                        .extend(table_rows);
+                    match table_blocks.entry(table_name) {
+                        Entry::Vacant(entry) => {
+                            entry.insert(block);
+                        }
+                        Entry::Occupied(mut entry) => entry
+                            .get_mut()
+                            .concat(block)
+                            .expect("All blocks for a table must match"),
+                    }
                 }
             }
 
-            let (table_name, measurement_row) =
-                model::unroll_measurement_row(sample);
-
-            rows.entry(table_name)
-                .or_insert_with(Vec::new)
-                .push(measurement_row);
+            let (table_name, measurement_block) =
+                model::measurements::extract_measurement_as_block(sample);
+            match table_blocks.entry(table_name) {
+                Entry::Vacant(entry) => {
+                    entry.insert(measurement_block);
+                }
+                Entry::Occupied(mut entry) => entry
+                    .get_mut()
+                    .concat(measurement_block)
+                    .expect("All blocks for a table must match"),
+            }
 
             seen_timeseries.insert(key);
         }
 
-        UnrolledSampleRows { new_schema, rows }
+        let new_schema = new_schema.into_values().collect();
+        UnrolledSampleRows { new_schema, blocks: table_blocks }
     }
 
     // Insert unrolled sample rows into the corresponding tables.
     async fn insert_unrolled_samples(
         &self,
-        rows: BTreeMap<String, Vec<String>>,
+        blocks: BTreeMap<String, Block>,
     ) -> Result<(), Error> {
-        for (table_name, rows) in rows {
-            let body = format!(
-                "INSERT INTO {table_name} FORMAT JSONEachRow\n{row_data}\n",
+        for (table_name, block) in blocks {
+            let n_rows = block.n_rows();
+            let query = format!(
+                "INSERT INTO {db_name}.{table_name} FORMAT Native",
+                db_name = crate::DATABASE_NAME,
                 table_name = table_name,
-                row_data = rows.join("\n")
             );
             // TODO-robustness We've verified the schema, so this is likely a transient failure.
             // But we may want to check the actual error condition, and, if possible, continue
             // inserting any remaining data.
-            self.execute(body).await?;
+            self.insert_native(&query, block).await?;
             debug!(
                 self.log,
                 "inserted rows into table";
-                "n_rows" => rows.len(),
-                "table_name" => table_name,
+                "n_rows" => n_rows,
+                "table_name" => &table_name,
             );
         }
 
@@ -268,7 +285,7 @@ impl Client {
     // receive a sample with a new schema, and both would then try to insert that schema.
     pub(super) async fn save_new_schema_or_remove(
         &self,
-        new_schema: BTreeMap<TimeseriesName, String>,
+        new_schema: Vec<TimeseriesSchema>,
     ) -> Result<(), Error> {
         if !new_schema.is_empty() {
             debug!(
@@ -276,17 +293,11 @@ impl Client {
                 "inserting {} new timeseries schema",
                 new_schema.len()
             );
-            const APPROX_ROW_SIZE: usize = 64;
-            let mut body = String::with_capacity(
-                APPROX_ROW_SIZE + APPROX_ROW_SIZE * new_schema.len(),
+            let body = const_format::formatcp!(
+                "INSERT INTO {}.timeseries_schema FORMAT Native",
+                crate::DATABASE_NAME
             );
-            body.push_str("INSERT INTO ");
-            body.push_str(crate::DATABASE_NAME);
-            body.push_str(".timeseries_schema FORMAT JSONEachRow\n");
-            for row_data in new_schema.values() {
-                body.push_str(row_data);
-                body.push('\n');
-            }
+            let block = TimeseriesSchema::to_block(&new_schema)?;
 
             // Try to insert the schema.
             //
@@ -294,16 +305,16 @@ impl Client {
             // internal cache. Since we check the internal cache first for
             // schema, if we fail here but _don't_ remove the schema, we'll
             // never end up inserting the schema, but we will insert samples.
-            if let Err(e) = self.execute(body).await {
+            if let Err(e) = self.insert_native(&body, block).await {
                 debug!(
                     self.log,
                     "failed to insert new schema, removing from cache";
                     "error" => ?e,
                 );
                 let mut schema = self.schema.lock().await;
-                for name in new_schema.keys() {
+                for schema_to_remove in new_schema.iter() {
                     schema
-                        .remove(name)
+                        .remove(&schema_to_remove.timeseries_name)
                         .expect("New schema should have been cached");
                 }
                 return Err(e);
@@ -316,12 +327,15 @@ impl Client {
     //
     // This is intended to be used for the methods which run SQL from one of the
     // SQL files in the crate, e.g., the DB initialization or update files.
+    //
+    // NOTE: This uses the native TCP connection interface to run its
+    // statements.
     async fn run_many_sql_statements(
         &self,
         sql: impl AsRef<str>,
     ) -> Result<(), Error> {
         for stmt in sql.as_ref().split(';').filter(|s| !s.trim().is_empty()) {
-            self.execute(stmt).await?;
+            self.execute_native(stmt).await?;
         }
         Ok(())
     }

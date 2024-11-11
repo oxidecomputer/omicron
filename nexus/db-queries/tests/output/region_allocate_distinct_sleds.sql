@@ -271,7 +271,10 @@ WITH
         dataset.port,
         dataset.kind,
         dataset.size_used,
-        dataset.zone_name
+        dataset.zone_name,
+        dataset.quota,
+        dataset.reservation,
+        dataset.compression
     )
 (
   SELECT
@@ -286,6 +289,9 @@ WITH
     dataset.kind,
     dataset.size_used,
     dataset.zone_name,
+    dataset.quota,
+    dataset.reservation,
+    dataset.compression,
     old_regions.id,
     old_regions.time_created,
     old_regions.time_modified,
@@ -313,6 +319,9 @@ UNION
       updated_datasets.kind,
       updated_datasets.size_used,
       updated_datasets.zone_name,
+      updated_datasets.quota,
+      updated_datasets.reservation,
+      updated_datasets.compression,
       inserted_regions.id,
       inserted_regions.time_created,
       inserted_regions.time_modified,

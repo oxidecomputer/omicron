@@ -7,13 +7,13 @@ use http::{method::Method, StatusCode};
 use nexus_db_queries::authn::USER_TEST_UNPRIVILEGED;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO_ID;
 use nexus_test_utils::assert_same_items;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::views;
 use nexus_types::identity::Asset;
+use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::api::external::LookupType;
 use uuid::Uuid;
 
@@ -46,8 +46,8 @@ async fn test_silo_group_users(cptestctx: &ControlPlaneTestContext) {
 
     let authz_silo = authz::Silo::new(
         authz::FLEET,
-        *DEFAULT_SILO_ID,
-        LookupType::ById(*DEFAULT_SILO_ID),
+        DEFAULT_SILO_ID,
+        LookupType::ById(DEFAULT_SILO_ID),
     );
 
     // create a group

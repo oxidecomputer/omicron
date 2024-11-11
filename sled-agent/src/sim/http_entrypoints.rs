@@ -10,6 +10,7 @@ use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::FreeformBody;
 use dropshot::HttpError;
+use dropshot::HttpResponseAccepted;
 use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseDeleted;
 use dropshot::HttpResponseHeaders;
@@ -25,6 +26,7 @@ use nexus_sled_agent_shared::inventory::{Inventory, OmicronZonesConfig};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::api::internal::nexus::UpdateArtifactId;
+use omicron_common::api::internal::shared::ExternalIpGatewayMap;
 use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
 use omicron_common::api::internal::shared::{
@@ -34,6 +36,7 @@ use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::DatasetsManagementResult;
 use omicron_common::disk::DisksManagementResult;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
+use omicron_common::update::ArtifactHash;
 use sled_agent_api::*;
 use sled_agent_types::boot_disk::BootDiskOsWriteStatus;
 use sled_agent_types::boot_disk::BootDiskPathParams;
@@ -72,7 +75,6 @@ pub fn api() -> SledApiDescription {
         api.register(instance_poke_single_step_post)?;
         api.register(instance_post_sim_migration_source)?;
         api.register(disk_poke_post)?;
-
         Ok(api)
     }
 
@@ -179,6 +181,48 @@ impl SledAgentApi for SledAgentSimImpl {
             .await
             .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
         Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn artifact_list(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<BTreeMap<ArtifactHash, usize>>, HttpError> {
+        Ok(HttpResponseOk(rqctx.context().artifact_store().list().await?))
+    }
+
+    async fn artifact_copy_from_depot(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<ArtifactPathParam>,
+        body: TypedBody<ArtifactCopyFromDepotBody>,
+    ) -> Result<HttpResponseAccepted<ArtifactCopyFromDepotResponse>, HttpError>
+    {
+        let sha256 = path_params.into_inner().sha256;
+        let depot_base_url = body.into_inner().depot_base_url;
+        rqctx
+            .context()
+            .artifact_store()
+            .copy_from_depot(sha256, &depot_base_url)
+            .await?;
+        Ok(HttpResponseAccepted(ArtifactCopyFromDepotResponse {}))
+    }
+
+    async fn artifact_put(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<ArtifactPathParam>,
+        body: StreamingBody,
+    ) -> Result<HttpResponseOk<ArtifactPutResponse>, HttpError> {
+        let sha256 = path_params.into_inner().sha256;
+        Ok(HttpResponseOk(
+            rqctx.context().artifact_store().put_body(sha256, body).await?,
+        ))
+    }
+
+    async fn artifact_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<ArtifactPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let sha256 = path_params.into_inner().sha256;
+        rqctx.context().artifact_store().delete(sha256).await?;
+        Ok(HttpResponseDeleted())
     }
 
     async fn vmm_issue_disk_snapshot_request(
@@ -325,13 +369,6 @@ impl SledAgentApi for SledAgentSimImpl {
         Ok(HttpResponseOk(sa.omicron_physical_disks_list().await?))
     }
 
-    async fn omicron_zones_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<OmicronZonesConfig>, HttpError> {
-        let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.omicron_zones_list().await))
-    }
-
     async fn omicron_zones_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<OmicronZonesConfig>,
@@ -362,6 +399,15 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         sa.set_vpc_routes(body.into_inner()).await;
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn set_eip_gateways(
+        rqctx: RequestContext<Self::Context>,
+        _body: TypedBody<ExternalIpGatewayMap>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let _sa = rqctx.context();
+        // sa.set_vpc_routes(body.into_inner()).await;
         Ok(HttpResponseUpdatedNoContent())
     }
 
@@ -494,6 +540,18 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn bootstore_status(
         _rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<BootstoreStatus>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn support_zoneadm_info(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn support_ipadm_info(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
         method_unimplemented()
     }
 }

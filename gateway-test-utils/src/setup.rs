@@ -197,7 +197,11 @@ pub async fn test_setup_with_config(
             future::ready(result)
         },
         &Duration::from_millis(100),
-        &Duration::from_secs(1),
+        // This seems like a pretty long time to wait for MGS to discover the
+        // simulated SPs, but we've seen tests fail due to timeouts here in the
+        // past, so we may as well be generous:
+        // https://github.com/oxidecomputer/omicron/issues/6877
+        &Duration::from_secs(30),
     )
     .await
     .unwrap();

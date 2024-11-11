@@ -12,7 +12,8 @@ use dropshot::{
     endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path, RequestContext, TypedBody,
 };
-use internal_dns::ServiceName;
+use internal_dns_types::config::DnsConfigBuilder;
+use internal_dns_types::names::ServiceName;
 use nexus_client::types::SledAgentInfo;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{SledVmmState, UpdateArtifactId};
@@ -168,7 +169,7 @@ pub async fn start_dns_server(
     nexus: &dropshot::HttpServer<ServerContext>,
 ) -> dns_server::TransientServer {
     let dns = dns_server::TransientServer::new(log).await.unwrap();
-    let mut dns_config_builder = internal_dns::DnsConfigBuilder::new();
+    let mut dns_config_builder = DnsConfigBuilder::new();
 
     let nexus_addr = match nexus.local_addr() {
         std::net::SocketAddr::V6(addr) => addr,

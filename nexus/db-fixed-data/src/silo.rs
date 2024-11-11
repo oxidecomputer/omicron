@@ -3,15 +3,15 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use nexus_db_model as model;
-use nexus_types::external_api::{params, shared};
+use nexus_types::{
+    external_api::{params, shared},
+    silo::{
+        default_silo_name, internal_silo_name, DEFAULT_SILO_ID,
+        INTERNAL_SILO_ID,
+    },
+};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use once_cell::sync::Lazy;
-
-pub static DEFAULT_SILO_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
-    "001de000-5110-4000-8000-000000000000"
-        .parse()
-        .expect("invalid uuid for builtin silo id")
-});
 
 /// "Default" Silo
 ///
@@ -19,10 +19,10 @@ pub static DEFAULT_SILO_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
 /// remove it per omicron#2305.
 pub static DEFAULT_SILO: Lazy<model::Silo> = Lazy::new(|| {
     model::Silo::new_with_id(
-        *DEFAULT_SILO_ID,
+        DEFAULT_SILO_ID,
         params::SiloCreate {
             identity: IdentityMetadataCreateParams {
-                name: "default-silo".parse().unwrap(),
+                name: default_silo_name().clone(),
                 description: "default silo".to_string(),
             },
             // This quota is actually _unused_ because the default silo
@@ -38,21 +38,14 @@ pub static DEFAULT_SILO: Lazy<model::Silo> = Lazy::new(|| {
     .unwrap()
 });
 
-/// UUID of built-in internal silo.
-pub static INTERNAL_SILO_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
-    "001de000-5110-4000-8000-000000000001"
-        .parse()
-        .expect("invalid uuid for builtin silo id")
-});
-
 /// Built-in Silo to house internal resources. It contains no users and
 /// can't be logged into.
 pub static INTERNAL_SILO: Lazy<model::Silo> = Lazy::new(|| {
     model::Silo::new_with_id(
-        *INTERNAL_SILO_ID,
+        INTERNAL_SILO_ID,
         params::SiloCreate {
             identity: IdentityMetadataCreateParams {
-                name: "oxide-internal".parse().unwrap(),
+                name: internal_silo_name().clone(),
                 description: "Built-in internal Silo.".to_string(),
             },
             // The internal silo contains no virtual resources, so it has no allotted capacity.

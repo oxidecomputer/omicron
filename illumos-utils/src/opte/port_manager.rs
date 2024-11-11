@@ -13,6 +13,7 @@ use crate::opte::Port;
 use crate::opte::Vni;
 use ipnetwork::IpNetwork;
 use omicron_common::api::external;
+use omicron_common::api::internal::shared::ExternalIpGatewayMap;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
@@ -77,6 +78,12 @@ struct PortManagerInner {
 
     /// Map of all current resolved routes.
     routes: Mutex<HashMap<RouterId, RouteSet>>,
+
+    /// Mappings of associated Internet Gateways for all External IPs
+    /// attached to each NIC.
+    ///
+    /// IGW IDs are specific to the VPC of each NIC.
+    eip_gateways: Mutex<HashMap<Uuid, HashMap<IpAddr, HashSet<Uuid>>>>,
 }
 
 impl PortManagerInner {
@@ -116,6 +123,7 @@ impl PortManager {
             underlay_ip,
             ports: Mutex::new(BTreeMap::new()),
             routes: Mutex::new(Default::default()),
+            eip_gateways: Mutex::new(Default::default()),
         });
 
         Self { inner }
@@ -249,7 +257,7 @@ impl PortManager {
         };
 
         let vpc_cfg = VpcCfg {
-            ip_cfg,
+            ip_cfg: ip_cfg.clone(),
             guest_mac: MacAddr::from(nic.mac.into_array()),
             gateway_mac: MacAddr::from(gateway.mac.into_array()),
             vni,
@@ -329,26 +337,15 @@ impl PortManager {
         // create a record to show that we're interested in receiving
         // those routes.
         let mut routes = self.inner.routes.lock().unwrap();
-        let system_routes =
-            routes.entry(port.system_router_key()).or_insert_with(|| {
-                let mut routes = HashSet::new();
+        let system_routes = match &ip_cfg {
+            IpCfg::Ipv4(_) => system_routes_v4(is_service, &mut routes, &port),
+            IpCfg::Ipv6(_) => system_routes_v6(is_service, &mut routes, &port),
+            IpCfg::DualStack { .. } => {
+                system_routes_v4(is_service, &mut routes, &port);
+                system_routes_v6(is_service, &mut routes, &port)
+            }
+        };
 
-                // Services do not talk to one another via OPTE, but do need
-                // to reach out over the Internet *before* nexus is up to give
-                // us real rules. The easiest bet is to instantiate these here.
-                if is_service {
-                    routes.insert(ResolvedVpcRoute {
-                        dest: "0.0.0.0/0".parse().unwrap(),
-                        target: ApiRouterTarget::InternetGateway,
-                    });
-                    routes.insert(ResolvedVpcRoute {
-                        dest: "::/0".parse().unwrap(),
-                        target: ApiRouterTarget::InternetGateway,
-                    });
-                }
-
-                RouteSet { version: None, routes, active_ports: 0 }
-            });
         system_routes.active_ports += 1;
         // Clone is needed to get borrowck on our side, sadly.
         let system_routes = system_routes.clone();
@@ -371,7 +368,16 @@ impl PortManager {
                     class,
                     port_name: port_name.clone(),
                     dest: super::net_to_cidr(route.dest),
-                    target: super::router_target_opte(&route.target),
+                    target: super::router_target_opte(
+                        &route.target,
+                        // This option doesn't make any difference here:
+                        // We don't yet know any associated InetGw IDs for
+                        // the IPs attached to this interface.
+                        // We might have this knowledge at create-time in
+                        // future, but assume for now that the control plane
+                        // will backfill this.
+                        false,
+                    ),
                 };
 
                 #[cfg(target_os = "illumos")]
@@ -443,9 +449,11 @@ impl PortManager {
     ) -> Result<(), Error> {
         let mut routes = self.inner.routes.lock().unwrap();
         let mut deltas = HashMap::new();
+        slog::debug!(self.inner.log, "new routes: {new_routes:#?}");
         for new in new_routes {
             // Disregard any route information for a subnet we don't have.
             let Some(old) = routes.get(&new.id) else {
+                slog::warn!(self.inner.log, "ignoring route {new:#?}");
                 continue;
             };
 
@@ -458,6 +466,13 @@ impl PortManager {
                     (Some(old_vers), Some(new_vers))
                         if !old_vers.is_replaced_by(&new_vers) =>
                     {
+                        slog::info!(
+                            self.inner.log,
+                            "skipping delta compute for subnet";
+                            "subnet" => ?new.id,
+                            "old_vers" => ?old_vers,
+                            "new_vers" => ?new_vers,
+                        );
                         continue;
                     }
                     _ => (
@@ -486,12 +501,15 @@ impl PortManager {
         let hdl = opte_ioctl::OpteHdl::open(opte_ioctl::OpteHdl::XDE_CTL)?;
 
         // Propagate deltas out to all ports.
-        for port in ports.values() {
+        for (interface_id, port) in ports.iter() {
             let system_id = port.system_router_key();
             let system_delta = deltas.get(&system_id);
 
             let custom_id = port.custom_router_key();
             let custom_delta = deltas.get(&custom_id);
+
+            let is_instance =
+                matches!(interface_id.1, NetworkInterfaceKind::Instance { .. });
 
             #[cfg_attr(not(target_os = "illumos"), allow(unused_variables))]
             for (class, delta) in [
@@ -499,15 +517,25 @@ impl PortManager {
                 (RouterClass::Custom, custom_delta),
             ] {
                 let Some((to_add, to_delete)) = delta else {
+                    debug!(self.inner.log, "vpc route ensure: no delta");
                     continue;
                 };
+
+                debug!(self.inner.log, "vpc route ensure to_add: {to_add:#?}");
+                debug!(
+                    self.inner.log,
+                    "vpc router ensure to_delete: {to_delete:#?}"
+                );
 
                 for route in to_delete {
                     let route = DelRouterEntryReq {
                         class,
                         port_name: port.name().into(),
                         dest: super::net_to_cidr(route.dest),
-                        target: super::router_target_opte(&route.target),
+                        target: super::router_target_opte(
+                            &route.target,
+                            is_instance,
+                        ),
                     };
 
                     #[cfg(target_os = "illumos")]
@@ -526,7 +554,10 @@ impl PortManager {
                         class,
                         port_name: port.name().into(),
                         dest: super::net_to_cidr(route.dest),
-                        target: super::router_target_opte(&route.target),
+                        target: super::router_target_opte(
+                            &route.target,
+                            is_instance,
+                        ),
                     };
 
                     #[cfg(target_os = "illumos")]
@@ -545,6 +576,20 @@ impl PortManager {
         Ok(())
     }
 
+    /// Set Internet Gateway mappings for all external IPs in use
+    /// by attached `NetworkInterface`s.
+    ///
+    /// Returns whether the internal mappings were changed.
+    pub fn set_eip_gateways(&self, mappings: ExternalIpGatewayMap) -> bool {
+        let mut gateways = self.inner.eip_gateways.lock().unwrap();
+
+        let changed = &*gateways != &mappings.mappings;
+
+        *gateways = mappings.mappings;
+
+        changed
+    }
+
     /// Ensure external IPs for an OPTE port are up to date.
     #[cfg_attr(not(target_os = "illumos"), allow(unused_variables))]
     pub fn external_ips_ensure(
@@ -555,6 +600,10 @@ impl PortManager {
         ephemeral_ip: Option<IpAddr>,
         floating_ips: &[IpAddr],
     ) -> Result<(), Error> {
+        let egw_lock = self.inner.eip_gateways.lock().unwrap();
+        let inet_gw_map = egw_lock.get(&nic_id).cloned();
+        drop(egw_lock);
+
         let ports = self.inner.ports.lock().unwrap();
         let port = ports.get(&(nic_id, nic_kind)).ok_or_else(|| {
             Error::ExternalIpUpdateMissingPort(nic_id, nic_kind)
@@ -645,10 +694,21 @@ impl PortManager {
             }
         }
 
+        let inet_gw_map = if let Some(map) = inet_gw_map {
+            Some(
+                map.into_iter()
+                    .map(|(k, v)| (k.into(), v.into_iter().collect()))
+                    .collect(),
+            )
+        } else {
+            None
+        };
+
         let req = SetExternalIpsReq {
             port_name: port.name().into(),
             external_ips_v4: v4_cfg,
             external_ips_v6: v6_cfg,
+            inet_gw_map,
         };
 
         #[cfg(target_os = "illumos")]
@@ -938,4 +998,44 @@ impl Drop for PortTicket {
         // can't do anything with it anyway.
         let _ = self.release_inner();
     }
+}
+
+fn system_routes_v4<'a>(
+    is_service: bool,
+    routes: &'a mut HashMap<RouterId, RouteSet>,
+    port: &Port,
+) -> &'a mut RouteSet {
+    let routes = routes.entry(port.system_router_key()).or_insert_with(|| {
+        let routes = HashSet::new();
+        RouteSet { version: None, routes, active_ports: 0 }
+    });
+
+    if is_service {
+        routes.routes.insert(ResolvedVpcRoute {
+            dest: "0.0.0.0/0".parse().unwrap(),
+            target: ApiRouterTarget::InternetGateway(None),
+        });
+    }
+
+    routes
+}
+
+fn system_routes_v6<'a>(
+    is_service: bool,
+    routes: &'a mut HashMap<RouterId, RouteSet>,
+    port: &Port,
+) -> &'a mut RouteSet {
+    let routes = routes.entry(port.system_router_key()).or_insert_with(|| {
+        let routes = HashSet::new();
+        RouteSet { version: None, routes, active_ports: 0 }
+    });
+
+    if is_service {
+        routes.routes.insert(ResolvedVpcRoute {
+            dest: "::/0".parse().unwrap(),
+            target: ApiRouterTarget::InternetGateway(None),
+        });
+    }
+
+    routes
 }

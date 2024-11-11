@@ -137,7 +137,7 @@ impl CockroachCli {
 mod tests {
     use super::*;
     use cockroach_admin_types::NodeMembership;
-    use nexus_test_utils::db::test_setup_database;
+    use nexus_test_utils::db::TestDatabase;
     use omicron_test_utils::dev;
     use std::net::SocketAddr;
     use url::Url;
@@ -179,8 +179,8 @@ mod tests {
     #[tokio::test]
     async fn test_node_status_compatibility() {
         let logctx = dev::test_setup_log("test_node_status_compatibility");
-        let mut db = test_setup_database(&logctx.log).await;
-        let db_url = db.listen_url().to_string();
+        let db = TestDatabase::new_populate_nothing(&logctx.log).await;
+        let db_url = db.crdb().listen_url().to_string();
 
         let expected_headers = "id,address,sql_address,build,started_at,updated_at,locality,is_available,is_live";
 
@@ -225,7 +225,7 @@ mod tests {
         assert_eq!(status[0].is_available, true);
         assert_eq!(status[0].is_live, true);
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -236,8 +236,8 @@ mod tests {
     async fn test_node_decommission_compatibility() {
         let logctx =
             dev::test_setup_log("test_node_decommission_compatibility");
-        let mut db = test_setup_database(&logctx.log).await;
-        let db_url = db.listen_url().to_string();
+        let db = TestDatabase::new_populate_nothing(&logctx.log).await;
+        let db_url = db.crdb().listen_url().to_string();
 
         let expected_headers =
             "id,is_live,replicas,is_decommissioning,membership,is_draining";
@@ -291,7 +291,7 @@ mod tests {
         assert_eq!(result.is_draining, false);
         assert_eq!(result.notes, &[] as &[&str]);
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

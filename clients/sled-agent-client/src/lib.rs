@@ -31,6 +31,7 @@ progenitor::generate_api!(
         BgpConfig = { derives = [Eq, Hash] },
         BgpPeerConfig = { derives = [Eq, Hash] },
         LldpPortConfig = { derives = [Eq, Hash, PartialOrd, Ord] },
+        TxEqConfig = { derives = [Eq, Hash] },
         OmicronPhysicalDiskConfig = { derives = [Eq, Hash, PartialOrd, Ord] },
         PortConfigV2 = { derives = [Eq, Hash] },
         RouteConfig = { derives = [Eq, Hash] },
@@ -43,9 +44,11 @@ progenitor::generate_api!(
     replace = {
         Baseboard = nexus_sled_agent_shared::inventory::Baseboard,
         ByteCount = omicron_common::api::external::ByteCount,
+        DatasetsConfig = omicron_common::disk::DatasetsConfig,
         DatasetKind = omicron_common::api::internal::shared::DatasetKind,
         DiskIdentity = omicron_common::disk::DiskIdentity,
         DiskVariant = omicron_common::disk::DiskVariant,
+        ExternalIpGatewayMap = omicron_common::api::internal::shared::ExternalIpGatewayMap,
         Generation = omicron_common::api::external::Generation,
         ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
         Inventory = nexus_sled_agent_shared::inventory::Inventory,
@@ -384,36 +387,6 @@ impl From<omicron_common::api::internal::shared::NetworkInterfaceKind>
             Instance { id } => Self::Instance(id),
             Service { id } => Self::Service(id),
             Probe { id } => Self::Probe(id),
-        }
-    }
-}
-
-impl From<omicron_common::api::internal::shared::SledIdentifiers>
-    for types::SledIdentifiers
-{
-    fn from(
-        value: omicron_common::api::internal::shared::SledIdentifiers,
-    ) -> Self {
-        Self {
-            model: value.model,
-            rack_id: value.rack_id,
-            revision: value.revision,
-            serial: value.serial,
-            sled_id: value.sled_id,
-        }
-    }
-}
-
-impl From<types::SledIdentifiers>
-    for omicron_common::api::internal::shared::SledIdentifiers
-{
-    fn from(value: types::SledIdentifiers) -> Self {
-        Self {
-            model: value.model,
-            rack_id: value.rack_id,
-            revision: value.revision,
-            serial: value.serial,
-            sled_id: value.sled_id,
         }
     }
 }

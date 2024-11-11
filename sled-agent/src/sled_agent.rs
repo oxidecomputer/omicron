@@ -4,6 +4,7 @@
 
 //! Sled agent implementation
 
+use crate::artifact_store::ArtifactStore;
 use crate::boot_disk_os_writer::BootDiskOsWriter;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::early_networking::EarlyNetworkSetupError;
@@ -18,10 +19,11 @@ use crate::params::OmicronZoneTypeExt;
 use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::StorageMonitorHandle;
+use crate::support_bundle::{SupportBundleCmdError, SupportBundleCmdOutput};
 use crate::updates::{ConfigUpdates, UpdateManager};
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
-use crate::zone_bundle;
 use crate::zone_bundle::BundleError;
+use crate::{support_bundle, zone_bundle};
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use derive_more::From;
@@ -41,9 +43,9 @@ use omicron_common::address::{
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::api::internal::shared::{
-    HostPortConfig, RackNetworkConfig, ResolvedVpcFirewallRule,
-    ResolvedVpcRouteSet, ResolvedVpcRouteState, SledIdentifiers,
-    VirtualNetworkInterfaceHost,
+    ExternalIpGatewayMap, HostPortConfig, RackNetworkConfig,
+    ResolvedVpcFirewallRule, ResolvedVpcRouteSet, ResolvedVpcRouteState,
+    SledIdentifiers, VirtualNetworkInterfaceHost,
 };
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::UpdateArtifactId,
@@ -73,7 +75,6 @@ use sled_agent_types::zone_bundle::{
 use sled_hardware::{underlay, HardwareManager};
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_hardware_types::Baseboard;
-use sled_storage::dataset::{CRYPT_DATASET, ZONE_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use sprockets_tls::keys::SprocketsConfig;
@@ -145,7 +146,7 @@ pub enum Error {
     Hardware(String),
 
     #[error("Error resolving DNS name: {0}")]
-    ResolveError(#[from] internal_dns::resolver::ResolveError),
+    ResolveError(#[from] internal_dns_resolver::ResolveError),
 
     #[error(transparent)]
     ZpoolList(#[from] illumos_utils::zpool::ListError),
@@ -167,6 +168,9 @@ pub enum Error {
 
     #[error("Expected revision to fit in a u32, but found {0}")]
     UnexpectedRevision(i64),
+
+    #[error(transparent)]
+    RepoDepotStart(#[from] crate::artifact_store::StartError),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -186,11 +190,21 @@ impl From<Error> for omicron_common::api::external::Error {
 impl From<Error> for dropshot::HttpError {
     fn from(err: Error) -> Self {
         const NO_SUCH_INSTANCE: &str = "NO_SUCH_INSTANCE";
+        const INSTANCE_CHANNEL_FULL: &str = "INSTANCE_CHANNEL_FULL";
         match err {
             Error::Instance(crate::instance_manager::Error::Instance(
                 instance_error,
             )) => {
                 match instance_error {
+                    // The instance's request channel is full, so it cannot
+                    // currently process this request. Shed load, but indicate
+                    // to the client that it can try again later.
+                    err @ crate::instance::Error::FailedSendChannelFull => {
+                        HttpError::for_unavail(
+                            Some(INSTANCE_CHANNEL_FULL.to_string()),
+                            err.to_string(),
+                        )
+                    }
                     crate::instance::Error::Propolis(propolis_error) => {
                         // Work around dropshot#693: HttpError::for_status
                         // only accepts client errors and asserts on server
@@ -350,6 +364,9 @@ struct SledAgentInner {
 
     // Component of Sled Agent responsible for managing instrumentation probes.
     probes: ProbeManager,
+
+    // Component of Sled Agent responsible for managing the artifact store.
+    repo_depot: dropshot::HttpServer<ArtifactStore<StorageHandle>>,
 }
 
 impl SledAgentInner {
@@ -451,7 +468,7 @@ impl SledAgent {
             serial: baseboard.identifier().to_string(),
         };
         let metrics_manager =
-            MetricsManager::new(&log, identifiers, *sled_address.ip())?;
+            MetricsManager::new(&log, identifiers.clone(), *sled_address.ip())?;
 
         // Start tracking the underlay physical links.
         for link in underlay::find_chelsio_links(&config.data_links)? {
@@ -497,10 +514,8 @@ impl SledAgent {
         };
         let updates = UpdateManager::new(update_config);
 
-        let svc_config = services::Config::new(
-            request.body.id.into_untyped_uuid(),
-            config.sidecar_revision.clone(),
-        );
+        let svc_config =
+            services::Config::new(identifiers, config.sidecar_revision.clone());
 
         // Get our rack network config from the bootstore; we cannot proceed
         // until we have this, as we need to know which switches have uplinks to
@@ -582,6 +597,10 @@ impl SledAgent {
             log.new(o!("component" => "ProbeManager")),
         );
 
+        let repo_depot = ArtifactStore::new(&log, storage_manager.clone())
+            .start(sled_address, &config.dropshot)
+            .await?;
+
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
                 id: request.body.id,
@@ -604,6 +623,7 @@ impl SledAgent {
                 bootstore: long_running_task_handles.bootstore.clone(),
                 _metrics_manager: metrics_manager,
                 boot_disk_os_writer: BootDiskOsWriter::new(&parent_log),
+                repo_depot,
             }),
             log: log.clone(),
             sprockets: config.sprockets.clone(),
@@ -917,11 +937,6 @@ impl SledAgent {
         Ok(disk_result)
     }
 
-    /// List the Omicron zone configuration that's currently running
-    pub async fn omicron_zones_list(&self) -> OmicronZonesConfig {
-        self.inner.services.omicron_zones_list().await
-    }
-
     /// Ensures that the specific set of Omicron zones are running as configured
     /// (and that no other zones are running)
     pub async fn omicron_zones_ensure(
@@ -1084,6 +1099,8 @@ impl SledAgent {
     }
 
     /// Downloads and applies an artifact.
+    // TODO: This is being split into "download" (i.e. store an artifact in the
+    // artifact store) and "apply" (perform an update using an artifact).
     pub async fn update_artifact(
         &self,
         artifact: UpdateArtifactId,
@@ -1093,6 +1110,10 @@ impl SledAgent {
             .download_artifact(artifact, &self.inner.nexus_client)
             .await?;
         Ok(())
+    }
+
+    pub fn artifact_store(&self) -> &ArtifactStore<StorageHandle> {
+        &self.inner.repo_depot.app_private()
     }
 
     /// Issue a snapshot request for a Crucible disk attached to an instance
@@ -1177,6 +1198,42 @@ impl SledAgent {
         self.inner.port_manager.vpc_routes_ensure(routes).map_err(Error::from)
     }
 
+    pub async fn set_eip_gateways(
+        &self,
+        mappings: ExternalIpGatewayMap,
+    ) -> Result<(), Error> {
+        info!(
+            self.log,
+            "IGW mapping received";
+            "values" => ?mappings
+        );
+        let changed = self.inner.port_manager.set_eip_gateways(mappings);
+
+        // TODO(kyle)
+        // There is a substantial downside to this approach, which is that
+        // we can currently only do correct Internet Gateway association for
+        // *Instances* -- sled agent does not remember the ExtIPs associated
+        // with Services or with Probes.
+        //
+        // In practice, services should not have more than one IGW. Not having
+        // identical source IP selection for Probes is a little sad, though.
+        // OPTE will follow the old (single-IGW) behaviour when no mappings
+        // are installed.
+        //
+        // My gut feeling is that the correct place for External IPs to
+        // live is on each NetworkInterface, which makes it far simpler for
+        // nexus to administer and add/remove IPs on *all* classes of port
+        // via RPW. This is how we would make this correct in general.
+        // My understanding is that NetworkInterface's schema makes its way into
+        // the ledger, and I'm not comfortable redoing that this close to a release.
+        if changed {
+            self.inner.instances.refresh_external_ips().await?;
+            info!(self.log, "IGW mapping changed; external IPs refreshed");
+        }
+
+        Ok(())
+    }
+
     pub(crate) fn storage(&self) -> &StorageHandle {
         &self.inner.storage
     }
@@ -1225,7 +1282,10 @@ impl SledAgent {
         let mut disks = vec![];
         let mut zpools = vec![];
         let mut datasets = vec![];
-        let all_disks = self.storage().get_latest_disks().await;
+        let (all_disks, omicron_zones) = tokio::join!(
+            self.storage().get_latest_disks(),
+            self.inner.services.omicron_zones_list()
+        );
         for (identity, variant, slot, firmware) in all_disks.iter_all() {
             disks.push(InventoryDisk {
                 identity: identity.clone(),
@@ -1259,32 +1319,8 @@ impl SledAgent {
                 total_size: ByteCount::try_from(info.size())?,
             });
 
-            // We do care about the total space usage within zpools, but mapping
-            // the layering back to "datasets we care about" is a little
-            // awkward.
-            //
-            // We could query for all datasets within a pool, but the sled agent
-            // doesn't really care about the children of datasets that it
-            // allocates. As an example: Sled Agent might provision a "crucible"
-            // dataset, but how region allocation occurs within that dataset
-            // is a detail for Crucible to care about, not the Sled Agent.
-            //
-            // To balance this effort, we ask for information about datasets
-            // that the Sled Agent is directly resopnsible for managing.
-            let datasets_of_interest = [
-                // We care about the zpool itself, and all direct children.
-                zpool.to_string(),
-                // Likewise, we care about the encrypted dataset, and all
-                // direct children.
-                format!("{zpool}/{CRYPT_DATASET}"),
-                // The zone dataset gives us additional context on "what zones
-                // have datasets provisioned".
-                format!("{zpool}/{ZONE_DATASET}"),
-            ];
             let inv_props =
-                match illumos_utils::zfs::Zfs::get_dataset_properties(
-                    datasets_of_interest.as_slice(),
-                ) {
+                match self.storage().datasets_list(zpool.clone()).await {
                     Ok(props) => props
                         .into_iter()
                         .map(|prop| InventoryDataset::from(prop)),
@@ -1309,10 +1345,23 @@ impl SledAgent {
             usable_hardware_threads,
             usable_physical_ram: ByteCount::try_from(usable_physical_ram)?,
             reservoir_size,
+            omicron_zones,
             disks,
             zpools,
             datasets,
         })
+    }
+
+    pub(crate) async fn support_zoneadm_info(
+        &self,
+    ) -> Result<SupportBundleCmdOutput, SupportBundleCmdError> {
+        support_bundle::zoneadm_info().await
+    }
+
+    pub(crate) async fn support_ipadm_info(
+        &self,
+    ) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
+        support_bundle::ipadm_info().await
     }
 }
 
