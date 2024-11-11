@@ -1171,7 +1171,10 @@ impl DataStore {
         let query = diesel::update(instance_dsl::instance)
             .into_boxed()
             .filter(instance_dsl::id.eq(authz_instance.id()))
-            .filter(instance_dsl::state.eq_any(InstanceState::NO_VMM_STATES));
+            .filter(
+                instance_dsl::state
+                    .eq_any(InstanceState::NOT_INCARNATED_STATES),
+            );
         let query = if boot_disk_id.is_some() {
             query.filter(
                 instance_dsl::boot_disk_id
@@ -1194,7 +1197,7 @@ impl DataStore {
                     return Ok(());
                 }
 
-                if !InstanceState::NO_VMM_STATES
+                if !InstanceState::NOT_INCARNATED_STATES
                     .contains(&r.found.runtime().nexus_state)
                 {
                     return Err(err.bail(Error::conflict(
@@ -1230,7 +1233,10 @@ impl DataStore {
 
         let r = diesel::update(instance_dsl::instance)
             .filter(instance_dsl::id.eq(authz_instance.id()))
-            .filter(instance_dsl::state.eq_any(InstanceState::NO_VMM_STATES))
+            .filter(
+                instance_dsl::state
+                    .eq_any(InstanceState::NOT_INCARNATED_STATES),
+            )
             .filter(
                 instance_dsl::ncpus
                     .ne(ncpus)
@@ -1250,7 +1256,7 @@ impl DataStore {
                     return Ok(());
                 }
 
-                if !InstanceState::NO_VMM_STATES
+                if !InstanceState::NOT_INCARNATED_STATES
                     .contains(&r.found.runtime().nexus_state)
                 {
                     return Err(err.bail(Error::conflict(
