@@ -52,7 +52,6 @@ impl BlueprintDisksEditor {
         SledDisksEditor::new(sled_id, config, &mut self.changed)
     }
 
-    #[cfg(test)]
     pub fn current_sled_disks(
         &self,
         sled_id: &SledUuid,
