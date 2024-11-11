@@ -10,8 +10,11 @@ use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
+use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+
+use super::Ensure;
 
 /// Helper for working with sets of disks on each sled
 ///
@@ -107,26 +110,31 @@ impl<'a> SledDisksEditor<'a> {
         Self { config, changed: false, sled_id, parent_changed_set }
     }
 
-    pub fn disks(&self) -> impl Iterator<Item = &BlueprintPhysicalDiskConfig> {
-        self.config.disks.values()
-    }
-
-    pub fn disks_ids(&self) -> impl Iterator<Item = PhysicalDiskUuid> + '_ {
+    pub fn disk_ids(&self) -> impl Iterator<Item = PhysicalDiskUuid> + '_ {
         self.config.disks.keys().copied()
     }
 
-    pub fn contains_disk(&self, disk_id: &PhysicalDiskUuid) -> bool {
-        self.config.disks.contains_key(disk_id)
-    }
-
-    pub fn add_disk(
+    pub fn ensure_disk(
         &mut self,
         disk: BlueprintPhysicalDiskConfig,
-    ) -> Option<BlueprintPhysicalDiskConfig> {
-        self.changed = true;
-        self.config
-            .disks
-            .insert(PhysicalDiskUuid::from_untyped_uuid(disk.id), disk)
+    ) -> Ensure {
+        let disk_id = PhysicalDiskUuid::from_untyped_uuid(disk.id);
+        match self.config.disks.entry(disk_id) {
+            Entry::Vacant(slot) => {
+                slot.insert(disk);
+                self.changed = true;
+                Ensure::Added
+            }
+            Entry::Occupied(mut slot) => {
+                if *slot.get() != disk {
+                    slot.insert(disk);
+                    self.changed = true;
+                    Ensure::Updated
+                } else {
+                    Ensure::NotNeeded
+                }
+            }
+        }
     }
 
     pub fn remove_disk(

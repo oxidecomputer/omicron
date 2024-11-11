@@ -169,16 +169,6 @@ impl<'a> SledDatasetsEditor<'a> {
         }
     }
 
-    pub fn database_dataset_ids(
-        &self,
-    ) -> &BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, DatasetUuid>> {
-        &self.database_dataset_ids
-    }
-
-    pub fn datasets(&self) -> impl Iterator<Item = &BlueprintDatasetConfig> {
-        self.config.datasets.values()
-    }
-
     pub fn expunge_datasets_if<F>(&mut self, mut expunge_if: F) -> usize
     where
         F: FnMut(&BlueprintDatasetConfig) -> bool,
@@ -205,7 +195,7 @@ impl<'a> SledDatasetsEditor<'a> {
     pub fn ensure_debug_dataset(
         &mut self,
         zpool: ZpoolName,
-    ) -> (DatasetUuid, Ensure) {
+    ) -> Ensure {
         const DEBUG_QUOTA_SIZE_GB: u32 = 100;
 
         let address = None;
@@ -224,7 +214,7 @@ impl<'a> SledDatasetsEditor<'a> {
     pub fn ensure_zone_root_dataset(
         &mut self,
         zpool: ZpoolName,
-    ) -> (DatasetUuid, Ensure) {
+    ) -> Ensure {
         let address = None;
         let quota = None;
         let reservation = None;
@@ -252,7 +242,7 @@ impl<'a> SledDatasetsEditor<'a> {
         quota: Option<ByteCount>,
         reservation: Option<ByteCount>,
         compression: CompressionAlgorithm,
-    ) -> (DatasetUuid, Ensure) {
+    ) -> Ensure {
         let zpool_id = dataset.pool().id();
         let kind = dataset.dataset();
 
@@ -280,15 +270,13 @@ impl<'a> SledDatasetsEditor<'a> {
             );
             let new_config = make_config(*existing_id);
 
-            let ensure = if new_config != *old_config {
+            return if new_config != *old_config {
                 *old_config = new_config;
                 self.changed = true;
                 Ensure::Updated
             } else {
                 Ensure::NotNeeded
             };
-
-            return (old_config.id, ensure);
         }
 
         // Is there a dataset ID matching this one in the database? If so, use
@@ -315,7 +303,7 @@ impl<'a> SledDatasetsEditor<'a> {
             .or_default()
             .insert(kind.clone(), id);
 
-        (id, Ensure::Added)
+        Ensure::Added
     }
 }
 

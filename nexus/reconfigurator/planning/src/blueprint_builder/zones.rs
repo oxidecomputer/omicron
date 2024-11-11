@@ -75,7 +75,7 @@ impl BuilderZonesConfig {
     pub(super) fn expunge_zone(
         &mut self,
         zone_id: OmicronZoneUuid,
-    ) -> Result<(), BuilderZonesConfigError> {
+    ) -> Result<&BuilderZoneConfig, BuilderZonesConfigError> {
         let zone = self
             .zones
             .iter_mut()
@@ -94,13 +94,15 @@ impl BuilderZonesConfig {
         zone.zone.disposition = BlueprintZoneDisposition::Expunged;
         zone.state = BuilderZoneState::Modified;
 
-        Ok(())
+        Ok(&*zone)
     }
 
     pub(super) fn expunge_zones(
         &mut self,
         mut zones: BTreeSet<OmicronZoneUuid>,
-    ) -> Result<(), BuilderZonesConfigError> {
+    ) -> Result<Vec<&BlueprintZoneConfig>, BuilderZonesConfigError> {
+        let mut removed = Vec::new();
+
         for zone in &mut self.zones {
             if zones.remove(&zone.zone.id) {
                 // Check that the zone is expungeable. Typically, zones passed
@@ -110,6 +112,7 @@ impl BuilderZonesConfig {
                 is_already_expunged(&zone.zone, zone.state)?;
                 zone.zone.disposition = BlueprintZoneDisposition::Expunged;
                 zone.state = BuilderZoneState::Modified;
+                removed.push(&zone.zone);
             }
         }
 
@@ -121,7 +124,7 @@ impl BuilderZonesConfig {
             });
         }
 
-        Ok(())
+        Ok(removed)
     }
 
     pub(super) fn iter_zones(
@@ -438,7 +441,7 @@ mod tests {
         for (sled_id, resources) in
             input2.all_sled_resources(SledFilter::Commissioned)
         {
-            builder.sled_ensure_datasets(sled_id, resources).unwrap();
+            builder.sled_ensure_zone_datasets(sled_id, resources).unwrap();
         }
 
         // Now build the blueprint and ensure that all the changes we described
