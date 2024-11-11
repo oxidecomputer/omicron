@@ -1,7 +1,7 @@
 use std::{process::Command, time::Duration};
 
 use futures::{stream::FuturesUnordered, StreamExt};
-use illumos_utils::{zone::IPADM, PFEXEC, ZONEADM};
+use illumos_utils::{dladm::DLADM, zone::IPADM, PFEXEC, ZONEADM};
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
 
@@ -161,6 +161,36 @@ fn ipadm_show_prop() -> Command {
     cmd
 }
 
+fn dladm_show_phys() -> Command {
+    let mut cmd = std::process::Command::new(PFEXEC);
+    cmd.env_clear().arg(DLADM).arg("show-phys");
+    cmd
+}
+
+fn dladm_show_ether() -> Command {
+    let mut cmd = std::process::Command::new(PFEXEC);
+    cmd.env_clear().arg(DLADM).arg("show-ether");
+    cmd
+}
+
+fn dladm_show_link() -> Command {
+    let mut cmd = std::process::Command::new(PFEXEC);
+    cmd.env_clear().arg(DLADM).arg("show-link");
+    cmd
+}
+
+fn dladm_show_vnic() -> Command {
+    let mut cmd = std::process::Command::new(PFEXEC);
+    cmd.env_clear().arg(DLADM).arg("show-vnic");
+    cmd
+}
+
+fn dladm_show_linkprop() -> Command {
+    let mut cmd = std::process::Command::new(PFEXEC);
+    cmd.env_clear().arg(DLADM).arg("show-linkprop");
+    cmd
+}
+
 /*
  * Public API
  */
@@ -175,6 +205,25 @@ pub async fn zoneadm_info(
 pub async fn ipadm_info(
 ) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
     [ipadm_show_interface(), ipadm_show_addr(), ipadm_show_prop()]
+        .into_iter()
+        .map(|c| async move {
+            execute_command_with_timeout(c, DEFAULT_TIMEOUT).await
+        })
+        .collect::<FuturesUnordered<_>>()
+        .collect::<Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>>>()
+        .await
+}
+
+/// Retrieve various `dladm` command output for the system.
+pub async fn dladm_info(
+) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
+    [
+        dladm_show_phys(),
+        dladm_show_ether(),
+        dladm_show_link(),
+        dladm_show_vnic(),
+        dladm_show_linkprop(),
+    ]
         .into_iter()
         .map(|c| async move {
             execute_command_with_timeout(c, DEFAULT_TIMEOUT).await
