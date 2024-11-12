@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Functions for querying the timeseries database.
-// Copyright 2021 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
 use crate::{
     Error, FieldSchema, FieldSource, TimeseriesSchema, DATABASE_NAME,
@@ -299,7 +299,36 @@ impl SelectQueryBuilder {
 
 /// Return the name of the measurements table for a datum type.
 pub(crate) fn measurement_table_name(ty: DatumType) -> String {
-    format!("measurements_{}", ty.to_string().to_lowercase())
+    let suffix = match ty {
+        DatumType::Bool => "bool",
+        DatumType::I8 => "i8",
+        DatumType::U8 => "u8",
+        DatumType::I16 => "i16",
+        DatumType::U16 => "u16",
+        DatumType::I32 => "i32",
+        DatumType::U32 => "u32",
+        DatumType::I64 => "i64",
+        DatumType::U64 => "u64",
+        DatumType::F32 => "f32",
+        DatumType::F64 => "f64",
+        DatumType::String => "string",
+        DatumType::Bytes => "bytes",
+        DatumType::CumulativeI64 => "cumulativei64",
+        DatumType::CumulativeU64 => "cumulativeu64",
+        DatumType::CumulativeF32 => "cumulativef32",
+        DatumType::CumulativeF64 => "cumulativef64",
+        DatumType::HistogramI8 => "histogrami8",
+        DatumType::HistogramU8 => "histogramu8",
+        DatumType::HistogramI16 => "histogrami16",
+        DatumType::HistogramU16 => "histogramu16",
+        DatumType::HistogramI32 => "histogrami32",
+        DatumType::HistogramU32 => "histogramu32",
+        DatumType::HistogramI64 => "histogrami64",
+        DatumType::HistogramU64 => "histogramu64",
+        DatumType::HistogramF32 => "histogramf32",
+        DatumType::HistogramF64 => "histogramf64",
+    };
+    format!("measurements_{suffix}")
 }
 
 fn parse_selector_field_value<T>(
@@ -339,7 +368,21 @@ pub struct FieldSelector {
 
 /// Return the name of the field table for the provided field type.
 pub(crate) fn field_table_name(ty: FieldType) -> String {
-    format!("fields_{}", ty.to_string().to_lowercase())
+    let suffix = match ty {
+        FieldType::String => "string",
+        FieldType::I8 => "i8",
+        FieldType::U8 => "u8",
+        FieldType::I16 => "i16",
+        FieldType::U16 => "u16",
+        FieldType::I32 => "i32",
+        FieldType::U32 => "u32",
+        FieldType::I64 => "i64",
+        FieldType::U64 => "u64",
+        FieldType::IpAddr => "ipaddr",
+        FieldType::Uuid => "uuid",
+        FieldType::Bool => "bool",
+    };
+    format!("fields_{suffix}")
 }
 
 impl FieldSelector {

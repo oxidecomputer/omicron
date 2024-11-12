@@ -242,7 +242,8 @@ mod tests {
 
     use crate::{
         blueprint_builder::{test::verify_blueprint, BlueprintBuilder, Ensure},
-        example::ExampleSystemBuilder,
+        example::{ExampleSystemBuilder, SimRngState},
+        planner::rng::PlannerRng,
     };
 
     use super::*;
@@ -252,13 +253,21 @@ mod tests {
     fn test_builder_zones() {
         static TEST_NAME: &str = "blueprint_test_builder_zones";
         let logctx = test_setup_log(TEST_NAME);
-        let (mut example, blueprint_initial) =
-            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
+
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+        let (example, blueprint_initial) = ExampleSystemBuilder::new_with_rng(
+            &logctx.log,
+            rng.next_system_rng(),
+        )
+        .build();
 
         // Add a completely bare sled to the input.
         let (new_sled_id, input2) = {
+            let mut sled_id_rng = rng.next_sled_id_rng();
+            let new_sled_id = sled_id_rng.next();
+
             let mut input = example.input.clone().into_builder();
-            let new_sled_id = example.sled_rng.next();
+
             input
                 .add_sled(
                     new_sled_id,
@@ -308,7 +317,7 @@ mod tests {
             "the_test",
         )
         .expect("creating blueprint builder");
-        builder.set_rng_seed((TEST_NAME, "bp2"));
+        builder.set_rng(PlannerRng::from_seed((TEST_NAME, "bp2")));
 
         // Test adding a new sled with an NTP zone.
         assert_eq!(
@@ -486,7 +495,7 @@ mod tests {
                 "the_test",
             )
             .expect("creating blueprint builder");
-            builder.set_rng_seed((TEST_NAME, "bp2"));
+            builder.set_rng(PlannerRng::from_seed((TEST_NAME, "bp2")));
 
             // This call by itself shouldn't bump the generation number.
             builder.zones.change_sled_zones(existing_sled_id);

@@ -50,6 +50,7 @@ use indicatif::ProgressDrawTarget;
 use indicatif::ProgressStyle;
 use internal_dns_types::names::ServiceName;
 use ipnetwork::IpNetwork;
+use itertools::Itertools;
 use nexus_config::PostgresConfigWithUrl;
 use nexus_db_model::Dataset;
 use nexus_db_model::Disk;
@@ -5189,6 +5190,7 @@ async fn cmd_db_inventory_collections_show(
     let nerrors = inv_collection_print_errors(&collection).await?;
     inv_collection_print_devices(&collection, &long_string_formatter).await?;
     inv_collection_print_sleds(&collection);
+    inv_collection_print_keeper_membership(&collection);
 
     if nerrors > 0 {
         eprintln!(
@@ -5512,6 +5514,24 @@ fn inv_collection_print_sleds(collection: &Collection) {
             );
         }
     }
+}
+
+fn inv_collection_print_keeper_membership(collection: &Collection) {
+    println!("\nKEEPER MEMBERSHIP");
+    for k in &collection.clickhouse_keeper_cluster_membership {
+        println!("\n    queried keeper: {}", k.queried_keeper);
+        println!(
+            "    leader_committed_log_index: {}",
+            k.leader_committed_log_index
+        );
+
+        let s = k.raft_config.iter().join(", ");
+        println!("    raft config: {s}");
+    }
+    if collection.clickhouse_keeper_cluster_membership.is_empty() {
+        println!("No membership retrieved.");
+    }
+    println!("");
 }
 
 #[derive(Debug)]
