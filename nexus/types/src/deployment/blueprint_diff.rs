@@ -6,10 +6,9 @@
 
 use super::blueprint_display::{
     constants::*, linear_table_modified, linear_table_unchanged,
-    BpClickhouseServersSubtableSchema, BpDatasetsSubtableSchema, BpDiffState,
-    BpGeneration, BpOmicronZonesSubtableSchema, BpPhysicalDisksSubtableSchema,
-    BpSledSubtable, BpSledSubtableColumn, BpSledSubtableData,
-    BpSledSubtableRow, KvListWithHeading, KvPair,
+    BpClickhouseServersTableSchema, BpDatasetsTableSchema, BpDiffState,
+    BpGeneration, BpOmicronZonesTableSchema, BpPhysicalDisksTableSchema,
+    BpTable, BpTableColumn, BpTableData, BpTableRow, KvListWithHeading, KvPair,
 };
 use super::{
     zone_sort_key, Blueprint, ClickhouseClusterConfig,
@@ -23,7 +22,7 @@ use omicron_uuid_kinds::SledUuid;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use crate::deployment::blueprint_display::BpClickhouseKeepersSubtableSchema;
+use crate::deployment::blueprint_display::BpClickhouseKeepersTableSchema;
 use crate::deployment::{
     BlueprintDatasetConfigForDiff, BlueprintDatasetsConfig, BlueprintMetadata,
     BlueprintOrCollectionDatasetsConfig, BlueprintOrCollectionDisksConfig,
@@ -42,7 +41,7 @@ pub struct BpDiffZoneDetails {
     pub zones: Vec<BlueprintOrCollectionZoneConfig>,
 }
 
-impl BpSledSubtableData for BpDiffZoneDetails {
+impl BpTableData for BpDiffZoneDetails {
     fn bp_generation(&self) -> BpGeneration {
         BpGeneration::Diff {
             before: self.generation_before,
@@ -50,12 +49,9 @@ impl BpSledSubtableData for BpDiffZoneDetails {
         }
     }
 
-    fn rows(
-        &self,
-        state: BpDiffState,
-    ) -> impl Iterator<Item = BpSledSubtableRow> {
+    fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
         self.zones.iter().map(move |zone| {
-            BpSledSubtableRow::from_strings(
+            BpTableRow::from_strings(
                 state,
                 vec![
                     zone.kind().report_str().to_string(),
@@ -143,7 +139,7 @@ pub struct BpDiffZonesModified {
     pub zones: Vec<ModifiedZone>,
 }
 
-impl BpSledSubtableData for BpDiffZonesModified {
+impl BpTableData for BpDiffZonesModified {
     fn bp_generation(&self) -> BpGeneration {
         BpGeneration::Diff {
             before: Some(self.generation_before),
@@ -151,25 +147,20 @@ impl BpSledSubtableData for BpDiffZonesModified {
         }
     }
 
-    fn rows(
-        &self,
-        state: BpDiffState,
-    ) -> impl Iterator<Item = BpSledSubtableRow> {
+    fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
         self.zones.iter().map(move |zone| {
-            BpSledSubtableRow::new(
+            BpTableRow::new(
                 state,
                 vec![
-                    BpSledSubtableColumn::value(
+                    BpTableColumn::value(
                         zone.zone.kind().report_str().to_string(),
                     ),
-                    BpSledSubtableColumn::value(zone.zone.id().to_string()),
-                    BpSledSubtableColumn::diff(
+                    BpTableColumn::value(zone.zone.id().to_string()),
+                    BpTableColumn::diff(
                         zone.prior_disposition.to_string(),
                         zone.zone.disposition().to_string(),
                     ),
-                    BpSledSubtableColumn::value(
-                        zone.zone.underlay_ip().to_string(),
-                    ),
+                    BpTableColumn::value(zone.zone.underlay_ip().to_string()),
                 ],
             )
         })
@@ -349,7 +340,7 @@ impl BpDiffZones {
         diffs
     }
 
-    /// Return a [`BpSledSubtable`] for the given `sled_id`
+    /// Return a [`BpTable`] for the given `sled_id`
     ///
     /// We collate all the data from each category to produce a single table.
     /// The order is:
@@ -365,10 +356,7 @@ impl BpDiffZones {
     ///
     /// Errors are printed in a more freeform manner after the table is
     /// displayed.
-    pub fn to_bp_sled_subtable(
-        &self,
-        sled_id: &SledUuid,
-    ) -> Option<BpSledSubtable> {
+    pub fn to_bp_sled_subtable(&self, sled_id: &SledUuid) -> Option<BpTable> {
         let mut generation = BpGeneration::Diff { before: None, after: None };
         let mut rows = vec![];
         if let Some(diff) = self.unchanged.get(sled_id) {
@@ -396,11 +384,7 @@ impl BpDiffZones {
         if rows.is_empty() {
             None
         } else {
-            Some(BpSledSubtable::new(
-                BpOmicronZonesSubtableSchema {},
-                generation,
-                rows,
-            ))
+            Some(BpTable::new(BpOmicronZonesTableSchema {}, generation, rows))
         }
     }
 }
@@ -417,7 +401,7 @@ pub struct DiffPhysicalDisksDetails {
     pub disks: BTreeSet<DiskIdentity>,
 }
 
-impl BpSledSubtableData for DiffPhysicalDisksDetails {
+impl BpTableData for DiffPhysicalDisksDetails {
     fn bp_generation(&self) -> BpGeneration {
         BpGeneration::Diff {
             before: self.before_generation,
@@ -425,12 +409,9 @@ impl BpSledSubtableData for DiffPhysicalDisksDetails {
         }
     }
 
-    fn rows(
-        &self,
-        state: BpDiffState,
-    ) -> impl Iterator<Item = BpSledSubtableRow> {
+    fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
         self.disks.iter().map(move |d| {
-            BpSledSubtableRow::from_strings(
+            BpTableRow::from_strings(
                 state,
                 vec![d.vendor.clone(), d.model.clone(), d.serial.clone()],
             )
@@ -524,11 +505,8 @@ impl BpDiffPhysicalDisks {
         diffs
     }
 
-    /// Return a [`BpSledSubtable`] for the given `sled_id`
-    pub fn to_bp_sled_subtable(
-        &self,
-        sled_id: &SledUuid,
-    ) -> Option<BpSledSubtable> {
+    /// Return a [`BpTable`] for the given `sled_id`
+    pub fn to_bp_sled_subtable(&self, sled_id: &SledUuid) -> Option<BpTable> {
         let mut generation = BpGeneration::Diff { before: None, after: None };
         let mut rows = vec![];
         if let Some(diff) = self.unchanged.get(sled_id) {
@@ -550,11 +528,7 @@ impl BpDiffPhysicalDisks {
         if rows.is_empty() {
             None
         } else {
-            Some(BpSledSubtable::new(
-                BpPhysicalDisksSubtableSchema {},
-                generation,
-                rows,
-            ))
+            Some(BpTable::new(BpPhysicalDisksTableSchema {}, generation, rows))
         }
     }
 }
@@ -572,7 +546,7 @@ pub struct DiffDatasetsDetails {
         BTreeMap<CollectionDatasetIdentifier, BlueprintDatasetConfigForDiff>,
 }
 
-impl BpSledSubtableData for DiffDatasetsDetails {
+impl BpTableData for DiffDatasetsDetails {
     fn bp_generation(&self) -> BpGeneration {
         BpGeneration::Diff {
             before: self.before_generation,
@@ -580,12 +554,9 @@ impl BpSledSubtableData for DiffDatasetsDetails {
         }
     }
 
-    fn rows(
-        &self,
-        state: BpDiffState,
-    ) -> impl Iterator<Item = BpSledSubtableRow> {
+    fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
         self.datasets.values().map(move |dataset| {
-            BpSledSubtableRow::from_strings(state, dataset.as_strings())
+            BpTableRow::from_strings(state, dataset.as_strings())
         })
     }
 }
@@ -603,7 +574,7 @@ pub struct BpDiffDatasetsModified {
     pub datasets: Vec<ModifiedDataset>,
 }
 
-impl BpSledSubtableData for BpDiffDatasetsModified {
+impl BpTableData for BpDiffDatasetsModified {
     fn bp_generation(&self) -> BpGeneration {
         BpGeneration::Diff {
             before: self.generation_before,
@@ -611,10 +582,7 @@ impl BpSledSubtableData for BpDiffDatasetsModified {
         }
     }
 
-    fn rows(
-        &self,
-        state: BpDiffState,
-    ) -> impl Iterator<Item = BpSledSubtableRow> {
+    fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
         self.datasets.iter().map(move |dataset| {
             let before_strings = dataset.before.as_strings();
             let after_strings = dataset.after.as_strings();
@@ -623,14 +591,14 @@ impl BpSledSubtableData for BpDiffDatasetsModified {
             for (before, after) in std::iter::zip(before_strings, after_strings)
             {
                 let column = if before != after {
-                    BpSledSubtableColumn::diff(before, after)
+                    BpTableColumn::diff(before, after)
                 } else {
-                    BpSledSubtableColumn::value(before)
+                    BpTableColumn::value(before)
                 };
                 columns.push(column);
             }
 
-            BpSledSubtableRow::new(state, columns)
+            BpTableRow::new(state, columns)
         })
     }
 }
@@ -777,11 +745,8 @@ impl BpDiffDatasets {
         diffs
     }
 
-    /// Return a [`BpSledSubtable`] for the given `sled_id`
-    pub fn to_bp_sled_subtable(
-        &self,
-        sled_id: &SledUuid,
-    ) -> Option<BpSledSubtable> {
+    /// Return a [`BpTable`] for the given `sled_id`
+    pub fn to_bp_sled_subtable(&self, sled_id: &SledUuid) -> Option<BpTable> {
         let mut generation = BpGeneration::Diff { before: None, after: None };
         let mut rows = vec![];
         if let Some(diff) = self.unchanged.get(sled_id) {
@@ -807,11 +772,7 @@ impl BpDiffDatasets {
         if rows.is_empty() {
             None
         } else {
-            Some(BpSledSubtable::new(
-                BpDatasetsSubtableSchema {},
-                generation,
-                rows,
-            ))
+            Some(BpTable::new(BpDatasetsTableSchema {}, generation, rows))
         }
     }
 }
@@ -972,8 +933,8 @@ impl BlueprintDiff {
 
 pub struct ClickhouseClusterConfigDiffTables {
     pub metadata: KvListWithHeading,
-    pub keepers: BpSledSubtable,
-    pub servers: Option<BpSledSubtable>,
+    pub keepers: BpTable,
+    pub servers: Option<BpTable>,
 }
 
 impl ClickhouseClusterConfigDiffTables {
@@ -1053,20 +1014,20 @@ impl ClickhouseClusterConfigDiffTables {
         for (zone_id, keeper_id) in &after.keepers {
             if before.raft_config.contains(keeper_id) {
                 // Unchanged keepers
-                keeper_rows.push(BpSledSubtableRow::new(
+                keeper_rows.push(BpTableRow::new(
                     BpDiffState::Unchanged,
                     vec![
-                        BpSledSubtableColumn::Value(zone_id.to_string()),
-                        BpSledSubtableColumn::Value(keeper_id.to_string()),
+                        BpTableColumn::Value(zone_id.to_string()),
+                        BpTableColumn::Value(keeper_id.to_string()),
                     ],
                 ));
             } else {
                 // Added keepers
-                keeper_rows.push(BpSledSubtableRow::new(
+                keeper_rows.push(BpTableRow::new(
                     BpDiffState::Added,
                     vec![
-                        BpSledSubtableColumn::Value(zone_id.to_string()),
-                        BpSledSubtableColumn::Value(keeper_id.to_string()),
+                        BpTableColumn::Value(zone_id.to_string()),
+                        BpTableColumn::Value(keeper_id.to_string()),
                     ],
                 ));
             }
@@ -1076,36 +1037,36 @@ impl ClickhouseClusterConfigDiffTables {
         for keeper_id in &before.raft_config {
             if !after_ids.contains(keeper_id) {
                 // Removed keepers
-                keeper_rows.push(BpSledSubtableRow::new(
+                keeper_rows.push(BpTableRow::new(
                     BpDiffState::Removed,
                     vec![
-                        BpSledSubtableColumn::Value(
+                        BpTableColumn::Value(
                             NOT_PRESENT_IN_COLLECTION_PARENS.to_string(),
                         ),
-                        BpSledSubtableColumn::Value(keeper_id.to_string()),
+                        BpTableColumn::Value(keeper_id.to_string()),
                     ],
                 ));
             }
         }
 
-        let keepers = BpSledSubtable::new(
-            BpClickhouseKeepersSubtableSchema {},
+        let keepers = BpTable::new(
+            BpClickhouseKeepersTableSchema {},
             BpGeneration::Diff { before: None, after: Some(after.generation) },
             keeper_rows,
         );
 
         // Build up our server table
-        let server_rows: Vec<BpSledSubtableRow> = after
+        let server_rows: Vec<BpTableRow> = after
             .servers
             .iter()
             .map(|(zone_id, server_id)| {
-                BpSledSubtableRow::new(
+                BpTableRow::new(
                     BpDiffState::Added,
                     vec![
-                        BpSledSubtableColumn::CollectionNotPresentDiff {
+                        BpTableColumn::CollectionNotPresentDiff {
                             after: zone_id.to_string(),
                         },
-                        BpSledSubtableColumn::CollectionNotPresentDiff {
+                        BpTableColumn::CollectionNotPresentDiff {
                             after: server_id.to_string(),
                         },
                     ],
@@ -1113,8 +1074,8 @@ impl ClickhouseClusterConfigDiffTables {
             })
             .collect();
 
-        let servers = Some(BpSledSubtable::new(
-            BpClickhouseServersSubtableSchema {},
+        let servers = Some(BpTable::new(
+            BpClickhouseServersTableSchema {},
             BpGeneration::Diff { before: None, after: Some(after.generation) },
             server_rows,
         ));
@@ -1165,24 +1126,20 @@ impl ClickhouseClusterConfigDiffTables {
                 for (zone_id, id) in &after.$collection {
                     if before.$collection.contains_key(zone_id) {
                         // Unchanged
-                        $rows.push(BpSledSubtableRow::new(
+                        $rows.push(BpTableRow::new(
                             BpDiffState::Unchanged,
                             vec![
-                                BpSledSubtableColumn::Value(
-                                    zone_id.to_string(),
-                                ),
-                                BpSledSubtableColumn::Value(id.to_string()),
+                                BpTableColumn::Value(zone_id.to_string()),
+                                BpTableColumn::Value(id.to_string()),
                             ],
                         ));
                     } else {
                         // Added
-                        $rows.push(BpSledSubtableRow::new(
+                        $rows.push(BpTableRow::new(
                             BpDiffState::Added,
                             vec![
-                                BpSledSubtableColumn::Value(
-                                    zone_id.to_string(),
-                                ),
-                                BpSledSubtableColumn::Value(id.to_string()),
+                                BpTableColumn::Value(zone_id.to_string()),
+                                BpTableColumn::Value(id.to_string()),
                             ],
                         ));
                     }
@@ -1191,13 +1148,11 @@ impl ClickhouseClusterConfigDiffTables {
                 for (zone_id, id) in &before.$collection {
                     if !after.$collection.contains_key(zone_id) {
                         // Removed
-                        $rows.push(BpSledSubtableRow::new(
+                        $rows.push(BpTableRow::new(
                             BpDiffState::Removed,
                             vec![
-                                BpSledSubtableColumn::Value(
-                                    zone_id.to_string(),
-                                ),
-                                BpSledSubtableColumn::Value(id.to_string()),
+                                BpTableColumn::Value(zone_id.to_string()),
+                                BpTableColumn::Value(id.to_string()),
                             ],
                         ));
                     }
@@ -1208,8 +1163,8 @@ impl ClickhouseClusterConfigDiffTables {
         // Construct our keeper table
         let mut keeper_rows = vec![];
         diff_table_rows!(keeper_rows, keepers);
-        let keepers = BpSledSubtable::new(
-            BpClickhouseKeepersSubtableSchema {},
+        let keepers = BpTable::new(
+            BpClickhouseKeepersTableSchema {},
             BpGeneration::Diff {
                 before: Some(before.generation),
                 after: Some(after.generation),
@@ -1221,8 +1176,8 @@ impl ClickhouseClusterConfigDiffTables {
         let mut server_rows = vec![];
         diff_table_rows!(server_rows, servers);
 
-        let servers = Some(BpSledSubtable::new(
-            BpClickhouseServersSubtableSchema {},
+        let servers = Some(BpTable::new(
+            BpClickhouseServersTableSchema {},
             BpGeneration::Diff {
                 before: Some(before.generation),
                 after: Some(after.generation),
@@ -1248,24 +1203,24 @@ impl ClickhouseClusterConfigDiffTables {
             )],
         );
 
-        let keeper_rows: Vec<BpSledSubtableRow> = before
+        let keeper_rows: Vec<BpTableRow> = before
             .raft_config
             .iter()
             .map(|keeper_id| {
-                BpSledSubtableRow::new(
+                BpTableRow::new(
                     BpDiffState::Removed,
                     vec![
-                        BpSledSubtableColumn::Value(
+                        BpTableColumn::Value(
                             NOT_PRESENT_IN_COLLECTION_PARENS.to_string(),
                         ),
-                        BpSledSubtableColumn::Value(keeper_id.to_string()),
+                        BpTableColumn::Value(keeper_id.to_string()),
                     ],
                 )
             })
             .collect();
 
-        let keepers = BpSledSubtable::new(
-            BpClickhouseKeepersSubtableSchema {},
+        let keepers = BpTable::new(
+            BpClickhouseKeepersTableSchema {},
             BpGeneration::unknown(),
             keeper_rows,
         );
@@ -1315,13 +1270,13 @@ impl ClickhouseClusterConfigDiffTables {
         let metadata =
             KvListWithHeading::new(CLICKHOUSE_CLUSTER_CONFIG_HEADING, rows);
 
-        let keepers = BpSledSubtable::new(
-            BpClickhouseKeepersSubtableSchema {},
+        let keepers = BpTable::new(
+            BpClickhouseKeepersTableSchema {},
             BpGeneration::Value(config.generation),
             (config.generation, &config.keepers).rows(diff_state).collect(),
         );
-        let servers = Some(BpSledSubtable::new(
-            BpClickhouseServersSubtableSchema {},
+        let servers = Some(BpTable::new(
+            BpClickhouseServersTableSchema {},
             BpGeneration::Value(config.generation),
             (config.generation, &config.servers).rows(diff_state).collect(),
         ));

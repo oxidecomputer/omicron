@@ -122,7 +122,7 @@ impl fmt::Display for BpGeneration {
     }
 }
 
-pub enum BpSledSubtableColumn {
+pub enum BpTableColumn {
     Value(String),
     Diff { before: String, after: String },
     // A special nomenclature for when we are diffing a collection with a
@@ -131,29 +131,29 @@ pub enum BpSledSubtableColumn {
     CollectionNotPresentDiff { after: String },
 }
 
-impl BpSledSubtableColumn {
-    pub fn value(s: String) -> BpSledSubtableColumn {
-        BpSledSubtableColumn::Value(s)
+impl BpTableColumn {
+    pub fn value(s: String) -> BpTableColumn {
+        BpTableColumn::Value(s)
     }
 
-    pub fn diff(before: String, after: String) -> BpSledSubtableColumn {
-        BpSledSubtableColumn::Diff { before, after }
+    pub fn diff(before: String, after: String) -> BpTableColumn {
+        BpTableColumn::Diff { before, after }
     }
 
     pub fn len(&self) -> usize {
         match self {
-            BpSledSubtableColumn::Value(s) => s.len(),
-            BpSledSubtableColumn::Diff { before, after } => {
+            BpTableColumn::Value(s) => s.len(),
+            BpTableColumn::Diff { before, after } => {
                 // Add 1 for the added/removed prefix and 1 for a space
                 //
                 // This will need to change if we change how we render diffs in
-                // the `Display` impl for `BpSledSubtable`. However, putting it
+                // the `Display` impl for `BpTable`. However, putting it
                 // here allows to minimize any extra horizontal spacing in case
                 // other values for the same column are already longer than the
                 // the before or after values + 2.
                 usize::max(before.len(), after.len()) + 2
             }
-            BpSledSubtableColumn::CollectionNotPresentDiff { after } => {
+            BpTableColumn::CollectionNotPresentDiff { after } => {
                 usize::max(NOT_PRESENT_IN_COLLECTION_PARENS.len(), after.len())
                     + 4
             }
@@ -161,62 +161,53 @@ impl BpSledSubtableColumn {
     }
 }
 
-/// A row in a [`BpSledSubtable`]
-pub struct BpSledSubtableRow {
+/// A row in a [`BpTable`]
+pub struct BpTableRow {
     state: BpDiffState,
-    columns: Vec<BpSledSubtableColumn>,
+    columns: Vec<BpTableColumn>,
 }
 
-impl BpSledSubtableRow {
-    pub fn new(state: BpDiffState, columns: Vec<BpSledSubtableColumn>) -> Self {
-        BpSledSubtableRow { state, columns }
+impl BpTableRow {
+    pub fn new(state: BpDiffState, columns: Vec<BpTableColumn>) -> Self {
+        BpTableRow { state, columns }
     }
 
     pub fn from_strings(state: BpDiffState, columns: Vec<String>) -> Self {
-        BpSledSubtableRow {
+        BpTableRow {
             state,
-            columns: columns
-                .into_iter()
-                .map(BpSledSubtableColumn::Value)
-                .collect(),
+            columns: columns.into_iter().map(BpTableColumn::Value).collect(),
         }
     }
 }
 
-/// Metadata about all instances of specific type of [`BpSledSubtable`],
+/// Metadata about all instances of specific type of [`BpTable`],
 /// such as omicron zones or physical disks.
-pub trait BpSledSubtableSchema {
+pub trait BpTableSchema {
     fn table_name(&self) -> &'static str;
     fn column_names(&self) -> &'static [&'static str];
 }
 
-// Provide data specific to an instance of a [`BpSledSubtable`]
-pub trait BpSledSubtableData {
+// Provide data specific to an instance of a [`BpTable`]
+pub trait BpTableData {
     fn bp_generation(&self) -> BpGeneration;
-    fn rows(
-        &self,
-        state: BpDiffState,
-    ) -> impl Iterator<Item = BpSledSubtableRow>;
+    fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow>;
 }
 
 /// A table specific to a sled resource, such as a zone or disk.
-//
-// TODO: Rename to `BpTable` since it is also used for blueprint wide tables
-// like those relating to `ClickhouseClusterConfig`?
-pub struct BpSledSubtable {
+pub struct BpTable {
     table_name: &'static str,
     column_names: &'static [&'static str],
     generation: BpGeneration,
-    rows: Vec<BpSledSubtableRow>,
+    rows: Vec<BpTableRow>,
 }
 
-impl BpSledSubtable {
+impl BpTable {
     pub fn new(
-        schema: impl BpSledSubtableSchema,
+        schema: impl BpTableSchema,
         generation: BpGeneration,
-        rows: Vec<BpSledSubtableRow>,
-    ) -> BpSledSubtable {
-        BpSledSubtable {
+        rows: Vec<BpTableRow>,
+    ) -> BpTable {
+        BpTable {
             table_name: schema.table_name(),
             column_names: schema.column_names(),
             generation,
@@ -244,7 +235,7 @@ impl BpSledSubtable {
 const SUBTABLE_INDENT: usize = 4;
 const COLUMN_GAP: usize = 3;
 
-impl fmt::Display for BpSledSubtable {
+impl fmt::Display for BpTable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let widths = self.column_widths();
         let mut total_width =
@@ -285,17 +276,15 @@ impl fmt::Display for BpSledSubtable {
                 row.columns.iter().zip(&widths).enumerate()
             {
                 let (column, needs_multiline) = match column {
-                    BpSledSubtableColumn::Value(s) => (s.clone(), false),
-                    BpSledSubtableColumn::Diff { before, .. } => {
+                    BpTableColumn::Value(s) => (s.clone(), false),
+                    BpTableColumn::Diff { before, .. } => {
                         // If we remove the prefix and space, we'll need to also
-                        // modify `BpSledSubtableColumn::len` to reflect this.
+                        // modify `BpTableColumn::len` to reflect this.
                         (format!("{REMOVED_PREFIX} {before}"), true)
                     }
-                    BpSledSubtableColumn::CollectionNotPresentDiff {
-                        ..
-                    } => (
+                    BpTableColumn::CollectionNotPresentDiff { .. } => (
                         // If we remove the prefix and space, we'll need to also
-                        // modify `BpSledSubtableColumn::len` to reflect this.
+                        // modify `BpTableColumn::len` to reflect this.
                         format!("{NOT_PRESENT_IN_COLLECTION_PARENS}"),
                         true,
                     ),
@@ -318,15 +307,13 @@ impl fmt::Display for BpSledSubtable {
                 {
                     // Write the after columns or nothing
                     let column = match column {
-                        BpSledSubtableColumn::Value(_) => "".to_string(),
-                        BpSledSubtableColumn::Diff { after, .. } => {
+                        BpTableColumn::Value(_) => "".to_string(),
+                        BpTableColumn::Diff { after, .. } => {
                             // If we remove the prefix and space, we'll need to also
-                            // modify `BpSledSubtableColumn::len` to reflect this.
+                            // modify `BpTableColumn::len` to reflect this.
                             format!("{ADDED_PREFIX} {after}")
                         }
-                        BpSledSubtableColumn::CollectionNotPresentDiff {
-                            after,
-                        } => {
+                        BpTableColumn::CollectionNotPresentDiff { after } => {
                             format!("{after}")
                         }
                     };
@@ -345,9 +332,9 @@ impl fmt::Display for BpSledSubtable {
     }
 }
 
-/// The [`BpSledSubtable`] schema for physical disks
-pub struct BpPhysicalDisksSubtableSchema {}
-impl BpSledSubtableSchema for BpPhysicalDisksSubtableSchema {
+/// The [`BpTable`] schema for physical disks
+pub struct BpPhysicalDisksTableSchema {}
+impl BpTableSchema for BpPhysicalDisksTableSchema {
     fn table_name(&self) -> &'static str {
         "physical disks"
     }
@@ -357,9 +344,9 @@ impl BpSledSubtableSchema for BpPhysicalDisksSubtableSchema {
     }
 }
 
-/// The [`BpSledSubtable`] schema for datasets
-pub struct BpDatasetsSubtableSchema {}
-impl BpSledSubtableSchema for BpDatasetsSubtableSchema {
+/// The [`BpTable`] schema for datasets
+pub struct BpDatasetsTableSchema {}
+impl BpTableSchema for BpDatasetsTableSchema {
     fn table_name(&self) -> &'static str {
         "datasets"
     }
@@ -369,9 +356,9 @@ impl BpSledSubtableSchema for BpDatasetsSubtableSchema {
     }
 }
 
-/// The [`BpSledSubtable`] schema for omicron zones
-pub struct BpOmicronZonesSubtableSchema {}
-impl BpSledSubtableSchema for BpOmicronZonesSubtableSchema {
+/// The [`BpTable`] schema for omicron zones
+pub struct BpOmicronZonesTableSchema {}
+impl BpTableSchema for BpOmicronZonesTableSchema {
     fn table_name(&self) -> &'static str {
         "omicron zones"
     }
@@ -380,9 +367,9 @@ impl BpSledSubtableSchema for BpOmicronZonesSubtableSchema {
     }
 }
 
-/// The [`BpSledSubtable`] schema for clickhouse keepers
-pub struct BpClickhouseKeepersSubtableSchema {}
-impl BpSledSubtableSchema for BpClickhouseKeepersSubtableSchema {
+/// The [`BpTable`] schema for clickhouse keepers
+pub struct BpClickhouseKeepersTableSchema {}
+impl BpTableSchema for BpClickhouseKeepersTableSchema {
     fn table_name(&self) -> &'static str {
         "clickhouse keepers"
     }
@@ -392,9 +379,9 @@ impl BpSledSubtableSchema for BpClickhouseKeepersSubtableSchema {
     }
 }
 
-/// The [`BpSledSubtable`] schema for clickhouse servers
-pub struct BpClickhouseServersSubtableSchema {}
-impl BpSledSubtableSchema for BpClickhouseServersSubtableSchema {
+/// The [`BpTable`] schema for clickhouse servers
+pub struct BpClickhouseServersTableSchema {}
+impl BpTableSchema for BpClickhouseServersTableSchema {
     fn table_name(&self) -> &'static str {
         "clickhouse servers"
     }

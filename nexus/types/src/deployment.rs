@@ -90,9 +90,9 @@ pub use zone_type::BlueprintZoneType;
 pub use zone_type::DurableDataset;
 
 use blueprint_display::{
-    constants::*, BpDiffState, BpGeneration, BpOmicronZonesSubtableSchema,
-    BpPhysicalDisksSubtableSchema, BpSledSubtable, BpSledSubtableData,
-    BpSledSubtableRow, KvListWithHeading,
+    constants::*, BpDiffState, BpGeneration, BpOmicronZonesTableSchema,
+    BpPhysicalDisksTableSchema, BpTable, BpTableData, BpTableRow,
+    KvListWithHeading,
 };
 
 pub use blueprint_diff::BlueprintDiff;
@@ -375,38 +375,29 @@ impl Blueprint {
     }
 }
 
-impl BpSledSubtableData for &OmicronPhysicalDisksConfig {
+impl BpTableData for &OmicronPhysicalDisksConfig {
     fn bp_generation(&self) -> BpGeneration {
         BpGeneration::Value(self.generation)
     }
 
-    fn rows(
-        &self,
-        state: BpDiffState,
-    ) -> impl Iterator<Item = BpSledSubtableRow> {
+    fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
         let sorted_disk_ids: BTreeSet<DiskIdentity> =
             self.disks.iter().map(|d| d.identity.clone()).collect();
 
         sorted_disk_ids.into_iter().map(move |d| {
-            BpSledSubtableRow::from_strings(
-                state,
-                vec![d.vendor, d.model, d.serial],
-            )
+            BpTableRow::from_strings(state, vec![d.vendor, d.model, d.serial])
         })
     }
 }
 
-impl BpSledSubtableData for BlueprintOrCollectionZonesConfig {
+impl BpTableData for BlueprintOrCollectionZonesConfig {
     fn bp_generation(&self) -> BpGeneration {
         BpGeneration::Value(self.generation())
     }
 
-    fn rows(
-        &self,
-        state: BpDiffState,
-    ) -> impl Iterator<Item = BpSledSubtableRow> {
+    fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
         self.zones().map(move |zone| {
-            BpSledSubtableRow::from_strings(
+            BpTableRow::from_strings(
                 state,
                 vec![
                     zone.kind().report_str().to_string(),
@@ -421,7 +412,7 @@ impl BpSledSubtableData for BlueprintOrCollectionZonesConfig {
 
 // Useful implementation for printing two column tables stored in a `BTreeMap`, where
 // each key and value impl `Display`.
-impl<S1, S2> BpSledSubtableData for (Generation, &BTreeMap<S1, S2>)
+impl<S1, S2> BpTableData for (Generation, &BTreeMap<S1, S2>)
 where
     S1: fmt::Display,
     S2: fmt::Display,
@@ -430,12 +421,9 @@ where
         BpGeneration::Value(self.0)
     }
 
-    fn rows(
-        &self,
-        state: BpDiffState,
-    ) -> impl Iterator<Item = BpSledSubtableRow> {
+    fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
         self.1.iter().map(move |(s1, s2)| {
-            BpSledSubtableRow::from_strings(
+            BpTableRow::from_strings(
                 state,
                 vec![s1.to_string(), s2.to_string()],
             )
@@ -509,7 +497,7 @@ impl<'a> BlueprintDisplay<'a> {
     // Return tables representing a [`ClickhouseClusterConfig`] in a given blueprint
     fn make_clickhouse_cluster_config_tables(
         &self,
-    ) -> Option<(KvListWithHeading, BpSledSubtable, BpSledSubtable)> {
+    ) -> Option<(KvListWithHeading, BpTable, BpTable)> {
         let Some(config) = &self.blueprint.clickhouse_cluster_config else {
             return None;
         };
@@ -552,8 +540,8 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
         // If there are corresponding zones, print those as well.
         for (sled_id, disks) in &self.blueprint.blueprint_disks {
             // Construct the disks subtable
-            let disks_table = BpSledSubtable::new(
-                BpPhysicalDisksSubtableSchema {},
+            let disks_table = BpTable::new(
+                BpPhysicalDisksTableSchema {},
                 disks.bp_generation(),
                 disks.rows(BpDiffState::Unchanged).collect(),
             );
@@ -573,8 +561,8 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
                 Some(zones) => {
                     let zones =
                         BlueprintOrCollectionZonesConfig::from(zones.clone());
-                    let zones_tab = BpSledSubtable::new(
-                        BpOmicronZonesSubtableSchema {},
+                    let zones_tab = BpTable::new(
+                        BpOmicronZonesTableSchema {},
                         zones.bp_generation(),
                         zones.rows(BpDiffState::Unchanged).collect(),
                     );
@@ -603,8 +591,8 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
                     f,
                     "\n!{sled_id}\n{}\n{}\n\n",
                     "WARNING: Zones exist without physical disks!",
-                    BpSledSubtable::new(
-                        BpOmicronZonesSubtableSchema {},
+                    BpTable::new(
+                        BpOmicronZonesTableSchema {},
                         zones.bp_generation(),
                         zones.rows(BpDiffState::Unchanged).collect()
                     )
