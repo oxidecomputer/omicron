@@ -1102,14 +1102,12 @@ impl ClickhouseClusterConfigDiffTables {
                 BpSledSubtableRow::new(
                     BpDiffState::Added,
                     vec![
-                        BpSledSubtableColumn::diff(
-                            NOT_PRESENT_IN_COLLECTION_PARENS.to_string(),
-                            zone_id.to_string(),
-                        ),
-                        BpSledSubtableColumn::diff(
-                            NOT_PRESENT_IN_COLLECTION_PARENS.to_string(),
-                            server_id.to_string(),
-                        ),
+                        BpSledSubtableColumn::CollectionNotPresentDiff {
+                            after: zone_id.to_string(),
+                        },
+                        BpSledSubtableColumn::CollectionNotPresentDiff {
+                            after: server_id.to_string(),
+                        },
                     ],
                 )
             })

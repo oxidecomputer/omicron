@@ -125,6 +125,10 @@ impl fmt::Display for BpGeneration {
 pub enum BpSledSubtableColumn {
     Value(String),
     Diff { before: String, after: String },
+    // A special nomenclature for when we are diffing a collection with a
+    // blueprint but the before value doesn't exist in the collection, because
+    // collections don't have such a field.
+    CollectionNotPresentDiff { after: String },
 }
 
 impl BpSledSubtableColumn {
@@ -148,6 +152,10 @@ impl BpSledSubtableColumn {
                 // other values for the same column are already longer than the
                 // the before or after values + 2.
                 usize::max(before.len(), after.len()) + 2
+            }
+            BpSledSubtableColumn::CollectionNotPresentDiff { after } => {
+                usize::max(NOT_PRESENT_IN_COLLECTION_PARENS.len(), after.len())
+                    + 4
             }
         }
     }
@@ -283,6 +291,14 @@ impl fmt::Display for BpSledSubtable {
                         // modify `BpSledSubtableColumn::len` to reflect this.
                         (format!("{REMOVED_PREFIX} {before}"), true)
                     }
+                    BpSledSubtableColumn::CollectionNotPresentDiff {
+                        ..
+                    } => (
+                        // If we remove the prefix and space, we'll need to also
+                        // modify `BpSledSubtableColumn::len` to reflect this.
+                        format!("{NOT_PRESENT_IN_COLLECTION_PARENS}"),
+                        true,
+                    ),
                 };
                 multiline_row |= needs_multiline;
 
@@ -301,23 +317,22 @@ impl fmt::Display for BpSledSubtable {
                     row.columns.iter().zip(&widths).enumerate()
                 {
                     // Write the after columns or nothing
-                    let column = if let BpSledSubtableColumn::Diff {
-                        after,
-                        ..
-                    } = column
-                    {
-                        // If we remove the prefix and space, we'll need to also
-                        // modify `BpSledSubtableColumn::len` to reflect this.
-                        format!("{ADDED_PREFIX} {after}")
-                    } else {
-                        "".to_string()
+                    let column = match column {
+                        BpSledSubtableColumn::Value(_) => "".to_string(),
+                        BpSledSubtableColumn::Diff { after, .. } => {
+                            // If we remove the prefix and space, we'll need to also
+                            // modify `BpSledSubtableColumn::len` to reflect this.
+                            format!("{ADDED_PREFIX} {after}")
+                        }
+                        BpSledSubtableColumn::CollectionNotPresentDiff {
+                            after,
+                        } => {
+                            format!("{after}")
+                        }
                     };
-
                     if i == 0 {
-                        // First column should never be modifiable
-                        assert!(column.is_empty());
-                        let column = format!(" {SUB_LAST}");
-                        write!(f, "{column:<width$}")?;
+                        let s = format!(" {SUB_LAST} {column}");
+                        write!(f, "{s:<width$}")?;
                     } else {
                         write!(f, "{:<COLUMN_GAP$}{column:<width$}", "")?;
                     }

@@ -2944,6 +2944,13 @@ mod test {
             &diff.display().to_string(),
         );
 
+        let coll_diff = blueprint4.diff_since_collection(&collection);
+        println!("coll_diff = {coll_diff:#?}");
+        assert_contents(
+            "tests/output/planner_deploy_all_keeper_nodes_4_collection.txt",
+            &coll_diff.display().to_string(),
+        );
+
         let bp3_config = blueprint3.clickhouse_cluster_config.as_ref().unwrap();
         let bp4_config = blueprint4.clickhouse_cluster_config.as_ref().unwrap();
         assert_eq!(bp4_config.generation, bp3_config.generation);
