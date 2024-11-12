@@ -619,6 +619,8 @@ CREATE INDEX IF NOT EXISTS lookup_dataset_by_zpool on omicron.public.dataset (
     id
 ) WHERE pool_id IS NOT NULL AND time_deleted IS NULL;
 
+CREATE INDEX IF NOT EXISTS lookup_dataset_by_ip on omicron.public.dataset (ip);
+
 /*
  * A region of space allocated to Crucible Downstairs, within a dataset.
  */
@@ -641,7 +643,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.region (
 
     port INT4,
 
-    read_only BOOL NOT NULL
+    read_only BOOL NOT NULL,
+
+    deleting BOOL NOT NULL
 );
 
 /*
@@ -663,6 +667,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_region_by_dataset on omicron.public.reg
 CREATE INDEX IF NOT EXISTS lookup_regions_missing_ports
     on omicron.public.region (id)
     WHERE port IS NULL;
+
+CREATE INDEX IF NOT EXISTS lookup_regions_by_read_only
+    on omicron.public.region (read_only);
 
 /*
  * A snapshot of a region, within a dataset.
@@ -696,6 +703,10 @@ CREATE INDEX IF NOT EXISTS lookup_region_by_dataset on omicron.public.region_sna
 
 CREATE INDEX IF NOT EXISTS lookup_region_snapshot_by_region_id on omicron.public.region_snapshot (
     region_id
+);
+
+CREATE INDEX IF NOT EXISTS lookup_region_snapshot_by_deleting on omicron.public.region_snapshot (
+    deleting
 );
 
 /*
@@ -4589,6 +4600,78 @@ CREATE INDEX IF NOT EXISTS lookup_bgp_config_by_bgp_announce_set_id ON omicron.p
 ) WHERE
     time_deleted IS NULL;
 
+CREATE TYPE IF NOT EXISTS omicron.public.volume_resource_usage_type AS ENUM (
+  'read_only_region',
+  'region_snapshot'
+);
+
+/*
+ * This table records when a Volume makes use of a read-only resource. When
+ * there are no more entries for a particular read-only resource, then that
+ * resource can be garbage collected.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.volume_resource_usage (
+    usage_id UUID NOT NULL,
+
+    volume_id UUID NOT NULL,
+
+    usage_type omicron.public.volume_resource_usage_type NOT NULL,
+
+    /*
+     * This column contains a non-NULL value when the usage type is read_only
+     * region
+     */
+    region_id UUID,
+
+    /*
+     * These columns contain non-NULL values when the usage type is region
+     * snapshot
+     */
+    region_snapshot_dataset_id UUID,
+    region_snapshot_region_id UUID,
+    region_snapshot_snapshot_id UUID,
+
+    PRIMARY KEY (usage_id),
+
+    CONSTRAINT exactly_one_usage_source CHECK (
+     (
+      (usage_type = 'read_only_region') AND
+      (region_id IS NOT NULL) AND
+      (
+       region_snapshot_dataset_id IS NULL AND
+       region_snapshot_region_id IS NULL AND
+       region_snapshot_snapshot_id IS NULL
+      )
+     )
+    OR
+     (
+      (usage_type = 'region_snapshot') AND
+      (region_id IS NULL) AND
+      (
+       region_snapshot_dataset_id IS NOT NULL AND
+       region_snapshot_region_id IS NOT NULL AND
+       region_snapshot_snapshot_id IS NOT NULL
+      )
+     )
+    )
+);
+
+CREATE INDEX IF NOT EXISTS lookup_volume_resource_usage_by_region on omicron.public.volume_resource_usage (
+    region_id
+);
+
+CREATE INDEX IF NOT EXISTS lookup_volume_resource_usage_by_snapshot on omicron.public.volume_resource_usage (
+    region_snapshot_dataset_id, region_snapshot_region_id, region_snapshot_snapshot_id
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS one_record_per_volume_resource_usage on omicron.public.volume_resource_usage (
+    volume_id,
+    usage_type,
+    region_id,
+    region_snapshot_dataset_id,
+    region_snapshot_region_id,
+    region_snapshot_snapshot_id
+);
 
 /*
  * Keep this at the end of file so that the database does not contain a version
@@ -4601,7 +4684,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '113.0.0', NULL)
+    (TRUE, NOW(), NOW(), '114.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
