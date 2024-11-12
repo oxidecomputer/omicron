@@ -285,7 +285,7 @@ impl fmt::Display for BpTable {
                     BpTableColumn::CollectionNotPresentDiff { .. } => (
                         // If we remove the prefix and space, we'll need to also
                         // modify `BpTableColumn::len` to reflect this.
-                        format!("{NOT_PRESENT_IN_COLLECTION_PARENS}"),
+                        NOT_PRESENT_IN_COLLECTION_PARENS.to_string(),
                         true,
                     ),
                 };
@@ -314,7 +314,7 @@ impl fmt::Display for BpTable {
                             format!("{ADDED_PREFIX} {after}")
                         }
                         BpTableColumn::CollectionNotPresentDiff { after } => {
-                            format!("{after}")
+                            after.to_string()
                         }
                     };
                     if i == 0 {
