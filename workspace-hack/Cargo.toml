@@ -85,6 +85,7 @@ num-traits = { version = "0.2.19", features = ["i128", "libm"] }
 openapiv3 = { version = "2.0.0", default-features = false, features = ["skip_serializing_defaults"] }
 peg-runtime = { version = "0.8.3", default-features = false, features = ["std"] }
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
+percent-encoding = { version = "2.3.1" }
 petgraph = { version = "0.6.5", features = ["serde-1"] }
 phf = { version = "0.11.2" }
 phf_shared = { version = "0.11.2" }
@@ -204,6 +205,7 @@ num-traits = { version = "0.2.19", features = ["i128", "libm"] }
 openapiv3 = { version = "2.0.0", default-features = false, features = ["skip_serializing_defaults"] }
 peg-runtime = { version = "0.8.3", default-features = false, features = ["std"] }
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
+percent-encoding = { version = "2.3.1" }
 petgraph = { version = "0.6.5", features = ["serde-1"] }
 phf = { version = "0.11.2" }
 phf_shared = { version = "0.11.2" }
