@@ -38,12 +38,12 @@ async fn test_lgif_parsing() -> anyhow::Result<()> {
     );
 
     let clickhouse_cli = ClickhouseCli::new(
-        Utf8PathBuf::from_str("clickhouse").unwrap(),
+        Utf8PathBuf::from_str("clickhouse")?,
         SocketAddrV6::new(Ipv6Addr::LOCALHOST, 29001, 0, 0),
     )
     .with_log(logctx.log.clone());
 
-    let lgif = clickhouse_cli.lgif().await.unwrap();
+    let lgif = clickhouse_cli.lgif().await?;
 
     // The first log index from a newly created cluster should always be 1
     assert_eq!(lgif.first_log_idx, 1);
