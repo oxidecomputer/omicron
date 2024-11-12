@@ -20,7 +20,7 @@ async fn main() -> Result<()> {
 
     let (parent_dir, _prefix) = log_prefix_for_test(logctx.test_name());
     // TODO: Switch to "{prefix}_clickward_test"?
-    let path = parent_dir.join(format!("clickward_test"));
+    let path = parent_dir.join("clickward_test");
     std::fs::create_dir(&path)?;
 
     slog::info!(logctx.log, "Setting up a ClickHouse cluster");
@@ -43,7 +43,6 @@ async fn main() -> Result<()> {
 
     let mut deployment = Deployment::new(config);
 
-    // TODO: Use 2 replicas and 3 keepers, for now I'm just testing
     let num_keepers = 3;
     let num_replicas = 2;
     deployment

@@ -146,7 +146,7 @@ async fn test_teardown() -> anyhow::Result<()> {
 
     let (parent_dir, _prefix) = log_prefix_for_test("clickhouse_cluster");
     // TODO: Switch to "{prefix}_clickward_test" ?
-    let path = parent_dir.join(format!("clickward_test"));
+    let path = parent_dir.join("clickward_test");
 
     info!(&logctx.log, "Tearing down ClickHouse cluster"; "path" => ?path);
 
