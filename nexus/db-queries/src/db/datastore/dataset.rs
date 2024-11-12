@@ -347,14 +347,13 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::db::datastore::test::bp_insert_and_make_target;
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::Generation;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
-    use nexus_types::deployment::Blueprint;
-    use nexus_types::deployment::BlueprintTarget;
     use omicron_common::api::internal::shared::DatasetKind as ApiDatasetKind;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::SledUuid;
@@ -514,28 +513,6 @@ mod test {
 
         db.terminate().await;
         logctx.cleanup_successful();
-    }
-
-    async fn bp_insert_and_make_target(
-        opctx: &OpContext,
-        datastore: &DataStore,
-        bp: &Blueprint,
-    ) {
-        datastore
-            .blueprint_insert(opctx, bp)
-            .await
-            .expect("inserted blueprint");
-        datastore
-            .blueprint_target_set_current(
-                opctx,
-                BlueprintTarget {
-                    target_id: bp.id,
-                    enabled: true,
-                    time_made_target: Utc::now(),
-                },
-            )
-            .await
-            .expect("made blueprint the target");
     }
 
     fn new_dataset_on(zpool_id: ZpoolUuid) -> Dataset {

@@ -2042,6 +2042,7 @@ allow_tables_to_appear_in_same_query!(
     console_session,
     sled,
     sled_resource,
+    support_bundle,
     router_route,
     vmm,
     volume,

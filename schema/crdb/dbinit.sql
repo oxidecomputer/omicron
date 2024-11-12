@@ -2390,24 +2390,55 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo_artifact (
 
 
 CREATE TYPE IF NOT EXISTS omicron.public.support_bundle_state AS ENUM (
+  -- The bundle is currently being created.
+  --
+  -- All storage for this bundle exists in Nexus's transient filesystem, as it
+  -- is being assembled.
   'collecting',
+
+  -- The bundle has been created, and is being transferred to a Sled.
+  --
+  -- This bundle may been partially allocated to a Sled.
+  'collected',
+
+  -- The bundle has been explicitly marked cancelled.
+  --
+  -- It may or may not have durable storage which needs to be freed.
   'cancelling',
+
+  -- The bundle, for whatever reason, has failed.
+  --
+  -- It should no longer have any managed durable storage.
   'failed',
+
+  -- The bundle has been collected successfully, and has storage on
+  -- a particular sled.
   'active'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.support_bundle (
-    id UUID NOT NULL,
+    id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     reason_for_creation TEXT NOT NULL,
     reason_for_failure TEXT,
     state omicron.public.support_bundle_state NOT NULL,
-    zpool_id NOT NULL UUID,
-    dataset_id NOT NULL UUID,
+    zpool_id UUID NOT NULL,
+    dataset_id UUID NOT NULL,
 
     -- The Nexus which is in charge of collecting the support bundle,
     -- and later managing its storage.
-    assigned_nexus UUID,
+    assigned_nexus UUID
+);
+
+-- The "UNIQUE" part of this index helps enforce that we allow one support bundle
+-- per debug dataset. This constraint can be removed, if the query responsible
+-- for allocation changes to allocate more intelligently.
+CREATE UNIQUE INDEX IF NOT EXISTS one_bundle_per_dataset ON omicron.public.support_bundle (
+    dataset_id
+);
+
+CREATE INDEX IF NOT EXISTS lookup_bundle_by_neuxs ON omicron.public.support_bundle (
+    assigned_nexus
 );
 
 /*******************************************************************/
