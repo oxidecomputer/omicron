@@ -46,7 +46,7 @@ live-tests = { max-threads = 1 }
 default-filter = 'all() - package(omicron-live-tests) - package(end-to-end-tests)'
 
 [[profile.default.overrides]]
-filter = 'package(oximeter-db) and test(replicated)'
+filter = 'package(oximeter-db) and test(replicated) + package(omicron-clickhouse-admin)'
 test-group = 'clickhouse-cluster'
 
 [[profile.default.overrides]]

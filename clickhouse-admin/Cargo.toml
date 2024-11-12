@@ -31,7 +31,6 @@ omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 clickward.workspace = true
-ctor.workspace = true
 dropshot.workspace = true
 expectorate.workspace = true
 nexus-test-utils.workspace = true
