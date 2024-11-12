@@ -17,7 +17,7 @@ use crate::internal_api::params::DnsConfigParams;
 use crate::inventory::Collection;
 pub use crate::inventory::SourceNatConfig;
 pub use crate::inventory::ZpoolName;
-use blueprint_diff::ClickhouseClusterConfigDiffTables;
+use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
 use derive_more::From;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
@@ -498,24 +498,15 @@ impl<'a> BlueprintDisplay<'a> {
     fn make_clickhouse_cluster_config_tables(
         &self,
     ) -> Option<(KvListWithHeading, BpTable, BpTable)> {
-        let Some(config) = &self.blueprint.clickhouse_cluster_config else {
-            return None;
-        };
+        let config = &self.blueprint.clickhouse_cluster_config.as_ref()?;
 
         let diff_table =
-            ClickhouseClusterConfigDiffTables::single_blueprint_table(
+            ClickhouseClusterConfigDiffTablesForSingleBlueprint::new(
                 BpDiffState::Unchanged,
                 config,
             );
 
-        Some((
-            diff_table.metadata,
-            diff_table.keepers,
-            // Safety: The call to
-            // `ClickhouseClusterConfigDiffTables::single_blueprint_table`
-            // always returns all tables.
-            diff_table.servers.unwrap(),
-        ))
+        Some((diff_table.metadata, diff_table.keepers, diff_table.servers))
     }
 }
 

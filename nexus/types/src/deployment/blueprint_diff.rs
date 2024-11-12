@@ -931,6 +931,82 @@ impl BlueprintDiff {
     }
 }
 
+/// A printable representation of `ClickhouseClusterConfig` diff tables where
+/// there is only a single known blueprint with no before or after collection or
+/// bluerpint to compare to.
+pub struct ClickhouseClusterConfigDiffTablesForSingleBlueprint {
+    pub metadata: KvListWithHeading,
+    pub keepers: BpTable,
+    pub servers: BpTable,
+}
+
+impl ClickhouseClusterConfigDiffTablesForSingleBlueprint {
+    pub fn new(
+        diff_state: BpDiffState,
+        config: &ClickhouseClusterConfig,
+    ) -> Self {
+        let rows: Vec<_> = [
+            (GENERATION, config.generation.to_string()),
+            (
+                CLICKHOUSE_MAX_USED_SERVER_ID,
+                config.max_used_server_id.to_string(),
+            ),
+            (
+                CLICKHOUSE_MAX_USED_KEEPER_ID,
+                config.max_used_keeper_id.to_string(),
+            ),
+            (CLICKHOUSE_CLUSTER_NAME, config.cluster_name.clone()),
+            (CLICKHOUSE_CLUSTER_SECRET, config.cluster_secret.clone()),
+            (
+                CLICKHOUSE_HIGHEST_SEEN_KEEPER_LEADER_COMMITTED_LOG_INDEX,
+                config
+                    .highest_seen_keeper_leader_committed_log_index
+                    .to_string(),
+            ),
+        ]
+        .into_iter()
+        .map(|(key, val)| KvPair::new(diff_state, key, val))
+        .collect();
+
+        let metadata =
+            KvListWithHeading::new(CLICKHOUSE_CLUSTER_CONFIG_HEADING, rows);
+
+        let keepers = BpTable::new(
+            BpClickhouseKeepersTableSchema {},
+            BpGeneration::Value(config.generation),
+            (config.generation, &config.keepers).rows(diff_state).collect(),
+        );
+        let servers = BpTable::new(
+            BpClickhouseServersTableSchema {},
+            BpGeneration::Value(config.generation),
+            (config.generation, &config.servers).rows(diff_state).collect(),
+        );
+
+        ClickhouseClusterConfigDiffTablesForSingleBlueprint {
+            metadata,
+            keepers,
+            servers,
+        }
+    }
+}
+
+impl From<ClickhouseClusterConfigDiffTablesForSingleBlueprint>
+    for ClickhouseClusterConfigDiffTables
+{
+    fn from(
+        value: ClickhouseClusterConfigDiffTablesForSingleBlueprint,
+    ) -> Self {
+        ClickhouseClusterConfigDiffTables {
+            metadata: value.metadata,
+            keepers: value.keepers,
+            servers: Some(value.servers),
+        }
+    }
+}
+
+/// A printable representation of the difference between two
+/// `ClickhouseClusterConfig` tables or a `ClickhouseClusterConfig` table and
+/// its inventory representation.
 pub struct ClickhouseClusterConfigDiffTables {
     pub metadata: KvListWithHeading,
     pub keepers: BpTable,
@@ -1231,57 +1307,21 @@ impl ClickhouseClusterConfigDiffTables {
     /// The "before" inventory collection or blueprint does not have a relevant
     /// keeper configuration.
     pub fn added_to_blueprint(after: &ClickhouseClusterConfig) -> Self {
-        Self::single_blueprint_table(BpDiffState::Added, after)
+        ClickhouseClusterConfigDiffTablesForSingleBlueprint::new(
+            BpDiffState::Added,
+            after,
+        )
+        .into()
     }
 
     /// We are diffing two `Blueprint`s, but The latest bluerprint does not have
     /// a `ClickhouseClusterConfig`.
     pub fn removed_from_blueprint(before: &ClickhouseClusterConfig) -> Self {
-        Self::single_blueprint_table(BpDiffState::Removed, before)
-    }
-
-    pub fn single_blueprint_table(
-        diff_state: BpDiffState,
-        config: &ClickhouseClusterConfig,
-    ) -> Self {
-        let rows: Vec<_> = [
-            (GENERATION, config.generation.to_string()),
-            (
-                CLICKHOUSE_MAX_USED_SERVER_ID,
-                config.max_used_server_id.to_string(),
-            ),
-            (
-                CLICKHOUSE_MAX_USED_KEEPER_ID,
-                config.max_used_keeper_id.to_string(),
-            ),
-            (CLICKHOUSE_CLUSTER_NAME, config.cluster_name.clone()),
-            (CLICKHOUSE_CLUSTER_SECRET, config.cluster_secret.clone()),
-            (
-                CLICKHOUSE_HIGHEST_SEEN_KEEPER_LEADER_COMMITTED_LOG_INDEX,
-                config
-                    .highest_seen_keeper_leader_committed_log_index
-                    .to_string(),
-            ),
-        ]
-        .into_iter()
-        .map(|(key, val)| KvPair::new(diff_state, key, val))
-        .collect();
-
-        let metadata =
-            KvListWithHeading::new(CLICKHOUSE_CLUSTER_CONFIG_HEADING, rows);
-
-        let keepers = BpTable::new(
-            BpClickhouseKeepersTableSchema {},
-            BpGeneration::Value(config.generation),
-            (config.generation, &config.keepers).rows(diff_state).collect(),
-        );
-        let servers = Some(BpTable::new(
-            BpClickhouseServersTableSchema {},
-            BpGeneration::Value(config.generation),
-            (config.generation, &config.servers).rows(diff_state).collect(),
-        ));
-
-        ClickhouseClusterConfigDiffTables { metadata, keepers, servers }
+        ClickhouseClusterConfigDiffTablesForSingleBlueprint::new(
+            BpDiffState::Removed,
+            before,
+        )
+        .into()
     }
 }
 
