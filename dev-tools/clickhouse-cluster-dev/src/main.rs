@@ -3,13 +3,16 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::{Context, Result};
-use clickward::{BasePorts, Deployment, DeploymentConfig};
+use clickward::{BasePorts, Deployment, DeploymentConfig, KeeperId};
 use dropshot::test_util::{log_prefix_for_test, LogContext};
 use dropshot::{ConfigLogging, ConfigLoggingLevel};
-use oximeter_test_utils::wait_for_keepers;
+use oximeter_db::Client;
+use oximeter_test_utils::{wait_for_keepers, wait_for_ping};
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let request_timeout = Duration::from_secs(15);
     let logctx = LogContext::new(
         "clickhouse_cluster",
         &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
@@ -41,17 +44,34 @@ async fn main() -> Result<()> {
     let mut deployment = Deployment::new(config);
 
     // TODO: Use 2 replicas and 3 keepers, for now I'm just testing
-    let num_keepers = 1;
-    let num_replicas = 1;
+    let num_keepers = 3;
+    let num_replicas = 2;
     deployment
         .generate_config(num_keepers, num_replicas)
         .context("failed to generate config")?;
     deployment.deploy().context("failed to deploy")?;
 
-    wait_for_keepers(&logctx.log, &deployment, vec![clickward::KeeperId(1)])
-        .await?;
+    let client1 = Client::new_with_request_timeout(
+        deployment.http_addr(1.into()),
+        deployment.native_addr(1.into()),
+        &logctx.log,
+        request_timeout,
+    );
+    let client2 = Client::new_with_request_timeout(
+        deployment.http_addr(2.into()),
+        deployment.native_addr(2.into()),
+        &logctx.log,
+        request_timeout,
+    );
 
-    // TODO: Also wait for replicas
+    wait_for_ping(&logctx.log, &client1).await?;
+    wait_for_ping(&logctx.log, &client2).await?;
+    wait_for_keepers(
+        &logctx.log,
+        &deployment,
+        (1..=num_keepers).map(KeeperId).collect(),
+    )
+    .await?;
 
     Ok(())
 }
