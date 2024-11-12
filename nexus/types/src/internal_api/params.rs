@@ -96,7 +96,7 @@ pub struct ZpoolPutRequest {
 pub struct DatasetPutRequest {
     /// Address on which a service is responding to requests for the
     /// dataset.
-    pub address: SocketAddrV6,
+    pub address: Option<SocketAddrV6>,
 
     /// Type of dataset being inserted.
     pub kind: DatasetKind,

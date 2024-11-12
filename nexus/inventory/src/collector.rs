@@ -359,10 +359,16 @@ impl<'a> Collector<'a> {
     /// Collect inventory from about keepers from all `ClickhouseAdminKeeper`
     /// clients
     async fn collect_all_keepers(&mut self) {
+        debug!(self.log, "begin collecting all keepers";
+            "nkeeper_admin_clients" => self.keeper_admin_clients.len());
+
         for client in &self.keeper_admin_clients {
             Self::collect_one_keeper(&client, &self.log, &mut self.in_progress)
                 .await;
         }
+
+        debug!(self.log, "end collecting all keepers";
+            "nkeeper_admin_clients" => self.keeper_admin_clients.len());
     }
 
     /// Collect inventory about one keeper from one `ClickhouseAdminKeeper`
@@ -384,9 +390,14 @@ impl<'a> Collector<'a> {
                 in_progress.found_error(InventoryError::from(error));
             }
             Ok(membership) => {
-                in_progress.found_clickhouse_keeper_cluster_membership(
-                    membership.into_inner(),
+                let membership = membership.into_inner();
+                debug!(log, "found keeper membership";
+                    "keeper_admin_url" => client.baseurl(),
+                    "leader_committed_log_index" =>
+                    membership.leader_committed_log_index
                 );
+                in_progress
+                    .found_clickhouse_keeper_cluster_membership(membership);
             }
         }
     }

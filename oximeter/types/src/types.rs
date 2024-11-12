@@ -556,6 +556,12 @@ impl From<&str> for Datum {
     }
 }
 
+impl From<&[u8]> for Datum {
+    fn from(value: &[u8]) -> Self {
+        Datum::Bytes(Bytes::from(value.to_vec()))
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 pub struct MissingDatum {
     datum_type: DatumType,

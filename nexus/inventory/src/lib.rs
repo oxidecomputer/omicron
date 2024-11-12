@@ -24,6 +24,7 @@ mod sled_agent_enumerator;
 
 // only exposed for test code to construct collections
 pub use builder::CollectionBuilder;
+pub use builder::CollectionBuilderRng;
 pub use builder::CollectorBug;
 pub use builder::InventoryError;
 

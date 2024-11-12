@@ -32,7 +32,7 @@ enum ClickhouseAdminServerImpl {}
 impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
     type Context = Arc<ServerContext>;
 
-    async fn generate_config(
+    async fn generate_config_and_enable_svc(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<ServerConfigurableSettings>,
     ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError> {
@@ -62,7 +62,7 @@ enum ClickhouseAdminKeeperImpl {}
 impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
     type Context = Arc<ServerContext>;
 
-    async fn generate_config(
+    async fn generate_config_and_enable_svc(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<KeeperConfigurableSettings>,
     ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError> {
