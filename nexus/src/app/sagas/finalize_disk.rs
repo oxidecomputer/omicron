@@ -21,6 +21,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::Name;
 use serde::Deserialize;
 use serde::Serialize;
+use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddrV6;
 use steno::ActionError;
 use steno::Node;
@@ -293,6 +294,12 @@ async fn sfd_call_pantry_detach_for_disk(
         pantry_address,
     )
     .await
+    .map_err(|e| {
+        ActionError::action_failed(format!(
+            "pantry detach failed: {}",
+            InlineErrorChain::new(&e)
+        ))
+    })
 }
 
 async fn sfd_clear_pantry_address(

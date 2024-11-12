@@ -103,10 +103,13 @@ use anyhow::anyhow;
 use nexus_db_model::Generation;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_db_queries::db::lookup::LookupPath;
-use omicron_common::api::external::Error;
 use omicron_common::retry_until_known_result;
 use omicron_common::{
     api::external, progenitor_operation_retry::ProgenitorOperationRetry,
+};
+use omicron_common::{
+    api::external::Error,
+    progenitor_operation_retry::ProgenitorOperationRetryError,
 };
 use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid};
 use rand::{rngs::StdRng, RngCore, SeedableRng};
@@ -116,6 +119,7 @@ use sled_agent_client::types::CrucibleOpts;
 use sled_agent_client::types::VmmIssueDiskSnapshotRequestBody;
 use sled_agent_client::types::VolumeConstructionRequest;
 use slog::info;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::net::SocketAddrV6;
@@ -1147,13 +1151,25 @@ async fn ssc_call_pantry_attach_for_disk_undo(
             pantry_address
         );
 
-        call_pantry_detach_for_disk(
+        match call_pantry_detach_for_disk(
             sagactx.user_data().nexus(),
             &log,
             params.disk_id,
             pantry_address,
         )
-        .await?;
+        .await
+        {
+            // We can treat the pantry being permanently gone as success.
+            Ok(()) | Err(ProgenitorOperationRetryError::Gone) => (),
+            Err(err) => {
+                return Err(anyhow!(
+                    "failed to detach disk {} from pantry at {}: {}",
+                    params.disk_id,
+                    pantry_address,
+                    InlineErrorChain::new(&err)
+                ))
+            }
+        }
     } else {
         info!(
             log,
@@ -1267,7 +1283,13 @@ async fn ssc_call_pantry_detach_for_disk(
             params.disk_id,
             pantry_address,
         )
-        .await?;
+        .await
+        .map_err(|e| {
+            ActionError::action_failed(format!(
+                "pantry detach failed: {}",
+                InlineErrorChain::new(&e)
+            ))
+        })?;
     }
 
     Ok(())

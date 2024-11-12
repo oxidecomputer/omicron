@@ -7,6 +7,7 @@
 use super::*;
 
 use crate::Nexus;
+use crucible_pantry_client::types::Error as CruciblePantryClientError;
 use crucible_pantry_client::types::VolumeConstructionRequest;
 use internal_dns_types::names::ServiceName;
 use nexus_db_queries::authz;
@@ -15,6 +16,7 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::Error;
 use omicron_common::progenitor_operation_retry::ProgenitorOperationRetry;
+use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddrV6;
@@ -138,7 +140,7 @@ pub(crate) async fn call_pantry_detach_for_disk(
     log: &slog::Logger,
     disk_id: Uuid,
     pantry_address: SocketAddrV6,
-) -> Result<(), ActionError> {
+) -> Result<(), ProgenitorOperationRetryError<CruciblePantryClientError>> {
     let endpoint = format!("http://{}", pantry_address);
 
     info!(log, "sending detach for disk {disk_id} to endpoint {endpoint}");
@@ -153,14 +155,7 @@ pub(crate) async fn call_pantry_detach_for_disk(
     ProgenitorOperationRetry::new(detach_operation, gone_check)
         .run(log)
         .await
-        .map_err(|e| {
-            ActionError::action_failed(format!(
-                "pantry detach failed: {}",
-                InlineErrorChain::new(&e)
-            ))
-        })?;
-
-    Ok(())
+        .map(|_response| ())
 }
 
 pub(crate) fn find_only_new_region(
