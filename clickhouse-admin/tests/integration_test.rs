@@ -41,7 +41,7 @@ async fn test_lgif_parsing() -> anyhow::Result<()> {
         Utf8PathBuf::from_str("clickhouse")?,
         SocketAddrV6::new(Ipv6Addr::LOCALHOST, 29001, 0, 0),
     )
-    .with_log(logctx.log.clone());
+    .with_log(logctx.log);
 
     let lgif = clickhouse_cli.lgif().await?;
 
@@ -52,116 +52,41 @@ async fn test_lgif_parsing() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn test_teardown() -> anyhow::Result<()> {
+async fn test_raft_config_parsing() -> anyhow::Result<()> {
     let logctx = LogContext::new(
         "clickhouse_cluster",
         &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
     );
 
-    let (parent_dir, _prefix) = log_prefix_for_test("clickhouse_cluster");
-    // TODO: Switch to "{prefix}_clickward_test" ?
-    let path = parent_dir.join(format!("clickward_test"));
+    let clickhouse_cli = ClickhouseCli::new(
+        Utf8PathBuf::from_str("clickhouse").unwrap(),
+        SocketAddrV6::new(Ipv6Addr::LOCALHOST, 29001, 0, 0),
+    )
+    .with_log(logctx.log);
 
-    info!(&logctx.log, "Tearing down ClickHouse cluster"; "path" => ?path);
+    let raft_config = clickhouse_cli.raft_config().await.unwrap();
 
-    // TODO: Find another way to retrieve deployment
+    let mut keeper_servers = BTreeSet::new();
+    let num_keepers = 3;
 
-    // We spin up several replicated clusters and must use a
-    // separate set of ports in case the tests run concurrently.
-    let base_ports = BasePorts {
-        keeper: 29000,
-        raft: 29100,
-        clickhouse_tcp: 29200,
-        clickhouse_http: 29300,
-        clickhouse_interserver_http: 29400,
-    };
+    for i in 1..=num_keepers {
+        let raft_port = u16::try_from(29100 + i).unwrap();
+        keeper_servers.insert(KeeperServerInfo {
+            server_id: clickhouse_admin_types::KeeperId(i),
+            host: ClickhouseHost::Ipv6("::1".parse().unwrap()),
+            raft_port,
+            server_type: KeeperServerType::Participant,
+            priority: 1,
+        });
+    }
 
-    let config = DeploymentConfig {
-        path: path.clone(),
-        base_ports,
-        cluster_name: "oximeter_cluster".to_string(),
-    };
+    let expected_raft_config = RaftConfig { keeper_servers };
 
-    let deployment = Deployment::new(config);
-    deployment.teardown()?;
-    std::fs::remove_dir_all(path)?;
-    logctx.cleanup_successful();
+    assert_eq!(raft_config, expected_raft_config);
 
     Ok(())
 }
 
-//#[tokio::test]
-//async fn test_raft_config_parsing() -> anyhow::Result<()> {
-//    let logctx = test_setup_log("test_raft_config_parsing");
-//    let log = logctx.log.clone();
-//
-//    let (parent_dir, prefix) = log_prefix_for_test(logctx.test_name());
-//    let path = parent_dir.join(format!("{prefix}-oximeter-clickward-test"));
-//    std::fs::create_dir(&path)?;
-//
-//    // We spin up several replicated clusters and must use a
-//    // separate set of ports in case the tests run concurrently.
-//    let base_ports = BasePorts {
-//        keeper: 29500,
-//        raft: 29600,
-//        clickhouse_tcp: 29700,
-//        clickhouse_http: 29800,
-//        clickhouse_interserver_http: 29900,
-//    };
-//
-//    let config = DeploymentConfig {
-//        path: path.clone(),
-//        base_ports,
-//        cluster_name: "oximeter_cluster".to_string(),
-//    };
-//
-//    let mut deployment = Deployment::new(config);
-//
-//    let num_keepers = 3;
-//    let num_replicas = 1;
-//    deployment
-//        .generate_config(num_keepers, num_replicas)
-//        .context("failed to generate config")?;
-//    deployment.deploy().context("failed to deploy")?;
-//
-//    wait_for_keepers(
-//        &log,
-//        &deployment,
-//        (1..=num_keepers).map(clickward::KeeperId).collect(),
-//    )
-//    .await?;
-//
-//    let clickhouse_cli = ClickhouseCli::new(
-//        Utf8PathBuf::from_str("clickhouse").unwrap(),
-//        SocketAddrV6::new(Ipv6Addr::LOCALHOST, 29501, 0, 0),
-//    )
-//    .with_log(log.clone());
-//
-//    let raft_config = clickhouse_cli.raft_config().await.unwrap();
-//
-//    let mut keeper_servers = BTreeSet::new();
-//
-//    for i in 1..=num_keepers {
-//        let raft_port = u16::try_from(29600 + i).unwrap();
-//        keeper_servers.insert(KeeperServerInfo {
-//            server_id: clickhouse_admin_types::KeeperId(i),
-//            host: ClickhouseHost::Ipv6("::1".parse().unwrap()),
-//            raft_port,
-//            server_type: KeeperServerType::Participant,
-//            priority: 1,
-//        });
-//    }
-//
-//    let expected_raft_config = RaftConfig { keeper_servers };
-//
-//    assert_eq!(raft_config, expected_raft_config);
-//
-//    info!(&log, "Cleaning up test");
-//    deployment.teardown()?;
-//    std::fs::remove_dir_all(path)?;
-//    logctx.cleanup_successful();
-//    Ok(())
-//}
 //
 //#[tokio::test]
 //async fn test_keeper_conf_parsing() -> anyhow::Result<()> {
@@ -296,3 +221,42 @@ async fn test_teardown() -> anyhow::Result<()> {
 //    logctx.cleanup_successful();
 //    Ok(())
 //}
+
+#[tokio::test]
+async fn test_teardown() -> anyhow::Result<()> {
+    let logctx = LogContext::new(
+        "clickhouse_cluster",
+        &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
+    );
+
+    let (parent_dir, _prefix) = log_prefix_for_test("clickhouse_cluster");
+    // TODO: Switch to "{prefix}_clickward_test" ?
+    let path = parent_dir.join(format!("clickward_test"));
+
+    info!(&logctx.log, "Tearing down ClickHouse cluster"; "path" => ?path);
+
+    // TODO: Find another way to retrieve deployment
+
+    // We spin up several replicated clusters and must use a
+    // separate set of ports in case the tests run concurrently.
+    let base_ports = BasePorts {
+        keeper: 29000,
+        raft: 29100,
+        clickhouse_tcp: 29200,
+        clickhouse_http: 29300,
+        clickhouse_interserver_http: 29400,
+    };
+
+    let config = DeploymentConfig {
+        path: path.clone(),
+        base_ports,
+        cluster_name: "oximeter_cluster".to_string(),
+    };
+
+    let deployment = Deployment::new(config);
+    deployment.teardown()?;
+    std::fs::remove_dir_all(path)?;
+    logctx.cleanup_successful();
+
+    Ok(())
+}
