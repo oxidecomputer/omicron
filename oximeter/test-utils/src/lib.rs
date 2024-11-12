@@ -187,7 +187,10 @@ pub async fn wait_for_keepers(
 }
 
 /// Try to ping the server until it responds.
-pub async fn wait_for_ping(log: &Logger, client: &Client) -> anyhow::Result<()> {
+pub async fn wait_for_ping(
+    log: &Logger,
+    client: &Client,
+) -> anyhow::Result<()> {
     poll::wait_for_condition(
         || async {
             client

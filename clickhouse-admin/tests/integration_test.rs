@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::Context;
 use camino::Utf8PathBuf;
 use clickhouse_admin_types::{
     ClickhouseHost, ClickhouseKeeperClusterMembership, KeeperId,
@@ -12,23 +11,10 @@ use clickward::{BasePorts, Deployment, DeploymentConfig};
 use dropshot::test_util::{log_prefix_for_test, LogContext};
 use dropshot::{ConfigLogging, ConfigLoggingLevel};
 use omicron_clickhouse_admin::ClickhouseCli;
-use omicron_test_utils::dev::test_setup_log;
-use oximeter_test_utils::wait_for_keepers;
 use slog::info;
 use std::collections::BTreeSet;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::str::FromStr;
-
-#[tokio::test]
-async fn test_1() {
-    println!("Running test 1...");
-}
-
-#[tokio::test]
-async fn test_2() {
-    println!("Running test 2...");
-    //     assert_eq!(1, 2);
-}
 
 #[tokio::test]
 async fn test_lgif_parsing() -> anyhow::Result<()> {
@@ -88,7 +74,6 @@ async fn test_raft_config_parsing() -> anyhow::Result<()> {
     Ok(())
 }
 
-
 #[tokio::test]
 async fn test_keeper_conf_parsing() -> anyhow::Result<()> {
     let logctx = LogContext::new(
@@ -105,7 +90,7 @@ async fn test_keeper_conf_parsing() -> anyhow::Result<()> {
     let conf = clickhouse_cli.keeper_conf().await.unwrap();
 
     assert_eq!(conf.server_id, clickhouse_admin_types::KeeperId(1));
- 
+
     Ok(())
 }
 
