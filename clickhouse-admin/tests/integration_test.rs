@@ -32,56 +32,28 @@ use std::sync::Once;
 //     });
 // }
 
-fn teardown() {
-    println!("Teardown after all tests: test");
-}
+// static TEARDOWN: Once = Once::new();
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+struct Teardown;
 
-    #[tokio::test]
-    async fn test_1() {
-        // setup();
-        println!("Running test 1...");
-    }
-
-    #[tokio::test]
-    async fn test_2() {
-        // setup();
-        println!("Running test 2...");
-    }
-
-    #[tokio::test]
-    async fn test_lgif_parsing() -> anyhow::Result<()> {
-        // TODO: Fix up log setup
-        let logctx = LogContext::new(
-            "clickhouse_cluster",
-            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
-        );
-
-        let (parent_dir, _prefix) = log_prefix_for_test(logctx.test_name());
+impl Drop for Teardown {
+    fn drop(&mut self) {
+        println!("Teardown after all tests: test");
+        //        let logctx = LogContext::new(
+        //            "clickhouse_cluster",
+        //            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
+        //        );
+        //
+        let (parent_dir, _prefix) = log_prefix_for_test("clickhouse_cluster");
         // TODO: Switch to "{prefix}_clickward_test" ?
         let path = parent_dir.join(format!("clickward_test"));
 
-        let clickhouse_cli = ClickhouseCli::new(
-            Utf8PathBuf::from_str("clickhouse").unwrap(),
-            SocketAddrV6::new(Ipv6Addr::LOCALHOST, 29001, 0, 0),
-        )
-        .with_log(logctx.log.clone());
-
-        let lgif = clickhouse_cli.lgif().await.unwrap();
-
-        // The first log index from a newly created cluster should always be 1
-        assert_eq!(lgif.first_log_idx, 1);
-
-        // TODO: Move this code to teardown function.
-        // For now moving it to that function results in a PoisonError
-
-        info!(&logctx.log, "Cleaning up test");
-
-        // TODO: Find another way to retrieve deployment
-
+        println!("{}: test", path);
+        //
+        //        info!(&logctx.log, "Cleaning up test");
+        //
+        //        // TODO: Find another way to retrieve deployment
+        //
         // We spin up several replicated clusters and must use a
         // separate set of ports in case the tests run concurrently.
         let base_ports = BasePorts {
@@ -99,20 +71,195 @@ mod tests {
         };
 
         let mut deployment = Deployment::new(config);
-        deployment.teardown()?;
-        std::fs::remove_dir_all(path)?;
-        logctx.cleanup_successful();
+        deployment.teardown().unwrap();
+        std::fs::remove_dir_all(path).unwrap();
+        //        logctx.cleanup_successful();
+
+        //Ok(())
+    }
+}
+
+// fn teardown() {
+//     println!("Teardown after all tests: test");
+//     //        let logctx = LogContext::new(
+// //            "clickhouse_cluster",
+// //            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
+// //        );
+// //
+// let (parent_dir, _prefix) = log_prefix_for_test("clickhouse_cluster");
+// // TODO: Switch to "{prefix}_clickward_test" ?
+// let path = parent_dir.join(format!("clickward_test"));
+//
+// println!("{}: test", path);
+// //
+// //        info!(&logctx.log, "Cleaning up test");
+// //
+// //        // TODO: Find another way to retrieve deployment
+// //
+// // We spin up several replicated clusters and must use a
+// // separate set of ports in case the tests run concurrently.
+// let base_ports = BasePorts {
+//     keeper: 29000,
+//     raft: 29100,
+//     clickhouse_tcp: 29200,
+//     clickhouse_http: 29300,
+//     clickhouse_interserver_http: 29400,
+// };
+//
+// let config = DeploymentConfig {
+//     path: path.clone(),
+//     base_ports,
+//     cluster_name: "oximeter_cluster".to_string(),
+// };
+//
+// let mut deployment = Deployment::new(config);
+// deployment.teardown().unwrap();
+// std::fs::remove_dir_all(path).unwrap();
+// //        logctx.cleanup_successful();
+//
+// //Ok(())
+// }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_1() {
+        // setup();
+       // let _teardown = Teardown;
+        println!("Running test 1...");
+    }
+
+    #[tokio::test]
+    async fn test_2() {
+        // setup();
+        //let _teardown = Teardown;
+        println!("Running test 2...");
+   //     assert_eq!(1, 2);
+    }
+
+    #[tokio::test]
+    async fn test_lgif_parsing() -> anyhow::Result<()> {
+        // TODO: Fix up log setup
+      //  let _teardown = Teardown;
+        let logctx = LogContext::new(
+            "clickhouse_cluster",
+            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
+        );
+
+        //  let (parent_dir, _prefix) = log_prefix_for_test(logctx.test_name());
+        //  // TODO: Switch to "{prefix}_clickward_test" ?
+        //  let path = parent_dir.join(format!("clickward_test"));
+
+        let clickhouse_cli = ClickhouseCli::new(
+            Utf8PathBuf::from_str("clickhouse").unwrap(),
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, 29001, 0, 0),
+        )
+        .with_log(logctx.log.clone());
+
+        let lgif = clickhouse_cli.lgif().await.unwrap();
+
+        // The first log index from a newly created cluster should always be 1
+        assert_eq!(lgif.first_log_idx, 1);
+
+        // TODO: Move this code to teardown function.
+        // For now moving it to that function results in a PoisonError
+
+        //        info!(&logctx.log, "Cleaning up test");
+        //
+        //        // TODO: Find another way to retrieve deployment
+        //
+        //        // We spin up several replicated clusters and must use a
+        //        // separate set of ports in case the tests run concurrently.
+        //        let base_ports = BasePorts {
+        //            keeper: 29000,
+        //            raft: 29100,
+        //            clickhouse_tcp: 29200,
+        //            clickhouse_http: 29300,
+        //            clickhouse_interserver_http: 29400,
+        //        };
+        //
+        //        let config = DeploymentConfig {
+        //            path: path.clone(),
+        //            base_ports,
+        //            cluster_name: "oximeter_cluster".to_string(),
+        //        };
+        //
+        //        let mut deployment = Deployment::new(config);
+        //        deployment.teardown()?;
+        //        std::fs::remove_dir_all(path)?;
+        //        logctx.cleanup_successful();
         Ok(())
     }
 
-    // Ensure teardown after all tests finish
-    #[cfg(test)]
-    #[dtor] // Cleanup to be run when tests finish
-    fn after_tests() {
-        println!("Cleanup after tests: test");
-        teardown();
+    #[tokio::test]
+    async fn test_teardown() -> anyhow::Result<()> {
+        //     println!("Teardown after all tests: test");
+     //        let logctx = LogContext::new(
+ //            "clickhouse_cluster",
+ //            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
+ //        );
+ //
+ let (parent_dir, _prefix) = log_prefix_for_test("clickhouse_cluster");
+ // TODO: Switch to "{prefix}_clickward_test" ?
+ let path = parent_dir.join(format!("clickward_test"));
+
+ println!("{}: test", path);
+ //
+ //        info!(&logctx.log, "Cleaning up test");
+ //
+ //        // TODO: Find another way to retrieve deployment
+ //
+ // We spin up several replicated clusters and must use a
+ // separate set of ports in case the tests run concurrently.
+ let base_ports = BasePorts {
+     keeper: 29000,
+     raft: 29100,
+     clickhouse_tcp: 29200,
+     clickhouse_http: 29300,
+     clickhouse_interserver_http: 29400,
+ };
+
+ let config = DeploymentConfig {
+     path: path.clone(),
+     base_ports,
+     cluster_name: "oximeter_cluster".to_string(),
+ };
+
+ let mut deployment = Deployment::new(config);
+ deployment.teardown().unwrap();
+ std::fs::remove_dir_all(path).unwrap();
+ //        logctx.cleanup_successful();
+
+ Ok(())
     }
+
+    // Ensure teardown after all tests finish
+    //    #[cfg(test)]
+    //    #[ctor] // Cleanup to be run when tests finish
+    //    fn after_tests() {
+    //        println!("Cleanup after tests: test");
+    //        TEARDOWN.call_once(|| {
+    //            teardown();
+    //        });
+
+    //        teardown();
+    //    }
 }
+
+//#[test]
+//fn after_tests() {
+//    println!("Cleanup after tests: test");
+//    TEARDOWN.call_once(|| {
+//        teardown();
+//    });
+//}
+//
+//fn main() {
+//    // The `run_teardown` ensures the teardown happens after all tests.
+//    after_tests();
+//}
 
 // #[tokio::test]
 // async fn test_lgif_parsing() -> anyhow::Result<()> {
