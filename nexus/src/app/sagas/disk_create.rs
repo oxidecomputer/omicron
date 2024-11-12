@@ -934,6 +934,34 @@ pub(crate) mod test {
             .is_none()
     }
 
+    async fn no_volume_resource_usage_records_exist(
+        datastore: &DataStore,
+    ) -> bool {
+        use nexus_db_queries::db::schema::volume_resource_usage::dsl;
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        let rows = datastore
+            .transaction_retry_wrapper("no_volume_resource_usage_records_exist")
+            .transaction(&conn, |conn| async move {
+                conn.batch_execute_async(
+                    nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
+                )
+                .await
+                .unwrap();
+
+                Ok(dsl::volume_resource_usage
+                    .count()
+                    .get_result_async::<i64>(&conn)
+                    .await
+                    .unwrap())
+            })
+            .await
+            .unwrap();
+
+        rows == 0
+    }
+
     async fn no_virtual_provisioning_resource_records_exist(
         datastore: &DataStore,
     ) -> bool {
@@ -1030,6 +1058,7 @@ pub(crate) mod test {
         .await;
         assert!(no_disk_records_exist(datastore).await);
         assert!(no_volume_records_exist(datastore).await);
+        assert!(no_volume_resource_usage_records_exist(datastore).await);
         assert!(
             no_virtual_provisioning_resource_records_exist(datastore).await
         );

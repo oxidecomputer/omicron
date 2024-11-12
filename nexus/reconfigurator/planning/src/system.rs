@@ -845,9 +845,9 @@ impl Sled {
             name: config.name.full_name(),
             available: ByteCount::from_gibibytes_u32(1),
             used: ByteCount::from_gibibytes_u32(0),
-            quota: config.quota,
-            reservation: config.reservation,
-            compression: config.compression.to_string(),
+            quota: config.inner.quota,
+            reservation: config.inner.reservation,
+            compression: config.inner.compression.to_string(),
         });
     }
 

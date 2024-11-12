@@ -255,7 +255,8 @@ pub fn allocation_query(
       ").param().sql(" AS blocks_per_extent,
       ").param().sql(" AS extent_count,
       NULL AS port,
-      ").param().sql(" AS read_only
+      ").param().sql(" AS read_only,
+      FALSE as deleting
     FROM shuffled_candidate_datasets")
   // Only select the *additional* number of candidate regions for the required
   // redundancy level
@@ -368,7 +369,7 @@ pub fn allocation_query(
     .sql("
   inserted_regions AS (
     INSERT INTO region
-      (id, time_created, time_modified, dataset_id, volume_id, block_size, blocks_per_extent, extent_count, port, read_only)
+      (id, time_created, time_modified, dataset_id, volume_id, block_size, blocks_per_extent, extent_count, port, read_only, deleting)
     SELECT ").sql(AllColumnsOfRegion::with_prefix("candidate_regions")).sql("
     FROM candidate_regions
     WHERE

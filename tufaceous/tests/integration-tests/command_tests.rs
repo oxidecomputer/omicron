@@ -18,7 +18,7 @@ use tufaceous_lib::{Key, OmicronRepo};
 async fn test_init_and_add() -> Result<()> {
     let logctx = test_setup_log("test_init_and_add");
     let tempdir = tempfile::tempdir().unwrap();
-    let key = Key::generate_ed25519();
+    let key = Key::generate_ed25519()?;
 
     let mut cmd = make_cmd_with_repo(tempdir.path(), &key);
     cmd.args(["init", "0.0.0"]);
@@ -114,7 +114,7 @@ async fn test_init_and_add() -> Result<()> {
 fn test_assemble_fake() -> Result<()> {
     let logctx = test_setup_log("test_assemble_fake");
     let tempdir = tempfile::tempdir().unwrap();
-    let key = Key::generate_ed25519();
+    let key = Key::generate_ed25519()?;
 
     let archive_path = tempdir.path().join("archive.zip");
 

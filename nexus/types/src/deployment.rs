@@ -32,6 +32,7 @@ use omicron_common::disk::DatasetName;
 use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
+use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -980,9 +981,11 @@ impl From<BlueprintDatasetConfig> for DatasetConfig {
         Self {
             id: config.id,
             name: DatasetName::new(config.pool, config.kind),
-            quota: config.quota,
-            reservation: config.reservation,
-            compression: config.compression,
+            inner: SharedDatasetConfig {
+                quota: config.quota,
+                reservation: config.reservation,
+                compression: config.compression,
+            },
         }
     }
 }
