@@ -15,6 +15,7 @@ use crate::db::model::DatasetKind;
 use crate::db::model::SupportBundle;
 use crate::db::model::SupportBundleState;
 use crate::db::pagination::paginated;
+use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
@@ -39,12 +40,29 @@ const CANNOT_ALLOCATE_ERR_MSG: &'static str =
  no disks are available. Either delete old support bundles or add additional \
  disks";
 
+const FAILURE_REASON_NO_DATASET: &'static str =
+    "Allocated dataset no longer exists";
+const FAILURE_REASON_NO_NEXUS: &'static str =
+    "Nexus managing this bundle no longer exists";
+
 /// Provides a report on how many bundle were expunged, and why.
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq)]
 pub struct SupportBundleExpungementReport {
+    /// Bundles marked "failed" because the datasets storing them have been
+    /// expunged.
     pub bundles_failed_missing_datasets: usize,
-    pub bundles_cancelled_missing_nexus: usize,
-    pub bundles_failed_missing_nexus: usize,
+    /// Bundles deleted because the datasets storing them have been
+    /// expunged.
+    pub bundles_deleted_missing_datasets: usize,
+
+    /// Bundles marked "destroying" because the nexuses managing them have been
+    /// expunged.
+    ///
+    /// These bundles should be re-assigned to a different nexus for cleanup.
+    pub bundles_failing_missing_nexus: usize,
+
+    /// Bundles which had a new Nexus assigned to them.
+    pub bundles_reassigned: usize,
 }
 
 impl DataStore {
@@ -248,30 +266,52 @@ impl DataStore {
                 async move {
                     use db::schema::support_bundle::dsl;
 
-                    // Find all bundles on datasets that no longer exist, and
-                    // mark them "failed".
+                    // Find all bundles without backing storage.
                     let bundles_with_bad_datasets = dsl::support_bundle
                         .filter(dsl::dataset_id.eq_any(invalid_datasets))
                         .select(SupportBundle::as_select())
                         .load_async(&*conn)
                         .await?;
 
+                    // Split these bundles into two categories:
+                    // - Ones that are being destroyed anyway, and that can be
+                    // fully deleted.
+                    // - Ones that are NOT being destroyed, and should be marked
+                    // failed so the end-user has visibility into their
+                    // destruction.
+                    let (bundles_to_delete, bundles_to_fail): (Vec<_>, Vec<_>) =
+                        bundles_with_bad_datasets.into_iter().partition(
+                            |bundle| bundle.state == SupportBundleState::Destroying
+                        );
+                    let bundles_to_delete = bundles_to_delete.into_iter().map(|b| b.id).collect::<Vec<_>>();
+                    let bundles_to_fail = bundles_to_fail.into_iter().map(|b| b.id).collect::<Vec<_>>();
+
+                    // Find all non-destroying bundles on datasets that no
+                    // longer exist, and mark them "failed". They skip the
+                    // "failing" state because there is no remaining storage to
+                    // be cleaned up.
+                    let state = SupportBundleState::Failed;
                     let bundles_failed_missing_datasets =
                         diesel::update(dsl::support_bundle)
-                            .filter(dsl::state.ne(SupportBundleState::Failed))
-                            .filter(
-                                dsl::id.eq_any(
-                                    bundles_with_bad_datasets
-                                        .iter()
-                                        .map(|b| b.id)
-                                        .collect::<Vec<_>>(),
-                                ),
-                            )
+                            .filter(dsl::state.eq_any(state.valid_old_states()))
+                            .filter(dsl::id.eq_any(bundles_to_fail))
                             .set((
-                                dsl::state.eq(SupportBundleState::Failed),
-                                dsl::reason_for_failure
-                                    .eq("Allocated dataset no longer exists"),
+                                dsl::state.eq(state),
+                                dsl::reason_for_failure.eq(FAILURE_REASON_NO_DATASET),
                             ))
+                            .execute_async(&*conn)
+                            .await?;
+                    // For bundles that are in the process of being destroyed,
+                    // the dataset expungement speeds up the process.
+                    let bundles_deleted_missing_datasets =
+                        diesel::delete(dsl::support_bundle)
+                            .filter(dsl::state.eq_any(state.valid_old_states()))
+                            .filter(dsl::id.eq_any(bundles_to_delete))
+                            // This check should be redundant (we already
+                            // partitioned above based on this state) but out of
+                            // an abundance of catuion we don't auto-delete a
+                            // bundle in any other state.
+                            .filter(dsl::state.eq(SupportBundleState::Destroying))
                             .execute_async(&*conn)
                             .await?;
 
@@ -279,79 +319,55 @@ impl DataStore {
                         valid_nexus_zones.get(0).cloned()
                     else {
                         return Err(external::Error::internal_error(
-                            "No valid Nexuses",
+                            "No valid Nexuses, we cannot re-assign this support bundle",
                         )
                         .into());
                     };
 
                     // Find all bundles on nexuses that no longer exist.
-                    //
-                    // If the bundle might have storage:
-                    // - Mark it cancelled and re-assign the managing Nexus
-                    // - Otherwise: mark it failed
                     let bundles_with_bad_nexuses = dsl::support_bundle
                         .filter(dsl::assigned_nexus.eq_any(invalid_nexus_zones))
                         .select(SupportBundle::as_select())
                         .load_async(&*conn)
                         .await?;
-                    let (needs_cancellation, needs_failure): (Vec<_>, Vec<_>) =
-                        bundles_with_bad_nexuses.into_iter().partition(
-                            |bundle| bundle.state.might_have_dataset_storage(),
-                        );
 
-                    // Mark these support bundles as cancelled, and assign then
+                    let bundles_to_mark_failing = bundles_with_bad_nexuses.iter()
+                        .map(|b| b.id).collect::<Vec<_>>();
+                    let bundles_to_reassign = bundles_with_bad_nexuses.iter()
+                        .filter_map(|bundle| {
+                            if bundle.state != SupportBundleState::Failed {
+                                Some(bundle.id)
+                            } else {
+                                None
+                            }
+                        }).collect::<Vec<_>>();
+
+                    // Mark these support bundles as failing, and assign then
                     // to a nexus that should still exist.
                     //
                     // This should lead to their storage being freed, if it
                     // exists.
-                    let bundles_cancelled_missing_nexus = diesel::update(
-                        dsl::support_bundle,
-                    )
-                    .filter(dsl::state.ne(SupportBundleState::Cancelling))
-                    .filter(dsl::state.ne(SupportBundleState::Failed))
-                    .filter(
-                        dsl::id.eq_any(
-                            needs_cancellation
-                                .iter()
-                                .map(|b| b.id)
-                                .collect::<Vec<_>>(),
-                        ),
-                    )
-                    .set((
-                        dsl::assigned_nexus.eq(arbitrary_valid_nexus),
-                        dsl::state.eq(SupportBundleState::Cancelling),
-                        dsl::reason_for_failure
-                            .eq("Nexus managing this bundle no longer exists"),
-                    ))
-                    .execute_async(&*conn)
-                    .await?;
-
-                    // Mark these support bundles as failed.
-                    //
-                    // If they don't have storage (e.g., they never got that
-                    // far, or their underlying dataset was expunged) there
-                    // isn't anything left to free. This means we can skip the
-                    // "Cancelling" state and jump to "Failed".
-                    let bundles_failed_missing_nexus = diesel::update(
-                        dsl::support_bundle,
-                    )
-                    .filter(dsl::state.ne(SupportBundleState::Cancelling))
-                    .filter(dsl::state.ne(SupportBundleState::Failed))
-                    .filter(dsl::id.eq_any(
-                        needs_failure.iter().map(|b| b.id).collect::<Vec<_>>(),
-                    ))
-                    .set((
-                        dsl::state.eq(SupportBundleState::Failed),
-                        dsl::reason_for_failure
-                            .eq("Nexus managing this bundle no longer exists"),
-                    ))
-                    .execute_async(&*conn)
-                    .await?;
+                    let state = SupportBundleState::Failing;
+                    let bundles_failing_missing_nexus = diesel::update(dsl::support_bundle)
+                        .filter(dsl::state.eq_any(state.valid_old_states()))
+                        .filter(dsl::id.eq_any(bundles_to_mark_failing))
+                        .set((
+                            dsl::state.eq(state),
+                            dsl::reason_for_failure.eq(FAILURE_REASON_NO_NEXUS),
+                        ))
+                        .execute_async(&*conn)
+                        .await?;
+                    let bundles_reassigned = diesel::update(dsl::support_bundle)
+                        .filter(dsl::id.eq_any(bundles_to_reassign))
+                        .set(dsl::assigned_nexus.eq(arbitrary_valid_nexus))
+                        .execute_async(&*conn)
+                        .await?;
 
                     Ok(SupportBundleExpungementReport {
                         bundles_failed_missing_datasets,
-                        bundles_cancelled_missing_nexus,
-                        bundles_failed_missing_nexus,
+                        bundles_deleted_missing_datasets,
+                        bundles_failing_missing_nexus,
+                        bundles_reassigned,
                     })
                 }
                 .boxed()
@@ -360,29 +376,35 @@ impl DataStore {
         .await
     }
 
-    /// Cancels a single support bundle.
-    ///
-    /// Note that this does not delete the support bundle record, but starts the
-    /// process by which it may later be deleted.
-    pub async fn support_bundle_cancel(
+    /// Updates the state of a support bundle
+    pub async fn support_bundle_update(
         &self,
         opctx: &OpContext,
         id: SupportBundleUuid,
+        state: SupportBundleState,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
-        use db::schema::support_bundle::dsl as support_bundle_dsl;
-
+        use db::schema::support_bundle::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
-        diesel::update(support_bundle_dsl::support_bundle)
-            .filter(support_bundle_dsl::id.eq(id.into_untyped_uuid()))
-            .set(support_bundle_dsl::state.eq(SupportBundleState::Cancelling))
-            .execute_async(&*conn)
+        let result = diesel::update(dsl::support_bundle)
+            .filter(dsl::id.eq(id.into_untyped_uuid()))
+            .filter(dsl::state.eq_any(state.valid_old_states()))
+            .set(dsl::state.eq(state))
+            .check_if_exists::<SupportBundle>(id.into_untyped_uuid())
+            .execute_and_check(&*conn)
             .await
-            .map(|_rows_modified| ())
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        Ok(())
+        match result.status {
+            UpdateStatus::Updated => Ok(()),
+            UpdateStatus::NotUpdatedButExists => {
+                Err(Error::invalid_request(format!(
+                    "Cannot update support bundle state from {:?} to {:?}",
+                    result.found.state, state
+                )))
+            }
+        }
     }
 
     /// Deletes a support bundle.
@@ -396,11 +418,16 @@ impl DataStore {
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
-        use db::schema::support_bundle::dsl as support_bundle_dsl;
+        use db::schema::support_bundle::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        diesel::delete(support_bundle_dsl::support_bundle)
-            .filter(support_bundle_dsl::id.eq(id.into_untyped_uuid()))
+        diesel::delete(dsl::support_bundle)
+            .filter(
+                dsl::state
+                    .eq(SupportBundleState::Destroying)
+                    .or(dsl::state.eq(SupportBundleState::Failed)),
+            )
+            .filter(dsl::id.eq(id.into_untyped_uuid()))
             .execute_async(&*conn)
             .await
             .map(|_rows_modified| ())
@@ -425,6 +452,7 @@ mod test {
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::BlueprintDatasetFilter;
+    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::BlueprintZoneType;
     use omicron_common::api::internal::shared::DatasetKind::Debug as DebugDatasetKind;
@@ -614,7 +642,7 @@ mod test {
         )
         .await;
 
-        // If we cancel a bundle, it isn't deleted (yet).
+        // If we destroy a bundle, it isn't deleted (yet).
         // This operation should signify that we can start to free up
         // storage on the dataset, but that needs to happen outside the
         // database.
@@ -622,9 +650,13 @@ mod test {
         // We should still expect to hit capacity limits.
 
         datastore
-            .support_bundle_cancel(&opctx, bundles[0].id.into())
+            .support_bundle_update(
+                &opctx,
+                bundles[0].id.into(),
+                SupportBundleState::Destroying,
+            )
             .await
-            .expect("Should be able to cancel this bundle");
+            .expect("Should be able to destroy this bundle");
         support_bundle_create_expect_no_capacity(
             &datastore,
             &opctx,
@@ -638,7 +670,7 @@ mod test {
         datastore
             .support_bundle_delete(&opctx, bundles[0].id.into())
             .await
-            .expect("Should be able to cancel this bundle");
+            .expect("Should be able to destroy this bundle");
         datastore
             .support_bundle_create(&opctx, "for the test", this_nexus_id)
             .await
@@ -687,24 +719,28 @@ mod test {
         assert_eq!(1, observed_bundles.len());
         assert_eq!(bundle, observed_bundles[0]);
 
-        // Cancel the bundle, observe the new state
+        // Destroy the bundle, observe the new state
 
         datastore
-            .support_bundle_cancel(&opctx, bundle.id.into())
+            .support_bundle_update(
+                &opctx,
+                bundle.id.into(),
+                SupportBundleState::Destroying,
+            )
             .await
-            .expect("Should be able to cancel our bundle");
+            .expect("Should be able to destroy our bundle");
         let observed_bundle = datastore
             .support_bundle_get(&opctx, bundle.id.into())
             .await
             .expect("Should be able to get bundle we just created");
-        assert_eq!(SupportBundleState::Cancelling, observed_bundle.state);
+        assert_eq!(SupportBundleState::Destroying, observed_bundle.state);
 
         // Delete the bundle, observe that it's gone
 
         datastore
             .support_bundle_delete(&opctx, bundle.id.into())
             .await
-            .expect("Should be able to cancel our bundle");
+            .expect("Should be able to destroy our bundle");
         let observed_bundles = datastore
             .support_bundle_list(&opctx, &pagparams)
             .await
@@ -757,9 +793,29 @@ mod test {
             .collect()
     }
 
+    fn expunge_dataset_for_bundle(bp: &mut Blueprint, bundle: &SupportBundle) {
+        for datasets in bp.blueprint_datasets.values_mut() {
+            for dataset in datasets.datasets.values_mut() {
+                if dataset.id == bundle.dataset_id.into() {
+                    dataset.disposition = BlueprintDatasetDisposition::Expunged;
+                }
+            }
+        }
+    }
+
+    fn expunge_nexus_for_bundle(bp: &mut Blueprint, bundle: &SupportBundle) {
+        for zones in bp.blueprint_zones.values_mut() {
+            for zone in &mut zones.zones {
+                if zone.id == bundle.assigned_nexus.unwrap().into() {
+                    zone.disposition = BlueprintZoneDisposition::Expunged;
+                }
+            }
+        }
+    }
+
     #[tokio::test]
-    async fn test_bundle_expungement() {
-        static TEST_NAME: &str = "test_bundle_expungement";
+    async fn test_bundle_failed_from_expunged_dataset() {
+        static TEST_NAME: &str = "test_bundle_failed_from_expunged_dataset";
         let logctx = dev::test_setup_log(TEST_NAME);
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
@@ -811,43 +867,277 @@ mod test {
             .await
             .expect("Should be able to create bundle");
         assert_eq!(bundle.assigned_nexus, Some(this_nexus_id.into()));
-
         assert!(
             debug_datasets.contains(&DatasetUuid::from(bundle.dataset_id)),
             "Bundle should have been allocated from a blueprint dataset"
         );
 
-        // Expunge the bundle's dataset.
+        // If we try to "fail support bundles" from expunged datasets/nexuses,
+        // we should see a no-op. Nothing has been expunged yet!
+        let report =
+            datastore.support_bundle_fail_expunged(&opctx, &bp1).await.expect(
+                "Should have been able to perform no-op support bundle failure",
+            );
+        assert_eq!(SupportBundleExpungementReport::default(), report);
+
+        // Expunge the bundle's dataset (manually)
         let bp2 = {
             let mut bp2 = bp1.clone();
             bp2.id = Uuid::new_v4();
             bp2.parent_blueprint_id = Some(bp1.id);
-
-            for datasets in bp2.blueprint_datasets.values_mut() {
-                for dataset in datasets.datasets.values_mut() {
-                    if dataset.id == bundle.dataset_id.into() {
-                        dataset.disposition =
-                            BlueprintDatasetDisposition::Expunged;
-                    }
-                }
-            }
+            expunge_dataset_for_bundle(&mut bp2, &bundle);
             bp2
         };
         bp_insert_and_make_target(&opctx, &datastore, &bp2).await;
 
-        // TODO: Call this on bp1, observe no changes?
+        datastore
+            .support_bundle_fail_expunged(&opctx, &bp1)
+            .await
+            .expect_err("bp1 is no longer the target; this should fail");
         let report = datastore
             .support_bundle_fail_expunged(&opctx, &bp2)
             .await
             .expect("Should have been able to mark bundle state as failed");
+        assert_eq!(
+            SupportBundleExpungementReport {
+                bundles_failed_missing_datasets: 1,
+                ..Default::default()
+            },
+            report
+        );
 
-        assert_eq!(1, report.bundles_failed_missing_datasets);
-        assert_eq!(0, report.bundles_cancelled_missing_nexus);
-        assert_eq!(0, report.bundles_failed_missing_nexus);
+        let observed_bundle = datastore
+            .support_bundle_get(&opctx, bundle.id.into())
+            .await
+            .expect("Should be able to get bundle we just failed");
+        assert_eq!(SupportBundleState::Failed, observed_bundle.state);
+        assert!(observed_bundle
+            .reason_for_failure
+            .unwrap()
+            .contains(FAILURE_REASON_NO_DATASET));
 
-        // TODO: Another test, maybe?
-        // TODO: Find the nexus where we allocated the bundle
-        // TODO: expunge it
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_bundle_failed_from_expunged_nexus_no_reassign() {
+        static TEST_NAME: &str =
+            "test_bundle_failed_from_expunged_nexus_no_reassign";
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+        let (_example, mut bp1) = ExampleSystemBuilder::new_with_rng(
+            &logctx.log,
+            rng.next_system_rng(),
+        )
+        .build();
+
+        bp1.parent_blueprint_id = None;
+        bp_insert_and_make_target(&opctx, &datastore, &bp1).await;
+
+        // Manually perform the equivalent of blueprint execution to populate
+        // database records.
+        let sleds = TestSled::new_from_blueprint(&bp1);
+        for sled in &sleds {
+            sled.create_database_records(&datastore, &opctx).await;
+        }
+
+        // Extract Nexus and Dataset information from the generated blueprint.
+        let nexus_ids = get_nexuses_from_blueprint(
+            &bp1,
+            BlueprintZoneFilter::ShouldBeRunning,
+        );
+        let debug_datasets = get_debug_datasets_from_blueprint(
+            &bp1,
+            BlueprintDatasetFilter::InService,
+        );
+        assert!(!debug_datasets.is_empty());
+
+        // When we create a bundle, it should exist on a dataset provisioned by
+        // the blueprint.
+        let bundle = datastore
+            .support_bundle_create(&opctx, "for the test", nexus_ids[0])
+            .await
+            .expect("Should be able to create bundle");
+
+        assert_eq!(bundle.state, SupportBundleState::Collecting);
+        assert_eq!(bundle.assigned_nexus, Some(nexus_ids[0].into()));
+        assert!(
+            debug_datasets.contains(&DatasetUuid::from(bundle.dataset_id)),
+            "Bundle should have been allocated from a blueprint dataset"
+        );
+
+        // Expunge the bundle's dataset. This marks it as "failed", and
+        // is a prerequisite for the bundle not later being re-assigned.
+        let bp2 = {
+            let mut bp2 = bp1.clone();
+            bp2.id = Uuid::new_v4();
+            bp2.parent_blueprint_id = Some(bp1.id);
+            expunge_dataset_for_bundle(&mut bp2, &bundle);
+            bp2
+        };
+        bp_insert_and_make_target(&opctx, &datastore, &bp2).await;
+
+        let report = datastore
+            .support_bundle_fail_expunged(&opctx, &bp2)
+            .await
+            .expect("Should have been able to mark bundle state as failed");
+        assert_eq!(
+            SupportBundleExpungementReport {
+                bundles_failed_missing_datasets: 1,
+                ..Default::default()
+            },
+            report
+        );
+
+        let observed_bundle = datastore
+            .support_bundle_get(&opctx, bundle.id.into())
+            .await
+            .expect("Should be able to get bundle we just failed");
+        assert_eq!(SupportBundleState::Failed, observed_bundle.state);
+        assert!(observed_bundle
+            .reason_for_failure
+            .unwrap()
+            .contains(FAILURE_REASON_NO_DATASET));
+
+        // Expunge the bundle's Nexus
+        let bp3 = {
+            let mut bp3 = bp2.clone();
+            bp3.id = Uuid::new_v4();
+            bp3.parent_blueprint_id = Some(bp2.id);
+            expunge_nexus_for_bundle(&mut bp3, &bundle);
+            bp3
+        };
+        bp_insert_and_make_target(&opctx, &datastore, &bp3).await;
+
+        let report = datastore
+            .support_bundle_fail_expunged(&opctx, &bp3)
+            .await
+            .expect("Should have been able to mark bundle state as failed");
+
+        // Although the record for this bundle already exists, it is not
+        // re-assigned, and the original reason for it failing (dataset loss) is
+        // preserved.
+        assert_eq!(SupportBundleExpungementReport::default(), report);
+
+        let observed_bundle = datastore
+            .support_bundle_get(&opctx, bundle.id.into())
+            .await
+            .expect("Should be able to get bundle we just failed");
+        assert_eq!(SupportBundleState::Failed, observed_bundle.state);
+        assert!(observed_bundle
+            .reason_for_failure
+            .unwrap()
+            .contains(FAILURE_REASON_NO_DATASET));
+
+        datastore
+            .support_bundle_delete(&opctx, bundle.id.into())
+            .await
+            .expect("Should have been able to delete support bundle");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_bundle_failed_from_expunged_nexus_with_reassign() {
+        static TEST_NAME: &str =
+            "test_bundle_failed_from_expunged_nexus_with_reassign";
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+        let (_example, mut bp1) = ExampleSystemBuilder::new_with_rng(
+            &logctx.log,
+            rng.next_system_rng(),
+        )
+        .build();
+
+        bp1.parent_blueprint_id = None;
+        bp_insert_and_make_target(&opctx, &datastore, &bp1).await;
+
+        // Manually perform the equivalent of blueprint execution to populate
+        // database records.
+        let sleds = TestSled::new_from_blueprint(&bp1);
+        for sled in &sleds {
+            sled.create_database_records(&datastore, &opctx).await;
+        }
+
+        // Extract Nexus and Dataset information from the generated blueprint.
+        let nexus_ids = get_nexuses_from_blueprint(
+            &bp1,
+            BlueprintZoneFilter::ShouldBeRunning,
+        );
+        let debug_datasets = get_debug_datasets_from_blueprint(
+            &bp1,
+            BlueprintDatasetFilter::InService,
+        );
+        assert!(!debug_datasets.is_empty());
+
+        // When we create a bundle, it should exist on a dataset provisioned by
+        // the blueprint.
+        let bundle = datastore
+            .support_bundle_create(&opctx, "for the test", nexus_ids[0])
+            .await
+            .expect("Should be able to create bundle");
+
+        assert_eq!(bundle.state, SupportBundleState::Collecting);
+        assert_eq!(bundle.assigned_nexus, Some(nexus_ids[0].into()));
+        assert!(
+            debug_datasets.contains(&DatasetUuid::from(bundle.dataset_id)),
+            "Bundle should have been allocated from a blueprint dataset"
+        );
+
+        // Update the bundle's state.
+        //
+        // This is what we would do when we finish collecting, and
+        // provisioned storage on a sled.
+        datastore
+            .support_bundle_update(
+                &opctx,
+                bundle.id.into(),
+                SupportBundleState::Active,
+            )
+            .await
+            .expect("Should have been able to update state");
+
+        // Expunge the bundle's Nexus (manually)
+        let bp2 = {
+            let mut bp2 = bp1.clone();
+            bp2.id = Uuid::new_v4();
+            bp2.parent_blueprint_id = Some(bp1.id);
+            expunge_nexus_for_bundle(&mut bp2, &bundle);
+            bp2
+        };
+        bp_insert_and_make_target(&opctx, &datastore, &bp2).await;
+
+        let report = datastore
+            .support_bundle_fail_expunged(&opctx, &bp2)
+            .await
+            .expect("Should have been able to mark bundle state as destroying");
+
+        assert_eq!(
+            SupportBundleExpungementReport {
+                bundles_failing_missing_nexus: 1,
+                bundles_reassigned: 1,
+                ..Default::default()
+            },
+            report
+        );
+
+        let observed_bundle = datastore
+            .support_bundle_get(&opctx, bundle.id.into())
+            .await
+            .expect("Should be able to get bundle we just failed");
+        assert_eq!(SupportBundleState::Failing, observed_bundle.state);
+        assert!(observed_bundle
+            .reason_for_failure
+            .unwrap()
+            .contains(FAILURE_REASON_NO_NEXUS));
 
         db.terminate().await;
         logctx.cleanup_successful();

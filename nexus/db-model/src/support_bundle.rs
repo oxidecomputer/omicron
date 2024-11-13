@@ -30,22 +30,28 @@ impl_enum_type!(
 
     // Enum values
     Collecting => b"collecting"
-    Collected => b"collected"
-    Cancelling => b"cancelling"
-    Failed => b"failed"
     Active => b"active"
+    Destroying => b"destroying"
+    Failing => b"failing"
+    Failed => b"failed"
 );
 
 impl SupportBundleState {
-    pub fn might_have_dataset_storage(&self) -> bool {
+    /// Returns the list of valid prior states.
+    ///
+    /// This is used to confirm that state updates are performed legally,
+    /// and defines the possible state transitions.
+    pub fn valid_old_states(&self) -> Vec<SupportBundleState> {
         use SupportBundleState::*;
 
         match self {
-            Collecting => false,
-            Collected => true,
-            Cancelling => true,
-            Failed => false,
-            Active => true,
+            Collecting => vec![],
+            Active => vec![Collecting],
+            // The "Destroying" state is terminal.
+            Destroying => vec![Active, Collecting, Failing],
+            Failing => vec![Collecting, Active],
+            // The "Failed" state is terminal.
+            Failed => vec![Collecting, Active, Failing],
         }
     }
 }
@@ -56,12 +62,17 @@ impl From<SupportBundleState> for SupportBundleStateView {
 
         match state {
             Collecting => SupportBundleStateView::Collecting,
-            // The distinction between "collected" and "collecting" is an
-            // internal detail that doesn't need to be exposed through the API.
-            Collected => SupportBundleStateView::Collecting,
-            Cancelling => SupportBundleStateView::Cancelling,
-            Failed => SupportBundleStateView::Failed,
             Active => SupportBundleStateView::Active,
+            Destroying => SupportBundleStateView::Destroying,
+            // The distinction between "failing" and "failed" should not be
+            // visible to end-users. This is internal book-keeping to decide
+            // whether or not the bundle record can be safely deleted.
+            //
+            // Either way, it should be possible to delete the bundle.
+            // - "Failing" bundles will become "Destroying"
+            // - "Failed" bundles will be destroyed immediately
+            Failing => SupportBundleStateView::Failed,
+            Failed => SupportBundleStateView::Failed,
         }
     }
 }

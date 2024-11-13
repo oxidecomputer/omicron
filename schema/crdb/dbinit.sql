@@ -2392,28 +2392,29 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo_artifact (
 CREATE TYPE IF NOT EXISTS omicron.public.support_bundle_state AS ENUM (
   -- The bundle is currently being created.
   --
-  -- All storage for this bundle exists in Nexus's transient filesystem, as it
-  -- is being assembled.
+  -- It might have storage that is partially allocated on a sled.
   'collecting',
-
-  -- The bundle has been created, and is being transferred to a Sled.
-  --
-  -- This bundle may been partially allocated to a Sled.
-  'collected',
-
-  -- The bundle has been explicitly marked cancelled.
-  --
-  -- It may or may not have durable storage which needs to be freed.
-  'cancelling',
-
-  -- The bundle, for whatever reason, has failed.
-  --
-  -- It should no longer have any managed durable storage.
-  'failed',
 
   -- The bundle has been collected successfully, and has storage on
   -- a particular sled.
-  'active'
+  'active',
+
+  -- The user has explicitly requested that a bundle be destroyed.
+  -- We must ensure that storage backing that bundle is gone before
+  -- it is automatically deleted.
+  'destroying',
+
+  -- The support bundle is failing.
+  -- This happens when Nexus is expunged partway through collection.
+  --
+  -- A different Nexus must ensure that storage is gone before the
+  -- bundle can be marked "failed".
+  'failing',
+
+  -- The bundle has finished failing.
+  --
+  -- The only action that can be taken on this bundle is to delete it.
+  'failed'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.support_bundle (

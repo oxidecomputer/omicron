@@ -423,20 +423,22 @@ pub enum SupportBundleState {
     /// Support Bundle still actively being collected.
     ///
     /// This is the initial state for a Support Bundle, and it will
-    /// automatically transition to either "Failed" or "Active".
+    /// automatically transition to either "Failing" or "Active".
     ///
     /// If a user no longer wants to access a Support Bundle, they can
-    /// request cancellation, which will transition to the "Cancelling" state.
+    /// request cancellation, which will transition to the "Destroying" state.
     Collecting,
 
-    /// Support Bundle has been cancelled, and will be deleted shortly.
-    Cancelling,
+    /// Support Bundle is being destroyed.
+    ///
+    /// Once backing storage has been freed, this bundle is destroyed.
+    Destroying,
 
     /// Support Bundle was not created successfully, or was created and has lost
     /// backing storage.
     ///
     /// The record of the bundle still exists for readability, but the only
-    /// valid operation on these bundles is to delete them.
+    /// valid operation on these bundles is to destroy them.
     Failed,
 
     /// Support Bundle has been processed, and is ready for usage.
