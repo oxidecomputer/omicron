@@ -194,6 +194,28 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// Lists one page of support bundles in a particular state, assigned to
+    /// a particular Nexus.
+    pub async fn support_bundle_list_assigned_to_nexus(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+        nexus_id: OmicronZoneUuid,
+        states: Vec<SupportBundleState>,
+    ) -> ListResultVec<SupportBundle> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        use db::schema::support_bundle::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        paginated(dsl::support_bundle, dsl::id, pagparams)
+            .filter(dsl::assigned_nexus.eq(nexus_id.into_untyped_uuid()))
+            .filter(dsl::state.eq_any(states))
+            .select(SupportBundle::as_select())
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     /// Marks support bundles as failed if their assigned Nexus or backing
     /// dataset has been destroyed.
     pub async fn support_bundle_fail_expunged(
@@ -376,7 +398,12 @@ impl DataStore {
         .await
     }
 
-    /// Updates the state of a support bundle
+    /// Updates the state of a support bundle.
+    ///
+    /// Returns:
+    /// - "Ok" if the bundle was updated successfully.
+    /// - "Err::InvalidRequest" if the bundle exists, but could not be updated
+    /// because the state transition is invalid.
     pub async fn support_bundle_update(
         &self,
         opctx: &OpContext,

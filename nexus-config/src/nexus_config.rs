@@ -374,6 +374,8 @@ pub struct BackgroundTaskConfig {
     pub nat_cleanup: NatCleanupConfig,
     /// configuration for inventory tasks
     pub inventory: InventoryConfig,
+    /// configuration for support bundle collection
+    pub support_bundle_collector: SupportBundleCollectorConfig,
     /// configuration for physical disk adoption tasks
     pub physical_disk_adoption: PhysicalDiskAdoptionConfig,
     /// configuration for decommissioned disk cleaner task
@@ -459,6 +461,20 @@ pub struct ExternalEndpointsConfig {
     pub period_secs: Duration,
     // Other policy around the TLS certificates could go here (e.g.,
     // allow/disallow wildcard certs, don't serve expired certs, etc.)
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SupportBundleCollectorConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// A toggle to disable support bundle collection
+    ///
+    /// Default: Off
+    #[serde(default)]
+    pub disable: bool,
 }
 
 #[serde_as]
@@ -935,6 +951,7 @@ mod test {
             inventory.period_secs = 10
             inventory.nkeep = 11
             inventory.disable = false
+            support_bundle_collector.period_secs = 30
             physical_disk_adoption.period_secs = 30
             decommissioned_disk_cleaner.period_secs = 30
             phantom_disks.period_secs = 30
@@ -1081,6 +1098,11 @@ mod test {
                             nkeep: 11,
                             disable: false,
                         },
+                        support_bundle_collector:
+                            SupportBundleCollectorConfig {
+                                period_secs: Duration::from_secs(30),
+                                disable: false,
+                            },
                         physical_disk_adoption: PhysicalDiskAdoptionConfig {
                             period_secs: Duration::from_secs(30),
                             disable: false,
@@ -1215,6 +1237,7 @@ mod test {
             inventory.period_secs = 10
             inventory.nkeep = 3
             inventory.disable = false
+            support_bundle_collector.period_secs = 30
             physical_disk_adoption.period_secs = 30
             decommissioned_disk_cleaner.period_secs = 30
             phantom_disks.period_secs = 30
