@@ -175,17 +175,24 @@ impl<'a> BuilderExternalNetworking<'a> {
         // Recycle the IP addresses of expunged external DNS zones,
         // ensuring that those addresses aren't currently in use.
         // TODO: Remove when external DNS addresses come from policy.
-        let available_external_dns_ips = expunged_omicron_zones
-            .filter_map(|zone| {
-                if let BlueprintZoneType::ExternalDns(dns) = &zone.zone_type {
-                    let ip = dns.dns_address.addr.ip();
-                    if !used_external_dns_ips.contains(&ip) {
-                        return Some(ip);
-                    }
+        let mut available_external_dns_ips = BTreeSet::new();
+        for zone in expunged_omicron_zones {
+            if let BlueprintZoneType::ExternalDns(dns) = &zone.zone_type {
+                let ip = dns.dns_address.addr.ip();
+                if !used_external_dns_ips.contains(&ip) {
+                    available_external_dns_ips.insert(ip);
+
+                    // We also need to partition the external DNS IPs off from
+                    // the set of standard service external IPs. For any
+                    // available external DNS IP, mark it as used as far as the
+                    // normal IP allocator is concerned.
+                    let omicron_ip = OmicronZoneExternalIp::Floating(
+                        dns.dns_address.into_ip(),
+                    );
+                    external_ip_alloc.mark_ip_used(&omicron_ip)?;
                 }
-                None
-            })
-            .collect::<BTreeSet<IpAddr>>();
+            }
+        }
 
         // TODO-performance Building these iterators as "walk through the list
         // and skip anything we've used already" is fine as long as we're
@@ -773,11 +780,26 @@ impl TryFrom<(u16, u16)> for SnatPortRange {
 
 #[cfg(test)]
 pub mod test {
+    use std::net::SocketAddr;
+
     use super::*;
+    use illumos_utils::zpool::ZpoolName;
+    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
+    use nexus_types::deployment::blueprint_zone_type;
+    use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
+    use nexus_types::inventory::NetworkInterface;
+    use nexus_types::inventory::NetworkInterfaceKind;
+    use omicron_common::api::external::Vni;
     use omicron_uuid_kinds::ExternalIpUuid;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
+    use slog_error_chain::InlineErrorChain;
     use test_strategy::proptest;
+    use uuid::Uuid;
 
     /// Test that `AvailableIterator` correctly filters out items that are in
     /// use.
@@ -953,5 +975,140 @@ pub mod test {
             }
             claim_exclusive = !claim_exclusive;
         }
+    }
+
+    #[test]
+    fn external_dns_ips_are_partitioned_separately() {
+        // Construct a service IP range with 3 IPs.
+        let service_ip_pool = IpRange::try_from((
+            "192.0.2.1".parse::<IpAddr>().unwrap(),
+            "192.0.2.3".parse::<IpAddr>().unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(service_ip_pool.len(), 3);
+
+        let make_external_dns = |index, disposition| {
+            let id = OmicronZoneUuid::new_v4();
+            let pool_name = ZpoolName::new_external(ZpoolUuid::new_v4());
+            BlueprintZoneConfig {
+                disposition,
+                id,
+                filesystem_pool: Some(pool_name.clone()),
+                zone_type: BlueprintZoneType::ExternalDns(
+                    blueprint_zone_type::ExternalDns {
+                        dataset: OmicronZoneDataset { pool_name },
+                        http_address: "[::1]:0".parse().unwrap(),
+                        dns_address: OmicronZoneExternalFloatingAddr {
+                            id: ExternalIpUuid::new_v4(),
+                            addr: SocketAddr::new(
+                                service_ip_pool.iter().nth(index).unwrap(),
+                                0,
+                            ),
+                        },
+                        nic: NetworkInterface {
+                            id: Uuid::new_v4(),
+                            kind: NetworkInterfaceKind::Service {
+                                id: id.into_untyped_uuid(),
+                            },
+                            name: format!("test-{index}").parse().unwrap(),
+                            ip: DNS_OPTE_IPV4_SUBNET
+                                .addr_iter()
+                                .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + index)
+                                .unwrap()
+                                .into(),
+                            mac: MacAddr::iter_system().nth(index).unwrap(),
+                            subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET),
+                            vni: Vni::SERVICES_VNI,
+                            primary: true,
+                            slot: 0,
+                            transit_ips: Vec::new(),
+                        },
+                    },
+                ),
+            }
+        };
+
+        // Construct a set of inputs with 1 in-service external DNS zone (at IP
+        // 1) and 1 expunged external DNS zone (at IP 2). That should result in
+        // IP 2 being set aside for new external DNS zones, and one IP (IP 3)
+        // being set aside for other services (e.g., Nexus).
+        let running_external_dns =
+            make_external_dns(0, BlueprintZoneDisposition::InService);
+        let expunged_external_dns =
+            make_external_dns(1, BlueprintZoneDisposition::Expunged);
+
+        // Construct a builder; ask for external DNS IPs first (we should get IP
+        // 1 then "none available") then Nexus IPs (we should get IP 2 then
+        // "none available").
+        let mut builder = BuilderExternalNetworking::new(
+            [&running_external_dns].iter().copied(),
+            [&expunged_external_dns].iter().copied(),
+            std::slice::from_ref(&service_ip_pool),
+        )
+        .expect("constructed builder");
+
+        // Test external DNS
+        assert_eq!(
+            builder
+                .for_new_external_dns()
+                .expect("got external DNS IP")
+                .external_ip,
+            service_ip_pool.iter().nth(1).unwrap()
+        );
+        let err = builder.for_new_external_dns().expect_err("no DNS IPs left");
+        assert!(
+            matches!(err, Error::NoExternalDnsIpAvailable),
+            "unexpected error: {}",
+            InlineErrorChain::new(&err),
+        );
+
+        // Test Nexus
+        assert_eq!(
+            builder.for_new_nexus().expect("got Nexus IP").external_ip,
+            service_ip_pool.iter().nth(2).unwrap()
+        );
+        let err = builder.for_new_nexus().expect_err("no Nexus IPs left");
+        assert!(
+            matches!(err, Error::NoExternalServiceIpAvailable),
+            "unexpected error: {}",
+            InlineErrorChain::new(&err),
+        );
+
+        // Repeat the above test, but ask for IPs in the reverse order (Nexus
+        // then external DNS). The outcome should be identical, as the IPs are
+        // partitioned off and do not depend on request ordering.
+        let mut builder = BuilderExternalNetworking::new(
+            [&running_external_dns].iter().copied(),
+            [&expunged_external_dns].iter().copied(),
+            std::slice::from_ref(&service_ip_pool),
+        )
+        .expect("constructed builder");
+
+        // Test Nexus
+        assert_eq!(
+            builder.for_new_nexus().expect("got Nexus IP").external_ip,
+            service_ip_pool.iter().nth(2).unwrap()
+        );
+        let err = builder.for_new_nexus().expect_err("no Nexus IPs left");
+        assert!(
+            matches!(err, Error::NoExternalServiceIpAvailable),
+            "unexpected error: {}",
+            InlineErrorChain::new(&err),
+        );
+
+        // Text external DNS
+        assert_eq!(
+            builder
+                .for_new_external_dns()
+                .expect("got external DNS IP")
+                .external_ip,
+            service_ip_pool.iter().nth(1).unwrap()
+        );
+        let err = builder.for_new_external_dns().expect_err("no DNS IPs left");
+        assert!(
+            matches!(err, Error::NoExternalDnsIpAvailable),
+            "unexpected error: {}",
+            InlineErrorChain::new(&err),
+        );
     }
 }
