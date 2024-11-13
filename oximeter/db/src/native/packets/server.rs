@@ -6,10 +6,42 @@
 
 //! Packets sent from the server.
 
+use crate::native::block::Block;
+use crate::native::block::DataType;
 use std::fmt;
 use std::time::Duration;
 
-use crate::native::block::Block;
+/// Description of a single column in a table.
+///
+/// This is used during insertion queries. When the client sends a request to
+/// insert data, the server responds with a description of all the columns in
+/// the table, which the client is supposed to use to verify the data block
+/// being inserted.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ColumnDescription {
+    /// The name of the column.
+    pub name: String,
+    /// The type of the column.
+    pub data_type: DataType,
+    /// Information about how default values for a column are created.
+    ///
+    /// At this point, we only care about whether there are default expressions,
+    /// not what they actually are.
+    pub defaults: ColumnDefaults,
+}
+
+/// Details about the default values for a column.
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
+pub struct ColumnDefaults {
+    /// The column has a default expression, like `DEFAULT 'foo'`.
+    pub has_default: bool,
+    /// The column values are materialized on insertion, like `MATERIALIZED now()`.
+    pub has_materialized: bool,
+    /// The column is ephemeral, i.e., used to compute other column defaults.
+    pub has_ephemeral: bool,
+    /// The column is an alias of some other expression.
+    pub has_alias: bool,
+}
 
 /// A packet sent from the ClickHouse server to the client.
 #[derive(Clone, Debug, PartialEq)]
@@ -30,6 +62,8 @@ pub enum Packet {
     EndOfStream,
     /// Profiling data for a query.
     ProfileInfo(ProfileInfo),
+    /// Metadata about the columns in a table.
+    TableColumns(Vec<ColumnDescription>),
     /// A data block containing profiling events during a query.
     ProfileEvents(Block),
 }
@@ -42,6 +76,7 @@ impl Packet {
     pub const PONG: u8 = 4;
     pub const END_OF_STREAM: u8 = 5;
     pub const PROFILE_INFO: u8 = 6;
+    pub const TABLE_COLUMNS: u8 = 11;
     pub const PROFILE_EVENTS: u8 = 14;
 
     /// Return the kind of the packet as a string.
@@ -54,6 +89,7 @@ impl Packet {
             Packet::Pong => "Pong",
             Packet::EndOfStream => "EndOfStream",
             Packet::ProfileInfo(_) => "ProfileInfo",
+            Packet::TableColumns(_) => "TableColumns",
             Packet::ProfileEvents(_) => "ProfileEvents",
         }
     }

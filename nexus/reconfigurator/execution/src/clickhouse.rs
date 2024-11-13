@@ -93,18 +93,22 @@ pub(crate) async fn deploy_nodes(
         let log = log.new(slog::o!("admin_url" => admin_url.clone()));
         futs.push(Either::Left(async move {
             let client = ClickhouseKeeperClient::new(&admin_url, log.clone());
-            client.generate_config(&config).await.map(|_| ()).map_err(|e| {
-                anyhow!(
-                    concat!(
+            client
+                .generate_config_and_enable_svc(&config)
+                .await
+                .map(|_| ())
+                .map_err(|e| {
+                    anyhow!(
+                        concat!(
                         "failed to send config for clickhouse keeper ",
                         "with id {} to clickhouse-admin-keeper; admin_url = {}",
                         "error = {}"
                     ),
-                    config.settings.id,
-                    admin_url,
-                    e
-                )
-            })
+                        config.settings.id,
+                        admin_url,
+                        e
+                    )
+                })
         }));
     }
     for config in server_configs {
@@ -118,18 +122,22 @@ pub(crate) async fn deploy_nodes(
         let log = opctx.log.new(slog::o!("admin_url" => admin_url.clone()));
         futs.push(Either::Right(async move {
             let client = ClickhouseServerClient::new(&admin_url, log.clone());
-            client.generate_config(&config).await.map(|_| ()).map_err(|e| {
-                anyhow!(
-                    concat!(
+            client
+                .generate_config_and_enable_svc(&config)
+                .await
+                .map(|_| ())
+                .map_err(|e| {
+                    anyhow!(
+                        concat!(
                         "failed to send config for clickhouse server ",
                         "with id {} to clickhouse-admin-server; admin_url = {}",
                         "error = {}"
                     ),
-                    config.settings.id,
-                    admin_url,
-                    e
-                )
-            })
+                        config.settings.id,
+                        admin_url,
+                        e
+                    )
+                })
         }));
     }
 
@@ -294,7 +302,10 @@ mod test {
         let num_servers = 2u64;
 
         let mut zones = BTreeMap::new();
-        let mut config = ClickhouseClusterConfig::new("test".to_string());
+        let mut config = ClickhouseClusterConfig::new(
+            "test".to_string(),
+            "test".to_string(),
+        );
 
         for keeper_id in 1..=num_keepers {
             let sled_id = SledUuid::new_v4();

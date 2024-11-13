@@ -4,12 +4,16 @@
 
 //! Example blueprints
 
+use std::fmt;
+use std::hash::Hash;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 
 use crate::blueprint_builder::BlueprintBuilder;
+use crate::planner::rng::PlannerRng;
 use crate::system::SledBuilder;
 use crate::system::SystemDescription;
+use nexus_inventory::CollectionBuilderRng;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::OmicronZoneNic;
@@ -22,6 +26,121 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::VnicUuid;
 use typed_rng::TypedUuidRng;
+
+/// Stateful PRNG for generating simulated systems.
+///
+/// When generating a succession of simulated systems, this stateful PRNG allows
+/// for reproducible generation of those systems after setting an initial seed.
+/// The PRNGs are structured in tree form as much as possible, so that (for
+/// example) if one part of the system decides to change how many sleds are in
+/// the system, it can do so without affecting other UUIDs.
+///
+/// We have a number of existing tests that manually set seeds for individual
+/// RNG instances. The old-style seeds have been kept around for backwards
+/// compatibility. Newer tests should use this struct to generate their RNGs
+/// instead, since it conveniently tracks generation numbers for each seed.
+#[derive(Clone, Debug)]
+pub struct SimRngState {
+    seed: String,
+    // Generation numbers for each RNG type.
+    system_rng_gen: u64,
+    collection_rng_gen: u64,
+    planner_rng_gen: u64,
+    // TODO: Currently, sled IDs are used to generate UUIDs to mutate the
+    // system. This should be replaced in the future with a richer simulation
+    // framework.
+    sled_id_rng_gen: u64,
+}
+
+impl SimRngState {
+    pub fn from_seed(seed: &str) -> Self {
+        Self {
+            seed: seed.to_string(),
+            system_rng_gen: 0,
+            collection_rng_gen: 0,
+            planner_rng_gen: 0,
+            sled_id_rng_gen: 0,
+        }
+    }
+
+    pub fn next_system_rng(&mut self) -> ExampleSystemRng {
+        // Different behavior for the first system_rng_gen is a bit weird, but
+        // it retains backwards compatibility with existing tests -- it means
+        // that generated UUIDs particularly in fixtures don't change.
+        self.system_rng_gen += 1;
+        if self.system_rng_gen == 1 {
+            ExampleSystemRng::from_seed(self.seed.as_str())
+        } else {
+            ExampleSystemRng::from_seed((
+                self.seed.as_str(),
+                self.system_rng_gen,
+            ))
+        }
+    }
+
+    pub fn next_collection_rng(&mut self) -> CollectionBuilderRng {
+        self.collection_rng_gen += 1;
+        // We don't need to pass in extra bits unique to collections, because
+        // `CollectionBuilderRng` adds its own.
+        CollectionBuilderRng::from_seed((
+            self.seed.as_str(),
+            self.collection_rng_gen,
+        ))
+    }
+
+    pub fn next_planner_rng(&mut self) -> PlannerRng {
+        self.planner_rng_gen += 1;
+        // We don't need to pass in extra bits unique to the planner, because
+        // `PlannerRng` adds its own.
+        PlannerRng::from_seed((self.seed.as_str(), self.planner_rng_gen))
+    }
+
+    pub fn next_sled_id_rng(&mut self) -> TypedUuidRng<SledKind> {
+        self.sled_id_rng_gen += 1;
+        TypedUuidRng::from_seed(
+            self.seed.as_str(),
+            ("sled-id-rng", self.sled_id_rng_gen),
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ExampleSystemRng {
+    seed: String,
+    sled_rng: TypedUuidRng<SledKind>,
+    collection_rng: CollectionBuilderRng,
+    // ExampleSystem instances generate two blueprints: create RNGs for both.
+    blueprint1_rng: PlannerRng,
+    blueprint2_rng: PlannerRng,
+}
+
+impl ExampleSystemRng {
+    pub fn from_seed<H: Hash + fmt::Debug>(seed: H) -> Self {
+        // This is merely "ExampleSystem" for backwards compatibility with
+        // existing test fixtures.
+        let sled_rng = TypedUuidRng::from_seed(&seed, "ExampleSystem");
+        // We choose to make our own collection and blueprint RNGs rather than
+        // passing them in via `SimRngState`. This means that `SimRngState` is
+        // influenced as little as possible by the specifics of how
+        // `ExampleSystem` instances are generated, and RNG stability is
+        // maintained.
+        let collection_rng = CollectionBuilderRng::from_seed((
+            &seed,
+            "ExampleSystem collection",
+        ));
+        let blueprint1_rng =
+            PlannerRng::from_seed((&seed, "ExampleSystem initial"));
+        let blueprint2_rng =
+            PlannerRng::from_seed((&seed, "ExampleSystem make_zones"));
+        Self {
+            seed: format!("{:?}", seed),
+            sled_rng,
+            collection_rng,
+            blueprint1_rng,
+            blueprint2_rng,
+        }
+    }
+}
 
 /// An example generated system, along with a consistent planning input and
 /// collection.
@@ -37,14 +156,6 @@ pub struct ExampleSystem {
     /// The initial blueprint that was used to describe the system. This
     /// blueprint has sleds but no zones.
     pub initial_blueprint: Blueprint,
-    // If we add more types of RNGs than just sleds here, we'll need to
-    // expand this to be similar to BlueprintBuilderRng where a root RNG
-    // creates sub-RNGs.
-    //
-    // This is currently only used for tests, so it looks unused in normal
-    // builds.  But in the future it could be used by other consumers, too.
-    #[allow(dead_code)]
-    pub(crate) sled_rng: TypedUuidRng<SledKind>,
 }
 
 /// Returns a collection, planning input, and blueprint describing a pretty
@@ -64,7 +175,7 @@ pub fn example(
 #[derive(Debug, Clone)]
 pub struct ExampleSystemBuilder {
     log: slog::Logger,
-    test_name: String,
+    rng: ExampleSystemRng,
     // TODO: Store a Policy struct instead of these fields:
     // https://github.com/oxidecomputer/omicron/issues/6803
     nsleds: usize,
@@ -89,9 +200,17 @@ impl ExampleSystemBuilder {
     pub const DEFAULT_EXTERNAL_DNS_COUNT: usize = 0;
 
     pub fn new(log: &slog::Logger, test_name: &str) -> Self {
+        let rng = ExampleSystemRng::from_seed(test_name);
+        Self::new_with_rng(log, rng)
+    }
+
+    pub fn new_with_rng(log: &slog::Logger, rng: ExampleSystemRng) -> Self {
         Self {
-            log: log.new(slog::o!("component" => "ExampleSystem", "test_name" => test_name.to_string())),
-            test_name: test_name.to_string(),
+            log: log.new(slog::o!(
+                "component" => "ExampleSystem",
+                "rng_seed" => rng.seed.clone(),
+            )),
+            rng,
             nsleds: Self::DEFAULT_N_SLEDS,
             ndisks_per_sled: SledBuilder::DEFAULT_NPOOLS,
             nexus_count: None,
@@ -229,6 +348,8 @@ impl ExampleSystemBuilder {
             "create_disks_in_blueprint" => self.create_disks_in_blueprint,
         );
 
+        let mut rng = self.rng.clone();
+
         let mut system = SystemDescription::new();
         // Update the system's target counts with the counts. (Note that
         // there's no external DNS count.)
@@ -236,10 +357,8 @@ impl ExampleSystemBuilder {
             .target_nexus_zone_count(nexus_count.0)
             .target_internal_dns_zone_count(self.internal_dns_count.0)
             .target_crucible_pantry_zone_count(self.crucible_pantry_count.0);
-        let mut sled_rng =
-            TypedUuidRng::from_seed(&self.test_name, "ExampleSystem");
         let sled_ids: Vec<_> =
-            (0..self.nsleds).map(|_| sled_rng.next()).collect();
+            (0..self.nsleds).map(|_| rng.sled_rng.next()).collect();
 
         for sled_id in &sled_ids {
             let _ = system
@@ -260,7 +379,7 @@ impl ExampleSystemBuilder {
         let initial_blueprint = BlueprintBuilder::build_empty_with_sleds_seeded(
             base_input.all_sled_ids(SledFilter::Commissioned),
             "test suite",
-            (&self.test_name, "ExampleSystem initial"),
+            rng.blueprint1_rng,
         );
 
         // Start with an empty collection
@@ -278,7 +397,7 @@ impl ExampleSystemBuilder {
             "test suite",
         )
         .unwrap();
-        builder.set_rng_seed((&self.test_name, "ExampleSystem make_zones"));
+        builder.set_rng(rng.blueprint2_rng);
 
         // Add as many external IPs as is necessary for external DNS zones. We
         // pick addresses in the TEST-NET-2 (RFC 5737) range.
@@ -410,9 +529,23 @@ impl ExampleSystemBuilder {
             }
         }
 
+        // We just ensured that a handful of datasets should exist in
+        // the blueprint, but they don't yet exist in the SystemDescription.
+        //
+        // Go back and add them so that the blueprint is consistent with
+        // inventory.
+        for (sled_id, datasets) in &blueprint.blueprint_datasets {
+            let sled = system.get_sled_mut(*sled_id).unwrap();
+
+            for dataset_config in datasets.datasets.values() {
+                let config = dataset_config.clone().try_into().unwrap();
+                sled.add_synthetic_dataset(config);
+            }
+        }
+
         let mut builder =
             system.to_collection_builder().expect("failed to build collection");
-        builder.set_rng_seed((&self.test_name, "ExampleSystem collection"));
+        builder.set_rng(rng.collection_rng);
 
         // The blueprint evolves separately from the system -- so it's returned
         // as a separate value.
@@ -421,7 +554,6 @@ impl ExampleSystemBuilder {
             input: input_builder.build(),
             collection: builder.build(),
             initial_blueprint,
-            sled_rng,
         };
         (example, blueprint)
     }

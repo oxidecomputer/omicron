@@ -891,9 +891,9 @@ impl SledAgent {
                             name: config.name.full_name(),
                             available: ByteCount::from_kibibytes_u32(0),
                             used: ByteCount::from_kibibytes_u32(0),
-                            quota: config.quota,
-                            reservation: config.reservation,
-                            compression: config.compression.to_string(),
+                            quota: config.inner.quota,
+                            reservation: config.inner.reservation,
+                            compression: config.inner.compression.to_string(),
                         })
                         .collect::<Vec<_>>()
                 })

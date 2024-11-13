@@ -60,8 +60,8 @@ pub const U2_DEBUG_DATASET: &'static str = "crypt/debug";
 // This is the root dataset for all U.2 drives. Encryption is inherited.
 pub const CRYPT_DATASET: &'static str = "crypt";
 
-const U2_EXPECTED_DATASET_COUNT: usize = 2;
-const U2_EXPECTED_DATASETS: [ExpectedDataset; U2_EXPECTED_DATASET_COUNT] = [
+pub const U2_EXPECTED_DATASET_COUNT: usize = 2;
+pub const U2_EXPECTED_DATASETS: [ExpectedDataset; U2_EXPECTED_DATASET_COUNT] = [
     // Stores filesystems for zones
     ExpectedDataset::new(ZONE_DATASET).wipe(),
     // For storing full kernel RAM dumps
@@ -102,7 +102,7 @@ const M2_EXPECTED_DATASETS: [ExpectedDataset; M2_EXPECTED_DATASET_COUNT] = [
 
 // Helper type for describing expected datasets and their optional quota.
 #[derive(Clone, Copy, Debug)]
-struct ExpectedDataset {
+pub struct ExpectedDataset {
     // Name for the dataset
     name: &'static str,
     // Optional quota, in _bytes_
@@ -121,6 +121,18 @@ impl ExpectedDataset {
             wipe: false,
             compression: CompressionAlgorithm::Off,
         }
+    }
+
+    pub fn get_name(&self) -> &'static str {
+        self.name
+    }
+
+    pub fn get_quota(&self) -> Option<ByteCount> {
+        self.quota
+    }
+
+    pub fn get_compression(&self) -> CompressionAlgorithm {
+        self.compression
     }
 
     const fn quota(mut self, quota: ByteCount) -> Self {
@@ -161,6 +173,9 @@ pub enum DatasetError {
     },
     #[error("Failed to make datasets encrypted")]
     EncryptionMigration(#[from] DatasetEncryptionMigrationError),
+
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
 }
 
 /// Ensure that the zpool contains all the datasets we would like it to

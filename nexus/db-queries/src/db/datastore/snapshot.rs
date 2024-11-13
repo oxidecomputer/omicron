@@ -322,4 +322,23 @@ impl DataStore {
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
+
+    /// Get a snapshot, returning None if it does not exist (instead of a
+    /// NotFound error).
+    pub async fn snapshot_get(
+        &self,
+        opctx: &OpContext,
+        snapshot_id: Uuid,
+    ) -> LookupResult<Option<Snapshot>> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use db::schema::snapshot::dsl;
+        dsl::snapshot
+            .filter(dsl::id.eq(snapshot_id))
+            .select(Snapshot::as_select())
+            .first_async(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
 }

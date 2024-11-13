@@ -128,6 +128,8 @@ pub mod block;
 pub mod connection;
 mod io;
 mod packets;
+pub use io::packet::client::Encoder;
+pub use io::packet::server::Decoder;
 
 #[usdt::provider(provider = "clickhouse_io")]
 mod probes {
@@ -143,8 +145,8 @@ mod probes {
     /// Emitted when we receive a data packet, with details about the size and
     /// data types for each column.
     fn data__packet__received(
-        n_cols: u64,
-        n_rows: u64,
+        n_cols: usize,
+        n_rows: usize,
         columns: Vec<(String, String)>,
     ) {
     }
@@ -170,6 +172,9 @@ pub enum Error {
 
     #[error("Unrecognized server packet, kind = {0}")]
     UnrecognizedServerPacket(u8),
+
+    #[error("Invalid data packet kind = '{kind}', msg = {msg}")]
+    InvalidPacket { kind: &'static str, msg: String },
 
     #[error("Encountered non-UTF8 string")]
     NonUtf8String,
@@ -205,11 +210,32 @@ pub enum Error {
     )]
     Exception { exceptions: Vec<Exception> },
 
-    #[error("Cannot concatenate blocks with mismatched structure")]
+    #[error(
+        "Mismatched data block structure when concatenating blocks or \
+        inserting data blocks into the database"
+    )]
     MismatchedBlockStructure,
 
     #[error("Value out of range for corresponding ClickHouse type")]
     OutOfRange { type_name: String, min: String, max: String, value: String },
+
+    #[error("Failed to serialize / deserialize value from the database")]
+    Serde(String),
+
+    #[error("No column with name '{0}'")]
+    NoSuchColumn(String),
+
+    #[error("Too many rows to create block")]
+    TooManyRows,
+
+    #[error("Column has unexpected type")]
+    UnexpectedColumnType,
+
+    #[error("Data block is too large")]
+    BlockTooLarge,
+
+    #[error("Expected an empty data block")]
+    ExpectedEmptyDataBlock,
 }
 
 /// Error codes and related constants.
