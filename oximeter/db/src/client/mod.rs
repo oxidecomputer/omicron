@@ -1004,7 +1004,7 @@ impl Client {
                     returned an empty data block",
                     ))
                 })
-                .map(|block| block.n_rows > 0)
+                .map(|block| block.n_rows() > 0)
         })
     }
 
@@ -1123,15 +1123,28 @@ impl Client {
     ) -> Result<QueryResult, Error> {
         trace!(
             self.log,
-            "executing SQL query";
+            "inserting data";
             "sql" => sql,
+            "n_rows" => block.n_rows(),
+            "n_columns" => block.n_columns(),
         );
         let mut handle = self.native_pool.claim().await?;
         let id = usdt::UniqueId::new();
-        probes::sql__query__start!(|| (&id, &sql));
-        let result = handle.insert(sql, block).await.map_err(Error::from);
+        probes::sql__query__start!(|| (&id, sql));
+        let now = tokio::time::Instant::now();
+        let result = tokio::time::timeout(
+            self.request_timeout,
+            handle.insert(sql, block),
+        )
+        .await;
+        let elapsed = now.elapsed();
         probes::sql__query__done!(|| (&id));
-        result
+        match result {
+            Ok(result) => result.map_err(Error::from),
+            Err(_) => Err(Error::DatabaseUnavailable(format!(
+                "SQL query timed out after {elapsed:?}"
+            ))),
+        }
     }
 
     // Execute a generic SQL statement, using the native TCP interface.
@@ -1155,21 +1168,18 @@ impl Client {
 
         let mut handle = self.native_pool.claim().await?;
         let id = usdt::UniqueId::new();
-        probes::sql__query__start!(|| (&id, &sql));
-        let result = handle.query(sql).await.map_err(Error::from);
+        probes::sql__query__start!(|| (&id, sql));
+        let now = tokio::time::Instant::now();
+        let result =
+            tokio::time::timeout(self.request_timeout, handle.query(sql)).await;
+        let elapsed = now.elapsed();
         probes::sql__query__done!(|| (&id));
-        result
-    }
-
-    // Execute a generic SQL statement.
-    //
-    // TODO-robustness This currently does no validation of the statement.
-    async fn execute<S>(&self, sql: S) -> Result<(), Error>
-    where
-        S: Into<String>,
-    {
-        self.execute_with_body(sql).await?;
-        Ok(())
+        match result {
+            Ok(result) => result.map_err(Error::from),
+            Err(_) => Err(Error::DatabaseUnavailable(format!(
+                "SQL query timed out after {elapsed:?}"
+            ))),
+        }
     }
 
     // Execute a generic SQL statement, awaiting the response as text
@@ -1281,14 +1291,14 @@ impl Client {
             trace!(self.log, "no new timeseries schema in database");
             return Ok(());
         };
-        if data.n_rows == 0 {
+        if data.n_rows() == 0 {
             trace!(self.log, "no new timeseries schema in database");
             return Ok(());
         }
         trace!(
             self.log,
             "retrieved new timeseries schema";
-            "n_schema" => data.n_rows,
+            "n_schema" => data.n_rows(),
         );
         for new_schema in TimeseriesSchema::from_block(data)?.into_iter() {
             schema.insert(new_schema.timeseries_name.clone(), new_schema);
@@ -3517,41 +3527,44 @@ mod tests {
         // Insert a record from this datum.
         const TIMESERIES_NAME: &str = "foo:bar";
         const TIMESERIES_KEY: u64 = 101;
-        let (measurement_table, inserted_row) =
-            crate::model::unroll_measurement_row_impl(
+        let (measurement_table, inserted_block) =
+            crate::model::measurements::extract_measurement_as_block_impl(
                 TIMESERIES_NAME.to_string(),
                 TIMESERIES_KEY,
                 &measurement,
             );
         let insert_sql = format!(
-            "INSERT INTO {measurement_table} FORMAT JSONEachRow {inserted_row}",
+            "INSERT INTO {}.{} FORMAT Native ",
+            crate::DATABASE_NAME,
+            measurement_table,
         );
-        println!("Inserted row: {}", inserted_row);
+        println!("Expected measurement: {:#?}", measurement);
+        println!("Inserted block: {:#?}", inserted_block);
         client
-            .execute_native(&insert_sql)
+            .insert_native(&insert_sql, inserted_block)
             .await
-            .expect("Failed to insert measurement row");
+            .expect("Failed to insert measurement block");
 
         // Select it exactly back out.
         let select_sql = format!(
-            "SELECT * FROM {} WHERE timestamp = '{}' FORMAT {};",
+            "SELECT * FROM {}.{} WHERE timestamp = '{}'",
+            crate::DATABASE_NAME,
             measurement_table,
             measurement.timestamp().format(crate::DATABASE_TIMESTAMP_FORMAT),
-            crate::DATABASE_SELECT_FORMAT,
         );
-        let body = client
-            .execute_with_body(select_sql)
+        let selected_block = client
+            .execute_with_block(&select_sql)
             .await
             .expect("Failed to select measurement row")
-            .1;
-        let (_, actual_row) = crate::model::parse_measurement_from_row(
-            &body,
-            measurement.datum_type(),
-        );
-        println!("Actual row: {actual_row:?}");
+            .data
+            .expect("Should have selected some data block");
+        let actual_measurements = Measurement::from_block(&selected_block)
+            .expect("Failed to extract measurement from block");
+        println!("Actual measurements: {actual_measurements:#?}");
+        assert_eq!(actual_measurements.len(), 1);
         assert_eq!(
-            actual_row, measurement,
-            "Actual and expected measurement rows do not match"
+            actual_measurements[0], measurement,
+            "Actual and expected measurements do not match"
         );
         Ok(())
     }

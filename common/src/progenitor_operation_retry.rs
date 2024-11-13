@@ -11,17 +11,20 @@ use crate::backoff::retry_notify;
 use crate::backoff::retry_policy_internal_service;
 use crate::backoff::BackoffError;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ProgenitorOperationRetryError<E> {
     /// Nexus determined that the operation will never return a known result
     /// because the remote server is gone.
+    #[error("remote server is gone")]
     Gone,
 
     /// Attempting to check if the retry loop should be stopped failed
-    GoneCheckError(Error),
+    #[error("failed to determine whether remote server is gone")]
+    GoneCheckError(#[source] Error),
 
     /// The retry loop progenitor operation saw a permanent client error
-    ProgenitorError(progenitor_client::Error<E>),
+    #[error("permanent error")]
+    ProgenitorError(#[source] progenitor_client::Error<E>),
 }
 
 impl<E> ProgenitorOperationRetryError<E> {

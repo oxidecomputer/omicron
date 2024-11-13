@@ -146,7 +146,7 @@ impl super::Nexus {
                 db::model::Dataset::new(
                     dataset.dataset_id,
                     dataset.zpool_id,
-                    Some(dataset.request.address),
+                    dataset.request.address,
                     dataset.request.kind,
                 )
             })

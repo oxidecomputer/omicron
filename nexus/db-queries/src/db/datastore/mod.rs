@@ -841,7 +841,7 @@ mod test {
     }
 
     #[derive(Debug)]
-    struct TestDatasets {
+    pub(crate) struct TestDatasets {
         // eligible and ineligible aren't currently used, but are probably handy
         // for the future.
         #[allow(dead_code)]
@@ -858,7 +858,7 @@ mod test {
     type SledToDatasetMap = HashMap<SledUuid, Vec<Uuid>>;
 
     impl TestDatasets {
-        async fn create(
+        pub(crate) async fn create(
             opctx: &OpContext,
             datastore: Arc<DataStore>,
             num_eligible_sleds: usize,
