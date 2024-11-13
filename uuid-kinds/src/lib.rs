@@ -65,6 +65,7 @@ impl_typed_uuid_kind! {
     RackReset => "rack_reset",
     Region => "region",
     Sled => "sled",
+    SupportBundle => "support_bundle",
     TufRepo => "tuf_repo",
     Upstairs => "upstairs",
     UpstairsRepair => "upstairs_repair",
