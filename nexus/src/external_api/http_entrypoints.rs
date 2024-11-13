@@ -5544,33 +5544,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn timeseries_schema_list(
-        rqctx: RequestContext<ApiContext>,
-        pag_params: Query<TimeseriesSchemaPaginationParams>,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<oximeter_db::TimeseriesSchema>>,
-        HttpError,
-    > {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let pagination = pag_params.into_inner();
-            let limit = rqctx.page_limit(&pagination)?;
-            nexus
-                .project_timeseries_schema_list(&opctx, &pagination, limit)
-                .await
-                .map(HttpResponseOk)
-                .map_err(HttpError::from)
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
     async fn timeseries_query(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::ProjectSelector>,
@@ -5586,7 +5559,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let project_lookup =
                 nexus.project_lookup(&opctx, project_selector)?;
             nexus
-                .project_timeseries_query(&opctx, &project_lookup, &query)
+                .timeseries_query_project(&opctx, &project_lookup, &query)
                 .await
                 .map(|tables| HttpResponseOk(views::OxqlQueryResult { tables }))
                 .map_err(HttpError::from)

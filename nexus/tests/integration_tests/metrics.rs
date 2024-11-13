@@ -261,33 +261,6 @@ async fn test_metrics(
 
 /// Test that we can correctly list some timeseries schema.
 #[nexus_test]
-async fn test_timeseries_schema_list(
-    cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
-) {
-    // Nexus registers itself as a metric producer on startup, with its own UUID
-    // as the producer ID. Wait for this to show up in the registered lists of
-    // producers.
-    let nexus_id = cptestctx.server.server_context().nexus.id();
-    wait_for_producer(&cptestctx.oximeter, nexus_id).await;
-
-    // We should be able to fetch the list of timeseries, and it should include
-    // Nexus's HTTP latency distribution. This is defined in Nexus itself, and
-    // should always exist after we've registered as a producer and start
-    // producing data. Force a collection to ensure that happens.
-    cptestctx.oximeter.force_collect().await;
-    let client = &cptestctx.external_client;
-    let url = "/v1/timeseries/schema";
-    let schema =
-        objects_list_page_authz::<TimeseriesSchema>(client, &url).await;
-    // request latency metric that shows up in the system endpoint is filtered out here
-    assert!(schema.items.is_empty());
-
-    // TODO: add a project-scoped metric and fetch again
-    // TODO: I think even unprivileged user should be able to list these
-}
-
-/// Test that we can correctly list some timeseries schema.
-#[nexus_test]
 async fn test_system_timeseries_schema_list(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
 ) {

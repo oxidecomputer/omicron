@@ -2567,22 +2567,6 @@ pub trait NexusExternalApi {
         body: TypedBody<params::TimeseriesQuery>,
     ) -> Result<HttpResponseOk<views::OxqlQueryResult>, HttpError>;
 
-    /// List project-scoped timeseries schemas
-    ///
-    /// List schemas that can be queried through the `/v1/timeseries/query` endpoint.
-    #[endpoint {
-        method = GET,
-        path = "/v1/timeseries/schema",
-        tags = ["metrics"],
-    }]
-    async fn timeseries_schema_list(
-        rqctx: RequestContext<Self::Context>,
-        pag_params: Query<TimeseriesSchemaPaginationParams>,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<oximeter_types::TimeseriesSchema>>,
-        HttpError,
-    >;
-
     /// Run project-scoped timeseries query
     ///
     /// Queries are written in OxQL. Project must be specified by name or ID in
