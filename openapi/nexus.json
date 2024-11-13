@@ -8893,7 +8893,7 @@
     "/v1/timeseries/query": {
       "post": {
         "tags": [
-          "metrics"
+          "hidden"
         ],
         "summary": "Run project-scoped timeseries query",
         "description": "Queries are written in OxQL. Project must be specified by name or ID in URL query parameter. The OxQL query will only return timeseries data from the specified project.",

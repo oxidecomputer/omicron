@@ -2567,6 +2567,10 @@ pub trait NexusExternalApi {
         body: TypedBody<params::TimeseriesQuery>,
     ) -> Result<HttpResponseOk<views::OxqlQueryResult>, HttpError>;
 
+    // TODO: list endpoint for project-scoped schemas is blocked on
+    // https://github.com/oxidecomputer/omicron/issues/5942: the authz scope for
+    // each schema is not stored in Clickhouse yet.
+
     /// Run project-scoped timeseries query
     ///
     /// Queries are written in OxQL. Project must be specified by name or ID in
@@ -2575,7 +2579,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = POST,
         path = "/v1/timeseries/query",
-        tags = ["metrics"],
+        tags = ["hidden"],
     }]
     async fn timeseries_query(
         rqctx: RequestContext<Self::Context>,

@@ -30,6 +30,7 @@ probe_create                             POST     /experimental/v1/probes
 probe_delete                             DELETE   /experimental/v1/probes/{probe}
 probe_list                               GET      /experimental/v1/probes
 probe_view                               GET      /experimental/v1/probes/{probe}
+timeseries_query                         POST     /v1/timeseries/query
 
 API operations found with tag "images"
 OPERATION ID                             METHOD   URL PATH
@@ -73,7 +74,6 @@ login_saml                               POST     /login/{silo_name}/saml/{provi
 API operations found with tag "metrics"
 OPERATION ID                             METHOD   URL PATH
 silo_metric                              GET      /v1/metrics/{metric_name}
-timeseries_query                         POST     /v1/timeseries/query
 
 API operations found with tag "policy"
 OPERATION ID                             METHOD   URL PATH
