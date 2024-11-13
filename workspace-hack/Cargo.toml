@@ -322,7 +322,7 @@ cookie = { version = "0.18.1", default-features = false, features = ["percent-en
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
 hyper-rustls = { version = "0.27.3", default-features = false, features = ["http1", "http2", "ring", "tls12", "webpki-tokio"] }
 hyper-util = { version = "0.1.10", features = ["full"] }
-indicatif = { version = "0.17.8", features = ["rayon"] }
+indicatif = { version = "0.17.9", features = ["rayon"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.20.2" }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
@@ -334,7 +334,7 @@ cookie = { version = "0.18.1", default-features = false, features = ["percent-en
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
 hyper-rustls = { version = "0.27.3", default-features = false, features = ["http1", "http2", "ring", "tls12", "webpki-tokio"] }
 hyper-util = { version = "0.1.10", features = ["full"] }
-indicatif = { version = "0.17.8", features = ["rayon"] }
+indicatif = { version = "0.17.9", features = ["rayon"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.20.2" }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
