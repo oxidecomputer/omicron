@@ -70,7 +70,7 @@ use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
-use storage::BlueprintStorageEditor;
+use storage_editor::BlueprintStorageEditor;
 use thiserror::Error;
 
 use super::clickhouse::ClickhouseAllocator;
@@ -85,7 +85,7 @@ use super::zones::BuilderZonesConfig;
 
 mod datasets_editor;
 mod disks_editor;
-mod storage;
+mod storage_editor;
 
 /// Errors encountered while assembling blueprints
 #[derive(Debug, Error)]
@@ -2253,7 +2253,7 @@ pub mod test {
 
             let zpool = zone_config.filesystem_pool.as_ref().unwrap();
             let kind = DatasetKind::TransientZone {
-                name: storage::zone_name(&zone_config),
+                name: storage_editor::zone_name(&zone_config),
             };
             let dataset = find_dataset(&datasets, &zpool, kind);
             assert_eq!(
