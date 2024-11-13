@@ -949,6 +949,8 @@ pub static DEMO_SILO_METRICS_URL: Lazy<String> = Lazy::new(|| {
 pub static TIMESERIES_QUERY_URL: Lazy<String> = Lazy::new(|| {
     format!("/v1/timeseries/query?project={}", *DEMO_PROJECT_NAME)
 });
+pub static TIMESERIES_LIST_URL: Lazy<String> =
+    Lazy::new(|| String::from("/v1/timeseries/schema"));
 
 pub static SYSTEM_TIMESERIES_LIST_URL: Lazy<String> =
     Lazy::new(|| String::from("/v1/system/timeseries/schemas"));
@@ -2206,6 +2208,15 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
                 AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &TIMESERIES_LIST_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::GetVolatile,
             ],
         },
 

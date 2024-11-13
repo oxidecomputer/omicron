@@ -14,6 +14,7 @@ use nexus_db_queries::{
 use nexus_external_api::TimeseriesSchemaPaginationParams;
 use nexus_types::external_api::params::SystemMetricName;
 use omicron_common::api::external::{Error, InternalContext};
+use oximeter::AuthzScope;
 use oximeter_db::{Measurement, TimeseriesSchema};
 use std::num::NonZeroU32;
 
@@ -166,7 +167,7 @@ impl super::Nexus {
     }
 
     /// Run an OxQL query against the timeseries database, scoped to a specific project.
-    pub(crate) async fn timeseries_query_project(
+    pub(crate) async fn project_timeseries_query(
         &self,
         _opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -197,6 +198,47 @@ impl super::Nexus {
                 oximeter_db::Error::Oxql(_)
                 | oximeter_db::Error::TimeseriesNotFound(_) => {
                     Error::invalid_request(e.to_string())
+                }
+                _ => Error::InternalError { internal_message: e.to_string() },
+            })
+    }
+
+    /// List available project-scoped timeseries schema
+    pub(crate) async fn project_timeseries_schema_list(
+        &self,
+        opctx: &OpContext,
+        pagination: &TimeseriesSchemaPaginationParams,
+        limit: NonZeroU32,
+    ) -> Result<dropshot::ResultsPage<TimeseriesSchema>, Error> {
+        // any authenticated user should be able to do this
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("listing project-scoped timeseries schemas")?;
+        opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
+
+        self.timeseries_client
+            .timeseries_schema_list(&pagination.page, limit)
+            .await
+            .and_then(|schemas| {
+                let filtered = schemas
+                    .items
+                    .into_iter()
+                    .filter(|schema| schema.authz_scope == AuthzScope::Project)
+                    .collect();
+                dropshot::ResultsPage::new(
+                    filtered,
+                    &dropshot::EmptyScanParams {},
+                    |schema, _| schema.timeseries_name.clone(),
+                )
+                .map_err(|err| oximeter_db::Error::Database(err.to_string()))
+            })
+            .map_err(|e| match e {
+                oximeter_db::Error::DatabaseUnavailable(_)
+                | oximeter_db::Error::Connection(_) => {
+                    Error::ServiceUnavailable {
+                        internal_message: e.to_string(),
+                    }
                 }
                 _ => Error::InternalError { internal_message: e.to_string() },
             })
