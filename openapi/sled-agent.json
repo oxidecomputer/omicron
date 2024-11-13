@@ -694,6 +694,48 @@
         }
       }
     },
+    "/support/pargs-info": {
+      "get": {
+        "operationId": "support_pargs_info",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/support/pstack-info": {
+      "get": {
+        "operationId": "support_pstack_info",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/support/zoneadm-info": {
       "get": {
         "operationId": "support_zoneadm_info",

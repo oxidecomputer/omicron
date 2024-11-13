@@ -1363,6 +1363,18 @@ impl SledAgent {
     ) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
         support_bundle::ipadm_info().await
     }
+
+    pub(crate) async fn support_pargs_info(
+        &self,
+    ) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
+        support_bundle::pargs_oxide_processes().await
+    }
+
+    pub(crate) async fn support_pstack_info(
+        &self,
+    ) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
+        support_bundle::pstack_oxide_processes().await
+    }
 }
 
 #[derive(From, thiserror::Error, Debug)]

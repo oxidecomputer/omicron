@@ -7039,6 +7039,7 @@ dependencies = [
  "expectorate",
  "flate2",
  "flume",
+ "fs-err",
  "futures",
  "gateway-client",
  "glob",

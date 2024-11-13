@@ -19,7 +19,7 @@ use crate::{execute, PFEXEC};
 use omicron_common::address::SLED_PREFIX;
 use omicron_uuid_kinds::OmicronZoneUuid;
 
-const DLADM: &str = "/usr/sbin/dladm";
+pub const DLADM: &str = "/usr/sbin/dladm";
 pub const IPADM: &str = "/usr/sbin/ipadm";
 pub const SVCADM: &str = "/usr/sbin/svcadm";
 pub const SVCCFG: &str = "/usr/sbin/svccfg";
