@@ -757,7 +757,7 @@ mod test {
     ) -> Vec<OmicronZoneUuid> {
         bp.blueprint_zones
             .values()
-            .map(|zones_config| {
+            .flat_map(|zones_config| {
                 let mut nexus_zones = vec![];
                 for zone in &zones_config.zones {
                     if matches!(zone.zone_type, BlueprintZoneType::Nexus(_))
@@ -768,7 +768,6 @@ mod test {
                 }
                 nexus_zones
             })
-            .flatten()
             .collect()
     }
 
@@ -778,7 +777,7 @@ mod test {
     ) -> Vec<DatasetUuid> {
         bp.blueprint_datasets
             .values()
-            .map(|datasets_config| {
+            .flat_map(|datasets_config| {
                 let mut debug_datasets = vec![];
                 for dataset in datasets_config.datasets.values() {
                     if matches!(dataset.kind, DebugDatasetKind)
@@ -789,7 +788,6 @@ mod test {
                 }
                 debug_datasets
             })
-            .flatten()
             .collect()
     }
 
