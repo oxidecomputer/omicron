@@ -31,7 +31,7 @@ bitflags-dff4ba8e3ae991db = { package = "bitflags", version = "1.3.2" }
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.6.0", default-features = false, features = ["serde", "std"] }
 bstr = { version = "1.10.0" }
 byteorder = { version = "1.5.0" }
-bytes = { version = "1.7.2", features = ["serde"] }
+bytes = { version = "1.8.0", features = ["serde"] }
 chrono = { version = "0.4.38", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
 clap = { version = "4.5.20", features = ["cargo", "derive", "env", "wrap_help"] }
@@ -150,7 +150,7 @@ bitflags-dff4ba8e3ae991db = { package = "bitflags", version = "1.3.2" }
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.6.0", default-features = false, features = ["serde", "std"] }
 bstr = { version = "1.10.0" }
 byteorder = { version = "1.5.0" }
-bytes = { version = "1.7.2", features = ["serde"] }
+bytes = { version = "1.8.0", features = ["serde"] }
 cc = { version = "1.1.30", default-features = false, features = ["parallel"] }
 chrono = { version = "0.4.38", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
