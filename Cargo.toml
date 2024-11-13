@@ -354,7 +354,7 @@ dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { path = "clients/dpd-client" }
-dropshot = { version = "0.12.1", features = [ "usdt-probes" ] }
+dropshot = { version = "0.13.0", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.17"
 either = "1.13.0"
 expectorate = "1.1.0"
@@ -809,8 +809,8 @@ opt-level = 3
 # It's common during development to use a local copy of various complex
 # dependencies.  If you want to use those, uncomment one of these blocks.
 #
-[patch."crates-io"]
-dropshot = { path = "../dropshot-api-versioning/dropshot" }
+#[patch."crates-io"]
+#dropshot = { path = "../dropshot/dropshot" }
 #[patch.crates-io]
 #steno = { path = "../steno" }
 # [patch."https://github.com/oxidecomputer/propolis"]
