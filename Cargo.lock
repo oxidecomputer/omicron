@@ -1354,6 +1354,7 @@ dependencies = [
  "camino",
  "clickward",
  "dropshot",
+ "omicron-workspace-hack",
 ]
 
 [[package]]

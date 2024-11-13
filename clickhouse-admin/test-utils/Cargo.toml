@@ -11,3 +11,5 @@ workspace = true
 camino.workspace = true
 clickward.workspace = true
 dropshot.workspace = true
+
+omicron-workspace-hack.workspace = true
