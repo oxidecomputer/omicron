@@ -5,7 +5,6 @@
 mod common;
 
 use anyhow::Context;
-use assert_matches::assert_matches;
 use common::reconfigurator::blueprint_edit_current_target;
 use common::LiveTestContext;
 use futures::TryStreamExt;
@@ -14,7 +13,6 @@ use nexus_client::types::Saga;
 use nexus_client::types::SagaState;
 use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
-use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::SledFilter;
@@ -63,20 +61,9 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
         &collection,
         &nexus,
         &|builder: &mut BlueprintBuilder| {
-            let nnexus = builder
-                .sled_num_running_zones_of_kind(sled_id, ZoneKind::Nexus);
-            let count = builder
-                .sled_ensure_zone_multiple_nexus(sled_id, nnexus + 1)
+            builder
+                .sled_add_zone_nexus(sled_id)
                 .context("adding Nexus zone")?;
-            assert_matches!(
-                count,
-                EnsureMultiple::Changed {
-                    added: 1,
-                    removed: 0,
-                    updated: 0,
-                    expunged: 0
-                }
-            );
             Ok(())
         },
     )

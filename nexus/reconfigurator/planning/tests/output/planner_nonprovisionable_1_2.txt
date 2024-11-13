@@ -353,9 +353,9 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
     oxp_cf32a1ce-2c9e-49f5-b1cf-4af7f2a28901/crypt/debug                                                    2dfc5c53-6618-4352-b754-86ef6463c20a   100 GiB   none          gzip-9     
     oxp_55196665-ed61-4b23-9a74-0711bf2eaf90/crypt/debug                                                    ae4f4e83-0bd1-48dc-bfe3-f1082e8f357a   100 GiB   none          gzip-9     
     oxp_f4d7f914-ec73-4b65-8696-5068591d9065/crypt/debug                                                    b803d901-7e43-42fa-8372-43c3c5b3c1a9   100 GiB   none          gzip-9     
-+   oxp_4069c804-c51a-4adc-8822-3cbbab56ed3f/crypt/zone/oxz_nexus_2ec75441-3d7d-4b4b-9614-af03de5a3666      cd15e9c9-0238-493a-8b32-926d1cd1bce6   none      none          off        
 +   oxp_4069c804-c51a-4adc-8822-3cbbab56ed3f/crypt/zone/oxz_nexus_508abd03-cbfe-4654-9a6d-7f15a1ad32e5      b781d032-3149-4c44-a7d3-5f8d80e4a607   none      none          off        
-+   oxp_4069c804-c51a-4adc-8822-3cbbab56ed3f/crypt/zone/oxz_nexus_59950bc8-1497-44dd-8cbf-b6502ba921b2      63ec1a21-2c77-41b5-ad3e-e7bf39207107   none      none          off        
++   oxp_4069c804-c51a-4adc-8822-3cbbab56ed3f/crypt/zone/oxz_nexus_99f6d544-8599-4e2b-a55a-82d9e0034662      8a39677a-fbcf-4884-b000-63be3247fb63   none      none          off        
++   oxp_4069c804-c51a-4adc-8822-3cbbab56ed3f/crypt/zone/oxz_nexus_c26b3bda-5561-44a1-a69f-22103fe209a1      c9c1a582-1fe0-4001-9301-97230387563a   none      none          off        
 
 
     omicron zones generation 2 -> 3:
@@ -374,9 +374,9 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
     crucible       f1a7b9a7-fc6a-4b23-b829-045ff33117ff   in service    fd00:1122:3344:104::26
     internal_ntp   621509d6-3772-4009-aca1-35eefd1098fb   in service    fd00:1122:3344:104::21
     nexus          a732c489-d29a-4f75-b900-5966385943af   in service    fd00:1122:3344:104::22
-+   nexus          2ec75441-3d7d-4b4b-9614-af03de5a3666   in service    fd00:1122:3344:104::2d
-+   nexus          508abd03-cbfe-4654-9a6d-7f15a1ad32e5   in service    fd00:1122:3344:104::2e
-+   nexus          59950bc8-1497-44dd-8cbf-b6502ba921b2   in service    fd00:1122:3344:104::2f
++   nexus          508abd03-cbfe-4654-9a6d-7f15a1ad32e5   in service    fd00:1122:3344:104::2d
++   nexus          99f6d544-8599-4e2b-a55a-82d9e0034662   in service    fd00:1122:3344:104::2e
++   nexus          c26b3bda-5561-44a1-a69f-22103fe209a1   in service    fd00:1122:3344:104::2f
 
 
   sled affab35f-600a-4109-8ea0-34a067a4e0bc (active):
@@ -443,9 +443,9 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
     oxp_cd62306a-aedf-47e8-93d5-92a358d64c7b/crypt/debug                                                    73674f4b-1d93-404a-bc9c-8395efac97fd   100 GiB   none          gzip-9     
     oxp_4fbd2fe0-2eac-41b8-8e8d-4fa46c3e8b6c/crypt/debug                                                    5a288f52-a84e-45a6-873a-3d9c81d67380   100 GiB   none          gzip-9     
     oxp_fe4fdfba-3b6d-47d3-8612-1fb2390b650a/crypt/debug                                                    8e58b91f-9ce2-4256-8dec-5f90f31a73fa   100 GiB   none          gzip-9     
++   oxp_33d48d85-751e-4982-b738-eae4d9a05f01/crypt/zone/oxz_nexus_2ec75441-3d7d-4b4b-9614-af03de5a3666      cd15e9c9-0238-493a-8b32-926d1cd1bce6   none      none          off        
 +   oxp_33d48d85-751e-4982-b738-eae4d9a05f01/crypt/zone/oxz_nexus_3ca5292f-8a59-4475-bb72-0f43714d0fff      871b35e6-d234-4a96-bab4-d07314bc6ba2   none      none          off        
-+   oxp_33d48d85-751e-4982-b738-eae4d9a05f01/crypt/zone/oxz_nexus_99f6d544-8599-4e2b-a55a-82d9e0034662      8a39677a-fbcf-4884-b000-63be3247fb63   none      none          off        
-+   oxp_33d48d85-751e-4982-b738-eae4d9a05f01/crypt/zone/oxz_nexus_c26b3bda-5561-44a1-a69f-22103fe209a1      c9c1a582-1fe0-4001-9301-97230387563a   none      none          off        
++   oxp_33d48d85-751e-4982-b738-eae4d9a05f01/crypt/zone/oxz_nexus_59950bc8-1497-44dd-8cbf-b6502ba921b2      63ec1a21-2c77-41b5-ad3e-e7bf39207107   none      none          off        
 
 
     omicron zones generation 2 -> 3:
@@ -464,9 +464,9 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
     crucible       e001fea0-6594-4ece-97e3-6198c293e931   in service    fd00:1122:3344:101::28
     internal_ntp   bf79a56a-97af-4cc4-94a5-8b20d64c2cda   in service    fd00:1122:3344:101::21
     nexus          4ad0e9da-08f8-4d40-b4d3-d17e711b5bbf   in service    fd00:1122:3344:101::22
-+   nexus          3ca5292f-8a59-4475-bb72-0f43714d0fff   in service    fd00:1122:3344:101::2e
-+   nexus          99f6d544-8599-4e2b-a55a-82d9e0034662   in service    fd00:1122:3344:101::2d
-+   nexus          c26b3bda-5561-44a1-a69f-22103fe209a1   in service    fd00:1122:3344:101::2f
++   nexus          2ec75441-3d7d-4b4b-9614-af03de5a3666   in service    fd00:1122:3344:101::2d
++   nexus          3ca5292f-8a59-4475-bb72-0f43714d0fff   in service    fd00:1122:3344:101::2f
++   nexus          59950bc8-1497-44dd-8cbf-b6502ba921b2   in service    fd00:1122:3344:101::2e
 
 
  COCKROACHDB SETTINGS:

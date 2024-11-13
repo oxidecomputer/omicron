@@ -315,7 +315,6 @@ mod test {
     use nexus_inventory::now_db_precision;
     use nexus_inventory::CollectionBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
-    use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_preparation::PlanningInputFromDb;
     use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
@@ -1384,30 +1383,7 @@ mod test {
         .unwrap();
         let sled_id =
             blueprint.sleds().next().expect("expected at least one sled");
-        let nalready =
-            builder.sled_num_running_zones_of_kind(sled_id, ZoneKind::Nexus);
-        let rv = builder
-            .sled_ensure_zone_multiple_nexus(sled_id, nalready + 1)
-            .unwrap();
-        assert_eq!(
-            rv,
-            EnsureMultiple::Changed {
-                added: 1,
-                updated: 0,
-                expunged: 0,
-                removed: 0
-            }
-        );
-        builder
-            .sled_ensure_zone_datasets(
-                sled_id,
-                &planning_input
-                    .sled_lookup(SledFilter::InService, sled_id)
-                    .expect("found sled")
-                    .resources,
-            )
-            .expect("ensured datasets");
-
+        builder.sled_add_zone_nexus(sled_id).unwrap();
         let blueprint2 = builder.build();
         eprintln!("blueprint2: {}", blueprint2.display());
         // Figure out the id of the new zone.
