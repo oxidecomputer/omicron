@@ -1348,6 +1348,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "clickhouse-admin-test-utils"
+version = "0.1.0"
+dependencies = [
+ "clickward",
+]
+
+[[package]]
 name = "clickhouse-admin-types"
 version = "0.1.0"
 dependencies = [
@@ -1374,6 +1381,7 @@ name = "clickhouse-cluster-dev"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clickhouse-admin-test-utils",
  "clickward",
  "dropshot",
  "omicron-workspace-hack",
@@ -6317,13 +6325,13 @@ dependencies = [
  "chrono",
  "clap",
  "clickhouse-admin-api",
+ "clickhouse-admin-test-utils",
  "clickhouse-admin-types",
  "clickward",
  "dropshot",
  "expectorate",
  "http 1.1.0",
  "illumos-utils",
- "nexus-test-utils",
  "omicron-common",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -6339,6 +6347,7 @@ dependencies = [
  "slog-async",
  "slog-dtrace",
  "slog-error-chain",
+ "slog-term",
  "subprocess",
  "thiserror",
  "tokio",

@@ -3,7 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::{Context, Result};
-use clickward::{BasePorts, Deployment, DeploymentConfig, KeeperId};
+use clickhouse_admin_test_utils::DEFAULT_CLICKHOUSE_ADMIN_BASE_PORTS;
+use clickward::{Deployment, DeploymentConfig, KeeperId};
 use dropshot::test_util::{log_prefix_for_test, LogContext};
 use dropshot::{ConfigLogging, ConfigLoggingLevel};
 use oximeter_db::Client;
@@ -27,13 +28,7 @@ async fn main() -> Result<()> {
 
     // We spin up several replicated clusters and must use a
     // separate set of ports in case the tests run concurrently.
-    let base_ports = BasePorts {
-        keeper: 29000,
-        raft: 29100,
-        clickhouse_tcp: 29200,
-        clickhouse_http: 29300,
-        clickhouse_interserver_http: 29400,
-    };
+    let base_ports = DEFAULT_CLICKHOUSE_ADMIN_BASE_PORTS;
 
     let config = DeploymentConfig {
         path: path.clone(),

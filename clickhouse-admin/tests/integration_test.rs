@@ -7,28 +7,33 @@ use clickhouse_admin_types::{
     ClickhouseHost, ClickhouseKeeperClusterMembership, KeeperId,
     KeeperServerInfo, KeeperServerType, RaftConfig,
 };
+use clickhouse_admin_test_utils::DEFAULT_CLICKHOUSE_ADMIN_BASE_PORTS;
 use clickward::{BasePorts, Deployment, DeploymentConfig};
 use dropshot::test_util::{log_prefix_for_test, LogContext};
 use dropshot::{ConfigLogging, ConfigLoggingLevel};
 use omicron_clickhouse_admin::ClickhouseCli;
-use slog::info;
+use slog::{info, o, Drain};
+use slog_term::{FullFormat, PlainDecorator, TestStdoutWriter};
 use std::collections::BTreeSet;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::str::FromStr;
 
+fn log() -> slog::Logger {
+    let decorator = PlainDecorator::new(TestStdoutWriter);
+    let drain = FullFormat::new(decorator).build().fuse();
+    let drain = slog_async::Async::new(drain).build().fuse();
+    slog::Logger::root(drain, o!())
+}
+
 #[tokio::test]
 async fn test_lgif_parsing() -> anyhow::Result<()> {
-    // TODO: Do we want these to have their own log dirs or not?
-    let logctx = LogContext::new(
-        "clickhouse_cluster",
-        &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
-    );
+    let log = log();
 
     let clickhouse_cli = ClickhouseCli::new(
         Utf8PathBuf::from_str("clickhouse")?,
         SocketAddrV6::new(Ipv6Addr::LOCALHOST, 29001, 0, 0),
     )
-    .with_log(logctx.log);
+    .with_log(log);
 
     let lgif = clickhouse_cli.lgif().await?;
 
@@ -40,16 +45,13 @@ async fn test_lgif_parsing() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn test_raft_config_parsing() -> anyhow::Result<()> {
-    let logctx = LogContext::new(
-        "clickhouse_cluster",
-        &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
-    );
+    let log = log();
 
     let clickhouse_cli = ClickhouseCli::new(
         Utf8PathBuf::from_str("clickhouse").unwrap(),
         SocketAddrV6::new(Ipv6Addr::LOCALHOST, 29001, 0, 0),
     )
-    .with_log(logctx.log);
+    .with_log(log);
 
     let raft_config = clickhouse_cli.raft_config().await.unwrap();
 
@@ -76,16 +78,13 @@ async fn test_raft_config_parsing() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn test_keeper_conf_parsing() -> anyhow::Result<()> {
-    let logctx = LogContext::new(
-        "clickhouse_cluster",
-        &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
-    );
+    let log = log();
 
     let clickhouse_cli = ClickhouseCli::new(
         Utf8PathBuf::from_str("clickhouse").unwrap(),
         SocketAddrV6::new(Ipv6Addr::LOCALHOST, 29001, 0, 0),
     )
-    .with_log(logctx.log);
+    .with_log(log);
 
     let conf = clickhouse_cli.keeper_conf().await.unwrap();
 
@@ -96,16 +95,13 @@ async fn test_keeper_conf_parsing() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn test_keeper_cluster_membership() -> anyhow::Result<()> {
-    let logctx = LogContext::new(
-        "clickhouse_cluster",
-        &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
-    );
+    let log = log();
 
     let clickhouse_cli = ClickhouseCli::new(
         Utf8PathBuf::from_str("clickhouse").unwrap(),
         SocketAddrV6::new(Ipv6Addr::LOCALHOST, 29001, 0, 0),
     )
-    .with_log(logctx.log);
+    .with_log(log);
 
     let keeper_cluster_membership =
         clickhouse_cli.keeper_cluster_membership().await.unwrap();
@@ -154,13 +150,7 @@ async fn test_teardown() -> anyhow::Result<()> {
 
     // We spin up several replicated clusters and must use a
     // separate set of ports in case the tests run concurrently.
-    let base_ports = BasePorts {
-        keeper: 29000,
-        raft: 29100,
-        clickhouse_tcp: 29200,
-        clickhouse_http: 29300,
-        clickhouse_interserver_http: 29400,
-    };
+    let base_ports = DEFAULT_CLICKHOUSE_ADMIN_BASE_PORTS;
 
     let config = DeploymentConfig {
         path: path.clone(),

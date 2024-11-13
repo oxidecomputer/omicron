@@ -325,6 +325,7 @@ clickhouse-admin-api = { path = "clickhouse-admin/api" }
 clickhouse-admin-keeper-client = { path = "clients/clickhouse-admin-keeper-client" }
 clickhouse-admin-server-client = { path = "clients/clickhouse-admin-server-client" }
 clickhouse-admin-types = { path = "clickhouse-admin/types" }
+clickhouse-admin-test-utils = { path = "clickhouse-admin/test-utils" }
 clickward = { git = "https://github.com/oxidecomputer/clickward", rev = "a1b342c2558e835d09e6e39a40d3de798a29c2f" }
 cockroach-admin-api = { path = "cockroach-admin/api" }
 cockroach-admin-client = { path = "clients/cockroach-admin-client" }
