@@ -2627,6 +2627,7 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
 #[cfg(test)]
 pub mod test {
     use super::*;
+    use crate::blueprint_builder::external_networking::ExternalIpAllocator;
     use crate::example::example;
     use crate::example::ExampleSystemBuilder;
     use crate::example::SimRngState;
@@ -2693,6 +2694,26 @@ pub mod test {
                     blueprint.display(),
                 );
             }
+        }
+
+        // There should be no duplicate external IPs.
+        //
+        // Checking this is slightly complicated due to SNAT IPs, so we'll
+        // delegate to an `ExternalIpAllocator`, which already contains the
+        // logic for dup checking. (`mark_ip_used` fails if the IP is _already_
+        // marked as used.)
+        //
+        // We create this with an empty set of service IP pool ranges; those are
+        // used for allocation, which we don't do, and aren't needed for
+        // duplicate checking.
+        let mut ip_allocator = ExternalIpAllocator::new(&[]);
+        for (external_ip, _nic) in blueprint
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .filter_map(|(_, zone)| zone.zone_type.external_networking())
+        {
+            ip_allocator
+                .mark_ip_used(&external_ip)
+                .expect("no duplicate external IPs in running zones");
         }
 
         // On any given zpool, we should have at most one zone of any given

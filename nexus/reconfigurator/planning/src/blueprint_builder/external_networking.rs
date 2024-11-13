@@ -592,14 +592,14 @@ impl<T: Hash + Eq> Iterator for AvailableIterator<'_, T> {
 // This struct keeps track of both kinds of IPs used by blueprints, allowing
 // allocation of either kind.
 #[derive(Debug)]
-struct ExternalIpAllocator<'a> {
+pub(super) struct ExternalIpAllocator<'a> {
     service_ip_pool_ips: DebugIgnore<Box<dyn Iterator<Item = IpAddr> + 'a>>,
     used_exclusive_ips: BTreeSet<IpAddr>,
     used_snat_ips: BTreeMap<IpAddr, BTreeSet<SnatPortRange>>,
 }
 
 #[derive(Debug, thiserror::Error)]
-enum ExternalIpAllocatorError {
+pub(super) enum ExternalIpAllocatorError {
     #[error("duplicate external IP: {0:?}")]
     DuplicateExternalIp(OmicronZoneExternalIp),
     #[error("invalid SNAT port range")]
@@ -607,7 +607,7 @@ enum ExternalIpAllocatorError {
 }
 
 impl<'a> ExternalIpAllocator<'a> {
-    fn new(service_pool_ranges: &'a [IpRange]) -> Self {
+    pub fn new(service_pool_ranges: &'a [IpRange]) -> Self {
         let service_ip_pool_ips =
             service_pool_ranges.iter().flat_map(|r| r.iter());
         Self {
@@ -617,7 +617,7 @@ impl<'a> ExternalIpAllocator<'a> {
         }
     }
 
-    fn mark_ip_used(
+    pub fn mark_ip_used(
         &mut self,
         external_ip: &OmicronZoneExternalIp,
     ) -> Result<(), ExternalIpAllocatorError> {
