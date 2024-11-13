@@ -799,7 +799,7 @@ mod test {
     // Progenitor client.
     fn expect_openapi_json_valid_for_test_server() {
         let api = api();
-        let openapi = api.openapi("Test Server", "v0.1.0");
+        let openapi = api.openapi("Test Server", semver::Version::new(0,1,0));
         let mut output = std::io::Cursor::new(Vec::new());
         openapi.write(&mut output).unwrap();
         expectorate::assert_contents(
