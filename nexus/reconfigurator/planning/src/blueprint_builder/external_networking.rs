@@ -189,7 +189,16 @@ impl<'a> BuilderExternalNetworking<'a> {
                     let omicron_ip = OmicronZoneExternalIp::Floating(
                         dns.dns_address.into_ip(),
                     );
-                    external_ip_alloc.mark_ip_used(&omicron_ip)?;
+                    match external_ip_alloc.mark_ip_used(&omicron_ip) {
+                        // Because we're checking _expunged_ zones, we might
+                        // have duplicate IPs. Ignore those; that means we've
+                        // already marked this IP as used, which is all we need.
+                        Ok(())
+                        | Err(ExternalIpAllocatorError::DuplicateExternalIp(
+                            _,
+                        )) => (),
+                        Err(err) => return Err(err.into()),
+                    }
                 }
             }
         }
@@ -589,6 +598,14 @@ struct ExternalIpAllocator<'a> {
     used_snat_ips: BTreeMap<IpAddr, BTreeSet<SnatPortRange>>,
 }
 
+#[derive(Debug, thiserror::Error)]
+enum ExternalIpAllocatorError {
+    #[error("duplicate external IP: {0:?}")]
+    DuplicateExternalIp(OmicronZoneExternalIp),
+    #[error("invalid SNAT port range")]
+    InvalidSnatPortRange(#[source] anyhow::Error),
+}
+
 impl<'a> ExternalIpAllocator<'a> {
     fn new(service_pool_ranges: &'a [IpRange]) -> Self {
         let service_ip_pool_ips =
@@ -603,20 +620,25 @@ impl<'a> ExternalIpAllocator<'a> {
     fn mark_ip_used(
         &mut self,
         external_ip: &OmicronZoneExternalIp,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), ExternalIpAllocatorError> {
         match external_ip {
             OmicronZoneExternalIp::Floating(ip) => {
                 let ip = ip.ip;
                 if self.used_snat_ips.contains_key(&ip)
                     || !self.used_exclusive_ips.insert(ip)
                 {
-                    bail!("duplicate external IP: {external_ip:?}");
+                    return Err(ExternalIpAllocatorError::DuplicateExternalIp(
+                        *external_ip,
+                    ));
                 }
             }
             OmicronZoneExternalIp::Snat(snat) => {
                 let ip = snat.snat_cfg.ip;
                 let port_range =
-                    SnatPortRange::try_from(snat.snat_cfg.port_range_raw())?;
+                    SnatPortRange::try_from(snat.snat_cfg.port_range_raw())
+                        .map_err(
+                            ExternalIpAllocatorError::InvalidSnatPortRange,
+                        )?;
                 if self.used_exclusive_ips.contains(&ip)
                     || !self
                         .used_snat_ips
@@ -624,7 +646,9 @@ impl<'a> ExternalIpAllocator<'a> {
                         .or_default()
                         .insert(port_range)
                 {
-                    bail!("duplicate external IP: {external_ip:?}");
+                    return Err(ExternalIpAllocatorError::DuplicateExternalIp(
+                        *external_ip,
+                    ));
                 }
             }
         }
@@ -1080,6 +1104,46 @@ pub mod test {
         let mut builder = BuilderExternalNetworking::new(
             [&running_external_dns].iter().copied(),
             [&expunged_external_dns].iter().copied(),
+            std::slice::from_ref(&service_ip_pool),
+        )
+        .expect("constructed builder");
+
+        // Test Nexus
+        assert_eq!(
+            builder.for_new_nexus().expect("got Nexus IP").external_ip,
+            service_ip_pool.iter().nth(2).unwrap()
+        );
+        let err = builder.for_new_nexus().expect_err("no Nexus IPs left");
+        assert!(
+            matches!(err, Error::NoExternalServiceIpAvailable),
+            "unexpected error: {}",
+            InlineErrorChain::new(&err),
+        );
+
+        // Text external DNS
+        assert_eq!(
+            builder
+                .for_new_external_dns()
+                .expect("got external DNS IP")
+                .external_ip,
+            service_ip_pool.iter().nth(1).unwrap()
+        );
+        let err = builder.for_new_external_dns().expect_err("no DNS IPs left");
+        assert!(
+            matches!(err, Error::NoExternalDnsIpAvailable),
+            "unexpected error: {}",
+            InlineErrorChain::new(&err),
+        );
+
+        // Repeat the above test, but this time with two expunged DNS zones
+        // (different IDs, but both assigned the same IP, which is perfectly
+        // reasonable for expunged zones if they were never in service at the
+        // same time).
+        let expunged_external_dns2 =
+            make_external_dns(1, BlueprintZoneDisposition::Expunged);
+        let mut builder = BuilderExternalNetworking::new(
+            [&running_external_dns].iter().copied(),
+            [&expunged_external_dns, &expunged_external_dns2].iter().copied(),
             std::slice::from_ref(&service_ip_pool),
         )
         .expect("constructed builder");
