@@ -10,7 +10,6 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
-dropshot.workspace = true
 clickhouse-admin-test-utils.workspace = true
 clickward.workspace = true
 slog.workspace = true

@@ -3,14 +3,14 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use camino::Utf8PathBuf;
-use clickhouse_admin_test_utils::DEFAULT_CLICKHOUSE_ADMIN_BASE_PORTS;
+use clickhouse_admin_test_utils::{
+    default_clickhouse_cluster_test_deployment,
+    default_clickhouse_log_ctx_and_path, DEFAULT_CLICKHOUSE_ADMIN_BASE_PORTS,
+};
 use clickhouse_admin_types::{
     ClickhouseHost, ClickhouseKeeperClusterMembership, KeeperId,
     KeeperServerInfo, KeeperServerType, RaftConfig,
 };
-use clickward::{Deployment, DeploymentConfig};
-use dropshot::test_util::{log_prefix_for_test, LogContext};
-use dropshot::{ConfigLogging, ConfigLoggingLevel};
 use omicron_clickhouse_admin::ClickhouseCli;
 use slog::{info, o, Drain};
 use slog_term::{FullFormat, PlainDecorator, TestStdoutWriter};
@@ -86,7 +86,7 @@ async fn test_raft_config_parsing() -> anyhow::Result<()> {
     for i in 1..=num_keepers {
         let raft_port = get_keeper_raft_port(KeeperId(i));
         keeper_servers.insert(KeeperServerInfo {
-            server_id: clickhouse_admin_types::KeeperId(i.into()),
+            server_id: clickhouse_admin_types::KeeperId(i),
             host: ClickhouseHost::Ipv6("::1".parse().unwrap()),
             raft_port,
             server_type: KeeperServerType::Participant,
@@ -170,30 +170,11 @@ async fn test_keeper_cluster_membership() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn test_teardown() -> anyhow::Result<()> {
-    let logctx = LogContext::new(
-        "clickhouse_cluster",
-        &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
-    );
-
-    let (parent_dir, _prefix) = log_prefix_for_test("clickhouse_cluster");
-    // TODO: Switch to "{prefix}_clickward_test" ?
-    let path = parent_dir.join("clickward_test");
+    let (logctx, path) = default_clickhouse_log_ctx_and_path();
 
     info!(&logctx.log, "Tearing down ClickHouse cluster"; "path" => ?path);
 
-    // TODO: Find another way to retrieve deployment
-
-    // We spin up several replicated clusters and must use a
-    // separate set of ports in case the tests run concurrently.
-    let base_ports = DEFAULT_CLICKHOUSE_ADMIN_BASE_PORTS;
-
-    let config = DeploymentConfig {
-        path: path.clone(),
-        base_ports,
-        cluster_name: "oximeter_cluster".to_string(),
-    };
-
-    let deployment = Deployment::new(config);
+    let deployment = default_clickhouse_cluster_test_deployment(path.clone());
     deployment.teardown()?;
     std::fs::remove_dir_all(path)?;
     logctx.cleanup_successful();

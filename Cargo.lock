@@ -1351,7 +1351,9 @@ dependencies = [
 name = "clickhouse-admin-test-utils"
 version = "0.1.0"
 dependencies = [
+ "camino",
  "clickward",
+ "dropshot",
 ]
 
 [[package]]
@@ -1383,7 +1385,6 @@ dependencies = [
  "anyhow",
  "clickhouse-admin-test-utils",
  "clickward",
- "dropshot",
  "omicron-workspace-hack",
  "oximeter-db",
  "oximeter-test-utils",

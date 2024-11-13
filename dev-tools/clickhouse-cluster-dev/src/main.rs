@@ -3,10 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::{Context, Result};
-use clickhouse_admin_test_utils::DEFAULT_CLICKHOUSE_ADMIN_BASE_PORTS;
-use clickward::{Deployment, DeploymentConfig, KeeperId};
-use dropshot::test_util::{log_prefix_for_test, LogContext};
-use dropshot::{ConfigLogging, ConfigLoggingLevel};
+use clickhouse_admin_test_utils::{
+    default_clickhouse_cluster_test_deployment,
+    default_clickhouse_log_ctx_and_path,
+};
+use clickward::KeeperId;
 use oximeter_db::Client;
 use oximeter_test_utils::{wait_for_keepers, wait_for_ping};
 use std::time::Duration;
@@ -14,29 +15,13 @@ use std::time::Duration;
 #[tokio::main]
 async fn main() -> Result<()> {
     let request_timeout = Duration::from_secs(15);
-    let logctx = LogContext::new(
-        "clickhouse_cluster",
-        &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
-    );
-
-    let (parent_dir, _prefix) = log_prefix_for_test(logctx.test_name());
-    // TODO: Switch to "{prefix}_clickward_test"?
-    let path = parent_dir.join("clickward_test");
+    let (logctx, path) = default_clickhouse_log_ctx_and_path();
     std::fs::create_dir(&path)?;
 
     slog::info!(logctx.log, "Setting up a ClickHouse cluster");
 
-    // We spin up several replicated clusters and must use a
-    // separate set of ports in case the tests run concurrently.
-    let base_ports = DEFAULT_CLICKHOUSE_ADMIN_BASE_PORTS;
-
-    let config = DeploymentConfig {
-        path: path.clone(),
-        base_ports,
-        cluster_name: "oximeter_cluster".to_string(),
-    };
-
-    let mut deployment = Deployment::new(config);
+    let mut deployment =
+        default_clickhouse_cluster_test_deployment(path.clone());
 
     let num_keepers = 3;
     let num_replicas = 2;
