@@ -355,6 +355,7 @@ mod test {
     use omicron_common::api::external;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::VolumeUuid;
     use sled_agent_client::types::CrucibleOpts;
     use sled_agent_client::types::VolumeConstructionRequest;
     use std::collections::BTreeMap;
@@ -408,7 +409,7 @@ mod test {
 
         let request_id = request.id;
 
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
 
         datastore
             .volume_create(nexus_db_model::Volume::new(
@@ -513,13 +514,13 @@ mod test {
             .await
             .unwrap();
 
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
 
         datastore
             .volume_create(nexus_db_model::Volume::new(
                 volume_id,
                 serde_json::to_string(&VolumeConstructionRequest::Volume {
-                    id: volume_id,
+                    id: Uuid::new_v4(),
                     block_size: 512,
                     sub_volumes: vec![],
                     read_only_parent: None,
@@ -548,8 +549,9 @@ mod test {
 
                     project_id,
                     disk_id: Uuid::new_v4(),
-                    volume_id,
-                    destination_volume_id: Uuid::new_v4(),
+
+                    volume_id: volume_id.into(),
+                    destination_volume_id: VolumeUuid::new_v4().into(),
 
                     gen: Generation::new(),
                     state: SnapshotState::Creating,
@@ -684,7 +686,7 @@ mod test {
 
         let request_id = request.id;
 
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
 
         datastore
             .volume_create(nexus_db_model::Volume::new(
@@ -736,7 +738,7 @@ mod test {
             .unwrap();
 
         assert!(!records.is_empty());
-        assert_eq!(records[0].volume_id, volume_id);
+        assert_eq!(records[0].volume_id, volume_id.into());
 
         datastore
             .insert_region_snapshot_replacement_request_with_volume_id(

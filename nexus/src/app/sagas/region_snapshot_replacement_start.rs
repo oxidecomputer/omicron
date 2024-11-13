@@ -62,10 +62,14 @@ use crate::app::sagas::common_storage::find_only_new_region;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::RegionAllocationStrategy;
 use crate::app::{authn, db};
+use nexus_db_queries::db::datastore::NewRegionVolumeId;
+use nexus_db_queries::db::datastore::OldSnapshotVolumeId;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::CrucibleOpts;
@@ -440,7 +444,7 @@ struct AllocRegionParams {
     extent_count: u64,
     current_allocated_regions: Vec<(db::model::Dataset, db::model::Region)>,
     snapshot_id: Uuid,
-    snapshot_volume_id: Uuid,
+    snapshot_volume_id: VolumeUuid,
 }
 
 async fn rsrss_get_alloc_region_params(
@@ -479,7 +483,7 @@ async fn rsrss_get_alloc_region_params(
 
     let current_allocated_regions = osagactx
         .datastore()
-        .get_allocated_regions(db_snapshot.volume_id)
+        .get_allocated_regions(db_snapshot.volume_id())
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -489,7 +493,7 @@ async fn rsrss_get_alloc_region_params(
         extent_count: db_region.extent_count(),
         current_allocated_regions,
         snapshot_id: db_snapshot.id(),
-        snapshot_volume_id: db_snapshot.volume_id,
+        snapshot_volume_id: db_snapshot.volume_id(),
     })
 }
 
@@ -715,7 +719,7 @@ async fn rsrss_new_region_volume_create(
     let osagactx = sagactx.user_data();
 
     let new_region_volume_id =
-        sagactx.lookup::<Uuid>("new_region_volume_id")?;
+        sagactx.lookup::<VolumeUuid>("new_region_volume_id")?;
 
     let (new_dataset, ensured_region) = sagactx.lookup::<(
         db::model::Dataset,
@@ -744,7 +748,7 @@ async fn rsrss_new_region_volume_create(
     // in, removing the last reference to it and causing garbage collection.
 
     let volume_construction_request = VolumeConstructionRequest::Volume {
-        id: new_region_volume_id,
+        id: new_region_volume_id.into_untyped_uuid(),
         block_size: 0,
         sub_volumes: vec![VolumeConstructionRequest::Region {
             block_size: 0,
@@ -752,7 +756,7 @@ async fn rsrss_new_region_volume_create(
             extent_count: 0,
             gen: 0,
             opts: CrucibleOpts {
-                id: new_region_volume_id,
+                id: new_region_volume_id.into_untyped_uuid(),
                 target: vec![new_region_address.to_string()],
                 lossy: false,
                 flush_timeout: None,
@@ -791,7 +795,7 @@ async fn rsrss_new_region_volume_create_undo(
     // Delete the volume.
 
     let new_region_volume_id =
-        sagactx.lookup::<Uuid>("new_region_volume_id")?;
+        sagactx.lookup::<VolumeUuid>("new_region_volume_id")?;
     osagactx.datastore().volume_hard_delete(new_region_volume_id).await?;
 
     Ok(())
@@ -799,7 +803,7 @@ async fn rsrss_new_region_volume_create_undo(
 
 async fn rsrss_get_old_snapshot_volume_id(
     sagactx: NexusActionContext,
-) -> Result<Uuid, ActionError> {
+) -> Result<VolumeUuid, ActionError> {
     // Save the snapshot's original volume ID, because we'll be altering it and
     // need the original
 
@@ -827,7 +831,7 @@ async fn rsrss_get_old_snapshot_volume_id(
         )));
     };
 
-    Ok(db_snapshot.volume_id)
+    Ok(db_snapshot.volume_id())
 }
 
 async fn rsrss_create_fake_volume(
@@ -835,14 +839,14 @@ async fn rsrss_create_fake_volume(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
 
-    let new_volume_id = sagactx.lookup::<Uuid>("new_volume_id")?;
+    let new_volume_id = sagactx.lookup::<VolumeUuid>("new_volume_id")?;
 
     // Create a fake volume record for the old snapshot target. This will be
     // deleted after snapshot replacement has finished. It can be completely
     // blank here, it will be replaced by `volume_replace_snapshot`.
 
     let volume_construction_request = VolumeConstructionRequest::Volume {
-        id: new_volume_id,
+        id: *new_volume_id.as_untyped_uuid(),
         block_size: 0,
         sub_volumes: vec![VolumeConstructionRequest::Region {
             block_size: 0,
@@ -850,7 +854,7 @@ async fn rsrss_create_fake_volume(
             extent_count: 0,
             gen: 0,
             opts: CrucibleOpts {
-                id: new_volume_id,
+                id: *new_volume_id.as_untyped_uuid(),
                 // Do not put the new region ID here: it will be deleted during
                 // the associated garbage collection saga if
                 // `volume_replace_snapshot` does not perform the swap (which
@@ -895,7 +899,7 @@ async fn rsrss_create_fake_volume_undo(
 
     // Delete the fake volume.
 
-    let new_volume_id = sagactx.lookup::<Uuid>("new_volume_id")?;
+    let new_volume_id = sagactx.lookup::<VolumeUuid>("new_volume_id")?;
     osagactx.datastore().volume_hard_delete(new_volume_id).await?;
 
     Ok(())
@@ -903,10 +907,10 @@ async fn rsrss_create_fake_volume_undo(
 
 #[derive(Debug)]
 struct ReplaceParams {
-    old_volume_id: Uuid,
+    old_volume_id: VolumeUuid,
     old_snapshot_address: SocketAddrV6,
     new_region_address: SocketAddrV6,
-    new_volume_id: Uuid,
+    new_volume_id: VolumeUuid,
 }
 
 async fn get_replace_params(
@@ -915,7 +919,7 @@ async fn get_replace_params(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
-    let new_volume_id = sagactx.lookup::<Uuid>("new_volume_id")?;
+    let new_volume_id = sagactx.lookup::<VolumeUuid>("new_volume_id")?;
 
     let region_snapshot = osagactx
         .datastore()
@@ -969,7 +973,8 @@ async fn get_replace_params(
         0,
     );
 
-    let old_volume_id = sagactx.lookup::<Uuid>("old_snapshot_volume_id")?;
+    let old_volume_id =
+        sagactx.lookup::<VolumeUuid>("old_snapshot_volume_id")?;
 
     // Return the replacement parameters for the forward action case - the undo
     // will swap the existing and replacement target
@@ -1102,10 +1107,10 @@ async fn rsrss_update_request_record(
 
     let new_region_id = new_dataset_and_region.1.id();
 
-    let old_region_volume_id = sagactx.lookup::<Uuid>("new_volume_id")?;
+    let old_region_volume_id = sagactx.lookup::<VolumeUuid>("new_volume_id")?;
 
     let new_region_volume_id =
-        sagactx.lookup::<Uuid>("new_region_volume_id")?;
+        sagactx.lookup::<VolumeUuid>("new_region_volume_id")?;
 
     // Now that the region has been ensured and the construction request has
     // been updated, update the replacement request record to 'ReplacementDone'
@@ -1117,8 +1122,8 @@ async fn rsrss_update_request_record(
             params.request.id,
             saga_id,
             new_region_id,
-            new_region_volume_id,
-            old_region_volume_id,
+            NewRegionVolumeId(new_region_volume_id),
+            OldSnapshotVolumeId(old_region_volume_id),
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -1230,14 +1235,14 @@ pub(crate) mod test {
 
         // Assert disk has three allocated regions
         let disk_allocated_regions =
-            datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+            datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
         assert_eq!(disk_allocated_regions.len(), 3);
 
         // Assert the snapshot has zero allocated regions
         let snapshot_id = snapshot.identity.id;
 
         let snapshot_allocated_regions = datastore
-            .get_allocated_regions(db_snapshot.volume_id)
+            .get_allocated_regions(db_snapshot.volume_id())
             .await
             .unwrap();
         assert_eq!(snapshot_allocated_regions.len(), 0);
@@ -1291,12 +1296,12 @@ pub(crate) mod test {
 
         // Validate number of regions for disk didn't change
         let disk_allocated_regions =
-            datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+            datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
         assert_eq!(disk_allocated_regions.len(), 3);
 
         // Validate that the snapshot now has one allocated region
         let snapshot_allocated_datasets_and_regions = datastore
-            .get_allocated_regions(db_snapshot.volume_id)
+            .get_allocated_regions(db_snapshot.volume_id())
             .await
             .unwrap();
 
@@ -1325,7 +1330,7 @@ pub(crate) mod test {
         assert!(volumes
             .iter()
             .map(|v| v.id())
-            .any(|vid| vid == db_snapshot.volume_id));
+            .any(|vid| vid == db_snapshot.volume_id()));
     }
 
     fn new_test_params(
@@ -1489,7 +1494,7 @@ pub(crate) mod test {
         let opctx = test_opctx(cptestctx);
 
         let disk_allocated_regions =
-            datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+            datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
         assert_eq!(disk_allocated_regions.len(), 3);
 
         let region: &nexus_db_model::Region = &disk_allocated_regions[0].1;
@@ -1509,8 +1514,11 @@ pub(crate) mod test {
             .await
             .unwrap();
 
-        let affected_volume_original =
-            datastore.volume_get(db_snapshot.volume_id).await.unwrap().unwrap();
+        let affected_volume_original = datastore
+            .volume_get(db_snapshot.volume_id())
+            .await
+            .unwrap()
+            .unwrap();
 
         verify_clean_slate(
             &cptestctx,
@@ -1618,7 +1626,7 @@ pub(crate) mod test {
         let opctx = test_opctx(cptestctx);
 
         let disk_allocated_regions =
-            datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+            datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
         assert_eq!(disk_allocated_regions.len(), 3);
 
         let region: &nexus_db_model::Region = &disk_allocated_regions[0].1;

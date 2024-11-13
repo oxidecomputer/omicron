@@ -135,6 +135,7 @@ use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::VolumeUuid;
 use sled_agent_client::types::VolumeConstructionRequest;
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -1536,7 +1537,7 @@ async fn cmd_db_disk_info(
                 disk_name,
                 instance_name,
                 propolis_zone: format!("oxz_propolis-server_{}", propolis_id),
-                volume_id: disk.volume_id.to_string(),
+                volume_id: disk.volume_id().to_string(),
                 disk_state: disk.runtime_state.disk_state.to_string(),
             }
         } else {
@@ -1545,7 +1546,7 @@ async fn cmd_db_disk_info(
                 disk_name,
                 instance_name,
                 propolis_zone: NO_ACTIVE_PROPOLIS_MSG.to_string(),
-                volume_id: disk.volume_id.to_string(),
+                volume_id: disk.volume_id().to_string(),
                 disk_state: disk.runtime_state.disk_state.to_string(),
             }
         }
@@ -1557,7 +1558,7 @@ async fn cmd_db_disk_info(
             disk_name: disk.name().to_string(),
             instance_name: "-".to_string(),
             propolis_zone: "-".to_string(),
-            volume_id: disk.volume_id.to_string(),
+            volume_id: disk.volume_id().to_string(),
             disk_state: disk.runtime_state.disk_state.to_string(),
         }
     };
@@ -1571,7 +1572,7 @@ async fn cmd_db_disk_info(
     println!("{}", table);
 
     // Get the dataset backing this volume.
-    let regions = datastore.get_allocated_regions(disk.volume_id).await?;
+    let regions = datastore.get_allocated_regions(disk.volume_id()).await?;
 
     let mut rows = Vec::with_capacity(3);
     for (dataset, region) in regions {
@@ -1605,7 +1606,7 @@ async fn cmd_db_disk_info(
 
     println!("{}", table);
 
-    get_and_display_vcr(disk.volume_id, datastore).await?;
+    get_and_display_vcr(disk.volume_id(), datastore).await?;
     Ok(())
 }
 
@@ -1613,13 +1614,13 @@ async fn cmd_db_disk_info(
 // If found, attempt to parse the .data field into a VolumeConstructionRequest
 // and display it if successful.
 async fn get_and_display_vcr(
-    volume_id: Uuid,
+    volume_id: VolumeUuid,
     datastore: &DataStore,
 ) -> Result<(), anyhow::Error> {
     // Get the VCR from the volume and display selected parts.
     use db::schema::volume::dsl as volume_dsl;
     let volumes = volume_dsl::volume
-        .filter(volume_dsl::id.eq(volume_id))
+        .filter(volume_dsl::id.eq(to_db_typed_uuid(volume_id)))
         .limit(1)
         .select(Volume::as_select())
         .load_async(&*datastore.pool_connection_for_tests().await?)
@@ -1729,7 +1730,7 @@ async fn cmd_db_disk_physical(
             .context("loading region")?;
 
         for rs in regions {
-            volume_ids.insert(rs.volume_id());
+            volume_ids.insert(rs.volume_id().into_untyped_uuid());
         }
     }
 
@@ -1977,8 +1978,8 @@ impl From<Snapshot> for SnapshotRow {
             state: format_snapshot(&s.state).to_string(),
             size: s.size.to_string(),
             source_disk_id: s.disk_id.to_string(),
-            source_volume_id: s.volume_id.to_string(),
-            destination_volume_id: s.destination_volume_id.to_string(),
+            source_volume_id: s.volume_id().to_string(),
+            destination_volume_id: s.destination_volume_id().to_string(),
         }
     }
 }
@@ -2046,8 +2047,8 @@ async fn cmd_db_snapshot_info(
     let mut dest_volume_ids = Vec::new();
     let mut source_volume_ids = Vec::new();
     let rows = snapshots.into_iter().map(|snapshot| {
-        dest_volume_ids.push(snapshot.destination_volume_id);
-        source_volume_ids.push(snapshot.volume_id);
+        dest_volume_ids.push(snapshot.destination_volume_id());
+        source_volume_ids.push(snapshot.volume_id());
         SnapshotRow::from(snapshot)
     });
     if rows.len() == 0 {
@@ -2362,7 +2363,7 @@ async fn cmd_db_region_list(
         struct RegionRow {
             id: Uuid,
             dataset_id: DatasetUuid,
-            volume_id: Uuid,
+            volume_id: VolumeUuid,
             block_size: i64,
             blocks_per_extent: u64,
             extent_count: u64,
@@ -2414,7 +2415,8 @@ async fn cmd_db_region_used_by(
         String::from("listing regions")
     });
 
-    let volumes: Vec<Uuid> = regions.iter().map(|x| x.volume_id()).collect();
+    let volumes: Vec<Uuid> =
+        regions.iter().map(|x| x.volume_id().into_untyped_uuid()).collect();
 
     let disks_used: Vec<Disk> = {
         let volumes = volumes.clone();
@@ -2504,7 +2506,7 @@ async fn cmd_db_region_used_by(
     #[derive(Tabled)]
     struct RegionRow {
         id: Uuid,
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
         usage_type: String,
         usage_id: String,
         usage_name: String,
@@ -2515,7 +2517,7 @@ async fn cmd_db_region_used_by(
         .into_iter()
         .map(|region: Region| {
             if let Some(image) =
-                images_used.iter().find(|x| x.volume_id == region.volume_id())
+                images_used.iter().find(|x| x.volume_id() == region.volume_id())
             {
                 RegionRow {
                     id: region.id(),
@@ -2528,7 +2530,7 @@ async fn cmd_db_region_used_by(
                 }
             } else if let Some(snapshot) = snapshots_used
                 .iter()
-                .find(|x| x.volume_id == region.volume_id())
+                .find(|x| x.volume_id() == region.volume_id())
             {
                 RegionRow {
                     id: region.id(),
@@ -2541,7 +2543,7 @@ async fn cmd_db_region_used_by(
                 }
             } else if let Some(snapshot) = snapshots_used
                 .iter()
-                .find(|x| x.destination_volume_id == region.volume_id())
+                .find(|x| x.destination_volume_id() == region.volume_id())
             {
                 RegionRow {
                     id: region.id(),
@@ -2553,7 +2555,7 @@ async fn cmd_db_region_used_by(
                     deleted: snapshot.time_deleted().is_some(),
                 }
             } else if let Some(disk) =
-                disks_used.iter().find(|x| x.volume_id == region.volume_id())
+                disks_used.iter().find(|x| x.volume_id() == region.volume_id())
             {
                 RegionRow {
                     id: region.id(),
@@ -2602,7 +2604,7 @@ async fn cmd_db_region_find_deleted(
 
     #[derive(Tabled)]
     struct VolumeRow {
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
     }
 
     let region_rows: Vec<RegionRow> = freed_crucible_resources
@@ -4423,7 +4425,7 @@ async fn cmd_db_region_snapshot_replacement_request(
         .insert_region_snapshot_replacement_request_with_volume_id(
             opctx,
             request,
-            db_snapshots[0].volume_id,
+            db_snapshots[0].volume_id(),
         )
         .await?;
 

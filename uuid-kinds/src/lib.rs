@@ -72,5 +72,6 @@ impl_typed_uuid_kind! {
     UpstairsRepair => "upstairs_repair",
     UpstairsSession => "upstairs_session",
     Vnic => "vnic",
+    Volume => "volume",
     Zpool => "zpool",
 }
