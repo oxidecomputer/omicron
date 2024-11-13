@@ -218,6 +218,7 @@ mod test {
                 id,
                 blueprint_zones: BTreeMap::new(),
                 blueprint_disks: BTreeMap::new(),
+                blueprint_datasets: BTreeMap::new(),
                 sled_state: BTreeMap::new(),
                 cockroachdb_setting_preserve_downgrade:
                     CockroachDbPreserveDowngrade::DoNotModify,
@@ -225,6 +226,7 @@ mod test {
                 internal_dns_version: Generation::new(),
                 external_dns_version: Generation::new(),
                 cockroachdb_fingerprint: String::new(),
+                clickhouse_cluster_config: None,
                 time_created: now_db_precision(),
                 creator: "test".to_string(),
                 comment: "test blueprint".to_string(),

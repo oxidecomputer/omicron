@@ -12,6 +12,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
+use std::str::FromStr;
 use uuid::Uuid;
 
 use crate::{
@@ -106,6 +107,7 @@ impl DatasetName {
         &self.pool_name
     }
 
+    // TODO: Maybe rename this to "kind"?
     pub fn dataset(&self) -> &DatasetKind {
         &self.kind
     }
@@ -186,6 +188,18 @@ impl GzipLevel {
     }
 }
 
+impl FromStr for GzipLevel {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let level = s.parse::<u8>()?;
+        if level < GZIP_LEVEL_MIN || level > GZIP_LEVEL_MAX {
+            bail!("Invalid gzip compression level: {level}");
+        }
+        Ok(Self(level))
+    }
+}
+
 #[derive(
     Copy,
     Clone,
@@ -224,6 +238,7 @@ pub enum CompressionAlgorithm {
     Zle,
 }
 
+/// These match the arguments which can be passed to "zfs set compression=..."
 impl fmt::Display for CompressionAlgorithm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use CompressionAlgorithm::*;
@@ -242,7 +257,57 @@ impl fmt::Display for CompressionAlgorithm {
     }
 }
 
-/// Configuration information necessary to request a single dataset
+impl FromStr for CompressionAlgorithm {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use CompressionAlgorithm::*;
+        let c = match s {
+            "on" => On,
+            "" | "off" => Off,
+            "gzip" => Gzip,
+            "lz4" => Lz4,
+            "lzjb" => Lzjb,
+            "zle" => Zle,
+            _ => {
+                let Some(suffix) = s.strip_prefix("gzip-") else {
+                    bail!("Unknown compression algorithm {s}");
+                };
+                GzipN { level: suffix.parse()? }
+            }
+        };
+        Ok(c)
+    }
+}
+
+/// Shared configuration information to request a dataset.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+)]
+pub struct SharedDatasetConfig {
+    /// The compression mode to be used by the dataset
+    pub compression: CompressionAlgorithm,
+
+    /// The upper bound on the amount of storage used by this dataset
+    pub quota: Option<ByteCount>,
+
+    /// The lower bound on the amount of storage usable by this dataset
+    pub reservation: Option<ByteCount>,
+}
+
+/// Configuration information necessary to request a single dataset.
+///
+/// These datasets are tracked directly by Nexus.
 #[derive(
     Clone,
     Debug,
@@ -262,14 +327,8 @@ pub struct DatasetConfig {
     /// The dataset's name
     pub name: DatasetName,
 
-    /// The compression mode to be used by the dataset
-    pub compression: CompressionAlgorithm,
-
-    /// The upper bound on the amount of storage used by this dataset
-    pub quota: Option<ByteCount>,
-
-    /// The lower bound on the amount of storage usable by this dataset
-    pub reservation: Option<ByteCount>,
+    #[serde(flatten)]
+    pub inner: SharedDatasetConfig,
 }
 
 #[derive(

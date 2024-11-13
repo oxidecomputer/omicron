@@ -261,7 +261,7 @@ pub(crate) async fn boundary_switches(
 pub(crate) async fn instance_ensure_dpd_config(
     datastore: &DataStore,
     log: &slog::Logger,
-    resolver: &internal_dns::resolver::Resolver,
+    resolver: &internal_dns_resolver::Resolver,
     opctx: &OpContext,
     opctx_alloc: &OpContext,
     instance_id: InstanceUuid,
@@ -538,7 +538,7 @@ pub(crate) async fn probe_ensure_dpd_config(
 pub(crate) async fn instance_delete_dpd_config(
     datastore: &DataStore,
     log: &slog::Logger,
-    resolver: &internal_dns::resolver::Resolver,
+    resolver: &internal_dns_resolver::Resolver,
     opctx: &OpContext,
     opctx_alloc: &OpContext,
     authz_instance: &authz::Instance,
@@ -574,7 +574,7 @@ pub(crate) async fn instance_delete_dpd_config(
 pub(crate) async fn probe_delete_dpd_config(
     datastore: &DataStore,
     log: &slog::Logger,
-    resolver: &internal_dns::resolver::Resolver,
+    resolver: &internal_dns_resolver::Resolver,
     opctx: &OpContext,
     opctx_alloc: &OpContext,
     probe_id: Uuid,
@@ -659,7 +659,7 @@ pub(crate) async fn probe_delete_dpd_config(
 /// e.g. a rapid reattach or a reallocated ephemeral IP.
 pub(crate) async fn delete_dpd_config_by_entry(
     datastore: &DataStore,
-    resolver: &internal_dns::resolver::Resolver,
+    resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
     opctx: &OpContext,
     opctx_alloc: &OpContext,
@@ -730,7 +730,7 @@ async fn external_ip_delete_dpd_config_inner(
 async fn notify_dendrite_nat_state(
     datastore: &DataStore,
     log: &slog::Logger,
-    resolver: &internal_dns::resolver::Resolver,
+    resolver: &internal_dns_resolver::Resolver,
     opctx_alloc: &OpContext,
     instance_id: Option<InstanceUuid>,
     fail_fast: bool,

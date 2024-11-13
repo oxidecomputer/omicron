@@ -255,7 +255,8 @@ pub fn allocation_query(
       ").param().sql(" AS blocks_per_extent,
       ").param().sql(" AS extent_count,
       NULL AS port,
-      ").param().sql(" AS read_only
+      ").param().sql(" AS read_only,
+      FALSE as deleting
     FROM shuffled_candidate_datasets")
   // Only select the *additional* number of candidate regions for the required
   // redundancy level
@@ -368,7 +369,7 @@ pub fn allocation_query(
     .sql("
   inserted_regions AS (
     INSERT INTO region
-      (id, time_created, time_modified, dataset_id, volume_id, block_size, blocks_per_extent, extent_count, port, read_only)
+      (id, time_created, time_modified, dataset_id, volume_id, block_size, blocks_per_extent, extent_count, port, read_only, deleting)
     SELECT ").sql(AllColumnsOfRegion::with_prefix("candidate_regions")).sql("
     FROM candidate_regions
     WHERE
@@ -407,8 +408,8 @@ mod test {
     use super::*;
     use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
     use crate::db::explain::ExplainableAsync;
+    use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::expectorate_query_contents;
-    use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
     use uuid::Uuid;
 
@@ -504,10 +505,8 @@ mod test {
     #[tokio::test]
     async fn explainable() {
         let logctx = dev::test_setup_log("explainable");
-        let log = logctx.log.new(o!());
-        let mut db = test_setup_database(&log).await;
-        let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool = crate::db::Pool::new_single_host(&logctx.log, &cfg);
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
         let volume_id = Uuid::new_v4();
@@ -546,7 +545,7 @@ mod test {
             .await
             .expect("Failed to explain query - is it valid SQL?");
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

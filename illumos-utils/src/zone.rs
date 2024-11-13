@@ -17,6 +17,7 @@ use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
 use crate::zpool::PathInPool;
 use crate::{execute, PFEXEC};
 use omicron_common::address::SLED_PREFIX;
+use omicron_uuid_kinds::OmicronZoneUuid;
 
 const DLADM: &str = "/usr/sbin/dladm";
 pub const IPADM: &str = "/usr/sbin/ipadm";
@@ -28,6 +29,14 @@ pub const ROUTE: &str = "/usr/sbin/route";
 // TODO: These could become enums
 pub const ZONE_PREFIX: &str = "oxz_";
 pub const PROPOLIS_ZONE_PREFIX: &str = "oxz_propolis-server_";
+
+pub fn zone_name(prefix: &str, id: Option<OmicronZoneUuid>) -> String {
+    if let Some(id) = id {
+        format!("{ZONE_PREFIX}{}_{}", prefix, id)
+    } else {
+        format!("{ZONE_PREFIX}{}", prefix)
+    }
+}
 
 #[derive(thiserror::Error, Debug)]
 enum Error {

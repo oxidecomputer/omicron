@@ -11,3 +11,4 @@ mod internal_dns;
 mod zones;
 
 pub use builder::*;
+pub use clickhouse::{ClickhouseAllocator, ClickhouseZonesThatShouldBeRunning};

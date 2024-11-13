@@ -1551,6 +1551,7 @@ mod test {
                     params::InstanceNetworkInterfaceAttachment::None,
                 external_ips: vec![],
                 disks: vec![],
+                boot_disk: None,
                 start: true,
                 auto_restart_policy: Default::default(),
             },

@@ -6,7 +6,9 @@
 
 //! Decode server exception packets.
 
-use crate::native::{io, packets::server::Exception, Error};
+use crate::native::io;
+use crate::native::packets::server::Exception;
+use crate::native::Error;
 use bytes::Buf as _;
 
 /// Decode a list of Exception packets from the server, if possible.

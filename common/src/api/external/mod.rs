@@ -348,6 +348,16 @@ impl TryFrom<String> for NameOrId {
     }
 }
 
+impl FromStr for NameOrId {
+    // TODO: We should have better error types here.
+    // See https://github.com/oxidecomputer/omicron/issues/347
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        NameOrId::try_from(String::from(value))
+    }
+}
+
 impl From<Name> for NameOrId {
     fn from(name: Name) -> Self {
         NameOrId::Name(name)
@@ -717,8 +727,15 @@ impl From<ByteCount> for i64 {
 
 /// Generation numbers stored in the database, used for optimistic concurrency
 /// control
-// Because generation numbers are stored in the database, we represent them as
-// i64.
+//
+// A generation is a value between 0 and 2**63-1, i.e. equivalent to a u63.
+// The reason is that we store it as an i64 in the database, and we want to
+// disallow negative values. (We could potentially use two's complement to
+// store values greater than that as negative values, but surely 2**63 is
+// enough.)
+//
+// TODO: This allows deserialization into a value that's out of range. That's
+// not correct. See <https://github.com/oxidecomputer/omicron/issues/6865>.
 #[derive(
     Copy,
     Clone,
@@ -961,6 +978,9 @@ pub enum ResourceType {
     IpPool,
     IpPoolResource,
     InstanceNetworkInterface,
+    InternetGateway,
+    InternetGatewayIpPool,
+    InternetGatewayIpAddress,
     PhysicalDisk,
     Rack,
     Service,
@@ -1183,6 +1203,9 @@ pub struct Instance {
     /// RFC1035-compliant hostname for the Instance.
     pub hostname: String,
 
+    /// the ID of the disk used to boot this Instance, if a specific one is assigned.
+    pub boot_disk_id: Option<Uuid>,
+
     #[serde(flatten)]
     pub runtime: InstanceRuntimeState,
 
@@ -1202,6 +1225,23 @@ pub struct InstanceAutoRestartStatus {
     #[serde(rename = "auto_restart_enabled")]
     pub enabled: bool,
 
+    /// The auto-restart policy configured for this instance, or `null` if no
+    /// explicit policy has been configured.
+    ///
+    /// This policy determines whether the instance should be automatically
+    /// restarted by the control plane on failure. If this is `null`, the
+    /// control plane will use the default policy when determining whether or
+    /// not to automatically restart this instance, which may or may not allow
+    /// it to be restarted. The value of the `auto_restart_enabled` field
+    /// indicates whether the instance will be auto-restarted, based on its
+    /// current policy or the default if it has no configured policy.
+    //
+    // Rename this field, as the struct is `#[serde(flatten)]`ed into the
+    // `Instance` type, and we would like the field to be prefixed with
+    // `auto_restart`.
+    #[serde(rename = "auto_restart_policy")]
+    pub policy: Option<InstanceAutoRestartPolicy>,
+
     /// The time at which the auto-restart cooldown period for this instance
     /// completes, permitting it to be automatically restarted again. If the
     /// instance enters the `Failed` state, it will not be restarted until after
@@ -1220,7 +1260,9 @@ pub struct InstanceAutoRestartStatus {
 
 /// A policy determining when an instance should be automatically restarted by
 /// the control plane.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum InstanceAutoRestartPolicy {
     /// The instance should not be automatically restarted by the control plane
@@ -1538,10 +1580,32 @@ pub struct RouterRoute {
     pub vpc_router_id: Uuid,
     /// Describes the kind of router. Set at creation. `read-only`
     pub kind: RouterRouteKind,
-    /// The location that matched packets should be forwarded to.
+    /// The location that matched packets should be forwarded to
     pub target: RouteTarget,
-    /// Selects which traffic this routing rule will apply to.
+    /// Selects which traffic this routing rule will apply to
     pub destination: RouteDestination,
+}
+
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGatewayIpPool {
+    /// Common identifying metadata
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The ID of the internet gateway to which the IP pool entry belongs
+    pub internet_gateway_id: Uuid,
+    /// The ID of the referenced IP pool
+    pub ip_pool_id: Uuid,
+}
+
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGatewayIp {
+    /// Common identifying metadata
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The ID of the internet gateway to which the IP belongs
+    pub internet_gateway_id: Uuid,
+    /// The IP address
+    pub address: IpAddr,
 }
 
 /// A single rule in a VPC firewall
@@ -2294,6 +2358,10 @@ pub struct SwitchPortSettingsView {
     /// Link-layer discovery protocol (LLDP) settings.
     pub link_lldp: Vec<LldpLinkConfig>,
 
+    /// TX equalization settings.  These are optional, and most links will not
+    /// need them.
+    pub tx_eq: Vec<Option<TxEqConfig>>,
+
     /// Layer 3 interface settings.
     pub interfaces: Vec<SwitchInterfaceConfig>,
 
@@ -2436,6 +2504,9 @@ pub struct SwitchPortLinkConfig {
     /// link.
     pub lldp_link_config_id: Option<Uuid>,
 
+    /// The tx_eq configuration id for this link.
+    pub tx_eq_config_id: Option<Uuid>,
+
     /// The name of this link.
     pub link_name: String,
 
@@ -2478,6 +2549,34 @@ pub struct LldpLinkConfig {
 
     /// The LLDP management IP TLV.
     pub management_ip: Option<oxnet::IpNet>,
+}
+
+/// Per-port tx-eq overrides.  This can be used to fine-tune the transceiver
+/// equalization settings to improve signal integrity.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct TxEqConfig {
+    /// Pre-cursor tap1
+    pub pre1: Option<i32>,
+    /// Pre-cursor tap2
+    pub pre2: Option<i32>,
+    /// Main tap
+    pub main: Option<i32>,
+    /// Post-cursor tap2
+    pub post2: Option<i32>,
+    /// Post-cursor tap1
+    pub post1: Option<i32>,
+}
+
+impl From<crate::api::internal::shared::TxEqConfig> for TxEqConfig {
+    fn from(x: crate::api::internal::shared::TxEqConfig) -> TxEqConfig {
+        TxEqConfig {
+            pre1: x.pre1,
+            pre2: x.pre2,
+            main: x.main,
+            post2: x.post2,
+            post1: x.post1,
+        }
+    }
 }
 
 /// Describes the kind of an switch interface.
@@ -2553,8 +2652,8 @@ pub struct SwitchPortRouteConfig {
     /// over an 802.1Q tagged L2 segment.
     pub vlan_id: Option<u16>,
 
-    /// Local preference indicating priority within and across protocols.
-    pub local_pref: Option<u32>,
+    /// RIB Priority indicating priority within and across protocols.
+    pub rib_priority: Option<u8>,
 }
 
 /*

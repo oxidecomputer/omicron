@@ -17,7 +17,7 @@
 //! state files that get generated as RSS executes:
 //!
 //! - /pool/int/UUID/config/rss-sled-plan.json (Sled Plan)
-//! - /pool/int/UUID/config/rss-service-plan-v3.json (Service Plan)
+//! - /pool/int/UUID/config/rss-service-plan-v5.json (Service Plan)
 //! - /pool/int/UUID/config/rss-plan-completed.marker (Plan Execution Complete)
 //!
 //! These phases are described below.  As each phase completes, a corresponding
@@ -70,7 +70,6 @@ use crate::bootstrap::early_networking::{
     EarlyNetworkSetup, EarlyNetworkSetupError,
 };
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
-use crate::nexus::d2n_params;
 use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
 };
@@ -81,8 +80,9 @@ use anyhow::{bail, Context};
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use chrono::Utc;
-use internal_dns::resolver::{DnsError, Resolver as DnsResolver};
-use internal_dns::ServiceName;
+use dns_service_client::DnsError;
+use internal_dns_resolver::Resolver as DnsResolver;
+use internal_dns_types::names::ServiceName;
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
@@ -90,8 +90,9 @@ use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
 use nexus_types::deployment::{
-    blueprint_zone_type, Blueprint, BlueprintZoneType, BlueprintZonesConfig,
-    CockroachDbPreserveDowngrade,
+    blueprint_zone_type, Blueprint, BlueprintDatasetConfig,
+    BlueprintDatasetDisposition, BlueprintDatasetsConfig, BlueprintZoneType,
+    BlueprintZonesConfig, CockroachDbPreserveDowngrade,
 };
 use nexus_types::external_api::views::SledState;
 use omicron_common::address::get_sled_address;
@@ -102,12 +103,14 @@ use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::disk::{
-    OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig,
+    DatasetKind, DatasetsConfig, OmicronPhysicalDiskConfig,
+    OmicronPhysicalDisksConfig,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
@@ -200,7 +203,7 @@ pub enum SetupServiceError {
     Dendrite(String),
 
     #[error("Error during DNS lookup: {0}")]
-    DnsResolver(#[from] internal_dns::resolver::ResolveError),
+    DnsResolver(#[from] internal_dns_resolver::ResolveError),
 
     #[error("Bootstore error: {0}")]
     Bootstore(#[from] bootstore::NodeRequestError),
@@ -323,7 +326,8 @@ impl ServiceInner {
     ) -> Result<(), SetupServiceError> {
         cancel_safe_futures::future::join_all_then_try(
             plan.services.iter().map(|(sled_address, config)| async move {
-                self.initialize_storage_on_sled(
+                // Ensure all the physical disks are initialized
+                self.initialize_disks_on_sled(
                     *sled_address,
                     OmicronPhysicalDisksConfig {
                         generation: config.disks.generation,
@@ -339,7 +343,16 @@ impl ServiceInner {
                             .collect(),
                     },
                 )
-                .await
+                .await?;
+
+                // Ensure all datasets are initialized
+                self.initialize_datasets_on_sled(
+                    *sled_address,
+                    config.datasets.clone(),
+                )
+                .await?;
+
+                Ok::<(), SetupServiceError>(())
             }),
         )
         .await?;
@@ -348,13 +361,7 @@ impl ServiceInner {
 
     /// Requests that the specified sled configure storage as described
     /// by `storage_config`.
-    ///
-    /// This function succeeds if either the configuration is supplied, or if
-    /// the configuration on the target sled is newer than what we're supplying.
-    // This function shares a lot of implementation details with
-    // [Self::initialize_zones_on_sled]. Although it has a different meaning,
-    // the usage (and expectations around generation numbers) are similar.
-    async fn initialize_storage_on_sled(
+    async fn initialize_disks_on_sled(
         &self,
         sled_address: SocketAddrV6,
         storage_config: OmicronPhysicalDisksConfig,
@@ -380,10 +387,7 @@ impl ServiceInner {
                 .omicron_physical_disks_put(&storage_config.clone())
                 .await;
             let Err(error) = result else {
-                return Ok::<
-                    (),
-                    BackoffError<SledAgentError<SledAgentTypes::Error>>,
-                >(());
+                return Ok(());
             };
 
             if let sled_agent_client::Error::ErrorResponse(response) = &error {
@@ -397,22 +401,98 @@ impl ServiceInner {
                         "server_message" => &response.message,
                     );
 
-                    // If we attempt to initialize storage at generation X, and
-                    // the server refuses because it's at some generation newer
-                    // than X, then we treat that as success.  See the doc
-                    // comment on this function.
-                    return Ok(());
+                    return Err(BackoffError::permanent(
+                        SetupServiceError::SledInitialization(format!(
+                            "Conflict initializing disks: {}",
+                            response.message
+                        )),
+                    ));
                 }
             }
 
             // TODO Many other codes here should not be retried.  See
             // omicron#4578.
-            return Err(BackoffError::transient(error));
+            return Err(BackoffError::transient(SetupServiceError::SledApi(
+                error,
+            )));
         };
         let log_failure = |error, delay| {
             warn!(
                 log,
                 "failed to initialize Omicron storage";
+                "error" => #%error,
+                "retry_after" => ?delay,
+            );
+        };
+        retry_notify(
+            retry_policy_internal_service_aggressive(),
+            storage_put,
+            log_failure,
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    /// Requests that the specified sled configure datasets as described
+    /// by `storage_config`.
+    async fn initialize_datasets_on_sled(
+        &self,
+        sled_address: SocketAddrV6,
+        storage_config: DatasetsConfig,
+    ) -> Result<(), SetupServiceError> {
+        let dur = std::time::Duration::from_secs(60);
+        let client = reqwest::ClientBuilder::new()
+            .connect_timeout(dur)
+            .build()
+            .map_err(SetupServiceError::HttpClient)?;
+        let log = self.log.new(o!("sled_address" => sled_address.to_string()));
+        let client = SledAgentClient::new_with_client(
+            &format!("http://{}", sled_address),
+            client,
+            log.clone(),
+        );
+
+        let storage_put = || async {
+            info!(
+                log,
+                "attempting to set up sled's datasets: {:?}", storage_config,
+            );
+            let result = client.datasets_put(&storage_config.clone()).await;
+            let Err(error) = result else {
+                return Ok(());
+            };
+
+            if let sled_agent_client::Error::ErrorResponse(response) = &error {
+                if response.status() == http::StatusCode::CONFLICT {
+                    warn!(
+                        log,
+                        "ignoring attempt to initialize datasets because \
+                        the server seems to be newer";
+                        "attempted_generation" => i64::from(&storage_config.generation),
+                        "req_id" => &response.request_id,
+                        "server_message" => &response.message,
+                    );
+
+                    return Err(BackoffError::permanent(
+                        SetupServiceError::SledInitialization(format!(
+                            "Conflict initializing datasets {}",
+                            response.message
+                        )),
+                    ));
+                }
+            }
+
+            // TODO Many other codes here should not be retried.  See
+            // omicron#4578.
+            return Err(BackoffError::transient(SetupServiceError::SledApi(
+                error,
+            )));
+        };
+        let log_failure = |error, delay| {
+            warn!(
+                log,
+                "failed to initialize Omicron datasets";
                 "error" => #%error,
                 "retry_after" => ?delay,
             );
@@ -714,8 +794,7 @@ impl ServiceInner {
         let blueprint = build_initial_blueprint_from_plan(
             &sled_configs_by_id,
             service_plan,
-        )
-        .map_err(SetupServiceError::ConvertPlanToBlueprint)?;
+        );
 
         info!(self.log, "Nexus address: {}", nexus_address.to_string());
 
@@ -733,26 +812,62 @@ impl ServiceInner {
         );
 
         // Convert all the information we have about datasets into a format
-        // which can be processed by Nexus.
-        let mut datasets: Vec<NexusTypes::DatasetCreateRequest> = vec![];
+        // which can be stored in CockroachDB once they make their way to Nexus.
+        //
+        // TODO(https://github.com/oxidecomputer/omicron/issues/6998): Remove me!
+        // This is somewhat redundant with the information we're supplying in
+        // the initial blueprint, and could be de-duplicated if we can fully
+        // migrate to a world where "datasets exist in the blueprint, but not
+        // in CockroachDB".
+        let mut datasets = HashMap::<
+            (ZpoolUuid, DatasetKind),
+            NexusTypes::DatasetCreateRequest,
+        >::new();
         for sled_config in service_plan.services.values() {
+            // Add all datasets, as they appear in our plan.
+            //
+            // Note that we assume all datasets have a "None" address
+            // field -- the coupling of datasets with addresses is linked
+            // to usage by specific zones.
+            for dataset in sled_config.datasets.datasets.values() {
+                let duplicate = datasets.insert(
+                    (dataset.name.pool().id(), dataset.name.dataset().clone()),
+                    NexusTypes::DatasetCreateRequest {
+                        zpool_id: dataset.name.pool().id().into_untyped_uuid(),
+                        dataset_id: dataset.id.into_untyped_uuid(),
+                        request: NexusTypes::DatasetPutRequest {
+                            address: None,
+                            kind: dataset.name.dataset().clone(),
+                        },
+                    },
+                );
+
+                if let Some(dataset) = duplicate {
+                    panic!("Inserting multiple datasets of the same kind on a single zpool: {dataset:?}");
+                }
+            }
+
+            // If any datasets came from a zone, patch their addresses.
+            //
+            // It would be better if "datasets" was keyed off of a DatasetUuid,
+            // but the SeldConfig storing zones does not know about
+            // DatasetUuids.
+            //
+            // Instead, we use the (Zpool, DatasetKind) tuple as a unique
+            // identifier for the dataset.
             for zone in &sled_config.zones {
                 if let Some(dataset) = zone.zone_type.durable_dataset() {
-                    datasets.push(NexusTypes::DatasetCreateRequest {
-                        zpool_id: dataset
-                            .dataset
-                            .pool_name
-                            .id()
-                            .into_untyped_uuid(),
-                        dataset_id: zone.id.into_untyped_uuid(),
-                        request: NexusTypes::DatasetPutRequest {
-                            address: dataset.address.to_string(),
-                            kind: dataset.kind,
-                        },
-                    })
+                    let Some(entry) = datasets.get_mut(&(
+                        dataset.dataset.pool_name.id(),
+                        dataset.kind.clone(),
+                    )) else {
+                        panic!("zone's durable dataset not found");
+                    };
+                    entry.request.address = Some(dataset.address.to_string());
                 }
             }
         }
+        let datasets: Vec<_> = datasets.into_values().collect();
         let internal_services_ip_pool_ranges = config
             .internal_services_ip_pool_ranges
             .clone()
@@ -778,7 +893,7 @@ impl ServiceInner {
                                 destination: r.destination,
                                 nexthop: r.nexthop,
                                 vlan_id: r.vlan_id,
-                                local_pref: r.local_pref,
+                                rib_priority: r.rib_priority,
                             })
                             .collect(),
                         addresses: config
@@ -842,6 +957,15 @@ impl ServiceInner {
                                     .clone(),
                                 port_description: lp.port_description.clone(),
                                 management_addrs: lp.management_addrs.clone(),
+                            }
+                        }),
+                        tx_eq: config.tx_eq.as_ref().map(|tx_eq| {
+                            NexusTypes::TxEqConfig {
+                                pre1: tx_eq.pre1,
+                                pre2: tx_eq.pre2,
+                                main: tx_eq.main,
+                                post2: tx_eq.post2,
+                                post1: tx_eq.post1,
                             }
                         }),
                     })
@@ -931,7 +1055,7 @@ impl ServiceInner {
             datasets,
             internal_services_ip_pool_ranges,
             certs: config.external_certificates.clone(),
-            internal_dns_zone_config: d2n_params(&service_plan.dns_config),
+            internal_dns_zone_config: service_plan.dns_config.clone(),
             external_dns_zone_name: config.external_dns_zone_name.clone(),
             recovery_silo: config.recovery_silo.clone(),
             rack_network_config,
@@ -1427,17 +1551,11 @@ fn build_sled_configs_by_id(
 fn build_initial_blueprint_from_plan(
     sled_configs_by_id: &BTreeMap<SledUuid, SledConfig>,
     service_plan: &ServicePlan,
-) -> anyhow::Result<Blueprint> {
-    let internal_dns_version =
-        Generation::try_from(service_plan.dns_config.generation)
-            .context("invalid internal dns version")?;
-
-    let blueprint = build_initial_blueprint_from_sled_configs(
+) -> Blueprint {
+    build_initial_blueprint_from_sled_configs(
         sled_configs_by_id,
-        internal_dns_version,
-    );
-
-    Ok(blueprint)
+        service_plan.dns_config.generation,
+    )
 }
 
 pub(crate) fn build_initial_blueprint_from_sled_configs(
@@ -1448,6 +1566,47 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         .iter()
         .map(|(sled_id, sled_config)| (*sled_id, sled_config.disks.clone()))
         .collect();
+
+    let mut blueprint_datasets = BTreeMap::new();
+    for (sled_id, sled_config) in sled_configs_by_id {
+        let mut datasets = BTreeMap::new();
+        for d in sled_config.datasets.datasets.values() {
+            // Only the "Crucible" dataset needs to know the address
+            let address = sled_config.zones.iter().find_map(|z| {
+                if let BlueprintZoneType::Crucible(
+                    blueprint_zone_type::Crucible { address, dataset },
+                ) = &z.zone_type
+                {
+                    if &dataset.pool_name == d.name.pool() {
+                        return Some(*address);
+                    }
+                };
+                None
+            });
+
+            datasets.insert(
+                d.id,
+                BlueprintDatasetConfig {
+                    disposition: BlueprintDatasetDisposition::InService,
+                    id: d.id,
+                    pool: d.name.pool().clone(),
+                    kind: d.name.dataset().clone(),
+                    address,
+                    compression: d.inner.compression,
+                    quota: d.inner.quota,
+                    reservation: d.inner.reservation,
+                },
+            );
+        }
+
+        blueprint_datasets.insert(
+            *sled_id,
+            BlueprintDatasetsConfig {
+                generation: sled_config.datasets.generation,
+                datasets,
+            },
+        );
+    }
 
     let mut blueprint_zones = BTreeMap::new();
     let mut sled_state = BTreeMap::new();
@@ -1475,6 +1634,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         id: Uuid::new_v4(),
         blueprint_zones,
         blueprint_disks,
+        blueprint_datasets,
         sled_state,
         parent_blueprint_id: None,
         internal_dns_version,
@@ -1486,6 +1646,9 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         cockroachdb_fingerprint: String::new(),
         cockroachdb_setting_preserve_downgrade:
             CockroachDbPreserveDowngrade::DoNotModify,
+        // We do not create clickhouse clusters in RSS. We create them via
+        // reconfigurator only.
+        clickhouse_cluster_config: None,
         time_created: Utc::now(),
         creator: "RSS".to_string(),
         comment: "initial blueprint from rack setup".to_string(),
@@ -1590,7 +1753,8 @@ mod test {
     use super::{Config, OmicronZonesConfigGenerator};
     use crate::rack_setup::plan::service::{Plan as ServicePlan, SledInfo};
     use nexus_sled_agent_shared::inventory::{
-        Baseboard, Inventory, InventoryDisk, OmicronZoneType, SledRole,
+        Baseboard, Inventory, InventoryDisk, OmicronZoneType,
+        OmicronZonesConfig, SledRole,
     };
     use omicron_common::{
         address::{get_sled_address, Ipv6Subnet, SLED_PREFIX},
@@ -1617,6 +1781,10 @@ mod test {
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::from_gibibytes_u32(16),
                 reservoir_size: ByteCount::from_gibibytes_u32(0),
+                omicron_zones: OmicronZonesConfig {
+                    generation: Generation::new(),
+                    zones: vec![],
+                },
                 disks: (0..u2_count)
                     .map(|i| InventoryDisk {
                         identity: DiskIdentity {

@@ -5,19 +5,37 @@
 use anyhow::{bail, Context, Error, Result};
 use atomicwrites::AtomicFile;
 use camino::Utf8PathBuf;
+use chrono::{DateTime, Utc};
 use derive_more::{Add, AddAssign, Display, From};
 use itertools::Itertools;
-use schemars::JsonSchema;
+use omicron_common::api::external::Generation;
+use schemars::{
+    gen::SchemaGenerator,
+    schema::{Schema, SchemaObject},
+    JsonSchema,
+};
 use serde::{Deserialize, Serialize};
 use slog::{info, Logger};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::create_dir;
 use std::io::{ErrorKind, Write};
 use std::net::Ipv6Addr;
 use std::str::FromStr;
 
-pub mod config;
-use config::*;
+mod config;
+pub use config::{
+    ClickhouseHost, KeeperConfig, KeeperConfigsForReplica, KeeperNodeConfig,
+    LogConfig, LogLevel, Macros, NodeType, RaftServerConfig,
+    RaftServerSettings, RaftServers, ReplicaConfig, ServerNodeConfig,
+};
+
+// Used for schemars to be able to be used with camino:
+// See https://github.com/camino-rs/camino/issues/91#issuecomment-2027908513
+pub fn path_schema(gen: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject = <String>::json_schema(gen).into();
+    schema.format = Some("Utf8PathBuf".to_owned());
+    schema.into()
+}
 
 pub const OXIMETER_CLUSTER: &str = "oximeter_cluster";
 
@@ -58,6 +76,26 @@ pub struct KeeperId(pub u64);
     Deserialize,
 )]
 pub struct ServerId(pub u64);
+
+/// The top most type for configuring clickhouse-servers via
+/// clickhouse-admin-server-api
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ServerConfigurableSettings {
+    /// A unique identifier for the configuration generation.
+    pub generation: Generation,
+    /// Configurable settings for a ClickHouse replica server node.
+    pub settings: ServerSettings,
+}
+
+/// The top most type for configuring clickhouse-servers via
+/// clickhouse-admin-keeper-api
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct KeeperConfigurableSettings {
+    /// A unique identifier for the configuration generation.
+    pub generation: Generation,
+    /// Configurable settings for a ClickHouse keeper node.
+    pub settings: KeeperSettings,
+}
 
 /// Configurable settings for a ClickHouse replica server node.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -900,19 +938,116 @@ impl KeeperConf {
     }
 }
 
+/// The configuration of the clickhouse keeper raft cluster returned from a
+/// single keeper node
+///
+/// Each keeper is asked for its known raft configuration via `clickhouse-admin`
+/// dropshot servers running in `ClickhouseKeeper` zones. state. We include the
+/// leader committed log index known to the current keeper node (whether or not
+/// it is the leader) to determine which configuration is newest.
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct ClickhouseKeeperClusterMembership {
+    /// Keeper ID of the keeper being queried
+    pub queried_keeper: KeeperId,
+    /// Index of the last committed log entry from the leader's perspective
+    pub leader_committed_log_index: u64,
+    /// Keeper IDs of all keepers in the cluster
+    pub raft_config: BTreeSet<KeeperId>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+/// Contains information about distributed ddl queries (ON CLUSTER clause) that were
+/// executed on a cluster.
+pub struct DistributedDdlQueue {
+    /// Query id
+    pub entry: String,
+    /// Version of the entry
+    pub entry_version: u64,
+    /// Host that initiated the DDL operation
+    pub initiator_host: String,
+    /// Port used by the initiator
+    pub initiator_port: u16,
+    /// Cluster name
+    pub cluster: String,
+    /// Query executed
+    pub query: String,
+    /// Settings used in the DDL operation
+    pub settings: BTreeMap<String, String>,
+    /// Query created time
+    pub query_create_time: DateTime<Utc>,
+    /// Hostname
+    pub host: Ipv6Addr,
+    /// Host Port
+    pub port: u16,
+    /// Status of the query
+    pub status: String,
+    /// Exception code
+    pub exception_code: u64,
+    /// Exception message
+    pub exception_text: String,
+    /// Query finish time
+    pub query_finish_time: DateTime<Utc>,
+    /// Duration of query execution (in milliseconds)
+    pub query_duration_ms: u64,
+}
+
+impl DistributedDdlQueue {
+    pub fn parse(log: &Logger, data: &[u8]) -> Result<Vec<Self>> {
+        let s = String::from_utf8_lossy(data);
+        info!(
+            log,
+            "Retrieved data from `system.distributed_ddl_queue`";
+            "output" => ?s
+        );
+
+        let mut ddl = vec![];
+
+        for line in s.lines() {
+            let item: DistributedDdlQueue = serde_json::from_str(line)?;
+            ddl.push(item);
+        }
+
+        Ok(ddl)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use camino::Utf8PathBuf;
     use camino_tempfile::Builder;
+    use chrono::{DateTime, Utc};
     use slog::{o, Drain};
     use slog_term::{FullFormat, PlainDecorator, TestStdoutWriter};
+    use std::collections::BTreeMap;
     use std::net::{Ipv4Addr, Ipv6Addr};
     use std::str::FromStr;
 
     use crate::{
-        ClickhouseHost, KeeperConf, KeeperId, KeeperServerInfo,
-        KeeperServerType, KeeperSettings, Lgif, LogLevel, RaftConfig,
-        RaftServerSettings, ServerId, ServerSettings,
+        ClickhouseHost, DistributedDdlQueue, KeeperConf, KeeperId,
+        KeeperServerInfo, KeeperServerType, KeeperSettings, Lgif, LogLevel,
+        RaftConfig, RaftServerSettings, ServerId, ServerSettings,
     };
 
     fn log() -> slog::Logger {
@@ -1669,6 +1804,87 @@ snapshot_storage_disk=LocalSnapshotDisk
         assert_eq!(
             format!("{}", root_cause),
             "Extracted key `\"session_timeout_fake\"` from output differs from expected key `session_timeout_ms`"
+        );
+    }
+
+    #[test]
+    fn test_distributed_ddl_queries_parse_success() {
+        let log = log();
+        let data =
+            "{\"entry\":\"query-0000000000\",\"entry_version\":5,\"initiator_host\":\"ixchel\",\"initiator_port\":22001,\"cluster\":\"oximeter_cluster\",\"query\":\"CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster\",\"settings\":{\"load_balancing\":\"random\"},\"query_create_time\":\"2024-11-01T16:16:45Z\",\"host\":\"::1\",\"port\":22001,\"status\":\"Finished\",\"exception_code\":0,\"exception_text\":\"\",\"query_finish_time\":\"2024-11-01T16:16:45Z\",\"query_duration_ms\":4}
+{\"entry\":\"query-0000000000\",\"entry_version\":5,\"initiator_host\":\"ixchel\",\"initiator_port\":22001,\"cluster\":\"oximeter_cluster\",\"query\":\"CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster\",\"settings\":{\"load_balancing\":\"random\"},\"query_create_time\":\"2024-11-01T16:16:45Z\",\"host\":\"::1\",\"port\":22002,\"status\":\"Finished\",\"exception_code\":0,\"exception_text\":\"\",\"query_finish_time\":\"2024-11-01T16:16:45Z\",\"query_duration_ms\":4}
+"
+            .as_bytes();
+        let ddl = DistributedDdlQueue::parse(&log, data).unwrap();
+
+        let expected_result = vec![
+            DistributedDdlQueue{
+                entry: "query-0000000000".to_string(),
+                entry_version: 5,
+                initiator_host: "ixchel".to_string(),
+                initiator_port: 22001,
+                cluster: "oximeter_cluster".to_string(),
+                query: "CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster".to_string(),
+                settings: BTreeMap::from([
+    ("load_balancing".to_string(), "random".to_string()),
+]),
+                query_create_time: "2024-11-01T16:16:45Z".parse::<DateTime::<Utc>>().unwrap(),
+                host: Ipv6Addr::from_str("::1").unwrap(),
+                port: 22001,
+                exception_code: 0,
+                exception_text: "".to_string(),
+                status: "Finished".to_string(),
+                query_finish_time: "2024-11-01T16:16:45Z".parse::<DateTime::<Utc>>().unwrap(),
+                query_duration_ms: 4,
+            },
+            DistributedDdlQueue{
+                entry: "query-0000000000".to_string(),
+                entry_version: 5,
+                initiator_host: "ixchel".to_string(),
+                initiator_port: 22001,
+                cluster: "oximeter_cluster".to_string(),
+                query: "CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster".to_string(),
+                settings: BTreeMap::from([
+    ("load_balancing".to_string(), "random".to_string()),
+]),
+                query_create_time: "2024-11-01T16:16:45Z".parse::<DateTime::<Utc>>().unwrap(),
+                host: Ipv6Addr::from_str("::1").unwrap(),
+                port: 22002,
+                exception_code: 0,
+                exception_text: "".to_string(),
+                status: "Finished".to_string(),
+                query_finish_time: "2024-11-01T16:16:45Z".parse::<DateTime::<Utc>>().unwrap(),
+                query_duration_ms: 4,
+            },
+        ];
+        assert!(ddl == expected_result);
+    }
+
+    #[test]
+    fn test_empty_distributed_ddl_queries_parse_success() {
+        let log = log();
+        let data = "".as_bytes();
+        let ddl = DistributedDdlQueue::parse(&log, data).unwrap();
+
+        let expected_result = vec![];
+        assert!(ddl == expected_result);
+    }
+
+    #[test]
+    fn test_misshapen_distributed_ddl_queries_parse_fail() {
+        let log = log();
+        let data =
+        "{\"entry\":\"query-0000000000\",\"initiator_host\":\"ixchel\",\"initiator_port\":22001,\"cluster\":\"oximeter_cluster\",\"query\":\"CREATE DATABASE IF NOT EXISTS db1 UUID 'a49757e4-179e-42bd-866f-93ac43136e2d' ON CLUSTER oximeter_cluster\",\"settings\":{\"load_balancing\":\"random\"},\"query_create_time\":\"2024-11-01T16:16:45Z\",\"host\":\"::1\",\"port\":22001,\"status\":\"Finished\",\"exception_code\":0,\"exception_text\":\"\",\"query_finish_time\":\"2024-11-01T16:16:45Z\",\"query_duration_ms\":4}
+"
+.as_bytes();
+        let result = DistributedDdlQueue::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+            "missing field `entry_version` at line 1 column 454",
         );
     }
 }

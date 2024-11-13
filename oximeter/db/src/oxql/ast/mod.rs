@@ -14,7 +14,7 @@ use self::table_ops::BasicTableOp;
 use self::table_ops::GroupedTableOp;
 use self::table_ops::TableOp;
 pub mod cmp;
-pub(super) mod grammar;
+pub(crate) mod grammar;
 pub mod ident;
 pub mod literal;
 pub mod logical_op;

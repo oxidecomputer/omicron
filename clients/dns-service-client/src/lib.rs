@@ -2,13 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-mod diff;
-
-use crate::Error as DnsConfigError;
-use anyhow::ensure;
-pub use diff::DnsDiff;
-use std::collections::HashMap;
-
 progenitor::generate_api!(
     spec = "../../openapi/dns-server.json",
     inner_type = slog::Logger,
@@ -23,23 +16,32 @@ progenitor::generate_api!(
     post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
         slog::debug!(log, "client response"; "result" => ?result);
     }),
+    replace = {
+        DnsConfig = internal_dns_types::config::DnsConfig,
+        DnsConfigParams = internal_dns_types::config::DnsConfigParams,
+        DnsConfigZone = internal_dns_types::config::DnsConfigZone,
+        DnsRecord = internal_dns_types::config::DnsRecord,
+        Srv = internal_dns_types::config::Srv,
+    }
 );
+
+pub type DnsError = crate::Error<crate::types::Error>;
 
 pub const ERROR_CODE_UPDATE_IN_PROGRESS: &'static str = "UpdateInProgress";
 pub const ERROR_CODE_BAD_UPDATE_GENERATION: &'static str =
     "BadUpdateGeneration";
 
 /// Returns whether an error from this client should be retried
-pub fn is_retryable(error: &DnsConfigError<crate::types::Error>) -> bool {
+pub fn is_retryable(error: &DnsError) -> bool {
     let response_value = match error {
-        DnsConfigError::CommunicationError(_) => return true,
-        DnsConfigError::InvalidRequest(_)
-        | DnsConfigError::InvalidResponsePayload(_, _)
-        | DnsConfigError::UnexpectedResponse(_)
-        | DnsConfigError::InvalidUpgrade(_)
-        | DnsConfigError::ResponseBodyError(_)
-        | DnsConfigError::PreHookError(_) => return false,
-        DnsConfigError::ErrorResponse(response_value) => response_value,
+        DnsError::CommunicationError(_) => return true,
+        DnsError::InvalidRequest(_)
+        | DnsError::InvalidResponsePayload(_, _)
+        | DnsError::UnexpectedResponse(_)
+        | DnsError::InvalidUpgrade(_)
+        | DnsError::ResponseBodyError(_)
+        | DnsError::PreHookError(_) => return false,
+        DnsError::ErrorResponse(response_value) => response_value,
     };
 
     let status_code = response_value.status();
@@ -88,63 +90,4 @@ pub fn is_retryable(error: &DnsConfigError<crate::types::Error>) -> bool {
     }
 
     false
-}
-
-type DnsRecords = HashMap<String, Vec<types::DnsRecord>>;
-
-impl types::DnsConfigParams {
-    /// Given a high-level DNS configuration, return a reference to its sole
-    /// DNS zone.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if there are 0 or more than one zones in this
-    /// configuration.
-    pub fn sole_zone(&self) -> Result<&types::DnsConfigZone, anyhow::Error> {
-        ensure!(
-            self.zones.len() == 1,
-            "expected exactly one DNS zone, but found {}",
-            self.zones.len()
-        );
-        Ok(&self.zones[0])
-    }
-}
-
-impl Ord for types::DnsRecord {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        use types::DnsRecord;
-        match (self, other) {
-            // Same kinds: compare the items in them
-            (DnsRecord::A(addr1), DnsRecord::A(addr2)) => addr1.cmp(addr2),
-            (DnsRecord::Aaaa(addr1), DnsRecord::Aaaa(addr2)) => {
-                addr1.cmp(addr2)
-            }
-            (DnsRecord::Srv(srv1), DnsRecord::Srv(srv2)) => srv1
-                .target
-                .cmp(&srv2.target)
-                .then_with(|| srv1.port.cmp(&srv2.port)),
-
-            // Different kinds: define an arbitrary order among the kinds.
-            // We could use std::mem::discriminant() here but it'd be nice if
-            // this were stable over time.
-            // We define (arbitrarily): A < Aaaa < Srv
-            (DnsRecord::A(_), DnsRecord::Aaaa(_) | DnsRecord::Srv(_)) => {
-                std::cmp::Ordering::Less
-            }
-            (DnsRecord::Aaaa(_), DnsRecord::Srv(_)) => std::cmp::Ordering::Less,
-
-            // Anything else will result in "Greater".  But let's be explicit.
-            (DnsRecord::Aaaa(_), DnsRecord::A(_))
-            | (DnsRecord::Srv(_), DnsRecord::A(_))
-            | (DnsRecord::Srv(_), DnsRecord::Aaaa(_)) => {
-                std::cmp::Ordering::Greater
-            }
-        }
-    }
-}
-
-impl PartialOrd for types::DnsRecord {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
 }

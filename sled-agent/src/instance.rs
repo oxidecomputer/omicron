@@ -17,7 +17,6 @@ use crate::profile::*;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
-use backoff::BackoffError;
 use chrono::Utc;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
@@ -30,9 +29,13 @@ use omicron_common::api::internal::shared::{
     NetworkInterface, ResolvedVpcFirewallRule, SledIdentifiers, SourceNatConfig,
 };
 use omicron_common::backoff;
+use omicron_common::backoff::BackoffError;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_common::NoDebug;
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid};
+use omicron_uuid_kinds::{
+    GenericUuid, InstanceUuid, OmicronZoneUuid, PropolisUuid,
+};
+use propolis_api_types::ErrorCode as PropolisErrorCode;
 use propolis_client::Client as PropolisClient;
 use rand::prelude::IteratorRandom;
 use rand::SeedableRng;
@@ -64,7 +67,7 @@ pub enum Error {
     VnicCreation(#[from] illumos_utils::dladm::CreateVnicError),
 
     #[error("Failure from Propolis Client: {0}")]
-    Propolis(#[from] propolis_client::Error<propolis_client::types::Error>),
+    Propolis(#[from] PropolisClientError),
 
     // TODO: Remove this error; prefer to retry notifications.
     #[error("Notifying Nexus failed: {0}")]
@@ -101,7 +104,7 @@ pub enum Error {
     InvalidHostname(&'static str),
 
     #[error("Error resolving DNS name: {0}")]
-    ResolveError(#[from] internal_dns::resolver::ResolveError),
+    ResolveError(#[from] internal_dns_resolver::ResolveError),
 
     #[error("Propolis job with ID {0} is registered but not running")]
     VmNotRunning(PropolisUuid),
@@ -119,6 +122,12 @@ pub enum Error {
     FailedSendChannelClosed,
 
     #[error(
+        "Failed to send request to Instance: channel at capacity \
+         ({QUEUE_SIZE})"
+    )]
+    FailedSendChannelFull,
+
+    #[error(
         "Failed to send request from Instance Runner: Client Channel closed"
     )]
     FailedSendClientClosed,
@@ -129,6 +138,9 @@ pub enum Error {
     #[error("Instance is terminating")]
     Terminating,
 }
+
+type PropolisClientError =
+    propolis_client::Error<propolis_client::types::Error>;
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
 // an acknowledgement. This provides a hacky mechanism to "wait until the HTTP
@@ -213,18 +225,14 @@ enum InstanceRequest {
         tx: oneshot::Sender<Result<ZoneBundleMetadata, BundleError>>,
     },
     GetFilesystemPool {
-        tx: oneshot::Sender<Option<ZpoolName>>,
+        tx: oneshot::Sender<Result<Option<ZpoolName>, ManagerError>>,
     },
     CurrentState {
-        tx: oneshot::Sender<SledVmmState>,
+        tx: oneshot::Sender<Result<SledVmmState, ManagerError>>,
     },
     PutState {
         state: VmmStateRequested,
         tx: oneshot::Sender<Result<VmmPutStateResponse, ManagerError>>,
-    },
-    Terminate {
-        mark_failed: bool,
-        tx: oneshot::Sender<Result<VmmUnregisterResponse, ManagerError>>,
     },
     IssueSnapshotRequest {
         disk_id: Uuid,
@@ -239,6 +247,63 @@ enum InstanceRequest {
         ip: InstanceExternalIpBody,
         tx: oneshot::Sender<Result<(), ManagerError>>,
     },
+    RefreshExternalIps {
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+    },
+}
+
+impl InstanceRequest {
+    /// Handle an error returned by [`mpsc::Sender::try_send`] when attempting
+    /// to send a request to the instance.
+    ///
+    /// This is a bit complex: the returned [`mpsc::error::TrySendError`] will
+    /// contain the [`InstanceRequest`] we were trying to send, and thus the
+    /// [`oneshot::Sender`] for that request's response. This function handles
+    /// the `TrySendError` by inspecting the error to determine whether the
+    /// channel has closed or is full, constructing the relevant [`Error`], and
+    /// extracting the response oneshot channel from the request, and then
+    /// sending back the error over that channel.
+    ///
+    /// If sending the error back to the client fails, this function returns an
+    /// error, so that the client having given up can be logged; otherwise, it returns `Ok(())`.
+    fn fail_try_send(
+        err: mpsc::error::TrySendError<Self>,
+    ) -> Result<(), Error> {
+        let (error, this) = match err {
+            mpsc::error::TrySendError::Closed(this) => {
+                (Error::FailedSendChannelClosed, this)
+            }
+            mpsc::error::TrySendError::Full(this) => {
+                (Error::FailedSendChannelFull, this)
+            }
+        };
+
+        match this {
+            Self::RequestZoneBundle { tx } => tx
+                .send(Err(BundleError::FailedSend(anyhow!(error))))
+                .map_err(|_| Error::FailedSendClientClosed),
+            Self::GetFilesystemPool { tx } => tx
+                .send(Err(error.into()))
+                .map_err(|_| Error::FailedSendClientClosed),
+            Self::CurrentState { tx } => tx
+                .send(Err(error.into()))
+                .map_err(|_| Error::FailedSendClientClosed),
+            Self::PutState { tx, .. } => tx
+                .send(Err(error.into()))
+                .map_err(|_| Error::FailedSendClientClosed),
+            Self::IssueSnapshotRequest { tx, .. }
+            | Self::AddExternalIp { tx, .. }
+            | Self::DeleteExternalIp { tx, .. }
+            | Self::RefreshExternalIps { tx } => tx
+                .send(Err(error.into()))
+                .map_err(|_| Error::FailedSendClientClosed),
+        }
+    }
+}
+
+struct TerminateRequest {
+    mark_failed: bool,
+    tx: oneshot::Sender<Result<VmmUnregisterResponse, ManagerError>>,
 }
 
 // A small task which tracks the state of the instance, by constantly querying
@@ -248,24 +313,32 @@ enum InstanceRequest {
 struct InstanceMonitorRunner {
     client: Arc<PropolisClient>,
     tx_monitor: mpsc::Sender<InstanceMonitorRequest>,
+    log: slog::Logger,
 }
 
 impl InstanceMonitorRunner {
     async fn run(self) -> Result<(), anyhow::Error> {
-        let mut gen = 0;
+        let mut generation = 0;
         loop {
-            // State monitoring always returns the most recent state/gen pair
-            // known to Propolis.
-            let response = self
-                .client
-                .instance_state_monitor()
-                .body(propolis_client::types::InstanceStateMonitorRequest {
-                    gen,
-                })
-                .send()
-                .await?
-                .into_inner();
-            let observed_gen = response.gen;
+            let update = backoff::retry_notify(
+                backoff::retry_policy_local(),
+                || self.monitor(generation),
+                |error, delay| {
+                    warn!(
+                        self.log,
+                        "Failed to poll Propolis state";
+                        "error" => %error,
+                        "retry_in" => ?delay,
+                        "generation" => generation,
+                    );
+                },
+            )
+            .await?;
+
+            // Update the state generation for the next poll.
+            if let InstanceMonitorUpdate::State(ref state) = update {
+                generation = state.r#gen + 1;
+            }
 
             // Now that we have the response from Propolis' HTTP server, we
             // forward that to the InstanceRunner.
@@ -273,26 +346,59 @@ impl InstanceMonitorRunner {
             // It will decide the new state, provide that info to Nexus,
             // and possibly identify if we should terminate.
             let (tx, rx) = oneshot::channel();
-            self.tx_monitor
-                .send(InstanceMonitorRequest::Update { state: response, tx })
-                .await?;
+            self.tx_monitor.send(InstanceMonitorRequest { update, tx }).await?;
 
             if let Reaction::Terminate = rx.await? {
                 return Ok(());
             }
+        }
+    }
 
-            // Update the generation number we're asking for, to ensure the
-            // Propolis will only return more recent values.
-            gen = observed_gen + 1;
+    async fn monitor(
+        &self,
+        generation: u64,
+    ) -> Result<InstanceMonitorUpdate, BackoffError<PropolisClientError>> {
+        // State monitoring always returns the most recent state/gen pair
+        // known to Propolis.
+        let result = self
+            .client
+            .instance_state_monitor()
+            .body(propolis_client::types::InstanceStateMonitorRequest {
+                r#gen: generation,
+            })
+            .send()
+            .await;
+        match result {
+            Ok(response) => {
+                let state = response.into_inner();
+
+                Ok(InstanceMonitorUpdate::State(state))
+            }
+            // If the channel has closed, then there's nothing left for us to do
+            // here. Go die.
+            Err(e) if self.tx_monitor.is_closed() => {
+                Err(BackoffError::permanent(e))
+            }
+            // Otherwise, was there a known error code from Propolis?
+            Err(e) => propolis_error_code(&self.log, &e)
+                // If we were able to parse a known error code, send it along to
+                // the instance runner task.
+                .map(InstanceMonitorUpdate::Error)
+                // Otherwise, just keep trying until we see a good state or
+                // known error code.
+                .ok_or_else(|| BackoffError::transient(e)),
         }
     }
 }
 
-enum InstanceMonitorRequest {
-    Update {
-        state: propolis_client::types::InstanceStateMonitorResponse,
-        tx: oneshot::Sender<Reaction>,
-    },
+enum InstanceMonitorUpdate {
+    State(propolis_client::types::InstanceStateMonitorResponse),
+    Error(PropolisErrorCode),
+}
+
+struct InstanceMonitorRequest {
+    update: InstanceMonitorUpdate,
+    tx: oneshot::Sender<Reaction>,
 }
 
 struct InstanceRunner {
@@ -312,6 +418,8 @@ struct InstanceRunner {
 
     // Properties visible to Propolis
     properties: propolis_client::types::InstanceProperties,
+    vcpus: u8,
+    memory_mib: u64,
 
     // The ID of the Propolis server (and zone) running this instance
     propolis_id: PropolisUuid,
@@ -336,6 +444,7 @@ struct InstanceRunner {
 
     // Disk related properties
     requested_disks: Vec<propolis_client::types::DiskRequest>,
+    boot_settings: Option<propolis_client::types::BootSettings>,
     cloud_init_bytes: Option<NoDebug<String>>,
 
     // Internal State management
@@ -362,7 +471,7 @@ struct InstanceRunner {
 }
 
 impl InstanceRunner {
-    async fn run(mut self) {
+    async fn run(mut self, mut terminate_rx: mpsc::Receiver<TerminateRequest>) {
         use InstanceRequest::*;
         while !self.should_terminate {
             tokio::select! {
@@ -370,9 +479,9 @@ impl InstanceRunner {
 
                 // Handle messages from our own "Monitor the VMM" task.
                 request = self.rx_monitor.recv() => {
-                    use InstanceMonitorRequest::*;
+                    use InstanceMonitorUpdate::*;
                     match request {
-                        Some(Update { state, tx }) => {
+                        Some(InstanceMonitorRequest { update: State(state), tx }) => {
                             let observed = ObservedPropolisState::new(&state);
                             let reaction = self.observe_state(&observed).await;
                             self.publish_state_to_nexus().await;
@@ -385,6 +494,41 @@ impl InstanceRunner {
                                 warn!(self.log, "InstanceRunner failed to send to InstanceMonitorRunner");
                             }
                         },
+                         Some(InstanceMonitorRequest { update: Error(code), tx }) => {
+                            let reaction = if code == PropolisErrorCode::NoInstance {
+                                // If we see a `NoInstance` error code from
+                                // Propolis after the instance has been ensured,
+                                // this means that Propolis must have crashed
+                                // and been restarted, and now no longer
+                                // remembers that it once had a VM. In that
+                                // case, this Propolis is permanently busted, so
+                                // mark it as Failed and tear down the zone.
+                                warn!(
+                                    self.log,
+                                    "Propolis has lost track of its instance! \
+                                     It must have crashed. Moving to Failed";
+                                    "error_code" => ?code,
+                                );
+                                self.terminate(true).await;
+                                Reaction::Terminate
+                            } else {
+                                // The other error codes we know of are not
+                                // expected here --- they all relate to the
+                                // instance-creation APIs. So I guess we'll just
+                                // whine about it and then keep trying to
+                                // monitor the instance.
+                                warn!(
+                                    self.log,
+                                    "Propolis state monitor returned an \
+                                     unexpected error code";
+                                    "error_code" => ?code,
+                                );
+                                Reaction::Continue
+                            };
+                            if let Err(_) = tx.send(reaction) {
+                                warn!(self.log, "InstanceRunner failed to send to InstanceMonitorRunner");
+                            }
+                        },
                         // NOTE: This case shouldn't really happen, as we keep a copy
                         // of the sender alive in "self.tx_monitor".
                         None => {
@@ -393,70 +537,103 @@ impl InstanceRunner {
                             self.terminate(mark_failed).await;
                         },
                     }
-
                 },
+                // Requests to terminate the instance take priority over any
+                // other request to the instance.
+                request = terminate_rx.recv() => {
+                    self.handle_termination_request(request, None).await;
+                    break;
+                }
+
                 // Handle external requests to act upon the instance.
                 request = self.rx.recv() => {
-                    let request_variant = request.as_ref().map(|r| r.to_string());
-                    let result = match request {
-                        Some(RequestZoneBundle { tx }) => {
-                            tx.send(self.request_zone_bundle().await)
-                                .map_err(|_| Error::FailedSendClientClosed)
-                        },
-                        Some(GetFilesystemPool { tx } ) => {
-                            tx.send(self.get_filesystem_zpool())
-                                .map_err(|_| Error::FailedSendClientClosed)
-                        },
-                        Some(CurrentState{ tx }) => {
-                            tx.send(self.current_state())
-                                .map_err(|_| Error::FailedSendClientClosed)
-                        },
-                        Some(PutState{ state, tx }) => {
-                             tx.send(self.put_state(state).await
-                                .map(|r| VmmPutStateResponse { updated_runtime: Some(r) })
-                                .map_err(|e| e.into()))
-                                .map_err(|_| Error::FailedSendClientClosed)
-                        },
-                        Some(Terminate { mark_failed, tx }) => {
-                            tx.send(Ok(VmmUnregisterResponse {
-                                updated_runtime: Some(self.terminate(mark_failed).await)
-                            }))
-                            .map_err(|_| Error::FailedSendClientClosed)
-                        },
-                        Some(IssueSnapshotRequest { disk_id, snapshot_id, tx }) => {
-                            tx.send(
-                                self.issue_snapshot_request(
-                                    disk_id,
-                                    snapshot_id
-                                ).await.map_err(|e| e.into())
-                            )
-                            .map_err(|_| Error::FailedSendClientClosed)
-                        },
-                        Some(AddExternalIp { ip, tx }) => {
-                            tx.send(self.add_external_ip(&ip).await.map_err(|e| e.into()))
-                            .map_err(|_| Error::FailedSendClientClosed)
-                        },
-                        Some(DeleteExternalIp { ip, tx }) => {
-                            tx.send(self.delete_external_ip(&ip).await.map_err(|e| e.into()))
-                            .map_err(|_| Error::FailedSendClientClosed)
-                        },
+                    let request = match request {
+                        Some(r) => r,
                         None => {
                             warn!(self.log, "Instance request channel closed; shutting down");
                             let mark_failed = false;
                             self.terminate(mark_failed).await;
                             break;
-                        },
+                        }
                     };
+                    let request_variant = request.to_string();
+                    // Okay, this is a little bit wacky: if we are waiting for
+                    // one of the instance operations we run here to come back,
+                    // and a termination request comes in, we want to give up on
+                    // the outstanding operation and honor the termination
+                    // request immediately. This is in case the instance
+                    // operation has gotten stuck: we don't want it to prevent
+                    // the instance from terminating because something else is
+                    // wedged.
+                    //
+                    // Therefore, we're going to select between the future that
+                    // actually performs the instance op and receiving another
+                    // request from the termination  channel.
+                    let op = async {
+                        match request {
+                            RequestZoneBundle { tx } => {
+                                tx.send(self.request_zone_bundle().await)
+                                    .map_err(|_| Error::FailedSendClientClosed)
+                            },
+                            GetFilesystemPool { tx } => {
+                                tx.send(Ok(self.get_filesystem_zpool()))
+                                    .map_err(|_| Error::FailedSendClientClosed)
+                            },
+                            CurrentState{ tx } => {
+                                tx.send(Ok(self.current_state()))
+                                    .map_err(|_| Error::FailedSendClientClosed)
+                            },
+                            PutState{ state, tx } => {
+                                tx.send(self.put_state(state).await
+                                    .map(|r| VmmPutStateResponse { updated_runtime: Some(r) })
+                                    .map_err(|e| e.into()))
+                                    .map_err(|_| Error::FailedSendClientClosed)
+                            },
+                            IssueSnapshotRequest { disk_id, snapshot_id, tx } => {
+                                tx.send(
+                                    self.issue_snapshot_request(
+                                        disk_id,
+                                        snapshot_id
+                                    ).await.map_err(|e| e.into())
+                                )
+                                .map_err(|_| Error::FailedSendClientClosed)
+                            },
+                            AddExternalIp { ip, tx } => {
+                                tx.send(self.add_external_ip(&ip).await.map_err(|e| e.into()))
+                                .map_err(|_| Error::FailedSendClientClosed)
+                            },
+                            DeleteExternalIp { ip, tx } => {
+                                tx.send(self.delete_external_ip(&ip).await.map_err(|e| e.into()))
+                                .map_err(|_| Error::FailedSendClientClosed)
+                            },
+                            RefreshExternalIps { tx } => {
+                                tx.send(self.refresh_external_ips().map_err(|e| e.into()))
+                                .map_err(|_| Error::FailedSendClientClosed)
+                            }
+                        }
+                    };
+                    tokio::select! {
+                        biased;
 
-                    if let Err(err) = result {
-                        warn!(
-                            self.log,
-                            "Error handling request";
-                            "request" => request_variant.unwrap(),
-                            "err" => ?err,
+                        request = terminate_rx.recv() => {
+                            self.handle_termination_request(
+                                request,
+                                Some(&request_variant),
+                            ).await;
+                            break;
+                        }
 
-                        );
-                    }
+                        result = op => {
+                            if let Err(err) = result {
+                                warn!(
+                                    self.log,
+                                    "Error handling request";
+                                    "request" => request_variant,
+                                    "err" => ?err,
+                                );
+                            }
+                        }
+                    };
                 }
 
             }
@@ -474,14 +651,11 @@ impl InstanceRunner {
                 RequestZoneBundle { tx } => tx
                     .send(Err(BundleError::InstanceTerminating))
                     .map_err(|_| ()),
-                GetFilesystemPool { tx } => tx.send(None).map_err(|_| ()),
+                GetFilesystemPool { tx } => tx.send(Ok(None)).map_err(|_| ()),
                 CurrentState { tx } => {
-                    tx.send(self.current_state()).map_err(|_| ())
+                    tx.send(Ok(self.current_state())).map_err(|_| ())
                 }
                 PutState { tx, .. } => {
-                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
-                }
-                Terminate { tx, .. } => {
                     tx.send(Err(Error::Terminating.into())).map_err(|_| ())
                 }
                 IssueSnapshotRequest { tx, .. } => {
@@ -493,7 +667,19 @@ impl InstanceRunner {
                 DeleteExternalIp { tx, .. } => {
                     tx.send(Err(Error::Terminating.into())).map_err(|_| ())
                 }
+                RefreshExternalIps { tx } => {
+                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
+                }
             };
+        }
+
+        // Anyone else who was trying to ask us to go die will be happy to learn
+        // that we have now done so!
+        while let Some(TerminateRequest { tx, .. }) = terminate_rx.recv().await
+        {
+            let _ = tx.send(Ok(VmmUnregisterResponse {
+                updated_runtime: Some(self.current_state()),
+            }));
         }
     }
 
@@ -642,7 +828,7 @@ impl InstanceRunner {
     async fn propolis_state_put(
         &self,
         request: propolis_client::types::InstanceStateRequested,
-    ) -> Result<(), Error> {
+    ) -> Result<(), PropolisClientError> {
         let res = self
             .running_state
             .as_ref()
@@ -655,11 +841,10 @@ impl InstanceRunner {
 
         if let Err(e) = &res {
             error!(self.log, "Error from Propolis client: {:?}", e;
-                   "status" => ?e.status());
+               "status" => ?e.status());
         }
 
-        res?;
-        Ok(())
+        res.map(|_| ())
     }
 
     /// Sends an instance ensure request to this instance's Propolis.
@@ -728,6 +913,8 @@ impl InstanceRunner {
 
         let request = propolis_client::types::InstanceEnsureRequest {
             properties: self.properties.clone(),
+            vcpus: self.vcpus,
+            memory: self.memory_mib,
             nics,
             disks: self
                 .requested_disks
@@ -735,6 +922,7 @@ impl InstanceRunner {
                 .cloned()
                 .map(Into::into)
                 .collect(),
+            boot_settings: self.boot_settings.clone(),
             migrate,
             cloud_init_bytes: self.cloud_init_bytes.clone().map(|x| x.0),
         };
@@ -772,6 +960,7 @@ impl InstanceRunner {
         let runner = InstanceMonitorRunner {
             client: client.clone(),
             tx_monitor: self.tx_monitor.clone(),
+            log: self.log.clone(),
         };
         let log = self.log.clone();
         let monitor_handle = tokio::task::spawn(async move {
@@ -896,7 +1085,23 @@ impl InstanceRunner {
             }
         }
 
-        let Some(primary_nic) = self.requested_nics.get(0) else {
+        let Some(primary_nic) = self.primary_nic() else {
+            return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
+        };
+
+        self.port_manager.external_ips_ensure(
+            primary_nic.id,
+            primary_nic.kind,
+            Some(self.source_nat),
+            self.ephemeral_ip,
+            &self.floating_ips,
+        )?;
+
+        Ok(())
+    }
+
+    fn refresh_external_ips_inner(&mut self) -> Result<(), Error> {
+        let Some(primary_nic) = self.primary_nic() else {
             return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
         };
 
@@ -944,7 +1149,7 @@ impl InstanceRunner {
             }
         }
 
-        let Some(primary_nic) = self.requested_nics.get(0) else {
+        let Some(primary_nic) = self.primary_nic() else {
             return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
         };
 
@@ -958,16 +1163,84 @@ impl InstanceRunner {
 
         Ok(())
     }
+
+    fn primary_nic(&self) -> Option<&NetworkInterface> {
+        self.requested_nics.iter().find(|nic| nic.primary)
+    }
+}
+
+fn propolis_error_code(
+    log: &slog::Logger,
+    error: &PropolisClientError,
+) -> Option<PropolisErrorCode> {
+    // Is this a structured error response from the Propolis server?
+    let propolis_client::Error::ErrorResponse(ref rv) = &error else {
+        return None;
+    };
+
+    let code = rv.error_code.as_deref()?;
+    match code.parse::<PropolisErrorCode>() {
+        Err(parse_error) => {
+            warn!(log, "Propolis returned an unknown error code: {code:?}";
+                "status" => ?error.status(),
+                "error" => %error,
+                "code" => ?code,
+                "parse_error" => ?parse_error);
+            None
+        }
+        Ok(code) => Some(code),
+    }
 }
 
 /// Describes a single Propolis server that incarnates a specific instance.
+#[derive(Clone)]
 pub struct Instance {
     id: InstanceUuid,
 
+    /// Request channel for communicating with the instance task.
+    ///
+    /// # Extremely Serious Warning
+    ///
+    /// This channel is used by the `InstanceManager` task to communicate to the
+    /// instance task corresponding to each instance on this sled. Note that all
+    /// of the methods on this type which send [`InstanceRequest`]s over this
+    /// channel use [`mpsc::Sender::try_send`], which fails if the channel is at
+    /// capacity, and *not* [`mpsc::Sender::send`], which is an async method
+    /// that *waits* until capacity is available. THIS IS VERY IMPORTANT.
+    ///
+    /// This is because the `InstanceManager` task will call these methods in
+    /// its request-processing loop as it receives requests from clients, in
+    /// order to forward the request to the relevant instance. If the instance's
+    /// channel has filled up because the instance is currently processing a
+    /// slow request, `await`ing a call to [`mpsc::Sender::send`] will block the
+    /// `InstanceManager`'s main loop from proceeding until the instance task
+    /// has finished what it's doing and drained the next request from channel.
+    /// Critically, this means that requests to *other, unrelated instances* on
+    /// this sled would have to wait until this instance has finished what it's
+    /// doing. That means a single deadlocked instance task, which is waiting
+    /// for something that never completes, can render *all* instances on this
+    /// sled inaccessible.
+    ///
+    /// Therefore, any time we send requests to the `Instance` over this channel
+    /// from code that's called in the `InstanceManager`'s run loop MUST use
+    /// [`mpsc::Sender::try_send`] rather than [`mpsc::Sender::send`]. Should
+    /// the channel be at capacity, we return an
+    /// [`Error::FailedSendChannelFull`], which eventually becomes a 503 Service
+    /// Unavailable error when returned to the client. It is acceptable to call
+    /// [`mpsc::Sender::send`] on this channel ONLY from code which runs
+    /// exclusively in tasks that are not blocking the `InstanceManager`'s run
+    /// loop.
     tx: mpsc::Sender<InstanceRequest>,
 
+    /// Sender for requests to terminate the instance.
+    ///
+    /// These are sent over a separate channel so that they can be prioritized
+    /// over all other requests to the instance.
+    terminate_tx: mpsc::Sender<TerminateRequest>,
+
+    /// This is reference-counted so that the `Instance` struct may be cloned.
     #[allow(dead_code)]
-    runner_handle: tokio::task::JoinHandle<()>,
+    runner_handle: Arc<tokio::task::JoinHandle<()>>,
 }
 
 #[derive(Debug)]
@@ -1063,6 +1336,19 @@ impl Instance {
         let (tx, rx) = mpsc::channel(QUEUE_SIZE);
         let (tx_monitor, rx_monitor) = mpsc::channel(1);
 
+        // Request channel for terminating the instance.
+        //
+        // This is a separate channel from the main request channel (`self.rx`)
+        // because we would like to be able to prioritize requests to terminate, and
+        // handle them even when the instance's main request channel may have filled
+        // up.
+        //
+        // Note also that this is *not* part of the `InstanceRunner` struct,
+        // because it's necessary to split mutable borrows in order to allow
+        // selecting between the actual instance operation (which must mutate
+        // the `InstanceRunner`) and awaiting a termination request.
+        let (terminate_tx, terminate_rx) = mpsc::channel(QUEUE_SIZE);
+
         let metadata = propolis_client::types::InstanceMetadata {
             project_id: metadata.project_id,
             silo_id: metadata.silo_id,
@@ -1084,15 +1370,13 @@ impl Instance {
                 id: id.into_untyped_uuid(),
                 name: hardware.properties.hostname.to_string(),
                 description: "Test description".to_string(),
-                image_id: Uuid::nil(),
-                bootrom_id: Uuid::nil(),
-                // TODO: Align the byte type w/propolis.
-                memory: hardware.properties.memory.to_whole_mebibytes(),
-                // TODO: we should probably make propolis aligned with
-                // InstanceCpuCount here, to avoid any casting...
-                vcpus: hardware.properties.ncpus.0 as u8,
                 metadata,
             },
+            // TODO: we should probably make propolis aligned with
+            // InstanceCpuCount here, to avoid any casting...
+            vcpus: hardware.properties.ncpus.0 as u8,
+            // TODO: Align the byte type w/propolis.
+            memory_mib: hardware.properties.memory.to_whole_mebibytes(),
             propolis_id,
             propolis_addr,
             vnic_allocator,
@@ -1105,6 +1389,7 @@ impl Instance {
             dhcp_config,
             requested_disks: hardware.disks,
             cloud_init_bytes: hardware.cloud_init_bytes,
+            boot_settings: hardware.boot_settings,
             state: InstanceStates::new(vmm_runtime, migration_id),
             running_state: None,
             nexus_client,
@@ -1116,9 +1401,14 @@ impl Instance {
         };
 
         let runner_handle =
-            tokio::task::spawn(async move { runner.run().await });
+            tokio::task::spawn(async move { runner.run(terminate_rx).await });
 
-        Ok(Instance { id, tx, runner_handle })
+        Ok(Instance {
+            id,
+            tx,
+            runner_handle: Arc::new(runner_handle),
+            terminate_tx,
+        })
     }
 
     pub fn id(&self) -> InstanceUuid {
@@ -1126,35 +1416,31 @@ impl Instance {
     }
 
     /// Create bundle from an instance zone.
-    pub async fn request_zone_bundle(
+    pub fn request_zone_bundle(
         &self,
         tx: oneshot::Sender<Result<ZoneBundleMetadata, BundleError>>,
-    ) -> Result<(), BundleError> {
+    ) -> Result<(), Error> {
         self.tx
-            .send(InstanceRequest::RequestZoneBundle { tx })
-            .await
-            .map_err(|err| BundleError::FailedSend(anyhow!(err)))?;
-        Ok(())
+            .try_send(InstanceRequest::RequestZoneBundle { tx })
+            .or_else(InstanceRequest::fail_try_send)
     }
 
-    pub async fn get_filesystem_zpool(
+    pub fn get_filesystem_zpool(
         &self,
-    ) -> Result<Option<ZpoolName>, Error> {
-        let (tx, rx) = oneshot::channel();
+        tx: oneshot::Sender<Result<Option<ZpoolName>, ManagerError>>,
+    ) -> Result<(), Error> {
         self.tx
-            .send(InstanceRequest::GetFilesystemPool { tx })
-            .await
-            .map_err(|_| Error::FailedSendChannelClosed)?;
-        Ok(rx.await?)
+            .try_send(InstanceRequest::GetFilesystemPool { tx })
+            .or_else(InstanceRequest::fail_try_send)
     }
 
-    pub async fn current_state(&self) -> Result<SledVmmState, Error> {
-        let (tx, rx) = oneshot::channel();
+    pub fn current_state(
+        &self,
+        tx: oneshot::Sender<Result<SledVmmState, ManagerError>>,
+    ) -> Result<(), Error> {
         self.tx
-            .send(InstanceRequest::CurrentState { tx })
-            .await
-            .map_err(|_| Error::FailedSendChannelClosed)?;
-        Ok(rx.await?)
+            .try_send(InstanceRequest::CurrentState { tx })
+            .or_else(InstanceRequest::fail_try_send)
     }
 
     /// Attempts to update the current state of the instance by launching a
@@ -1168,71 +1454,82 @@ impl Instance {
     /// instance begins to stop when Propolis has just begun to handle a prior
     /// request to reboot, the instance's state may proceed from Stopping to
     /// Rebooting to Running to Stopping to Stopped.
-    pub async fn put_state(
+    pub fn put_state(
         &self,
         tx: oneshot::Sender<Result<VmmPutStateResponse, ManagerError>>,
         state: VmmStateRequested,
     ) -> Result<(), Error> {
         self.tx
-            .send(InstanceRequest::PutState { state, tx })
-            .await
-            .map_err(|_| Error::FailedSendChannelClosed)?;
-        Ok(())
+            .try_send(InstanceRequest::PutState { state, tx })
+            .or_else(InstanceRequest::fail_try_send)
     }
 
     /// Rudely terminates this instance's Propolis (if it has one) and
     /// immediately transitions the instance to the Destroyed state.
-    pub async fn terminate(
+    pub fn terminate(
         &self,
         tx: oneshot::Sender<Result<VmmUnregisterResponse, ManagerError>>,
         mark_failed: bool,
     ) -> Result<(), Error> {
-        self.tx
-            .send(InstanceRequest::Terminate { mark_failed, tx })
-            .await
-            .map_err(|_| Error::FailedSendChannelClosed)?;
-        Ok(())
+        self.terminate_tx
+            .try_send(TerminateRequest { mark_failed, tx })
+            .or_else(|err| match err {
+                mpsc::error::TrySendError::Closed(TerminateRequest {
+                    tx,
+                    ..
+                }) => tx.send(Err(Error::FailedSendChannelClosed.into())),
+                mpsc::error::TrySendError::Full(TerminateRequest {
+                    tx,
+                    ..
+                }) => tx.send(Err(Error::FailedSendChannelFull.into())),
+            })
+            .map_err(|_| Error::FailedSendClientClosed)
     }
 
-    pub async fn issue_snapshot_request(
+    pub fn issue_snapshot_request(
         &self,
         tx: oneshot::Sender<Result<(), ManagerError>>,
         disk_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
         self.tx
-            .send(InstanceRequest::IssueSnapshotRequest {
+            .try_send(InstanceRequest::IssueSnapshotRequest {
                 disk_id,
                 snapshot_id,
                 tx,
             })
-            .await
-            .map_err(|_| Error::FailedSendChannelClosed)?;
-        Ok(())
+            .or_else(InstanceRequest::fail_try_send)
     }
 
-    pub async fn add_external_ip(
+    pub fn add_external_ip(
         &self,
         tx: oneshot::Sender<Result<(), ManagerError>>,
         ip: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
         self.tx
-            .send(InstanceRequest::AddExternalIp { ip: *ip, tx })
-            .await
-            .map_err(|_| Error::FailedSendChannelClosed)?;
-        Ok(())
+            .try_send(InstanceRequest::AddExternalIp { ip: *ip, tx })
+            .or_else(InstanceRequest::fail_try_send)
     }
 
-    pub async fn delete_external_ip(
+    pub fn delete_external_ip(
         &self,
         tx: oneshot::Sender<Result<(), ManagerError>>,
         ip: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
         self.tx
-            .send(InstanceRequest::DeleteExternalIp { ip: *ip, tx })
-            .await
-            .map_err(|_| Error::FailedSendChannelClosed)?;
-        Ok(())
+            .try_send(InstanceRequest::DeleteExternalIp { ip: *ip, tx })
+            .or_else(InstanceRequest::fail_try_send)
+    }
+
+    /// Reinstalls an instance's set of external IPs within OPTE, using
+    /// up-to-date IP<->IGW mappings. This will not disrupt existing flows.
+    pub fn refresh_external_ips(
+        &self,
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+    ) -> Result<(), Error> {
+        self.tx
+            .try_send(InstanceRequest::RefreshExternalIps { tx })
+            .or_else(InstanceRequest::fail_try_send)
     }
 }
 
@@ -1358,7 +1655,29 @@ impl InstanceRunner {
         };
 
         if let Some(p) = propolis_state {
-            self.propolis_state_put(p).await?;
+            if let Err(e) = self.propolis_state_put(p).await {
+                match propolis_error_code(&self.log, &e) {
+                    Some(
+                        code @ PropolisErrorCode::NoInstance
+                        | code @ PropolisErrorCode::CreateFailed,
+                    ) => {
+                        error!(self.log,
+                            "Propolis error code indicates VMM failure";
+                            "code" => ?code,
+                        );
+                        self.terminate(true).await;
+                        // We've transitioned to `Failed`, so just return the
+                        // failed state normally. We return early here instead
+                        // of falling through because we don't want to overwrite
+                        // `self.state` with the published VMM state determined
+                        // above.
+                        return Ok(self.state.sled_instance_state());
+                    }
+                    _ => {
+                        return Err(Error::Propolis(e));
+                    }
+                }
+            }
         }
         if let Some(s) = next_published {
             self.state.transition_vmm(s, Utc::now());
@@ -1417,7 +1736,9 @@ impl InstanceRunner {
             .with_zone_root_path(root)
             .with_zone_image_paths(&["/opt/oxide".into()])
             .with_zone_type("propolis-server")
-            .with_unique_name(self.propolis_id.into_untyped_uuid())
+            .with_unique_name(OmicronZoneUuid::from_untyped_uuid(
+                self.propolis_id.into_untyped_uuid(),
+            ))
             .with_datasets(&[])
             .with_filesystems(&[])
             .with_data_links(&[])
@@ -1501,6 +1822,64 @@ impl InstanceRunner {
         Ok(PropolisSetup { client, running_zone })
     }
 
+    async fn handle_termination_request(
+        &mut self,
+        req: Option<TerminateRequest>,
+        current_req: Option<&str>,
+    ) {
+        match req {
+            Some(TerminateRequest { tx, mark_failed }) => {
+                if let Some(request) = current_req {
+                    info!(
+                        self.log,
+                        "Received request to terminate instance while waiting \
+                         on an ongoing request";
+                        "request" => %request,
+                        "mark_failed" => mark_failed,
+                    );
+                } else {
+                    info!(
+                        self.log,
+                        "Received request to terminate instance";
+                        "mark_failed" => mark_failed,
+                    );
+                }
+
+                let result = tx
+                    .send(Ok(VmmUnregisterResponse {
+                        updated_runtime: Some(
+                            self.terminate(mark_failed).await,
+                        ),
+                    }))
+                    .map_err(|_| Error::FailedSendClientClosed);
+                if let Err(err) = result {
+                    warn!(
+                        self.log,
+                        "Error handling request to terminate instance";
+                        "err" => ?err,
+                    );
+                }
+            }
+            None => {
+                if let Some(request) = current_req {
+                    warn!(
+                        self.log,
+                        "Instance termination request channel closed while \
+                         waiting on an ongoing request; shutting down";
+                        "request" => %request,
+                    );
+                } else {
+                    warn!(
+                        self.log,
+                        "Instance termination request channel closed; \
+                         shutting down";
+                    );
+                }
+                self.terminate(false).await;
+            }
+        };
+    }
+
     async fn terminate(&mut self, mark_failed: bool) -> SledVmmState {
         self.terminate_inner().await;
         self.state.terminate_rudely(mark_failed);
@@ -1571,6 +1950,10 @@ impl InstanceRunner {
         }
         out
     }
+
+    fn refresh_external_ips(&mut self) -> Result<(), Error> {
+        self.refresh_external_ips_inner()
+    }
 }
 
 #[cfg(all(test, target_os = "illumos"))]
@@ -1590,7 +1973,7 @@ mod tests {
     use illumos_utils::zone::MockZones;
     use illumos_utils::zone::__mock_MockZones::__boot::Context as MockZonesBootContext;
     use illumos_utils::zone::__mock_MockZones::__id::Context as MockZonesIdContext;
-    use internal_dns::resolver::Resolver;
+    use internal_dns_resolver::Resolver;
     use omicron_common::api::external::{
         ByteCount, Generation, Hostname, InstanceCpuCount,
     };
@@ -1719,25 +2102,17 @@ mod tests {
     // TODO: factor out, this is also in sled-agent-sim.
     fn propolis_mock_server(
         log: &Logger,
-    ) -> (HttpServer<Arc<propolis_mock_server::Context>>, PropolisClient) {
+    ) -> (propolis_mock_server::Server, PropolisClient) {
         let propolis_bind_address =
             SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0); // allocate port
-        let dropshot_config = dropshot::ConfigDropshot {
+        let dropshot_config = propolis_mock_server::Config {
             bind_address: propolis_bind_address,
             ..Default::default()
         };
-        let propolis_log = log.new(o!("component" => "propolis-server-mock"));
-        let private =
-            Arc::new(propolis_mock_server::Context::new(propolis_log));
         info!(log, "Starting mock propolis-server...");
-        let dropshot_log = log.new(o!("component" => "dropshot"));
-        let mock_api = propolis_mock_server::api();
 
-        let srv = dropshot::ServerBuilder::new(mock_api, private, dropshot_log)
-            .config(dropshot_config)
-            .start()
+        let srv = propolis_mock_server::start(dropshot_config, log.clone())
             .expect("couldn't create mock propolis-server");
-
         let client = propolis_client::Client::new(&format!(
             "http://{}",
             srv.local_addr()
@@ -1832,6 +2207,7 @@ mod tests {
                 search_domains: vec![],
             },
             disks: vec![],
+            boot_settings: None,
             cloud_init_bytes: None,
         };
 
@@ -1928,7 +2304,6 @@ mod tests {
         // pretending we're InstanceManager::ensure_state, start our "instance"
         // (backed by fakes and propolis_mock_server)
         inst.put_state(put_tx, VmmStateRequested::Running)
-            .await
             .expect("failed to send Instance::put_state");
 
         // even though we ignore this result at instance creation time in
@@ -2022,7 +2397,6 @@ mod tests {
         // pretending we're InstanceManager::ensure_state, try in vain to start
         // our "instance", but no propolis server is running
         inst.put_state(put_tx, VmmStateRequested::Running)
-            .await
             .expect("failed to send Instance::put_state");
 
         let timeout_fut = timeout(TIMEOUT_DURATION, put_rx);
@@ -2129,7 +2503,6 @@ mod tests {
         // pretending we're InstanceManager::ensure_state, try in vain to start
         // our "instance", but the zone never finishes installing
         inst.put_state(put_tx, VmmStateRequested::Running)
-            .await
             .expect("failed to send Instance::put_state");
 
         // Timeout our future waiting for the instance-state-change at 1s. This

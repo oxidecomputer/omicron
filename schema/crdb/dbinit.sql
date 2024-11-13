@@ -42,6 +42,46 @@ ALTER DEFAULT PRIVILEGES GRANT INSERT, SELECT, UPDATE, DELETE ON TABLES to omicr
  */
 ALTER RANGE default CONFIGURE ZONE USING num_replicas = 5;
 
+
+/*
+ * The deployment strategy for clickhouse 
+ */
+CREATE TYPE IF NOT EXISTS omicron.public.clickhouse_mode AS ENUM (
+   -- Only deploy a single node clickhouse 
+   'single_node_only',
+
+   -- Only deploy a clickhouse cluster without any single node deployments 
+   'cluster_only',
+
+   -- Deploy both a single node and cluster deployment.
+   -- This is the strategy for stage 1 described in RFD 468
+   'both'
+);
+
+/*
+ * A planning policy for clickhouse for a single multirack setup
+ *
+ * We currently implicitly tie this policy to a rack, as we don't yet support
+ * multirack. Multiple parts of this database schema are going to have to change
+ * to support multirack, so we add one more for now.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.clickhouse_policy (
+    -- Monotonically increasing version for all policies
+    --
+    -- This is similar to `bp_target` which will also require being changed for
+    -- multirack to associate with some sort of rack group ID.
+    version INT8 PRIMARY KEY,
+
+    clickhouse_mode omicron.public.clickhouse_mode NOT NULL,
+
+    -- Only greater than 0 when clickhouse cluster is enabled
+    clickhouse_cluster_target_servers INT2 NOT NULL,
+    -- Only greater than 0 when clickhouse cluster is enabled
+    clickhouse_cluster_target_keepers INT2 NOT NULL,
+
+    time_created TIMESTAMPTZ NOT NULL
+);
+
 /*
  * Racks
  */
@@ -542,6 +582,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.dataset (
     /* Only valid if kind = zone -- the name of this zone */
     zone_name TEXT,
 
+    quota INT8,
+    reservation INT8,
+    compression TEXT,
+
     /* Crucible must make use of 'size_used'; other datasets manage their own storage */
     CONSTRAINT size_used_column_set_for_crucible CHECK (
       (kind != 'crucible') OR
@@ -575,6 +619,8 @@ CREATE INDEX IF NOT EXISTS lookup_dataset_by_zpool on omicron.public.dataset (
     id
 ) WHERE pool_id IS NOT NULL AND time_deleted IS NULL;
 
+CREATE INDEX IF NOT EXISTS lookup_dataset_by_ip on omicron.public.dataset (ip);
+
 /*
  * A region of space allocated to Crucible Downstairs, within a dataset.
  */
@@ -597,7 +643,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.region (
 
     port INT4,
 
-    read_only BOOL NOT NULL
+    read_only BOOL NOT NULL,
+
+    deleting BOOL NOT NULL
 );
 
 /*
@@ -619,6 +667,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_region_by_dataset on omicron.public.reg
 CREATE INDEX IF NOT EXISTS lookup_regions_missing_ports
     on omicron.public.region (id)
     WHERE port IS NULL;
+
+CREATE INDEX IF NOT EXISTS lookup_regions_by_read_only
+    on omicron.public.region (read_only);
 
 /*
  * A snapshot of a region, within a dataset.
@@ -652,6 +703,10 @@ CREATE INDEX IF NOT EXISTS lookup_region_by_dataset on omicron.public.region_sna
 
 CREATE INDEX IF NOT EXISTS lookup_region_snapshot_by_region_id on omicron.public.region_snapshot (
     region_id
+);
+
+CREATE INDEX IF NOT EXISTS lookup_region_snapshot_by_deleting on omicron.public.region_snapshot (
+    deleting
 );
 
 /*
@@ -1108,7 +1163,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      * by the control plane.
      */
     auto_restart_policy omicron.public.instance_auto_restart,
-
     /*
      * The cooldown period that must elapse between consecutive auto restart
      * attempts. If this is NULL, no cooldown period is explicitly configured
@@ -1116,6 +1170,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      */
      auto_restart_cooldown INTERVAL,
 
+    /*
+     * Which disk, if any, is the one this instance should be directed to boot
+     * from. With a boot device selected, guest OSes cannot configure their
+     * boot policy for future boots, so also permit NULL to indicate a guest
+     * does not want our policy, and instead should be permitted control over
+     * its boot-time fates.
+     */
+    boot_disk_id UUID,
 
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
@@ -1579,6 +1641,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.network_interface (
     transit_ips INET[] NOT NULL DEFAULT ARRAY[]
 );
 
+CREATE INDEX IF NOT EXISTS instance_network_interface_mac
+    ON omicron.public.network_interface (mac) STORING (time_deleted);
+
 /* A view of the network_interface table for just instance-kind records. */
 CREATE VIEW IF NOT EXISTS omicron.public.instance_network_interface AS
 SELECT
@@ -1757,6 +1822,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_router_by_vpc ON omicron.public.vpc_rou
 ) WHERE
     time_deleted IS NULL;
 
+/* Index used to accelerate vpc_increment_rpw_version and list. */
+CREATE INDEX IF NOT EXISTS lookup_routers_in_vpc ON omicron.public.vpc_router (
+    vpc_id
+) WHERE
+    time_deleted IS NULL;
+
 CREATE TYPE IF NOT EXISTS omicron.public.router_route_kind AS ENUM (
     'default',
     'vpc_subnet',
@@ -1786,6 +1857,57 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_route_by_router ON omicron.public.route
     name
 ) WHERE
     time_deleted IS NULL;
+
+CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    vpc_id UUID NOT NULL,
+    rcgen INT NOT NULL,
+    resolved_version INT NOT NULL DEFAULT 0
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_internet_gateway_by_vpc ON omicron.public.internet_gateway (
+    vpc_id,
+    name
+) WHERE
+    time_deleted IS NULL;
+
+CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway_ip_pool (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    internet_gateway_id UUID,
+    ip_pool_id UUID
+);
+
+CREATE INDEX IF NOT EXISTS lookup_internet_gateway_ip_pool_by_igw_id ON omicron.public.internet_gateway_ip_pool (
+    internet_gateway_id
+) WHERE
+    time_deleted IS NULL;
+
+CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway_ip_address (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    internet_gateway_id UUID,
+    address INET
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_internet_gateway_ip_address_by_igw_id ON omicron.public.internet_gateway_ip_address (
+    internet_gateway_id
+) WHERE
+    time_deleted IS NULL;
+
 
 /*
  * An IP Pool, a collection of zero or more IP ranges for external IPs.
@@ -2736,6 +2858,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_link_config (
     speed omicron.public.switch_link_speed,
     autoneg BOOL NOT NULL DEFAULT false,
     lldp_link_config_id UUID,
+    tx_eq_config_id UUID,
 
     PRIMARY KEY (port_settings_id, link_name)
 );
@@ -2752,6 +2875,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.lldp_link_config (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.tx_eq_config (
+    id UUID PRIMARY KEY,
+    pre1 INT4,
+    pre2 INT4,
+    main INT4,
+    post2 INT4,
+    post1 INT4
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.switch_interface_kind AS ENUM (
@@ -3037,6 +3169,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_collection (
 CREATE INDEX IF NOT EXISTS inv_collection_by_time_started
     ON omicron.public.inv_collection (time_started);
 
+CREATE INDEX IF NOT EXISTS inv_collectionby_time_done
+    ON omicron.public.inv_collection (time_done DESC);
+
 -- list of errors generated during a collection
 CREATE TABLE IF NOT EXISTS omicron.public.inv_collection_error (
     inv_collection_id UUID NOT NULL,
@@ -3321,6 +3456,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_dataset (
     PRIMARY KEY (inv_collection_id, sled_id, name)
 );
 
+-- TODO: This table is vestigial and can be combined with `inv_sled_agent`. See
+-- https://github.com/oxidecomputer/omicron/issues/6770.
 CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_omicron_zones (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
@@ -3367,7 +3504,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
 
     -- unique id for this zone
     id UUID NOT NULL,
-    underlay_address INET NOT NULL,
     zone_type omicron.public.zone_type NOT NULL,
 
     -- SocketAddr of the "primary" service for this zone
@@ -3428,6 +3564,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
     PRIMARY KEY (inv_collection_id, id)
 );
 
+CREATE INDEX IF NOT EXISTS inv_omicron_zone_nic_id ON omicron.public.inv_omicron_zone
+    (nic_id) STORING (sled_id, primary_service_ip, second_service_ip, snat_ip);
+
 CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_nic (
     inv_collection_id UUID NOT NULL,
     id UUID NOT NULL,
@@ -3440,6 +3579,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_nic (
     slot INT2 NOT NULL,
 
     PRIMARY KEY (inv_collection_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_clickhouse_keeper_membership (
+    inv_collection_id UUID NOT NULL,
+    queried_keeper_id INT8 NOT NULL,
+    leader_committed_log_index INT8 NOT NULL,
+    raft_config INT8[] NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, queried_keeper_id)
 );
 
 /*
@@ -3474,6 +3622,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_nic (
 CREATE TYPE IF NOT EXISTS omicron.public.bp_zone_disposition AS ENUM (
     'in_service',
     'quiesced',
+    'expunged'
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.bp_dataset_disposition AS ENUM (
+    'in_service',
     'expunged'
 );
 
@@ -3578,6 +3731,52 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_physical_disk  (
     PRIMARY KEY (blueprint_id, id)
 );
 
+-- description of a collection of omicron datasets stored in a blueprint
+CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_datasets (
+    -- foreign key into the `blueprint` table
+    blueprint_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    generation INT8 NOT NULL,
+
+    PRIMARY KEY (blueprint_id, sled_id)
+);
+
+-- description of an omicron dataset specified in a blueprint.
+CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_dataset (
+    -- foreign key into the `blueprint` table
+    blueprint_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    id UUID NOT NULL,
+
+    -- Dataset disposition
+    disposition omicron.public.bp_dataset_disposition NOT NULL,
+
+    pool_id UUID NOT NULL,
+    kind omicron.public.dataset_kind NOT NULL,
+    -- Only valid if kind = zone
+    zone_name TEXT,
+
+    -- Only valid if kind = crucible
+    ip INET,
+    port INT4 CHECK (port BETWEEN 0 AND 65535),
+
+    quota INT8,
+    reservation INT8,
+    compression TEXT NOT NULL,
+
+    CONSTRAINT zone_name_for_zone_kind CHECK (
+      (kind != 'zone') OR
+      (kind = 'zone' AND zone_name IS NOT NULL)
+    ),
+
+    CONSTRAINT ip_and_port_set_for_crucible CHECK (
+      (kind != 'crucible') OR
+      (kind = 'crucible' AND ip IS NOT NULL and port IS NOT NULL)
+    ),
+
+    PRIMARY KEY (blueprint_id, id)
+);
+
 -- see inv_sled_omicron_zones, which is identical except it references a
 -- collection whereas this table references a blueprint
 CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_zones (
@@ -3606,7 +3805,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
 
     -- unique id for this zone
     id UUID NOT NULL,
-    underlay_address INET NOT NULL,
     zone_type omicron.public.zone_type NOT NULL,
 
     -- SocketAddr of the "primary" service for this zone
@@ -4402,6 +4600,78 @@ CREATE INDEX IF NOT EXISTS lookup_bgp_config_by_bgp_announce_set_id ON omicron.p
 ) WHERE
     time_deleted IS NULL;
 
+CREATE TYPE IF NOT EXISTS omicron.public.volume_resource_usage_type AS ENUM (
+  'read_only_region',
+  'region_snapshot'
+);
+
+/*
+ * This table records when a Volume makes use of a read-only resource. When
+ * there are no more entries for a particular read-only resource, then that
+ * resource can be garbage collected.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.volume_resource_usage (
+    usage_id UUID NOT NULL,
+
+    volume_id UUID NOT NULL,
+
+    usage_type omicron.public.volume_resource_usage_type NOT NULL,
+
+    /*
+     * This column contains a non-NULL value when the usage type is read_only
+     * region
+     */
+    region_id UUID,
+
+    /*
+     * These columns contain non-NULL values when the usage type is region
+     * snapshot
+     */
+    region_snapshot_dataset_id UUID,
+    region_snapshot_region_id UUID,
+    region_snapshot_snapshot_id UUID,
+
+    PRIMARY KEY (usage_id),
+
+    CONSTRAINT exactly_one_usage_source CHECK (
+     (
+      (usage_type = 'read_only_region') AND
+      (region_id IS NOT NULL) AND
+      (
+       region_snapshot_dataset_id IS NULL AND
+       region_snapshot_region_id IS NULL AND
+       region_snapshot_snapshot_id IS NULL
+      )
+     )
+    OR
+     (
+      (usage_type = 'region_snapshot') AND
+      (region_id IS NULL) AND
+      (
+       region_snapshot_dataset_id IS NOT NULL AND
+       region_snapshot_region_id IS NOT NULL AND
+       region_snapshot_snapshot_id IS NOT NULL
+      )
+     )
+    )
+);
+
+CREATE INDEX IF NOT EXISTS lookup_volume_resource_usage_by_region on omicron.public.volume_resource_usage (
+    region_id
+);
+
+CREATE INDEX IF NOT EXISTS lookup_volume_resource_usage_by_snapshot on omicron.public.volume_resource_usage (
+    region_snapshot_dataset_id, region_snapshot_region_id, region_snapshot_snapshot_id
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS one_record_per_volume_resource_usage on omicron.public.volume_resource_usage (
+    volume_id,
+    usage_type,
+    region_id,
+    region_snapshot_dataset_id,
+    region_snapshot_region_id,
+    region_snapshot_snapshot_id
+);
 
 /*
  * Keep this at the end of file so that the database does not contain a version
@@ -4414,7 +4684,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '106.0.0', NULL)
+    (TRUE, NOW(), NOW(), '114.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

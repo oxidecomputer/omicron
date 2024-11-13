@@ -12,7 +12,6 @@ use crate::storage::QueryError;
 use crate::storage::Store;
 use anyhow::anyhow;
 use anyhow::Context;
-use dns_server_api::DnsRecord;
 use hickory_proto::op::Header;
 use hickory_proto::op::ResponseCode;
 use hickory_proto::rr::rdata::SRV;
@@ -26,6 +25,8 @@ use hickory_resolver::Name;
 use hickory_server::authority::MessageRequest;
 use hickory_server::authority::MessageResponse;
 use hickory_server::authority::MessageResponseBuilder;
+use internal_dns_types::config::DnsRecord;
+use internal_dns_types::config::Srv;
 use pretty_hex::*;
 use serde::Deserialize;
 use slog::{debug, error, info, o, trace, Logger};
@@ -231,7 +232,7 @@ fn dns_record_to_record(
             Ok(a)
         }
 
-        DnsRecord::AAAA(addr) => {
+        DnsRecord::Aaaa(addr) => {
             let mut aaaa = Record::new();
             aaaa.set_name(name.clone())
                 .set_rr_type(RecordType::AAAA)
@@ -239,7 +240,7 @@ fn dns_record_to_record(
             Ok(aaaa)
         }
 
-        DnsRecord::SRV(dns_server_api::SRV { prio, weight, port, target }) => {
+        DnsRecord::Srv(Srv { prio, weight, port, target }) => {
             let tgt = Name::from_str(&target).map_err(|error| {
                 RequestError::ServFail(anyhow!(
                     "serialization failed due to bad SRV target {:?}: {:#}",
@@ -273,6 +274,19 @@ async fn handle_dns_message(
     let mut additional_records = vec![];
     let response_records = records
         .into_iter()
+        .filter(|record| {
+            let ty = query.query_type();
+            if ty == RecordType::ANY {
+                return true;
+            }
+
+            match (ty, record) {
+                (RecordType::A, DnsRecord::A(_)) => true,
+                (RecordType::AAAA, DnsRecord::Aaaa(_)) => true,
+                (RecordType::SRV, DnsRecord::Srv(_)) => true,
+                _ => false,
+            }
+        })
         .map(|record| {
             let record = dns_record_to_record(&name, record)?;
 

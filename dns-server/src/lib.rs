@@ -52,6 +52,7 @@ use hickory_resolver::config::Protocol;
 use hickory_resolver::config::ResolverConfig;
 use hickory_resolver::config::ResolverOpts;
 use hickory_resolver::TokioAsyncResolver;
+use internal_dns_types::config::DnsConfigParams;
 use slog::o;
 use std::net::SocketAddr;
 
@@ -148,7 +149,7 @@ impl TransientServer {
     pub async fn initialize_with_config(
         &self,
         log: &slog::Logger,
-        dns_config: &dns_service_client::types::DnsConfigParams,
+        dns_config: &DnsConfigParams,
     ) -> Result<(), anyhow::Error> {
         let dns_config_client = dns_service_client::Client::new(
             &format!("http://{}", self.dropshot_server.local_addr()),

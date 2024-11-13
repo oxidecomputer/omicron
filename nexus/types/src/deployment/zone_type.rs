@@ -14,9 +14,11 @@ use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_common::disk::DatasetName;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 
 #[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
@@ -37,6 +39,65 @@ pub enum BlueprintZoneType {
 }
 
 impl BlueprintZoneType {
+    /// Returns the underlay IP address associated with this zone.
+    ///
+    /// Assumes all zone have exactly one underlay IP address (which is
+    /// currently true).
+    pub fn underlay_ip(&self) -> Ipv6Addr {
+        match self {
+            BlueprintZoneType::BoundaryNtp(
+                blueprint_zone_type::BoundaryNtp { address, .. },
+            )
+            | BlueprintZoneType::Clickhouse(
+                blueprint_zone_type::Clickhouse { address, .. },
+            )
+            | BlueprintZoneType::ClickhouseKeeper(
+                blueprint_zone_type::ClickhouseKeeper { address, .. },
+            )
+            | BlueprintZoneType::ClickhouseServer(
+                blueprint_zone_type::ClickhouseServer { address, .. },
+            )
+            | BlueprintZoneType::CockroachDb(
+                blueprint_zone_type::CockroachDb { address, .. },
+            )
+            | BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
+                address,
+                ..
+            })
+            | BlueprintZoneType::CruciblePantry(
+                blueprint_zone_type::CruciblePantry { address },
+            )
+            | BlueprintZoneType::ExternalDns(
+                blueprint_zone_type::ExternalDns {
+                    http_address: address, ..
+                },
+            )
+            | BlueprintZoneType::InternalNtp(
+                blueprint_zone_type::InternalNtp { address },
+            )
+            | BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                internal_address: address,
+                ..
+            })
+            | BlueprintZoneType::Oximeter(blueprint_zone_type::Oximeter {
+                address,
+            }) => *address.ip(),
+            BlueprintZoneType::InternalDns(
+                blueprint_zone_type::InternalDns {
+                    http_address: address,
+                    dns_address,
+                    ..
+                },
+            ) => {
+                // InternalDns is the only variant that carries two
+                // `SocketAddrV6`s that are both on the underlay network. We
+                // expect these to have the same IP address.
+                debug_assert_eq!(address.ip(), dns_address.ip());
+                *address.ip()
+            }
+        }
+    }
+
     /// Returns the zpool being used by this zone, if any.
     pub fn durable_zpool(
         &self,
@@ -100,6 +161,26 @@ impl BlueprintZoneType {
         matches!(self, BlueprintZoneType::Crucible(_))
     }
 
+    /// Identifies whether this is a Crucible pantry zone
+    pub fn is_crucible_pantry(&self) -> bool {
+        matches!(self, BlueprintZoneType::CruciblePantry(_))
+    }
+
+    /// Identifies whether this is a clickhouse keeper zone
+    pub fn is_clickhouse_keeper(&self) -> bool {
+        matches!(self, BlueprintZoneType::ClickhouseKeeper(_))
+    }
+
+    /// Identifies whether this is a clickhouse server zone
+    pub fn is_clickhouse_server(&self) -> bool {
+        matches!(self, BlueprintZoneType::ClickhouseServer(_))
+    }
+
+    /// Identifies whether this is a single-node clickhouse zone
+    pub fn is_clickhouse(&self) -> bool {
+        matches!(self, BlueprintZoneType::Clickhouse(_))
+    }
+
     /// Returns the durable dataset associated with this zone, if any exists.
     pub fn durable_dataset(&self) -> Option<DurableDataset<'_>> {
         let (dataset, kind, &address) = match self {
@@ -145,6 +226,12 @@ pub struct DurableDataset<'a> {
     pub dataset: &'a OmicronZoneDataset,
     pub kind: DatasetKind,
     pub address: SocketAddrV6,
+}
+
+impl<'a> From<DurableDataset<'a>> for DatasetName {
+    fn from(d: DurableDataset<'a>) -> Self {
+        DatasetName::new(d.dataset.pool_name.clone(), d.kind)
+    }
 }
 
 impl From<BlueprintZoneType> for OmicronZoneType {

@@ -4,6 +4,8 @@
 
 //! Tests basic disk support in the API
 
+use crate::integration_tests::metrics::wait_for_producer;
+
 use super::instances::instance_wait_for_state;
 use super::metrics::{get_latest_silo_metric, query_for_metrics};
 use chrono::Utc;
@@ -17,7 +19,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::RegionAllocationFor;
 use nexus_db_queries::db::datastore::RegionAllocationParameters;
 use nexus_db_queries::db::datastore::REGION_REDUNDANCY_THRESHOLD;
-use nexus_db_queries::db::fixed_data::{silo::DEFAULT_SILO_ID, FLEET_ID};
+use nexus_db_queries::db::fixed_data::FLEET_ID;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::Collection;
@@ -33,7 +35,7 @@ use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
-use omicron_common::api::external::ByteCount;
+use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -41,6 +43,7 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::{ByteCount, SimpleIdentity as _};
 use omicron_nexus::app::{MAX_DISK_SIZE_BYTES, MIN_DISK_SIZE_BYTES};
 use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
@@ -1108,7 +1111,7 @@ async fn test_disk_virtual_provisioning_collection(
         0
     );
     let virtual_provisioning_collection = datastore
-        .virtual_provisioning_collection_get(&opctx, *DEFAULT_SILO_ID)
+        .virtual_provisioning_collection_get(&opctx, DEFAULT_SILO_ID)
         .await
         .unwrap();
     assert_eq!(
@@ -1172,7 +1175,7 @@ async fn test_disk_virtual_provisioning_collection(
         0
     );
     let virtual_provisioning_collection = datastore
-        .virtual_provisioning_collection_get(&opctx, *DEFAULT_SILO_ID)
+        .virtual_provisioning_collection_get(&opctx, DEFAULT_SILO_ID)
         .await
         .unwrap();
     assert_eq!(
@@ -1229,7 +1232,7 @@ async fn test_disk_virtual_provisioning_collection(
         disk_size
     );
     let virtual_provisioning_collection = datastore
-        .virtual_provisioning_collection_get(&opctx, *DEFAULT_SILO_ID)
+        .virtual_provisioning_collection_get(&opctx, DEFAULT_SILO_ID)
         .await
         .unwrap();
     assert_eq!(
@@ -1267,7 +1270,7 @@ async fn test_disk_virtual_provisioning_collection(
         0
     );
     let virtual_provisioning_collection = datastore
-        .virtual_provisioning_collection_get(&opctx, *DEFAULT_SILO_ID)
+        .virtual_provisioning_collection_get(&opctx, DEFAULT_SILO_ID)
         .await
         .unwrap();
     assert_eq!(
@@ -1801,7 +1804,6 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     DiskTest::new(&cptestctx).await;
     let project_id = create_project_and_pool(client).await;
     let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
-    oximeter.force_collect().await;
 
     // When grabbing a metric, we look for data points going back to the
     // start of this test all the way up to the current time.
@@ -1825,6 +1827,7 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
             .await;
     assert!(measurements.items.is_empty());
 
+    oximeter.force_collect().await;
     assert_eq!(
         get_latest_silo_metric(
             cptestctx,
@@ -1837,6 +1840,7 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
 
     // Create an instance, attach the disk to it.
     create_instance_with_disk(client).await;
+    wait_for_producer(&cptestctx.oximeter, disk.id()).await;
     oximeter.force_collect().await;
 
     for metric in &ALL_METRICS {
@@ -1869,8 +1873,9 @@ async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(client).await;
-    create_disk(&client, PROJECT_NAME, DISK_NAME).await;
+    let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
     create_instance_with_disk(client).await;
+    wait_for_producer(&cptestctx.oximeter, disk.id()).await;
 
     let oximeter = &cptestctx.oximeter;
     oximeter.force_collect().await;
@@ -2435,83 +2440,6 @@ async fn test_single_region_allocate_for_replace_not_enough_zpools(
         .unwrap();
 
     assert_eq!(datasets_and_regions.len(), REGION_REDUNDANCY_THRESHOLD);
-}
-
-// Confirm that a region set can start at N, a region can be deleted, and the
-// allocation CTE can bring the redundancy back to N.
-#[nexus_test]
-async fn test_region_allocation_after_delete(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let nexus = &cptestctx.server.server_context().nexus;
-    let datastore = nexus.datastore();
-    let opctx =
-        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
-
-    // Create three 10 GiB zpools, each with one dataset.
-    let _disk_test = DiskTest::new(&cptestctx).await;
-
-    // Assert default is still 10 GiB
-    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
-
-    // Create a disk
-    let client = &cptestctx.external_client;
-    let _project_id = create_project_and_pool(client).await;
-
-    let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
-
-    // Assert disk has three allocated regions
-    let disk_id = disk.identity.id;
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
-        .disk_id(disk_id)
-        .fetch()
-        .await
-        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
-
-    let allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
-    assert_eq!(allocated_regions.len(), REGION_REDUNDANCY_THRESHOLD);
-
-    // Delete one of the regions
-    let region_to_delete: &nexus_db_model::Region = &allocated_regions[0].1;
-    datastore
-        .regions_hard_delete(&opctx.log, vec![region_to_delete.id()])
-        .await
-        .unwrap();
-
-    // Assert disk's volume has one less allocated region
-    let allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
-    assert_eq!(allocated_regions.len(), REGION_REDUNDANCY_THRESHOLD - 1);
-
-    let region_total_size: ByteCount = ByteCount::try_from(
-        region_to_delete.block_size().to_bytes()
-            * region_to_delete.blocks_per_extent()
-            * region_to_delete.extent_count(),
-    )
-    .unwrap();
-
-    // Rerun disk region allocation
-    datastore
-        .disk_region_allocate(
-            &opctx,
-            db_disk.volume_id,
-            &params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(
-                    region_to_delete.block_size().to_bytes() as u32,
-                )
-                .unwrap(),
-            },
-            region_total_size,
-            &RegionAllocationStrategy::Random { seed: None },
-        )
-        .await
-        .unwrap();
-
-    // Assert redundancy was restored
-    let allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
-    assert_eq!(allocated_regions.len(), REGION_REDUNDANCY_THRESHOLD);
 }
 
 #[nexus_test]

@@ -2,4 +2,4 @@
 
 # only set this if you want to override the version of opte/xde installed by the
 # install_opte.sh script
-OPTE_COMMIT=""
+OPTE_COMMIT="f3002b356da7d0e4ca15beb66a5566a92919baaa"

@@ -61,6 +61,7 @@ pub struct InstanceHardware {
     pub dhcp_config: DhcpConfig,
     // TODO: replace `propolis_client::*` with locally-modeled request type
     pub disks: Vec<propolis_client::types::DiskRequest>,
+    pub boot_settings: Option<propolis_client::types::BootSettings>,
     pub cloud_init_bytes: Option<NoDebug<String>>,
 }
 

@@ -83,14 +83,21 @@ impl InternalServer {
         .await?;
 
         // Launch the internal server.
-        let http_server_internal = dropshot::ServerBuilder::new(
+        let server_starter_internal = match dropshot::HttpServerStarter::new(
+            &config.deployment.dropshot_internal,
             internal_api(),
             context.clone(),
-            log.new(o!("component" => "dropshot_internal")),
+            &log.new(o!("component" => "dropshot_internal")),
         )
-        .config(config.deployment.dropshot_internal.clone())
-        .start()
-        .map_err(|error| format!("initializing internal server: {}", error))?;
+        .map_err(|error| format!("initializing internal server: {}", error))
+        {
+            Ok(server) => server,
+            Err(err) => {
+                context.context.nexus.datastore().terminate().await;
+                return Err(err);
+            }
+        };
+        let http_server_internal = server_starter_internal.start();
 
         Ok(Self {
             apictx: context,
@@ -150,30 +157,32 @@ impl Server {
         };
 
         let http_server_external = {
-            dropshot::ServerBuilder::new(
-                external_api(),
-                apictx.for_external(),
-                log.new(o!("component" => "dropshot_external")),
-            )
-            .config(config.deployment.dropshot_external.dropshot.clone())
-            .tls(tls_config.clone().map(dropshot::ConfigTls::Dynamic))
-            .start()
-            .map_err(|error| {
-                format!("initializing external server: {}", error)
-            })?
+            let server_starter_external =
+                dropshot::HttpServerStarter::new_with_tls(
+                    &config.deployment.dropshot_external.dropshot,
+                    external_api(),
+                    apictx.for_external(),
+                    &log.new(o!("component" => "dropshot_external")),
+                    tls_config.clone().map(dropshot::ConfigTls::Dynamic),
+                )
+                .map_err(|error| {
+                    format!("initializing external server: {}", error)
+                })?;
+            server_starter_external.start()
         };
         let http_server_techport_external = {
-            dropshot::ServerBuilder::new(
-                external_api(),
-                apictx.for_techport(),
-                log.new(o!("component" => "dropshot_external_techport")),
-            )
-            .config(techport_server_config)
-            .tls(tls_config.map(dropshot::ConfigTls::Dynamic))
-            .start()
-            .map_err(|error| {
-                format!("initializing external techport server: {}", error)
-            })?
+            let server_starter_external_techport =
+                dropshot::HttpServerStarter::new_with_tls(
+                    &techport_server_config,
+                    external_api(),
+                    apictx.for_techport(),
+                    &log.new(o!("component" => "dropshot_external_techport")),
+                    tls_config.map(dropshot::ConfigTls::Dynamic),
+                )
+                .map_err(|error| {
+                    format!("initializing external techport server: {}", error)
+                })?;
+            server_starter_external_techport.start()
         };
 
         // Start the metric producer server that oximeter uses to fetch our
@@ -202,12 +211,12 @@ impl Server {
         &self.apictx.context
     }
 
-    /// Wait for the given server to shut down
-    ///
-    /// Note that this doesn't initiate a graceful shutdown, so if you call this
-    /// immediately after calling `start()`, the program will block indefinitely
-    /// or until something else initiates a graceful shutdown.
-    pub(crate) async fn wait_for_finish(self) -> Result<(), String> {
+    // Wait for the given server to shut down
+    //
+    // Note that this doesn't initiate a graceful shutdown, so if you call this
+    // immediately after calling `start()`, the program will block indefinitely
+    // or until something else initiates a graceful shutdown.
+    async fn wait_for_finish(self) -> Result<(), String> {
         self.server_context().nexus.wait_for_shutdown().await
     }
 }
@@ -219,12 +228,21 @@ impl nexus_test_interface::NexusServer for Server {
     async fn start_internal(
         config: &NexusConfig,
         log: &Logger,
-    ) -> (InternalServer, SocketAddr) {
-        let internal_server =
-            InternalServer::start(config, &log).await.unwrap();
+    ) -> Result<(InternalServer, SocketAddr), String> {
+        let internal_server = InternalServer::start(config, &log).await?;
         internal_server.apictx.context.nexus.wait_for_populate().await.unwrap();
         let addr = internal_server.http_server_internal.local_addr();
-        (internal_server, addr)
+        Ok((internal_server, addr))
+    }
+
+    async fn stop_internal(internal_server: InternalServer) {
+        internal_server
+            .apictx
+            .context
+            .nexus
+            .terminate()
+            .await
+            .expect("Failed to terminate Nexus");
     }
 
     async fn start(
@@ -390,10 +408,9 @@ impl nexus_test_interface::NexusServer for Server {
         self.apictx
             .context
             .nexus
-            .close_servers()
+            .terminate()
             .await
-            .expect("failed to close servers during test cleanup");
-        self.wait_for_finish().await.unwrap()
+            .expect("Failed to terminate Nexus");
     }
 }
 

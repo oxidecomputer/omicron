@@ -145,6 +145,7 @@ table! {
         speed -> crate::SwitchLinkSpeedEnum,
         autoneg -> Bool,
         lldp_link_config_id -> Nullable<Uuid>,
+        tx_eq_config_id -> Nullable<Uuid>,
     }
 }
 
@@ -161,6 +162,17 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
+    tx_eq_config (id) {
+        id -> Uuid,
+        pre1 -> Nullable<Int4>,
+        pre2 -> Nullable<Int4>,
+        main -> Nullable<Int4>,
+        post2 -> Nullable<Int4>,
+        post1 -> Nullable<Int4>,
     }
 }
 
@@ -188,7 +200,7 @@ table! {
         dst -> Inet,
         gw -> Inet,
         vid -> Nullable<Int4>,
-        local_pref -> Nullable<Int8>,
+        local_pref -> Nullable<Int2>,
     }
 }
 
@@ -409,6 +421,7 @@ table! {
         hostname -> Text,
         auto_restart_policy -> Nullable<crate::InstanceAutoRestartPolicyEnum>,
         auto_restart_cooldown -> Nullable<Interval>,
+        boot_disk_id -> Nullable<Uuid>,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_propolis_id -> Nullable<Uuid>,
@@ -841,6 +854,16 @@ table! {
 }
 
 table! {
+    clickhouse_policy (version) {
+        version -> Int8,
+        clickhouse_mode -> crate::clickhouse_policy::ClickhouseModeEnum,
+        clickhouse_cluster_target_servers -> Int2,
+        clickhouse_cluster_target_keepers -> Int2,
+        time_created -> Timestamptz,
+    }
+}
+
+table! {
     rack (id) {
         id -> Uuid,
         time_created -> Timestamptz,
@@ -1027,6 +1050,10 @@ table! {
         kind -> crate::DatasetKindEnum,
         size_used -> Nullable<Int8>,
         zone_name -> Nullable<Text>,
+
+        quota -> Nullable<Int8>,
+        reservation -> Nullable<Int8>,
+        compression -> Nullable<Text>,
     }
 }
 
@@ -1048,6 +1075,8 @@ table! {
         port -> Nullable<Int4>,
 
         read_only -> Bool,
+
+        deleting -> Bool,
     }
 }
 
@@ -1143,6 +1172,46 @@ table! {
         vpc_router_id -> Uuid,
         target -> Text,
         destination -> Text,
+    }
+}
+
+table! {
+    internet_gateway(id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        vpc_id -> Uuid,
+        rcgen -> Int8,
+        resolved_version -> Int8,
+    }
+}
+
+table! {
+    internet_gateway_ip_pool(id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        internet_gateway_id -> Uuid,
+        ip_pool_id -> Uuid,
+    }
+}
+
+table! {
+    internet_gateway_ip_address(id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        internet_gateway_id -> Uuid,
+        address -> Inet,
     }
 }
 
@@ -1490,7 +1559,6 @@ table! {
         sled_id -> Uuid,
 
         id -> Uuid,
-        underlay_address -> Inet,
         zone_type -> crate::ZoneTypeEnum,
 
         primary_service_ip -> Inet,
@@ -1524,6 +1592,15 @@ table! {
         vni -> Int8,
         is_primary -> Bool,
         slot -> Int2,
+    }
+}
+
+table! {
+    inv_clickhouse_keeper_membership (inv_collection_id, queried_keeper_id) {
+        inv_collection_id -> Uuid,
+        queried_keeper_id -> Int8,
+        leader_committed_log_index -> Int8,
+        raft_config -> Array<Int8>,
     }
 }
 
@@ -1587,6 +1664,35 @@ table! {
 
         id -> Uuid,
         pool_id -> Uuid,
+    }
+}
+
+table! {
+    bp_sled_omicron_datasets (blueprint_id, sled_id) {
+        blueprint_id -> Uuid,
+        sled_id -> Uuid,
+
+        generation -> Int8,
+    }
+}
+
+table! {
+    bp_omicron_dataset (blueprint_id, id) {
+        blueprint_id -> Uuid,
+        sled_id -> Uuid,
+        id -> Uuid,
+
+        disposition -> crate::DbBpDatasetDispositionEnum,
+
+        pool_id -> Uuid,
+        kind -> crate::DatasetKindEnum,
+        zone_name -> Nullable<Text>,
+        ip -> Nullable<Inet>,
+        port -> Nullable<Int4>,
+
+        quota -> Nullable<Int8>,
+        reservation -> Nullable<Int8>,
+        compression -> Text,
     }
 }
 
@@ -1935,6 +2041,9 @@ allow_tables_to_appear_in_same_query!(
     role_builtin,
     role_assignment,
     probe,
+    internet_gateway,
+    internet_gateway_ip_pool,
+    internet_gateway_ip_address,
 );
 
 allow_tables_to_appear_in_same_query!(dns_zone, dns_version, dns_name);
@@ -1943,6 +2052,20 @@ allow_tables_to_appear_in_same_query!(dns_zone, dns_version, dns_name);
 allow_tables_to_appear_in_same_query!(external_ip, instance);
 allow_tables_to_appear_in_same_query!(external_ip, project);
 allow_tables_to_appear_in_same_query!(external_ip, ip_pool_resource);
+allow_tables_to_appear_in_same_query!(external_ip, vmm);
+allow_tables_to_appear_in_same_query!(external_ip, network_interface);
+allow_tables_to_appear_in_same_query!(external_ip, inv_omicron_zone);
+allow_tables_to_appear_in_same_query!(external_ip, inv_omicron_zone_nic);
+allow_tables_to_appear_in_same_query!(inv_omicron_zone, inv_omicron_zone_nic);
+allow_tables_to_appear_in_same_query!(network_interface, inv_omicron_zone);
+allow_tables_to_appear_in_same_query!(network_interface, inv_omicron_zone_nic);
+allow_tables_to_appear_in_same_query!(network_interface, inv_collection);
+allow_tables_to_appear_in_same_query!(inv_omicron_zone, inv_collection);
+allow_tables_to_appear_in_same_query!(inv_omicron_zone_nic, inv_collection);
+allow_tables_to_appear_in_same_query!(external_ip, inv_collection);
+allow_tables_to_appear_in_same_query!(external_ip, internet_gateway);
+allow_tables_to_appear_in_same_query!(external_ip, internet_gateway_ip_pool);
+allow_tables_to_appear_in_same_query!(external_ip, internet_gateway_ip_address);
 
 allow_tables_to_appear_in_same_query!(
     switch_port,
@@ -1966,3 +2089,19 @@ joinable!(instance_ssh_key -> instance (instance_id));
 allow_tables_to_appear_in_same_query!(sled, sled_instance);
 
 joinable!(network_interface -> probe (parent_id));
+
+table! {
+    volume_resource_usage (usage_id) {
+        usage_id -> Uuid,
+
+        volume_id -> Uuid,
+
+        usage_type -> crate::VolumeResourceUsageTypeEnum,
+
+        region_id -> Nullable<Uuid>,
+
+        region_snapshot_dataset_id -> Nullable<Uuid>,
+        region_snapshot_region_id -> Nullable<Uuid>,
+        region_snapshot_snapshot_id -> Nullable<Uuid>,
+    }
+}

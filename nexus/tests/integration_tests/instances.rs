@@ -16,7 +16,6 @@ use http::StatusCode;
 use itertools::Itertools;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
-use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO_ID;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
 use nexus_test_interface::NexusServer;
@@ -49,6 +48,7 @@ use nexus_types::external_api::views::SshKey;
 use nexus_types::external_api::{params, views};
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::InstanceMigrateRequest;
+use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
@@ -227,6 +227,7 @@ async fn test_create_instance_with_bad_hostname_impl(
         network_interfaces: Default::default(),
         external_ips: vec![],
         disks: vec![],
+        boot_disk: None,
         start: false,
         ssh_public_keys: None,
         auto_restart_policy: Default::default(),
@@ -333,6 +334,7 @@ async fn test_instances_create_reboot_halt(
                     params::InstanceNetworkInterfaceAttachment::Default,
                 external_ips: vec![],
                 disks: vec![],
+                boot_disk: None,
                 start: true,
                 auto_restart_policy: Default::default(),
             }))
@@ -1281,29 +1283,51 @@ async fn test_instance_failed_when_on_expunged_sled(
     let nexus = &apictx.nexus;
     let instance1_name = "romeo";
     let instance2_name = "juliet";
+    let instance3_name = "mercutio";
 
     create_project_and_pool(&client).await;
 
     // Create and start the test instances.
-    let mk_instance = |name: &'static str| async move {
-        let instance_url = get_instance_url(name);
-        let instance = create_instance(client, PROJECT_NAME, name).await;
-        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
-        instance_simulate(nexus, &instance_id).await;
-        let instance_next = instance_get(&client, &instance_url).await;
-        assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+    let mk_instance =
+        |name: &'static str, auto_restart: InstanceAutoRestartPolicy| async move {
+            let instance_url = get_instance_url(name);
+            let instance = create_instance_with(
+                client,
+                PROJECT_NAME,
+                name,
+                &params::InstanceNetworkInterfaceAttachment::Default,
+                // Disks=
+                Vec::<params::InstanceDiskAttachment>::new(),
+                // External IPs=
+                Vec::<params::ExternalIpCreate>::new(),
+                true,
+                Some(auto_restart),
+            )
+            .await;
+            let instance_id =
+                InstanceUuid::from_untyped_uuid(instance.identity.id);
+            instance_simulate(nexus, &instance_id).await;
+            let instance_next = instance_get(&client, &instance_url).await;
+            assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
-        slog::info!(
-            &cptestctx.logctx.log,
-            "test instance is running";
-            "instance_name" => %name,
-            "instance_id" => %instance_id,
-        );
+            slog::info!(
+                &cptestctx.logctx.log,
+                "test instance is running";
+                "instance_name" => %name,
+                "instance_id" => %instance_id,
+            );
 
-        instance_id
-    };
-    let instance1_id = mk_instance(instance1_name).await;
-    let instance2_id = mk_instance(instance2_name).await;
+            instance_id
+        };
+    // We are going to manually attempt to delete/restart these instances when
+    // they go to `Failed`, so don't allow them to reincarnate.
+    let instance1_id =
+        mk_instance(instance1_name, InstanceAutoRestartPolicy::Never).await;
+    let instance2_id =
+        mk_instance(instance2_name, InstanceAutoRestartPolicy::Never).await;
+    let instance3_id =
+        mk_instance(instance3_name, InstanceAutoRestartPolicy::BestEffort)
+            .await;
 
     // Create a second sled for instances on the Expunged sled to be assigned
     // to.
@@ -1349,11 +1373,17 @@ async fn test_instance_failed_when_on_expunged_sled(
     // ...or restartable.
     expect_instance_start_ok(client, instance2_name).await;
 
-    // The restarted instance shoild now transition back to `Running`, on its
+    // The restarted instance should now transition back to `Running`, on its
     // new sled.
     instance_wait_for_vmm_registration(cptestctx, &instance2_id).await;
     instance_simulate(nexus, &instance2_id).await;
     instance_wait_for_state(client, instance2_id, InstanceState::Running).await;
+
+    // The auto-restartable instance should be...restarted automatically.
+
+    instance_wait_for_vmm_registration(cptestctx, &instance3_id).await;
+    instance_simulate(nexus, &instance3_id).await;
+    instance_wait_for_state(client, instance3_id, InstanceState::Running).await;
 }
 
 // Verifies that the instance-watcher background task transitions an instance
@@ -1611,7 +1641,7 @@ async fn assert_metrics(
             ram
         );
     }
-    for id in &[None, Some(*DEFAULT_SILO_ID)] {
+    for id in &[None, Some(DEFAULT_SILO_ID)] {
         assert_eq!(
             get_latest_system_metric(
                 cptestctx,
@@ -1922,6 +1952,7 @@ async fn test_instances_create_stopped_start(
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![],
             disks: vec![],
+            boot_disk: None,
             start: false,
             auto_restart_policy: Default::default(),
         },
@@ -2102,6 +2133,7 @@ async fn test_instance_using_image_from_other_project_fails(
                         size: ByteCount::from_gibibytes_u32(4),
                     },
                 )],
+                boot_disk: None,
                 start: true,
                 auto_restart_policy: Default::default(),
             }))
@@ -2166,6 +2198,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         network_interfaces: interface_params.clone(),
         external_ips: vec![],
         disks: vec![],
+        boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -2195,6 +2228,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
+        boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -2285,6 +2319,7 @@ async fn test_instance_with_single_explicit_ip_address(
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
+        boot_disk: None,
         start: true,
 
         auto_restart_policy: Default::default(),
@@ -2402,6 +2437,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
+        boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -2518,6 +2554,7 @@ async fn test_instance_create_delete_network_interface(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
         external_ips: vec![],
         disks: vec![],
+        boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -2763,6 +2800,7 @@ async fn test_instance_update_network_interfaces(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
         external_ips: vec![],
         disks: vec![],
+        boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -3163,6 +3201,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
+        boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -3216,6 +3255,8 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(disks.len(), 1);
     assert_eq!(disks[0].state, DiskState::Detached);
 
+    let disk_name = Name::try_from(String::from("probablydata")).unwrap();
+
     // Create the instance
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
@@ -3229,11 +3270,10 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
-        disks: vec![params::InstanceDiskAttachment::Attach(
-            params::InstanceDiskAttach {
-                name: Name::try_from(String::from("probablydata")).unwrap(),
-            },
-        )],
+        boot_disk: Some(params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach { name: disk_name.clone() },
+        )),
+        disks: Vec::new(),
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -3290,12 +3330,27 @@ async fn test_instance_create_attach_disks(
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
-        disks: vec![
-            params::InstanceDiskAttachment::Create(params::DiskCreate {
+        boot_disk: Some(params::InstanceDiskAttachment::Create(
+            params::DiskCreate {
                 identity: IdentityMetadataCreateParams {
                     name: Name::try_from(String::from("created-disk")).unwrap(),
                     description: String::from(
-                        "A disk that was created by instance create",
+                        "A boot disk that was created by instance create",
+                    ),
+                },
+                size: ByteCount::from_gibibytes_u32(4),
+                disk_source: params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(512).unwrap(),
+                },
+            },
+        )),
+        disks: vec![
+            params::InstanceDiskAttachment::Create(params::DiskCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: Name::try_from(String::from("created-disk2"))
+                        .unwrap(),
+                    description: String::from(
+                        "A data disk that was created by instance create",
                     ),
                 },
                 size: ByteCount::from_gibibytes_u32(4),
@@ -3305,7 +3360,7 @@ async fn test_instance_create_attach_disks(
             }),
             params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach {
-                    name: attachable_disk.identity.name,
+                    name: attachable_disk.identity.name.clone(),
                 },
             ),
         ],
@@ -3332,7 +3387,7 @@ async fn test_instance_create_attach_disks(
             .await
             .expect("failed to list disks")
             .all_items;
-    assert_eq!(disks.len(), 2);
+    assert_eq!(disks.len(), 3);
 
     for disk in disks {
         assert_eq!(disk.state, DiskState::Attached(instance.identity.id));
@@ -3406,6 +3461,7 @@ async fn test_instance_create_attach_disks_undo(
                 params::InstanceDiskAttach { name: faulted_disk.identity.name },
             ),
         ],
+        boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -3474,7 +3530,12 @@ async fn test_attach_eight_disks_to_instance(
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
-        disks: (0..8)
+        boot_disk: Some(params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach {
+                name: Name::try_from("probablydata0".to_string()).unwrap(),
+            },
+        )),
+        disks: (1..8)
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
@@ -3556,7 +3617,12 @@ async fn test_cannot_attach_nine_disks_to_instance(
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
-        disks: (0..9)
+        boot_disk: Some(params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach {
+                name: Name::try_from("probablydata0".to_string()).unwrap(),
+            },
+        )),
+        disks: (1..9)
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
@@ -3652,7 +3718,12 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
-        disks: (0..8)
+        boot_disk: Some(params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach {
+                name: Name::try_from("probablydata0".to_string()).unwrap(),
+            },
+        )),
+        disks: (1..8)
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
@@ -3737,7 +3808,12 @@ async fn test_disks_detached_when_instance_destroyed(
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
-        disks: (0..8)
+        boot_disk: Some(params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach {
+                name: Name::try_from("probablydata0".to_string()).unwrap(),
+            },
+        )),
+        disks: (1..8)
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
@@ -3829,7 +3905,12 @@ async fn test_disks_detached_when_instance_destroyed(
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
-        disks: (0..8)
+        boot_disk: Some(params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach {
+                name: Name::try_from("probablydata0".to_string()).unwrap(),
+            },
+        )),
+        disks: (1..8)
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
@@ -3867,6 +3948,658 @@ async fn test_disks_detached_when_instance_destroyed(
     }
 }
 
+// Surprising but true: mentioning a disk multiple times for attachment is just
+// fine. This means that having a disk in the boot_disk field and disks list
+// will succeed as well.
+//
+// Test here to ensure we're not caught by surprise if this behavior is changed,
+// rather than to assert that this is a specific desired behavior.
+#[nexus_test]
+async fn test_duplicate_disk_attach_requests_ok(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Test pre-reqs
+    DiskTest::new(&cptestctx).await;
+    create_project_and_pool(&client).await;
+
+    create_disk(&client, PROJECT_NAME, "probablydata").await;
+    create_disk(&client, PROJECT_NAME, "alsodata").await;
+
+    // Verify disk is there and currently detached
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
+    assert_eq!(disks.len(), 2);
+    assert_eq!(disks[0].state, DiskState::Detached);
+    assert_eq!(disks[1].state, DiskState::Detached);
+
+    // Create the instance with a duplicate disks entry
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "nfs".parse().unwrap(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: "nfs".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: vec![
+            params::InstanceDiskAttachment::Attach(
+                params::InstanceDiskAttach {
+                    name: Name::try_from(String::from("probablydata")).unwrap(),
+                },
+            ),
+            params::InstanceDiskAttachment::Attach(
+                params::InstanceDiskAttach {
+                    name: Name::try_from(String::from("probablydata")).unwrap(),
+                },
+            ),
+        ],
+        boot_disk: None,
+        start: true,
+        auto_restart_policy: Default::default(),
+    };
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("can attempt to create instance");
+
+    let instance = response
+        .parsed_body::<Instance>()
+        .expect("Failed to parse error response body");
+    assert_eq!(instance.boot_disk_id, None);
+
+    // Create the instance with a disk mentioned both as a data disk and a boot
+    // disk
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "nfs2".parse().unwrap(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: "nfs2".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        boot_disk: Some(params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach {
+                name: Name::try_from(String::from("alsodata")).unwrap(),
+            },
+        )),
+        disks: vec![params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach {
+                name: Name::try_from(String::from("alsodata")).unwrap(),
+            },
+        )],
+        start: true,
+        auto_restart_policy: Default::default(),
+    };
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("can attempt to create instance");
+
+    let instance = response
+        .parsed_body::<Instance>()
+        .expect("Failed to parse error response body");
+    let expected_disk =
+        disks.iter().find(|d| d.identity.name.as_str() == "alsodata").unwrap();
+    assert_eq!(instance.boot_disk_id, Some(expected_disk.identity.id));
+}
+
+// Create an instance with a boot disk, try and fail to detach it, change the
+// boot disk to something else, and succeed to detach the formerly-boot
+// device.
+#[nexus_test]
+async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let instance_name = "nifs";
+
+    // Test pre-reqs
+    DiskTest::new(&cptestctx).await;
+    create_project_and_pool(&client).await;
+
+    // Create the "probablydata" disk
+    create_disk(&client, PROJECT_NAME, "probablydata0").await;
+
+    // Create the instance
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: "nfs".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        boot_disk: Some(params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach {
+                name: Name::try_from(String::from("probablydata0")).unwrap(),
+            },
+        )),
+        disks: Vec::new(),
+        start: false,
+        auto_restart_policy: Default::default(),
+    };
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to work!");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+
+    // Verify disk is attached to the instance
+    let url_instance_disks =
+        format!("/v1/instances/{}/disks", instance.identity.id);
+    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
+        client,
+        &url_instance_disks,
+        "",
+        None,
+    )
+    .await
+    .expect("failed to list disks")
+    .all_items;
+    assert_eq!(disks.len(), 1);
+    assert_eq!(disks[0].state, DiskState::Attached(instance.identity.id));
+    assert_eq!(instance.boot_disk_id, Some(disks[0].identity.id));
+
+    // Attempt to detach the instance's boot disk. This should fail.
+    let url_instance_detach_disk =
+        format!("/v1/instances/{}/disks/detach", instance.identity.id);
+
+    let builder = RequestBuilder::new(
+        client,
+        http::Method::POST,
+        &url_instance_detach_disk,
+    )
+    .body(Some(&params::DiskPath { disk: disks[0].identity.id.into() }))
+    .expect_status(Some(http::StatusCode::CONFLICT));
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("can attempt to detach boot disk");
+
+    let err = response
+        .parsed_body::<HttpErrorResponseBody>()
+        .expect("Failed to parse error response body");
+    assert_eq!(err.message, "boot disk cannot be detached");
+
+    // Change the instance's boot disk.
+    let instance = expect_instance_reconfigure_ok(
+        &client,
+        &instance.identity.id,
+        params::InstanceUpdate { boot_disk: None, auto_restart_policy: None },
+    )
+    .await;
+    assert_eq!(instance.boot_disk_id, None);
+
+    // Now try to detach `disks[0]` again. This should succeed.
+    let builder = RequestBuilder::new(
+        client,
+        http::Method::POST,
+        &url_instance_detach_disk,
+    )
+    .body(Some(&params::DiskPath { disk: disks[0].identity.id.into() }))
+    .expect_status(Some(http::StatusCode::ACCEPTED));
+    NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("can attempt to detach boot disk");
+}
+
+#[nexus_test]
+async fn test_updating_running_instance_boot_disk_is_conflict(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "immediately-running";
+
+    // Test pre-reqs
+    DiskTest::new(&cptestctx).await;
+    create_project_and_pool(&client).await;
+
+    create_disk(&client, PROJECT_NAME, "probablydata").await;
+    create_disk(&client, PROJECT_NAME, "alsodata").await;
+
+    // Verify disk is there and currently detached
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
+    assert_eq!(disks.len(), 2);
+    assert_eq!(disks[0].state, DiskState::Detached);
+    assert_eq!(disks[1].state, DiskState::Detached);
+
+    let probablydata = Name::try_from(String::from("probablydata")).unwrap();
+    let alsodata = Name::try_from(String::from("alsodata")).unwrap();
+
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from(instance_name)).unwrap(),
+            description: String::from("instance to run and fail to update"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: "inst".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: vec![
+            params::InstanceDiskAttachment::Attach(
+                params::InstanceDiskAttach { name: probablydata.clone() },
+            ),
+            params::InstanceDiskAttachment::Attach(
+                params::InstanceDiskAttach { name: alsodata.clone() },
+            ),
+        ],
+        boot_disk: Some(params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach { name: probablydata.clone() },
+        )),
+        start: true,
+        auto_restart_policy: Default::default(),
+    };
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to work!");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+    // The instance is technically updatable in the brief window that it is
+    // `Creating`. Wait for it to leave `Creating` to make sure we're in a
+    // non-updatable state before trying to update.
+    let nexus = &cptestctx.server.server_context().nexus;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+
+    let error = expect_instance_reconfigure_err(
+        &client,
+        &instance_id.into_untyped_uuid(),
+        params::InstanceUpdate {
+            boot_disk: Some(alsodata.clone().into()),
+            auto_restart_policy: None,
+        },
+        http::StatusCode::CONFLICT,
+    )
+    .await;
+    assert_eq!(error.message, "instance must be stopped to set boot disk");
+
+    // However, we can freely change the auto-restart policy of a running
+    // instance.
+    expect_instance_reconfigure_ok(
+        &client,
+        &instance_id.into_untyped_uuid(),
+        params::InstanceUpdate {
+            // Leave the boot disk the same as the one with which the instance
+            // was created.
+            boot_disk: Some(probablydata.clone().into()),
+            auto_restart_policy: Some(InstanceAutoRestartPolicy::BestEffort),
+        },
+    )
+    .await;
+}
+
+#[nexus_test]
+async fn test_updating_missing_instance_is_not_found(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    const UUID_THAT_DOESNT_EXIST: Uuid =
+        Uuid::from_u128(0x12341234_4321_8765_1234_432143214321);
+
+    let client = &cptestctx.external_client;
+
+    let error = expect_instance_reconfigure_err(
+        &client,
+        &UUID_THAT_DOESNT_EXIST,
+        params::InstanceUpdate { boot_disk: None, auto_restart_policy: None },
+        http::StatusCode::NOT_FOUND,
+    )
+    .await;
+    assert_eq!(
+        error.message,
+        format!("not found: instance with id \"{}\"", UUID_THAT_DOESNT_EXIST)
+    );
+}
+
+async fn expect_instance_reconfigure_ok(
+    external_client: &ClientTestContext,
+    instance_id: &Uuid,
+    update: params::InstanceUpdate,
+) -> Instance {
+    let url_instance_update = format!("/v1/instances/{instance_id}");
+
+    let builder = RequestBuilder::new(
+        external_client,
+        http::Method::PUT,
+        &url_instance_update,
+    )
+    .body(Some(&update))
+    .expect_status(Some(http::StatusCode::OK));
+
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("can attempt to reconfigure the instance");
+
+    response
+        .parsed_body::<Instance>()
+        .expect("response should be parsed as an instance")
+}
+
+async fn expect_instance_reconfigure_err(
+    external_client: &ClientTestContext,
+    instance_id: &Uuid,
+    update: params::InstanceUpdate,
+    status: http::StatusCode,
+) -> HttpErrorResponseBody {
+    let url_instance_update = format!("/v1/instances/{instance_id}");
+
+    let builder = RequestBuilder::new(
+        external_client,
+        http::Method::PUT,
+        &url_instance_update,
+    )
+    .body(Some(&update))
+    .expect_status(Some(status));
+
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("can attempt to reconfigure the instance");
+
+    response
+        .parsed_body::<HttpErrorResponseBody>()
+        .expect("error response should parse successfully")
+}
+// Test reconfiguring an instance's auto-restart policy.
+#[nexus_test]
+async fn test_auto_restart_policy_can_be_changed(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "reincarnation-station";
+
+    create_project_and_pool(&client).await;
+
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: String::from("stuff"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: instance_name.parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        boot_disk: None,
+        disks: Vec::new(),
+        start: true,
+        // Start out with None
+        auto_restart_policy: None,
+    };
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to work!");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+
+    // Starts out as None.
+    assert_eq!(instance.auto_restart_status.policy, None);
+
+    let assert_reconfigured = |auto_restart_policy| async move {
+        let instance = expect_instance_reconfigure_ok(
+            client,
+            &instance.identity.id,
+            dbg!(params::InstanceUpdate {
+                auto_restart_policy,
+                boot_disk: None,
+            }),
+        )
+        .await;
+        assert_eq!(
+            dbg!(instance).auto_restart_status.policy,
+            auto_restart_policy,
+        );
+    };
+
+    // Reconfigure to Never.
+    assert_reconfigured(Some(InstanceAutoRestartPolicy::Never)).await;
+
+    // Reconfigure to BestEffort
+    assert_reconfigured(Some(InstanceAutoRestartPolicy::BestEffort)).await;
+
+    // Reconfigure back to None.
+    assert_reconfigured(None).await;
+}
+
+// Create an instance with boot disk set to one of its attached disks, then set
+// it to the other disk.
+#[nexus_test]
+async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let instance_name = "nifs";
+
+    // Test pre-reqs
+    DiskTest::new(&cptestctx).await;
+    create_project_and_pool(&client).await;
+
+    // Create the "probablydata" disk
+    create_disk(&client, PROJECT_NAME, "probablydata0").await;
+    create_disk(&client, PROJECT_NAME, "probablydata1").await;
+
+    // Verify disks are there and currently detached
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
+    assert_eq!(disks.len(), 2);
+    assert_eq!(disks[0].state, DiskState::Detached);
+    assert_eq!(disks[1].state, DiskState::Detached);
+
+    // Create the instance
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: "nfs".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        boot_disk: Some(params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach {
+                name: Name::try_from(String::from("probablydata0")).unwrap(),
+            },
+        )),
+        disks: vec![params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach {
+                name: Name::try_from(String::from("probablydata1")).unwrap(),
+            },
+        )],
+        start: false,
+        auto_restart_policy: Default::default(),
+    };
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to work!");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+
+    assert_eq!(instance.boot_disk_id, Some(disks[0].identity.id));
+
+    // Change the instance's boot disk.ity.id);
+
+    let instance = expect_instance_reconfigure_ok(
+        &client,
+        &instance.identity.id,
+        params::InstanceUpdate {
+            boot_disk: Some(disks[1].identity.id.into()),
+            auto_restart_policy: None,
+        },
+    )
+    .await;
+    assert_eq!(instance.boot_disk_id, Some(disks[1].identity.id));
+}
+
+// Create an instance without a boot disk, fail to set the boot disk to a
+// detached disk, then attach the disk and make it a boot disk.
+#[nexus_test]
+async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let instance_name = "nifs";
+
+    // Test pre-reqs
+    DiskTest::new(&cptestctx).await;
+    create_project_and_pool(&client).await;
+
+    // Create the "probablydata" disk
+    create_disk(&client, PROJECT_NAME, "probablydata0").await;
+
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
+
+    // Create the instance
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: "nfs".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: vec![],
+        boot_disk: None,
+        start: false,
+        auto_restart_policy: Default::default(),
+    };
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to work!");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+
+    // Update the instance's boot disk to the unattached disk. This should fail.
+    let error = expect_instance_reconfigure_err(
+        &client,
+        &instance.identity.id,
+        params::InstanceUpdate {
+            boot_disk: Some(disks[0].identity.id.into()),
+            auto_restart_policy: None,
+        },
+        http::StatusCode::CONFLICT,
+    )
+    .await;
+
+    assert_eq!(error.message, format!("boot disk must be attached"));
+
+    // Now attach the disk.
+    let url_instance_detach_disk =
+        format!("/v1/instances/{}/disks/attach", instance.identity.id);
+
+    let builder = RequestBuilder::new(
+        client,
+        http::Method::POST,
+        &url_instance_detach_disk,
+    )
+    .body(Some(&params::DiskPath { disk: disks[0].identity.id.into() }))
+    .expect_status(Some(http::StatusCode::ACCEPTED));
+    NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("can attempt to detach boot disk");
+
+    // And now it can be made the boot disk.
+    let instance = expect_instance_reconfigure_ok(
+        &client,
+        &instance.identity.id,
+        params::InstanceUpdate {
+            boot_disk: Some(disks[0].identity.id.into()),
+            auto_restart_policy: None,
+        },
+    )
+    .await;
+    assert_eq!(instance.boot_disk_id, Some(disks[0].identity.id));
+}
+
 // Tests that an instance is rejected if the memory is less than
 // MIN_MEMORY_BYTES_PER_INSTANCE
 #[nexus_test]
@@ -3893,6 +4626,7 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
+        boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -3944,6 +4678,7 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
+        boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -3995,6 +4730,7 @@ async fn test_instances_memory_greater_than_max_size(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
+        boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -4079,6 +4815,7 @@ async fn test_instance_create_with_ssh_keys(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
+        boot_disk: None,
         auto_restart_policy: Default::default(),
     };
 
@@ -4126,6 +4863,7 @@ async fn test_instance_create_with_ssh_keys(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
+        boot_disk: None,
         auto_restart_policy: Default::default(),
     };
 
@@ -4172,6 +4910,7 @@ async fn test_instance_create_with_ssh_keys(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
+        boot_disk: None,
         auto_restart_policy: Default::default(),
     };
 
@@ -4293,6 +5032,7 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![],
             disks: vec![],
+            boot_disk: None,
             start: false,
             auto_restart_policy: Default::default(),
         };
@@ -4350,6 +5090,7 @@ async fn test_cannot_provision_instance_beyond_cpu_limit(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
+        boot_disk: None,
         start: false,
         auto_restart_policy: Default::default(),
     };
@@ -4404,6 +5145,7 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![],
             disks: vec![],
+            boot_disk: None,
             start: false,
             auto_restart_policy: Default::default(),
         };
@@ -4703,6 +5445,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         }],
         ssh_public_keys: None,
         disks: vec![],
+        boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -4771,6 +5514,7 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
         }],
         ssh_public_keys: None,
         disks: vec![],
+        boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -4833,6 +5577,7 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
         }],
         ssh_public_keys: None,
         disks: vec![],
+        boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -4969,6 +5714,7 @@ async fn test_instance_allow_only_one_ephemeral_ip(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![ephemeral_create.clone(), ephemeral_create],
         disks: vec![],
+        boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -5101,6 +5847,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
             pool: Some("default".parse::<Name>().unwrap().into()),
         }],
         disks: vec![],
+        boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -5566,7 +6313,6 @@ pub async fn assert_sled_vpc_routes(
                 .await
                 .unwrap()
                 .into_iter()
-                .map(|(dest, target)| ResolvedVpcRoute { dest, target })
                 .collect()
         } else {
             Default::default()
@@ -5583,37 +6329,68 @@ pub async fn assert_sled_vpc_routes(
         .await
         .unwrap()
         .into_iter()
-        .map(|(dest, target)| ResolvedVpcRoute { dest, target })
         .collect();
 
     assert!(!system_routes.is_empty());
 
     let condition = || async {
+        let sys_key = RouterId { vni, kind: RouterKind::System };
+        let custom_key = RouterId {
+            vni,
+            kind: RouterKind::Custom(db_subnet.ipv4_block.0.into()),
+        };
+
         let vpc_routes = sled_agent.vpc_routes.lock().await;
-        let sys_routes_found = vpc_routes.iter().any(|(id, set)| {
-            *id == RouterId { vni, kind: RouterKind::System }
-                && set.routes == system_routes
-        });
-        let custom_routes_found = vpc_routes.iter().any(|(id, set)| {
-            *id == RouterId {
-                vni,
-                kind: RouterKind::Custom(db_subnet.ipv4_block.0.into()),
-            } && set.routes == custom_routes
-        });
+        let sys_routes_found = vpc_routes
+            .iter()
+            .any(|(id, set)| *id == sys_key && set.routes == system_routes);
+        let custom_routes_found = vpc_routes
+            .iter()
+            .any(|(id, set)| *id == custom_key && set.routes == custom_routes);
 
         if sys_routes_found && custom_routes_found {
             Ok(())
         } else {
+            let found_system =
+                vpc_routes.get(&sys_key).cloned().unwrap_or_default();
+            let found_custom =
+                vpc_routes.get(&custom_key).cloned().unwrap_or_default();
+
+            println!("unexpected route setup");
+            println!("vni: {vni:?}");
+            println!("sled: {}", sled_agent.id);
+            println!("subnet: {}", db_subnet.ipv4_block.0);
+            println!("expected system: {system_routes:?}");
+            println!("expected custom {custom_routes:?}");
+            println!("found: {vpc_routes:?}");
+            println!(
+                "\n-----\nsystem diff (-): {:?}",
+                system_routes.difference(&found_system.routes)
+            );
+            println!(
+                "system diff (+): {:?}",
+                found_system.routes.difference(&system_routes)
+            );
+            println!(
+                "custom diff (-): {:?}",
+                custom_routes.difference(&found_custom.routes)
+            );
+            println!(
+                "custom diff (+): {:?}\n-----",
+                found_custom.routes.difference(&custom_routes)
+            );
             Err(CondCheckError::NotYet::<()>)
         }
     };
     wait_for_condition(
         condition,
         &Duration::from_secs(1),
-        &Duration::from_secs(30),
+        &Duration::from_secs(60),
     )
     .await
     .expect("matching vpc routes should be present");
+
+    println!("success! VPC routes as expected for sled {}", sled_agent.id);
 
     (system_routes, custom_routes)
 }

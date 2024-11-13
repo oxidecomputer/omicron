@@ -15,11 +15,15 @@ use std::mem;
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub(crate) enum DiscretionaryOmicronZone {
     BoundaryNtp,
+    Clickhouse,
+    ClickhouseKeeper,
+    ClickhouseServer,
     CockroachDb,
+    CruciblePantry,
     InternalDns,
     ExternalDns,
     Nexus,
-    // TODO expand this enum as we start to place more services
+    Oximeter,
 }
 
 impl DiscretionaryOmicronZone {
@@ -28,19 +32,22 @@ impl DiscretionaryOmicronZone {
     ) -> Option<Self> {
         match zone_type {
             BlueprintZoneType::BoundaryNtp(_) => Some(Self::BoundaryNtp),
+            BlueprintZoneType::Clickhouse(_) => Some(Self::Clickhouse),
+            BlueprintZoneType::ClickhouseKeeper(_) => {
+                Some(Self::ClickhouseKeeper)
+            }
+            BlueprintZoneType::ClickhouseServer(_) => {
+                Some(Self::ClickhouseServer)
+            }
             BlueprintZoneType::CockroachDb(_) => Some(Self::CockroachDb),
+            BlueprintZoneType::CruciblePantry(_) => Some(Self::CruciblePantry),
             BlueprintZoneType::InternalDns(_) => Some(Self::InternalDns),
             BlueprintZoneType::ExternalDns(_) => Some(Self::ExternalDns),
             BlueprintZoneType::Nexus(_) => Some(Self::Nexus),
-            // Zones that we should place but don't yet.
-            BlueprintZoneType::Clickhouse(_)
-            | BlueprintZoneType::ClickhouseKeeper(_)
-            | BlueprintZoneType::ClickhouseServer(_)
-            | BlueprintZoneType::CruciblePantry(_)
-            | BlueprintZoneType::Oximeter(_) => None,
+            BlueprintZoneType::Oximeter(_) => Some(Self::Oximeter),
             // Zones that get special handling for placement (all sleds get
             // them, although internal NTP has some interactions with boundary
-            // NTP that we don't yet handle, so this may change).
+            // NTP that are handled separately).
             BlueprintZoneType::Crucible(_)
             | BlueprintZoneType::InternalNtp(_) => None,
         }
@@ -51,10 +58,19 @@ impl From<DiscretionaryOmicronZone> for ZoneKind {
     fn from(zone: DiscretionaryOmicronZone) -> Self {
         match zone {
             DiscretionaryOmicronZone::BoundaryNtp => Self::BoundaryNtp,
+            DiscretionaryOmicronZone::Clickhouse => Self::Clickhouse,
+            DiscretionaryOmicronZone::ClickhouseKeeper => {
+                Self::ClickhouseKeeper
+            }
+            DiscretionaryOmicronZone::ClickhouseServer => {
+                Self::ClickhouseServer
+            }
             DiscretionaryOmicronZone::CockroachDb => Self::CockroachDb,
+            DiscretionaryOmicronZone::CruciblePantry => Self::CruciblePantry,
             DiscretionaryOmicronZone::InternalDns => Self::InternalDns,
             DiscretionaryOmicronZone::ExternalDns => Self::ExternalDns,
             DiscretionaryOmicronZone::Nexus => Self::Nexus,
+            DiscretionaryOmicronZone::Oximeter => Self::Oximeter,
         }
     }
 }

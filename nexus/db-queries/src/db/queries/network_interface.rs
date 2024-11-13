@@ -1807,11 +1807,11 @@ mod tests {
     use crate::db::model::NetworkInterface;
     use crate::db::model::Project;
     use crate::db::model::VpcSubnet;
+    use crate::db::pub_test_utils::TestDatabase;
     use crate::db::queries::network_interface::last_available_address;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use dropshot::test_util::LogContext;
     use model::NetworkInterfaceKind;
-    use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
     use nexus_types::external_api::params::InstanceCreate;
     use nexus_types::external_api::params::InstanceNetworkInterfaceAttachment;
@@ -1822,7 +1822,6 @@ mod tests {
     use omicron_common::api::external::InstanceCpuCount;
     use omicron_common::api::external::MacAddr;
     use omicron_test_utils::dev;
-    use omicron_test_utils::dev::db::CockroachInstance;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
     use oxnet::Ipv4Net;
@@ -1832,7 +1831,6 @@ mod tests {
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
-    use std::sync::Arc;
     use uuid::Uuid;
 
     // Add an instance. We'll use this to verify that the instance must be
@@ -1859,6 +1857,7 @@ mod tests {
             network_interfaces: InstanceNetworkInterfaceAttachment::None,
             external_ips: vec![],
             disks: vec![],
+            boot_disk: None,
             start: true,
             auto_restart_policy: Default::default(),
         };
@@ -1963,9 +1962,7 @@ mod tests {
     // Context for testing network interface queries.
     struct TestContext {
         logctx: LogContext,
-        opctx: OpContext,
-        db: CockroachInstance,
-        db_datastore: Arc<DataStore>,
+        db: TestDatabase,
         project_id: Uuid,
         net1: Network,
         net2: Network,
@@ -1975,10 +1972,8 @@ mod tests {
         async fn new(test_name: &str, n_subnets: u8) -> Self {
             let logctx = dev::test_setup_log(test_name);
             let log = logctx.log.new(o!());
-            let db = test_setup_database(&log).await;
-            let (opctx, db_datastore) =
-                crate::db::datastore::test_utils::datastore_test(&logctx, &db)
-                    .await;
+            let db = TestDatabase::new_with_datastore(&log).await;
+            let (opctx, datastore) = (db.opctx(), db.datastore());
 
             let authz_silo = opctx.authn.silo_required().unwrap();
 
@@ -1993,11 +1988,11 @@ mod tests {
                 },
             );
             let (.., project) =
-                db_datastore.project_create(&opctx, project).await.unwrap();
+                datastore.project_create(&opctx, project).await.unwrap();
 
             use crate::db::schema::vpc_subnet::dsl::vpc_subnet;
             let conn =
-                db_datastore.pool_connection_authorized(&opctx).await.unwrap();
+                datastore.pool_connection_authorized(&opctx).await.unwrap();
             let net1 = Network::new(n_subnets);
             let net2 = Network::new(n_subnets);
             for subnet in net1.subnets.iter().chain(net2.subnets.iter()) {
@@ -2008,29 +2003,29 @@ mod tests {
                     .unwrap();
             }
             drop(conn);
-            Self {
-                logctx,
-                opctx,
-                db,
-                db_datastore,
-                project_id: project.id(),
-                net1,
-                net2,
-            }
+            Self { logctx, db, project_id: project.id(), net1, net2 }
         }
 
-        async fn success(mut self) {
-            self.db.cleanup().await.unwrap();
+        fn opctx(&self) -> &OpContext {
+            self.db.opctx()
+        }
+
+        fn datastore(&self) -> &DataStore {
+            self.db.datastore()
+        }
+
+        async fn success(self) {
+            self.db.terminate().await;
             self.logctx.cleanup_successful();
         }
 
         async fn create_stopped_instance(&self) -> Instance {
             instance_set_state(
-                &self.db_datastore,
+                self.datastore(),
                 create_instance(
-                    &self.opctx,
+                    self.opctx(),
                     self.project_id,
-                    &self.db_datastore,
+                    self.datastore(),
                 )
                 .await,
                 InstanceState::NoVmm,
@@ -2040,11 +2035,11 @@ mod tests {
 
         async fn create_running_instance(&self) -> Instance {
             instance_set_state(
-                &self.db_datastore,
+                self.datastore(),
                 create_instance(
-                    &self.opctx,
+                    self.opctx(),
                     self.project_id,
-                    &self.db_datastore,
+                    self.datastore(),
                 )
                 .await,
                 InstanceState::Vmm,
@@ -2077,17 +2072,17 @@ mod tests {
         )
         .unwrap();
         let inserted_interface = context
-            .db_datastore
-            .service_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .service_create_network_interface_raw(context.opctx(), interface)
             .await
             .expect("Failed to insert interface");
 
         // We should be able to delete twice, and be told that the first delete
         // modified the row and the second did not.
         let first_deleted = context
-            .db_datastore
+            .datastore()
             .service_delete_network_interface(
-                &context.opctx,
+                context.opctx(),
                 service_id,
                 inserted_interface.id(),
             )
@@ -2096,9 +2091,9 @@ mod tests {
         assert!(first_deleted, "first delete removed interface");
 
         let second_deleted = context
-            .db_datastore
+            .datastore()
             .service_delete_network_interface(
-                &context.opctx,
+                context.opctx(),
                 service_id,
                 inserted_interface.id(),
             )
@@ -2109,9 +2104,9 @@ mod tests {
         // Attempting to delete a nonexistent interface should fail.
         let bogus_id = Uuid::new_v4();
         let err = context
-            .db_datastore
+            .datastore()
             .service_delete_network_interface(
-                &context.opctx,
+                context.opctx(),
                 service_id,
                 bogus_id,
             )
@@ -2146,8 +2141,8 @@ mod tests {
             Some(requested_ip),
         )
         .unwrap();
-        let err = context.db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface.clone())
+        let err = context.datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface.clone())
             .await
             .expect_err("Should not be able to create an interface for a running instance");
         assert!(
@@ -2176,9 +2171,9 @@ mod tests {
         )
         .unwrap();
         let inserted_interface = context
-            .db_datastore
+            .datastore()
             .instance_create_network_interface_raw(
-                &context.opctx,
+                context.opctx(),
                 interface.clone(),
             )
             .await
@@ -2207,8 +2202,8 @@ mod tests {
             None,
         )
         .unwrap();
-        let err = context.db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface.clone())
+        let err = context.datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface.clone())
             .await
             .expect_err("Should not be able to insert an interface for an instance that doesn't exist");
         assert!(
@@ -2246,9 +2241,9 @@ mod tests {
             )
             .unwrap();
             let inserted_interface = context
-                .db_datastore
+                .datastore()
                 .instance_create_network_interface_raw(
-                    &context.opctx,
+                    context.opctx(),
                     interface.clone(),
                 )
                 .await
@@ -2290,8 +2285,8 @@ mod tests {
         )
         .unwrap();
         let inserted_interface = context
-            .db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
             .await
             .expect("Failed to insert interface");
 
@@ -2309,8 +2304,8 @@ mod tests {
         )
         .unwrap();
         let result = context
-            .db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
             .await;
         assert!(
             matches!(result, Err(InsertError::IpAddressNotAvailable(_))),
@@ -2346,8 +2341,8 @@ mod tests {
         )
         .unwrap();
         let inserted_interface = context
-            .db_datastore
-            .service_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .service_create_network_interface_raw(context.opctx(), interface)
             .await
             .expect("Failed to insert interface");
         assert_eq!(inserted_interface.mac.0, mac);
@@ -2386,8 +2381,11 @@ mod tests {
             )
             .unwrap();
             let inserted_interface = context
-                .db_datastore
-                .service_create_network_interface_raw(&context.opctx, interface)
+                .datastore()
+                .service_create_network_interface_raw(
+                    context.opctx(),
+                    interface,
+                )
                 .await
                 .expect("Failed to insert interface");
             assert_eq!(*inserted_interface.slot, slot);
@@ -2423,8 +2421,8 @@ mod tests {
         )
         .unwrap();
         let inserted_interface = context
-            .db_datastore
-            .service_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .service_create_network_interface_raw(context.opctx(), interface)
             .await
             .expect("Failed to insert interface");
         assert_eq!(inserted_interface.mac.0, mac);
@@ -2446,8 +2444,11 @@ mod tests {
         )
         .unwrap();
         let result = context
-            .db_datastore
-            .service_create_network_interface_raw(&context.opctx, new_interface)
+            .datastore()
+            .service_create_network_interface_raw(
+                context.opctx(),
+                new_interface,
+            )
             .await;
         assert!(
             matches!(result, Err(InsertError::MacAddressNotAvailable(_))),
@@ -2499,8 +2500,8 @@ mod tests {
         )
         .unwrap();
         let inserted_interface = context
-            .db_datastore
-            .service_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .service_create_network_interface_raw(context.opctx(), interface)
             .await
             .expect("Failed to insert interface");
         assert_eq!(*inserted_interface.slot, 0);
@@ -2520,8 +2521,11 @@ mod tests {
         )
         .unwrap();
         let result = context
-            .db_datastore
-            .service_create_network_interface_raw(&context.opctx, new_interface)
+            .datastore()
+            .service_create_network_interface_raw(
+                context.opctx(),
+                new_interface,
+            )
             .await;
         assert!(
             matches!(result, Err(InsertError::SlotNotAvailable(0))),
@@ -2548,9 +2552,9 @@ mod tests {
         )
         .unwrap();
         let _ = context
-            .db_datastore
+            .datastore()
             .instance_create_network_interface_raw(
-                &context.opctx,
+                context.opctx(),
                 interface.clone(),
             )
             .await
@@ -2567,8 +2571,8 @@ mod tests {
         )
         .unwrap();
         let result = context
-            .db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
             .await;
         assert!(
             matches!(
@@ -2598,8 +2602,8 @@ mod tests {
         )
         .unwrap();
         let _ = context
-            .db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
             .await
             .expect("Failed to insert interface");
         let interface = IncompleteNetworkInterface::new_instance(
@@ -2614,8 +2618,8 @@ mod tests {
         )
         .unwrap();
         let result = context
-            .db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
             .await;
         assert!(
             matches!(result, Err(InsertError::NonUniqueVpcSubnets)),
@@ -2642,16 +2646,16 @@ mod tests {
         )
         .unwrap();
         let _ = context
-            .db_datastore
+            .datastore()
             .instance_create_network_interface_raw(
-                &context.opctx,
+                context.opctx(),
                 interface.clone(),
             )
             .await
             .expect("Failed to insert interface");
         let result = context
-            .db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
             .await;
         assert!(
             matches!(
@@ -2684,8 +2688,8 @@ mod tests {
         )
         .unwrap();
         let _ = context
-            .db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
             .await
             .expect("Failed to insert interface");
         let expected_address = "172.30.0.5".parse().unwrap();
@@ -2702,9 +2706,9 @@ mod tests {
             )
             .unwrap();
             let result = context
-                .db_datastore
+                .datastore()
                 .instance_create_network_interface_raw(
-                    &context.opctx,
+                    context.opctx(),
                     interface,
                 )
                 .await;
@@ -2738,9 +2742,9 @@ mod tests {
             )
             .unwrap();
             let _ = context
-                .db_datastore
+                .datastore()
                 .instance_create_network_interface_raw(
-                    &context.opctx,
+                    context.opctx(),
                     interface,
                 )
                 .await
@@ -2749,9 +2753,9 @@ mod tests {
 
         // Next one should fail
         let instance = create_stopped_instance(
-            &context.opctx,
+            context.opctx(),
             context.project_id,
-            &context.db_datastore,
+            context.datastore(),
         )
         .await;
         let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
@@ -2767,8 +2771,8 @@ mod tests {
         )
         .unwrap();
         let result = context
-            .db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
             .await;
         assert!(
             matches!(result, Err(InsertError::NoAvailableIpAddresses)),
@@ -2800,9 +2804,9 @@ mod tests {
             )
             .unwrap();
             let result = context
-                .db_datastore
+                .datastore()
                 .instance_create_network_interface_raw(
-                    &context.opctx,
+                    context.opctx(),
                     interface,
                 )
                 .await;
@@ -2868,9 +2872,9 @@ mod tests {
             )
             .unwrap();
             let inserted_interface = context
-                .db_datastore
+                .datastore()
                 .instance_create_network_interface_raw(
-                    &context.opctx,
+                    context.opctx(),
                     interface.clone(),
                 )
                 .await
@@ -2903,9 +2907,9 @@ mod tests {
         )
         .unwrap();
         let result = context
-            .db_datastore
+            .datastore()
             .instance_create_network_interface_raw(
-                &context.opctx,
+                context.opctx(),
                 interface.clone(),
             )
             .await

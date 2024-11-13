@@ -10,7 +10,7 @@ use super::sled_agent::SledAgent;
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::nexus::make_nexus_client;
 use crate::services::ServiceManager;
-use internal_dns::resolver::Resolver;
+use internal_dns_resolver::Resolver;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;

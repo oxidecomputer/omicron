@@ -170,7 +170,78 @@ impl BackgroundTask for RegionReplacementDetector {
             };
 
             for request in requests {
+                // If the replacement request is in the `requested` state and
+                // the request's volume was soft-deleted or hard-deleted, avoid
+                // sending the start request and instead transition the request
+                // to completed
+
+                let volume_deleted = match self
+                    .datastore
+                    .volume_deleted(request.volume_id)
+                    .await
+                {
+                    Ok(volume_deleted) => volume_deleted,
+
+                    Err(e) => {
+                        let s = format!(
+                            "error checking if volume id {} was deleted: {e}",
+                            request.volume_id,
+                        );
+                        error!(&log, "{s}");
+
+                        status.errors.push(s);
+                        continue;
+                    }
+                };
+
                 let request_id = request.id;
+
+                if volume_deleted {
+                    // Volume was soft or hard deleted, so proceed with clean
+                    // up, which if this is in state Requested there won't be
+                    // any additional associated state, so transition the record
+                    // to Completed.
+
+                    info!(
+                        &log,
+                        "request {} volume {} was soft or hard deleted!",
+                        request_id,
+                        request.volume_id,
+                    );
+
+                    let result = self
+                        .datastore
+                        .set_region_replacement_complete_from_requested(
+                            opctx, request,
+                        )
+                        .await;
+
+                    match result {
+                        Ok(()) => {
+                            let s = format!(
+                                "request {} transitioned from requested to \
+                                complete",
+                                request_id,
+                            );
+
+                            info!(&log, "{s}");
+                            status.requests_completed_ok.push(s);
+                        }
+
+                        Err(e) => {
+                            let s = format!(
+                                "error transitioning {} from requested to \
+                                complete: {e}",
+                                request_id,
+                            );
+
+                            error!(&log, "{s}");
+                            status.errors.push(s);
+                        }
+                    }
+
+                    continue;
+                }
 
                 let result = self
                     .send_start_request(
@@ -213,7 +284,10 @@ mod test {
     use super::*;
     use crate::app::background::init::test::NoopStartSaga;
     use nexus_db_model::RegionReplacement;
+    use nexus_db_model::Volume;
     use nexus_test_utils_macros::nexus_test;
+    use sled_agent_client::types::CrucibleOpts;
+    use sled_agent_client::types::VolumeConstructionRequest;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -239,13 +313,48 @@ mod test {
         assert_eq!(result, json!(RegionReplacementStatus::default()));
 
         // Add a region replacement request for a fake region
-        let request = RegionReplacement::new(Uuid::new_v4(), Uuid::new_v4());
+        let volume_id = Uuid::new_v4();
+        let request = RegionReplacement::new(Uuid::new_v4(), volume_id);
         let request_id = request.id;
 
         datastore
             .insert_region_replacement_request(&opctx, request)
             .await
             .unwrap();
+
+        let volume_construction_request = VolumeConstructionRequest::Volume {
+            id: volume_id,
+            block_size: 0,
+            sub_volumes: vec![VolumeConstructionRequest::Region {
+                block_size: 0,
+                blocks_per_extent: 0,
+                extent_count: 0,
+                gen: 0,
+                opts: CrucibleOpts {
+                    id: volume_id,
+                    target: vec![
+                        // if you put something here, you'll need a synthetic
+                        // dataset record
+                    ],
+                    lossy: false,
+                    flush_timeout: None,
+                    key: None,
+                    cert_pem: None,
+                    key_pem: None,
+                    root_cert_pem: None,
+                    control: None,
+                    read_only: false,
+                },
+            }],
+            read_only_parent: None,
+        };
+
+        let volume_data =
+            serde_json::to_string(&volume_construction_request).unwrap();
+
+        let volume = Volume::new(volume_id, volume_data);
+
+        datastore.volume_create(volume).await.unwrap();
 
         // Activate the task - it should pick that up and try to run the region
         // replacement start saga

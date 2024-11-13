@@ -4,8 +4,8 @@
 
 //! TCP proxy to expose Nexus's external API via the techport.
 
-use internal_dns::resolver::Resolver;
-use internal_dns::ServiceName;
+use internal_dns_resolver::Resolver;
+use internal_dns_types::names::ServiceName;
 use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
 use slog::info;
 use slog::o;

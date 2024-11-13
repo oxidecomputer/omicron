@@ -1,0 +1,304 @@
+:showtitle:
+:numbered:
+:toc: left
+
+= Omicron Time Synchronization Debugging Guide
+
+THis guide is aimed at helping Omicron developers debug common time
+synchronisation problems. If you run into a problem that's not covered here,
+please consider adding it!
+
+== Overview
+
+In any Oxide control plane deployment, there is a single NTP zone per sled.
+Up to two of these will be configured as *boundary* NTP zones and these are the
+ones that reach out of the rack to communicate with upstream NTP servers on an
+external network. In lab environments this is often a public NTP server pool on
+the Internet. On sleds that are not running one of the two boundary NTP zones,
+there are *internal* NTP zones, which talk to the boundary NTP zones in order
+to synchronise time.
+
+The external, boundary and internal NTP zones form a hierarchy:
+
+
+[source,text]
+----
+                       +----------+
+                       | External |
+                       |  Source  |
+                       +----------+
+                         /      \
+                       /          \
+                     v              v
+               +----------+    +----------+
+               | Boundary |    | Boundary |
+               |   NTP    |    |   NTP    |
+               |  Zone    |    |  Zone    |
+               +----------+    +----------+
+                   |||             |||
+                   vvv             vvv
+     +----------+ +----------+    +----------+ +----------+
+     | Internal | | Internal |    | Internal | | Internal |
+     |   NTP    | |   NTP    |....|   NTP    | |   NTP    |
+     |  Zone    | |  Zone    |    |  Zone    | |  Zone    |
+     +----------+ +----------+    +----------+ +----------+
+----
+
+== Debugging
+
+Time synchronisation is required to be established before other services, such
+as the database, can be brought online. The sled agent will usually be
+repeatedly reporting:
+
+[source,text]
+----
+2024-04-01T23:14:24.799Z WARN SledAgent (RSS): Time is not yet synchronized
+    error = "Time is synchronized on 0/10 sleds"
+----
+
+You will first need to find one of the boundary NTP zones. In the case of a
+single or dual sled deployment this is obviously easy -- both sleds will have a
+boundary NTP zone -- but otherwise you are looking for an NTP zone in which the
+NTP `boundary` property in the `chrony-setup` service is true:
+
+[source,text]
+----
+sled0# svcprop -p config/boundary -z `zoneadm list | grep oxz_ntp` chrony-setup
+true
+----
+
+Having found a boundary zone, log into it and check the following things:
+
+===== Basic networking
+
+First, confirm that the zone has basic networking configuration and
+connectivity with the outside world. In some environments this may be limited
+due to the configuration of external network devices such as firewalls, but for
+the purposes of this guide I assume that it's unrestricted:
+
+The zone should have an OPTE interface:
+
+[source,text]
+----
+root@oxz_ntp_cb901d3e:~# dladm
+LINK        CLASS     MTU    STATE    BRIDGE     OVER
+opte0       misc      1500   up       --         --
+oxControlService1 vnic 9000  up       --         ?
+----
+
+and that interface should have successfully obtained an IP address via DHCP:
+
+[source,text]
+----
+root@oxz_ntp_cb901d3e:~# ipadm show-addr opte0/public
+ADDROBJ           TYPE     STATE        ADDR
+opte0/public      dhcp     ok           172.30.3.6/32
+----
+
+and a corresponding default route:
+
+[source,text]
+----
+root@oxz_ntp_cb901d3e:~# route -n get default
+   route to: default
+destination: default
+       mask: default
+    gateway: 172.30.3.1
+  interface: opte0
+      flags: <UP,GATEWAY,DONE,STATIC>
+ recvpipe  sendpipe  ssthresh    rtt,ms rttvar,ms  hopcount      mtu     expire
+       0         0         0         0         0         0      1500         0
+----
+
+The zone should be able to ping the Internet, by number:
+
+[source,text]
+----
+root@oxz_ntp_cb901d3e:~# ping -sn 1.1.1.1 54 1
+PING 1.1.1.1 (1.1.1.1): 54 data bytes
+62 bytes from 1.1.1.1: icmp_seq=0. time=1.953 ms
+
+----1.1.1.1 PING Statistics----
+1 packets transmitted, 1 packets received, 0% packet loss
+round-trip (ms)  min/avg/max/stddev = 1.953/1.953/1.953/-nan
+----
+
+and by name:
+
+[source,text]
+----
+root@oxz_ntp_cb901d3e:~# ping -sn oxide.computer 56 1
+PING oxide.computer (76.76.21.21): 56 data bytes
+64 bytes from 76.76.21.21: icmp_seq=0. time=1.373 ms
+
+----oxide.computer PING Statistics----
+1 packets transmitted, 1 packets received, 0% packet loss
+round-trip (ms)  min/avg/max/stddev = 1.373/1.373/1.373/-nan
+----
+
+Perform arbitrary DNS lookups via dig:
+
+[source,text]
+----
+root@oxz_ntp_cb901d3e:~# dig 0.pool.ntp.org @1.1.1.1
+
+; <<>> DiG 9.18.14 <<>> 0.pool.ntp.org @1.1.1.1
+;; global options: +cmd
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 3283
+;; flags: qr rd ra; QUERY: 1, ANSWER: 4, AUTHORITY: 0, ADDITIONAL: 1
+
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags:; udp: 1232
+;; QUESTION SECTION:
+;0.pool.ntp.org.                        IN      A
+
+;; ANSWER SECTION:
+0.pool.ntp.org.         68      IN      A       23.186.168.1
+0.pool.ntp.org.         68      IN      A       204.17.205.27
+0.pool.ntp.org.         68      IN      A       23.186.168.2
+0.pool.ntp.org.         68      IN      A       198.60.22.240
+
+;; Query time: 2 msec
+;; SERVER: 1.1.1.1#53(1.1.1.1) (UDP)
+;; WHEN: Wed Oct 02 16:51:29 UTC 2024
+;; MSG SIZE  rcvd: 107
+----
+
+and via the local resolver:
+
+[source,text]
+----
+root@oxz_ntp_cb901d3e:~# getent hosts time.cloudflare.com
+162.159.200.123 time.cloudflare.com
+162.159.200.1   time.cloudflare.com
+----
+
+===== NTP Service (chrony)
+
+Having established that basic networking and DNS are working, now look at the
+running NTP service (chrony).
+
+First, confirm that it is indeed running. There should be two processes
+associated with the service.
+
+[source,text]
+----
+root@oxz_ntp_cb901d3e:~# svcs -vp ntp
+STATE          NSTATE        STIME    CTID   FMRI
+online         -             1986        217 svc:/oxide/ntp:default
+               1986         2551 chronyd
+               1986         2552 chronyd
+----
+
+Check if it has been able to synchronise time.
+
+Here is example output for a server that cannot synchronise:
+
+[source,text]
+----
+root@oxz_ntp_cb901d3e:~# chronyc -n tracking
+Reference ID    : 7F7F0101 ()
+Stratum         : 10
+Ref time (UTC)  : Mon Apr 01 23:14:59
+System time     : 0.000000000 seconds
+Last offset     : +0.000000000 seconds
+RMS offset      : 0.000000000 seconds
+Frequency       : 0.000 ppm slow
+Residual freq   : +0.000 ppm
+Skew            : 0.000 ppm
+Root delay      : 0.000000000 seconds
+Root dispersion : 0.000000000 seconds
+Update interval : 0.0 seconds
+Leap status     : Normal
+----
+
+and an example of one that can:
+
+[source,text]
+----
+root@oxz_ntp_cb901d3e:~# chronyc -n tracking
+Reference ID    : A29FC87B (162.159.200.123)
+Stratum         : 4
+Ref time (UTC)  : Wed Oct 02 16:57:11 2024
+System time     : 0.000004693 seconds fast of NTP time
+Last offset     : +0.000000982 seconds
+RMS offset      : 0.000002580 seconds
+Frequency       : 32.596 ppm slow
+Residual freq   : +0.002 ppm
+Skew            : 0.111 ppm
+Root delay      : 0.030124957 seconds
+Root dispersion : 0.000721255 seconds
+Update interval : 8.1 seconds
+Leap status     : Normal
+----
+
+Similarly, check the active time synchronisation source list:
+
+Example of output for a server that cannot synchronise:
+
+[source,text]
+----
+root@oxz_ntp_cb901d3e:~# chronyc -n sources -a
+MS Name/IP address         Stratum Poll Reach LastRx Last sample
+================================================================
+----
+
+and one that can:
+
+[source,text]
+----
+root@oxz_ntp_cb901d3e:~# chronyc -n sources -a
+MS Name/IP address         Stratum Poll Reach LastRx Last sample
+===============================================================================
+^? ID#0000000001                 0   0     0     -     +0ns[   +0ns] +/-    0ns
+^* 162.159.200.123               3   3   377     4    +45us[  +44us] +/-   16ms
+^? ID#0000000003                 0   0     0     -     +0ns[   +0ns] +/-    0ns
+^? ID#0000000004                 0   0     0     -     +0ns[   +0ns] +/-    0ns
+^? ID#0000000005                 0   0     0     -     +0ns[   +0ns] +/-    0ns
+^? 2606:4700:f1::1               0   3     0     -     +0ns[   +0ns] +/-    0ns
+^? ID#0000000007                 0   0     0     -     +0ns[   +0ns] +/-    0ns
+^? ID#0000000008                 0   0     0     -     +0ns[   +0ns] +/-    0ns
+^+ 162.159.200.1                 3   3   377     5    -64us[  -65us] +/-   16ms
+^? ID#0000000010                 0   0     0     -     +0ns[   +0ns] +/-    0ns
+^? ID#0000000011                 0   0     0     -     +0ns[   +0ns] +/-    0ns
+^? ID#0000000012                 0   0     0     -     +0ns[   +0ns] +/-    0ns
+^? 2606:4700:f1::123             0   3     0     -     +0ns[   +0ns] +/-    0ns
+^? ID#0000000014                 0   0     0     -     +0ns[   +0ns] +/-    0ns
+^? ID#0000000015                 0   0     0     -     +0ns[   +0ns] +/-    0ns
+^? ID#0000000016                 0   0     0     -     +0ns[   +0ns] +/-    0ns
+----
+
+Note that the `Reach` column is shown in octal and is a representation of
+bits showing the past 8 communication attempts. `377` means that all of the
+previous 8 attempts succeeded.
+
+Chrony generates log files under `/var/log/chrony/` which can help with
+diagnosing failures.
+
+At this point, if time is not synchronising. Stop the chrony daemon and attempt
+to synchronise manually, from the command line.
+
+[source,text]
+----
+root@oxz_ntp_cb901d3e:~# svcadm disable ntp
+root@oxz_ntp_cb901d3e:~# /usr/sbin/chronyd -t 10 -ddQ 'pool time.cloudflare.com iburst maxdelay 0.1'
+2024-10-02T17:02:54Z chronyd version 4.5 starting (+CMDMON +NTP +REFCLOCK -RTC
++PRIVDROP -SCFILTER +SIGND +ASYNCDNS -NTS +SECHASH +IPV6 -DEBUG)
+2024-10-02T17:02:54Z Disabled control of system clock
+2024-10-02T17:02:59Z System clock wrong by -0.000015 seconds (ignored)
+2024-10-02T17:02:59Z chronyd exiting
+----
+
+== Post-mortem CI Debugging
+
+If time synchronisation fails in CI, such as in the omicron `deploy` job, then
+the information above will have been collected as evidence and uploaded to
+buildomat for inspection. You should be able to perform the same diagnosis by
+finding the output of the above commands in there and determining whether basic
+networking is present and correct, and then whether chrony is behaving as
+expected.
+
+If there's something that would be useful in post mortem but is not being
+collected, add it to the deploy job script.
+

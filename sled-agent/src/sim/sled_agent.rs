@@ -4,18 +4,20 @@
 
 //! Simulated sled agent implementation
 
+use super::artifact_store::SimArtifactStorage;
 use super::collection::{PokeMode, SimCollection};
 use super::config::Config;
 use super::disk::SimDisk;
 use super::instance::{self, SimInstance};
 use super::storage::CrucibleData;
 use super::storage::Storage;
+use crate::artifact_store::ArtifactStore;
 use crate::nexus::NexusClient;
 use crate::sim::simulatable::Simulatable;
 use crate::updates::UpdateManager;
 use anyhow::bail;
 use anyhow::Context;
-use dropshot::{HttpError, HttpServer};
+use dropshot::HttpError;
 use futures::lock::Mutex;
 use nexus_sled_agent_shared::inventory::{
     Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
@@ -41,7 +43,6 @@ use oxnet::Ipv6Net;
 use propolis_client::{
     types::VolumeConstructionRequest, Client as PropolisClient,
 };
-use propolis_mock_server::Context as PropolisContext;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
@@ -72,14 +73,14 @@ pub struct SledAgent {
     vmms: Arc<SimCollection<SimInstance>>,
     /// collection of simulated disks, indexed by disk uuid
     disks: Arc<SimCollection<SimDisk>>,
-    storage: Mutex<Storage>,
+    storage: Arc<Mutex<Storage>>,
     updates: UpdateManager,
     nexus_address: SocketAddr,
     pub nexus_client: Arc<NexusClient>,
     disk_id_to_region_ids: Mutex<HashMap<String, Vec<Uuid>>>,
     pub v2p_mappings: Mutex<HashSet<VirtualNetworkInterfaceHost>>,
     mock_propolis:
-        Mutex<Option<(HttpServer<Arc<PropolisContext>>, PropolisClient)>>,
+        Mutex<Option<(propolis_mock_server::Server, PropolisClient)>>,
     /// lists of external IPs assigned to instances
     pub external_ips:
         Mutex<HashMap<PropolisUuid, HashSet<InstanceExternalIpBody>>>,
@@ -88,6 +89,7 @@ pub struct SledAgent {
     fake_zones: Mutex<OmicronZonesConfig>,
     instance_ensure_state_error: Mutex<Option<Error>>,
     pub bootstore_network_config: Mutex<EarlyNetworkConfig>,
+    artifacts: ArtifactStore<SimArtifactStorage>,
     pub log: Logger,
 }
 
@@ -165,6 +167,14 @@ impl SledAgent {
             },
         });
 
+        let storage = Arc::new(Mutex::new(Storage::new(
+            id.into_untyped_uuid(),
+            config.storage.ip,
+            storage_log,
+        )));
+        let artifacts =
+            ArtifactStore::new(&log, SimArtifactStorage::new(storage.clone()));
+
         Arc::new(SledAgent {
             id,
             ip: config.dropshot.bind_address.ip(),
@@ -178,11 +188,7 @@ impl SledAgent {
                 disk_log,
                 sim_mode,
             )),
-            storage: Mutex::new(Storage::new(
-                id.into_untyped_uuid(),
-                config.storage.ip,
-                storage_log,
-            )),
+            storage,
             updates: UpdateManager::new(config.updates.clone()),
             nexus_address,
             nexus_client,
@@ -197,6 +203,7 @@ impl SledAgent {
                 zones: vec![],
             }),
             instance_ensure_state_error: Mutex::new(None),
+            artifacts,
             log,
             bootstore_network_config,
         })
@@ -338,16 +345,15 @@ impl SledAgent {
                     id: propolis_id.into_untyped_uuid(),
                     name: hardware.properties.hostname.to_string(),
                     description: "sled-agent-sim created instance".to_string(),
-                    image_id: Uuid::default(),
-                    bootrom_id: Uuid::default(),
-                    memory: hardware.properties.memory.to_whole_mebibytes(),
-                    vcpus: hardware.properties.ncpus.0 as u8,
                     metadata,
                 };
                 let body = propolis_client::types::InstanceEnsureRequest {
                     properties,
+                    memory: hardware.properties.memory.to_whole_mebibytes(),
+                    vcpus: hardware.properties.ncpus.0 as u8,
                     nics: vec![],
                     disks: vec![],
+                    boot_settings: None,
                     migrate: None,
                     cloud_init_bytes: None,
                 };
@@ -557,6 +563,10 @@ impl SledAgent {
 
     pub fn updates(&self) -> &UpdateManager {
         &self.updates
+    }
+
+    pub(super) fn artifact_store(&self) -> &ArtifactStore<SimArtifactStorage> {
+        &self.artifacts
     }
 
     pub async fn vmm_count(&self) -> usize {
@@ -786,19 +796,12 @@ impl SledAgent {
         }
         let propolis_bind_address =
             SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0);
-        let dropshot_config = dropshot::ConfigDropshot {
+        let dropshot_config = propolis_mock_server::Config {
             bind_address: propolis_bind_address,
             ..Default::default()
         };
-        let propolis_log = log.new(o!("component" => "propolis-server-mock"));
-        let private = Arc::new(PropolisContext::new(propolis_log));
         info!(log, "Starting mock propolis-server...");
-        let dropshot_log = log.new(o!("component" => "dropshot"));
-        let mock_api = propolis_mock_server::api();
-
-        let srv = dropshot::ServerBuilder::new(mock_api, private, dropshot_log)
-            .config(dropshot_config)
-            .start()
+        let srv = propolis_mock_server::start(dropshot_config, log.clone())
             .map_err(|error| {
                 Error::unavail(&format!(
                     "initializing propolis-server: {}",
@@ -837,6 +840,7 @@ impl SledAgent {
                 self.config.hardware.reservoir_ram,
             )
             .context("reservoir_size")?,
+            omicron_zones: self.fake_zones.lock().await.clone(),
             disks: storage
                 .physical_disks()
                 .values()
@@ -878,9 +882,9 @@ impl SledAgent {
                             name: config.name.full_name(),
                             available: ByteCount::from_kibibytes_u32(0),
                             used: ByteCount::from_kibibytes_u32(0),
-                            quota: config.quota,
-                            reservation: config.reservation,
-                            compression: config.compression.to_string(),
+                            quota: config.inner.quota,
+                            reservation: config.inner.reservation,
+                            compression: config.inner.compression.to_string(),
                         })
                         .collect::<Vec<_>>()
                 })
@@ -955,7 +959,12 @@ impl SledAgent {
                 {
                     continue;
                 }
-                _ => {}
+                _ => {
+                    println!(
+                        "sled {} successfully installed routes {new:?}",
+                        self.id
+                    );
+                }
             };
 
             routes.insert(

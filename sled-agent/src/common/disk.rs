@@ -8,7 +8,6 @@ use chrono::Utc;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
-use propolis_client::types::DiskAttachmentState as PropolisDiskState;
 use sled_agent_types::disk::DiskStateRequested;
 use uuid::Uuid;
 
@@ -47,15 +46,9 @@ impl DiskStates {
     /// Propolis.
     pub fn observe_transition(
         &mut self,
-        observed: &PropolisDiskState,
+        observed: &DiskState,
     ) -> Option<Action> {
-        let next = match observed {
-            PropolisDiskState::Attached(uuid) => DiskState::Attached(*uuid),
-            PropolisDiskState::Detached => DiskState::Detached,
-            PropolisDiskState::Destroyed => DiskState::Destroyed,
-            PropolisDiskState::Faulted => DiskState::Faulted,
-        };
-        self.transition(next, None);
+        self.transition(observed.clone(), None);
         None
     }
 

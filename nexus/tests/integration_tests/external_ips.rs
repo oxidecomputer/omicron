@@ -1000,6 +1000,7 @@ async fn test_floating_ip_attach_fail_between_projects(
                 floating_ip: fip.identity.id.into(),
             }],
             disks: vec![],
+            boot_disk: None,
             start: true,
             auto_restart_policy: Default::default(),
         },

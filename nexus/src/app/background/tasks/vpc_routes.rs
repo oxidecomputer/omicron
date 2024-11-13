@@ -15,7 +15,8 @@ use nexus_types::{
     identity::Resource,
 };
 use omicron_common::api::internal::shared::{
-    ResolvedVpcRoute, ResolvedVpcRouteSet, RouterId, RouterKind, RouterVersion,
+    ExternalIpGatewayMap, ResolvedVpcRoute, ResolvedVpcRouteSet, RouterId,
+    RouterKind, RouterVersion,
 };
 use serde_json::json;
 use std::collections::hash_map::Entry;
@@ -56,6 +57,7 @@ impl BackgroundTask for VpcRouteManager {
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
             let log = &opctx.log;
+            info!(log, "VPC route manager running");
 
             let sleds = match self
                 .datastore
@@ -93,6 +95,7 @@ impl BackgroundTask for VpcRouteManager {
             let mut vni_to_vpc = HashMap::new();
 
             for (sled, client) in sled_clients {
+                info!(log, "VPC route manager sled {}", sled.id());
                 let Ok(route_sets) = client.list_vpc_routes().await else {
                     warn!(
                         log,
@@ -101,6 +104,41 @@ impl BackgroundTask for VpcRouteManager {
                     );
                     continue;
                 };
+
+                // Map each external IP in use by the sled to the Internet Gateway(s)
+                // which are allowed to make use of it.
+                // TODO: this should really not be the responsibility of this RPW.
+                // I would expect this belongs in a future external IPs RPW, but until
+                // then it lives here since it's a core part of the Internet Gateways
+                // system.
+                match self.datastore.vpc_resolve_sled_external_ips_to_gateways(opctx, sled.id()).await {
+                    Ok(mappings) => {
+                        info!(
+                            log,
+                            "computed internet gateway mappings for sled";
+                            "sled" => sled.serial_number(),
+                            "assocs" => ?mappings
+                        );
+                        let param = ExternalIpGatewayMap {mappings};
+                        if let Err(e) = client.set_eip_gateways(&param).await {
+                            error!(
+                                log,
+                                "failed to push internet gateway assignments for sled";
+                                "sled" => sled.serial_number(),
+                                "err" => ?e
+                            );
+                            continue;
+                        };
+                    }
+                    Err(e) => {
+                        error!(
+                            log,
+                            "failed to produce EIP Internet Gateway mappings for sled";
+                            "sled" => sled.serial_number(),
+                            "err" => ?e
+                        );
+                    }
+                }
 
                 let route_sets = route_sets.into_inner();
 
@@ -152,7 +190,7 @@ impl BackgroundTask for VpcRouteManager {
 
                     let Ok(custom_routers) = self
                         .datastore
-                        .vpc_get_active_custom_routers(opctx, vpc_id)
+                        .vpc_get_active_custom_routers_with_associated_subnets(opctx, vpc_id)
                         .await
                     else {
                         error!(
@@ -202,7 +240,7 @@ impl BackgroundTask for VpcRouteManager {
 
                 // resolve into known_rules on an as-needed basis.
                 for set in &route_sets {
-                    let Some(db_router) = db_routers.get(&set.id) else {
+                   let Some(db_router) = db_routers.get(&set.id) else {
                         // The sled wants to know about rules for a VPC
                         // subnet with no custom router set. Send them
                         // the empty list, and unset its table version.
@@ -221,7 +259,33 @@ impl BackgroundTask for VpcRouteManager {
                     // number.
                     match &set.version {
                         Some(v) if !v.is_replaced_by(&version) => {
+                            info!(
+                                log,
+                                "VPC route manager sled {} push not needed",
+                                sled.id()
+                            );
                             continue;
+                            // Currently, this version is bumped in response to
+                            // events that change the routes. This has to be
+                            // done explicitly by the programmer in response to
+                            // any event that may result in a difference in
+                            // route resolution calculation. With the
+                            // introduction of internet gateway targets that
+                            // are parameterized on source IP, route resolution
+                            // computations can change based on events that are
+                            // not directly modifying VPC routes - like the
+                            // linkiage of an IP pool to a silo, or the
+                            // allocation of an external IP address and
+                            // attachment of that IP address to a service or
+                            // instance. This broadened context for changes
+                            // influencing route resolution makes manual
+                            // tracking of a router version easy to get wrong
+                            // and I feel like it will be a bug magnet.
+                            //
+                            // I think we should move decisions around change
+                            // propagation to be based on actual delta
+                            // calculation, rather than trying to manually
+                            // maintain a signal.
                         }
                         _ => {}
                     }
@@ -229,8 +293,12 @@ impl BackgroundTask for VpcRouteManager {
                     // We may have already resolved the rules for this
                     // router in a previous iteration.
                     if let Some(rules) = known_rules.get(&router_id) {
+                        info!(
+                            log,
+                            "VPC route manager sled {} rules already resolved",
+                            sled.id()
+                        );
                         set_rules(set.id, Some(version), rules.clone());
-                        continue;
                     }
 
                     match self
@@ -242,15 +310,8 @@ impl BackgroundTask for VpcRouteManager {
                         .await
                     {
                         Ok(rules) => {
-                            let collapsed: HashSet<_> = rules
-                                .into_iter()
-                                .map(|(dest, target)| ResolvedVpcRoute {
-                                    dest,
-                                    target,
-                                })
-                                .collect();
-                            set_rules(set.id, Some(version), collapsed.clone());
-                            known_rules.insert(router_id, collapsed);
+                            set_rules(set.id, Some(version), rules.clone());
+                            known_rules.insert(router_id, rules);
                         }
                         Err(e) => {
                             error!(

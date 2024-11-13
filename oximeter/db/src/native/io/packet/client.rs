@@ -7,16 +7,18 @@
 //! Encode client packets destined for the server.
 
 use crate::native::block::Block;
-use crate::native::packets::client::{
-    ClientInfo, Query, QueryKind, Settings, Stage,
-};
+use crate::native::io;
+use crate::native::packets::client::ClientInfo;
+use crate::native::packets::client::Hello;
+use crate::native::packets::client::Packet;
+use crate::native::packets::client::Query;
+use crate::native::packets::client::QueryKind;
+use crate::native::packets::client::Settings;
+use crate::native::packets::client::Stage;
 use crate::native::probes;
-use crate::native::{
-    io,
-    packets::client::{Hello, Packet},
-    Error,
-};
-use bytes::{BufMut as _, BytesMut};
+use crate::native::Error;
+use bytes::BufMut as _;
+use bytes::BytesMut;
 
 /// Encoder for client packets.
 #[derive(Clone, Copy, Debug)]
@@ -65,8 +67,7 @@ impl Encoder {
         io::string::encode("", &mut dst);
 
         // Send an empty block to signal the end of data transfer.
-        self.encode_block(Block::empty(std::iter::empty()).unwrap(), &mut dst)
-            .unwrap();
+        self.encode_block(Block::empty(), &mut dst).unwrap();
     }
 
     /// Encode a ClientInfo into the buffer.

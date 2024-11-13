@@ -112,18 +112,11 @@ impl super::Nexus {
         // resources they have access to.
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.timeseries_client
-            .get()
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "Cannot access timeseries DB: {}",
-                    e
-                ))
-            })?
             .timeseries_schema_list(&pagination.page, limit)
             .await
             .map_err(|e| match e {
-                oximeter_db::Error::DatabaseUnavailable(_) => {
+                oximeter_db::Error::DatabaseUnavailable(_)
+                | oximeter_db::Error::Connection(_) => {
                     Error::ServiceUnavailable {
                         internal_message: e.to_string(),
                     }
@@ -145,14 +138,6 @@ impl super::Nexus {
         // resources they have access to.
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.timeseries_client
-            .get()
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "Cannot access timeseries DB: {}",
-                    e
-                ))
-            })?
             .oxql_query(query)
             .await
             .map(|result| {
@@ -166,7 +151,8 @@ impl super::Nexus {
                 result.tables
             })
             .map_err(|e| match e {
-                oximeter_db::Error::DatabaseUnavailable(_) => {
+                oximeter_db::Error::DatabaseUnavailable(_)
+                | oximeter_db::Error::Connection(_) => {
                     Error::ServiceUnavailable {
                         internal_message: e.to_string(),
                     }

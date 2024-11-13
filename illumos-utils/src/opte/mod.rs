@@ -86,11 +86,23 @@ fn net_to_cidr(net: IpNet) -> IpCidr {
 }
 
 /// Convert a nexus `RouterTarget` to an OPTE `RouterTarget`.
-fn router_target_opte(target: &shared::RouterTarget) -> RouterTarget {
+///
+/// Currently, we strip InternetGateway IDs from any routes targeting
+/// non-instance NICs, because we need to actively store the full set
+/// (and division of) SNAT/ephemeral/floating IPs.
+/// Sled-agent only holds this today for instances, because these are
+/// reconfigurable at run-time (whereas services and probes are fixed).
+fn router_target_opte(
+    target: &shared::RouterTarget,
+    is_instance: bool,
+) -> RouterTarget {
     use shared::RouterTarget::*;
     match target {
         Drop => RouterTarget::Drop,
-        InternetGateway => RouterTarget::InternetGateway,
+        InternetGateway(id) if is_instance => {
+            RouterTarget::InternetGateway(*id)
+        }
+        InternetGateway(_) => RouterTarget::InternetGateway(None),
         Ip(ip) => RouterTarget::Ip((*ip).into()),
         VpcSubnet(net) => RouterTarget::VpcSubnet(net_to_cidr(*net)),
     }

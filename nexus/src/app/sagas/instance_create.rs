@@ -44,7 +44,6 @@ pub(crate) struct Params {
     pub create_params: params::InstanceCreate,
     pub boundary_switches: HashSet<SwitchLocation>,
 }
-
 // Several nodes in this saga are wrapped in their own subsaga so that they can
 // have a parameter that denotes which node they are (e.g., which NIC or which
 // external IP).  They also need the outer saga's parameters.
@@ -99,6 +98,10 @@ declare_saga_actions! {
     ATTACH_DISKS_TO_INSTANCE -> "attach_disk_output" {
         + sic_attach_disk_to_instance
         - sic_attach_disk_to_instance_undo
+    }
+    SET_BOOT_DISK -> "set_boot_disk" {
+        + sic_set_boot_disk
+        - sic_set_boot_disk_undo
     }
     MOVE_TO_STOPPED -> "stopped_instance" {
         + sic_move_to_stopped
@@ -244,9 +247,19 @@ impl NexusSaga for SagaInstanceCreate {
             )?;
         }
 
+        // Build an iterator of all InstanceDiskAttachment entries in the
+        // request; these could either be a boot disk or data disks. As far as
+        // create/attach is concerned, they're all disks and all need to be
+        // processed just the same.
+        let all_disks = params
+            .create_params
+            .boot_disk
+            .iter()
+            .chain(params.create_params.disks.iter());
+
         // Appends the disk create saga as a subsaga directly to the instance
         // create builder.
-        for (i, disk) in params.create_params.disks.iter().enumerate() {
+        for (i, disk) in all_disks.clone().enumerate() {
             if let InstanceDiskAttachment::Create(create_disk) = disk {
                 let subsaga_name =
                     SagaName::new(&format!("instance-create-disk-{i}"));
@@ -268,7 +281,7 @@ impl NexusSaga for SagaInstanceCreate {
 
         // Attaches all disks included in the instance create request, including
         // those which were previously created by the disk create subsagas.
-        for (i, disk_attach) in params.create_params.disks.iter().enumerate() {
+        for (i, disk_attach) in all_disks.enumerate() {
             let subsaga_name =
                 SagaName::new(&format!("instance-attach-disk-{i}"));
             let mut subsaga_builder = DagBuilder::new(subsaga_name);
@@ -292,6 +305,7 @@ impl NexusSaga for SagaInstanceCreate {
             )?;
         }
 
+        builder.append(set_boot_disk_action());
         builder.append(move_to_stopped_action());
         Ok(builder.build()?)
     }
@@ -1021,6 +1035,84 @@ async fn sic_delete_instance_record(
     Ok(())
 }
 
+// This is done intentionally late in instance creation:
+// * if the boot disk is provided by name and that disk is created along with
+//   the disk, there would not have been an ID to use any earlier
+// * if the boot disk is pre-existing, we still must wait for `disk-attach`
+//   subsagas to complete; attempting to set the boot disk earlier would error
+//   out because the desired boot disk is not attached.
+/// Set the instance's boot disk, if one was specified.
+async fn sic_set_boot_disk(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let datastore = osagactx.datastore();
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    // TODO: instead of taking this from create_params, if this is a name, take
+    // it from the ID we get when creating the named disk.
+    let Some(boot_disk) =
+        params.create_params.boot_disk.as_ref().map(|x| x.name())
+    else {
+        return Ok(());
+    };
+
+    let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
+
+    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance_id.into_untyped_uuid())
+        .lookup_for(authz::Action::Modify)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let (.., authz_disk) = LookupPath::new(&opctx, datastore)
+        .project_id(params.project_id)
+        .disk_name_owned(boot_disk.into())
+        .lookup_for(authz::Action::Read)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    datastore
+        .instance_set_boot_disk(&opctx, &authz_instance, Some(authz_disk.id()))
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
+async fn sic_set_boot_disk_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let datastore = osagactx.datastore();
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
+
+    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance_id.into_untyped_uuid())
+        .lookup_for(authz::Action::Modify)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    // If there was a boot disk, clear it. If there was not a boot disk,
+    // this is a no-op.
+    datastore
+        .instance_set_boot_disk(&opctx, &authz_instance, None)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
 async fn sic_move_to_stopped(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
@@ -1120,11 +1212,12 @@ pub mod test {
                 external_ips: vec![params::ExternalIpCreate::Ephemeral {
                     pool: None,
                 }],
-                disks: vec![params::InstanceDiskAttachment::Attach(
+                boot_disk: Some(params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
                         name: DISK_NAME.parse().unwrap(),
                     },
-                )],
+                )),
+                disks: Vec::new(),
                 start: false,
                 auto_restart_policy: Default::default(),
             },

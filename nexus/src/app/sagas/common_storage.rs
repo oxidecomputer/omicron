@@ -7,34 +7,75 @@
 use super::*;
 
 use crate::Nexus;
+use crucible_pantry_client::types::Error as CruciblePantryClientError;
 use crucible_pantry_client::types::VolumeConstructionRequest;
-use internal_dns::ServiceName;
+use internal_dns_types::names::ServiceName;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::Error;
-use omicron_common::retry_until_known_result;
+use omicron_common::progenitor_operation_retry::ProgenitorOperationRetry;
+use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddrV6;
+
+mod pantry_pool;
+
+pub(crate) use pantry_pool::make_pantry_connection_pool;
+pub(crate) use pantry_pool::PooledPantryClient;
 
 // Common Pantry operations
 
 pub(crate) async fn get_pantry_address(
-    nexus: &Arc<Nexus>,
+    nexus: &Nexus,
 ) -> Result<SocketAddrV6, ActionError> {
-    nexus
+    let client = nexus.pantry_connection_pool().claim().await.map_err(|e| {
+        ActionError::action_failed(format!(
+            "failed to claim pantry client from pool: {}",
+            InlineErrorChain::new(&e)
+        ))
+    })?;
+    Ok(client.address())
+}
+
+// Helper function for attach/detach below: we retry as long as the pantry isn't
+// gone, and we detect "gone" by seeing whether the pantry address we've chosen
+// is still present when we resolve all the crucible pantry records in DNS.
+//
+// This function never returns an error because it's expected to be used with
+// `ProgenitorOperationRetry`, which treats an error in the "gone check" as a
+// fatal error. We don't want to amplify failures: if something is wrong with
+// DNS, we can't go back and choose another pantry anyway, so we'll just keep
+// retrying until DNS comes back. All that to say: a failure to resolve DNS is
+// treated as "the pantry is not gone".
+pub(super) async fn is_pantry_gone(
+    nexus: &Nexus,
+    pantry_address: SocketAddrV6,
+    log: &Logger,
+) -> bool {
+    let all_pantry_dns_entries = match nexus
         .resolver()
-        .lookup_socket_v6(ServiceName::CruciblePantry)
+        .lookup_all_socket_v6(ServiceName::CruciblePantry)
         .await
-        .map_err(|e| e.to_string())
-        .map_err(ActionError::action_failed)
+    {
+        Ok(entries) => entries,
+        Err(err) => {
+            warn!(
+                log, "Failed to query DNS for Crucible pantry";
+                InlineErrorChain::new(&err),
+            );
+            return false;
+        }
+    };
+    !all_pantry_dns_entries.contains(&pantry_address)
 }
 
 pub(crate) async fn call_pantry_attach_for_disk(
     log: &slog::Logger,
     opctx: &OpContext,
-    nexus: &Arc<Nexus>,
+    nexus: &Nexus,
     disk_id: Uuid,
     pantry_address: SocketAddrV6,
 ) -> Result<(), ActionError> {
@@ -76,37 +117,45 @@ pub(crate) async fn call_pantry_attach_for_disk(
         volume_construction_request,
     };
 
-    retry_until_known_result(log, || async {
-        client.attach(&disk_id.to_string(), &attach_request).await
-    })
-    .await
-    .map_err(|e| {
-        ActionError::action_failed(format!("pantry attach failed with {:?}", e))
-    })?;
+    let attach_operation =
+        || async { client.attach(&disk_id.to_string(), &attach_request).await };
+    let gone_check =
+        || async { Ok(is_pantry_gone(nexus, pantry_address, log).await) };
+
+    ProgenitorOperationRetry::new(attach_operation, gone_check)
+        .run(log)
+        .await
+        .map_err(|e| {
+            ActionError::action_failed(format!(
+                "pantry attach failed: {}",
+                InlineErrorChain::new(&e)
+            ))
+        })?;
 
     Ok(())
 }
 
 pub(crate) async fn call_pantry_detach_for_disk(
+    nexus: &Nexus,
     log: &slog::Logger,
     disk_id: Uuid,
     pantry_address: SocketAddrV6,
-) -> Result<(), ActionError> {
+) -> Result<(), ProgenitorOperationRetryError<CruciblePantryClientError>> {
     let endpoint = format!("http://{}", pantry_address);
 
     info!(log, "sending detach for disk {disk_id} to endpoint {endpoint}");
 
     let client = crucible_pantry_client::Client::new(&endpoint);
 
-    retry_until_known_result(log, || async {
-        client.detach(&disk_id.to_string()).await
-    })
-    .await
-    .map_err(|e| {
-        ActionError::action_failed(format!("pantry detach failed with {:?}", e))
-    })?;
+    let detach_operation =
+        || async { client.detach(&disk_id.to_string()).await };
+    let gone_check =
+        || async { Ok(is_pantry_gone(nexus, pantry_address, log).await) };
 
-    Ok(())
+    ProgenitorOperationRetry::new(detach_operation, gone_check)
+        .run(log)
+        .await
+        .map(|_response| ())
 }
 
 pub(crate) fn find_only_new_region(

@@ -12,7 +12,7 @@ use std::env::current_dir;
 
 use crate::integration_tests::saml::SAML_RESPONSE_IDP_DESCRIPTOR;
 use base64::Engine;
-use internal_dns::names::DNS_ZONE_EXTERNAL_TESTING;
+use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
 use nexus_db_queries::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::{Asset, Resource};

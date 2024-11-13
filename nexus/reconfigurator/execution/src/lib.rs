@@ -7,75 +7,38 @@
 //! See `nexus_reconfigurator_planning` crate-level docs for background.
 
 use anyhow::{anyhow, Context};
-use internal_dns::resolver::Resolver;
+use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::execution::*;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintDatasetFilter;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::SledState;
 use nexus_types::identity::Asset;
-use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
 use omicron_physical_disks::DeployDisksDone;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
-use overridables::Overridables;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
-use std::net::SocketAddrV6;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use update_engine::merge_anyhow_list;
 
+mod clickhouse;
 mod cockroachdb;
 mod datasets;
 mod dns;
 mod omicron_physical_disks;
 mod omicron_zones;
-mod overridables;
 mod sagas;
 mod sled_state;
 #[cfg(test)]
 mod test_utils;
-
-pub use dns::blueprint_external_dns_config;
-pub use dns::blueprint_internal_dns_config;
-pub use dns::blueprint_nexus_external_ips;
-pub use dns::silo_dns_name;
-
-pub struct Sled {
-    id: SledUuid,
-    sled_agent_address: SocketAddrV6,
-    is_scrimlet: bool,
-}
-
-impl Sled {
-    pub fn new(
-        id: SledUuid,
-        sled_agent_address: SocketAddrV6,
-        is_scrimlet: bool,
-    ) -> Sled {
-        Sled { id, sled_agent_address, is_scrimlet }
-    }
-
-    pub(crate) fn subnet(&self) -> Ipv6Subnet<SLED_PREFIX> {
-        Ipv6Subnet::<SLED_PREFIX>::new(*self.sled_agent_address.ip())
-    }
-}
-
-impl From<nexus_db_model::Sled> for Sled {
-    fn from(value: nexus_db_model::Sled) -> Self {
-        Sled {
-            id: SledUuid::from_untyped_uuid(value.id()),
-            sled_agent_address: value.address(),
-            is_scrimlet: value.is_scrimlet(),
-        }
-    }
-}
 
 /// The result of calling [`realize_blueprint`] or
 /// [`realize_blueprint_with_overrides`].
@@ -154,6 +117,13 @@ pub async fn realize_blueprint_with_overrides(
         sled_list.clone(),
     );
 
+    register_deploy_datasets_step(
+        &engine.for_component(ExecutionComponent::Datasets),
+        &opctx,
+        blueprint,
+        sled_list.clone(),
+    );
+
     register_deploy_zones_step(
         &engine.for_component(ExecutionComponent::OmicronZones),
         &opctx,
@@ -204,6 +174,12 @@ pub async fn realize_blueprint_with_overrides(
         &opctx,
         datastore,
         deploy_disks_done,
+    );
+
+    register_deploy_clickhouse_cluster_nodes_step(
+        &engine.for_component(ExecutionComponent::Clickhouse),
+        &opctx,
+        blueprint,
     );
 
     let reassign_saga_output = register_reassign_sagas_step(
@@ -279,7 +255,7 @@ fn register_sled_list_step<'a>(
                     .map(|db_sled| {
                         (
                             SledUuid::from_untyped_uuid(db_sled.id()),
-                            Sled::from(db_sled),
+                            db_sled.into(),
                         )
                     })
                     .collect();
@@ -314,6 +290,32 @@ fn register_deploy_disks_step<'a>(
             },
         )
         .register()
+}
+
+fn register_deploy_datasets_step<'a>(
+    registrar: &ComponentRegistrar<'_, 'a>,
+    opctx: &'a OpContext,
+    blueprint: &'a Blueprint,
+    sleds: SharedStepHandle<Arc<BTreeMap<SledUuid, Sled>>>,
+) {
+    registrar
+        .new_step(
+            ExecutionStepId::Ensure,
+            "Deploy datasets",
+            move |cx| async move {
+                let sleds_by_id = sleds.into_value(cx.token()).await;
+                datasets::deploy_datasets(
+                    &opctx,
+                    &sleds_by_id,
+                    &blueprint.blueprint_datasets,
+                )
+                .await
+                .map_err(merge_anyhow_list)?;
+
+                StepSuccess::new(()).into()
+            },
+        )
+        .register();
 }
 
 fn register_deploy_zones_step<'a>(
@@ -381,6 +383,7 @@ fn register_dataset_records_step<'a>(
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
 ) {
+    let bp_id = BlueprintUuid::from_untyped_uuid(blueprint.id);
     registrar
         .new_step(
             ExecutionStepId::Ensure,
@@ -389,9 +392,8 @@ fn register_dataset_records_step<'a>(
                 datasets::ensure_dataset_records_exist(
                     &opctx,
                     datastore,
-                    blueprint
-                        .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
-                        .map(|(_sled_id, zone)| zone),
+                    bp_id,
+                    blueprint.all_omicron_datasets(BlueprintDatasetFilter::All),
                 )
                 .await?;
 
@@ -512,6 +514,34 @@ fn register_decommission_expunged_disks_step<'a>(
                 )
                 .await
                 .map_err(merge_anyhow_list)?;
+
+                StepSuccess::new(()).into()
+            },
+        )
+        .register();
+}
+
+fn register_deploy_clickhouse_cluster_nodes_step<'a>(
+    registrar: &ComponentRegistrar<'_, 'a>,
+    opctx: &'a OpContext,
+    blueprint: &'a Blueprint,
+) {
+    registrar
+        .new_step(
+            ExecutionStepId::Ensure,
+            "Deploy clickhouse cluster nodes",
+            move |_cx| async move {
+                if let Some(clickhouse_cluster_config) =
+                    &blueprint.clickhouse_cluster_config
+                {
+                    clickhouse::deploy_nodes(
+                        &opctx,
+                        &blueprint.blueprint_zones,
+                        &clickhouse_cluster_config,
+                    )
+                    .await
+                    .map_err(merge_anyhow_list)?;
+                }
 
                 StepSuccess::new(()).into()
             },
