@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 camino.workspace = true
+clickhouse-admin-types.workspace = true
 clickward.workspace = true
 dropshot.workspace = true
 

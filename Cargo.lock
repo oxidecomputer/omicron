@@ -1352,6 +1352,7 @@ name = "clickhouse-admin-test-utils"
 version = "0.1.0"
 dependencies = [
  "camino",
+ "clickhouse-admin-types",
  "clickward",
  "dropshot",
  "omicron-workspace-hack",

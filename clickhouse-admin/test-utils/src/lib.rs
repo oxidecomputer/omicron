@@ -5,6 +5,7 @@
 //! Integration testing facilities for clickhouse-admin
 
 use camino::Utf8PathBuf;
+use clickhouse_admin_types::OXIMETER_CLUSTER;
 use clickward::{BasePorts, Deployment, DeploymentConfig};
 use dropshot::test_util::{log_prefix_for_test, LogContext};
 use dropshot::{ConfigLogging, ConfigLoggingLevel};
@@ -20,12 +21,10 @@ pub const DEFAULT_CLICKHOUSE_ADMIN_BASE_PORTS: BasePorts = BasePorts {
 pub fn default_clickhouse_cluster_test_deployment(
     path: Utf8PathBuf,
 ) -> Deployment {
-    let base_ports = DEFAULT_CLICKHOUSE_ADMIN_BASE_PORTS;
-
     let config = DeploymentConfig {
         path,
-        base_ports,
-        cluster_name: "oximeter_cluster".to_string(),
+        base_ports: DEFAULT_CLICKHOUSE_ADMIN_BASE_PORTS,
+        cluster_name: OXIMETER_CLUSTER.to_string(),
     };
 
     Deployment::new(config)

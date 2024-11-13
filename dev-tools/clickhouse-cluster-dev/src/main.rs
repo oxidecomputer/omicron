@@ -2,6 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! Sets up a 3 keeper 2 replica ClickHouse cluster for clickhouse-admin
+//! integration tests.
+//!
+//! NB: This should only be used for testing that doesn't write data to
+//! ClickHouse. Otherwise, it may result in flaky tests.
+
 use anyhow::{Context, Result};
 use clickhouse_admin_test_utils::{
     default_clickhouse_cluster_test_deployment,

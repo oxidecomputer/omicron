@@ -55,7 +55,7 @@ async fn test_lgif_parsing() -> anyhow::Result<()> {
     )
     .with_log(log);
 
-    let lgif = clickhouse_cli.lgif().await?;
+    let lgif = clickhouse_cli.lgif().await.unwrap();
 
     // The first log index from a newly created cluster should always be 1
     assert_eq!(lgif.first_log_idx, 1);
