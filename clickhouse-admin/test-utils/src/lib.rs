@@ -4,7 +4,7 @@
 
 //! Integration testing facilities for clickhouse-admin
 
-use clickward::BasePorts;
+use clickward::{BasePorts, Deployment};
 
 pub const DEFAULT_CLICKHOUSE_ADMIN_BASE_PORTS: BasePorts = BasePorts {
     keeper: 29000,
@@ -13,3 +13,7 @@ pub const DEFAULT_CLICKHOUSE_ADMIN_BASE_PORTS: BasePorts = BasePorts {
     clickhouse_http: 29300,
     clickhouse_interserver_http: 29400,
 };
+
+//pub fn default_clickhouse_cluster_test_deployment() -> Deployment {
+//
+//}

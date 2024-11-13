@@ -3,12 +3,12 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use camino::Utf8PathBuf;
+use clickhouse_admin_test_utils::DEFAULT_CLICKHOUSE_ADMIN_BASE_PORTS;
 use clickhouse_admin_types::{
     ClickhouseHost, ClickhouseKeeperClusterMembership, KeeperId,
     KeeperServerInfo, KeeperServerType, RaftConfig,
 };
-use clickhouse_admin_test_utils::DEFAULT_CLICKHOUSE_ADMIN_BASE_PORTS;
-use clickward::{BasePorts, Deployment, DeploymentConfig};
+use clickward::{Deployment, DeploymentConfig};
 use dropshot::test_util::{log_prefix_for_test, LogContext};
 use dropshot::{ConfigLogging, ConfigLoggingLevel};
 use omicron_clickhouse_admin::ClickhouseCli;
@@ -25,13 +25,33 @@ fn log() -> slog::Logger {
     slog::Logger::root(drain, o!())
 }
 
+// In Clickward, keeper server ports are assigned by adding i to each
+// base port. Keeper IDs are also assigned with consecutive numbers
+// starting with 1.
+fn get_keeper_server_port(keeper_id: KeeperId) -> u16 {
+    let raw_id = keeper_id.0;
+    // We can safely unwrap raw_id as the Keeper IDs we use for testing are
+    // all in the single digits
+    DEFAULT_CLICKHOUSE_ADMIN_BASE_PORTS.keeper + u16::try_from(raw_id).unwrap()
+}
+
+fn get_keeper_raft_port(keeper_id: KeeperId) -> u16 {
+    let raw_id = keeper_id.0;
+    DEFAULT_CLICKHOUSE_ADMIN_BASE_PORTS.raft + u16::try_from(raw_id).unwrap()
+}
+
 #[tokio::test]
 async fn test_lgif_parsing() -> anyhow::Result<()> {
     let log = log();
 
     let clickhouse_cli = ClickhouseCli::new(
         Utf8PathBuf::from_str("clickhouse")?,
-        SocketAddrV6::new(Ipv6Addr::LOCALHOST, 29001, 0, 0),
+        SocketAddrV6::new(
+            Ipv6Addr::LOCALHOST,
+            get_keeper_server_port(KeeperId(1)),
+            0,
+            0,
+        ),
     )
     .with_log(log);
 
@@ -49,7 +69,12 @@ async fn test_raft_config_parsing() -> anyhow::Result<()> {
 
     let clickhouse_cli = ClickhouseCli::new(
         Utf8PathBuf::from_str("clickhouse").unwrap(),
-        SocketAddrV6::new(Ipv6Addr::LOCALHOST, 29001, 0, 0),
+        SocketAddrV6::new(
+            Ipv6Addr::LOCALHOST,
+            get_keeper_server_port(KeeperId(1)),
+            0,
+            0,
+        ),
     )
     .with_log(log);
 
@@ -59,9 +84,9 @@ async fn test_raft_config_parsing() -> anyhow::Result<()> {
     let num_keepers = 3;
 
     for i in 1..=num_keepers {
-        let raft_port = u16::try_from(29100 + i).unwrap();
+        let raft_port = get_keeper_raft_port(KeeperId(i));
         keeper_servers.insert(KeeperServerInfo {
-            server_id: clickhouse_admin_types::KeeperId(i),
+            server_id: clickhouse_admin_types::KeeperId(i.into()),
             host: ClickhouseHost::Ipv6("::1".parse().unwrap()),
             raft_port,
             server_type: KeeperServerType::Participant,
@@ -82,13 +107,18 @@ async fn test_keeper_conf_parsing() -> anyhow::Result<()> {
 
     let clickhouse_cli = ClickhouseCli::new(
         Utf8PathBuf::from_str("clickhouse").unwrap(),
-        SocketAddrV6::new(Ipv6Addr::LOCALHOST, 29001, 0, 0),
+        SocketAddrV6::new(
+            Ipv6Addr::LOCALHOST,
+            get_keeper_server_port(KeeperId(1)),
+            0,
+            0,
+        ),
     )
     .with_log(log);
 
     let conf = clickhouse_cli.keeper_conf().await.unwrap();
 
-    assert_eq!(conf.server_id, clickhouse_admin_types::KeeperId(1));
+    assert_eq!(conf.server_id, KeeperId(1));
 
     Ok(())
 }
@@ -99,7 +129,12 @@ async fn test_keeper_cluster_membership() -> anyhow::Result<()> {
 
     let clickhouse_cli = ClickhouseCli::new(
         Utf8PathBuf::from_str("clickhouse").unwrap(),
-        SocketAddrV6::new(Ipv6Addr::LOCALHOST, 29001, 0, 0),
+        SocketAddrV6::new(
+            Ipv6Addr::LOCALHOST,
+            get_keeper_server_port(KeeperId(1)),
+            0,
+            0,
+        ),
     )
     .with_log(log);
 
@@ -110,7 +145,7 @@ async fn test_keeper_cluster_membership() -> anyhow::Result<()> {
 
     let num_keepers = 3;
     for i in 1..=num_keepers {
-        raft_config.insert(clickhouse_admin_types::KeeperId(i));
+        raft_config.insert(KeeperId(i));
     }
 
     let expected_keeper_cluster_membership =
