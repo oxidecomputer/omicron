@@ -21,6 +21,7 @@
 
 use super::string;
 use crate::native::block::DataType;
+use crate::native::packets::server::ColumnDefaults;
 use crate::native::packets::server::ColumnDescription;
 use crate::native::Error;
 use nom::bytes::streaming::is_not;
@@ -122,25 +123,40 @@ fn backtick_quoted_column_name(s: &str) -> IResult<&str, &str> {
     delimited(tag("`"), is_not("`"), tag("`"))(s)
 }
 
+fn column_defaults(s: &str) -> ColumnDefaults {
+    if s.is_empty() {
+        return ColumnDefaults::default();
+    }
+    let has_default = s.contains("DEFAULT");
+    let has_materialized = s.contains("MATERIALIZED");
+    let has_ephemeral = s.contains("EPHEMERAL");
+    let has_alias = s.contains("ALIAS");
+    ColumnDefaults { has_default, has_materialized, has_ephemeral, has_alias }
+}
+
 // Parse a full column description from one line.
 //
 // Note that this must _not_ end in a newline, so one should use something like
 // `str::lines()` and pass the result to this method.
 fn column_description(s: &str) -> IResult<&str, ColumnDescription> {
-    let (s, (name, data_type)) = separated_pair(
+    let (s, maybe_suffix) = match s.split_once("\t") {
+        Some((s, suf)) => (s, suf),
+        None => (s, ""),
+    };
+    let (_, (name, data_type)) = separated_pair(
         backtick_quoted_column_name,
         tag(" "),
         DataType::nom_parse,
     )(s)?;
 
-    // At this point, we take any remaining output as the details, which may be
+    // At this point, we take any remaining output as the defaults, which may be
     // empty.
     Ok((
         "",
         ColumnDescription {
             name: name.to_string(),
             data_type,
-            details: s.to_string(),
+            defaults: column_defaults(maybe_suffix),
         },
     ))
 }
@@ -177,7 +193,7 @@ mod tests {
         let desc = column_description("`timeseries_name` String").unwrap().1;
         assert_eq!(desc.name, "timeseries_name");
         assert_eq!(desc.data_type, DataType::String);
-        assert!(desc.details.is_empty());
+        assert_eq!(desc.defaults, Default::default());
     }
 
     #[test]
@@ -202,12 +218,13 @@ mod tests {
 
     #[test]
     fn test_column_description_with_default() {
-        static INPUT: &str = r#"`timeseries_name` String\tDEFAULT "foo""#;
+        static INPUT: &str = "`timeseries_name` String\tDEFAULT \"foo\"";
         let column = column_description(&mut &*INPUT)
             .expect("failed to decode column description")
             .1;
         assert_eq!(column.name, "timeseries_name");
         assert_eq!(column.data_type, DataType::String);
-        assert_eq!(column.details, "\\tDEFAULT \"foo\"");
+        assert!(column.defaults.has_default);
+        assert!(!column.defaults.has_materialized);
     }
 }

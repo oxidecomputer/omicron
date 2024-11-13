@@ -23,12 +23,24 @@ pub struct ColumnDescription {
     pub name: String,
     /// The type of the column.
     pub data_type: DataType,
-    /// Other details for the column.
+    /// Information about how default values for a column are created.
     ///
-    /// This is collected as a string, but otherwise unparsed or processed. We
-    /// don't care about these details at this point, and do nothing with them
-    /// for now.
-    pub details: String,
+    /// At this point, we only care about whether there are default expressions,
+    /// not what they actually are.
+    pub defaults: ColumnDefaults,
+}
+
+/// Details about the default values for a column.
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
+pub struct ColumnDefaults {
+    /// The column has a default expression, like `DEFAULT 'foo'`.
+    pub has_default: bool,
+    /// The column values are materialized on insertion, like `MATERIALIZED now()`.
+    pub has_materialized: bool,
+    /// The column is ephemeral, i.e., used to compute other column defaults.
+    pub has_ephemeral: bool,
+    /// The column is an alias of some other expression.
+    pub has_alias: bool,
 }
 
 /// A packet sent from the ClickHouse server to the client.

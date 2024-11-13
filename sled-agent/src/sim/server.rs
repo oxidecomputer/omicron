@@ -205,7 +205,7 @@ impl Server {
                 zpool_id: zpool_id.into_untyped_uuid(),
                 dataset_id,
                 request: NexusTypes::DatasetPutRequest {
-                    address: address.to_string(),
+                    address: Some(address.to_string()),
                     kind: DatasetKind::Crucible,
                 },
             });
@@ -522,7 +522,7 @@ pub async fn run_standalone_server(
                 zpool_id: zpool.id,
                 dataset_id,
                 request: NexusTypes::DatasetPutRequest {
-                    address: address.to_string(),
+                    address: Some(address.to_string()),
                     kind: DatasetKind::Crucible,
                 },
             });
