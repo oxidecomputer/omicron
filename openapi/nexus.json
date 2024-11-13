@@ -20183,8 +20183,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
           },
           "reason_for_creation": {
             "type": "string"
@@ -20232,21 +20231,21 @@
       "SupportBundleState": {
         "oneOf": [
           {
-            "description": "Support Bundle still actively being collected.\n\nThis is the initial state for a Support Bundle, and it will automatically transition to either \"Failed\" or \"Active\".\n\nIf a user no longer wants to access a Support Bundle, they can request cancellation, which will transition to the \"Cancelling\" state.",
+            "description": "Support Bundle still actively being collected.\n\nThis is the initial state for a Support Bundle, and it will automatically transition to either \"Failing\" or \"Active\".\n\nIf a user no longer wants to access a Support Bundle, they can request cancellation, which will transition to the \"Destroying\" state.",
             "type": "string",
             "enum": [
               "collecting"
             ]
           },
           {
-            "description": "Support Bundle has been cancelled, and will be deleted shortly.",
+            "description": "Support Bundle is being destroyed.\n\nOnce backing storage has been freed, this bundle is destroyed.",
             "type": "string",
             "enum": [
-              "cancelling"
+              "destroying"
             ]
           },
           {
-            "description": "Support Bundle was not created successfully, or was created and has lost backing storage.\n\nThe record of the bundle still exists for readability, but the only valid operation on these bundles is to delete them.",
+            "description": "Support Bundle was not created successfully, or was created and has lost backing storage.\n\nThe record of the bundle still exists for readability, but the only valid operation on these bundles is to destroy them.",
             "type": "string",
             "enum": [
               "failed"
@@ -21274,6 +21273,10 @@
             "format": "int32"
           }
         }
+      },
+      "TypedUuidForSupportBundleKind": {
+        "type": "string",
+        "format": "uuid"
       },
       "UninitializedSled": {
         "description": "A sled that has not been added to an initialized rack yet",

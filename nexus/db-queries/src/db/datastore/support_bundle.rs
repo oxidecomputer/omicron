@@ -270,7 +270,7 @@ impl DataStore {
                     let bundles_with_bad_datasets = dsl::support_bundle
                         .filter(dsl::dataset_id.eq_any(invalid_datasets))
                         .select(SupportBundle::as_select())
-                        .load_async(&*conn)
+                        .load_async(conn)
                         .await?;
 
                     // Split these bundles into two categories:
@@ -299,7 +299,7 @@ impl DataStore {
                                 dsl::state.eq(state),
                                 dsl::reason_for_failure.eq(FAILURE_REASON_NO_DATASET),
                             ))
-                            .execute_async(&*conn)
+                            .execute_async(conn)
                             .await?;
                     // For bundles that are in the process of being destroyed,
                     // the dataset expungement speeds up the process.
@@ -312,7 +312,7 @@ impl DataStore {
                             // an abundance of catuion we don't auto-delete a
                             // bundle in any other state.
                             .filter(dsl::state.eq(SupportBundleState::Destroying))
-                            .execute_async(&*conn)
+                            .execute_async(conn)
                             .await?;
 
                     let Some(arbitrary_valid_nexus) =
@@ -328,7 +328,7 @@ impl DataStore {
                     let bundles_with_bad_nexuses = dsl::support_bundle
                         .filter(dsl::assigned_nexus.eq_any(invalid_nexus_zones))
                         .select(SupportBundle::as_select())
-                        .load_async(&*conn)
+                        .load_async(conn)
                         .await?;
 
                     let bundles_to_mark_failing = bundles_with_bad_nexuses.iter()
@@ -355,12 +355,12 @@ impl DataStore {
                             dsl::state.eq(state),
                             dsl::reason_for_failure.eq(FAILURE_REASON_NO_NEXUS),
                         ))
-                        .execute_async(&*conn)
+                        .execute_async(conn)
                         .await?;
                     let bundles_reassigned = diesel::update(dsl::support_bundle)
                         .filter(dsl::id.eq_any(bundles_to_reassign))
                         .set(dsl::assigned_nexus.eq(arbitrary_valid_nexus))
-                        .execute_async(&*conn)
+                        .execute_async(conn)
                         .await?;
 
                     Ok(SupportBundleExpungementReport {
@@ -392,7 +392,7 @@ impl DataStore {
             .filter(dsl::state.eq_any(state.valid_old_states()))
             .set(dsl::state.eq(state))
             .check_if_exists::<SupportBundle>(id.into_untyped_uuid())
-            .execute_and_check(&*conn)
+            .execute_and_check(&conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
