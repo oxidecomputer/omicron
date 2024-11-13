@@ -802,7 +802,6 @@ impl SledAgent {
         };
         info!(log, "Starting mock propolis-server...");
         let srv = propolis_mock_server::start(dropshot_config, log.clone())
-            .await
             .map_err(|error| {
                 Error::unavail(&format!(
                     "initializing propolis-server: {}",

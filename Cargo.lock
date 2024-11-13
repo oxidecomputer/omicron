@@ -8808,7 +8808,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=dap/mock-server-fix#364413d21aa83a8427c317bbb3ad9733a1e2b97b"
+source = "git+https://github.com/oxidecomputer/propolis?branch=dap/mock-server-fix#fea74a6e5a083dfb2d62245e9b01af3e192a091c"
 dependencies = [
  "anyhow",
  "atty",
@@ -8863,7 +8863,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=dap/mock-server-fix#364413d21aa83a8427c317bbb3ad9733a1e2b97b"
+source = "git+https://github.com/oxidecomputer/propolis?branch=dap/mock-server-fix#fea74a6e5a083dfb2d62245e9b01af3e192a091c"
 dependencies = [
  "schemars",
  "serde",

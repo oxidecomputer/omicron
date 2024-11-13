@@ -2112,9 +2112,7 @@ mod tests {
         info!(log, "Starting mock propolis-server...");
 
         let srv = propolis_mock_server::start(dropshot_config, log.clone())
-            .await
-            .expect("couldn't create mock propolis-server")
-            .start();
+            .expect("couldn't create mock propolis-server");
         let client = propolis_client::Client::new(&format!(
             "http://{}",
             srv.local_addr()
