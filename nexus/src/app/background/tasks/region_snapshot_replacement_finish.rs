@@ -170,6 +170,7 @@ mod test {
     use nexus_db_queries::db::datastore::region_snapshot_replacement;
     use nexus_test_utils_macros::nexus_test;
     use omicron_uuid_kinds::DatasetUuid;
+    use omicron_uuid_kinds::VolumeUuid;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -212,7 +213,7 @@ mod test {
             .insert_region_snapshot_replacement_request_with_volume_id(
                 &opctx,
                 request,
-                Uuid::new_v4(),
+                VolumeUuid::new_v4(),
             )
             .await
             .unwrap();
@@ -232,7 +233,7 @@ mod test {
             .unwrap();
 
         let new_region_id = Uuid::new_v4();
-        let old_snapshot_volume_id = Uuid::new_v4();
+        let old_snapshot_volume_id = VolumeUuid::new_v4();
 
         datastore
             .set_region_snapshot_replacement_replacement_done(
@@ -267,14 +268,18 @@ mod test {
 
         let operating_saga_id = Uuid::new_v4();
 
-        let mut step_1 =
-            RegionSnapshotReplacementStep::new(request_id, Uuid::new_v4());
+        let mut step_1 = RegionSnapshotReplacementStep::new(
+            request_id,
+            VolumeUuid::new_v4(),
+        );
         step_1.replacement_state = RegionSnapshotReplacementStepState::Complete;
         step_1.operating_saga_id = Some(operating_saga_id);
         let step_1_id = step_1.id;
 
-        let mut step_2 =
-            RegionSnapshotReplacementStep::new(request_id, Uuid::new_v4());
+        let mut step_2 = RegionSnapshotReplacementStep::new(
+            request_id,
+            VolumeUuid::new_v4(),
+        );
         step_2.replacement_state = RegionSnapshotReplacementStepState::Complete;
         step_2.operating_saga_id = Some(operating_saga_id);
         let step_2_id = step_2.id;

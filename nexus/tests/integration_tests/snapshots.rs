@@ -42,6 +42,7 @@ use omicron_nexus::app::MIN_DISK_SIZE_BYTES;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::VolumeUuid;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -574,8 +575,8 @@ async fn test_reject_creating_disk_from_snapshot(
 
                 project_id,
                 disk_id: Uuid::new_v4(),
-                volume_id: Uuid::new_v4(),
-                destination_volume_id: Uuid::new_v4(),
+                volume_id: VolumeUuid::new_v4().into(),
+                destination_volume_id: VolumeUuid::new_v4().into(),
 
                 gen: db::model::Generation::new(),
                 state: db::model::SnapshotState::Creating,
@@ -727,8 +728,8 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
 
                 project_id,
                 disk_id: Uuid::new_v4(),
-                volume_id: Uuid::new_v4(),
-                destination_volume_id: Uuid::new_v4(),
+                volume_id: VolumeUuid::new_v4().into(),
+                destination_volume_id: VolumeUuid::new_v4().into(),
 
                 gen: db::model::Generation::new(),
                 state: db::model::SnapshotState::Creating,
@@ -823,8 +824,8 @@ async fn test_reject_creating_disk_from_other_project_snapshot(
 
                 project_id,
                 disk_id: Uuid::new_v4(),
-                volume_id: Uuid::new_v4(),
-                destination_volume_id: Uuid::new_v4(),
+                volume_id: VolumeUuid::new_v4().into(),
+                destination_volume_id: VolumeUuid::new_v4().into(),
 
                 gen: db::model::Generation::new(),
                 state: db::model::SnapshotState::Creating,
@@ -1044,8 +1045,8 @@ async fn test_create_snapshot_record_idempotent(
 
         project_id,
         disk_id,
-        volume_id: Uuid::new_v4(),
-        destination_volume_id: Uuid::new_v4(),
+        volume_id: VolumeUuid::new_v4().into(),
+        destination_volume_id: VolumeUuid::new_v4().into(),
 
         gen: db::model::Generation::new(),
         state: db::model::SnapshotState::Creating,
@@ -1095,8 +1096,8 @@ async fn test_create_snapshot_record_idempotent(
 
         project_id,
         disk_id,
-        volume_id: Uuid::new_v4(),
-        destination_volume_id: Uuid::new_v4(),
+        volume_id: VolumeUuid::new_v4().into(),
+        destination_volume_id: VolumeUuid::new_v4().into(),
 
         gen: db::model::Generation::new(),
         state: db::model::SnapshotState::Creating,
@@ -1196,8 +1197,8 @@ async fn test_create_snapshot_record_idempotent(
 
         project_id,
         disk_id,
-        volume_id: Uuid::new_v4(),
-        destination_volume_id: Uuid::new_v4(),
+        volume_id: VolumeUuid::new_v4().into(),
+        destination_volume_id: VolumeUuid::new_v4().into(),
 
         gen: db::model::Generation::new(),
         state: db::model::SnapshotState::Creating,
@@ -1398,13 +1399,13 @@ async fn test_multiple_deletes_not_sent(cptestctx: &ControlPlaneTestContext) {
     // which will cause the saga to fail.
 
     let resources_1 =
-        datastore.soft_delete_volume(db_snapshot_1.volume_id).await.unwrap();
+        datastore.soft_delete_volume(db_snapshot_1.volume_id()).await.unwrap();
 
     let resources_2 =
-        datastore.soft_delete_volume(db_snapshot_2.volume_id).await.unwrap();
+        datastore.soft_delete_volume(db_snapshot_2.volume_id()).await.unwrap();
 
     let resources_3 =
-        datastore.soft_delete_volume(db_snapshot_3.volume_id).await.unwrap();
+        datastore.soft_delete_volume(db_snapshot_3.volume_id()).await.unwrap();
 
     let resources_1_datasets_and_regions =
         datastore.regions_to_delete(&resources_1).await.unwrap();
@@ -1490,7 +1491,7 @@ async fn test_region_allocation_for_snapshot(
         .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
 
     let allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
     assert_eq!(allocated_regions.len(), REGION_REDUNDANCY_THRESHOLD);
 
     // Create a snapshot of the disk
@@ -1525,7 +1526,7 @@ async fn test_region_allocation_for_snapshot(
         });
 
     let allocated_regions =
-        datastore.get_allocated_regions(db_snapshot.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_snapshot.volume_id()).await.unwrap();
 
     assert_eq!(allocated_regions.len(), 0);
 
@@ -1537,7 +1538,7 @@ async fn test_region_allocation_for_snapshot(
         .arbitrary_region_allocate(
             &opctx,
             RegionAllocationFor::SnapshotVolume {
-                volume_id: db_snapshot.volume_id,
+                volume_id: db_snapshot.volume_id(),
                 snapshot_id: snapshot.identity.id,
             },
             RegionAllocationParameters::FromDiskSource {
@@ -1556,7 +1557,7 @@ async fn test_region_allocation_for_snapshot(
         .unwrap();
 
     let allocated_regions =
-        datastore.get_allocated_regions(db_snapshot.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_snapshot.volume_id()).await.unwrap();
 
     assert_eq!(allocated_regions.len(), 1);
 
@@ -1595,7 +1596,7 @@ async fn test_region_allocation_for_snapshot(
         .arbitrary_region_allocate(
             &opctx,
             RegionAllocationFor::SnapshotVolume {
-                volume_id: db_snapshot.volume_id,
+                volume_id: db_snapshot.volume_id(),
                 snapshot_id: snapshot.identity.id,
             },
             RegionAllocationParameters::FromDiskSource {
@@ -1614,7 +1615,7 @@ async fn test_region_allocation_for_snapshot(
         .unwrap();
 
     let allocated_regions =
-        datastore.get_allocated_regions(db_snapshot.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_snapshot.volume_id()).await.unwrap();
 
     assert_eq!(allocated_regions.len(), 1);
 
@@ -1625,7 +1626,7 @@ async fn test_region_allocation_for_snapshot(
         .arbitrary_region_allocate(
             &opctx,
             RegionAllocationFor::SnapshotVolume {
-                volume_id: db_snapshot.volume_id,
+                volume_id: db_snapshot.volume_id(),
                 snapshot_id: snapshot.identity.id,
             },
             RegionAllocationParameters::FromDiskSource {
@@ -1644,7 +1645,7 @@ async fn test_region_allocation_for_snapshot(
         .unwrap();
 
     let allocated_regions =
-        datastore.get_allocated_regions(db_snapshot.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_snapshot.volume_id()).await.unwrap();
 
     assert_eq!(allocated_regions.len(), 2);
 }

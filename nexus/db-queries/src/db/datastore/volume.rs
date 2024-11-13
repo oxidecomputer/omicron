@@ -55,6 +55,7 @@ use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsKind;
 use omicron_uuid_kinds::UpstairsRepairKind;
+use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
@@ -189,7 +190,7 @@ impl DataStore {
         use db::schema::volume::dsl;
 
         let maybe_volume: Option<Volume> = dsl::volume
-            .filter(dsl::id.eq(volume.id()))
+            .filter(dsl::id.eq(to_db_typed_uuid(volume.id())))
             .select(Volume::as_select())
             .first_async(conn)
             .await
@@ -414,11 +415,11 @@ impl DataStore {
 
     async fn volume_get_impl(
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
     ) -> Result<Option<Volume>, diesel::result::Error> {
         use db::schema::volume::dsl;
         dsl::volume
-            .filter(dsl::id.eq(volume_id))
+            .filter(dsl::id.eq(to_db_typed_uuid(volume_id)))
             .select(Volume::as_select())
             .first_async::<Volume>(conn)
             .await
@@ -428,7 +429,7 @@ impl DataStore {
     /// Return a `Option<Volume>` based on id, even if it's soft deleted.
     pub async fn volume_get(
         &self,
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
     ) -> LookupResult<Option<Volume>> {
         let conn = self.pool_connection_unauthorized().await?;
         Self::volume_get_impl(&conn, volume_id)
@@ -438,11 +439,14 @@ impl DataStore {
 
     /// Delete the volume if it exists. If it was already deleted, this is a
     /// no-op.
-    pub async fn volume_hard_delete(&self, volume_id: Uuid) -> DeleteResult {
+    pub async fn volume_hard_delete(
+        &self,
+        volume_id: VolumeUuid,
+    ) -> DeleteResult {
         use db::schema::volume::dsl;
 
         diesel::delete(dsl::volume)
-            .filter(dsl::id.eq(volume_id))
+            .filter(dsl::id.eq(to_db_typed_uuid(volume_id)))
             .execute_async(&*self.pool_connection_unauthorized().await?)
             .await
             .map(|_| ())
@@ -501,8 +505,8 @@ impl DataStore {
     pub async fn swap_volume_usage_records_for_resources(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         resource: VolumeResourceUsage,
-        from_volume_id: Uuid,
-        to_volume_id: Uuid,
+        from_volume_id: VolumeUuid,
+        to_volume_id: VolumeUuid,
     ) -> Result<(), diesel::result::Error> {
         use db::schema::volume_resource_usage::dsl;
 
@@ -514,8 +518,8 @@ impl DataStore {
                             .eq(VolumeResourceUsageType::ReadOnlyRegion),
                     )
                     .filter(dsl::region_id.eq(region_id))
-                    .filter(dsl::volume_id.eq(from_volume_id))
-                    .set(dsl::volume_id.eq(to_volume_id))
+                    .filter(dsl::volume_id.eq(to_db_typed_uuid(from_volume_id)))
+                    .set(dsl::volume_id.eq(to_db_typed_uuid(to_volume_id)))
                     .execute_async(conn)
                     .await?;
 
@@ -540,8 +544,8 @@ impl DataStore {
                     )
                     .filter(dsl::region_snapshot_region_id.eq(region_id))
                     .filter(dsl::region_snapshot_snapshot_id.eq(snapshot_id))
-                    .filter(dsl::volume_id.eq(from_volume_id))
-                    .set(dsl::volume_id.eq(to_volume_id))
+                    .filter(dsl::volume_id.eq(to_db_typed_uuid(from_volume_id)))
+                    .set(dsl::volume_id.eq(to_db_typed_uuid(to_volume_id)))
                     .execute_async(conn)
                     .await?;
 
@@ -808,14 +812,14 @@ impl DataStore {
     async fn volume_checkout_in_txn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         err: OptionalError<VolumeGetError>,
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
         reason: VolumeCheckoutReason,
     ) -> Result<Volume, diesel::result::Error> {
         use db::schema::volume::dsl;
 
         // Grab the volume in question.
         let volume = dsl::volume
-            .filter(dsl::id.eq(volume_id))
+            .filter(dsl::id.eq(to_db_typed_uuid(volume_id)))
             .select(Volume::as_select())
             .get_result_async(conn)
             .await?;
@@ -839,7 +843,7 @@ impl DataStore {
 
             let maybe_disk: Option<Disk> = disk_dsl::disk
                 .filter(disk_dsl::time_deleted.is_null())
-                .filter(disk_dsl::volume_id.eq(volume_id))
+                .filter(disk_dsl::volume_id.eq(to_db_typed_uuid(volume_id)))
                 .select(Disk::as_select())
                 .get_result_async(conn)
                 .await
@@ -937,7 +941,7 @@ impl DataStore {
                     // Update the original volume_id with the new volume.data.
                     use db::schema::volume::dsl as volume_dsl;
                     let num_updated = diesel::update(volume_dsl::volume)
-                        .filter(volume_dsl::id.eq(volume_id))
+                        .filter(volume_dsl::id.eq(to_db_typed_uuid(volume_id)))
                         .set(volume_dsl::data.eq(new_volume_data))
                         .execute_async(conn)
                         .await?;
@@ -988,7 +992,7 @@ impl DataStore {
     /// crash consistency.
     pub async fn volume_checkout(
         &self,
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
         reason: VolumeCheckoutReason,
     ) -> LookupResult<Volume> {
         // We perform a transaction here, to be sure that on completion
@@ -1095,7 +1099,7 @@ impl DataStore {
     /// returned by `read_only_resources_associated_with_volume`.
     pub async fn volume_checkout_randomize_ids(
         &self,
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
         reason: VolumeCheckoutReason,
     ) -> CreateResult<Volume> {
         let volume = self.volume_checkout(volume_id, reason).await?;
@@ -1109,7 +1113,7 @@ impl DataStore {
         )?;
 
         self.volume_create(db::model::Volume::new(
-            Uuid::new_v4(),
+            VolumeUuid::new_v4(),
             randomized_vcr,
         ))
         .await
@@ -1220,7 +1224,7 @@ impl DataStore {
 
     pub async fn read_only_resources_associated_with_volume(
         &self,
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
     ) -> LookupResult<CrucibleTargets> {
         let volume = if let Some(volume) = self.volume_get(volume_id).await? {
             volume
@@ -1264,7 +1268,7 @@ impl DataStore {
     // See comment for `soft_delete_volume`
     async fn soft_delete_volume_in_txn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
         err: OptionalError<SoftDeleteError>,
     ) -> Result<CrucibleResources, diesel::result::Error> {
         // Grab the volume, and check if the volume was already soft-deleted.
@@ -1276,7 +1280,7 @@ impl DataStore {
             use db::schema::volume::dsl;
 
             let volume = dsl::volume
-                .filter(dsl::id.eq(volume_id))
+                .filter(dsl::id.eq(to_db_typed_uuid(volume_id)))
                 .select(Volume::as_select())
                 .get_result_async(conn)
                 .await
@@ -1421,7 +1425,10 @@ impl DataStore {
                 VolumeResourceUsage::ReadOnlyRegion { region_id } => {
                     let updated_rows =
                         diesel::delete(ru_dsl::volume_resource_usage)
-                            .filter(ru_dsl::volume_id.eq(volume_id))
+                            .filter(
+                                ru_dsl::volume_id
+                                    .eq(to_db_typed_uuid(volume_id)),
+                            )
                             .filter(
                                 ru_dsl::usage_type.eq(
                                     VolumeResourceUsageType::ReadOnlyRegion,
@@ -1508,7 +1515,10 @@ impl DataStore {
                 } => {
                     let updated_rows =
                         diesel::delete(ru_dsl::volume_resource_usage)
-                            .filter(ru_dsl::volume_id.eq(volume_id))
+                            .filter(
+                                ru_dsl::volume_id
+                                    .eq(to_db_typed_uuid(volume_id)),
+                            )
                             .filter(
                                 ru_dsl::usage_type.eq(
                                     VolumeResourceUsageType::RegionSnapshot,
@@ -1613,7 +1623,7 @@ impl DataStore {
         {
             use db::schema::volume::dsl;
             let updated_rows = diesel::update(dsl::volume)
-                .filter(dsl::id.eq(volume_id))
+                .filter(dsl::id.eq(to_db_typed_uuid(volume_id)))
                 .set((
                     dsl::time_deleted.eq(Utc::now()),
                     dsl::resources_to_clean_up.eq(Some(serialized_resources)),
@@ -1644,7 +1654,7 @@ impl DataStore {
     /// it is called from a saga node.
     pub async fn soft_delete_volume(
         &self,
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
     ) -> Result<CrucibleResources, Error> {
         let err = OptionalError::new();
         let conn = self.pool_connection_unauthorized().await?;
@@ -1668,8 +1678,8 @@ impl DataStore {
     async fn volume_remove_rop_in_txn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         err: OptionalError<RemoveRopError>,
-        volume_id: Uuid,
-        temp_volume_id: Uuid,
+        volume_id: VolumeUuid,
+        temp_volume_id: VolumeUuid,
     ) -> Result<bool, diesel::result::Error> {
         // Grab the volume in question. If the volume record was already deleted
         // then we can just return.
@@ -1677,7 +1687,7 @@ impl DataStore {
             use db::schema::volume::dsl;
 
             let volume = dsl::volume
-                .filter(dsl::id.eq(volume_id))
+                .filter(dsl::id.eq(to_db_typed_uuid(volume_id)))
                 .select(Volume::as_select())
                 .get_result_async(conn)
                 .await
@@ -1733,7 +1743,7 @@ impl DataStore {
                     // Update the original volume_id with the new volume.data.
                     use db::schema::volume::dsl as volume_dsl;
                     let num_updated = diesel::update(volume_dsl::volume)
-                        .filter(volume_dsl::id.eq(volume_id))
+                        .filter(volume_dsl::id.eq(to_db_typed_uuid(volume_id)))
                         .set(volume_dsl::data.eq(new_volume_data))
                         .execute_async(conn)
                         .await?;
@@ -1753,7 +1763,7 @@ impl DataStore {
                     // temp_volume_id, but the read_only_parent from the
                     // original volume.
                     let rop_vcr = VolumeConstructionRequest::Volume {
-                        id: temp_volume_id,
+                        id: *temp_volume_id.as_untyped_uuid(),
                         block_size,
                         sub_volumes: vec![],
                         read_only_parent,
@@ -1765,7 +1775,9 @@ impl DataStore {
                     // Update the temp_volume_id with the volume data that
                     // contains the read_only_parent.
                     let num_updated = diesel::update(volume_dsl::volume)
-                        .filter(volume_dsl::id.eq(temp_volume_id))
+                        .filter(
+                            volume_dsl::id.eq(to_db_typed_uuid(temp_volume_id)),
+                        )
                         .filter(volume_dsl::time_deleted.is_null())
                         .set(volume_dsl::data.eq(rop_volume_data))
                         .execute_async(conn)
@@ -1858,8 +1870,8 @@ impl DataStore {
     // not happen again, or be undone.
     pub async fn volume_remove_rop(
         &self,
-        volume_id: Uuid,
-        temp_volume_id: Uuid,
+        volume_id: VolumeUuid,
+        temp_volume_id: VolumeUuid,
     ) -> Result<bool, Error> {
         // In this single transaction:
         // - Get the given volume from the volume_id from the database
@@ -1908,7 +1920,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         dataset_id: DatasetUuid,
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
     ) -> LookupResult<Vec<SocketAddrV6>> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -2276,7 +2288,10 @@ impl DataStore {
     }
 
     /// Return true if a volume was soft-deleted or hard-deleted
-    pub async fn volume_deleted(&self, volume_id: Uuid) -> Result<bool, Error> {
+    pub async fn volume_deleted(
+        &self,
+        volume_id: VolumeUuid,
+    ) -> Result<bool, Error> {
         match self.volume_get(volume_id).await? {
             Some(v) => Ok(v.time_deleted.is_some()),
             None => Ok(true),
@@ -2590,7 +2605,7 @@ fn read_only_target_in_vcr(
 
 #[derive(Clone)]
 pub struct VolumeReplacementParams {
-    pub volume_id: Uuid,
+    pub volume_id: VolumeUuid,
     pub region_id: Uuid,
     pub region_addr: SocketAddrV6,
 }
@@ -2599,7 +2614,7 @@ pub struct VolumeReplacementParams {
 // parameters
 
 #[derive(Debug, Clone, Copy)]
-pub struct VolumeWithTarget(pub Uuid);
+pub struct VolumeWithTarget(pub VolumeUuid);
 
 #[derive(Debug, Clone, Copy)]
 pub struct ExistingTarget(pub SocketAddrV6);
@@ -2608,7 +2623,7 @@ pub struct ExistingTarget(pub SocketAddrV6);
 pub struct ReplacementTarget(pub SocketAddrV6);
 
 #[derive(Debug, Clone, Copy)]
-pub struct VolumeToDelete(pub Uuid);
+pub struct VolumeToDelete(pub VolumeUuid);
 
 // The result type returned from both `volume_replace_region` and
 // `volume_replace_snapshot`
@@ -2725,7 +2740,7 @@ impl DataStore {
         // Grab the old volume first
         let maybe_old_volume = {
             volume_dsl::volume
-                .filter(volume_dsl::id.eq(existing.volume_id))
+                .filter(volume_dsl::id.eq(to_db_typed_uuid(existing.volume_id)))
                 .select(Volume::as_select())
                 .first_async::<Volume>(conn)
                 .await
@@ -2852,7 +2867,10 @@ impl DataStore {
         // Set the existing region's volume id to the replacement's volume id
         diesel::update(region_dsl::region)
             .filter(region_dsl::id.eq(existing.region_id))
-            .set(region_dsl::volume_id.eq(replacement.volume_id))
+            .set(
+                region_dsl::volume_id
+                    .eq(to_db_typed_uuid(replacement.volume_id)),
+            )
             .execute_async(conn)
             .await
             .map_err(|e| {
@@ -2867,7 +2885,7 @@ impl DataStore {
         // Set the replacement region's volume id to the existing's volume id
         diesel::update(region_dsl::region)
             .filter(region_dsl::id.eq(replacement.region_id))
-            .set(region_dsl::volume_id.eq(existing.volume_id))
+            .set(region_dsl::volume_id.eq(to_db_typed_uuid(existing.volume_id)))
             .execute_async(conn)
             .await
             .map_err(|e| {
@@ -2901,7 +2919,7 @@ impl DataStore {
 
         // Update the existing volume's data
         diesel::update(volume_dsl::volume)
-            .filter(volume_dsl::id.eq(existing.volume_id))
+            .filter(volume_dsl::id.eq(to_db_typed_uuid(existing.volume_id)))
             .set(volume_dsl::data.eq(new_volume_data))
             .execute_async(conn)
             .await
@@ -2979,7 +2997,7 @@ impl DataStore {
         // Grab the old volume first
         let maybe_old_volume = {
             volume_dsl::volume
-                .filter(volume_dsl::id.eq(volume_id.0))
+                .filter(volume_dsl::id.eq(to_db_typed_uuid(volume_id.0)))
                 .select(Volume::as_select())
                 .first_async::<Volume>(conn)
                 .await
@@ -3079,7 +3097,7 @@ impl DataStore {
 
         // Update the existing volume's data
         diesel::update(volume_dsl::volume)
-            .filter(volume_dsl::id.eq(volume_id.0))
+            .filter(volume_dsl::id.eq(to_db_typed_uuid(volume_id.0)))
             .set(volume_dsl::data.eq(new_volume_data))
             .execute_async(conn)
             .await
@@ -3096,7 +3114,7 @@ impl DataStore {
         // don't matter, just that it gets fed into the volume_delete machinery
         // later.
         let vcr = VolumeConstructionRequest::Volume {
-            id: volume_to_delete_id.0,
+            id: *volume_to_delete_id.0.as_untyped_uuid(),
             block_size: 512,
             sub_volumes: vec![VolumeConstructionRequest::Region {
                 block_size: 512,
@@ -3104,7 +3122,7 @@ impl DataStore {
                 extent_count: 1,
                 gen: 1,
                 opts: sled_agent_client::types::CrucibleOpts {
-                    id: volume_to_delete_id.0,
+                    id: *volume_to_delete_id.0.as_untyped_uuid(),
                     target: vec![existing.0.to_string()],
                     lossy: false,
                     flush_timeout: None,
@@ -3124,7 +3142,7 @@ impl DataStore {
 
         // Update the volume to delete data
         let num_updated = diesel::update(volume_dsl::volume)
-            .filter(volume_dsl::id.eq(volume_to_delete_id.0))
+            .filter(volume_dsl::id.eq(to_db_typed_uuid(volume_to_delete_id.0)))
             .filter(volume_dsl::time_deleted.is_null())
             .set(volume_dsl::data.eq(volume_data))
             .execute_async(conn)
@@ -3208,7 +3226,7 @@ impl DataStore {
             })?
             // TODO be smart enough to .filter the above query
             .into_iter()
-            .filter(|record| record.volume_id == volume_to_delete_id.0)
+            .filter(|record| record.volume_id == volume_to_delete_id.0.into())
             .count();
 
         // The "replacement" target moved into the volume
@@ -3696,7 +3714,8 @@ impl DataStore {
                         public_error_from_diesel(e, ErrorHandler::Server)
                     })?;
 
-            paginator = p.found_batch(&haystack, &|r| r.id());
+            paginator =
+                p.found_batch(&haystack, &|r| *r.id().as_untyped_uuid());
 
             for volume in haystack {
                 if volume.data().contains(&needle) {
@@ -3736,7 +3755,8 @@ impl DataStore {
                     .get_results_async::<Volume>(conn)
                     .await?;
 
-            paginator = p.found_batch(&haystack, &|v| v.id());
+            paginator =
+                p.found_batch(&haystack, &|v| *v.id().as_untyped_uuid());
 
             for volume in haystack {
                 Self::validate_volume_has_all_resources(&conn, volume).await?;
@@ -3908,6 +3928,7 @@ mod tests {
     use nexus_types::external_api::params::DiskSource;
     use omicron_common::api::external::ByteCount;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::VolumeUuid;
     use sled_agent_client::types::CrucibleOpts;
 
     // Assert that Nexus will not fail to deserialize an old version of
@@ -3922,12 +3943,12 @@ mod tests {
 
         // Start with a fake volume, doesn't matter if it's empty
 
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
         let _volume = datastore
             .volume_create(nexus_db_model::Volume::new(
                 volume_id,
                 serde_json::to_string(&VolumeConstructionRequest::Volume {
-                    id: volume_id,
+                    id: *volume_id.as_untyped_uuid(),
                     block_size: 512,
                     sub_volumes: vec![],
                     read_only_parent: None,
@@ -3979,7 +4000,7 @@ mod tests {
 "#;
 
             diesel::update(dsl::volume)
-                .filter(dsl::id.eq(volume_id))
+                .filter(dsl::id.eq(to_db_typed_uuid(volume_id)))
                 .set((
                     dsl::resources_to_clean_up.eq(resources_to_clean_up),
                     dsl::time_deleted.eq(Utc::now()),
@@ -4031,8 +4052,8 @@ mod tests {
         )
         .await;
 
-        let volume_id = Uuid::new_v4();
-        let volume_to_delete_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
+        let volume_to_delete_id = VolumeUuid::new_v4();
 
         let datasets_and_regions = datastore
             .disk_region_allocate(
@@ -4100,7 +4121,7 @@ mod tests {
             .volume_create(nexus_db_model::Volume::new(
                 volume_id,
                 serde_json::to_string(&VolumeConstructionRequest::Volume {
-                    id: volume_id,
+                    id: *volume_id.as_untyped_uuid(),
                     block_size: 512,
                     sub_volumes: vec![VolumeConstructionRequest::Region {
                         block_size: 512,
@@ -4108,7 +4129,7 @@ mod tests {
                         extent_count: 10,
                         gen: 1,
                         opts: CrucibleOpts {
-                            id: volume_id,
+                            id: *volume_id.as_untyped_uuid(),
                             target: vec![
                                 // target to replace
                                 region_addresses[0].clone(),
@@ -4163,7 +4184,7 @@ mod tests {
         assert_eq!(
             &vcr,
             &VolumeConstructionRequest::Volume {
-                id: volume_id,
+                id: *volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![VolumeConstructionRequest::Region {
                     block_size: 512,
@@ -4171,7 +4192,7 @@ mod tests {
                     extent_count: 10,
                     gen: 2, // generation number bumped
                     opts: CrucibleOpts {
-                        id: volume_id,
+                        id: *volume_id.as_untyped_uuid(),
                         target: vec![
                             replacement_region_addr.to_string(), // replaced
                             region_addresses[1].clone(),
@@ -4221,7 +4242,7 @@ mod tests {
         assert_eq!(
             &vcr,
             &VolumeConstructionRequest::Volume {
-                id: volume_id,
+                id: *volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![VolumeConstructionRequest::Region {
                     block_size: 512,
@@ -4229,7 +4250,7 @@ mod tests {
                     extent_count: 10,
                     gen: 3, // generation number bumped
                     opts: CrucibleOpts {
-                        id: volume_id,
+                        id: *volume_id.as_untyped_uuid(),
                         target: vec![
                             region_addresses[0].clone(), // back to what it was
                             region_addresses[1].clone(),
@@ -4269,8 +4290,8 @@ mod tests {
         )
         .await;
 
-        let volume_id = Uuid::new_v4();
-        let volume_to_delete_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
+        let volume_to_delete_id = VolumeUuid::new_v4();
 
         let datasets_and_regions = datastore
             .disk_region_allocate(
@@ -4385,7 +4406,7 @@ mod tests {
             .volume_create(nexus_db_model::Volume::new(
                 volume_id,
                 serde_json::to_string(&VolumeConstructionRequest::Volume {
-                    id: volume_id,
+                    id: *volume_id.as_untyped_uuid(),
                     block_size: 512,
                     sub_volumes: vec![VolumeConstructionRequest::Region {
                         block_size: 512,
@@ -4393,7 +4414,7 @@ mod tests {
                         extent_count: 10,
                         gen: 1,
                         opts: CrucibleOpts {
-                            id: volume_id,
+                            id: *volume_id.as_untyped_uuid(),
                             target: vec![
                                 region_addresses[0].clone(),
                                 region_addresses[1].clone(),
@@ -4453,14 +4474,14 @@ mod tests {
                 .unwrap();
 
             assert_eq!(usage.len(), 1);
-            assert_eq!(usage[0].volume_id, volume_id);
+            assert_eq!(usage[0].volume_id(), volume_id);
         }
 
         datastore
             .volume_create(nexus_db_model::Volume::new(
                 volume_to_delete_id,
                 serde_json::to_string(&VolumeConstructionRequest::Volume {
-                    id: volume_to_delete_id,
+                    id: *volume_to_delete_id.as_untyped_uuid(),
                     block_size: 512,
                     sub_volumes: vec![],
                     read_only_parent: None,
@@ -4508,7 +4529,7 @@ mod tests {
         assert_eq!(
             &vcr,
             &VolumeConstructionRequest::Volume {
-                id: volume_id,
+                id: *volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![VolumeConstructionRequest::Region {
                     block_size: 512,
@@ -4516,7 +4537,7 @@ mod tests {
                     extent_count: 10,
                     gen: 1,
                     opts: CrucibleOpts {
-                        id: volume_id,
+                        id: *volume_id.as_untyped_uuid(),
                         target: vec![
                             region_addresses[0].clone(),
                             region_addresses[1].clone(),
@@ -4573,7 +4594,7 @@ mod tests {
         assert_eq!(
             &vcr,
             &VolumeConstructionRequest::Volume {
-                id: volume_to_delete_id,
+                id: *volume_to_delete_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![VolumeConstructionRequest::Region {
                     block_size: 512,
@@ -4581,7 +4602,7 @@ mod tests {
                     extent_count: 1,
                     gen: 1,
                     opts: CrucibleOpts {
-                        id: volume_to_delete_id,
+                        id: *volume_to_delete_id.as_untyped_uuid(),
                         target: vec![
                             // replaced target stashed here
                             address_1.clone(),
@@ -4618,11 +4639,11 @@ mod tests {
 
             match i {
                 0 => {
-                    assert_eq!(usage[0].volume_id, volume_to_delete_id);
+                    assert_eq!(usage[0].volume_id(), volume_to_delete_id);
                 }
 
                 1 | 2 => {
-                    assert_eq!(usage[0].volume_id, volume_id);
+                    assert_eq!(usage[0].volume_id(), volume_id);
                 }
 
                 _ => panic!("out of range"),
@@ -4639,7 +4660,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(usage.len(), 1);
-        assert_eq!(usage[0].volume_id, volume_id);
+        assert_eq!(usage[0].volume_id(), volume_id);
 
         // Now undo the replacement. Note volume ID is not swapped.
 
@@ -4664,7 +4685,7 @@ mod tests {
         assert_eq!(
             &vcr,
             &VolumeConstructionRequest::Volume {
-                id: volume_id,
+                id: *volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![VolumeConstructionRequest::Region {
                     block_size: 512,
@@ -4672,7 +4693,7 @@ mod tests {
                     extent_count: 10,
                     gen: 1,
                     opts: CrucibleOpts {
-                        id: volume_id,
+                        id: *volume_id.as_untyped_uuid(),
                         target: vec![
                             region_addresses[0].clone(),
                             region_addresses[1].clone(),
@@ -4695,7 +4716,7 @@ mod tests {
                         extent_count: 10,
                         gen: 1,
                         opts: CrucibleOpts {
-                            id: rop_id,
+                            id: *rop_id.as_untyped_uuid(),
                             target: vec![
                                 // back to what it was
                                 address_1, address_2, address_3,
@@ -4727,7 +4748,7 @@ mod tests {
         assert_eq!(
             &vcr,
             &VolumeConstructionRequest::Volume {
-                id: volume_to_delete_id,
+                id: *volume_to_delete_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![VolumeConstructionRequest::Region {
                     block_size: 512,
@@ -4735,7 +4756,7 @@ mod tests {
                     extent_count: 1,
                     gen: 1,
                     opts: CrucibleOpts {
-                        id: volume_to_delete_id,
+                        id: *volume_to_delete_id.as_untyped_uuid(),
                         target: vec![
                             // replacement stashed here
                             replacement_region_addr.to_string(),
@@ -4769,7 +4790,7 @@ mod tests {
                 .unwrap();
 
             assert_eq!(usage.len(), 1);
-            assert_eq!(usage[0].volume_id, volume_id);
+            assert_eq!(usage[0].volume_id(), volume_id);
         }
 
         let usage = datastore
@@ -4782,7 +4803,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(usage.len(), 1);
-        assert_eq!(usage[0].volume_id, volume_to_delete_id);
+        assert_eq!(usage[0].volume_id(), volume_to_delete_id);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -4796,7 +4817,7 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
 
         // need to add region snapshot objects to satisfy volume create
         // transaction's search for resources
@@ -4839,7 +4860,7 @@ mod tests {
             .volume_create(nexus_db_model::Volume::new(
                 volume_id,
                 serde_json::to_string(&VolumeConstructionRequest::Volume {
-                    id: volume_id,
+                    id: *volume_id.as_untyped_uuid(),
                     block_size: 512,
                     sub_volumes: vec![],
                     read_only_parent: Some(Box::new(
@@ -5421,7 +5442,7 @@ mod tests {
         )
         .await;
 
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
 
         // Assert that allocating regions without creating the volume does not
         // cause them to be returned as "deleted" regions, as this can cause

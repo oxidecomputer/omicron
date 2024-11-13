@@ -71,7 +71,7 @@ impl RegionSnapshotReplacementFindAffected {
         opctx: &OpContext,
         request: RegionSnapshotReplacementStep,
     ) -> Result<(), omicron_common::api::external::Error> {
-        let Some(old_snapshot_volume_id) = request.old_snapshot_volume_id
+        let Some(old_snapshot_volume_id) = request.old_snapshot_volume_id()
         else {
             // This state is illegal!
             let s = format!(
@@ -141,8 +141,8 @@ impl RegionSnapshotReplacementFindAffected {
                     info!(
                         &log,
                         "{s}";
-                        "request.volume_id" => %request.volume_id,
-                        "request.old_snapshot_volume_id" => ?request.old_snapshot_volume_id,
+                        "request.volume_id" => %request.volume_id(),
+                        "request.old_snapshot_volume_id" => ?request.old_snapshot_volume_id(),
                     );
                     status.step_garbage_collect_invoked_ok.push(s);
                 }
@@ -155,8 +155,8 @@ impl RegionSnapshotReplacementFindAffected {
                     error!(
                         &log,
                         "{s}";
-                        "request.volume_id" => %request.volume_id,
-                        "request.old_snapshot_volume_id" => ?request.old_snapshot_volume_id,
+                        "request.volume_id" => %request.volume_id(),
+                        "request.old_snapshot_volume_id" => ?request.old_snapshot_volume_id(),
                     );
                     status.errors.push(s);
                 }
@@ -405,7 +405,7 @@ impl RegionSnapshotReplacementFindAffected {
                         &log,
                         "{s}";
                         "request.request_id" => %request.request_id,
-                        "request.volume_id" => %request.volume_id,
+                        "request.volume_id" => %request.volume_id(),
                     );
                     status.step_invoked_ok.push(s);
                 }
@@ -420,7 +420,7 @@ impl RegionSnapshotReplacementFindAffected {
                         &log,
                         "{s}";
                         "request.request_id" => %request.request_id,
-                        "request.volume_id" => %request.volume_id,
+                        "request.volume_id" => %request.volume_id(),
                     );
                     status.errors.push(s);
                 }
@@ -469,6 +469,8 @@ mod test {
     use nexus_db_model::Volume;
     use nexus_test_utils_macros::nexus_test;
     use omicron_uuid_kinds::DatasetUuid;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::VolumeUuid;
     use sled_agent_client::types::CrucibleOpts;
     use sled_agent_client::types::VolumeConstructionRequest;
     use uuid::Uuid;
@@ -479,8 +481,8 @@ mod test {
     async fn add_fake_volume_for_snapshot_addr(
         datastore: &DataStore,
         snapshot_addr: String,
-    ) -> Uuid {
-        let new_volume_id = Uuid::new_v4();
+    ) -> VolumeUuid {
+        let new_volume_id = VolumeUuid::new_v4();
 
         // need to add region snapshot objects to satisfy volume create
         // transaction's search for resources
@@ -496,7 +498,7 @@ mod test {
             .unwrap();
 
         let volume_construction_request = VolumeConstructionRequest::Volume {
-            id: new_volume_id,
+            id: *new_volume_id.as_untyped_uuid(),
             block_size: 0,
             sub_volumes: vec![],
             read_only_parent: Some(Box::new(
@@ -579,7 +581,7 @@ mod test {
             .insert_region_snapshot_replacement_request_with_volume_id(
                 &opctx,
                 request,
-                Uuid::new_v4(),
+                VolumeUuid::new_v4(),
             )
             .await
             .unwrap();
@@ -599,7 +601,7 @@ mod test {
             .unwrap();
 
         let new_region_id = Uuid::new_v4();
-        let old_snapshot_volume_id = Uuid::new_v4();
+        let old_snapshot_volume_id = VolumeUuid::new_v4();
 
         datastore
             .set_region_snapshot_replacement_replacement_done(
@@ -681,12 +683,12 @@ mod test {
             );
             assert!(result.step_invoked_ok.contains(&s));
 
-            if step.volume_id == new_volume_1_id
-                || step.volume_id == new_volume_2_id
+            if step.volume_id() == new_volume_1_id
+                || step.volume_id() == new_volume_2_id
             {
                 // ok!
-            } else if step.volume_id == other_volume_1_id
-                || step.volume_id == other_volume_2_id
+            } else if step.volume_id() == other_volume_1_id
+                || step.volume_id() == other_volume_2_id
             {
                 // error!
                 assert!(false);
@@ -735,12 +737,13 @@ mod test {
             .insert_region_snapshot_replacement_step(&opctx, {
                 let mut record = RegionSnapshotReplacementStep::new(
                     Uuid::new_v4(),
-                    Uuid::new_v4(),
+                    VolumeUuid::new_v4(),
                 );
 
                 record.replacement_state =
                     RegionSnapshotReplacementStepState::Complete;
-                record.old_snapshot_volume_id = Some(Uuid::new_v4());
+                record.old_snapshot_volume_id =
+                    Some(VolumeUuid::new_v4().into());
 
                 record
             })
@@ -756,12 +759,13 @@ mod test {
             .insert_region_snapshot_replacement_step(&opctx, {
                 let mut record = RegionSnapshotReplacementStep::new(
                     Uuid::new_v4(),
-                    Uuid::new_v4(),
+                    VolumeUuid::new_v4(),
                 );
 
                 record.replacement_state =
                     RegionSnapshotReplacementStepState::Complete;
-                record.old_snapshot_volume_id = Some(Uuid::new_v4());
+                record.old_snapshot_volume_id =
+                    Some(VolumeUuid::new_v4().into());
 
                 record
             })

@@ -276,6 +276,7 @@ mod test {
     use omicron_common::api::external;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::VolumeUuid;
     use std::collections::BTreeMap;
     use uuid::Uuid;
 
@@ -321,7 +322,7 @@ mod test {
             .insert_region_snapshot_replacement_request_with_volume_id(
                 &opctx,
                 request,
-                Uuid::new_v4(),
+                VolumeUuid::new_v4(),
             )
             .await
             .unwrap();
@@ -426,8 +427,8 @@ mod test {
 
                     project_id,
                     disk_id: Uuid::new_v4(),
-                    volume_id: Uuid::new_v4(),
-                    destination_volume_id: Uuid::new_v4(),
+                    volume_id: VolumeUuid::new_v4().into(),
+                    destination_volume_id: VolumeUuid::new_v4().into(),
 
                     gen: Generation::new(),
                     state: SnapshotState::Creating,

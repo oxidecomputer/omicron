@@ -33,17 +33,17 @@ use nexus_db_model::Volume;
 use nexus_db_queries::authn;
 use nexus_db_queries::db::datastore::CrucibleResources;
 use nexus_types::identity::Asset;
+use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
-use uuid::Uuid;
 
 // volume delete saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
-    pub volume_id: Uuid,
+    pub volume_id: VolumeUuid,
 }
 
 // volume delete saga: actions
@@ -330,7 +330,7 @@ async fn svd_delete_crucible_snapshot_records(
     Ok(())
 }
 
-type FreedCrucibleRegions = Vec<(Dataset, Region, Option<Uuid>)>;
+type FreedCrucibleRegions = Vec<(Dataset, Region, Option<VolumeUuid>)>;
 
 /// Deleting region snapshots in a previous saga node may have freed up regions
 /// that were deleted in the DB but couldn't be deleted by the Crucible Agent

@@ -10,6 +10,8 @@ use chrono::DateTime;
 use chrono::Utc;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::VolumeKind;
+use omicron_uuid_kinds::VolumeUuid;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -126,7 +128,7 @@ pub struct RegionSnapshotReplacement {
     pub old_snapshot_id: Uuid,
 
     /// A synthetic volume that only is used to later delete the old snapshot
-    pub old_snapshot_volume_id: Option<Uuid>,
+    pub old_snapshot_volume_id: Option<DbTypedUuid<VolumeKind>>,
 
     pub new_region_id: Option<Uuid>,
 
@@ -160,5 +162,9 @@ impl RegionSnapshotReplacement {
             replacement_state: RegionSnapshotReplacementState::Requested,
             operating_saga_id: None,
         }
+    }
+
+    pub fn old_snapshot_volume_id(&self) -> Option<VolumeUuid> {
+        self.old_snapshot_volume_id.map(|v| v.into())
     }
 }

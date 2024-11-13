@@ -84,7 +84,7 @@ async fn test_region_replacement_does_not_create_freed_region(
     // Next, expunge a physical disk that contains a region
 
     let disk_allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
     let (dataset, _) = &disk_allocated_regions[0];
     let zpool = disk_test
         .zpools()
@@ -172,7 +172,7 @@ impl<'a> RegionReplacementDeletedVolumeTest<'a> {
         assert_eq!(db_disk.id(), disk.identity.id);
 
         let disk_allocated_regions =
-            datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+            datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
         let (_, region) = &disk_allocated_regions[0];
 
         let replacement_request_id = datastore
@@ -371,7 +371,7 @@ impl<'a> RegionReplacementDeletedVolumeTest<'a> {
 
         pantry
             .activate_background_attachment(
-                region_replacement.volume_id.to_string(),
+                region_replacement.volume_id().to_string(),
             )
             .await
             .unwrap();
