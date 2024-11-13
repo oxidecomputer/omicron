@@ -59,10 +59,9 @@ pub(super) struct BuilderExternalNetworking<'a> {
 
 impl<'a> BuilderExternalNetworking<'a> {
     pub(super) fn new<'b>(
-        parent_blueprint: &'a Blueprint,
         running_omicron_zones: impl Iterator<Item = &'b BlueprintZoneConfig>,
         expunged_omicron_zones: impl Iterator<Item = &'b BlueprintZoneConfig>,
-        input: &'a PlanningInput,
+        service_ip_pool_ranges: &'a [IpRange],
     ) -> anyhow::Result<Self> {
         // Scan through the running zones and build several sets of "used
         // resources". When adding new control plane zones to a sled, we may
@@ -104,7 +103,7 @@ impl<'a> BuilderExternalNetworking<'a> {
         let mut existing_external_dns_v6_ips: HashSet<Ipv6Addr> =
             HashSet::new();
         let mut external_ip_alloc =
-            ExternalIpAllocator::new(input.service_ip_pool_ranges());
+            ExternalIpAllocator::new(service_ip_pool_ranges);
         let mut used_macs: HashSet<MacAddr> = HashSet::new();
         let mut used_external_dns_ips: HashSet<IpAddr> = HashSet::new();
 
@@ -187,21 +186,6 @@ impl<'a> BuilderExternalNetworking<'a> {
                 None
             })
             .collect::<BTreeSet<IpAddr>>();
-
-        // Check the planning input: there shouldn't be any external networking
-        // resources in the database (the source of `input`) that we don't know
-        // about from the parent blueprint.
-        //
-        // Logically this could be the first thing we do in this function, but
-        // we have some tests that check error cases in the above block that
-        // would also fail these checks (so reordering the checks would require
-        // those tests to do more work to construct valid `input`s), and we
-        // never expect this to fail in practice, so there's no use in "failing
-        // fast".
-        ensure_input_records_appear_in_parent_blueprint(
-            parent_blueprint,
-            input,
-        )?;
 
         // TODO-performance Building these iterators as "walk through the list
         // and skip anything we've used already" is fine as long as we're
@@ -418,7 +402,7 @@ impl<'a> BuilderExternalNetworking<'a> {
 // similar case to the previous paragraph: a zone with networking resources was
 // expunged, the database doesn't realize it yet, but can still move forward and
 // make planning decisions that reuse those resources for new zones.
-fn ensure_input_records_appear_in_parent_blueprint(
+pub(super) fn ensure_input_networking_records_appear_in_parent_blueprint(
     parent_blueprint: &Blueprint,
     input: &PlanningInput,
 ) -> anyhow::Result<()> {
