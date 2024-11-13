@@ -272,7 +272,7 @@ async fn test_timeseries_schema_list(
     // producing data. Force a collection to ensure that happens.
     cptestctx.oximeter.force_collect().await;
     let client = &cptestctx.external_client;
-    let url = "/v1/system/timeseries/schema";
+    let url = "/v1/system/timeseries/schemas";
     let schema =
         objects_list_page_authz::<TimeseriesSchema>(client, &url).await;
     schema

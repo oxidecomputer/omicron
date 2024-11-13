@@ -2541,7 +2541,7 @@ pub trait NexusExternalApi {
     /// List timeseries schemas
     #[endpoint {
         method = GET,
-        path = "/v1/system/timeseries/schema",
+        path = "/v1/system/timeseries/schemas",
         tags = ["system/metrics"],
     }]
     async fn system_timeseries_schema_list(

@@ -947,7 +947,7 @@ pub static DEMO_SILO_METRICS_URL: Lazy<String> = Lazy::new(|| {
 });
 
 pub static TIMESERIES_LIST_URL: Lazy<String> =
-    Lazy::new(|| String::from("/v1/system/timeseries/schema"));
+    Lazy::new(|| String::from("/v1/system/timeseries/schemas"));
 
 pub static TIMESERIES_QUERY_URL: Lazy<String> =
     Lazy::new(|| String::from("/v1/system/timeseries/query"));

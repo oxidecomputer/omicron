@@ -8528,7 +8528,7 @@
         }
       }
     },
-    "/v1/system/timeseries/schema": {
+    "/v1/system/timeseries/schemas": {
       "get": {
         "tags": [
           "system/metrics"

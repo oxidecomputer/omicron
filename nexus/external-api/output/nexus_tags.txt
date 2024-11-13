@@ -169,7 +169,7 @@ API operations found with tag "system/metrics"
 OPERATION ID                             METHOD   URL PATH
 system_metric                            GET      /v1/system/metrics/{metric_name}
 system_timeseries_query                  POST     /v1/system/timeseries/query
-system_timeseries_schema_list            GET      /v1/system/timeseries/schema
+system_timeseries_schema_list            GET      /v1/system/timeseries/schemas
 
 API operations found with tag "system/networking"
 OPERATION ID                             METHOD   URL PATH
