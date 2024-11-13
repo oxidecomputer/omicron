@@ -8808,7 +8808,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=86101eaf80b55e7f405b5cafe9b0de0e9f331656#86101eaf80b55e7f405b5cafe9b0de0e9f331656"
+source = "git+https://github.com/oxidecomputer/propolis?branch=dap/mock-server-fix#364413d21aa83a8427c317bbb3ad9733a1e2b97b"
 dependencies = [
  "anyhow",
  "atty",
@@ -8818,7 +8818,7 @@ dependencies = [
  "futures",
  "hyper",
  "progenitor",
- "propolis_types",
+ "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?branch=dap/mock-server-fix)",
  "rand",
  "reqwest",
  "schemars",
@@ -8853,11 +8853,20 @@ version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=86101eaf80b55e7f405b5cafe9b0de0e9f331656#86101eaf80b55e7f405b5cafe9b0de0e9f331656"
 dependencies = [
  "crucible-client-types",
- "propolis_types",
+ "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=86101eaf80b55e7f405b5cafe9b0de0e9f331656)",
  "schemars",
  "serde",
  "thiserror",
  "uuid",
+]
+
+[[package]]
+name = "propolis_types"
+version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/propolis?branch=dap/mock-server-fix#364413d21aa83a8427c317bbb3ad9733a1e2b97b"
+dependencies = [
+ "schemars",
+ "serde",
 ]
 
 [[package]]
