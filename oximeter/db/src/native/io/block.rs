@@ -24,8 +24,14 @@ pub fn encode(block: Block, mut dst: &mut BytesMut) -> Result<(), Error> {
     }
     io::string::encode(&block.name, &mut dst);
     encode_block_info(block.info, dst);
-    io::varuint::encode(block.n_columns, &mut dst);
-    io::varuint::encode(block.n_rows, &mut dst);
+    io::varuint::encode(
+        block.n_columns().try_into().map_err(|_| Error::BlockTooLarge)?,
+        &mut dst,
+    );
+    io::varuint::encode(
+        block.n_rows().try_into().map_err(|_| Error::BlockTooLarge)?,
+        &mut dst,
+    );
     for (name, col) in block.columns {
         io::column::encode(&name, col, &mut dst)?;
     }
@@ -53,7 +59,7 @@ pub fn decode(src: &mut &[u8]) -> Result<Option<Block>, Error> {
         };
         columns.insert(name, col);
     }
-    Ok(Some(Block { name, info, n_columns, n_rows, columns }))
+    Ok(Some(Block { name, info, columns }))
 }
 
 /// Decode a `BlockInfo` struct, if possible.
@@ -145,8 +151,8 @@ mod tests {
         assert_eq!(block.name, "block");
         assert_eq!(block.info.is_overflows, false);
         assert_eq!(block.info.bucket_num, 0);
-        assert_eq!(block.n_columns, 1);
-        assert_eq!(block.n_rows, 3);
+        assert_eq!(block.n_columns(), 1);
+        assert_eq!(block.n_rows(), 3);
         let col =
             block.columns.get("foo").expect("Should have a column named 'foo'");
         let ValueArray::UInt8(values) = &col.values else {
@@ -194,8 +200,8 @@ mod tests {
         assert_eq!(block.name, "block");
         assert_eq!(block.info.is_overflows, false);
         assert_eq!(block.info.bucket_num, 0);
-        assert_eq!(block.n_columns, 1);
-        assert_eq!(block.n_rows, 3);
+        assert_eq!(block.n_columns(), 1);
+        assert_eq!(block.n_rows(), 3);
         let (name, col) =
             block.columns.into_iter().next().expect("Should have one column");
         assert_eq!(name, "foo", "Should have a column named 'foo'");

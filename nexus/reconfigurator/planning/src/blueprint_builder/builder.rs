@@ -276,7 +276,6 @@ pub struct BlueprintBuilder<'a> {
     sled_ip_allocators: BTreeMap<SledUuid, IpAllocator>,
     external_networking: OnceCell<BuilderExternalNetworking<'a>>,
     internal_dns_subnets: OnceCell<DnsSubnetAllocator>,
-    clickhouse_allocator: Option<ClickhouseAllocator>,
 
     // These fields will become part of the final blueprint.  See the
     // corresponding fields in `Blueprint`.
@@ -397,43 +396,6 @@ impl<'a> BlueprintBuilder<'a> {
                 || commissioned_sled_ids.contains(sled_id)
         });
 
-        // If we have the clickhouse cluster setup enabled via policy and we
-        // don't yet have a `ClickhouseClusterConfiguration`, then we must create
-        // one and feed it to our `ClickhouseAllocator`.
-        let clickhouse_allocator = if input.clickhouse_cluster_enabled() {
-            let parent_config = parent_blueprint
-                .clickhouse_cluster_config
-                .clone()
-                .unwrap_or_else(|| {
-                    info!(
-                        log,
-                        concat!(
-                            "Clickhouse cluster enabled by policy: ",
-                            "generating initial 'ClickhouseClusterConfig' ",
-                            "and 'ClickhouseAllocator'"
-                        )
-                    );
-                    ClickhouseClusterConfig::new(OXIMETER_CLUSTER.to_string())
-                });
-            Some(ClickhouseAllocator::new(
-                log.clone(),
-                parent_config,
-                inventory.latest_clickhouse_keeper_membership(),
-            ))
-        } else {
-            if parent_blueprint.clickhouse_cluster_config.is_some() {
-                info!(
-                    log,
-                    concat!(
-                        "clickhouse cluster disabled via policy ",
-                        "discarding existing 'ClickhouseAllocator' and ",
-                        "the resulting generated 'ClickhouseClusterConfig"
-                    )
-                );
-            }
-            None
-        };
-
         Ok(BlueprintBuilder {
             log,
             parent_blueprint,
@@ -448,7 +410,6 @@ impl<'a> BlueprintBuilder<'a> {
             sled_state,
             cockroachdb_setting_preserve_downgrade: parent_blueprint
                 .cockroachdb_setting_preserve_downgrade,
-            clickhouse_allocator,
             creator: creator.to_owned(),
             operations: Vec::new(),
             comments: Vec::new(),
@@ -533,9 +494,50 @@ impl<'a> BlueprintBuilder<'a> {
             .datasets
             .into_datasets_map(self.input.all_sled_ids(SledFilter::InService));
 
+        // If we have the clickhouse cluster setup enabled via policy and we
+        // don't yet have a `ClickhouseClusterConfiguration`, then we must create
+        // one and feed it to our `ClickhouseAllocator`.
+        let clickhouse_allocator = if self.input.clickhouse_cluster_enabled() {
+            let parent_config = self
+                .parent_blueprint
+                .clickhouse_cluster_config
+                .clone()
+                .unwrap_or_else(|| {
+                    info!(
+                        self.log,
+                        concat!(
+                            "Clickhouse cluster enabled by policy: ",
+                            "generating initial 'ClickhouseClusterConfig' ",
+                            "and 'ClickhouseAllocator'"
+                        )
+                    );
+                    ClickhouseClusterConfig::new(
+                        OXIMETER_CLUSTER.to_string(),
+                        self.rng.next_clickhouse().to_string(),
+                    )
+                });
+            Some(ClickhouseAllocator::new(
+                self.log.clone(),
+                parent_config,
+                self.collection.latest_clickhouse_keeper_membership(),
+            ))
+        } else {
+            if self.parent_blueprint.clickhouse_cluster_config.is_some() {
+                info!(
+                    self.log,
+                    concat!(
+                        "clickhouse cluster disabled via policy ",
+                        "discarding existing 'ClickhouseAllocator' and ",
+                        "the resulting generated 'ClickhouseClusterConfig"
+                    )
+                );
+            }
+            None
+        };
+
         // If we have an allocator, use it to generate a new config. If an error
         // is returned then log it and carry over the parent_config.
-        let clickhouse_cluster_config = self.clickhouse_allocator.map(|a| {
+        let clickhouse_cluster_config = clickhouse_allocator.map(|a| {
             match a.plan(&(&blueprint_zones).into()) {
                 Ok(config) => config,
                 Err(e) => {

@@ -673,6 +673,48 @@
         }
       }
     },
+    "/support/ipadm-info": {
+      "get": {
+        "operationId": "support_ipadm_info",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/support/zoneadm-info": {
+      "get": {
+        "operationId": "support_zoneadm_info",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/switch-ports": {
       "post": {
         "operationId": "uplink_ensure",

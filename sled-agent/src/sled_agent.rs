@@ -18,10 +18,11 @@ use crate::nexus::{
 use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::StorageMonitorHandle;
+use crate::support_bundle::{SupportBundleCmdError, SupportBundleCmdOutput};
 use crate::updates::{ConfigUpdates, UpdateManager};
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
-use crate::zone_bundle;
 use crate::zone_bundle::BundleError;
+use crate::{support_bundle, zone_bundle};
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use derive_more::From;
@@ -1330,6 +1331,18 @@ impl SledAgent {
             zpools,
             datasets,
         })
+    }
+
+    pub(crate) async fn support_zoneadm_info(
+        &self,
+    ) -> Result<SupportBundleCmdOutput, SupportBundleCmdError> {
+        support_bundle::zoneadm_info().await
+    }
+
+    pub(crate) async fn support_ipadm_info(
+        &self,
+    ) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
+        support_bundle::ipadm_info().await
     }
 }
 

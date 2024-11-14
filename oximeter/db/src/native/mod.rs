@@ -128,6 +128,8 @@ pub mod block;
 pub mod connection;
 mod io;
 mod packets;
+pub use io::packet::client::Encoder;
+pub use io::packet::server::Decoder;
 
 #[usdt::provider(provider = "clickhouse_io")]
 mod probes {
@@ -143,8 +145,8 @@ mod probes {
     /// Emitted when we receive a data packet, with details about the size and
     /// data types for each column.
     fn data__packet__received(
-        n_cols: u64,
-        n_rows: u64,
+        n_cols: usize,
+        n_rows: usize,
         columns: Vec<(String, String)>,
     ) {
     }

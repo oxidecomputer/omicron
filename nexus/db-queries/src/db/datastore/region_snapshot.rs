@@ -64,14 +64,25 @@ impl DataStore {
     ) -> DeleteResult {
         use db::schema::region_snapshot::dsl;
 
-        diesel::delete(dsl::region_snapshot)
+        let conn = self.pool_connection_unauthorized().await?;
+
+        let result = diesel::delete(dsl::region_snapshot)
             .filter(dsl::dataset_id.eq(dataset_id))
             .filter(dsl::region_id.eq(region_id))
             .filter(dsl::snapshot_id.eq(snapshot_id))
-            .execute_async(&*self.pool_connection_unauthorized().await?)
+            .execute_async(&*conn)
             .await
             .map(|_rows_deleted| ())
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server));
+
+        // Whenever a region snapshot is hard-deleted, validate invariants for
+        // all volumes
+        #[cfg(any(test, feature = "testing"))]
+        Self::validate_volume_invariants(&conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        result
     }
 
     /// Find region snapshots on expunged disks
