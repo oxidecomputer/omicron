@@ -2541,10 +2541,10 @@ pub trait NexusExternalApi {
     /// List timeseries schemas
     #[endpoint {
         method = GET,
-        path = "/v1/timeseries/schema",
-        tags = ["metrics"],
+        path = "/v1/system/timeseries/schemas",
+        tags = ["system/metrics"],
     }]
-    async fn timeseries_schema_list(
+    async fn system_timeseries_schema_list(
         rqctx: RequestContext<Self::Context>,
         pag_params: Query<TimeseriesSchemaPaginationParams>,
     ) -> Result<
@@ -2559,10 +2559,10 @@ pub trait NexusExternalApi {
     /// Queries are written in OxQL.
     #[endpoint {
         method = POST,
-        path = "/v1/timeseries/query",
-        tags = ["metrics"],
+        path = "/v1/system/timeseries/query",
+        tags = ["system/metrics"],
     }]
-    async fn timeseries_query(
+    async fn system_timeseries_query(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<params::TimeseriesQuery>,
     ) -> Result<HttpResponseOk<views::OxqlQueryResult>, HttpError>;
