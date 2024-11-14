@@ -166,6 +166,9 @@ mod region_replacement {
     #[derive(Debug)]
     struct ExpectedIntermediateState(pub RegionReplacementState);
 
+    #[derive(Debug)]
+    struct ExpectedStartState(pub RegionReplacementState);
+
     pub(super) struct DeletedVolumeTest<'a> {
         log: Logger,
         datastore: Arc<DataStore>,
@@ -298,6 +301,7 @@ mod region_replacement {
             &self,
             expected_end_state: ExpectedEndState,
             expected_intermediate_state: ExpectedIntermediateState,
+            expected_start_state: ExpectedStartState,
         ) {
             wait_for_condition(
                 || {
@@ -321,6 +325,14 @@ mod region_replacement {
                             Ok(())
                         } else if state == expected_intermediate_state.0 {
                             // The saga is still running
+                            Err(CondCheckError::<()>::NotYet)
+                        // If the expected start and end state are the same,
+                        // then it's impossible to determine when the saga
+                        // starts and stops based on the state.
+                        } else if expected_end_state.0 != expected_start_state.0
+                            && state == expected_start_state.0
+                        {
+                            // The saga hasn't started yet
                             Err(CondCheckError::<()>::NotYet)
                         } else {
                             // Any other state is not expected
@@ -364,6 +376,7 @@ mod region_replacement {
             self.wait_for_request_state(
                 ExpectedEndState(RegionReplacementState::Running),
                 ExpectedIntermediateState(RegionReplacementState::Allocating),
+                ExpectedStartState(RegionReplacementState::Requested),
             )
             .await;
         }
@@ -382,21 +395,49 @@ mod region_replacement {
             self.wait_for_request_state(
                 ExpectedEndState(RegionReplacementState::Running),
                 ExpectedIntermediateState(RegionReplacementState::Driving),
+                ExpectedStartState(RegionReplacementState::Running),
             )
             .await;
 
             // Additionally, assert that the drive saga recorded that it sent
-            // the attachment request to the simulated pantry
+            // the attachment request to the simulated pantry.
+            //
+            // If `wait_for_request_state` has the same expected start and end
+            // state (as it does above), it's possible to exit the function
+            // having not yet started the saga yet, and this requires an
+            // additional `wait_for_condition` to wait for the expected recorded
+            // step.
 
-            let most_recent_step = self
-                .datastore
-                .current_region_replacement_request_step(
-                    &self.opctx(),
-                    self.replacement_request_id,
-                )
-                .await
-                .unwrap()
-                .unwrap();
+            let most_recent_step = wait_for_condition(
+                || {
+                    let datastore = self.datastore.clone();
+                    let opctx = self.opctx();
+                    let replacement_request_id = self.replacement_request_id;
+
+                    async move {
+                        match datastore
+                            .current_region_replacement_request_step(
+                                &opctx,
+                                replacement_request_id,
+                            )
+                            .await
+                            .unwrap()
+                        {
+                            Some(step) => Ok(step),
+
+                            None => {
+                                // The saga is still running - this can
+                                // happen when
+                                Err(CondCheckError::<()>::NotYet)
+                            }
+                        }
+                    }
+                },
+                &std::time::Duration::from_millis(500),
+                &std::time::Duration::from_secs(10),
+            )
+            .await
+            .expect("most recent step");
 
             assert!(most_recent_step.pantry_address().is_some());
         }
@@ -444,6 +485,7 @@ mod region_replacement {
             self.wait_for_request_state(
                 ExpectedEndState(RegionReplacementState::ReplacementDone),
                 ExpectedIntermediateState(RegionReplacementState::Driving),
+                ExpectedStartState(RegionReplacementState::Running),
             )
             .await;
         }
@@ -1023,6 +1065,9 @@ mod region_snapshot_replacement {
     #[derive(Debug)]
     struct ExpectedIntermediateState(pub RegionSnapshotReplacementState);
 
+    #[derive(Debug)]
+    struct ExpectedStartState(pub RegionSnapshotReplacementState);
+
     pub(super) struct DeletedVolumeTest<'a> {
         log: Logger,
         datastore: Arc<DataStore>,
@@ -1289,6 +1334,7 @@ mod region_snapshot_replacement {
             &self,
             expected_end_state: ExpectedEndState,
             expected_intermediate_state: ExpectedIntermediateState,
+            expected_start_state: ExpectedStartState,
         ) {
             wait_for_condition(
                 || {
@@ -1312,6 +1358,9 @@ mod region_snapshot_replacement {
                             Ok(())
                         } else if state == expected_intermediate_state.0 {
                             // The saga is still running
+                            Err(CondCheckError::<()>::NotYet)
+                        } else if state == expected_start_state.0 {
+                            // The saga hasn't started yet
                             Err(CondCheckError::<()>::NotYet)
                         } else {
                             // Any other state is not expected
@@ -1359,6 +1408,7 @@ mod region_snapshot_replacement {
                 ExpectedIntermediateState(
                     RegionSnapshotReplacementState::Allocating,
                 ),
+                ExpectedStartState(RegionSnapshotReplacementState::Requested),
             )
             .await;
         }
@@ -1381,6 +1431,9 @@ mod region_snapshot_replacement {
                 ExpectedEndState(RegionSnapshotReplacementState::Running),
                 ExpectedIntermediateState(
                     RegionSnapshotReplacementState::DeletingOldVolume,
+                ),
+                ExpectedStartState(
+                    RegionSnapshotReplacementState::ReplacementDone,
                 ),
             )
             .await;
