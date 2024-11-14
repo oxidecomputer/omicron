@@ -20,13 +20,12 @@ use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::StorageMonitorHandle;
 use crate::support_bundle::queries::{
-    SupportBundleCmdError, SupportBundleCmdOutput,
-    zoneadm_info, ipadm_info,
+    ipadm_info, zoneadm_info, SupportBundleCmdError, SupportBundleCmdOutput,
 };
 use crate::updates::{ConfigUpdates, UpdateManager};
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
-use crate::zone_bundle::BundleError;
 use crate::zone_bundle;
+use crate::zone_bundle::BundleError;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use derive_more::From;

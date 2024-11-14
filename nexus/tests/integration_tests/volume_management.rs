@@ -2364,7 +2364,10 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
 
     assert!(datasets_and_regions.is_empty());
     assert_eq!(datasets_and_snapshots.len(), 3);
-// Now, let's say we're at a spot where the running snapshots have been deleted, but before volume_hard_delete or region_snapshot_remove are called. Pretend another snapshot-create and snapshot-delete snuck in
+
+    // Now, let's say we're at a spot where the running snapshots have been
+    // deleted, but before volume_hard_delete or region_snapshot_remove are
+    // called. Pretend another snapshot-create and snapshot-delete snuck in
     // here, and the second snapshot hits a agent that reuses the first target.
 
     for i in 3..6 {
@@ -5505,7 +5508,10 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
 
     let region_snapshot_to_delete = &snapshots_to_delete[0].1;
 
-    assert_eq!(region_snapshot_to_delete.dataset_id, region_snapshots[0].0.into_untyped_uuid());
+    assert_eq!(
+        region_snapshot_to_delete.dataset_id,
+        region_snapshots[0].0.into_untyped_uuid()
+    );
     assert_eq!(region_snapshot_to_delete.region_id, region_snapshots[0].1);
     assert_eq!(region_snapshot_to_delete.snapshot_id, region_snapshots[0].2);
     assert_eq!(region_snapshot_to_delete.snapshot_addr, region_snapshots[0].3);
