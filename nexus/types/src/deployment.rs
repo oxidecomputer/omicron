@@ -17,6 +17,7 @@ use crate::internal_api::params::DnsConfigParams;
 use crate::inventory::Collection;
 pub use crate::inventory::SourceNatConfig;
 pub use crate::inventory::ZpoolName;
+use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
 use derive_more::From;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
@@ -90,9 +91,9 @@ pub use zone_type::BlueprintZoneType;
 pub use zone_type::DurableDataset;
 
 use blueprint_display::{
-    constants::*, BpDiffState, BpGeneration, BpOmicronZonesSubtableSchema,
-    BpPhysicalDisksSubtableSchema, BpSledSubtable, BpSledSubtableData,
-    BpSledSubtableRow, KvListWithHeading,
+    constants::*, BpDiffState, BpGeneration, BpOmicronZonesTableSchema,
+    BpPhysicalDisksTableSchema, BpTable, BpTableData, BpTableRow,
+    KvListWithHeading,
 };
 
 pub use blueprint_diff::BlueprintDiff;
@@ -269,8 +270,7 @@ impl Blueprint {
         self.blueprint_zones.keys().copied()
     }
 
-    /// Summarize the difference between sleds and zones between two
-    /// blueprints.
+    /// Summarize the difference between two blueprints.
     ///
     /// The argument provided is the "before" side, and `self` is the "after"
     /// side. This matches the order of arguments to
@@ -278,6 +278,7 @@ impl Blueprint {
     pub fn diff_since_blueprint(&self, before: &Blueprint) -> BlueprintDiff {
         BlueprintDiff::new(
             DiffBeforeMetadata::Blueprint(Box::new(before.metadata())),
+            DiffBeforeClickhouseClusterConfig::from(before),
             before.sled_state.clone(),
             before
                 .blueprint_zones
@@ -289,15 +290,16 @@ impl Blueprint {
                 .iter()
                 .map(|(sled_id, disks)| (*sled_id, disks.clone().into()))
                 .collect(),
-            self.metadata(),
-            self.sled_state.clone(),
-            self.blueprint_zones.clone(),
-            self.blueprint_disks.clone(),
+            before
+                .blueprint_datasets
+                .iter()
+                .map(|(sled_id, datasets)| (*sled_id, datasets.clone().into()))
+                .collect(),
+            &self,
         )
     }
 
-    /// Summarize the differences in sleds and zones between a collection and a
-    /// blueprint.
+    /// Summarize the differences between a collection and a blueprint.
     ///
     /// This gives an idea about what would change about a running system if
     /// one were to execute the blueprint.
@@ -338,15 +340,32 @@ impl Blueprint {
             })
             .collect();
 
+        let before_datasets = before
+            .sled_agents
+            .iter()
+            .map(|(sled_id, sa)| {
+                (
+                    *sled_id,
+                    CollectionDatasetsConfig {
+                        datasets: sa
+                            .datasets
+                            .iter()
+                            .map(|d| (CollectionDatasetIdentifier::from(d), d.clone().into()))
+                            .collect::<BTreeMap<_, BlueprintDatasetConfigForDiff>>(),
+                    }
+                    .into(),
+                )
+            })
+            .collect();
+
         BlueprintDiff::new(
             DiffBeforeMetadata::Collection { id: before.id },
+            DiffBeforeClickhouseClusterConfig::from(before),
             before_state,
             before_zones,
             before_disks,
-            self.metadata(),
-            self.sled_state.clone(),
-            self.blueprint_zones.clone(),
-            self.blueprint_disks.clone(),
+            before_datasets,
+            &self,
         )
     }
 
@@ -357,38 +376,29 @@ impl Blueprint {
     }
 }
 
-impl BpSledSubtableData for &OmicronPhysicalDisksConfig {
+impl BpTableData for &OmicronPhysicalDisksConfig {
     fn bp_generation(&self) -> BpGeneration {
         BpGeneration::Value(self.generation)
     }
 
-    fn rows(
-        &self,
-        state: BpDiffState,
-    ) -> impl Iterator<Item = BpSledSubtableRow> {
+    fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
         let sorted_disk_ids: BTreeSet<DiskIdentity> =
             self.disks.iter().map(|d| d.identity.clone()).collect();
 
         sorted_disk_ids.into_iter().map(move |d| {
-            BpSledSubtableRow::from_strings(
-                state,
-                vec![d.vendor, d.model, d.serial],
-            )
+            BpTableRow::from_strings(state, vec![d.vendor, d.model, d.serial])
         })
     }
 }
 
-impl BpSledSubtableData for BlueprintOrCollectionZonesConfig {
+impl BpTableData for BlueprintOrCollectionZonesConfig {
     fn bp_generation(&self) -> BpGeneration {
         BpGeneration::Value(self.generation())
     }
 
-    fn rows(
-        &self,
-        state: BpDiffState,
-    ) -> impl Iterator<Item = BpSledSubtableRow> {
+    fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
         self.zones().map(move |zone| {
-            BpSledSubtableRow::from_strings(
+            BpTableRow::from_strings(
                 state,
                 vec![
                     zone.kind().report_str().to_string(),
@@ -396,6 +406,27 @@ impl BpSledSubtableData for BlueprintOrCollectionZonesConfig {
                     zone.disposition().to_string(),
                     zone.underlay_ip().to_string(),
                 ],
+            )
+        })
+    }
+}
+
+// Useful implementation for printing two column tables stored in a `BTreeMap`, where
+// each key and value impl `Display`.
+impl<S1, S2> BpTableData for (Generation, &BTreeMap<S1, S2>)
+where
+    S1: fmt::Display,
+    S2: fmt::Display,
+{
+    fn bp_generation(&self) -> BpGeneration {
+        BpGeneration::Value(self.0)
+    }
+
+    fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
+        self.1.iter().map(move |(s1, s2)| {
+            BpTableRow::from_strings(
+                state,
+                vec![s1.to_string(), s2.to_string()],
             )
         })
     }
@@ -463,6 +494,21 @@ impl<'a> BlueprintDisplay<'a> {
             ],
         )
     }
+
+    // Return tables representing a [`ClickhouseClusterConfig`] in a given blueprint
+    fn make_clickhouse_cluster_config_tables(
+        &self,
+    ) -> Option<(KvListWithHeading, BpTable, BpTable)> {
+        let config = &self.blueprint.clickhouse_cluster_config.as_ref()?;
+
+        let diff_table =
+            ClickhouseClusterConfigDiffTablesForSingleBlueprint::new(
+                BpDiffState::Unchanged,
+                config,
+            );
+
+        Some((diff_table.metadata, diff_table.keepers, diff_table.servers))
+    }
 }
 
 impl<'a> fmt::Display for BlueprintDisplay<'a> {
@@ -486,8 +532,8 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
         // If there are corresponding zones, print those as well.
         for (sled_id, disks) in &self.blueprint.blueprint_disks {
             // Construct the disks subtable
-            let disks_table = BpSledSubtable::new(
-                BpPhysicalDisksSubtableSchema {},
+            let disks_table = BpTable::new(
+                BpPhysicalDisksTableSchema {},
                 disks.bp_generation(),
                 disks.rows(BpDiffState::Unchanged).collect(),
             );
@@ -507,8 +553,8 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
                 Some(zones) => {
                     let zones =
                         BlueprintOrCollectionZonesConfig::from(zones.clone());
-                    let zones_tab = BpSledSubtable::new(
-                        BpOmicronZonesSubtableSchema {},
+                    let zones_tab = BpTable::new(
+                        BpOmicronZonesTableSchema {},
                         zones.bp_generation(),
                         zones.rows(BpDiffState::Unchanged).collect(),
                     );
@@ -537,13 +583,18 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
                     f,
                     "\n!{sled_id}\n{}\n{}\n\n",
                     "WARNING: Zones exist without physical disks!",
-                    BpSledSubtable::new(
-                        BpOmicronZonesSubtableSchema {},
+                    BpTable::new(
+                        BpOmicronZonesTableSchema {},
                         zones.bp_generation(),
                         zones.rows(BpDiffState::Unchanged).collect()
                     )
                 )?;
             }
+        }
+
+        if let Some((t1, t2, t3)) = self.make_clickhouse_cluster_config_tables()
+        {
+            writeln!(f, "{t1}\n{t2}\n{t3}\n")?;
         }
 
         writeln!(f, "{}", self.make_cockroachdb_table())?;
@@ -939,6 +990,59 @@ impl From<BlueprintDatasetConfig> for DatasetConfig {
     }
 }
 
+/// Information about a dataset as used for diffing collections and blueprints.
+///
+/// This struct acts as a "lowest common denominator" between the
+/// inventory and blueprint types, for the purposes of comparison.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct BlueprintDatasetConfigForDiff {
+    pub name: String,
+    pub id: Option<DatasetUuid>,
+    pub quota: Option<ByteCount>,
+    pub reservation: Option<ByteCount>,
+    pub compression: String,
+}
+
+fn unwrap_or_none<T: ToString>(opt: &Option<T>) -> String {
+    opt.as_ref().map(|v| v.to_string()).unwrap_or_else(|| "none".to_string())
+}
+
+impl BlueprintDatasetConfigForDiff {
+    fn as_strings(&self) -> Vec<String> {
+        vec![
+            self.name.clone(),
+            unwrap_or_none(&self.id),
+            unwrap_or_none(&self.quota),
+            unwrap_or_none(&self.reservation),
+            self.compression.clone(),
+        ]
+    }
+}
+
+impl From<crate::inventory::Dataset> for BlueprintDatasetConfigForDiff {
+    fn from(dataset: crate::inventory::Dataset) -> Self {
+        Self {
+            name: dataset.name,
+            id: dataset.id,
+            quota: dataset.quota,
+            reservation: dataset.reservation,
+            compression: dataset.compression,
+        }
+    }
+}
+
+impl From<BlueprintDatasetConfig> for BlueprintDatasetConfigForDiff {
+    fn from(dataset: BlueprintDatasetConfig) -> Self {
+        Self {
+            name: DatasetName::new(dataset.pool, dataset.kind).full_name(),
+            id: Some(dataset.id),
+            quota: dataset.quota,
+            reservation: dataset.reservation,
+            compression: dataset.compression.to_string(),
+        }
+    }
+}
+
 /// Describe high-level metadata about a blueprint
 // These fields are a subset of [`Blueprint`], and include only the data we can
 // quickly fetch from the main blueprint table (e.g., when listing all
@@ -1012,6 +1116,37 @@ impl DiffBeforeMetadata {
             DiffBeforeMetadata::Collection { id } => format!("collection {id}"),
             DiffBeforeMetadata::Blueprint(b) => b.display_id(),
         }
+    }
+}
+
+/// Data about the "before" version within a [`BlueprintDiff`]
+///
+/// We only track keepers in inventory collections.
+#[derive(Clone, Debug)]
+pub enum DiffBeforeClickhouseClusterConfig {
+    Collection {
+        id: CollectionUuid,
+        latest_keeper_membership:
+            Option<clickhouse_admin_types::ClickhouseKeeperClusterMembership>,
+    },
+    Blueprint(Option<ClickhouseClusterConfig>),
+}
+
+impl From<&Collection> for DiffBeforeClickhouseClusterConfig {
+    fn from(value: &Collection) -> Self {
+        DiffBeforeClickhouseClusterConfig::Collection {
+            id: value.id,
+            latest_keeper_membership: value
+                .latest_clickhouse_keeper_membership(),
+        }
+    }
+}
+
+impl From<&Blueprint> for DiffBeforeClickhouseClusterConfig {
+    fn from(value: &Blueprint) -> Self {
+        DiffBeforeClickhouseClusterConfig::Blueprint(
+            value.clickhouse_cluster_config.clone(),
+        )
     }
 }
 
@@ -1193,6 +1328,77 @@ impl BlueprintOrCollectionDisksConfig {
 #[derive(Clone, Debug, From)]
 pub struct CollectionPhysicalDisksConfig {
     disks: BTreeSet<DiskIdentity>,
+}
+
+/// Single sled's datasets config for "before" version within a [`BlueprintDiff`].
+#[derive(Clone, Debug, From)]
+pub enum BlueprintOrCollectionDatasetsConfig {
+    /// The diff was made from a collection.
+    Collection(CollectionDatasetsConfig),
+    /// The diff was made from a blueprint.
+    Blueprint(BlueprintDatasetsConfig),
+}
+
+impl BlueprintOrCollectionDatasetsConfig {
+    pub fn generation(&self) -> Option<Generation> {
+        match self {
+            BlueprintOrCollectionDatasetsConfig::Collection(_) => None,
+            BlueprintOrCollectionDatasetsConfig::Blueprint(c) => {
+                Some(c.generation)
+            }
+        }
+    }
+
+    pub fn datasets(
+        &self,
+    ) -> BTreeMap<CollectionDatasetIdentifier, BlueprintDatasetConfigForDiff>
+    {
+        match self {
+            BlueprintOrCollectionDatasetsConfig::Collection(c) => {
+                c.datasets.clone()
+            }
+            BlueprintOrCollectionDatasetsConfig::Blueprint(c) => c
+                .datasets
+                .values()
+                .map(|d| {
+                    (CollectionDatasetIdentifier::from(d), d.clone().into())
+                })
+                .collect(),
+        }
+    }
+}
+
+/// A unique identifier for a dataset within a collection.
+///
+/// If a UUID is known for the dataset, it should be used.
+/// However, some datasets exist without UUIDs, and should still
+/// be reported by the inventory collection subsystem.
+#[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
+pub struct CollectionDatasetIdentifier {
+    name: String,
+    id: Option<DatasetUuid>,
+}
+
+impl From<&BlueprintDatasetConfig> for CollectionDatasetIdentifier {
+    fn from(d: &BlueprintDatasetConfig) -> Self {
+        Self {
+            id: Some(d.id),
+            name: DatasetName::new(d.pool.clone(), d.kind.clone()).full_name(),
+        }
+    }
+}
+
+impl From<&crate::inventory::Dataset> for CollectionDatasetIdentifier {
+    fn from(d: &crate::inventory::Dataset) -> Self {
+        Self { id: d.id, name: d.name.clone() }
+    }
+}
+
+/// Single sled's dataset config for "before" version within a [`BlueprintDiff`].
+#[derive(Clone, Debug, From)]
+pub struct CollectionDatasetsConfig {
+    datasets:
+        BTreeMap<CollectionDatasetIdentifier, BlueprintDatasetConfigForDiff>,
 }
 
 /// Encapsulates Reconfigurator state

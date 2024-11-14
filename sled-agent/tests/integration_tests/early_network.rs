@@ -132,7 +132,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfig) {
                     switch: SwitchLocation::Switch0,
                     port: "foo".to_owned(),
                     uplink_port_speed: PortSpeed::Speed200G,
-                    uplink_port_fec: PortFec::Firecode,
+                    uplink_port_fec: Some(PortFec::Firecode),
                     bgp_peers: vec![BgpPeerConfig {
                         asn: 65000,
                         port: "bar".to_owned(),

@@ -10,7 +10,6 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use uuid::Uuid;
 
 /// Global configuration for all clickhouse servers (replicas) and keepers
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
@@ -91,13 +90,16 @@ pub struct ClickhouseClusterConfig {
 }
 
 impl ClickhouseClusterConfig {
-    pub fn new(cluster_name: String) -> ClickhouseClusterConfig {
+    pub fn new(
+        cluster_name: String,
+        cluster_secret: String,
+    ) -> ClickhouseClusterConfig {
         ClickhouseClusterConfig {
             generation: Generation::new(),
             max_used_server_id: 0.into(),
             max_used_keeper_id: 0.into(),
             cluster_name,
-            cluster_secret: Uuid::new_v4().to_string(),
+            cluster_secret,
             highest_seen_keeper_leader_committed_log_index: 0,
             keepers: BTreeMap::new(),
             servers: BTreeMap::new(),

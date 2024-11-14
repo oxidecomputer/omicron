@@ -101,14 +101,14 @@ impl Server {
         .await;
 
         let dropshot_log = log.new(o!("component" => "dropshot"));
-        let http_server = dropshot::HttpServerStarter::new(
-            &config.dropshot,
+        let http_server = dropshot::ServerBuilder::new(
             http_api(),
             sled_agent.clone(),
-            &dropshot_log,
+            dropshot_log,
         )
-        .map_err(|error| anyhow!("initializing server: {}", error))?
-        .start();
+        .config(config.dropshot.clone())
+        .start()
+        .map_err(|error| anyhow!("initializing server: {}", error))?;
 
         // Notify the control plane that we're up, and continue trying this
         // until it succeeds. We retry with an randomized, capped exponential
@@ -207,7 +207,7 @@ impl Server {
                 zpool_id: zpool_id.into_untyped_uuid(),
                 dataset_id: dataset_id.into_untyped_uuid(),
                 request: NexusTypes::DatasetPutRequest {
-                    address: address.to_string(),
+                    address: Some(address.to_string()),
                     kind: DatasetKind::Crucible,
                 },
             });
@@ -524,7 +524,7 @@ pub async fn run_standalone_server(
                 zpool_id: zpool.id,
                 dataset_id: *dataset_id.as_untyped_uuid(),
                 request: NexusTypes::DatasetPutRequest {
-                    address: address.to_string(),
+                    address: Some(address.to_string()),
                     kind: DatasetKind::Crucible,
                 },
             });

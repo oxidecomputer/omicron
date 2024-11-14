@@ -19,10 +19,14 @@ use crate::params::OmicronZoneTypeExt;
 use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::StorageMonitorHandle;
+use crate::support_bundle::queries::{
+    SupportBundleCmdError, SupportBundleCmdOutput,
+    zoneadm_info, ipadm_info,
+};
 use crate::updates::{ConfigUpdates, UpdateManager};
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
-use crate::zone_bundle;
 use crate::zone_bundle::BundleError;
+use crate::zone_bundle;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use derive_more::From;
@@ -384,12 +388,9 @@ impl SledAgentInner {
 #[derive(Clone)]
 pub struct SledAgent {
     inner: Arc<SledAgentInner>,
-    log: Logger,
+    pub(crate) log: Logger,
     sprockets: SprocketsConfig,
 }
-
-// This extends the "impl SledAgent" for support bundle functionality.
-mod support_bundle;
 
 impl SledAgent {
     /// Initializes a new [`SledAgent`] object.
@@ -473,7 +474,7 @@ impl SledAgent {
             serial: baseboard.identifier().to_string(),
         };
         let metrics_manager =
-            MetricsManager::new(&log, identifiers, *sled_address.ip())?;
+            MetricsManager::new(&log, identifiers.clone(), *sled_address.ip())?;
 
         // Start tracking the underlay physical links.
         for link in underlay::find_chelsio_links(&config.data_links)? {
@@ -519,10 +520,8 @@ impl SledAgent {
         };
         let updates = UpdateManager::new(update_config);
 
-        let svc_config = services::Config::new(
-            request.body.id.into_untyped_uuid(),
-            config.sidecar_revision.clone(),
-        );
+        let svc_config =
+            services::Config::new(identifiers, config.sidecar_revision.clone());
 
         // Get our rack network config from the bootstore; we cannot proceed
         // until we have this, as we need to know which switches have uplinks to
@@ -1357,6 +1356,18 @@ impl SledAgent {
             zpools,
             datasets,
         })
+    }
+
+    pub(crate) async fn support_zoneadm_info(
+        &self,
+    ) -> Result<SupportBundleCmdOutput, SupportBundleCmdError> {
+        zoneadm_info().await
+    }
+
+    pub(crate) async fn support_ipadm_info(
+        &self,
+    ) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
+        ipadm_info().await
     }
 }
 

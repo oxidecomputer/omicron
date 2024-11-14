@@ -122,6 +122,7 @@ omicron-test-utils.workspace = true
 pretty_assertions.workspace = true
 rcgen.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
+semver.workspace = true
 subprocess.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true

@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use clickhouse_admin_types::{
-    ClickhouseKeeperClusterMembership, KeeperConf, KeeperConfig,
-    KeeperConfigurableSettings, Lgif, RaftConfig, ReplicaConfig,
+    ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
+    KeeperConfig, KeeperConfigurableSettings, Lgif, RaftConfig, ReplicaConfig,
     ServerConfigurableSettings,
 };
 use dropshot::{
@@ -35,7 +35,7 @@ pub trait ClickhouseAdminKeeperApi {
         method = PUT,
         path = "/config",
     }]
-    async fn generate_config(
+    async fn generate_config_and_enable_svc(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<KeeperConfigurableSettings>,
     ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError>;
@@ -45,7 +45,7 @@ pub trait ClickhouseAdminKeeperApi {
     /// and logs for consistency and recovery.
     #[endpoint {
         method = GET,
-        path = "/keeper/lgif",
+        path = "/4lw-lgif",
     }]
     async fn lgif(
         rqctx: RequestContext<Self::Context>,
@@ -55,7 +55,7 @@ pub trait ClickhouseAdminKeeperApi {
     /// contains last committed cluster configuration.
     #[endpoint {
         method = GET,
-        path = "/keeper/raft-config",
+        path = "/raft-config",
     }]
     async fn raft_config(
         rqctx: RequestContext<Self::Context>,
@@ -64,7 +64,7 @@ pub trait ClickhouseAdminKeeperApi {
     /// Retrieve configuration information from a keeper node.
     #[endpoint {
         method = GET,
-        path = "/keeper/conf",
+        path = "/4lw-conf",
     }]
     async fn keeper_conf(
         rqctx: RequestContext<Self::Context>,
@@ -73,7 +73,7 @@ pub trait ClickhouseAdminKeeperApi {
     /// Retrieve cluster membership information from a keeper node.
     #[endpoint {
         method = GET,
-        path = "/keeper/cluster-membership",
+        path = "/cluster-membership",
     }]
     async fn keeper_cluster_membership(
         rqctx: RequestContext<Self::Context>,
@@ -101,8 +101,18 @@ pub trait ClickhouseAdminServerApi {
         method = PUT,
         path = "/config"
     }]
-    async fn generate_config(
+    async fn generate_config_and_enable_svc(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<ServerConfigurableSettings>,
     ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError>;
+
+    /// Contains information about distributed ddl queries (ON CLUSTER clause)
+    /// that were executed on a cluster.
+    #[endpoint {
+        method = GET,
+        path = "/distributed-ddl-queue",
+    }]
+    async fn distributed_ddl_queue(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<DistributedDdlQueue>>, HttpError>;
 }

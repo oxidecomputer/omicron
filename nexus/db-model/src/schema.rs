@@ -141,7 +141,7 @@ table! {
         port_settings_id -> Uuid,
         link_name -> Text,
         mtu -> Int4,
-        fec -> crate::SwitchLinkFecEnum,
+        fec -> Nullable<crate::SwitchLinkFecEnum>,
         speed -> crate::SwitchLinkSpeedEnum,
         autoneg -> Bool,
         lldp_link_config_id -> Nullable<Uuid>,
@@ -1075,6 +1075,8 @@ table! {
         port -> Nullable<Int4>,
 
         read_only -> Bool,
+
+        deleting -> Bool,
     }
 }
 
@@ -2087,3 +2089,19 @@ joinable!(instance_ssh_key -> instance (instance_id));
 allow_tables_to_appear_in_same_query!(sled, sled_instance);
 
 joinable!(network_interface -> probe (parent_id));
+
+table! {
+    volume_resource_usage (usage_id) {
+        usage_id -> Uuid,
+
+        volume_id -> Uuid,
+
+        usage_type -> crate::VolumeResourceUsageTypeEnum,
+
+        region_id -> Nullable<Uuid>,
+
+        region_snapshot_dataset_id -> Nullable<Uuid>,
+        region_snapshot_region_id -> Nullable<Uuid>,
+        region_snapshot_snapshot_id -> Nullable<Uuid>,
+    }
+}

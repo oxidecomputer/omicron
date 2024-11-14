@@ -585,6 +585,22 @@ pub trait SledAgentApi {
         request_context: RequestContext<Self::Context>,
         body: TypedBody<ExternalIpGatewayMap>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/zoneadm-info",
+    }]
+    async fn support_zoneadm_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<FreeformBody>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/ipadm-info",
+    }]
+    async fn support_ipadm_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<FreeformBody>, HttpError>;
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]

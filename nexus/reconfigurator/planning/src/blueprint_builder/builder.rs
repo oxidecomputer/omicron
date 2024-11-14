@@ -58,6 +58,7 @@ use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
+use omicron_common::disk::GzipLevel;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -75,7 +76,6 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::fmt;
-use std::hash::Hash;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
@@ -276,7 +276,6 @@ pub struct BlueprintBuilder<'a> {
     sled_ip_allocators: BTreeMap<SledUuid, IpAllocator>,
     external_networking: OnceCell<BuilderExternalNetworking<'a>>,
     internal_dns_subnets: OnceCell<DnsSubnetAllocator>,
-    clickhouse_allocator: Option<ClickhouseAllocator>,
 
     // These fields will become part of the final blueprint.  See the
     // corresponding fields in `Blueprint`.
@@ -301,18 +300,20 @@ impl<'a> BlueprintBuilder<'a> {
         sled_ids: impl Iterator<Item = SledUuid>,
         creator: &str,
     ) -> Blueprint {
-        Self::build_empty_with_sleds_impl(sled_ids, creator, PlannerRng::new())
+        Self::build_empty_with_sleds_impl(
+            sled_ids,
+            creator,
+            PlannerRng::from_entropy(),
+        )
     }
 
     /// A version of [`Self::build_empty_with_sleds`] that allows the
-    /// blueprint ID to be generated from a random seed.
-    pub fn build_empty_with_sleds_seeded<H: Hash>(
+    /// blueprint ID to be generated from a deterministic RNG.
+    pub fn build_empty_with_sleds_seeded(
         sled_ids: impl Iterator<Item = SledUuid>,
         creator: &str,
-        seed: H,
+        rng: PlannerRng,
     ) -> Blueprint {
-        let mut rng = PlannerRng::new();
-        rng.set_seed(seed);
         Self::build_empty_with_sleds_impl(sled_ids, creator, rng)
     }
 
@@ -395,43 +396,6 @@ impl<'a> BlueprintBuilder<'a> {
                 || commissioned_sled_ids.contains(sled_id)
         });
 
-        // If we have the clickhouse cluster setup enabled via policy and we
-        // don't yet have a `ClickhouseClusterConfiguration`, then we must create
-        // one and feed it to our `ClickhouseAllocator`.
-        let clickhouse_allocator = if input.clickhouse_cluster_enabled() {
-            let parent_config = parent_blueprint
-                .clickhouse_cluster_config
-                .clone()
-                .unwrap_or_else(|| {
-                    info!(
-                        log,
-                        concat!(
-                            "Clickhouse cluster enabled by policy: ",
-                            "generating initial 'ClickhouseClusterConfig' ",
-                            "and 'ClickhouseAllocator'"
-                        )
-                    );
-                    ClickhouseClusterConfig::new(OXIMETER_CLUSTER.to_string())
-                });
-            Some(ClickhouseAllocator::new(
-                log.clone(),
-                parent_config,
-                inventory.latest_clickhouse_keeper_membership(),
-            ))
-        } else {
-            if parent_blueprint.clickhouse_cluster_config.is_some() {
-                info!(
-                    log,
-                    concat!(
-                        "clickhouse cluster disabled via policy ",
-                        "discarding existing 'ClickhouseAllocator' and ",
-                        "the resulting generated 'ClickhouseClusterConfig"
-                    )
-                );
-            }
-            None
-        };
-
         Ok(BlueprintBuilder {
             log,
             parent_blueprint,
@@ -446,11 +410,10 @@ impl<'a> BlueprintBuilder<'a> {
             sled_state,
             cockroachdb_setting_preserve_downgrade: parent_blueprint
                 .cockroachdb_setting_preserve_downgrade,
-            clickhouse_allocator,
             creator: creator.to_owned(),
             operations: Vec::new(),
             comments: Vec::new(),
-            rng: PlannerRng::new(),
+            rng: PlannerRng::from_entropy(),
         })
     }
 
@@ -531,9 +494,50 @@ impl<'a> BlueprintBuilder<'a> {
             .datasets
             .into_datasets_map(self.input.all_sled_ids(SledFilter::InService));
 
+        // If we have the clickhouse cluster setup enabled via policy and we
+        // don't yet have a `ClickhouseClusterConfiguration`, then we must create
+        // one and feed it to our `ClickhouseAllocator`.
+        let clickhouse_allocator = if self.input.clickhouse_cluster_enabled() {
+            let parent_config = self
+                .parent_blueprint
+                .clickhouse_cluster_config
+                .clone()
+                .unwrap_or_else(|| {
+                    info!(
+                        self.log,
+                        concat!(
+                            "Clickhouse cluster enabled by policy: ",
+                            "generating initial 'ClickhouseClusterConfig' ",
+                            "and 'ClickhouseAllocator'"
+                        )
+                    );
+                    ClickhouseClusterConfig::new(
+                        OXIMETER_CLUSTER.to_string(),
+                        self.rng.next_clickhouse().to_string(),
+                    )
+                });
+            Some(ClickhouseAllocator::new(
+                self.log.clone(),
+                parent_config,
+                self.collection.latest_clickhouse_keeper_membership(),
+            ))
+        } else {
+            if self.parent_blueprint.clickhouse_cluster_config.is_some() {
+                info!(
+                    self.log,
+                    concat!(
+                        "clickhouse cluster disabled via policy ",
+                        "discarding existing 'ClickhouseAllocator' and ",
+                        "the resulting generated 'ClickhouseClusterConfig"
+                    )
+                );
+            }
+            None
+        };
+
         // If we have an allocator, use it to generate a new config. If an error
         // is returned then log it and carry over the parent_config.
-        let clickhouse_cluster_config = self.clickhouse_allocator.map(|a| {
+        let clickhouse_cluster_config = clickhouse_allocator.map(|a| {
             match a.plan(&(&blueprint_zones).into()) {
                 Ok(config) => config,
                 Err(e) => {
@@ -579,12 +583,12 @@ impl<'a> BlueprintBuilder<'a> {
         self.sled_state.insert(sled_id, desired_state);
     }
 
-    /// Within tests, set a seeded RNG for deterministic results.
+    /// Within tests, set an RNG for deterministic results.
     ///
     /// This will ensure that tests that use this builder will produce the same
     /// results each time they are run.
-    pub fn set_rng_seed<H: Hash>(&mut self, seed: H) -> &mut Self {
-        self.rng.set_seed(seed);
+    pub fn set_rng(&mut self, rng: PlannerRng) -> &mut Self {
+        self.rng = rng;
         self
     }
 
@@ -869,17 +873,22 @@ impl<'a> BlueprintBuilder<'a> {
         let (mut additions, mut updates, mut expunges, removals) = {
             let mut datasets_builder = BlueprintSledDatasetsBuilder::new(
                 self.log.clone(),
+                &mut self.rng,
                 sled_id,
                 &self.datasets,
                 resources,
             );
 
             // Ensure each zpool has a "Debug" and "Zone Root" dataset.
-            let bp_zpools = self
+            let mut bp_zpools = self
                 .disks
                 .current_sled_disks(sled_id)
                 .map(|disk_config| disk_config.pool_id)
                 .collect::<Vec<ZpoolUuid>>();
+            // We iterate over the zpools in a deterministic order to ensure
+            // that "new Dataset UUIDs" are distributed in a reliable order.
+            bp_zpools.sort();
+
             for zpool_id in bp_zpools {
                 let zpool = ZpoolName::new_external(zpool_id);
                 let address = None;
@@ -888,7 +897,9 @@ impl<'a> BlueprintBuilder<'a> {
                     address,
                     Some(ByteCount::from_gibibytes_u32(DEBUG_QUOTA_SIZE_GB)),
                     None,
-                    CompressionAlgorithm::Off,
+                    CompressionAlgorithm::GzipN {
+                        level: GzipLevel::new::<9>(),
+                    },
                 );
                 datasets_builder.ensure(
                     DatasetName::new(zpool, DatasetKind::TransientZoneRoot),
@@ -2357,6 +2368,7 @@ impl<'a> BlueprintDatasetsBuilder<'a> {
 #[derive(Debug)]
 struct BlueprintSledDatasetsBuilder<'a> {
     log: Logger,
+    rng: &'a mut PlannerRng,
     blueprint_datasets:
         BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, &'a BlueprintDatasetConfig>>,
     database_datasets:
@@ -2377,6 +2389,7 @@ struct BlueprintSledDatasetsBuilder<'a> {
 impl<'a> BlueprintSledDatasetsBuilder<'a> {
     pub fn new(
         log: Logger,
+        rng: &'a mut PlannerRng,
         sled_id: SledUuid,
         datasets: &'a BlueprintDatasetsBuilder<'_>,
         resources: &'a SledResources,
@@ -2407,6 +2420,7 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
 
         Self {
             log,
+            rng,
             blueprint_datasets,
             database_datasets,
             unchanged_datasets: BTreeMap::new(),
@@ -2470,7 +2484,7 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
         let id = if let Some(old_config) = self.get_from_db(zpool_id, kind) {
             old_config.id
         } else {
-            DatasetUuid::new_v4()
+            self.rng.next_dataset()
         };
 
         let new_config = make_config(id);
@@ -2607,6 +2621,7 @@ pub mod test {
     use super::*;
     use crate::example::example;
     use crate::example::ExampleSystemBuilder;
+    use crate::example::SimRngState;
     use crate::system::SledBuilder;
     use expectorate::assert_contents;
     use nexus_inventory::CollectionBuilder;
@@ -2833,8 +2848,13 @@ pub mod test {
     fn test_basic() {
         static TEST_NAME: &str = "blueprint_builder_test_basic";
         let logctx = test_setup_log(TEST_NAME);
-        let (mut example, blueprint1) =
-            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
+
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+        let (mut example, blueprint1) = ExampleSystemBuilder::new_with_rng(
+            &logctx.log,
+            rng.next_system_rng(),
+        )
+        .build();
         verify_blueprint(&blueprint1);
 
         let mut builder = BlueprintBuilder::new_based_on(
@@ -2870,7 +2890,9 @@ pub mod test {
         assert_eq!(diff.sleds_modified.len(), 0);
 
         // The next step is adding these zones to a new sled.
-        let new_sled_id = example.sled_rng.next();
+        let mut sled_id_rng = rng.next_sled_id_rng();
+        let new_sled_id = sled_id_rng.next();
+
         let _ =
             example.system.sled(SledBuilder::new().id(new_sled_id)).unwrap();
         let input = example.system.to_planning_input_builder().unwrap().build();

@@ -107,6 +107,7 @@ impl DatasetName {
         &self.pool_name
     }
 
+    // TODO: Maybe rename this to "kind"?
     pub fn dataset(&self) -> &DatasetKind {
         &self.kind
     }
@@ -283,6 +284,7 @@ impl FromStr for CompressionAlgorithm {
 #[derive(
     Clone,
     Debug,
+    Default,
     Deserialize,
     Serialize,
     JsonSchema,

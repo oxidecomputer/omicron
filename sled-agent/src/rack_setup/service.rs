@@ -103,12 +103,14 @@ use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::disk::{
-    OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig,
+    DatasetKind, DatasetsConfig, OmicronPhysicalDiskConfig,
+    OmicronPhysicalDisksConfig,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
@@ -324,7 +326,8 @@ impl ServiceInner {
     ) -> Result<(), SetupServiceError> {
         cancel_safe_futures::future::join_all_then_try(
             plan.services.iter().map(|(sled_address, config)| async move {
-                self.initialize_storage_on_sled(
+                // Ensure all the physical disks are initialized
+                self.initialize_disks_on_sled(
                     *sled_address,
                     OmicronPhysicalDisksConfig {
                         generation: config.disks.generation,
@@ -340,7 +343,16 @@ impl ServiceInner {
                             .collect(),
                     },
                 )
-                .await
+                .await?;
+
+                // Ensure all datasets are initialized
+                self.initialize_datasets_on_sled(
+                    *sled_address,
+                    config.datasets.clone(),
+                )
+                .await?;
+
+                Ok::<(), SetupServiceError>(())
             }),
         )
         .await?;
@@ -349,13 +361,7 @@ impl ServiceInner {
 
     /// Requests that the specified sled configure storage as described
     /// by `storage_config`.
-    ///
-    /// This function succeeds if either the configuration is supplied, or if
-    /// the configuration on the target sled is newer than what we're supplying.
-    // This function shares a lot of implementation details with
-    // [Self::initialize_zones_on_sled]. Although it has a different meaning,
-    // the usage (and expectations around generation numbers) are similar.
-    async fn initialize_storage_on_sled(
+    async fn initialize_disks_on_sled(
         &self,
         sled_address: SocketAddrV6,
         storage_config: OmicronPhysicalDisksConfig,
@@ -381,10 +387,7 @@ impl ServiceInner {
                 .omicron_physical_disks_put(&storage_config.clone())
                 .await;
             let Err(error) = result else {
-                return Ok::<
-                    (),
-                    BackoffError<SledAgentError<SledAgentTypes::Error>>,
-                >(());
+                return Ok(());
             };
 
             if let sled_agent_client::Error::ErrorResponse(response) = &error {
@@ -398,22 +401,98 @@ impl ServiceInner {
                         "server_message" => &response.message,
                     );
 
-                    // If we attempt to initialize storage at generation X, and
-                    // the server refuses because it's at some generation newer
-                    // than X, then we treat that as success.  See the doc
-                    // comment on this function.
-                    return Ok(());
+                    return Err(BackoffError::permanent(
+                        SetupServiceError::SledInitialization(format!(
+                            "Conflict initializing disks: {}",
+                            response.message
+                        )),
+                    ));
                 }
             }
 
             // TODO Many other codes here should not be retried.  See
             // omicron#4578.
-            return Err(BackoffError::transient(error));
+            return Err(BackoffError::transient(SetupServiceError::SledApi(
+                error,
+            )));
         };
         let log_failure = |error, delay| {
             warn!(
                 log,
                 "failed to initialize Omicron storage";
+                "error" => #%error,
+                "retry_after" => ?delay,
+            );
+        };
+        retry_notify(
+            retry_policy_internal_service_aggressive(),
+            storage_put,
+            log_failure,
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    /// Requests that the specified sled configure datasets as described
+    /// by `storage_config`.
+    async fn initialize_datasets_on_sled(
+        &self,
+        sled_address: SocketAddrV6,
+        storage_config: DatasetsConfig,
+    ) -> Result<(), SetupServiceError> {
+        let dur = std::time::Duration::from_secs(60);
+        let client = reqwest::ClientBuilder::new()
+            .connect_timeout(dur)
+            .build()
+            .map_err(SetupServiceError::HttpClient)?;
+        let log = self.log.new(o!("sled_address" => sled_address.to_string()));
+        let client = SledAgentClient::new_with_client(
+            &format!("http://{}", sled_address),
+            client,
+            log.clone(),
+        );
+
+        let storage_put = || async {
+            info!(
+                log,
+                "attempting to set up sled's datasets: {:?}", storage_config,
+            );
+            let result = client.datasets_put(&storage_config.clone()).await;
+            let Err(error) = result else {
+                return Ok(());
+            };
+
+            if let sled_agent_client::Error::ErrorResponse(response) = &error {
+                if response.status() == http::StatusCode::CONFLICT {
+                    warn!(
+                        log,
+                        "ignoring attempt to initialize datasets because \
+                        the server seems to be newer";
+                        "attempted_generation" => i64::from(&storage_config.generation),
+                        "req_id" => &response.request_id,
+                        "server_message" => &response.message,
+                    );
+
+                    return Err(BackoffError::permanent(
+                        SetupServiceError::SledInitialization(format!(
+                            "Conflict initializing datasets {}",
+                            response.message
+                        )),
+                    ));
+                }
+            }
+
+            // TODO Many other codes here should not be retried.  See
+            // omicron#4578.
+            return Err(BackoffError::transient(SetupServiceError::SledApi(
+                error,
+            )));
+        };
+        let log_failure = |error, delay| {
+            warn!(
+                log,
+                "failed to initialize Omicron datasets";
                 "error" => #%error,
                 "retry_after" => ?delay,
             );
@@ -733,26 +812,62 @@ impl ServiceInner {
         );
 
         // Convert all the information we have about datasets into a format
-        // which can be processed by Nexus.
-        let mut datasets: Vec<NexusTypes::DatasetCreateRequest> = vec![];
+        // which can be stored in CockroachDB once they make their way to Nexus.
+        //
+        // TODO(https://github.com/oxidecomputer/omicron/issues/6998): Remove me!
+        // This is somewhat redundant with the information we're supplying in
+        // the initial blueprint, and could be de-duplicated if we can fully
+        // migrate to a world where "datasets exist in the blueprint, but not
+        // in CockroachDB".
+        let mut datasets = HashMap::<
+            (ZpoolUuid, DatasetKind),
+            NexusTypes::DatasetCreateRequest,
+        >::new();
         for sled_config in service_plan.services.values() {
+            // Add all datasets, as they appear in our plan.
+            //
+            // Note that we assume all datasets have a "None" address
+            // field -- the coupling of datasets with addresses is linked
+            // to usage by specific zones.
+            for dataset in sled_config.datasets.datasets.values() {
+                let duplicate = datasets.insert(
+                    (dataset.name.pool().id(), dataset.name.dataset().clone()),
+                    NexusTypes::DatasetCreateRequest {
+                        zpool_id: dataset.name.pool().id().into_untyped_uuid(),
+                        dataset_id: dataset.id.into_untyped_uuid(),
+                        request: NexusTypes::DatasetPutRequest {
+                            address: None,
+                            kind: dataset.name.dataset().clone(),
+                        },
+                    },
+                );
+
+                if let Some(dataset) = duplicate {
+                    panic!("Inserting multiple datasets of the same kind on a single zpool: {dataset:?}");
+                }
+            }
+
+            // If any datasets came from a zone, patch their addresses.
+            //
+            // It would be better if "datasets" was keyed off of a DatasetUuid,
+            // but the SeldConfig storing zones does not know about
+            // DatasetUuids.
+            //
+            // Instead, we use the (Zpool, DatasetKind) tuple as a unique
+            // identifier for the dataset.
             for zone in &sled_config.zones {
                 if let Some(dataset) = zone.zone_type.durable_dataset() {
-                    datasets.push(NexusTypes::DatasetCreateRequest {
-                        zpool_id: dataset
-                            .dataset
-                            .pool_name
-                            .id()
-                            .into_untyped_uuid(),
-                        dataset_id: zone.id.into_untyped_uuid(),
-                        request: NexusTypes::DatasetPutRequest {
-                            address: dataset.address.to_string(),
-                            kind: dataset.kind,
-                        },
-                    })
+                    let Some(entry) = datasets.get_mut(&(
+                        dataset.dataset.pool_name.id(),
+                        dataset.kind.clone(),
+                    )) else {
+                        panic!("zone's durable dataset not found");
+                    };
+                    entry.request.address = Some(dataset.address.to_string());
                 }
             }
         }
+        let datasets: Vec<_> = datasets.into_values().collect();
         let internal_services_ip_pool_ranges = config
             .internal_services_ip_pool_ranges
             .clone()
@@ -791,7 +906,9 @@ impl ServiceInner {
                             .collect(),
                         switch: config.switch.into(),
                         uplink_port_speed: config.uplink_port_speed.into(),
-                        uplink_port_fec: config.uplink_port_fec.into(),
+                        uplink_port_fec: config
+                            .uplink_port_fec
+                            .map(|fec| fec.into()),
                         autoneg: config.autoneg,
                         bgp_peers: config
                             .bgp_peers

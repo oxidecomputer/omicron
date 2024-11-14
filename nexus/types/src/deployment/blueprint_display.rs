@@ -23,6 +23,14 @@ pub mod constants {
     pub const COCKROACHDB_PRESERVE_DOWNGRADE: &str =
         "cluster.preserve_downgrade_option";
     pub const METADATA_HEADING: &str = "METADATA";
+    pub const CLICKHOUSE_CLUSTER_CONFIG_HEADING: &str =
+        "CLICKHOUSE CLUSTER CONFIG";
+    pub const CLICKHOUSE_MAX_USED_SERVER_ID: &str = "max used server id";
+    pub const CLICKHOUSE_MAX_USED_KEEPER_ID: &str = "max used keeper id";
+    pub const CLICKHOUSE_CLUSTER_NAME: &str = "cluster name";
+    pub const CLICKHOUSE_CLUSTER_SECRET: &str = "cluster secret";
+    pub const CLICKHOUSE_HIGHEST_SEEN_KEEPER_LEADER_COMMITTED_LOG_INDEX: &str =
+        "highest seen keeper leader committed log index";
     pub const CREATED_BY: &str = "created by";
     pub const CREATED_AT: &str = "created at";
     pub const INTERNAL_DNS_VERSION: &str = "internal DNS version";
@@ -34,6 +42,7 @@ pub mod constants {
     pub const NOT_PRESENT_IN_COLLECTION_PARENS: &str =
         "(not present in collection)";
     pub const INVALID_VALUE_PARENS: &str = "(invalid value)";
+    pub const GENERATION: &str = "generation";
 }
 use constants::*;
 
@@ -80,6 +89,13 @@ pub enum BpGeneration {
     Diff { before: Option<Generation>, after: Option<Generation> },
 }
 
+impl BpGeneration {
+    // Used when there isn't a corresponding generation
+    pub fn unknown() -> Self {
+        BpGeneration::Diff { before: None, after: None }
+    }
+}
+
 impl fmt::Display for BpGeneration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -100,96 +116,98 @@ impl fmt::Display for BpGeneration {
                 }
             }
             BpGeneration::Diff { before: None, after: None } => {
-                write!(f, "Error: unknown generation")
+                write!(f, "unknown generation")
             }
         }
     }
 }
 
-pub enum BpSledSubtableColumn {
+pub enum BpTableColumn {
     Value(String),
     Diff { before: String, after: String },
+    // A special nomenclature for when we are diffing a collection with a
+    // blueprint but the before value doesn't exist in the collection, because
+    // collections don't have such a field.
+    CollectionNotPresentDiff { after: String },
 }
 
-impl BpSledSubtableColumn {
-    pub fn value(s: String) -> BpSledSubtableColumn {
-        BpSledSubtableColumn::Value(s)
+impl BpTableColumn {
+    pub fn value(s: String) -> BpTableColumn {
+        BpTableColumn::Value(s)
     }
 
-    pub fn diff(before: String, after: String) -> BpSledSubtableColumn {
-        BpSledSubtableColumn::Diff { before, after }
+    pub fn diff(before: String, after: String) -> BpTableColumn {
+        BpTableColumn::Diff { before, after }
     }
 
     pub fn len(&self) -> usize {
         match self {
-            BpSledSubtableColumn::Value(s) => s.len(),
-            BpSledSubtableColumn::Diff { before, after } => {
+            BpTableColumn::Value(s) => s.len(),
+            BpTableColumn::Diff { before, after } => {
                 // Add 1 for the added/removed prefix and 1 for a space
                 //
                 // This will need to change if we change how we render diffs in
-                // the `Display` impl for `BpSledSubtable`. However, putting it
+                // the `Display` impl for `BpTable`. However, putting it
                 // here allows to minimize any extra horizontal spacing in case
                 // other values for the same column are already longer than the
                 // the before or after values + 2.
                 usize::max(before.len(), after.len()) + 2
             }
+            BpTableColumn::CollectionNotPresentDiff { after } => {
+                usize::max(NOT_PRESENT_IN_COLLECTION_PARENS.len(), after.len())
+                    + 4
+            }
         }
     }
 }
 
-/// A row in a [`BpSledSubtable`]
-pub struct BpSledSubtableRow {
+/// A row in a [`BpTable`]
+pub struct BpTableRow {
     state: BpDiffState,
-    columns: Vec<BpSledSubtableColumn>,
+    columns: Vec<BpTableColumn>,
 }
 
-impl BpSledSubtableRow {
-    pub fn new(state: BpDiffState, columns: Vec<BpSledSubtableColumn>) -> Self {
-        BpSledSubtableRow { state, columns }
+impl BpTableRow {
+    pub fn new(state: BpDiffState, columns: Vec<BpTableColumn>) -> Self {
+        BpTableRow { state, columns }
     }
 
     pub fn from_strings(state: BpDiffState, columns: Vec<String>) -> Self {
-        BpSledSubtableRow {
+        BpTableRow {
             state,
-            columns: columns
-                .into_iter()
-                .map(BpSledSubtableColumn::Value)
-                .collect(),
+            columns: columns.into_iter().map(BpTableColumn::Value).collect(),
         }
     }
 }
 
-/// Metadata about all instances of specific type of [`BpSledSubtable`],
+/// Metadata about all instances of specific type of [`BpTable`],
 /// such as omicron zones or physical disks.
-pub trait BpSledSubtableSchema {
+pub trait BpTableSchema {
     fn table_name(&self) -> &'static str;
     fn column_names(&self) -> &'static [&'static str];
 }
 
-// Provide data specific to an instance of a [`BpSledSubtable`]
-pub trait BpSledSubtableData {
+// Provide data specific to an instance of a [`BpTable`]
+pub trait BpTableData {
     fn bp_generation(&self) -> BpGeneration;
-    fn rows(
-        &self,
-        state: BpDiffState,
-    ) -> impl Iterator<Item = BpSledSubtableRow>;
+    fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow>;
 }
 
 /// A table specific to a sled resource, such as a zone or disk.
-pub struct BpSledSubtable {
+pub struct BpTable {
     table_name: &'static str,
     column_names: &'static [&'static str],
     generation: BpGeneration,
-    rows: Vec<BpSledSubtableRow>,
+    rows: Vec<BpTableRow>,
 }
 
-impl BpSledSubtable {
+impl BpTable {
     pub fn new(
-        schema: impl BpSledSubtableSchema,
+        schema: impl BpTableSchema,
         generation: BpGeneration,
-        rows: Vec<BpSledSubtableRow>,
-    ) -> BpSledSubtable {
-        BpSledSubtable {
+        rows: Vec<BpTableRow>,
+    ) -> BpTable {
+        BpTable {
             table_name: schema.table_name(),
             column_names: schema.column_names(),
             generation,
@@ -217,7 +235,7 @@ impl BpSledSubtable {
 const SUBTABLE_INDENT: usize = 4;
 const COLUMN_GAP: usize = 3;
 
-impl fmt::Display for BpSledSubtable {
+impl fmt::Display for BpTable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let widths = self.column_widths();
         let mut total_width =
@@ -258,12 +276,18 @@ impl fmt::Display for BpSledSubtable {
                 row.columns.iter().zip(&widths).enumerate()
             {
                 let (column, needs_multiline) = match column {
-                    BpSledSubtableColumn::Value(s) => (s.clone(), false),
-                    BpSledSubtableColumn::Diff { before, .. } => {
+                    BpTableColumn::Value(s) => (s.clone(), false),
+                    BpTableColumn::Diff { before, .. } => {
                         // If we remove the prefix and space, we'll need to also
-                        // modify `BpSledSubtableColumn::len` to reflect this.
+                        // modify `BpTableColumn::len` to reflect this.
                         (format!("{REMOVED_PREFIX} {before}"), true)
                     }
+                    BpTableColumn::CollectionNotPresentDiff { .. } => (
+                        // If we remove the prefix and space, we'll need to also
+                        // modify `BpTableColumn::len` to reflect this.
+                        NOT_PRESENT_IN_COLLECTION_PARENS.to_string(),
+                        true,
+                    ),
                 };
                 multiline_row |= needs_multiline;
 
@@ -282,23 +306,20 @@ impl fmt::Display for BpSledSubtable {
                     row.columns.iter().zip(&widths).enumerate()
                 {
                     // Write the after columns or nothing
-                    let column = if let BpSledSubtableColumn::Diff {
-                        after,
-                        ..
-                    } = column
-                    {
-                        // If we remove the prefix and space, we'll need to also
-                        // modify `BpSledSubtableColumn::len` to reflect this.
-                        format!("{ADDED_PREFIX} {after}")
-                    } else {
-                        "".to_string()
+                    let column = match column {
+                        BpTableColumn::Value(_) => "".to_string(),
+                        BpTableColumn::Diff { after, .. } => {
+                            // If we remove the prefix and space, we'll need to also
+                            // modify `BpTableColumn::len` to reflect this.
+                            format!("{ADDED_PREFIX} {after}")
+                        }
+                        BpTableColumn::CollectionNotPresentDiff { after } => {
+                            after.to_string()
+                        }
                     };
-
                     if i == 0 {
-                        // First column should never be modifiable
-                        assert!(column.is_empty());
-                        let column = format!(" {SUB_LAST}");
-                        write!(f, "{column:<width$}")?;
+                        let s = format!(" {SUB_LAST} {column}");
+                        write!(f, "{s:<width$}")?;
                     } else {
                         write!(f, "{:<COLUMN_GAP$}{column:<width$}", "")?;
                     }
@@ -311,9 +332,9 @@ impl fmt::Display for BpSledSubtable {
     }
 }
 
-/// The [`BpSledSubtable`] schema for physical disks
-pub struct BpPhysicalDisksSubtableSchema {}
-impl BpSledSubtableSchema for BpPhysicalDisksSubtableSchema {
+/// The [`BpTable`] schema for physical disks
+pub struct BpPhysicalDisksTableSchema {}
+impl BpTableSchema for BpPhysicalDisksTableSchema {
     fn table_name(&self) -> &'static str {
         "physical disks"
     }
@@ -323,14 +344,50 @@ impl BpSledSubtableSchema for BpPhysicalDisksSubtableSchema {
     }
 }
 
-/// The [`BpSledSubtable`] schema for omicron zones
-pub struct BpOmicronZonesSubtableSchema {}
-impl BpSledSubtableSchema for BpOmicronZonesSubtableSchema {
+/// The [`BpTable`] schema for datasets
+pub struct BpDatasetsTableSchema {}
+impl BpTableSchema for BpDatasetsTableSchema {
+    fn table_name(&self) -> &'static str {
+        "datasets"
+    }
+
+    fn column_names(&self) -> &'static [&'static str] {
+        &["dataset name", "dataset uuid", "quota", "reservation", "compression"]
+    }
+}
+
+/// The [`BpTable`] schema for omicron zones
+pub struct BpOmicronZonesTableSchema {}
+impl BpTableSchema for BpOmicronZonesTableSchema {
     fn table_name(&self) -> &'static str {
         "omicron zones"
     }
     fn column_names(&self) -> &'static [&'static str] {
         &["zone type", "zone id", "disposition", "underlay IP"]
+    }
+}
+
+/// The [`BpTable`] schema for clickhouse keepers
+pub struct BpClickhouseKeepersTableSchema {}
+impl BpTableSchema for BpClickhouseKeepersTableSchema {
+    fn table_name(&self) -> &'static str {
+        "clickhouse keepers"
+    }
+
+    fn column_names(&self) -> &'static [&'static str] {
+        &["zone id", "keeper id"]
+    }
+}
+
+/// The [`BpTable`] schema for clickhouse servers
+pub struct BpClickhouseServersTableSchema {}
+impl BpTableSchema for BpClickhouseServersTableSchema {
+    fn table_name(&self) -> &'static str {
+        "clickhouse servers"
+    }
+
+    fn column_names(&self) -> &'static [&'static str] {
+        &["zone id", "server id"]
     }
 }
 

@@ -673,6 +673,48 @@
         }
       }
     },
+    "/support/ipadm-info": {
+      "get": {
+        "operationId": "support_ipadm_info",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/support/zoneadm-info": {
+      "get": {
+        "operationId": "support_zoneadm_info",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/support-bundles/{zpool_id}/{dataset_id}": {
       "get": {
         "summary": "List all support bundles within a particular dataset",
@@ -4915,6 +4957,7 @@
             ]
           },
           "uplink_port_fec": {
+            "nullable": true,
             "description": "Port forward error correction type.",
             "allOf": [
               {
@@ -4937,7 +4980,6 @@
           "port",
           "routes",
           "switch",
-          "uplink_port_fec",
           "uplink_port_speed"
         ]
       },

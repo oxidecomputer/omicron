@@ -5,8 +5,8 @@
 use crate::context::ServerContext;
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::{
-    ClickhouseKeeperClusterMembership, KeeperConf, KeeperConfig,
-    KeeperConfigurableSettings, Lgif, RaftConfig, ReplicaConfig,
+    ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
+    KeeperConfig, KeeperConfigurableSettings, Lgif, RaftConfig, ReplicaConfig,
     ServerConfigurableSettings,
 };
 use dropshot::{
@@ -32,7 +32,7 @@ enum ClickhouseAdminServerImpl {}
 impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
     type Context = Arc<ServerContext>;
 
-    async fn generate_config(
+    async fn generate_config_and_enable_svc(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<ServerConfigurableSettings>,
     ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError> {
@@ -47,6 +47,14 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
 
         Ok(HttpResponseCreated(output))
     }
+
+    async fn distributed_ddl_queue(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<DistributedDdlQueue>>, HttpError> {
+        let ctx = rqctx.context();
+        let output = ctx.clickhouse_cli().distributed_ddl_queue().await?;
+        Ok(HttpResponseOk(output))
+    }
 }
 
 enum ClickhouseAdminKeeperImpl {}
@@ -54,7 +62,7 @@ enum ClickhouseAdminKeeperImpl {}
 impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
     type Context = Arc<ServerContext>;
 
-    async fn generate_config(
+    async fn generate_config_and_enable_svc(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<KeeperConfigurableSettings>,
     ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError> {

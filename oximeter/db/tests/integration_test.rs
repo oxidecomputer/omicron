@@ -123,7 +123,7 @@ async fn test_schemas_disjoint() -> anyhow::Result<()> {
 /// doesn't make much sense in an integration test.
 #[tokio::test]
 async fn test_cluster() -> anyhow::Result<()> {
-    usdt::register_probes().unwrap();
+    usdt::register_probes().expect("Failed to register USDT probes");
     let request_timeout = Duration::from_secs(15);
     let start = tokio::time::Instant::now();
     let logctx = test_setup_log("test_cluster");
@@ -455,6 +455,7 @@ async fn wait_for_num_points(
     Ok(())
 }
 
+// TODO: Use the function in the other package
 /// Try to ping the server until it responds.
 async fn wait_for_ping(log: &Logger, client: &Client) -> anyhow::Result<()> {
     poll::wait_for_condition(

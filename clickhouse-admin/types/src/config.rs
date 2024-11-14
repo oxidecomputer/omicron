@@ -154,6 +154,11 @@ impl ReplicaConfig {
         <!-- Controls how many tasks could be in the queue -->
         <max_tasks_in_queue>1000</max_tasks_in_queue>
      </distributed_ddl>
+
+     <!-- Disable sparse column serialization, which we expect to not need -->
+     <merge_tree>
+        <ratio_of_defaults_for_sparse_serialization>1.0</ratio_of_defaults_for_sparse_serialization>
+    </merge_tree>
 {macros}
 {remote_servers}
 {keepers}

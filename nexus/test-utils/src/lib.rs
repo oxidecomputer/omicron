@@ -249,7 +249,7 @@ impl RackInitRequestBuilder {
         self.datasets.push(DatasetCreateRequest {
             zpool_id: zpool_id.into_untyped_uuid(),
             dataset_id,
-            request: DatasetPutRequest { address, kind },
+            request: DatasetPutRequest { address: Some(address), kind },
         });
         let zone = self
             .internal_dns_config
@@ -276,7 +276,7 @@ impl RackInitRequestBuilder {
             zpool_id: zpool_id.into_untyped_uuid(),
             dataset_id,
             request: DatasetPutRequest {
-                address,
+                address: Some(address),
                 kind: DatasetKind::Clickhouse,
             },
         });
@@ -486,6 +486,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let dataset_id = Uuid::new_v4();
         let http_address = clickhouse.http_address();
         let http_port = http_address.port();
+        let native_address = clickhouse.native_address();
         self.rack_init_builder.add_clickhouse_dataset(
             zpool_id,
             dataset_id,
@@ -504,6 +505,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .as_mut()
             .expect("Tests expect to set a port of Clickhouse")
             .set_port(http_port);
+        self.config.pkg.timeseries_db.native_address =
+            Some(native_address.into());
 
         let pool_name = illumos_utils::zpool::ZpoolName::new_external(zpool_id)
             .to_string()
