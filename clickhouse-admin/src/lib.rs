@@ -3,12 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use context::{ServerContext, SingleServerContext};
-use dropshot::{HttpServer, HttpServerStarter};
+use dropshot::HttpServer;
 use omicron_common::FileKv;
 use slog::{debug, error, Drain};
 use slog_dtrace::ProbeRegistration;
 use slog_error_chain::SlogInlineError;
-use std::error::Error;
 use std::io;
 use std::sync::Arc;
 
@@ -29,7 +28,7 @@ pub enum StartError {
     #[error("failed to register dtrace probes: {0}")]
     RegisterDtraceProbes(String),
     #[error("failed to initialize HTTP server")]
-    InitializeHttpServer(#[source] Box<dyn Error + Send + Sync>),
+    InitializeHttpServer(#[source] dropshot::BuildError),
 }
 
 /// Start the dropshot server for `clickhouse-admin-server` which
@@ -63,15 +62,15 @@ pub async fn start_server_admin_server(
             .with_log(log.new(slog::o!("component" => "ClickhouseCli"))),
         log.new(slog::o!("component" => "ServerContext")),
     );
-    let http_server_starter = HttpServerStarter::new(
-        &server_config.dropshot,
+
+    dropshot::ServerBuilder::new(
         http_entrypoints::clickhouse_admin_server_api(),
         Arc::new(context),
-        &log.new(slog::o!("component" => "dropshot")),
+        log.new(slog::o!("component" => "dropshot")),
     )
-    .map_err(StartError::InitializeHttpServer)?;
-
-    Ok(http_server_starter.start())
+    .config(server_config.dropshot)
+    .start()
+    .map_err(StartError::InitializeHttpServer)
 }
 
 /// Start the dropshot server for `clickhouse-admin-server` which
@@ -105,15 +104,15 @@ pub async fn start_keeper_admin_server(
             .with_log(log.new(slog::o!("component" => "ClickhouseCli"))),
         log.new(slog::o!("component" => "ServerContext")),
     );
-    let http_server_starter = HttpServerStarter::new(
-        &server_config.dropshot,
+
+    dropshot::ServerBuilder::new(
         http_entrypoints::clickhouse_admin_keeper_api(),
         Arc::new(context),
-        &log.new(slog::o!("component" => "dropshot")),
+        log.new(slog::o!("component" => "dropshot")),
     )
-    .map_err(StartError::InitializeHttpServer)?;
-
-    Ok(http_server_starter.start())
+    .config(server_config.dropshot)
+    .start()
+    .map_err(StartError::InitializeHttpServer)
 }
 
 /// Start the dropshot server for `clickhouse-admin-single` which
@@ -141,13 +140,12 @@ pub async fn start_single_admin_server(
     }
 
     let context = SingleServerContext::new(clickhouse_cli);
-    let http_server_starter = HttpServerStarter::new(
-        &server_config.dropshot,
+    dropshot::ServerBuilder::new(
         http_entrypoints::clickhouse_admin_single_api(),
         Arc::new(context),
-        &log.new(slog::o!("component" => "dropshot")),
+        log.new(slog::o!("component" => "dropshot")),
     )
-    .map_err(StartError::InitializeHttpServer)?;
-
-    Ok(http_server_starter.start())
+    .config(server_config.dropshot)
+    .start()
+    .map_err(StartError::InitializeHttpServer)
 }
