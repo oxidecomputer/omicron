@@ -10,6 +10,7 @@ use clap::CommandFactory;
 use clap::FromArgMatches;
 use clap::ValueEnum;
 use clap::{Args, Parser, Subcommand};
+use indent_write::fmt::IndentWriter;
 use internal_dns_types::diff::DnsDiff;
 use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
@@ -41,6 +42,7 @@ use omicron_uuid_kinds::VnicUuid;
 use reedline::{Reedline, Signal};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::fmt::Write;
 use std::io::BufRead;
 use swrite::{swriteln, SWrite};
 use tabled::Tabled;
@@ -1232,14 +1234,11 @@ fn cmd_load(
         }
     }
 
-    if !result.notices.is_empty() {
-        swriteln!(s, "notices:");
-        for notice in result.notices {
-            swriteln!(s, "  {}", notice);
-        }
-    }
+    swriteln!(s, "result:");
+    let mut writer = IndentWriter::new("  ", &mut s);
+    writeln!(writer, "{}", result.system)?;
+    writeln!(writer, "{}", result.config)?;
 
-    do_print_properties(&mut s, sim.current_state());
     Ok(Some(s))
 }
 

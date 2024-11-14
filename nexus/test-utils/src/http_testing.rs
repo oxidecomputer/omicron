@@ -89,6 +89,7 @@ impl<'a> RequestBuilder<'a> {
             body: dropshot::Body::empty(),
             expected_status: None,
             allowed_headers: Some(vec![
+                http::header::CONNECTION,
                 http::header::CONTENT_ENCODING,
                 http::header::CONTENT_LENGTH,
                 http::header::CONTENT_TYPE,

@@ -36,6 +36,11 @@ use crate::{seed_from_entropy, SimState};
 #[derive(Clone, Debug)]
 pub struct Simulator {
     log: slog::Logger,
+    // The set of terminal nodes in the tree -- all states are reachable from
+    // one or more of these.
+    // 
+    // Similar to the list of Git branches or Jujutsu/Mercurial heads.
+    //
     // In the future, it would be interesting to store a chain of every set of
     // heads over time, similar to `jj op log`. That would let us implement undo
     // and restore operations.
@@ -62,10 +67,7 @@ impl Simulator {
 
     /// Create a new simulator with the given initial seed.
     pub fn new(log: &slog::Logger, seed: Option<String>) -> Self {
-        let seed = match seed {
-            Some(seed) => seed,
-            None => seed_from_entropy(),
-        };
+        let seed = seed.unwrap_or_else(|| seed_from_entropy());
         Self::new_inner(log, seed)
     }
 

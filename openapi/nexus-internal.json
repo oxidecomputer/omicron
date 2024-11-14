@@ -3128,6 +3128,7 @@
         "type": "object",
         "properties": {
           "address": {
+            "nullable": true,
             "description": "Address on which a service is responding to requests for the dataset.",
             "type": "string"
           },
@@ -3141,7 +3142,6 @@
           }
         },
         "required": [
-          "address",
           "kind"
         ]
       },

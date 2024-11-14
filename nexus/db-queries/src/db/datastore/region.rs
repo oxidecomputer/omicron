@@ -264,7 +264,7 @@ impl DataStore {
                 block_size,
                 blocks_per_extent,
                 extent_count,
-                read_only: false,
+                read_only: maybe_snapshot_id.is_some(),
             },
             allocation_strategy,
             num_regions_required,
@@ -362,6 +362,12 @@ impl DataStore {
                             )
                             .execute_async(&conn).await?;
                     }
+
+                    // Whenever a region is hard-deleted, validate invariants
+                    // for all volumes
+                    #[cfg(any(test, feature = "testing"))]
+                    Self::validate_volume_invariants(&conn).await?;
+
                     Ok(())
                 }
             })
