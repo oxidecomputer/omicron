@@ -285,15 +285,21 @@ fn register_deploy_disks_step<'a>(
             "Deploy physical disks",
             move |cx| async move {
                 let sleds_by_id = sleds.into_value(cx.token()).await;
-                let done = omicron_physical_disks::deploy_disks(
+                match omicron_physical_disks::deploy_disks(
                     &opctx,
                     &sleds_by_id,
                     &blueprint.blueprint_disks,
                 )
                 .await
-                .map_err(merge_anyhow_list)?;
-
-                StepSuccess::new(done).into()
+                .map_err(merge_anyhow_list)
+                {
+                    Ok(done) => StepSuccess::new(done).into(),
+                    Err(e) => StepWarning::new(
+                        DeployDisksDone::Failure,
+                        e.to_string(),
+                    )
+                    .into(),
+                }
             },
         )
         .register()
@@ -311,13 +317,16 @@ fn register_deploy_datasets_step<'a>(
             "Deploy datasets",
             move |cx| async move {
                 let sleds_by_id = sleds.into_value(cx.token()).await;
-                datasets::deploy_datasets(
+                if let Err(e) = datasets::deploy_datasets(
                     &opctx,
                     &sleds_by_id,
                     &blueprint.blueprint_datasets,
                 )
                 .await
-                .map_err(merge_anyhow_list)?;
+                .map_err(merge_anyhow_list)
+                {
+                    return StepWarning::new((), e.to_string()).into();
+                }
 
                 StepSuccess::new(()).into()
             },
@@ -337,13 +346,16 @@ fn register_deploy_zones_step<'a>(
             "Deploy Omicron zones",
             move |cx| async move {
                 let sleds_by_id = sleds.into_value(cx.token()).await;
-                omicron_zones::deploy_zones(
+                if let Err(e) = omicron_zones::deploy_zones(
                     &opctx,
                     &sleds_by_id,
                     &blueprint.blueprint_zones,
                 )
                 .await
-                .map_err(merge_anyhow_list)?;
+                .map_err(merge_anyhow_list)
+                {
+                    return StepWarning::new((), e.to_string()).into();
+                }
 
                 StepSuccess::new(()).into()
             },
@@ -396,13 +408,16 @@ fn register_dataset_records_step<'a>(
             ExecutionStepId::Ensure,
             "Ensure dataset records",
             move |_cx| async move {
-                datasets::ensure_dataset_records_exist(
+                if let Err(e) = datasets::ensure_dataset_records_exist(
                     &opctx,
                     datastore,
                     bp_id,
                     blueprint.all_omicron_datasets(BlueprintDatasetFilter::All),
                 )
-                .await?;
+                .await
+                {
+                    return StepWarning::new((), e.to_string()).into();
+                }
 
                 StepSuccess::new(()).into()
             },
@@ -426,7 +441,7 @@ fn register_dns_records_step<'a>(
             move |cx| async move {
                 let sleds_by_id = sleds.into_value(cx.token()).await;
 
-                dns::deploy_dns(
+                if let Err(e) = dns::deploy_dns(
                     &opctx,
                     datastore,
                     nexus_id.to_string(),
@@ -435,7 +450,10 @@ fn register_dns_records_step<'a>(
                     overrides,
                 )
                 .await
-                .map_err(|e| anyhow!("{}", InlineErrorChain::new(&e)))?;
+                .map_err(|e| anyhow!("{}", InlineErrorChain::new(&e)))
+                {
+                    return StepWarning::new((), e.to_string()).into();
+                }
 
                 StepSuccess::new(()).into()
             },
@@ -455,21 +473,24 @@ fn register_cleanup_expunged_zones_step<'a>(
             ExecutionStepId::Remove,
             "Cleanup expunged zones",
             move |_cx| async move {
-                omicron_zones::clean_up_expunged_zones(
+                if let Err(e) = omicron_zones::clean_up_expunged_zones(
                     &opctx,
                     datastore,
                     resolver,
                     blueprint.all_omicron_zones(BlueprintZoneFilter::Expunged),
                 )
                 .await
-                .map_err(merge_anyhow_list)?;
+                .map_err(merge_anyhow_list)
+                {
+                    return StepWarning::new((), e.to_string()).into();
+                }
 
                 StepSuccess::new(()).into()
             },
         )
         .register();
 }
-
+// TODO: I don't think we can safely do this if we fail to expunge zones/disks
 fn register_decommission_sleds_step<'a>(
     registrar: &ComponentRegistrar<'_, 'a>,
     opctx: &'a OpContext,
@@ -501,6 +522,7 @@ fn register_decommission_sleds_step<'a>(
         .register();
 }
 
+// TODO: I don't think we can safely do this if we fail to expunge zones/disks
 fn register_decommission_expunged_disks_step<'a>(
     registrar: &ComponentRegistrar<'_, 'a>,
     opctx: &'a OpContext,
@@ -516,6 +538,10 @@ fn register_decommission_expunged_disks_step<'a>(
             "Decommission expunged disks",
             move |cx| async move {
                 let done = deploy_disks_done.into_value(cx.token()).await;
+                if let DeployDisksDone::Failure = done {
+                    return StepSkipped::new((), "Failed to deploy disks")
+                        .into();
+                }
                 omicron_physical_disks::decommission_expunged_disks(
                     &opctx, datastore, done,
                 )

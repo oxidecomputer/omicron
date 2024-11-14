@@ -92,7 +92,7 @@ pub(crate) async fn deploy_disks(
         .await;
 
     if errors.is_empty() {
-        Ok(DeployDisksDone {})
+        Ok(DeployDisksDone::Success)
     } else {
         Err(errors)
     }
@@ -101,7 +101,10 @@ pub(crate) async fn deploy_disks(
 /// Typestate indicating that the deploy disks step was performed.
 #[derive(Debug)]
 #[must_use = "this should be passed into decommission_expunged_disks"]
-pub(crate) struct DeployDisksDone {}
+pub(crate) enum DeployDisksDone {
+    Success,
+    Failure,
+}
 
 /// Decommissions all disks which are currently expunged.
 pub(crate) async fn decommission_expunged_disks(
@@ -589,7 +592,7 @@ mod test {
             &datastore,
             // This is an internal test, and we're testing decommissioning in
             // isolation, so it's okay to create the typestate here.
-            DeployDisksDone {},
+            DeployDisksDone::Success,
         )
         .await
         .unwrap();
