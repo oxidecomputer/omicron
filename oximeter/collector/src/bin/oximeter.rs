@@ -24,7 +24,7 @@ use uuid::Uuid;
 
 pub fn run_standalone_openapi() -> Result<(), String> {
     standalone_nexus_api()
-        .openapi("Oxide Nexus API", "0.0.1")
+        .openapi("Oxide Nexus API", semver::Version::new(0, 0, 1))
         .description("API for interacting with Nexus")
         .contact_url("https://oxide.computer")
         .contact_email("api@oxide.computer")
