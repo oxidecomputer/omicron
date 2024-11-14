@@ -194,6 +194,29 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// Lists one page of support bundles in a particular state, assigned to
+    /// a particular Nexus.
+    pub async fn support_bundle_list_assigned_to_nexus(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+        nexus_id: OmicronZoneUuid,
+        states: Vec<SupportBundleState>,
+    ) -> ListResultVec<SupportBundle> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        use db::schema::support_bundle::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        paginated(dsl::support_bundle, dsl::id, pagparams)
+            .filter(dsl::assigned_nexus.eq(nexus_id.into_untyped_uuid()))
+            .filter(dsl::state.eq_any(states))
+            .order(dsl::time_created.asc())
+            .select(SupportBundle::as_select())
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     /// Marks support bundles as failed if their assigned Nexus or backing
     /// dataset has been destroyed.
     pub async fn support_bundle_fail_expunged(
@@ -376,7 +399,12 @@ impl DataStore {
         .await
     }
 
-    /// Updates the state of a support bundle
+    /// Updates the state of a support bundle.
+    ///
+    /// Returns:
+    /// - "Ok" if the bundle was updated successfully.
+    /// - "Err::InvalidRequest" if the bundle exists, but could not be updated
+    /// because the state transition is invalid.
     pub async fn support_bundle_update(
         &self,
         opctx: &OpContext,
@@ -595,6 +623,132 @@ mod test {
             message.external_message(),
             "Unexpected error: {message:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn test_bundle_list_filtering() {
+        let logctx = dev::test_setup_log("test_bundle_create_capacity_limits");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let nexus_a = OmicronZoneUuid::new_v4();
+        let nexus_b = OmicronZoneUuid::new_v4();
+
+        let _test_sled = create_sled_and_zpools(&datastore, &opctx, 5).await;
+
+        let pagparams = DataPageParams::max_page();
+
+        // No bundles exist yet, so the list should be empty
+
+        assert_eq!(
+            datastore
+                .support_bundle_list_assigned_to_nexus(
+                    &opctx,
+                    &pagparams,
+                    nexus_a,
+                    vec![SupportBundleState::Collecting]
+                )
+                .await
+                .expect("Should always be able to list bundles"),
+            vec![]
+        );
+
+        // Create two bundles on "nexus A", one bundle on "nexus B"
+
+        let bundle_a1 = datastore
+            .support_bundle_create(&opctx, "for the test", nexus_a)
+            .await
+            .expect("Should be able to create bundle");
+        let bundle_a2 = datastore
+            .support_bundle_create(&opctx, "for the test", nexus_a)
+            .await
+            .expect("Should be able to create bundle");
+        let bundle_b1 = datastore
+            .support_bundle_create(&opctx, "for the test", nexus_b)
+            .await
+            .expect("Should be able to create bundle");
+
+        assert_eq!(
+            datastore
+                .support_bundle_list_assigned_to_nexus(
+                    &opctx,
+                    &pagparams,
+                    nexus_a,
+                    vec![SupportBundleState::Collecting]
+                )
+                .await
+                .expect("Should always be able to list bundles")
+                .iter()
+                .map(|b| b.id)
+                .collect::<Vec<_>>(),
+            vec![bundle_a1.id, bundle_a2.id,]
+        );
+        assert_eq!(
+            datastore
+                .support_bundle_list_assigned_to_nexus(
+                    &opctx,
+                    &pagparams,
+                    nexus_b,
+                    vec![SupportBundleState::Collecting]
+                )
+                .await
+                .expect("Should always be able to list bundles")
+                .iter()
+                .map(|b| b.id)
+                .collect::<Vec<_>>(),
+            vec![bundle_b1.id,]
+        );
+
+        // When we update the state of the bundles, the list results
+        // should also be filtered.
+        datastore
+            .support_bundle_update(
+                &opctx,
+                bundle_a1.id.into(),
+                SupportBundleState::Active,
+            )
+            .await
+            .expect("Should have been able to update state");
+
+        // "bundle_a1" is no longer collecting, so it won't appear here.
+        assert_eq!(
+            datastore
+                .support_bundle_list_assigned_to_nexus(
+                    &opctx,
+                    &pagparams,
+                    nexus_a,
+                    vec![SupportBundleState::Collecting]
+                )
+                .await
+                .expect("Should always be able to list bundles")
+                .iter()
+                .map(|b| b.id)
+                .collect::<Vec<_>>(),
+            vec![bundle_a2.id,]
+        );
+
+        // ... but if we ask for enough states, it'll show up
+        assert_eq!(
+            datastore
+                .support_bundle_list_assigned_to_nexus(
+                    &opctx,
+                    &pagparams,
+                    nexus_a,
+                    vec![
+                        SupportBundleState::Active,
+                        SupportBundleState::Collecting
+                    ]
+                )
+                .await
+                .expect("Should always be able to list bundles")
+                .iter()
+                .map(|b| b.id)
+                .collect::<Vec<_>>(),
+            vec![bundle_a1.id, bundle_a2.id,]
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
