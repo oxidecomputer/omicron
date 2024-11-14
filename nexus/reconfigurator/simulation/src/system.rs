@@ -398,7 +398,8 @@ pub enum SimSystemLogEntry {
 
 /// The result of loading a serialized system state.
 ///
-/// Returned by `LoadSerializedResult`, as well as stored as part of [`SimSystemLogEntry::]
+/// Returned by [`LoadSerializedResult`](crate::LoadSerializedResult), as well
+/// as stored as part of [`SimSystemLogEntry::LoadSerialized`].
 #[derive(Clone, Debug)]
 #[must_use]
 pub struct LoadSerializedSystemResult {
