@@ -14,4 +14,10 @@
 #:	"oxidecomputer/dendrite",
 #: ]
 
+set -o errexit
+set -o pipefail
+set -o xtrace
+
+pfexec zfs set sync=disabled rpool
+
 exec .github/buildomat/build-and-test.sh illumos
