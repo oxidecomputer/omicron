@@ -1234,10 +1234,20 @@ fn cmd_load(
         }
     }
 
-    swriteln!(s, "result:");
-    let mut writer = IndentWriter::new("  ", &mut s);
-    writeln!(writer, "{}", result.system)?;
-    writeln!(writer, "{}", result.config)?;
+    swriteln!(s, "result:\n  system:");
+    {
+        let mut writer = IndentWriter::new("    ", &mut s);
+        // It's assumed that the result.system Display impl always ends in a
+        // newline, so we use `write!` instead of `writeln!`.
+        write!(writer, "{}", result.system)?;
+    }
+    swriteln!(s, "  config:");
+    {
+        let mut writer = IndentWriter::new("    ", &mut s);
+        // It's assumed that the result.config Display impl always ends in a
+        // newline, so we use `write!` instead of `writeln!`.
+        write!(writer, "{}", result.config)?;
+    }
 
     Ok(Some(s))
 }
