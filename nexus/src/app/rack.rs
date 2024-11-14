@@ -654,7 +654,7 @@ impl super::Nexus {
             let link = LinkConfigCreate {
                 //TODO https://github.com/oxidecomputer/omicron/issues/2274
                 mtu: 1500,
-                fec: uplink_config.uplink_port_fec.into(),
+                fec: uplink_config.uplink_port_fec.map(|fec| fec.into()),
                 speed: uplink_config.uplink_port_speed.into(),
                 autoneg: uplink_config.autoneg,
                 lldp,
