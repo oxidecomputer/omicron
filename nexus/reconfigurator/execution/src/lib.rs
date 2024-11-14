@@ -380,7 +380,7 @@ fn register_plumb_firewall_rules_step<'a>(
             ExecutionStepId::Ensure,
             "Plumb service firewall rules",
             move |_cx| async move {
-                nexus_networking::plumb_service_firewall_rules(
+                if let Err(e) = nexus_networking::plumb_service_firewall_rules(
                     datastore,
                     &opctx,
                     &[],
@@ -388,7 +388,10 @@ fn register_plumb_firewall_rules_step<'a>(
                     &opctx.log,
                 )
                 .await
-                .context("failed to plumb service firewall rules to sleds")?;
+                .context("failed to plumb service firewall rules to sleds")
+                {
+                    return StepWarning::new((), e.to_string()).into();
+                }
 
                 StepSuccess::new(()).into()
             },
