@@ -1376,6 +1376,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "clickhouse-admin-test-utils"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "clickhouse-admin-types",
+ "clickward",
+ "dropshot",
+ "omicron-workspace-hack",
+]
+
+[[package]]
 name = "clickhouse-admin-types"
 version = "0.1.0"
 dependencies = [
@@ -1395,6 +1406,20 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-term",
+]
+
+[[package]]
+name = "clickhouse-cluster-dev"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clickhouse-admin-test-utils",
+ "clickward",
+ "omicron-workspace-hack",
+ "oximeter-db",
+ "oximeter-test-utils",
+ "slog",
+ "tokio",
 ]
 
 [[package]]
@@ -6438,13 +6463,13 @@ dependencies = [
  "chrono",
  "clap",
  "clickhouse-admin-api",
+ "clickhouse-admin-test-utils",
  "clickhouse-admin-types",
  "clickward",
  "dropshot",
  "expectorate",
  "http",
  "illumos-utils",
- "nexus-test-utils",
  "omicron-common",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -6460,6 +6485,7 @@ dependencies = [
  "slog-async",
  "slog-dtrace",
  "slog-error-chain",
+ "slog-term",
  "subprocess",
  "thiserror",
  "tokio",
@@ -7824,6 +7850,7 @@ dependencies = [
  "clickward",
  "omicron-test-utils",
  "omicron-workspace-hack",
+ "oximeter-db",
  "oximeter-macro-impl",
  "oximeter-types",
  "slog",
