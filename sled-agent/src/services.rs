@@ -4755,6 +4755,7 @@ mod illumos_tests {
         zone::MockZones,
     };
 
+    use omicron_common::disk::DatasetsConfig;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use std::os::unix::process::ExitStatusExt;
@@ -5100,6 +5101,18 @@ mod illumos_tests {
             .await
             .expect("Failed to ensure disks");
         assert!(!result.has_error(), "{:?}", result);
+        let result = harness
+            .handle()
+            .datasets_ensure(DatasetsConfig {
+                generation: Generation::new(),
+                datasets: BTreeMap::new(),
+            })
+            .await
+            .unwrap();
+        assert!(
+            !result.has_error(),
+            "Failed to ensure empty dataset ledger: {result:?}"
+        );
         harness
     }
 

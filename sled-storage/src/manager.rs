@@ -856,6 +856,7 @@ impl StorageManager {
         let ledger_paths = self.all_omicron_dataset_ledgers().await;
         let maybe_ledger =
             Ledger::<DatasetsConfig>::new(&log, ledger_paths.clone()).await;
+        let had_old_ledger = maybe_ledger.is_some();
 
         let mut ledger = match maybe_ledger {
             Some(ledger) => {
@@ -914,7 +915,11 @@ impl StorageManager {
         let result = self.datasets_ensure_internal(&log, &config).await;
 
         let ledger_data = ledger.data_mut();
-        if *ledger_data == config {
+        if had_old_ledger && *ledger_data == config {
+            info!(
+                log,
+                "Skipping dataset ledger update because nothing changed"
+            );
             return Ok(result);
         }
         *ledger_data = config;
@@ -1142,6 +1147,7 @@ impl StorageManager {
             ledger_paths.clone(),
         )
         .await;
+        let had_old_ledger = maybe_ledger.is_some();
 
         let mut ledger = match maybe_ledger {
             Some(ledger) => {
@@ -1181,7 +1187,7 @@ impl StorageManager {
             self.omicron_physical_disks_ensure_internal(&log, &config).await?;
 
         let ledger_data = ledger.data_mut();
-        if *ledger_data == config {
+        if had_old_ledger && *ledger_data == config {
             return Ok(result);
         }
         *ledger_data = config;
