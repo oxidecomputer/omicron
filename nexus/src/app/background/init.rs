@@ -491,7 +491,7 @@ impl BackgroundTasksInitializer {
             period: config.blueprints.period_secs_collect_crdb_node_ids,
             task_impl: Box::new(crdb_node_id_collector),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![Box::new(rx_blueprint.clone())],
+            watchers: vec![Box::new(rx_blueprint)],
             activator: task_crdb_node_id_collector,
         });
 
@@ -528,6 +528,11 @@ impl BackgroundTasksInitializer {
             inventory_watcher
         };
 
+        // Cleans up and collects support bundles.
+        //
+        // This task is triggered by blueprint execution, since blueprint
+        // execution may cause bundles to start failing and need garbage
+        // collection.
         driver.register(TaskDefinition {
             name: "support_bundle_collector",
             description:
@@ -538,7 +543,6 @@ impl BackgroundTasksInitializer {
                     datastore.clone(),
                     config.support_bundle_collector.disable,
                     nexus_id,
-                    rx_blueprint,
                 ),
             ),
             opctx: opctx.child(BTreeMap::new()),

@@ -10,25 +10,23 @@ use futures::FutureExt;
 use nexus_db_model::SupportBundleState;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::{Blueprint, BlueprintTarget};
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::SupportBundleUuid;
 use serde::Serialize;
 use serde_json::json;
 use std::sync::Arc;
-use tokio::sync::watch;
 
 pub struct SupportBundleCollector {
     datastore: Arc<DataStore>,
     disable: bool,
     nexus_id: OmicronZoneUuid,
-    rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
 }
 
 #[derive(Debug, Default, Serialize)]
 struct CleanupReport {
-    // Responses from our requests to Sled Agents
+    // Responses from Sled Agents
     sled_bundles_deleted_ok: usize,
     sled_bundles_deleted_not_found: usize,
     sled_bundles_delete_failed: usize,
@@ -39,18 +37,17 @@ struct CleanupReport {
 }
 
 #[derive(Debug, Default, Serialize)]
-struct CollectionReport {}
+struct CollectionReport {
+    bundle: Option<SupportBundleUuid>,
+}
 
 impl SupportBundleCollector {
     pub fn new(
         datastore: Arc<DataStore>,
         disable: bool,
         nexus_id: OmicronZoneUuid,
-        rx_blueprint: watch::Receiver<
-            Option<Arc<(BlueprintTarget, Blueprint)>>,
-        >,
     ) -> Self {
-        SupportBundleCollector { datastore, disable, nexus_id, rx_blueprint }
+        SupportBundleCollector { datastore, disable, nexus_id }
     }
 
     // Monitors all bundles that are "destroying" or "failing" and assigned to
@@ -87,7 +84,7 @@ impl SupportBundleCollector {
 
         let mut report = CleanupReport::default();
 
-        // NOTE: This could be concurrent?
+        // NOTE: This could be concurrent, but the priority for that also seems low
         for bundle in bundles_to_destroy {
             // XXX: Contact the Sled Agent holding this bundle, release it.
             // If OK: report.bundles_deleted_ok++
@@ -131,7 +128,8 @@ impl SupportBundleCollector {
                             // this as the "Destroying" case, and delete the bundle.
                             info!(
                                 &opctx.log,
-                                "SupportBundleCollector: Concurrent state change";
+                                "SupportBundleCollector: Concurrent state change failing bundle";
+                                "bundle" => %bundle.id,
                                 "err" => ?err,
                             );
                         } else {
@@ -176,7 +174,7 @@ impl SupportBundleCollector {
             )
             .await;
 
-        let bundle_to_collect = match result {
+        let bundle = match result {
             Ok(bundles) => {
                 if let Some(bundle) = bundles.get(0) {
                     info!(
@@ -200,6 +198,7 @@ impl SupportBundleCollector {
                 return Err(format!("failed to query database: {:#}", err));
             }
         };
+        report.bundle = Some(bundle.id.into());
 
         // TODO: Actually collect the bundle here.
 
@@ -210,6 +209,27 @@ impl SupportBundleCollector {
         // This should perhaps be set up on a timer.
 
         // TODO: Store the bundle once collection has finished.
+
+        // TODO: Remove the temporary storage we used in the Nexus zone to
+        // collect the bundle.
+
+        if let Err(err) = self
+            .datastore
+            .support_bundle_update(
+                &opctx,
+                bundle.id.into(),
+                SupportBundleState::Active,
+            )
+            .await
+        {
+            info!(
+                &opctx.log,
+                "SupportBundleCollector: Concurrent state change activating bundle";
+                "bundle" => %bundle.id,
+                "err" => ?err,
+            );
+            return Ok(report);
+        }
 
         Ok(report)
     }
