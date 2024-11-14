@@ -63,6 +63,10 @@ impl SimRngState {
         }
     }
 
+    pub fn seed(&self) -> &str {
+        &self.seed
+    }
+
     pub fn next_system_rng(&mut self) -> ExampleSystemRng {
         // Different behavior for the first system_rng_gen is a bit weird, but
         // it retains backwards compatibility with existing tests -- it means
@@ -82,10 +86,8 @@ impl SimRngState {
         self.collection_rng_gen += 1;
         // We don't need to pass in extra bits unique to collections, because
         // `CollectionBuilderRng` adds its own.
-        CollectionBuilderRng::from_seed((
-            self.seed.as_str(),
-            self.collection_rng_gen,
-        ))
+        let seed = (self.seed.as_str(), self.collection_rng_gen);
+        CollectionBuilderRng::from_seed(seed)
     }
 
     pub fn next_planner_rng(&mut self) -> PlannerRng {
