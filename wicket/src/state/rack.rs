@@ -145,3 +145,53 @@ impl RackState {
         self.log = Some(log);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::ALL_COMPONENT_IDS;
+
+    #[test]
+    fn prev_next_are_opposites() {
+        let mut state = RackState::new();
+
+        for &id in ALL_COMPONENT_IDS.iter() {
+            state.selected = id;
+            state.next();
+            state.prev();
+            assert_eq!(
+                state.selected, id,
+                "prev is not inverse of next for {id:?}"
+            );
+            state.prev();
+            state.next();
+            assert_eq!(
+                state.selected, id,
+                "next is not inverse of prev for {id:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn up_down_are_opposites() {
+        let mut state = RackState::new();
+
+        for &id in ALL_COMPONENT_IDS.iter() {
+            state.selected = id;
+            state.set_column();
+
+            state.down();
+            state.up();
+            assert_eq!(
+                state.selected, id,
+                "up is not inverse of down for {id:?}"
+            );
+            state.up();
+            state.down();
+            assert_eq!(
+                state.selected, id,
+                "down is not inverse of up for {id:?}"
+            );
+        }
+    }
+}
