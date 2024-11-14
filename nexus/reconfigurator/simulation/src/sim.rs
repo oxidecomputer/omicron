@@ -38,7 +38,7 @@ pub struct Simulator {
     log: slog::Logger,
     // The set of terminal nodes in the tree -- all states are reachable from
     // one or more of these.
-    // 
+    //
     // Similar to the list of Git branches or Jujutsu/Mercurial heads.
     //
     // In the future, it would be interesting to store a chain of every set of
