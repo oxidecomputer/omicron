@@ -1382,7 +1382,7 @@ dependencies = [
  "camino",
  "clickhouse-admin-types",
  "clickward",
- "dropshot",
+ "dropshot 0.13.0",
  "omicron-workspace-hack",
 ]
 
