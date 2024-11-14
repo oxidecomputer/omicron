@@ -80,6 +80,7 @@ members = [
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
     "nexus/reconfigurator/preparation",
+    "nexus/reconfigurator/simulation",
     "nexus/saga-recovery",
     "nexus/test-interface",
     "nexus/test-utils-macros",
@@ -209,6 +210,7 @@ default-members = [
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
     "nexus/reconfigurator/preparation",
+    "nexus/reconfigurator/simulation",
     "nexus/saga-recovery",
     "nexus/test-interface",
     "nexus/test-utils-macros",
@@ -313,7 +315,7 @@ bootstrap-agent-api = { path = "sled-agent/bootstrap-agent-api" }
 bootstrap-agent-client = { path = "clients/bootstrap-agent-client" }
 buf-list = { version = "1.0.3", features = ["tokio1"] }
 byteorder = "1.5.0"
-bytes = "1.7.2"
+bytes = "1.8.0"
 camino = { version = "1.1", features = ["serde1"] }
 camino-tempfile = "1.1.1"
 cancel-safe-futures = "0.1.5"
@@ -412,7 +414,7 @@ illumos-utils = { path = "illumos-utils" }
 iana-time-zone = "0.1.61"
 indent_write = "2.2.0"
 indexmap = "2.6.0"
-indicatif = { version = "0.17.8", features = ["rayon"] }
+indicatif = { version = "0.17.9", features = ["rayon"] }
 indoc = "2.0.5"
 installinator = { path = "installinator" }
 installinator-api = { path = "installinator-api" }
@@ -457,6 +459,7 @@ nexus-networking = { path = "nexus/networking" }
 nexus-reconfigurator-execution = { path = "nexus/reconfigurator/execution" }
 nexus-reconfigurator-planning = { path = "nexus/reconfigurator/planning" }
 nexus-reconfigurator-preparation = { path = "nexus/reconfigurator/preparation" }
+nexus-reconfigurator-simulation = { path = "nexus/reconfigurator/simulation" }
 nexus-saga-recovery = { path = "nexus/saga-recovery" }
 nexus-sled-agent-shared = { path = "nexus-sled-agent-shared" }
 nexus-test-interface = { path = "nexus/test-interface" }
@@ -516,6 +519,10 @@ paste = "1.0.15"
 percent-encoding = "2.3.1"
 peg = "0.8.4"
 pem = "3.0"
+# petname's default features pull in clap for CLI parsing, which we don't need.
+# Note that if you depend on petname, you must also set default-features =
+# false: petname = { workspace = true, default-features = false }.
+petname = { version = "2.0.2", default-features = false, features = ["default-rng", "default-words"] }
 petgraph = "0.6.5"
 postgres-protocol = "0.6.7"
 predicates = "3.1.2"
@@ -606,6 +613,7 @@ strum = { version = "0.26", features = [ "derive" ] }
 subprocess = "0.2.9"
 supports-color = "3.0.1"
 swrite = "0.1.0"
+sync-ptr = "0.1.1"
 libsw = { version = "3.3.1", features = ["tokio"] }
 syn = { version = "2.0" }
 tabled = "0.15.0"
