@@ -38,6 +38,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SledUuid;
 use uuid::Uuid;
 
 impl DataStore {
@@ -66,7 +67,7 @@ impl DataStore {
                     // expunged.
                     Self::check_sled_in_service_on_connection(
                         &conn,
-                        disk.sled_id,
+                        SledUuid::from_untyped_uuid(disk.sled_id),
                     )
                     .await
                     .map_err(|txn_error| txn_error.into_diesel(&err))?;
@@ -336,7 +337,6 @@ mod test {
     use omicron_common::api::external::ByteCount;
     use omicron_common::disk::{DiskIdentity, DiskVariant};
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::SledUuid;
     use std::net::{Ipv6Addr, SocketAddrV6};
     use std::num::NonZeroU32;
 

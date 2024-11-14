@@ -14,6 +14,7 @@ use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_common::disk::DatasetName;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -225,6 +226,12 @@ pub struct DurableDataset<'a> {
     pub dataset: &'a OmicronZoneDataset,
     pub kind: DatasetKind,
     pub address: SocketAddrV6,
+}
+
+impl<'a> From<DurableDataset<'a>> for DatasetName {
+    fn from(d: DurableDataset<'a>) -> Self {
+        DatasetName::new(d.dataset.pool_name.clone(), d.kind)
+    }
 }
 
 impl From<BlueprintZoneType> for OmicronZoneType {

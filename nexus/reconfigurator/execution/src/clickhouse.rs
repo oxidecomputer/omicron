@@ -335,7 +335,10 @@ mod test {
         let num_servers = 2u64;
 
         let mut zones = BTreeMap::new();
-        let mut config = ClickhouseClusterConfig::new("test".to_string());
+        let mut config = ClickhouseClusterConfig::new(
+            "test".to_string(),
+            "test".to_string(),
+        );
 
         for keeper_id in 1..=num_keepers {
             let sled_id = SledUuid::new_v4();

@@ -30,6 +30,7 @@ openapiv3.workspace = true
 owo-colors.workspace = true
 oximeter-api.workspace = true
 repo-depot-api.workspace = true
+semver.workspace = true
 serde_json.workspace = true
 similar.workspace = true
 sled-agent-api.workspace = true
