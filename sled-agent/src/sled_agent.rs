@@ -19,10 +19,11 @@ use crate::params::OmicronZoneTypeExt;
 use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::StorageMonitorHandle;
+use crate::support_bundle::{SupportBundleCmdError, SupportBundleCmdOutput};
 use crate::updates::{ConfigUpdates, UpdateManager};
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
-use crate::zone_bundle;
 use crate::zone_bundle::BundleError;
+use crate::{support_bundle, zone_bundle};
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use derive_more::From;
@@ -74,7 +75,6 @@ use sled_agent_types::zone_bundle::{
 use sled_hardware::{underlay, HardwareManager};
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_hardware_types::Baseboard;
-use sled_storage::dataset::{CRYPT_DATASET, ZONE_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use sprockets_tls::keys::SprocketsConfig;
@@ -468,7 +468,7 @@ impl SledAgent {
             serial: baseboard.identifier().to_string(),
         };
         let metrics_manager =
-            MetricsManager::new(&log, identifiers, *sled_address.ip())?;
+            MetricsManager::new(&log, identifiers.clone(), *sled_address.ip())?;
 
         // Start tracking the underlay physical links.
         for link in underlay::find_chelsio_links(&config.data_links)? {
@@ -514,10 +514,8 @@ impl SledAgent {
         };
         let updates = UpdateManager::new(update_config);
 
-        let svc_config = services::Config::new(
-            request.body.id.into_untyped_uuid(),
-            config.sidecar_revision.clone(),
-        );
+        let svc_config =
+            services::Config::new(identifiers, config.sidecar_revision.clone());
 
         // Get our rack network config from the bootstore; we cannot proceed
         // until we have this, as we need to know which switches have uplinks to
@@ -1321,32 +1319,8 @@ impl SledAgent {
                 total_size: ByteCount::try_from(info.size())?,
             });
 
-            // We do care about the total space usage within zpools, but mapping
-            // the layering back to "datasets we care about" is a little
-            // awkward.
-            //
-            // We could query for all datasets within a pool, but the sled agent
-            // doesn't really care about the children of datasets that it
-            // allocates. As an example: Sled Agent might provision a "crucible"
-            // dataset, but how region allocation occurs within that dataset
-            // is a detail for Crucible to care about, not the Sled Agent.
-            //
-            // To balance this effort, we ask for information about datasets
-            // that the Sled Agent is directly resopnsible for managing.
-            let datasets_of_interest = [
-                // We care about the zpool itself, and all direct children.
-                zpool.to_string(),
-                // Likewise, we care about the encrypted dataset, and all
-                // direct children.
-                format!("{zpool}/{CRYPT_DATASET}"),
-                // The zone dataset gives us additional context on "what zones
-                // have datasets provisioned".
-                format!("{zpool}/{ZONE_DATASET}"),
-            ];
             let inv_props =
-                match illumos_utils::zfs::Zfs::get_dataset_properties(
-                    datasets_of_interest.as_slice(),
-                ) {
+                match self.storage().datasets_list(zpool.clone()).await {
                     Ok(props) => props
                         .into_iter()
                         .map(|prop| InventoryDataset::from(prop)),
@@ -1376,6 +1350,18 @@ impl SledAgent {
             zpools,
             datasets,
         })
+    }
+
+    pub(crate) async fn support_zoneadm_info(
+        &self,
+    ) -> Result<SupportBundleCmdOutput, SupportBundleCmdError> {
+        support_bundle::zoneadm_info().await
+    }
+
+    pub(crate) async fn support_ipadm_info(
+        &self,
+    ) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
+        support_bundle::ipadm_info().await
     }
 }
 

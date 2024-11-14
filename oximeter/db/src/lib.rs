@@ -20,6 +20,8 @@ pub use oximeter::Field;
 pub use oximeter::FieldType;
 pub use oximeter::Measurement;
 pub use oximeter::Sample;
+use parse_display::Display;
+use parse_display::FromStr;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -33,7 +35,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 mod client;
-pub mod model;
+pub(crate) mod model;
 pub mod native;
 #[cfg(any(feature = "oxql", test))]
 pub mod oxql;
@@ -224,7 +226,17 @@ pub struct Timeseries {
 }
 
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    FromStr,
+    Display,
 )]
 pub enum DbFieldSource {
     Target,

@@ -34,6 +34,7 @@ pub mod zone;
 pub mod zpool;
 
 pub const PFEXEC: &str = "/usr/bin/pfexec";
+pub const ZONEADM: &str = "/usr/sbin/zoneadm";
 
 #[derive(Debug)]
 pub struct CommandFailureInfo {

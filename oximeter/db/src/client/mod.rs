@@ -17,7 +17,9 @@ pub use self::dbwrite::DbWrite;
 pub use self::dbwrite::TestDbWrite;
 use crate::client::query_summary::QuerySummary;
 use crate::model;
+use crate::model::from_block::FromBlock;
 use crate::native;
+use crate::native::block::Block;
 use crate::native::block::ValueArray;
 use crate::native::QueryResult;
 use crate::query;
@@ -456,7 +458,7 @@ impl Client {
                         "FROM {}.timeseries_schema ",
                         "ORDER BY timeseries_name ",
                         "LIMIT {} ",
-                        "FORMAT JSONEachRow;",
+                        "FORMAT Native;",
                     ),
                     crate::DATABASE_NAME,
                     limit.get(),
@@ -469,7 +471,7 @@ impl Client {
                         "WHERE timeseries_name > '{}' ",
                         "ORDER BY timeseries_name ",
                         "LIMIT {} ",
-                        "FORMAT JSONEachRow;",
+                        "FORMAT Native;",
                     ),
                     crate::DATABASE_NAME,
                     last_timeseries,
@@ -477,18 +479,19 @@ impl Client {
                 )
             }
         };
-        let body = self.execute_with_body(sql).await?.1;
-        let schema = body
-            .lines()
-            .map(|line| {
-                TimeseriesSchema::from(
-                    serde_json::from_str::<model::DbTimeseriesSchema>(line)
-                        .expect(
-                        "Failed to deserialize TimeseriesSchema from database",
-                    ),
-                )
-            })
-            .collect::<Vec<_>>();
+        let result = self.execute_with_block(&sql).await?;
+        let Some(block) = result.data.as_ref() else {
+            error!(
+                self.log,
+                "query listing timeseries schema did not contain \
+                a data block"
+            );
+            return Err(Error::Database(String::from(
+                "Query listing timeseries schema did not contain \
+                any data from the database",
+            )));
+        };
+        let schema = TimeseriesSchema::from_block(block)?;
         ResultsPage::new(schema, &dropshot::EmptyScanParams {}, |schema, _| {
             schema.timeseries_name.clone()
         })
@@ -677,7 +680,7 @@ impl Client {
                 "path" => path.display(),
                 "filename" => &name,
             );
-            match self.execute_native(sql).await {
+            match self.execute_native(&sql).await {
                 Ok(_) => debug!(
                     self.log,
                     "successfully applied schema upgrade file";
@@ -885,11 +888,11 @@ impl Client {
     /// Read the latest version applied in the database.
     pub async fn read_latest_version(&self) -> Result<u64, Error> {
         const ALIAS: &str = "max_version";
-        let sql = format!(
+        const QUERY: &str = const_format::formatcp!(
             "SELECT MAX(value) AS {ALIAS} FROM {db_name}.version;",
             db_name = crate::DATABASE_NAME,
         );
-        match self.execute_with_result_native(sql).await {
+        match self.execute_with_block(QUERY).await {
             Ok(result) => {
                 let Some(data) = &result.data else {
                     error!(
@@ -985,13 +988,14 @@ impl Client {
             "INSERT INTO {db_name}.version (*) VALUES ({version}, now());",
             db_name = crate::DATABASE_NAME,
         );
-        self.execute_native(sql).await
+        self.execute_native(&sql).await
     }
 
     /// Verifies if instance is part of oximeter_cluster
     pub async fn is_oximeter_cluster(&self) -> Result<bool, Error> {
-        let sql = format!("SHOW CLUSTER {}", crate::CLUSTER_NAME);
-        self.execute_with_result_native(sql).await.and_then(|result| {
+        const QUERY: &str =
+            const_format::formatcp!("SHOW CLUSTER {}", crate::CLUSTER_NAME);
+        self.execute_with_block(QUERY).await.and_then(|result| {
             result
                 .data
                 .ok_or_else(|| {
@@ -1000,7 +1004,7 @@ impl Client {
                     returned an empty data block",
                     ))
                 })
-                .map(|block| block.n_rows > 0)
+                .map(|block| block.n_rows() > 0)
         })
     }
 
@@ -1017,7 +1021,7 @@ impl Client {
     async fn verify_or_cache_sample_schema(
         &self,
         sample: &Sample,
-    ) -> Result<Option<(TimeseriesName, String)>, Error> {
+    ) -> Result<Option<TimeseriesSchema>, Error> {
         let sample_schema = TimeseriesSchema::from(sample);
         let name = sample_schema.timeseries_name.clone();
         let mut schema = self.schema.lock().await;
@@ -1051,15 +1055,8 @@ impl Client {
                 }
             }
             Entry::Vacant(entry) => {
-                let name = entry.key().clone();
                 entry.insert(sample_schema.clone());
-                Ok(Some((
-                    name,
-                    serde_json::to_string(&model::DbTimeseriesSchema::from(
-                        sample_schema,
-                    ))
-                    .expect("Failed to convert schema to DB model"),
-                )))
+                Ok(Some(sample_schema))
             }
         }
     }
@@ -1118,49 +1115,71 @@ impl Client {
         Ok(timeseries_by_key.into_values().collect())
     }
 
+    // Insert data using the native TCP interface.
+    async fn insert_native(
+        &self,
+        sql: &str,
+        block: Block,
+    ) -> Result<QueryResult, Error> {
+        trace!(
+            self.log,
+            "inserting data";
+            "sql" => sql,
+            "n_rows" => block.n_rows(),
+            "n_columns" => block.n_columns(),
+        );
+        let mut handle = self.native_pool.claim().await?;
+        let id = usdt::UniqueId::new();
+        probes::sql__query__start!(|| (&id, sql));
+        let now = tokio::time::Instant::now();
+        let result = tokio::time::timeout(
+            self.request_timeout,
+            handle.insert(sql, block),
+        )
+        .await;
+        let elapsed = now.elapsed();
+        probes::sql__query__done!(|| (&id));
+        match result {
+            Ok(result) => result.map_err(Error::from),
+            Err(_) => Err(Error::DatabaseUnavailable(format!(
+                "SQL query timed out after {elapsed:?}"
+            ))),
+        }
+    }
+
     // Execute a generic SQL statement, using the native TCP interface.
-    async fn execute_native<S>(&self, sql: S) -> Result<(), Error>
-    where
-        S: Into<String>,
-    {
-        self.execute_with_result_native(sql).await.map(|_| ())
+    async fn execute_native(&self, sql: &str) -> Result<(), Error> {
+        self.execute_with_block(sql).await.map(|_| ())
     }
 
     // Execute a generic SQL statement, returning the query result as a data
     // block.
     //
     // TODO-robustness This currently does no validation of the statement.
-    async fn execute_with_result_native<S>(
+    async fn execute_with_block(
         &self,
-        sql: S,
-    ) -> Result<QueryResult, Error>
-    where
-        S: Into<String>,
-    {
-        let sql = sql.into();
+        sql: &str,
+    ) -> Result<QueryResult, Error> {
         trace!(
             self.log,
             "executing SQL query";
-            "sql" => &sql,
+            "sql" => sql,
         );
 
         let mut handle = self.native_pool.claim().await?;
         let id = usdt::UniqueId::new();
-        probes::sql__query__start!(|| (&id, &sql));
-        let result = handle.query(sql.as_str()).await.map_err(Error::from);
+        probes::sql__query__start!(|| (&id, sql));
+        let now = tokio::time::Instant::now();
+        let result =
+            tokio::time::timeout(self.request_timeout, handle.query(sql)).await;
+        let elapsed = now.elapsed();
         probes::sql__query__done!(|| (&id));
-        result
-    }
-
-    // Execute a generic SQL statement.
-    //
-    // TODO-robustness This currently does no validation of the statement.
-    async fn execute<S>(&self, sql: S) -> Result<(), Error>
-    where
-        S: Into<String>,
-    {
-        self.execute_with_body(sql).await?;
-        Ok(())
+        match result {
+            Ok(result) => result.map_err(Error::from),
+            Err(_) => Err(Error::DatabaseUnavailable(format!(
+                "SQL query timed out after {elapsed:?}"
+            ))),
+        }
     }
 
     // Execute a generic SQL statement, awaiting the response as text
@@ -1245,7 +1264,7 @@ impl Client {
         let sql = {
             if schema.is_empty() {
                 format!(
-                    "SELECT * FROM {db_name}.timeseries_schema FORMAT JSONEachRow;",
+                    "SELECT * FROM {db_name}.timeseries_schema FORMAT Native;",
                     db_name = crate::DATABASE_NAME,
                 )
             } else {
@@ -1256,7 +1275,7 @@ impl Client {
                         "FROM {db_name}.timeseries_schema ",
                         "WHERE timeseries_name NOT IN ",
                         "({current_keys}) ",
-                        "FORMAT JSONEachRow;",
+                        "FORMAT Native;",
                     ),
                     db_name = crate::DATABASE_NAME,
                     current_keys = schema
@@ -1267,21 +1286,22 @@ impl Client {
                 )
             }
         };
-        let body = self.execute_with_body(sql).await?.1;
-        if body.is_empty() {
+        let body = self.execute_with_block(&sql).await?;
+        let Some(data) = body.data.as_ref() else {
             trace!(self.log, "no new timeseries schema in database");
-        } else {
-            trace!(self.log, "extracting new timeseries schema");
-            let new = body.lines().map(|line| {
-                let schema = TimeseriesSchema::from(
-                    serde_json::from_str::<model::DbTimeseriesSchema>(line)
-                        .expect(
-                        "Failed to deserialize TimeseriesSchema from database",
-                    ),
-                );
-                (schema.timeseries_name.clone(), schema)
-            });
-            schema.extend(new);
+            return Ok(());
+        };
+        if data.n_rows() == 0 {
+            trace!(self.log, "no new timeseries schema in database");
+            return Ok(());
+        }
+        trace!(
+            self.log,
+            "retrieved new timeseries schema";
+            "n_schema" => data.n_rows(),
+        );
+        for new_schema in TimeseriesSchema::from_block(data)?.into_iter() {
+            schema.insert(new_schema.timeseries_name.clone(), new_schema);
         }
         Ok(())
     }
@@ -1375,7 +1395,7 @@ impl Client {
                     "table_name" => table,
                     "n_timeseries" => chunk.len(),
                 );
-                self.execute_native(sql).await?;
+                self.execute_native(&sql).await?;
             }
         }
         Ok(())
@@ -1427,9 +1447,34 @@ impl Client {
         if replicated {
             sql.push_str(" AND engine = 'ReplicatedMergeTree'");
         }
-        self.execute_with_body(sql).await.map(|(_summary, body)| {
-            body.lines().map(ToString::to_string).collect()
-        })
+        let col = self
+            .execute_with_block(&sql)
+            .await
+            .and_then(|result| {
+                result.data.ok_or_else(|| {
+                    Error::Database(String::from(
+                        "Query for database tables should have returned \
+                            a data block, but none was found",
+                    ))
+                })
+            })?
+            .columns
+            .swap_remove("name")
+            .ok_or_else(|| {
+                Error::Database(String::from(
+                    "Query for database tables should have returned \
+                    a column with name 'names', but none was found",
+                ))
+            })?;
+        let ValueArray::String(names) = col.values else {
+            return Err(Error::Database(format!(
+                "Query for database tables should have returned \
+                an array of string table names, but the column \
+                has type: '{}'",
+                col.data_type,
+            )));
+        };
+        Ok(names)
     }
 }
 
@@ -3039,7 +3084,7 @@ mod tests {
         client: &Client,
     ) -> Result<(), Error> {
         let field = FieldValue::Bool(true);
-        let as_json = serde_json::Value::from(1_u64);
+        let as_json = serde_json::Value::from(true);
         test_recall_field_value_impl(field, as_json, client).await?;
         Ok(())
     }
@@ -3153,7 +3198,7 @@ mod tests {
             "INSERT INTO oximeter.{field_table} FORMAT JSONEachRow {row}"
         );
         client
-            .execute_native(insert_sql)
+            .execute_native(&insert_sql)
             .await
             .expect("Failed to insert field row");
 
@@ -3164,7 +3209,7 @@ mod tests {
             crate::DATABASE_SELECT_FORMAT,
         );
         let body = client
-            .execute_with_body(select_sql)
+            .execute_with_body(&select_sql)
             .await
             .expect("Failed to select field row")
             .1;
@@ -3482,41 +3527,44 @@ mod tests {
         // Insert a record from this datum.
         const TIMESERIES_NAME: &str = "foo:bar";
         const TIMESERIES_KEY: u64 = 101;
-        let (measurement_table, inserted_row) =
-            crate::model::unroll_measurement_row_impl(
+        let (measurement_table, inserted_block) =
+            crate::model::measurements::extract_measurement_as_block_impl(
                 TIMESERIES_NAME.to_string(),
                 TIMESERIES_KEY,
                 &measurement,
             );
         let insert_sql = format!(
-            "INSERT INTO {measurement_table} FORMAT JSONEachRow {inserted_row}",
+            "INSERT INTO {}.{} FORMAT Native ",
+            crate::DATABASE_NAME,
+            measurement_table,
         );
-        println!("Inserted row: {}", inserted_row);
+        println!("Expected measurement: {:#?}", measurement);
+        println!("Inserted block: {:#?}", inserted_block);
         client
-            .execute_native(insert_sql)
+            .insert_native(&insert_sql, inserted_block)
             .await
-            .expect("Failed to insert measurement row");
+            .expect("Failed to insert measurement block");
 
         // Select it exactly back out.
         let select_sql = format!(
-            "SELECT * FROM {} WHERE timestamp = '{}' FORMAT {};",
+            "SELECT * FROM {}.{} WHERE timestamp = '{}'",
+            crate::DATABASE_NAME,
             measurement_table,
             measurement.timestamp().format(crate::DATABASE_TIMESTAMP_FORMAT),
-            crate::DATABASE_SELECT_FORMAT,
         );
-        let body = client
-            .execute_with_body(select_sql)
+        let selected_block = client
+            .execute_with_block(&select_sql)
             .await
             .expect("Failed to select measurement row")
-            .1;
-        let (_, actual_row) = crate::model::parse_measurement_from_row(
-            &body,
-            measurement.datum_type(),
-        );
-        println!("Actual row: {actual_row:?}");
+            .data
+            .expect("Should have selected some data block");
+        let actual_measurements = Measurement::from_block(&selected_block)
+            .expect("Failed to extract measurement from block");
+        println!("Actual measurements: {actual_measurements:#?}");
+        assert_eq!(actual_measurements.len(), 1);
         assert_eq!(
-            actual_row, measurement,
-            "Actual and expected measurement rows do not match"
+            actual_measurements[0], measurement,
+            "Actual and expected measurements do not match"
         );
         Ok(())
     }
@@ -3746,7 +3794,6 @@ mod tests {
         _: &ClickHouseDeployment,
         client: Client,
     ) {
-        usdt::register_probes().unwrap();
         let samples = [oximeter_test_utils::make_sample()];
         client.insert_samples(&samples).await.unwrap();
 
@@ -3806,7 +3853,6 @@ mod tests {
         client: Client,
     ) {
         use strum::IntoEnumIterator;
-        usdt::register_probes().unwrap();
         // Attempt to select all schema with each datum type.
         for ty in oximeter::DatumType::iter() {
             let sql = format!(
@@ -3847,7 +3893,6 @@ mod tests {
         db: &ClickHouseDeployment,
         client: Client,
     ) {
-        usdt::register_probes().unwrap();
         let samples = [oximeter_test_utils::make_sample()];
 
         // We're using the components of the `insert_samples()` method here,
@@ -4064,11 +4109,11 @@ mod tests {
         // table, to version 2, which adds two columns to that table in
         // different SQL files.
         client
-            .execute_native(format!("CREATE DATABASE {test_name};"))
+            .execute_native(&format!("CREATE DATABASE {test_name};"))
             .await
             .unwrap();
         client
-            .execute_native(format!(
+            .execute_native(&format!(
                 "\
             CREATE TABLE {test_name}.tbl (\
                 `col0` UInt8 \
@@ -4113,7 +4158,7 @@ mod tests {
 
         // Check that it actually worked!
         let body = client
-            .execute_with_body(format!(
+            .execute_with_body(&format!(
                 "\
             SELECT name, type FROM system.columns \
             WHERE database = '{test_name}' AND table = 'tbl' \
@@ -4276,11 +4321,11 @@ mod tests {
         // modifications over two versions, rather than as multiple schema
         // upgrades in one version bump.
         client
-            .execute_native(format!("CREATE DATABASE {test_name};"))
+            .execute_native(&format!("CREATE DATABASE {test_name};"))
             .await
             .unwrap();
         client
-            .execute_native(format!(
+            .execute_native(&format!(
                 "\
             CREATE TABLE {test_name}.tbl (\
                 `col0` UInt8 \
@@ -4453,7 +4498,6 @@ mod tests {
     #[tokio::test]
     async fn test_select_all_field_types() {
         use strum::IntoEnumIterator;
-        usdt::register_probes().unwrap();
         let logctx = test_setup_log("test_select_all_field_types");
         let log = &logctx.log;
 
@@ -4872,7 +4916,6 @@ mod tests {
         native_address: SocketAddr,
         replicated: bool,
     ) {
-        usdt::register_probes().unwrap();
         let client = Client::new(http_address, native_address, &log);
 
         const STARTING_VERSION: u64 = 1;

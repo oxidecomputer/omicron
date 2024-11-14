@@ -272,7 +272,7 @@ async fn test_timeseries_schema_list(
     // producing data. Force a collection to ensure that happens.
     cptestctx.oximeter.force_collect().await;
     let client = &cptestctx.external_client;
-    let url = "/v1/timeseries/schema";
+    let url = "/v1/system/timeseries/schemas";
     let schema =
         objects_list_page_authz::<TimeseriesSchema>(client, &url).await;
     schema
@@ -300,7 +300,7 @@ pub async fn timeseries_query(
         nexus_test_utils::http_testing::RequestBuilder::new(
             &cptestctx.external_client,
             http::Method::POST,
-            "/v1/timeseries/query",
+            "/v1/system/timeseries/query",
         )
         .body(Some(&body)),
     )

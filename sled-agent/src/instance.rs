@@ -2102,29 +2102,17 @@ mod tests {
     // TODO: factor out, this is also in sled-agent-sim.
     fn propolis_mock_server(
         log: &Logger,
-    ) -> (HttpServer<Arc<propolis_mock_server::Context>>, PropolisClient) {
+    ) -> (propolis_mock_server::Server, PropolisClient) {
         let propolis_bind_address =
             SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0); // allocate port
-        let dropshot_config = dropshot::ConfigDropshot {
+        let dropshot_config = propolis_mock_server::Config {
             bind_address: propolis_bind_address,
             ..Default::default()
         };
-        let propolis_log = log.new(o!("component" => "propolis-server-mock"));
-        let private =
-            Arc::new(propolis_mock_server::Context::new(propolis_log));
         info!(log, "Starting mock propolis-server...");
-        let dropshot_log = log.new(o!("component" => "dropshot"));
-        let mock_api = propolis_mock_server::api();
 
-        let srv = dropshot::HttpServerStarter::new(
-            &dropshot_config,
-            mock_api,
-            private,
-            &dropshot_log,
-        )
-        .expect("couldn't create mock propolis-server")
-        .start();
-
+        let srv = propolis_mock_server::start(dropshot_config, log.clone())
+            .expect("couldn't create mock propolis-server");
         let client = propolis_client::Client::new(&format!(
             "http://{}",
             srv.local_addr()

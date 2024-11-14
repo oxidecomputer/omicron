@@ -16,7 +16,6 @@ use tabled::{builder::Builder, settings::Style};
 
 /// Run the native SQL shell.
 pub async fn shell(addr: IpAddr, port: u16) -> anyhow::Result<()> {
-    usdt::register_probes()?;
     let addr = SocketAddr::new(addr, port);
     let mut conn = native::Connection::new(addr)
         .await
@@ -89,18 +88,14 @@ fn print_query_result(result: QueryResult) {
     if block.is_empty() {
         return;
     }
-    let n_rows = usize::try_from(block.n_rows).unwrap();
-    let mut builder = Builder::with_capacity(
-        n_rows,
-        usize::try_from(block.n_columns).unwrap(),
-    );
+    let mut builder = Builder::with_capacity(block.n_rows(), block.n_columns());
     let mut columns: Vec<_> = block
         .columns
         .values()
         .map(|col| values_to_string(&col.values))
         .collect();
     builder.push_record(block.columns.keys());
-    for _row in 0..n_rows {
+    for _row in 0..block.n_rows() {
         let row = columns.iter_mut().map(|col_iter| col_iter.next().unwrap());
         builder.push_record(row);
     }
@@ -114,6 +109,9 @@ fn values_to_string<'a>(
     values: &'a ValueArray,
 ) -> Box<dyn Iterator<Item = String> + 'a> {
     match values {
+        ValueArray::Bool(vals) => {
+            Box::new(vals.iter().map(ToString::to_string))
+        }
         ValueArray::UInt8(vals) => {
             Box::new(vals.iter().map(ToString::to_string))
         }

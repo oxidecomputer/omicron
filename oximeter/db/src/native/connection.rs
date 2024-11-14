@@ -6,6 +6,7 @@
 
 //! A connection and pool for talking to the ClickHouse server.
 
+use super::block::Block;
 use super::io::packet::client::Encoder;
 use super::io::packet::server::Decoder;
 use super::packets::client::Packet as ClientPacket;
@@ -208,8 +209,34 @@ impl Connection {
         Ok(false)
     }
 
-    /// Send a SQL query, possibly with data.
+    /// Send a SQL query that inserts data.
+    pub async fn insert(
+        &mut self,
+        query: &str,
+        block: Block,
+    ) -> Result<QueryResult, Error> {
+        self.query_inner(query, Some(block)).await
+    }
+
+    /// Send a SQL query, without any data.
     pub async fn query(&mut self, query: &str) -> Result<QueryResult, Error> {
+        self.query_inner(query, None).await
+    }
+
+    // Send a SQL query, possibly with data.
+    //
+    // If data is present, it is sent after the SQL query itself. An error is
+    // returned if the server indicates that the block structure required by the
+    // insert query doesn't match that of the provided block.
+    //
+    // IMPORTANT: We do not currently validate that data is provided iff the
+    // query is an INSERT statement! Callers are required to ensure that they
+    // provide data if and only if the query requires it.
+    async fn query_inner(
+        &mut self,
+        query: &str,
+        maybe_data: Option<Block>,
+    ) -> Result<QueryResult, Error> {
         let mut query_result = QueryResult {
             id: Uuid::new_v4(),
             progress: Progress::default(),
@@ -221,18 +248,115 @@ impl Connection {
         self.writer.send(ClientPacket::Query(query)).await?;
         probes::packet__sent!(|| "Query");
         self.outstanding_query = true;
+
+        // If we have data to send, wait for the server to send an empty block
+        // that describes its structure.
+        if let Some(block_to_insert) = maybe_data {
+            let res: Result<(), Error> = loop {
+                match self.reader.next().await {
+                    Some(Ok(packet)) => match packet {
+                        ServerPacket::Hello(_)
+                            | ServerPacket::Pong
+                            // The server should only send this after we've
+                            // inserted our data.
+                            | ServerPacket::EndOfStream =>
+                        {
+                            let kind = packet.kind();
+                            probes::unexpected__server__packet!(|| kind);
+                            break Err(Error::UnexpectedPacket(kind));
+                        }
+                        ServerPacket::Data(block) => {
+                            probes::data__packet__received!(|| {
+                                (
+                                    block.n_columns(),
+                                    block.n_rows(),
+                                    block
+                                        .columns
+                                        .iter()
+                                        .map(|(name, col)| {
+                                            (
+                                                name.clone(),
+                                                col.data_type.to_string(),
+                                            )
+                                        })
+                                        .collect::<Vec<_>>(),
+                                )
+                            });
+
+                            // Similar to when selecting data, the server sends
+                            // a block with zero rows that describes the table
+                            // structure, so any block with a non-zero number of
+                            // rows is an error here.
+                            if block.n_rows() != 0 {
+                                break Err(Error::ExpectedEmptyDataBlock);
+                            }
+
+                            // Don't concatenate the block, but check that its
+                            // structure matches what we're about to insert.
+                            if !block_to_insert.matches_structure(&block) {
+                                break Err(Error::MismatchedBlockStructure);
+                            }
+
+                            // Finally, send the actual data block and an empty
+                            // block to tell the server we're finished.
+                            if let Err(e) = self
+                                .writer
+                                .send(ClientPacket::Data(block_to_insert))
+                                .await
+                            {
+                                break Err(e);
+                            }
+                            break self
+                                .writer
+                                .send(ClientPacket::Data(Block::empty()))
+                                .await;
+                        }
+                        ServerPacket::Exception(exceptions) => {
+                            break Err(Error::Exception { exceptions })
+                        }
+                        ServerPacket::Progress(progress) => {
+                            query_result.progress += progress
+                        }
+                        ServerPacket::ProfileInfo(info) => {
+                            let _ = query_result.profile_info.replace(info);
+                        }
+                        ServerPacket::TableColumns(columns) => {
+                            if !block_to_insert
+                                .insertable_into(&columns)
+                            {
+                                break Err(Error::MismatchedBlockStructure);
+                            }
+                        }
+                        ServerPacket::ProfileEvents(block) => {
+                            let _ = query_result.profile_events.replace(block);
+                        }
+                    },
+                    Some(Err(e)) => break Err(e),
+                    None => break Err(Error::Disconnected),
+                }
+            };
+            if let Err(e) = res {
+                self.outstanding_query = false;
+                return Err(e);
+            }
+        }
+
+        // Now wait for the remainder of the query to execute.
         let res = loop {
             match self.reader.next().await {
                 Some(Ok(packet)) => match packet {
-                    ServerPacket::Hello(_) => {
-                        probes::unexpected__server__packet!(|| "Hello");
-                        break Err(Error::UnexpectedPacket("Hello"));
+                    ServerPacket::Hello(_)
+                    | ServerPacket::Pong
+                    | ServerPacket::TableColumns(_) => {
+                        let kind = packet.kind();
+                        probes::unexpected__server__packet!(|| kind);
+                        break Err(Error::UnexpectedPacket(kind));
                     }
                     ServerPacket::Data(block) => {
                         probes::data__packet__received!(|| {
                             (
-                                block.n_columns,
-                                block.n_rows,
+                                block.n_columns(),
+                                block.n_rows(),
                                 block
                                     .columns
                                     .iter()
@@ -263,10 +387,6 @@ impl Connection {
                     ServerPacket::Progress(progress) => {
                         query_result.progress += progress
                     }
-                    ServerPacket::Pong => {
-                        probes::unexpected__server__packet!(|| "Hello");
-                        break Err(Error::UnexpectedPacket("Pong"));
-                    }
                     ServerPacket::EndOfStream => break Ok(query_result),
                     ServerPacket::ProfileInfo(info) => {
                         let _ = query_result.profile_info.replace(info);
@@ -286,9 +406,12 @@ impl Connection {
 
 #[cfg(test)]
 mod tests {
+    use crate::native::block::Block;
+    use crate::native::block::Column;
     use crate::native::block::DataType;
     use crate::native::block::ValueArray;
     use crate::native::connection::Connection;
+    use indexmap::IndexMap;
     use omicron_test_utils::dev::clickhouse::ClickHouseDeployment;
     use omicron_test_utils::dev::test_setup_log;
     use std::sync::Arc;
@@ -320,8 +443,8 @@ mod tests {
             .expect("Should have run query");
         println!("{data:#?}");
         let block = data.data.as_ref().expect("Should have a data block");
-        assert_eq!(block.n_columns, 1);
-        assert_eq!(block.n_rows, 10);
+        assert_eq!(block.n_columns(), 1);
+        assert_eq!(block.n_rows(), 10);
         let (name, col) = block.columns.first().unwrap();
         assert_eq!(name, "number");
         let ValueArray::UInt64(values) = &col.values else {
@@ -347,8 +470,8 @@ mod tests {
             .expect("Should have run query");
         println!("{data:#?}");
         let block = data.data.as_ref().expect("Should have a data block");
-        assert_eq!(block.n_columns, 1);
-        assert_eq!(block.n_rows, 10);
+        assert_eq!(block.n_columns(), 1);
+        assert_eq!(block.n_rows(), 10);
         let (name, col) = block.columns.first().unwrap();
         assert_eq!(name, "number");
         assert_eq!(
@@ -383,8 +506,8 @@ mod tests {
             .expect("Should have run query");
         println!("{data:#?}");
         let block = data.data.as_ref().expect("Should have a data block");
-        assert_eq!(block.n_columns, 1);
-        assert_eq!(block.n_rows, 2);
+        assert_eq!(block.n_columns(), 1);
+        assert_eq!(block.n_rows(), 2);
         let (name, col) = block.columns.first().unwrap();
         assert_eq!(name, "arr");
         assert_eq!(col.data_type, DataType::Array(Box::new(DataType::UInt8)));
@@ -420,8 +543,8 @@ mod tests {
             .expect("Should have run query");
         println!("{data:#?}");
         let block = data.data.as_ref().expect("Should have a data block");
-        assert_eq!(block.n_columns, 1);
-        assert_eq!(block.n_rows, 1);
+        assert_eq!(block.n_columns(), 1);
+        assert_eq!(block.n_rows(), 1);
         let (name, col) = block.columns.first().unwrap();
         assert_eq!(name, "arr");
         assert_eq!(
@@ -535,11 +658,103 @@ mod tests {
         let Some(block) = &result.data else {
             panic!("Should have received data, but found None");
         };
-        assert_eq!(block.n_columns, 1);
-        assert_eq!(block.n_rows, 1);
+        assert_eq!(block.n_columns(), 1);
+        assert_eq!(block.n_rows(), 1);
         let (name, col) = block.columns.first().unwrap();
         assert_eq!(name, "timestamp");
         assert!(matches!(col.data_type, DataType::DateTime(_)));
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_insert_and_select_data() {
+        let logctx = test_setup_log("test_insert_and_select_data");
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
+            .await
+            .expect("Failed to start ClickHouse");
+        let mut conn =
+            Connection::new(db.native_address().into()).await.unwrap();
+        conn.query("CREATE TABLE tmp (x UInt8, name String) ENGINE = Memory")
+            .await
+            .expect("Failed to create test table");
+
+        let block = Block {
+            name: String::new(),
+            info: Default::default(),
+            columns: IndexMap::from([
+                (
+                    String::from("x"),
+                    Column::from(ValueArray::from(vec![0u8, 1, 2, 3])),
+                ),
+                (
+                    String::from("name"),
+                    Column::from(ValueArray::from(vec![
+                        String::from("a"),
+                        String::from("b"),
+                        String::from("c"),
+                        String::from("d"),
+                    ])),
+                ),
+            ]),
+        };
+        let _ = conn
+            .insert("INSERT INTO tmp FORMAT Native", block.clone())
+            .await
+            .expect("Should have inserted data");
+
+        let result = conn
+            .query("SELECT * FROM tmp")
+            .await
+            .expect("Failed to select data");
+        let actual_block =
+            result.data.as_ref().expect("Failed to select block");
+        assert_eq!(
+            &block, actual_block,
+            "Inserted and selected data do not match"
+        );
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_insert_and_select_uuid() {
+        let logctx = test_setup_log("test_insert_and_select_uuid");
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
+            .await
+            .expect("Failed to start ClickHouse");
+        let mut conn =
+            Connection::new(db.native_address().into()).await.unwrap();
+        conn.query("CREATE TABLE tmp (x UUID) ENGINE = Memory")
+            .await
+            .expect("Failed to create test table");
+
+        const ID: uuid::Uuid =
+            uuid::uuid!("00112233-4455-6677-8899-aabbccddeeff");
+        let block = Block {
+            name: String::new(),
+            info: Default::default(),
+            columns: IndexMap::from([(
+                String::from("x"),
+                Column::from(ValueArray::from(vec![ID])),
+            )]),
+        };
+        let _ = conn
+            .insert("INSERT INTO tmp FORMAT Native", block.clone())
+            .await
+            .expect("Should have inserted data");
+        let result = conn
+            .query("SELECT toString(x) AS x FROM tmp")
+            .await
+            .expect("Failed to select data");
+        let actual_block =
+            result.data.as_ref().expect("Failed to select block");
+        let ValueArray::String(ids) = actual_block.column_values("x").unwrap()
+        else {
+            panic!();
+        };
+        let id: uuid::Uuid = ids[0].parse().unwrap();
+        assert_eq!(id, ID, "UUID stored incorrectly in ClickHouse");
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

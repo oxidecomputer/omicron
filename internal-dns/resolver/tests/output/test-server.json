@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Test Server",
-    "version": "v0.1.0"
+    "version": "0.1.0"
   },
   "paths": {
     "/test": {
