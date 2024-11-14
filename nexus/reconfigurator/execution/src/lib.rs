@@ -541,13 +541,16 @@ fn register_deploy_clickhouse_cluster_nodes_step<'a>(
                 if let Some(clickhouse_cluster_config) =
                     &blueprint.clickhouse_cluster_config
                 {
-                    clickhouse::deploy_nodes(
+                    if let Err(e) = clickhouse::deploy_nodes(
                         &opctx,
                         &blueprint.blueprint_zones,
                         &clickhouse_cluster_config,
                     )
                     .await
-                    .map_err(merge_anyhow_list)?;
+                    .map_err(merge_anyhow_list)
+                    {
+                        return StepWarning::new((), e.to_string()).into();
+                    }
                 }
 
                 StepSuccess::new(()).into()
