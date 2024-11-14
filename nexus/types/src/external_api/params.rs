@@ -1716,7 +1716,7 @@ pub struct LinkConfigCreate {
     pub lldp: LldpLinkConfigCreate,
 
     /// The forward error correction mode of the link.
-    pub fec: LinkFec,
+    pub fec: Option<LinkFec>,
 
     /// The speed of the link.
     pub speed: LinkSpeed,

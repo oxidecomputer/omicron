@@ -55,7 +55,9 @@ impl backend::Connector for PantryConnector {
         };
         let client =
             crucible_pantry_client::Client::new(&format!("http://{address}"));
-        Ok(PooledPantryClient { client, address })
+        let mut conn = PooledPantryClient { client, address };
+        self.is_valid(&mut conn).await?;
+        Ok(conn)
     }
 
     async fn is_valid(
@@ -71,13 +73,6 @@ impl backend::Connector for PantryConnector {
             .map_err(backend::Error::Other)?;
 
         Ok(())
-    }
-
-    async fn on_acquire(
-        &self,
-        conn: &mut Self::Connection,
-    ) -> Result<(), backend::Error> {
-        self.is_valid(conn).await
     }
 }
 
