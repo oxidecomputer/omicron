@@ -257,6 +257,7 @@ mod test {
     use omicron_uuid_kinds::UpstairsKind;
     use omicron_uuid_kinds::UpstairsRepairKind;
     use omicron_uuid_kinds::UpstairsSessionKind;
+    use sled_agent_client::types::VolumeConstructionRequest;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -286,6 +287,20 @@ mod test {
         let region_id = Uuid::new_v4();
         let new_region_id = Uuid::new_v4();
         let volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: volume_id,
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
 
         let request = {
             let mut request = RegionReplacement::new(region_id, volume_id);
@@ -380,6 +395,20 @@ mod test {
                 .await
                 .unwrap();
         }
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                old_region.volume_id(),
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: old_region.volume_id(),
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
 
         // Add a region replacement request for that region, and change it to
         // state ReplacementDone. Set the new_region_id to the region created
@@ -479,6 +508,20 @@ mod test {
                 .await
                 .unwrap();
         }
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                old_region.volume_id(),
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: old_region.volume_id(),
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
 
         // Add a region replacement request for that region, and change it to
         // state Running. Set the new_region_id to the region created above.
@@ -628,6 +671,20 @@ mod test {
                 .await
                 .unwrap();
         }
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                old_region.volume_id(),
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: old_region.volume_id(),
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
 
         // Add a region replacement request for that region, and change it to
         // state Running. Set the new_region_id to the region created above.

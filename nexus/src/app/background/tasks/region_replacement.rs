@@ -314,6 +314,21 @@ mod test {
 
         // Add a region replacement request for a fake region
         let volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: volume_id,
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
         let request = RegionReplacement::new(Uuid::new_v4(), volume_id);
         let request_id = request.id;
 
