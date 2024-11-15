@@ -2513,7 +2513,9 @@ pub struct SwitchPortLinkConfig {
     /// The maximum transmission unit for this link.
     pub mtu: u16,
 
-    /// The forward error correction mode of the link.
+    /// The requested forward-error correction method.  If this is None, the
+    /// standard FEC for the underlying media will be applied if it can be
+    /// determined.
     pub fec: Option<LinkFec>,
 
     /// The configured speed of the link.

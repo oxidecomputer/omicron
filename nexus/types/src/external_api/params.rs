@@ -1715,7 +1715,9 @@ pub struct LinkConfigCreate {
     /// The link-layer discovery protocol (LLDP) configuration for the link.
     pub lldp: LldpLinkConfigCreate,
 
-    /// The forward error correction mode of the link.
+    /// The requested forward-error correction method.  If this is None, the
+    /// standard FEC for the underlying media will be applied if it can be
+    /// determined.
     pub fec: Option<LinkFec>,
 
     /// The speed of the link.
