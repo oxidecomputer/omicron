@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::DatasetKind as DbDatasetKind;
+use super::DatasetKind;
 use super::{ByteCount, Generation, Region, SqlU16};
 use crate::collection::DatastoreCollectionConfig;
 use crate::ipv6;
@@ -12,7 +12,6 @@ use db_macros::Asset;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::DatasetKind as ApiDatasetKind;
-use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
@@ -47,7 +46,7 @@ pub struct Dataset {
     ip: Option<ipv6::Ipv6Addr>,
     port: Option<SqlU16>,
 
-    pub kind: DbDatasetKind,
+    pub kind: DatasetKind,
     pub size_used: Option<i64>,
     zone_name: Option<String>,
 
@@ -64,12 +63,12 @@ pub struct Dataset {
 
 impl Dataset {
     pub fn new(
-        id: DatasetUuid,
+        id: omicron_uuid_kinds::DatasetUuid,
         pool_id: Uuid,
         addr: Option<SocketAddrV6>,
         api_kind: ApiDatasetKind,
     ) -> Self {
-        let kind = DbDatasetKind::from(&api_kind);
+        let kind = DatasetKind::from(&api_kind);
         let (size_used, zone_name) = match api_kind {
             ApiDatasetKind::Crucible => (Some(0), None),
             ApiDatasetKind::TransientZone { name } => (None, Some(name)),
@@ -103,7 +102,7 @@ impl Dataset {
 
 impl From<BlueprintDatasetConfig> for Dataset {
     fn from(bp: BlueprintDatasetConfig) -> Self {
-        let kind = DbDatasetKind::from(&bp.kind);
+        let kind = DatasetKind::from(&bp.kind);
         let zone_name = bp.kind.zone_name().map(|s| s.to_string());
         // Only Crucible uses this "size_used" field.
         let size_used = match bp.kind {
