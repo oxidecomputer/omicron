@@ -49,6 +49,8 @@ macro_rules! impl_typed_uuid_kind {
 // Please keep this list in alphabetical order.
 
 impl_typed_uuid_kind! {
+    AffinityGroup => "affinity_group",
+    AntiAffinityGroup => "anti_affinity_group",
     Blueprint => "blueprint",
     Collection => "collection",
     Dataset => "dataset",

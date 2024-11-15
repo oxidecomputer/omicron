@@ -1249,6 +1249,150 @@ pub trait NexusExternalApi {
         disk_to_detach: TypedBody<params::DiskPath>,
     ) -> Result<HttpResponseAccepted<Disk>, HttpError>;
 
+    // Affinity Groups
+
+    /// List affinity groups
+    #[endpoint {
+        method = GET,
+        path = "/v1/affinity-groups",
+        tags = ["affinity"],
+    }]
+    async fn affinity_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AffinityGroup>>, HttpError>;
+
+    /// List members of an affinity group
+    #[endpoint {
+        method = GET,
+        path = "/v1/affinity-groups/{affinity_group}",
+        tags = ["affinity"],
+    }]
+    async fn affinity_group_member_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AffinityGroupPath>,
+    ) -> Result<HttpResponseOk<ResultsPage<AffinityGroupMember>>, HttpError>;
+
+    /// Add a member to an affinity group
+    #[endpoint {
+        method = POST,
+        path = "/v1/affinity-groups/{affinity_group}/{member}",
+        tags = ["affinity"],
+    }]
+    async fn affinity_group_member_add(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AffinityGroupMemberPath>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Remove a member from an affinity group
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/affinity-groups/{affinity_group}/{member}",
+        tags = ["affinity"],
+    }]
+    async fn affinity_group_member_delete(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AffinityGroupMemberPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Create an affinity group
+    #[endpoint {
+        method = POST,
+        path = "/v1/affinity-groups",
+        tags = ["affinity"],
+    }]
+    async fn affinity_group_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_affinity_group_params: TypedBody<params::AffinityGroupCreate>,
+    ) -> Result<HttpResponseCreated<views::AffinityGroup>, HttpError>;
+
+    /// Delete an affinity group
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/affinity-groups/{affinity_group}",
+        tags = ["affinity"],
+    }]
+    async fn affinity_group_delete(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AffinityGroupPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List anti-affinity groups
+    #[endpoint {
+        method = GET,
+        path = "/v1/anti-affinity-groups",
+        tags = ["affinity"],
+    }]
+    async fn anti_affinity_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AntiAffinityGroup>>, HttpError>;
+
+    /// List members of an anti-affinity group
+    #[endpoint {
+        method = GET,
+        path = "/v1/anti-affinity-groups/{anti_affinity_group}",
+        tags = ["affinity"],
+    }]
+    async fn anti_affinity_group_member_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AntiAffinityGroupPath>,
+    ) -> Result<HttpResponseOk<ResultsPage<AntiAffinityGroupMember>>, HttpError>;
+
+    /// Add a member to an anti-affinity group
+    #[endpoint {
+        method = POST,
+        path = "/v1/anti-affinity-groups/{anti_affinity_group}/{member}",
+        tags = ["affinity"],
+    }]
+    async fn anti_affinity_group_member_add(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AntiAffinityGroupMemberPath>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Remove a member from an anti-affinity group
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/anti-affinity-groups/{anti_affinity_group}/{member}",
+        tags = ["affinity"],
+    }]
+    async fn anti_affinity_group_member_delete(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AntiAffinityGroupMemberPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Create an anti-affinity group
+    #[endpoint {
+        method = POST,
+        path = "/v1/anti-affinity-groups",
+        tags = ["affinity"],
+    }]
+    async fn anti_affinity_group_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_affinity_group_params: TypedBody<params::AntiAffinityGroupCreate>,
+    ) -> Result<HttpResponseCreated<views::AntiAffinityGroup>, HttpError>;
+
+    /// Delete an anti-affinity group
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/anti_affinity-groups/{anti_affinity_group}",
+        tags = ["affinity"],
+    }]
+    async fn anti_affinity_group_delete(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AntiAffinityGroupPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
     // Certificates
 
     /// List certificates for external endpoints

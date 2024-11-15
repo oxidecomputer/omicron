@@ -469,6 +469,46 @@ table! {
 }
 
 table! {
+    affinity_group (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        policy -> crate::AffinityPolicyEnum,
+        distance -> crate::AffinityDistanceEnum,
+    }
+}
+
+table! {
+    anti_affinity_group (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        policy -> crate::AffinityPolicyEnum,
+        distance -> crate::AffinityDistanceEnum,
+    }
+}
+
+table! {
+    affinity_group_instance_membership (group_id, instance_id) {
+        group_id -> Uuid,
+        instance_id -> Uuid,
+    }
+}
+
+table! {
+    anti_affinity_group_instance_membership (group_id, instance_id) {
+        group_id -> Uuid,
+        instance_id -> Uuid,
+    }
+}
+
+table! {
     metric_producer (id) {
         id -> Uuid,
         time_created -> Timestamptz,

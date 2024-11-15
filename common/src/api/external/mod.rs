@@ -1275,6 +1275,31 @@ pub enum InstanceAutoRestartPolicy {
     BestEffort,
 }
 
+// AFFINITY GROUPS
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AffinityPolicy {
+    Allow,
+    Fail,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AffinityDistance {
+    Sled,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub enum AffinityGroupMember {
+    Instance(Uuid),
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub enum AntiAffinityGroupMember {
+    Instance(Uuid),
+}
+
 // DISKS
 
 /// View of a Disk

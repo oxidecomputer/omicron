@@ -10,8 +10,9 @@ use base64::Engine;
 use chrono::{DateTime, Utc};
 use http::Uri;
 use omicron_common::api::external::{
-    AddressLotKind, AllowedSourceIps, BfdMode, BgpPeer, ByteCount, Hostname,
-    IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
+    AddressLotKind, AffinityDistance, AffinityGroupMember, AffinityPolicy,
+    AllowedSourceIps, AntiAffinityGroupMember, BfdMode, BgpPeer, ByteCount,
+    Hostname, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
     InstanceAutoRestartPolicy, InstanceCpuCount, LinkFec, LinkSpeed, Name,
     NameOrId, PaginationOrder, RouteDestination, RouteTarget, SemverVersion,
     TxEqConfig, UserId,
@@ -69,6 +70,8 @@ pub struct UninitializedSledId {
     pub part: String,
 }
 
+path_param!(AffinityGroupPath, affinity_group, "affinity group");
+path_param!(AntiAffinityGroupPath, anti_affinity_group, "anti affinity group");
 path_param!(ProjectPath, project, "project");
 path_param!(InstancePath, instance, "instance");
 path_param!(NetworkInterfacePath, interface, "network interface");
@@ -794,6 +797,40 @@ where
     }
 
     Ok(v)
+}
+
+// AFFINITY GROUPS
+
+/// Create-time parameters for an `AffinityGroup`
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AffinityGroupCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    pub policy: AffinityPolicy,
+    pub distance: AffinityDistance,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct AffinityGroupMemberPath {
+    pub affinity_group: NameOrId,
+    pub member: AffinityGroupMember,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct AntiAffinityGroupMemberPath {
+    pub anti_affinity_group: NameOrId,
+    pub member: AntiAffinityGroupMember,
+}
+
+/// Create-time parameters for an `AntiAffinityGroup`
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AntiAffinityGroupCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    pub policy: AffinityPolicy,
+    pub distance: AffinityDistance,
 }
 
 // PROJECTS

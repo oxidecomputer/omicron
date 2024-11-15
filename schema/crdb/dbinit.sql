@@ -3971,6 +3971,64 @@ CREATE TABLE IF NOT EXISTS omicron.public.cockroachdb_zone_id_to_node_id (
 COMMIT;
 BEGIN;
 
+-- Describes what happens when
+-- (for affinity groups) instance cannot be co-located, or
+-- (for ani-affinity groups) instance must be co-located, or
+CREATE TYPE IF NOT EXISTS omicron.public.affinity_policy AS ENUM (
+    -- If the affinity request cannot be satisfied, fail.
+    'fail',
+
+    -- If the affinity request cannot be satisfied, allow it anyway.
+    'allow'
+);
+
+-- Determines what "co-location" means for instances within an affinity
+-- or anti-affinity group.
+CREATE TYPE IF NOT EXISTS omicron.public.affinity_distance AS ENUM (
+    -- Instances are co-located if they are on the same sled.
+    'sled'
+);
+
+-- Describes a grouping of related instances that should be co-located.
+CREATE TABLE IF NOT EXISTS omicron.public.affinity_group (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    policy omicron.public.affinity_policy NOT NULL,
+    distance omicron.public.affinity_distance NOT NULL,
+);
+
+-- Describes an instance's membership within an affinity group
+CREATE TABLE IF NOT EXISTS omicron.public.affinity_group_instance_membership (
+    group_id UUID,
+    instance_id UUID,
+
+    PRIMARY KEY (group_id, instance_id);
+);
+
+-- Describes a collection of instances that should not be co-located.
+CREATE TABLE IF NOT EXISTS omicron.public.anti_affinity_group (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    policy omicron.public.affinity_policy NOT NULL,
+    distance omicron.public.affinity_distance NOT NULL,
+);
+
+-- Describes an instance's membership within an anti-affinity group
+CREATE TABLE IF NOT EXISTS omicron.public.anti_affinity_group_instance_membership (
+    group_id UUID,
+    instance_id UUID,
+
+    PRIMARY KEY (group_id, instance_id);
+);
+
 -- Per-VMM state.
 CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     id UUID PRIMARY KEY,
@@ -4684,7 +4742,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '114.0.0', NULL)
+    (TRUE, NOW(), NOW(), '115.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
