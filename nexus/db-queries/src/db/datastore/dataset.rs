@@ -28,7 +28,7 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
 use futures::FutureExt;
-use nexus_db_model::DatasetKind as DbDatasetKind;
+use nexus_db_model::DatasetKind;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -191,7 +191,7 @@ impl DataStore {
     async fn dataset_list(
         &self,
         opctx: &OpContext,
-        filter_kind: Option<DbDatasetKind>,
+        filter_kind: Option<DatasetKind>,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Dataset> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
@@ -223,7 +223,7 @@ impl DataStore {
     pub async fn dataset_list_all_batched(
         &self,
         opctx: &OpContext,
-        filter_kind: Option<DbDatasetKind>,
+        filter_kind: Option<DatasetKind>,
     ) -> ListResultVec<Dataset> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         opctx.check_complex_operations_allowed()?;
@@ -440,14 +440,14 @@ mod test {
         );
         assert_eq!(
             datastore
-                .dataset_list_all_batched(opctx, Some(DbDatasetKind::Crucible))
+                .dataset_list_all_batched(opctx, Some(DatasetKind::Crucible))
                 .await
                 .unwrap(),
             expected_datasets,
         );
         assert_eq!(
             datastore
-                .dataset_list_all_batched(opctx, Some(DbDatasetKind::Cockroach))
+                .dataset_list_all_batched(opctx, Some(DatasetKind::Cockroach))
                 .await
                 .unwrap(),
             [],
@@ -489,14 +489,14 @@ mod test {
         );
         assert_eq!(
             datastore
-                .dataset_list_all_batched(opctx, Some(DbDatasetKind::Crucible))
+                .dataset_list_all_batched(opctx, Some(DatasetKind::Crucible))
                 .await
                 .unwrap(),
             [dataset1.clone()],
         );
         assert_eq!(
             datastore
-                .dataset_list_all_batched(opctx, Some(DbDatasetKind::Cockroach))
+                .dataset_list_all_batched(opctx, Some(DatasetKind::Cockroach))
                 .await
                 .unwrap(),
             [dataset2.clone()],
