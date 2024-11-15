@@ -181,13 +181,11 @@ pub(crate) async fn deploy_single_node(
         let admin_url = format!("http://{admin_addr}");
         let log = opctx.log.new(slog::o!("admin_url" => admin_url.clone()));
         let client = ClickhouseSingleClient::new(&admin_url, log.clone());
-        if let Err(e) = client.init_db().await {
-            warn!(
-                log,
-                "failed to initialize single-node clickhouse database: {e}"
-            );
-        }
-        Ok(())
+        client.init_db().await.map(|_| ()).map_err(|e| {
+            anyhow!(
+                "failed to initialize single-node clickhouse database: {e}",
+            )
+        })
     } else {
         Ok(())
     }
