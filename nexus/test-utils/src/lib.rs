@@ -241,6 +241,7 @@ impl RackInitRequestBuilder {
     // - The internal DNS configuration for this service
     fn add_dataset(
         &mut self,
+        zone_id: OmicronZoneUuid,
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
         address: SocketAddrV6,
@@ -254,13 +255,7 @@ impl RackInitRequestBuilder {
         });
         let zone = self
             .internal_dns_config
-            .host_zone(
-                // XXX why is zone id being created from dataset id?
-                OmicronZoneUuid::from_untyped_uuid(
-                    *dataset_id.as_untyped_uuid(),
-                ),
-                *address.ip(),
-            )
+            .host_zone(zone_id, *address.ip())
             .expect("Failed to set up DNS for {kind}");
         self.internal_dns_config
             .service_backend_zone(service_name, &zone, address.port())
@@ -271,6 +266,7 @@ impl RackInitRequestBuilder {
     // single zone.
     fn add_clickhouse_dataset(
         &mut self,
+        zone_id: OmicronZoneUuid,
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
         address: SocketAddrV6,
@@ -284,14 +280,7 @@ impl RackInitRequestBuilder {
             },
         });
         self.internal_dns_config
-            .host_zone_clickhouse(
-                // XXX why is zone id being created from dataset id?
-                OmicronZoneUuid::from_untyped_uuid(
-                    *dataset_id.as_untyped_uuid(),
-                ),
-                ServiceName::Clickhouse,
-                address,
-            )
+            .host_zone_clickhouse(zone_id, ServiceName::Clickhouse, address)
             .expect("Failed to setup ClickHouse DNS");
     }
 }
@@ -453,6 +442,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let dataset_id = DatasetUuid::new_v4();
         eprintln!("DB address: {}", address);
         self.rack_init_builder.add_dataset(
+            OmicronZoneUuid::new_v4(),
             zpool_id,
             dataset_id,
             address,
@@ -465,10 +455,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .unwrap();
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
-            // XXX why is zone id being created from dataset id?
-            id: OmicronZoneUuid::from_untyped_uuid(
-                *dataset_id.as_untyped_uuid(),
-            ),
+            id: OmicronZoneUuid::new_v4(),
             filesystem_pool: Some(ZpoolName::new_external(zpool_id)),
             zone_type: BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb {
@@ -497,6 +484,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let http_port = http_address.port();
         let native_address = clickhouse.native_address();
         self.rack_init_builder.add_clickhouse_dataset(
+            OmicronZoneUuid::new_v4(),
             zpool_id,
             dataset_id,
             http_address,
@@ -523,10 +511,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .unwrap();
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
-            // XXX why is zone id being created from dataset id?
-            id: OmicronZoneUuid::from_untyped_uuid(
-                *dataset_id.as_untyped_uuid(),
-            ),
+            id: OmicronZoneUuid::new_v4(),
             filesystem_pool: Some(ZpoolName::new_external(zpool_id)),
             zone_type: BlueprintZoneType::Clickhouse(
                 blueprint_zone_type::Clickhouse {
