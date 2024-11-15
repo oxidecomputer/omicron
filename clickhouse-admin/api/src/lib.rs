@@ -123,8 +123,7 @@ pub trait ClickhouseAdminServerApi {
 /// The single-node server is distinct from the both the multi-node servers
 /// and its keepers. The sole purpose of this API is to serialize database
 /// initialization requests from reconfigurator execution. Multi-node clusters
-/// must eventually implement a similar interface, but the implementation will
-/// obviously be more complex.
+/// must provide a similar interface via [`ClickhouseAdminServerApi`].
 #[dropshot::api_description]
 pub trait ClickhouseAdminSingleApi {
     type Context;
