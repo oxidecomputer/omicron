@@ -311,6 +311,20 @@ pub(crate) mod test {
         };
 
         datastore
+            .volume_create(nexus_db_model::Volume::new(
+                new_volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: new_volume_id,
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
+        datastore
             .insert_region_replacement_request(&opctx, request.clone())
             .await
             .unwrap();
