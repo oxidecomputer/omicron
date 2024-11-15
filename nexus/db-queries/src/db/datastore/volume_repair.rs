@@ -11,6 +11,8 @@ use crate::db::datastore::RunnableQuery;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::VolumeRepair;
+use crate::db::DbConnection;
+use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
@@ -19,14 +21,44 @@ use omicron_common::api::external::Error;
 use uuid::Uuid;
 
 impl DataStore {
-    pub(super) fn volume_repair_insert_query(
+    pub(super) async fn volume_repair_insert_in_txn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        err: OptionalError<Error>,
         volume_id: Uuid,
         repair_id: Uuid,
-    ) -> impl RunnableQuery<VolumeRepair> {
+    ) -> Result<(), diesel::result::Error> {
+        // Do not allow a volume repair record to be created if the volume does
+        // not exist, or was hard-deleted!
+        let maybe_volume = Self::volume_get_impl(conn, volume_id).await?;
+
+        if maybe_volume.is_none() {
+            return Err(err.bail(Error::invalid_request(format!(
+                "cannot create record: volume {volume_id} does not exist"
+            ))));
+        }
+
         use db::schema::volume_repair::dsl;
 
-        diesel::insert_into(dsl::volume_repair)
+        match diesel::insert_into(dsl::volume_repair)
             .values(VolumeRepair { volume_id, repair_id })
+            .execute_async(conn)
+            .await
+        {
+            Ok(_) => Ok(()),
+
+            Err(e) => match e {
+                DieselError::DatabaseError(
+                    DatabaseErrorKind::UniqueViolation,
+                    ref error_information,
+                ) if error_information.constraint_name()
+                    == Some("volume_repair_pkey") =>
+                {
+                    Err(err.bail(Error::conflict("volume repair lock")))
+                }
+
+                _ => Err(e),
+            },
+        }
     }
 
     pub async fn volume_repair_lock(
@@ -36,21 +68,25 @@ impl DataStore {
         repair_id: Uuid,
     ) -> Result<(), Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        Self::volume_repair_insert_query(volume_id, repair_id)
-            .execute_async(&*conn)
-            .await
-            .map(|_| ())
-            .map_err(|e| match e {
-                DieselError::DatabaseError(
-                    DatabaseErrorKind::UniqueViolation,
-                    ref error_information,
-                ) if error_information.constraint_name()
-                    == Some("volume_repair_pkey") =>
-                {
-                    Error::conflict("volume repair lock")
-                }
+        let err = OptionalError::new();
 
-                _ => public_error_from_diesel(e, ErrorHandler::Server),
+        self.transaction_retry_wrapper("volume_repair_lock")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    Self::volume_repair_insert_in_txn(
+                        &conn, err, volume_id, repair_id,
+                    )
+                    .await
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    err
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
             })
     }
 
@@ -102,6 +138,7 @@ mod test {
 
     use crate::db::pub_test_utils::TestDatabase;
     use omicron_test_utils::dev;
+    use sled_agent_client::types::VolumeConstructionRequest;
 
     #[tokio::test]
     async fn volume_lock_conflict_error_returned() {
@@ -113,6 +150,20 @@ mod test {
         let lock_2 = Uuid::new_v4();
         let volume_id = Uuid::new_v4();
 
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: volume_id,
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
         datastore.volume_repair_lock(&opctx, volume_id, lock_1).await.unwrap();
 
         let err = datastore
@@ -121,6 +172,27 @@ mod test {
             .unwrap_err();
 
         assert!(matches!(err, Error::Conflict { .. }));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Assert that you can't take a volume repair lock if the volume does not
+    /// exist yet!
+    #[tokio::test]
+    async fn volume_lock_should_fail_without_volume() {
+        let logctx =
+            dev::test_setup_log("volume_lock_should_fail_without_volume");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let lock_1 = Uuid::new_v4();
+        let volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_repair_lock(&opctx, volume_id, lock_1)
+            .await
+            .unwrap_err();
 
         db.terminate().await;
         logctx.cleanup_successful();

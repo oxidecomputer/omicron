@@ -428,7 +428,7 @@ impl DataStore {
             })
     }
 
-    async fn volume_get_impl(
+    pub(super) async fn volume_get_impl(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         volume_id: Uuid,
     ) -> Result<Option<Volume>, diesel::result::Error> {
