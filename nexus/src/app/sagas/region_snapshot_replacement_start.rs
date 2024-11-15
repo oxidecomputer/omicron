@@ -759,7 +759,7 @@ async fn get_replace_params(
 
 async fn rsrss_replace_snapshot_in_volume(
     sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
+) -> Result<VolumeReplaceResult, ActionError> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
 
@@ -793,7 +793,7 @@ async fn rsrss_replace_snapshot_in_volume(
             // if the transaction occurred on the non-deleted volume so proceed
             // with the rest of the saga.
 
-            Ok(())
+            Ok(volume_replace_snapshot_result)
         }
 
         VolumeReplaceResult::ExistingVolumeDeleted => {
@@ -805,7 +805,7 @@ async fn rsrss_replace_snapshot_in_volume(
             // deleted. If this saga unwound here, that would violate the
             // property of idempotency.
 
-            Ok(())
+            Ok(volume_replace_snapshot_result)
         }
     }
 }

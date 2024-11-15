@@ -491,7 +491,7 @@ async fn srrs_get_old_region_address(
 
 async fn srrs_replace_region_in_volume(
     sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
+) -> Result<VolumeReplaceResult, ActionError> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
@@ -555,8 +555,6 @@ async fn srrs_replace_region_in_volume(
         .await
         .map_err(ActionError::action_failed)?;
 
-    debug!(log, "replacement returned {:?}", volume_replace_region_result);
-
     match volume_replace_region_result {
         VolumeReplaceResult::AlreadyHappened | VolumeReplaceResult::Done => {
             // The replacement was done either by this run of this saga node, or
@@ -565,7 +563,7 @@ async fn srrs_replace_region_in_volume(
             // with the rest of the saga (to properly clean up allocated
             // resources).
 
-            Ok(())
+            Ok(volume_replace_region_result)
         }
 
         VolumeReplaceResult::ExistingVolumeDeleted => {
