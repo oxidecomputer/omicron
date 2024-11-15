@@ -1045,7 +1045,7 @@ mod test {
             for (dataset, region) in dataset_and_regions {
                 // Must be 3 unique datasets
                 let dataset_id = dataset.id();
-                assert!(disk_datasets.insert(*dataset_id.as_untyped_uuid()));
+                assert!(disk_datasets.insert(dataset_id.into_untyped_uuid()));
                 // All regions should be unique
                 assert!(regions.insert(region.id()));
 

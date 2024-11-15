@@ -236,7 +236,7 @@ impl DataStore {
                 .await?;
             paginator = p
                 .found_batch(&batch, &|d: &nexus_db_model::Dataset| {
-                    *d.id().as_untyped_uuid()
+                    d.id().into_untyped_uuid()
                 });
             all_datasets.extend(batch);
         }
@@ -288,10 +288,9 @@ impl DataStore {
         use db::schema::dataset::dsl as dataset_dsl;
         let now = Utc::now();
 
-        let id = *id.as_untyped_uuid();
         diesel::update(dataset_dsl::dataset)
             .filter(dataset_dsl::time_deleted.is_null())
-            .filter(dataset_dsl::id.eq(id))
+            .filter(dataset_dsl::id.eq(to_db_typed_uuid(id)))
             .set(dataset_dsl::time_deleted.eq(now))
             .execute_async(conn)
             .await
