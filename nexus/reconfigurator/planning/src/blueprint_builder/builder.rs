@@ -83,6 +83,7 @@ use std::net::SocketAddrV6;
 use thiserror::Error;
 
 use super::clickhouse::ClickhouseAllocator;
+use super::external_networking::ensure_input_networking_records_appear_in_parent_blueprint;
 use super::external_networking::BuilderExternalNetworking;
 use super::external_networking::ExternalNetworkingChoice;
 use super::external_networking::ExternalSnatNetworkingChoice;
@@ -434,15 +435,22 @@ impl<'a> BlueprintBuilder<'a> {
     ) -> Result<&mut BuilderExternalNetworking<'a>, Error> {
         self.external_networking
             .get_or_try_init(|| {
-                BuilderExternalNetworking::new(
+                // Check the planning input: there shouldn't be any external
+                // networking resources in the database (the source of `input`)
+                // that we don't know about from the parent blueprint.
+                ensure_input_networking_records_appear_in_parent_blueprint(
                     self.parent_blueprint,
+                    self.input,
+                )?;
+
+                BuilderExternalNetworking::new(
                     self.zones
                         .current_zones(BlueprintZoneFilter::ShouldBeRunning)
                         .flat_map(|(_sled_id, zone_config)| zone_config),
                     self.zones
                         .current_zones(BlueprintZoneFilter::Expunged)
                         .flat_map(|(_sled_id, zone_config)| zone_config),
-                    self.input,
+                    self.input.service_ip_pool_ranges(),
                 )
             })
             .map_err(Error::Planner)?;
@@ -2619,6 +2627,7 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
 #[cfg(test)]
 pub mod test {
     use super::*;
+    use crate::blueprint_builder::external_networking::ExternalIpAllocator;
     use crate::example::example;
     use crate::example::ExampleSystemBuilder;
     use crate::example::SimRngState;
@@ -2631,7 +2640,6 @@ pub mod test {
     use nexus_types::external_api::views::SledPolicy;
     use omicron_common::address::IpRange;
     use omicron_test_utils::dev::test_setup_log;
-    use slog_error_chain::InlineErrorChain;
     use std::collections::BTreeSet;
     use std::mem;
 
@@ -2686,6 +2694,26 @@ pub mod test {
                     blueprint.display(),
                 );
             }
+        }
+
+        // There should be no duplicate external IPs.
+        //
+        // Checking this is slightly complicated due to SNAT IPs, so we'll
+        // delegate to an `ExternalIpAllocator`, which already contains the
+        // logic for dup checking. (`mark_ip_used` fails if the IP is _already_
+        // marked as used.)
+        //
+        // We create this with an empty set of service IP pool ranges; those are
+        // used for allocation, which we don't do, and aren't needed for
+        // duplicate checking.
+        let mut ip_allocator = ExternalIpAllocator::new(&[]);
+        for (external_ip, _nic) in blueprint
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .filter_map(|(_, zone)| zone.zone_type.external_networking())
+        {
+            ip_allocator
+                .mark_ip_used(&external_ip)
+                .expect("no duplicate external IPs in running zones");
         }
 
         // On any given zpool, we should have at most one zone of any given
@@ -3557,180 +3585,6 @@ pub mod test {
         // `NEXUS_OPTE_*_SUBNET`. We could hack around that by creating the
         // `BlueprintBuilder` and mucking with its internals, but that doesn't
         // seem like a particularly useful test either.
-
-        logctx.cleanup_successful();
-    }
-
-    #[test]
-    fn test_invalid_parent_blueprint_two_zones_with_same_external_ip() {
-        static TEST_NAME: &str =
-            "blueprint_builder_test_invalid_parent_blueprint_\
-             two_zones_with_same_external_ip";
-        let logctx = test_setup_log(TEST_NAME);
-        let (collection, input, mut parent) = example(&logctx.log, TEST_NAME);
-
-        // We should fail if the parent blueprint claims to contain two
-        // zones with the same external IP. Skim through the zones, copy the
-        // external IP from one Nexus zone, then assign it to a later Nexus
-        // zone.
-        let mut found_second_nexus_zone = false;
-        let mut nexus_external_ip = None;
-
-        'outer: for zones in parent.blueprint_zones.values_mut() {
-            for z in zones.zones.iter_mut() {
-                if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                    external_ip,
-                    ..
-                }) = &mut z.zone_type
-                {
-                    if let Some(ip) = nexus_external_ip {
-                        *external_ip = ip;
-                        found_second_nexus_zone = true;
-                        break 'outer;
-                    } else {
-                        nexus_external_ip = Some(*external_ip);
-                        continue 'outer;
-                    }
-                }
-            }
-        }
-        assert!(found_second_nexus_zone, "only one Nexus zone present?");
-
-        let mut builder = BlueprintBuilder::new_based_on(
-            &logctx.log,
-            &parent,
-            &input,
-            &collection,
-            "test",
-        )
-        .expect("created builder");
-
-        match builder.external_networking() {
-            Ok(_) => panic!("unexpected success"),
-            Err(err) => {
-                let err = InlineErrorChain::new(&err).to_string();
-                assert!(
-                    err.contains("duplicate external IP"),
-                    "unexpected error: {err}"
-                );
-            }
-        };
-
-        logctx.cleanup_successful();
-    }
-
-    #[test]
-    fn test_invalid_parent_blueprint_two_nexus_zones_with_same_nic_ip() {
-        static TEST_NAME: &str =
-            "blueprint_builder_test_invalid_parent_blueprint_\
-             two_nexus_zones_with_same_nic_ip";
-        let logctx = test_setup_log(TEST_NAME);
-        let (collection, input, mut parent) = example(&logctx.log, TEST_NAME);
-
-        // We should fail if the parent blueprint claims to contain two
-        // Nexus zones with the same NIC IP. Skim through the zones, copy
-        // the NIC IP from one Nexus zone, then assign it to a later
-        // Nexus zone.
-        let mut found_second_nexus_zone = false;
-        let mut nexus_nic_ip = None;
-
-        'outer: for zones in parent.blueprint_zones.values_mut() {
-            for z in zones.zones.iter_mut() {
-                if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                    nic,
-                    ..
-                }) = &mut z.zone_type
-                {
-                    if let Some(ip) = nexus_nic_ip {
-                        nic.ip = ip;
-                        found_second_nexus_zone = true;
-                        break 'outer;
-                    } else {
-                        nexus_nic_ip = Some(nic.ip);
-                        continue 'outer;
-                    }
-                }
-            }
-        }
-        assert!(found_second_nexus_zone, "only one Nexus zone present?");
-
-        let mut builder = BlueprintBuilder::new_based_on(
-            &logctx.log,
-            &parent,
-            &input,
-            &collection,
-            "test",
-        )
-        .expect("created builder");
-
-        match builder.external_networking() {
-            Ok(_) => panic!("unexpected success"),
-            Err(err) => {
-                let err = InlineErrorChain::new(&err).to_string();
-                assert!(
-                    err.contains("duplicate Nexus NIC IP"),
-                    "unexpected error: {err}"
-                );
-            }
-        };
-
-        logctx.cleanup_successful();
-    }
-
-    #[test]
-    fn test_invalid_parent_blueprint_two_zones_with_same_vnic_mac() {
-        static TEST_NAME: &str =
-            "blueprint_builder_test_invalid_parent_blueprint_\
-             two_zones_with_same_vnic_mac";
-        let logctx = test_setup_log(TEST_NAME);
-        let (collection, input, mut parent) = example(&logctx.log, TEST_NAME);
-
-        // We should fail if the parent blueprint claims to contain two
-        // zones with the same service vNIC MAC address. Skim through the
-        // zones, copy the NIC MAC from one Nexus zone, then assign it to a
-        // later Nexus zone.
-        let mut found_second_nexus_zone = false;
-        let mut nexus_nic_mac = None;
-
-        'outer: for zones in parent.blueprint_zones.values_mut() {
-            for z in zones.zones.iter_mut() {
-                if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                    nic,
-                    ..
-                }) = &mut z.zone_type
-                {
-                    if let Some(mac) = nexus_nic_mac {
-                        nic.mac = mac;
-                        found_second_nexus_zone = true;
-                        break 'outer;
-                    } else {
-                        nexus_nic_mac = Some(nic.mac);
-                        continue 'outer;
-                    }
-                }
-            }
-        }
-        assert!(found_second_nexus_zone, "only one Nexus zone present?");
-
-        let mut builder = BlueprintBuilder::new_based_on(
-            &logctx.log,
-            &parent,
-            &input,
-            &collection,
-            "test",
-        )
-        .expect("created builder");
-
-        match builder.external_networking() {
-            Ok(_) => panic!("unexpected success"),
-            Err(err) => {
-                let err = InlineErrorChain::new(&err).to_string();
-                assert!(
-                    err.contains("duplicate service vNIC MAC"),
-                    "unexpected error: {err}"
-                );
-            }
-        };
 
         logctx.cleanup_successful();
     }
