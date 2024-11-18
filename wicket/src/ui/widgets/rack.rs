@@ -147,8 +147,7 @@ impl<'a> Rack<'a> {
         let inner = block.inner(power_shelf);
         block.render(power_shelf, buf);
 
-        if i == 0 && presence == ComponentPresence::Present {
-            // Shipping racks only have one power shelf -- only show that one.
+        if presence == ComponentPresence::Present {
             let width = inner.right() - inner.left();
             let step = width / 6;
             let border = (width - step * 6) / 2;

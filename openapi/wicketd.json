@@ -6676,7 +6676,12 @@
             ]
           },
           "uplink_port_fec": {
-            "$ref": "#/components/schemas/PortFec"
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PortFec"
+              }
+            ]
           },
           "uplink_port_speed": {
             "$ref": "#/components/schemas/PortSpeed"
@@ -6686,7 +6691,6 @@
           "addresses",
           "autoneg",
           "routes",
-          "uplink_port_fec",
           "uplink_port_speed"
         ],
         "additionalProperties": false
