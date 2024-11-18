@@ -130,6 +130,7 @@ impl<T: Ledgerable> Ledger<T> {
                 warn!(self.log, "Failed to write ledger"; "path" => ?path, "err" => ?e);
                 failed_paths.push((path.to_path_buf(), e));
             } else {
+                info!(self.log, "Successfully wrote to ledger"; "path" => ?path);
                 one_successful_write = true;
             }
         }
