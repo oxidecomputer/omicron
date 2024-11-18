@@ -17167,7 +17167,7 @@
           },
           "fec": {
             "nullable": true,
-            "description": "The forward error correction mode of the link.",
+            "description": "The requested forward-error correction method.  If this is not specified, the standard FEC for the underlying media will be applied if it can be determined.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/LinkFec"
@@ -20411,7 +20411,7 @@
           },
           "fec": {
             "nullable": true,
-            "description": "The forward error correction mode of the link.",
+            "description": "The requested forward-error correction method.  If this is not specified, the standard FEC for the underlying media will be applied if it can be determined.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/LinkFec"
