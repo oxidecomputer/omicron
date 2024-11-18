@@ -3482,7 +3482,11 @@ impl ServiceManager {
     //
     // If the requested zones contain any datasets not configured on this sled,
     // an error is returned.
-    async fn check_requested_zone_datasets_exist(
+    //
+    // In this check the configured datasets are those intended to exist as
+    // written in a ledger. The datasets themselves may not actually physically
+    // exist yet, or they may have failed.
+    async fn check_requested_zone_datasets_configured(
         &self,
         request: &OmicronZonesConfig,
     ) -> Result<(), Error> {
@@ -3544,7 +3548,7 @@ impl ServiceManager {
         new_request: OmicronZonesConfig,
         fake_install_dir: Option<&String>,
     ) -> Result<(), Error> {
-        self.check_requested_zone_datasets_exist(&new_request).await?;
+        self.check_requested_zone_datasets_configured(&new_request).await?;
 
         // Do some data-normalization to ensure we can compare the "requested
         // set" vs the "existing set" as HashSets.
