@@ -33,19 +33,19 @@ impl ServerContext {
 
 pub struct SingleServerContext {
     clickhouse_cli: ClickhouseCli,
-    db_initialized: Arc<Mutex<bool>>,
+    initialization_lock: Arc<Mutex<()>>,
 }
 
 impl SingleServerContext {
     pub fn new(clickhouse_cli: ClickhouseCli) -> Self {
-        Self { clickhouse_cli, db_initialized: Arc::new(Mutex::new(false)) }
+        Self { clickhouse_cli, initialization_lock: Arc::new(Mutex::new(())) }
     }
 
     pub fn clickhouse_cli(&self) -> &ClickhouseCli {
         &self.clickhouse_cli
     }
 
-    pub fn db_initialized(&self) -> Arc<Mutex<bool>> {
-        self.db_initialized.clone()
+    pub fn initialization_lock(&self) -> Arc<Mutex<()>> {
+        self.initialization_lock.clone()
     }
 }

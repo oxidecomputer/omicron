@@ -130,38 +130,34 @@ impl ClickhouseAdminSingleApi for ClickhouseAdminSingleImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let log = &rqctx.log;
         let ctx = rqctx.context();
-        let initialized = ctx.db_initialized();
-        let mut initialized = initialized.lock().await;
-        if !*initialized {
-            let http_address = ctx.clickhouse_cli().listen_address;
-            let native_address = SocketAddrV6::new(
-                *http_address.ip(),
-                CLICKHOUSE_TCP_PORT,
-                0,
-                0,
-            );
+        let http_address = ctx.clickhouse_cli().listen_address;
+        let native_address =
+            SocketAddrV6::new(*http_address.ip(), CLICKHOUSE_TCP_PORT, 0, 0);
+        let client = OximeterClient::new(
+            http_address.into(),
+            native_address.into(),
+            log,
+        );
+        debug!(
+            log,
+            "initializing single-node ClickHouse \
+             at {http_address} to version {OXIMETER_VERSION}"
+        );
 
-            let client = OximeterClient::new(
-                http_address.into(),
-                native_address.into(),
-                log,
-            );
-            debug!(
-                log,
-                "initializing single-node ClickHouse \
-                 at {http_address} to version {OXIMETER_VERSION}"
-            );
-            client
-                .initialize_db_with_version(false, OXIMETER_VERSION)
-                .await
-                .map_err(|e| {
-                    HttpError::for_internal_error(format!(
-                        "can't initialize single-node ClickHouse \
-                         at {http_address} to version {OXIMETER_VERSION}: {e}",
-                    ))
-                })?;
-            *initialized = true;
-        }
+        // Database initialization is idempotent, but not concurrency-safe.
+        // Use a mutex to serialize requests.
+        let lock = ctx.initialization_lock();
+        let _guard = lock.lock().await;
+        client
+            .initialize_db_with_version(false, OXIMETER_VERSION)
+            .await
+            .map_err(|e| {
+                HttpError::for_internal_error(format!(
+                    "can't initialize single-node ClickHouse \
+                     at {http_address} to version {OXIMETER_VERSION}: {e}",
+                ))
+            })?;
+
         Ok(HttpResponseUpdatedNoContent())
     }
 }
