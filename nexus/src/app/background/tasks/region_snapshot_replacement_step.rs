@@ -655,11 +655,25 @@ mod test {
 
         let request_id = request.id;
 
+        let volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(), // not required to match!
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
         datastore
             .insert_region_snapshot_replacement_request_with_volume_id(
-                &opctx,
-                request,
-                Uuid::new_v4(),
+                &opctx, request, volume_id,
             )
             .await
             .unwrap();
@@ -813,11 +827,27 @@ mod test {
         // Now, add some Complete records and make sure the garbage collection
         // saga is invoked.
 
+        let volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(),
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
         let result = datastore
             .insert_region_snapshot_replacement_step(&opctx, {
                 let mut record = RegionSnapshotReplacementStep::new(
                     Uuid::new_v4(),
-                    Uuid::new_v4(),
+                    volume_id,
                 );
 
                 record.replacement_state =
@@ -831,11 +861,27 @@ mod test {
 
         assert!(matches!(result, InsertStepResult::Inserted { .. }));
 
+        let volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(),
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
         let result = datastore
             .insert_region_snapshot_replacement_step(&opctx, {
                 let mut record = RegionSnapshotReplacementStep::new(
                     Uuid::new_v4(),
-                    Uuid::new_v4(),
+                    volume_id,
                 );
 
                 record.replacement_state =

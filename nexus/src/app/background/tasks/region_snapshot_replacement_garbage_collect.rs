@@ -154,6 +154,7 @@ mod test {
     use nexus_db_model::RegionSnapshotReplacement;
     use nexus_db_model::RegionSnapshotReplacementState;
     use nexus_test_utils_macros::nexus_test;
+    use sled_agent_client::types::VolumeConstructionRequest;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -198,11 +199,25 @@ mod test {
 
         let request_1_id = request.id;
 
+        let volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(), // not required to match!
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
         datastore
             .insert_region_snapshot_replacement_request_with_volume_id(
-                &opctx,
-                request,
-                Uuid::new_v4(),
+                &opctx, request, volume_id,
             )
             .await
             .unwrap();
@@ -218,11 +233,25 @@ mod test {
 
         let request_2_id = request.id;
 
+        let volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(), // not required to match!
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
         datastore
             .insert_region_snapshot_replacement_request_with_volume_id(
-                &opctx,
-                request,
-                Uuid::new_v4(),
+                &opctx, request, volume_id,
             )
             .await
             .unwrap();

@@ -17,12 +17,12 @@ use crate::db::model::RegionSnapshotReplacement;
 use crate::db::model::RegionSnapshotReplacementState;
 use crate::db::model::RegionSnapshotReplacementStep;
 use crate::db::model::RegionSnapshotReplacementStepState;
-use crate::db::model::VolumeRepair;
 use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use crate::db::TransactionError;
+use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
@@ -85,32 +85,42 @@ impl DataStore {
         request: RegionSnapshotReplacement,
         volume_id: Uuid,
     ) -> Result<(), Error> {
+        let err = OptionalError::new();
         self.pool_connection_authorized(opctx)
             .await?
-            .transaction_async(|conn| async move {
-                use db::schema::region_snapshot_replacement::dsl;
-                use db::schema::volume_repair::dsl as volume_repair_dsl;
+            .transaction_async(|conn| {
+                let err = err.clone();
+                async move {
+                    use db::schema::region_snapshot_replacement::dsl;
 
-                // An associated volume repair record isn't _strictly_ needed:
-                // snapshot volumes should never be directly constructed, and
-                // therefore won't ever have an associated Upstairs that
-                // receives a volume replacement request. However it's being
-                // done in an attempt to be overly cautious.
+                    // An associated volume repair record isn't _strictly_
+                    // needed: snapshot volumes should never be directly
+                    // constructed, and therefore won't ever have an associated
+                    // Upstairs that receives a volume replacement request.
+                    // However it's being done in an attempt to be overly
+                    // cautious.
 
-                diesel::insert_into(volume_repair_dsl::volume_repair)
-                    .values(VolumeRepair { volume_id, repair_id: request.id })
-                    .execute_async(&conn)
+                    Self::volume_repair_insert_in_txn(
+                        &conn, err, volume_id, request.id,
+                    )
                     .await?;
 
-                diesel::insert_into(dsl::region_snapshot_replacement)
-                    .values(request)
-                    .execute_async(&conn)
-                    .await?;
+                    diesel::insert_into(dsl::region_snapshot_replacement)
+                        .values(request)
+                        .execute_async(&conn)
+                        .await?;
 
-                Ok(())
+                    Ok(())
+                }
             })
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    err
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
     }
 
     pub async fn get_region_snapshot_replacement_request_by_id(
@@ -749,6 +759,7 @@ impl DataStore {
         opctx: &OpContext,
         request: RegionSnapshotReplacementStep,
     ) -> Result<InsertStepResult, Error> {
+        let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
 
         self.transaction_retry_wrapper(
@@ -756,10 +767,10 @@ impl DataStore {
         )
         .transaction(&conn, |conn| {
             let request = request.clone();
+            let err = err.clone();
 
             async move {
                 use db::schema::region_snapshot_replacement_step::dsl;
-                use db::schema::volume_repair::dsl as volume_repair_dsl;
 
                 // Skip inserting this new record if we found another region
                 // snapshot replacement step with this volume in the step's
@@ -812,13 +823,13 @@ impl DataStore {
                 // volume replacement: create an associated volume repair
                 // record.
 
-                diesel::insert_into(volume_repair_dsl::volume_repair)
-                    .values(VolumeRepair {
-                        volume_id: request.volume_id,
-                        repair_id: request.id,
-                    })
-                    .execute_async(&conn)
-                    .await?;
+                Self::volume_repair_insert_in_txn(
+                    &conn,
+                    err,
+                    request.volume_id,
+                    request.id,
+                )
+                .await?;
 
                 let request_id = request.id;
 
@@ -831,7 +842,13 @@ impl DataStore {
             }
         })
         .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        .map_err(|e| {
+            if let Some(err) = err.take() {
+                err
+            } else {
+                public_error_from_diesel(e, ErrorHandler::Server)
+            }
+        })
     }
 
     pub async fn get_region_snapshot_replacement_step_by_id(
@@ -1274,6 +1291,20 @@ mod test {
 
         let volume_id = Uuid::new_v4();
 
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(), // not required to match!
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
         let request_1 = RegionSnapshotReplacement::new(
             dataset_1_id,
             region_1_id,
@@ -1320,6 +1351,20 @@ mod test {
 
         let volume_id = Uuid::new_v4();
 
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(), // not required to match!
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
         let request_1 = RegionSnapshotReplacement::new(
             dataset_1_id,
             region_1_id,
@@ -1356,6 +1401,20 @@ mod test {
 
         let volume_id = Uuid::new_v4();
 
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(), // not required to match!
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
         let request =
             RegionSnapshotReplacement::new(dataset_id, region_id, snapshot_id);
 
@@ -1388,11 +1447,25 @@ mod test {
 
         // Insert some replacement steps, and make sure counting works
 
+        let step_volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                step_volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(), // not required to match!
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
         {
-            let step = RegionSnapshotReplacementStep::new(
-                request_id,
-                Uuid::new_v4(), // volume id
-            );
+            let step =
+                RegionSnapshotReplacementStep::new(request_id, step_volume_id);
 
             let result = datastore
                 .insert_region_snapshot_replacement_step(&opctx, step)
@@ -1421,11 +1494,25 @@ mod test {
             1,
         );
 
+        let step_volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                step_volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(), // not required to match!
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
         {
-            let mut step = RegionSnapshotReplacementStep::new(
-                request_id,
-                Uuid::new_v4(), // volume id
-            );
+            let mut step =
+                RegionSnapshotReplacementStep::new(request_id, step_volume_id);
 
             step.replacement_state =
                 RegionSnapshotReplacementStepState::Running;
@@ -1457,11 +1544,25 @@ mod test {
             1,
         );
 
+        let step_volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                step_volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(), // not required to match!
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
         {
-            let mut step = RegionSnapshotReplacementStep::new(
-                request_id,
-                Uuid::new_v4(), // volume id
-            );
+            let mut step =
+                RegionSnapshotReplacementStep::new(request_id, step_volume_id);
 
             // VolumeDeleted does not count as "in-progress"
             step.replacement_state =
@@ -1510,6 +1611,20 @@ mod test {
         // per volume.
 
         let volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(), // not required to match!
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
 
         let step =
             RegionSnapshotReplacementStep::new(Uuid::new_v4(), volume_id);
@@ -1605,6 +1720,22 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
+        let volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(), // not required to match!
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
         let mut request = RegionSnapshotReplacement::new(
             Uuid::new_v4(),
             Uuid::new_v4(),
@@ -1616,9 +1747,7 @@ mod test {
 
         datastore
             .insert_region_snapshot_replacement_request_with_volume_id(
-                &opctx,
-                request,
-                Uuid::new_v4(),
+                &opctx, request, volume_id,
             )
             .await
             .unwrap();
@@ -1631,8 +1760,24 @@ mod test {
             .unwrap()
             .is_empty());
 
+        let step_volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                step_volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(), // not required to match!
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
         let mut step =
-            RegionSnapshotReplacementStep::new(request_id, Uuid::new_v4());
+            RegionSnapshotReplacementStep::new(request_id, step_volume_id);
         step.replacement_state = RegionSnapshotReplacementStepState::Complete;
 
         let result = datastore
@@ -1642,8 +1787,24 @@ mod test {
 
         assert!(matches!(result, InsertStepResult::Inserted { .. }));
 
+        let step_volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                step_volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(), // not required to match!
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
         let mut step =
-            RegionSnapshotReplacementStep::new(request_id, Uuid::new_v4());
+            RegionSnapshotReplacementStep::new(request_id, step_volume_id);
         step.replacement_state = RegionSnapshotReplacementStepState::Complete;
 
         let result = datastore
@@ -1682,6 +1843,34 @@ mod test {
         let request_id = Uuid::new_v4();
         let volume_id = Uuid::new_v4();
         let old_snapshot_volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(), // not required to match!
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                old_snapshot_volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(), // not required to match!
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
 
         let mut step =
             RegionSnapshotReplacementStep::new(request_id, volume_id);

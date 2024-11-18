@@ -276,6 +276,7 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external;
     use omicron_uuid_kinds::GenericUuid;
+    use sled_agent_client::types::VolumeConstructionRequest;
     use std::collections::BTreeMap;
     use uuid::Uuid;
 
@@ -317,11 +318,25 @@ mod test {
 
         let request_id = request.id;
 
+        let volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(), // not required to match!
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
         datastore
             .insert_region_snapshot_replacement_request_with_volume_id(
-                &opctx,
-                request,
-                Uuid::new_v4(),
+                &opctx, request, volume_id,
             )
             .await
             .unwrap();
@@ -408,6 +423,22 @@ mod test {
             .await
             .unwrap();
 
+        let volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: volume_id,
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
         datastore
             .project_ensure_snapshot(
                 &opctx,
@@ -427,7 +458,7 @@ mod test {
 
                     project_id,
                     disk_id: Uuid::new_v4(),
-                    volume_id: Uuid::new_v4(),
+                    volume_id,
                     destination_volume_id: Uuid::new_v4(),
 
                     gen: Generation::new(),

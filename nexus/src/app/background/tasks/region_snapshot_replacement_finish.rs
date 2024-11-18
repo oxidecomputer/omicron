@@ -197,6 +197,7 @@ mod test {
     use nexus_db_model::RegionSnapshotReplacementStepState;
     use nexus_db_queries::db::datastore::region_snapshot_replacement;
     use nexus_test_utils_macros::nexus_test;
+    use sled_agent_client::types::VolumeConstructionRequest;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -237,11 +238,25 @@ mod test {
 
         let request_id = request.id;
 
+        let volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(), // not required to match!
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
         datastore
             .insert_region_snapshot_replacement_request_with_volume_id(
-                &opctx,
-                request,
-                Uuid::new_v4(),
+                &opctx, request, volume_id,
             )
             .await
             .unwrap();
@@ -298,14 +313,44 @@ mod test {
 
         let operating_saga_id = Uuid::new_v4();
 
+        let step_volume_id = Uuid::new_v4();
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                step_volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(), // not required to match!
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
         let mut step_1 =
-            RegionSnapshotReplacementStep::new(request_id, Uuid::new_v4());
+            RegionSnapshotReplacementStep::new(request_id, step_volume_id);
         step_1.replacement_state = RegionSnapshotReplacementStepState::Complete;
         step_1.operating_saga_id = Some(operating_saga_id);
         let step_1_id = step_1.id;
 
+        let step_volume_id = Uuid::new_v4();
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                step_volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(), // not required to match!
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
         let mut step_2 =
-            RegionSnapshotReplacementStep::new(request_id, Uuid::new_v4());
+            RegionSnapshotReplacementStep::new(request_id, step_volume_id);
         step_2.replacement_state = RegionSnapshotReplacementStepState::Complete;
         step_2.operating_saga_id = Some(operating_saga_id);
         let step_2_id = step_2.id;
