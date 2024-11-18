@@ -124,7 +124,7 @@ pub async fn start_single_admin_server(
     let (drain, registration) = slog_dtrace::with_drain(
         server_config
             .log
-            .to_logger("clickhouse-admin-keeper")
+            .to_logger("clickhouse-admin-single")
             .map_err(StartError::InitializeLogger)?,
     );
     let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
