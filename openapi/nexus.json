@@ -13217,7 +13217,7 @@
         "type": "object",
         "properties": {
           "private_key": {
-            "description": "request signing private key (base64 encoded der file)",
+            "description": "request signing RSA private key in PKCS#1 format (base64 encoded der file)",
             "type": "string"
           },
           "public_cert": {
