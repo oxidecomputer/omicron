@@ -26,7 +26,6 @@ use sled_storage::manager::NestedDatasetConfig;
 use sled_storage::manager::NestedDatasetListOptions;
 use sled_storage::manager::NestedDatasetLocation;
 use std::io::Read;
-use std::io::Seek;
 use std::io::Write;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
@@ -88,19 +87,47 @@ impl From<Error> for HttpError {
     }
 }
 
+// Implements "seeking" and "putting a capacity on a file" manually.
+//
+// TODO: When https://github.com/zip-rs/zip2/issues/231 is resolved,
+// this method should be replaced by calling "seek" directly,
+// via the "by_name_seek" method from the zip crate.
+fn skip_and_limit(
+    mut reader: impl std::io::Read,
+    skip: usize,
+    limit: usize,
+) -> std::io::Result<impl std::io::Read> {
+    const BUF_SIZE: usize = 4096;
+    let mut buf = vec![0; BUF_SIZE];
+    let mut skip_left = skip;
+
+    while skip_left > 0 {
+        let to_read = std::cmp::min(skip_left, BUF_SIZE);
+        reader.read_exact(&mut buf[0..to_read])?;
+        skip_left -= to_read;
+    }
+
+    Ok(reader.take(limit as u64))
+}
+
 fn stream_zip_entry_helper(
     tx: &tokio::sync::mpsc::Sender<Result<Vec<u8>, HttpError>>,
     mut archive: zip::ZipArchive<std::fs::File>,
     entry_path: String,
     range: Option<SingleRange>,
 ) -> Result<(), Error> {
-    let mut reader = archive.by_name_seek(&entry_path)?;
+    // TODO: When https://github.com/zip-rs/zip2/issues/231 is resolved,
+    // this should call "by_name_seek" instead.
+    let reader = archive.by_name(&entry_path)?;
 
     let mut reader: Box<dyn std::io::Read> = match range {
         Some(range) => {
-            reader.seek(std::io::SeekFrom::Start(range.start()))?;
-            Box::new(reader.take(range.content_length().get()))
-        }
+            Box::new(skip_and_limit(
+                reader,
+                range.start() as usize,
+                range.content_length().get() as usize
+            )?)
+        },
         None => Box::new(reader),
     };
 
