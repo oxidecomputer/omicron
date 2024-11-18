@@ -15,7 +15,6 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::LookupType;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::test_cmds::assert_exit_code;
@@ -34,7 +33,6 @@ use subprocess::Exec;
 use subprocess::ExitStatus;
 use swrite::swriteln;
 use swrite::SWrite;
-use uuid::Uuid;
 
 fn path_to_cli() -> PathBuf {
     path_to_executable(env!("CARGO_BIN_EXE_reconfigurator-cli"))
