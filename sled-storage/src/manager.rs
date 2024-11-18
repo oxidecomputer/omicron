@@ -915,16 +915,14 @@ impl StorageManager {
         let result = self.datasets_ensure_internal(&log, &config).await;
 
         let ledger_data = ledger.data_mut();
-        if had_old_ledger && *ledger_data == config {
-            info!(
-                log,
-                "Skipping dataset ledger update because nothing changed"
-            );
-            return Ok(result);
-        }
-        *ledger_data = config;
-        ledger.commit().await?;
 
+        // Commit the ledger to storage if either:
+        // - No ledger exists in storage, or
+        // - The ledger has changed
+        if !had_old_ledger || *ledger_data != config {
+            *ledger_data = config;
+            ledger.commit().await?;
+        }
         Ok(result)
     }
 
@@ -1187,11 +1185,14 @@ impl StorageManager {
             self.omicron_physical_disks_ensure_internal(&log, &config).await?;
 
         let ledger_data = ledger.data_mut();
-        if had_old_ledger && *ledger_data == config {
-            return Ok(result);
+
+        // Commit the ledger to storage if either:
+        // - No ledger exists in storage, or
+        // - The ledger has changed
+        if !had_old_ledger || *ledger_data != config {
+            *ledger_data = config;
+            ledger.commit().await?;
         }
-        *ledger_data = config;
-        ledger.commit().await?;
 
         Ok(result)
     }

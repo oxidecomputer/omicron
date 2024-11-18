@@ -104,6 +104,7 @@ use sled_storage::dataset::{CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
@@ -279,7 +280,7 @@ pub enum Error {
     Storage(#[from] sled_storage::error::Error),
 
     #[error("Missing datasets: {datasets:?}")]
-    MissingDatasets { datasets: HashSet<DatasetName> },
+    MissingDatasets { datasets: BTreeSet<DatasetName> },
 
     #[error(
         "Requested generation ({requested}) is older than current ({current})"
@@ -3487,28 +3488,19 @@ impl ServiceManager {
     ) -> Result<(), Error> {
         // Before we provision these zones, inspect the request, and
         // check all the datasets we're trying to make.
-        let mut requested_datasets = HashSet::new();
+        let mut requested_datasets = BTreeSet::new();
         for zone in &request.zones {
             if let Some(dataset) = zone.dataset_name() {
                 requested_datasets.insert(dataset);
             }
-
-            if let Some(pool) = zone.filesystem_pool.as_ref() {
-                requested_datasets.insert(DatasetName::new(
-                    pool.clone(),
-                    DatasetKind::TransientZone {
-                        name: illumos_utils::zone::zone_name(
-                            zone.zone_type.kind().zone_prefix(),
-                            Some(zone.id),
-                        ),
-                    },
-                ));
+            if let Some(dataset) = zone.transient_zone_dataset_name() {
+                requested_datasets.insert(dataset);
             }
         }
 
         // These datasets are configured to be part of the control plane.
         let datasets_config = self.inner.storage.datasets_config_list().await?;
-        let existing_datasets: HashSet<_> = datasets_config
+        let existing_datasets: BTreeSet<_> = datasets_config
             .datasets
             .into_values()
             .map(|config| config.name)
@@ -3518,7 +3510,7 @@ impl ServiceManager {
         //
         // (It's fine to have "existing_datasets" not contained in the
         // request set).
-        let missing_datasets: HashSet<_> = requested_datasets
+        let missing_datasets: BTreeSet<_> = requested_datasets
             .difference(&existing_datasets)
             .cloned()
             .collect();
