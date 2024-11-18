@@ -8,13 +8,14 @@ use expectorate::assert_contents;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_test_utils::resource_helpers::DiskTestBuilder;
+use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::LookupType;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::test_cmds::assert_exit_code;
@@ -33,6 +34,7 @@ use subprocess::Exec;
 use subprocess::ExitStatus;
 use swrite::swriteln;
 use swrite::SWrite;
+use uuid::Uuid;
 
 fn path_to_cli() -> PathBuf {
     path_to_executable(env!("CARGO_BIN_EXE_reconfigurator-cli"))
@@ -93,18 +95,10 @@ type ControlPlaneTestContext =
 // import it back.
 #[nexus_test]
 async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
-    // Setup
-    //
-    // Add a zpool to all sleds, just to ensure that all new zones can find
-    // a transient filesystem wherever they end up being placed.
-    DiskTestBuilder::new(&cptestctx)
-        .on_all_sleds()
-        .with_zpool_count(1)
-        .build()
-        .await;
-
+    let initial_blueprint_id = cptestctx.initial_blueprint_id;
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
+
     let log = &cptestctx.logctx.log;
     let opctx = OpContext::for_background(
         log.clone(),
@@ -112,6 +106,40 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
         authn::Context::internal_api(),
         datastore.clone(),
     );
+
+    let initial_blueprint = datastore
+        .blueprint_read(
+            &opctx,
+            &nexus_db_queries::authz::Blueprint::new(
+                nexus_db_queries::authz::FLEET,
+                initial_blueprint_id,
+                LookupType::ById(initial_blueprint_id),
+            ),
+        )
+        .await
+        .expect("read initial blueprint");
+
+    // Setup
+    //
+    // For all the disks our blueprint says each sled should have, actually
+    // insert them into the DB. This is working around nexus-test-utils's setup
+    // being a little scattershot and spread out; tests are supposed to do their
+    // own disk setup.
+    let mut disk_test = DiskTest::new(&cptestctx).await;
+    for (sled_id, disks_config) in initial_blueprint.blueprint_disks.iter() {
+        for disk in &disks_config.disks {
+            disk_test
+                .add_zpool_with_dataset_ext(
+                    *sled_id,
+                    disk.id,
+                    disk.pool_id,
+                    Uuid::new_v4(),
+                    1024,
+                )
+                .await;
+        }
+    }
+
     let tmpdir = camino_tempfile::tempdir().expect("failed to create tmpdir");
     // Save the path and prevent the temporary directory from being cleaned up
     // automatically.  We want to be preserve the contents if this test fails.
