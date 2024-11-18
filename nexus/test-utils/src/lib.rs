@@ -438,11 +438,12 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .parse::<std::net::SocketAddrV6>()
             .expect("Failed to parse port");
 
+        let zone_id = OmicronZoneUuid::new_v4();
         let zpool_id = ZpoolUuid::new_v4();
         let dataset_id = DatasetUuid::new_v4();
         eprintln!("DB address: {}", address);
         self.rack_init_builder.add_dataset(
-            OmicronZoneUuid::new_v4(),
+            zone_id,
             zpool_id,
             dataset_id,
             address,
@@ -455,7 +456,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .unwrap();
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
-            id: OmicronZoneUuid::new_v4(),
+            id: zone_id,
             filesystem_pool: Some(ZpoolName::new_external(zpool_id)),
             zone_type: BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb {
@@ -478,13 +479,14 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .await
             .unwrap();
 
+        let zone_id = OmicronZoneUuid::new_v4();
         let zpool_id = ZpoolUuid::new_v4();
         let dataset_id = DatasetUuid::new_v4();
         let http_address = clickhouse.http_address();
         let http_port = http_address.port();
         let native_address = clickhouse.native_address();
         self.rack_init_builder.add_clickhouse_dataset(
-            OmicronZoneUuid::new_v4(),
+            zone_id,
             zpool_id,
             dataset_id,
             http_address,
@@ -511,7 +513,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .unwrap();
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
-            id: OmicronZoneUuid::new_v4(),
+            id: zone_id,
             filesystem_pool: Some(ZpoolName::new_external(zpool_id)),
             zone_type: BlueprintZoneType::Clickhouse(
                 blueprint_zone_type::Clickhouse {
