@@ -415,6 +415,8 @@ pub struct BackgroundTaskConfig {
     /// configuration for region snapshot replacement finisher task
     pub region_snapshot_replacement_finish:
         RegionSnapshotReplacementFinishConfig,
+    /// configuration for TUF artifact replication task
+    pub tuf_artifact_replication: TufArtifactReplicationConfig,
 }
 
 #[serde_as]
@@ -700,6 +702,14 @@ pub struct RegionSnapshotReplacementFinishConfig {
     pub period_secs: Duration,
 }
 
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TufArtifactReplicationConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PackageConfig {
@@ -954,6 +964,7 @@ mod test {
             region_snapshot_replacement_garbage_collection.period_secs = 30
             region_snapshot_replacement_step.period_secs = 30
             region_snapshot_replacement_finish.period_secs = 30
+            tuf_artifact_replication.period_secs = 60
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1144,6 +1155,10 @@ mod test {
                             RegionSnapshotReplacementFinishConfig {
                                 period_secs: Duration::from_secs(30),
                             },
+                        tuf_artifact_replication:
+                            TufArtifactReplicationConfig {
+                                period_secs: Duration::from_secs(60)
+                            },
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -1225,6 +1240,7 @@ mod test {
             region_snapshot_replacement_garbage_collection.period_secs = 30
             region_snapshot_replacement_step.period_secs = 30
             region_snapshot_replacement_finish.period_secs = 30
+            tuf_artifact_replication.period_secs = 60
             [default_region_allocation_strategy]
             type = "random"
             "##,

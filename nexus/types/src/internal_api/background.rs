@@ -193,3 +193,19 @@ impl std::fmt::Display for ReincarnatableInstance {
         write!(f, "{instance_id} ({reason})")
     }
 }
+
+/// The status of a `tuf_artifact_replication` background task activation
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TufArtifactReplicationStatus {
+    /// Number of requests handled by sled agents successfully.
+    pub requests_ok: usize,
+    /// Number of requests to sled agents that failed.
+    pub requests_err: usize,
+    /// Number of requests that were not sent during this activation because the
+    /// limits had been reached.
+    pub requests_outstanding: usize,
+    /// The number of repositories this Nexus instance is keeping in local
+    /// storage. Local repositories are deleted once all their artifacts are
+    /// sufficiently replicated.
+    pub local_repos: usize,
+}
