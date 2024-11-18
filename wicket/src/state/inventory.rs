@@ -20,8 +20,7 @@ pub static ALL_COMPONENT_IDS: Lazy<Vec<ComponentId>> = Lazy::new(|| {
     (0..=31u8)
         .map(ComponentId::Sled)
         .chain((0..=1u8).map(ComponentId::Switch))
-        // Currently shipping racks don't have PSC 1.
-        .chain(std::iter::once(ComponentId::Psc(0)))
+        .chain((0..=1u8).map(ComponentId::Psc))
         .collect()
 });
 
@@ -239,9 +238,7 @@ impl ComponentId {
     pub const MAX_SWITCH_ID: u8 = 1;
 
     /// The maximum possible power shelf ID.
-    ///
-    /// Currently shipping racks don't have PSC 1.
-    pub const MAX_PSC_ID: u8 = 0;
+    pub const MAX_PSC_ID: u8 = 1;
 
     pub fn new_sled(slot: u8) -> Result<Self> {
         if slot > Self::MAX_SLED_ID {
