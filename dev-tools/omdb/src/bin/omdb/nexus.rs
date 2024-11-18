@@ -51,6 +51,7 @@ use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
+use nexus_types::internal_api::background::TufArtifactReplicationStatus;
 use nexus_types::inventory::BaseboardId;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DemoSagaUuid;
@@ -1928,6 +1929,33 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 }
             }
         };
+    } else if name == "tuf_artifact_replication" {
+        match serde_json::from_value::<TufArtifactReplicationStatus>(
+            details.clone(),
+        ) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(status) => {
+                const ROWS: &[&str] = &[
+                    "requests ok:",
+                    "requests errored:",
+                    "requests outstanding:",
+                    "local repos:",
+                ];
+                const WIDTH: usize = const_max_len(ROWS);
+                println!("    last execution:");
+                for (label, value) in ROWS.iter().zip([
+                    status.requests_ok,
+                    status.requests_err,
+                    status.requests_outstanding,
+                    status.local_repos,
+                ]) {
+                    println!("      {label:<WIDTH$} {value:>3}");
+                }
+            }
+        }
     } else {
         println!(
             "warning: unknown background task: {:?} \

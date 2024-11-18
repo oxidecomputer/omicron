@@ -384,6 +384,10 @@ task: "switch_port_config_manager"
     manages switch port settings for rack switches
 
 
+task: "tuf_artifact_replication"
+    replicate update repo artifacts across sleds
+
+
 task: "v2p_manager"
     manages opte v2p mappings for vpc networking
 
@@ -697,6 +701,17 @@ task: "switch_port_config_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
+
+task: "tuf_artifact_replication"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last execution:
+      requests ok:            0
+      requests errored:       0
+      requests outstanding:   0
+      local repos:            0
 
 task: "v2p_manager"
   configured period: every <REDACTED_DURATION>s
@@ -1140,6 +1155,17 @@ task: "switch_port_config_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
+
+task: "tuf_artifact_replication"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last execution:
+      requests ok:            0
+      requests errored:       0
+      requests outstanding:   0
+      local repos:            0
 
 task: "v2p_manager"
   configured period: every <REDACTED_DURATION>s
