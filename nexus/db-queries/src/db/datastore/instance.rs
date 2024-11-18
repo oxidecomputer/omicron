@@ -1132,6 +1132,15 @@ impl DataStore {
     /// Set an instance's boot disk to the provided `boot_disk_id` (or unset it,
     /// if `boot_disk_id` is `None`), within an existing transaction.
     ///
+    /// The instance must be in an updatable state for this update to succeed.
+    /// If the instance is not updatable, return `Error::Conflict`.
+    ///
+    /// To update the boot disk an instance must not be incarnated by a VMM and,
+    /// if the boot disk is to be set non-NULL, the disk must already be
+    /// attached. These constraints together ensure that the boot disk reflected
+    /// in Nexus is always reflective of the disk a VMM should be allowed to
+    /// use.
+    ///
     /// This is factored out as it is used by both
     /// [`DataStore::instance_reconfigure`], which mutates many instance fields,
     /// and [`DataStore::instance_set_boot_disk`], which only touches the boot
@@ -1207,6 +1216,12 @@ impl DataStore {
 
                 // There should be no other reason the update fails on an
                 // existing instance.
+                warn!(
+                    self.log, "failed to instance_set_boot_disk_on_conn on an \
+                    instance that should have been updatable";
+                    "instance_id" => %r.found.id(),
+                    "new boot_disk_id" => ?boot_disk_id
+                );
                 return Err(err.bail(Error::internal_error(
                     "unable to reconfigure instance boot disk",
                 )));
@@ -1217,6 +1232,14 @@ impl DataStore {
 
     /// Set an instance's CPU count and memory size to the provided values,
     /// within an existing transaction.
+    ///
+    /// The instance must be in an updatable state for this update to succeed.
+    /// If the instance is not updatable, return `Error::Conflict`.
+    ///
+    /// To update an instance's CPU or memory sizes an instance must not be
+    /// incarnated by a VMM. This constraint ensures that the sizes recorded in
+    /// Nexus sum to the actual peak possible resource usage of running
+    /// instances.
     ///
     /// Does not allow setting sizes of running instances to ensure that if an
     /// instance is running, its resource reservation matches what we record in
@@ -1266,6 +1289,13 @@ impl DataStore {
 
                 // There should be no other reason the update fails on an
                 // existing instance.
+                warn!(
+                    self.log, "failed to instance_set_size_on_conn on an \
+                    instance that should have been updatable";
+                    "instance_id" => %r.found.id(),
+                    "new ncpus" => ?ncpus,
+                    "new memory" => ?memory,
+                );
                 return Err(err.bail(Error::internal_error(
                     "unable to reconfigure instance size",
                 )));
