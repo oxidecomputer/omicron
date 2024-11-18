@@ -323,7 +323,7 @@ mod test {
     use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_test_utils::resource_helpers::create_silo;
-    use nexus_test_utils::resource_helpers::DiskTestBuilder;
+    use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::Blueprint;
@@ -1249,14 +1249,6 @@ mod test {
     async fn test_silos_external_dns_end_to_end(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        // Add a zpool to all sleds, just to ensure that all new zones can find
-        // a transient filesystem wherever they end up being placed.
-        DiskTestBuilder::new(&cptestctx)
-            .on_all_sleds()
-            .with_zpool_count(1)
-            .build()
-            .await;
-
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let resolver = nexus.resolver();
@@ -1290,10 +1282,8 @@ mod test {
 
         // Record the zpools so we don't fail to ensure datasets (unrelated to
         // DNS) during blueprint execution.
-        crate::tests::create_disks_for_zones_using_datasets(
-            datastore, &opctx, &blueprint,
-        )
-        .await;
+        let mut disk_test = DiskTest::new(&cptestctx).await;
+        disk_test.add_blueprint_disks(&blueprint).await;
 
         // Now, execute the initial blueprint.
         let overrides = overridables_for_test(cptestctx);
@@ -1408,6 +1398,16 @@ mod test {
                 removed: 0
             }
         );
+        builder
+            .sled_ensure_zone_datasets(
+                sled_id,
+                &planning_input
+                    .sled_lookup(SledFilter::InService, sled_id)
+                    .expect("found sled")
+                    .resources,
+            )
+            .expect("ensured datasets");
+
         let blueprint2 = builder.build();
         eprintln!("blueprint2: {}", blueprint2.display());
         // Figure out the id of the new zone.
