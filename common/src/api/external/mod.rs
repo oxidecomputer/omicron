@@ -1289,9 +1289,11 @@ pub enum AffinityPolicy {
     Fail,
 }
 
+/// Describes the scope of affinity for the purposes of co-location.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum AffinityDistance {
+pub enum FailureDomain {
+    /// Instances are considered co-located if they are on the same sled
     Sled,
 }
 
