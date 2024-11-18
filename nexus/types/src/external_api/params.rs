@@ -10,8 +10,8 @@ use base64::Engine;
 use chrono::{DateTime, Utc};
 use http::Uri;
 use omicron_common::api::external::{
-    AddressLotKind, AffinityDistance, AffinityGroupMember, AffinityPolicy,
-    AllowedSourceIps, AntiAffinityGroupMember, BfdMode, BgpPeer, ByteCount,
+    AddressLotKind, AffinityGroupMember, AffinityPolicy, AllowedSourceIps,
+    AntiAffinityGroupMember, BfdMode, BgpPeer, ByteCount, FailureDomain,
     Hostname, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
     InstanceAutoRestartPolicy, InstanceCpuCount, LinkFec, LinkSpeed, Name,
     NameOrId, PaginationOrder, RouteDestination, RouteTarget, SemverVersion,
@@ -808,7 +808,7 @@ pub struct AffinityGroupCreate {
     pub identity: IdentityMetadataCreateParams,
 
     pub policy: AffinityPolicy,
-    pub distance: AffinityDistance,
+    pub failure_domain: FailureDomain,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -830,7 +830,7 @@ pub struct AntiAffinityGroupCreate {
     pub identity: IdentityMetadataCreateParams,
 
     pub policy: AffinityPolicy,
-    pub distance: AffinityDistance,
+    pub failure_domain: FailureDomain,
 }
 
 // PROJECTS

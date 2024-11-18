@@ -477,7 +477,7 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         policy -> crate::AffinityPolicyEnum,
-        distance -> crate::AffinityDistanceEnum,
+        failure_domain -> crate::FailureDomainEnum,
     }
 }
 
@@ -490,7 +490,7 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         policy -> crate::AffinityPolicyEnum,
-        distance -> crate::AffinityDistanceEnum,
+        failure_domain -> crate::FailureDomainEnum,
     }
 }
 

@@ -33,12 +33,12 @@ impl_enum_type!(
 
 impl_enum_type!(
     #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "affinity_distance", schema = "public"))]
-    pub struct AffinityDistanceEnum;
+    #[diesel(postgres_type(name = "failure_domain", schema = "public"))]
+    pub struct FailureDomainEnum;
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
-    #[diesel(sql_type = AffinityDistanceEnum)]
-    pub enum AffinityDistance;
+    #[diesel(sql_type = FailureDomainEnum)]
+    pub enum FailureDomain;
 
     // Enum values
     Sled => b"sled"
@@ -54,7 +54,7 @@ pub struct AffinityGroup {
     pub time_modified: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
     pub policy: AffinityPolicy,
-    pub distance: AffinityDistance,
+    pub failure_domain: FailureDomain,
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
@@ -67,7 +67,7 @@ pub struct AntiAffinityGroup {
     pub time_modified: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
     pub policy: AffinityPolicy,
-    pub distance: AffinityDistance,
+    pub failure_domain: FailureDomain,
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]

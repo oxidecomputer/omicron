@@ -5,6 +5,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.anti_affinity_group (
     time_created TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
     policy omicron.public.affinity_policy NOT NULL,
-    distance omicron.public.affinity_distance NOT NULL,
+    failure_domain omicron.public.failure_domain NOT NULL,
 );
 

@@ -3984,7 +3984,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.affinity_policy AS ENUM (
 
 -- Determines what "co-location" means for instances within an affinity
 -- or anti-affinity group.
-CREATE TYPE IF NOT EXISTS omicron.public.affinity_distance AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.failure_domain AS ENUM (
     -- Instances are co-located if they are on the same sled.
     'sled'
 );
@@ -3998,7 +3998,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.affinity_group (
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
     policy omicron.public.affinity_policy NOT NULL,
-    distance omicron.public.affinity_distance NOT NULL,
+    failure_domain omicron.public.failure_domain NOT NULL,
 );
 
 -- Describes an instance's membership within an affinity group
@@ -4018,7 +4018,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.anti_affinity_group (
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
     policy omicron.public.affinity_policy NOT NULL,
-    distance omicron.public.affinity_distance NOT NULL,
+    failure_domain omicron.public.failure_domain NOT NULL,
 );
 
 -- Describes an instance's membership within an anti-affinity group
