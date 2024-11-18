@@ -790,7 +790,13 @@ fn rss_config_text<'a>(
                 ],
                 vec![
                     Span::styled("  • FEC           : ", label_style),
-                    Span::styled(uplink_port_fec.to_string(), ok_style),
+                    Span::styled(
+                        match uplink_port_fec {
+                            Some(fec) => fec.to_string(),
+                            None => "unspecified".to_string(),
+                        },
+                        ok_style,
+                    ),
                 ],
                 vec![
                     Span::styled("  • Autoneg       : ", label_style),
