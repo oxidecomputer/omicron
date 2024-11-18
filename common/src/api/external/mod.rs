@@ -1280,7 +1280,12 @@ pub enum InstanceAutoRestartPolicy {
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AffinityPolicy {
+    /// If the affinity request cannot be satisfied, allow it anyway.
+    ///
+    /// This enables a "best-effort" attempt to satisfy the affinity policy.
     Allow,
+
+    /// If the affinity request cannot be satisfied, fail explicitly.
     Fail,
 }
 
