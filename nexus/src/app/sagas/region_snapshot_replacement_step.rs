@@ -229,7 +229,7 @@ async fn rsrss_create_replace_params(
     let region_snapshot = osagactx
         .datastore()
         .region_snapshot_get(
-            region_snapshot_replace_request.old_dataset_id,
+            region_snapshot_replace_request.old_dataset_id.into(),
             region_snapshot_replace_request.old_region_id,
             region_snapshot_replace_request.old_snapshot_id,
         )

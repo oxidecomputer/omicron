@@ -42,6 +42,7 @@ use omicron_common::backoff::{
 };
 use omicron_common::disk::DiskIdentity;
 use omicron_common::FileKv;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -197,7 +198,7 @@ impl Server {
             sled_agent
                 .create_zpool(zpool_id, physical_disk_id, zpool.size)
                 .await;
-            let dataset_id = Uuid::new_v4();
+            let dataset_id = DatasetUuid::new_v4();
             let address =
                 sled_agent.create_crucible_dataset(zpool_id, dataset_id).await;
 
