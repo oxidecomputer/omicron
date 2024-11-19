@@ -994,7 +994,7 @@ impl From<BlueprintDatasetConfig> for DatasetConfig {
 ///
 /// This struct acts as a "lowest common denominator" between the
 /// inventory and blueprint types, for the purposes of comparison.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq)]
 pub struct BlueprintDatasetConfigForDiff {
     pub name: String,
     pub kind: Option<DatasetKind>,
@@ -1002,6 +1002,21 @@ pub struct BlueprintDatasetConfigForDiff {
     pub quota: Option<ByteCount>,
     pub reservation: Option<ByteCount>,
     pub compression: String,
+}
+
+impl PartialEq for BlueprintDatasetConfigForDiff {
+    fn eq(&self, other: &Self) -> bool {
+        // We intentionally ignore `kind` when comparing; it's always `None`
+        // from collections because inventory doesn't report it, but we don't
+        // want to mark a dataset as modified in a collection-to-blueprint diff
+        // for this reason.
+        let Self { name, kind: _, id, quota, reservation, compression } = self;
+        *name == other.name
+            && *id == other.id
+            && *quota == other.quota
+            && *reservation == other.reservation
+            && *compression == other.compression
+    }
 }
 
 fn unwrap_or_none<T: ToString>(opt: &Option<T>) -> String {
