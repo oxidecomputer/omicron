@@ -997,6 +997,7 @@ impl From<BlueprintDatasetConfig> for DatasetConfig {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct BlueprintDatasetConfigForDiff {
     pub name: String,
+    pub kind: Option<DatasetKind>,
     pub id: Option<DatasetUuid>,
     pub quota: Option<ByteCount>,
     pub reservation: Option<ByteCount>,
@@ -1023,6 +1024,9 @@ impl From<crate::inventory::Dataset> for BlueprintDatasetConfigForDiff {
     fn from(dataset: crate::inventory::Dataset) -> Self {
         Self {
             name: dataset.name,
+            // TODO Should we know the dataset kind from inventory? We could
+            // probably infer it from the name, but yuck.
+            kind: None,
             id: dataset.id,
             quota: dataset.quota,
             reservation: dataset.reservation,
@@ -1034,7 +1038,9 @@ impl From<crate::inventory::Dataset> for BlueprintDatasetConfigForDiff {
 impl From<BlueprintDatasetConfig> for BlueprintDatasetConfigForDiff {
     fn from(dataset: BlueprintDatasetConfig) -> Self {
         Self {
-            name: DatasetName::new(dataset.pool, dataset.kind).full_name(),
+            name: DatasetName::new(dataset.pool, dataset.kind.clone())
+                .full_name(),
+            kind: Some(dataset.kind),
             id: Some(dataset.id),
             quota: dataset.quota,
             reservation: dataset.reservation,
