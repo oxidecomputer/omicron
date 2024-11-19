@@ -7338,7 +7338,6 @@ dependencies = [
  "getrandom",
  "group",
  "hashbrown 0.15.0",
- "heck 0.4.1",
  "hex",
  "hickory-proto",
  "hmac",
