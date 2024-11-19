@@ -197,8 +197,8 @@ mod test {
     use nexus_db_model::RegionSnapshotReplacementStepState;
     use nexus_db_queries::db::datastore::region_snapshot_replacement;
     use nexus_test_utils_macros::nexus_test;
-    use sled_agent_client::types::VolumeConstructionRequest;
     use omicron_uuid_kinds::DatasetUuid;
+    use sled_agent_client::types::VolumeConstructionRequest;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =

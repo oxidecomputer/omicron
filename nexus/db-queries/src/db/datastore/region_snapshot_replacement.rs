@@ -1273,8 +1273,8 @@ mod test {
     use crate::db::model::RegionReplacement;
     use crate::db::pub_test_utils::TestDatabase;
     use omicron_test_utils::dev;
-    use sled_agent_client::types::VolumeConstructionRequest;
     use omicron_uuid_kinds::DatasetUuid;
+    use sled_agent_client::types::VolumeConstructionRequest;
 
     #[tokio::test]
     async fn test_one_replacement_per_volume() {

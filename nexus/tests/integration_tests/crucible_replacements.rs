@@ -818,7 +818,10 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
         .unwrap();
 
     assert_eq!(region_snapshot_replacements.len(), 1);
-    assert_eq!(region_snapshot_replacements[0].old_dataset_id, dataset.id());
+    assert_eq!(
+        region_snapshot_replacements[0].old_dataset_id,
+        dataset.id().into()
+    );
     assert_eq!(region_snapshot_replacements[0].old_region_id, region.id());
     assert_eq!(
         region_snapshot_replacements[0].old_snapshot_id,
