@@ -6,7 +6,7 @@ use anyhow::Result;
 use camino::Utf8PathBuf;
 use clickhouse_admin_types::{
     ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
-    KeeperId, Lgif, RaftConfig, OXIMETER_CLUSTER,
+    KeeperId, Lgif, Monitoring, RaftConfig, OXIMETER_CLUSTER,
 };
 use dropshot::HttpError;
 use illumos_utils::{output_to_exec_error, ExecutionError};
@@ -156,6 +156,26 @@ impl ClickhouseCli {
             "Retrieve information about distributed ddl queries (ON CLUSTER clause) 
             that were executed on a cluster",
             DistributedDdlQueue::parse,
+            self.log.clone().unwrap(),
+        )
+        .await
+    }
+
+    pub async fn monitoring_queries_per_second_avg(
+        &self,
+    ) -> Result<Vec<Monitoring>, ClickhouseCliError> {
+        self.client_non_interactive(
+            ClickhouseClientType::Server,
+            // TODO: Have this query as a helper function?
+            "SELECT toStartOfInterval(event_time, INTERVAL 60 SECOND)::INT AS t, avg(ProfileEvent_Query)
+            FROM system.metric_log
+            WHERE event_date >= toDate(now() - 86400) AND event_time >= now() - 86400
+            GROUP BY t
+            ORDER BY t WITH FILL STEP 60
+            FORMAT JSONEachRow",
+            "Retrieve information about distributed ddl queries (ON CLUSTER clause) 
+            that were executed on a cluster",
+            Monitoring::parse,
             self.log.clone().unwrap(),
         )
         .await

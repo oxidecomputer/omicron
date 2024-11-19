@@ -1033,6 +1033,69 @@ impl DistributedDdlQueue {
     }
 }
 
+// TODO: Should I have settings for each system table?
+// or should I just add an enum here?
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct MonitoringSettings {
+    /// The interval to collect monitoring metrics in seconds.
+    /// Default is 60 seconds.
+    pub interval: u64,
+    /// Range of time to collect monitoring metrics in seconds.
+    /// Default is 86400 seconds (24 hrs).
+    pub time_range: u64,
+    // TODO: Have an enum?
+    /// Name of the metric to retrieve
+    pub metric: String,
+}
+
+impl MonitoringSettings {
+    pub fn query(&self) -> String {
+        let interval = self.interval;
+        let time_range = self.time_range;
+        let metric = &self.metric;
+        // TODO: Should there be different methods for each system table?
+        let query = format!("SELECT toStartOfInterval(event_time, INTERVAL {interval} SECOND) AS time, avg({metric}) AS value
+        FROM system.metric_log
+        WHERE event_date >= toDate(now() - {time_range}) AND event_time >= now() - {time_range}
+        GROUP BY time
+        ORDER BY time WITH FILL STEP {interval}
+        FORMAT JSONEachRow
+        SETTINGS date_time_output_format = 'iso'");
+        query
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+// TODO: Come up with a better name
+pub struct Monitoring {
+    pub time: DateTime<Utc>,
+    pub value: u64,
+    // TODO: Have an enum with possible units? (s, ms, bytes)
+    // Not sure if I can even add this, the table doesn't mention units at all
+    // pub unit: String,
+}
+
+impl Monitoring {
+    pub fn parse(log: &Logger, data: &[u8]) -> Result<Vec<Self>> {
+        let s = String::from_utf8_lossy(data);
+        info!(
+            log,
+            // TODO: Should this be per table? Is it necessary?
+            "Retrieved data from `system.metric_log`";
+            "output" => ?s
+        );
+
+        let mut m = vec![];
+
+        for line in s.lines() {
+            let item: Monitoring = serde_json::from_str(line)?;
+            m.push(item);
+        }
+
+        Ok(m)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use camino::Utf8PathBuf;
