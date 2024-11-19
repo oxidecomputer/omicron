@@ -135,7 +135,7 @@ impl ReplicaConfig {
     <metric_log>
         <database>system</database>
         <table>metric_log</table>
-        <!-- 
+        <!--
             TTL will be 30 days until we've finished long running tests.
             After that, we can reduce it to a week or two.
         -->
@@ -151,7 +151,7 @@ impl ReplicaConfig {
     <asynchronous_metric_log>
         <database>system</database>
         <table>asynchronous_metric_log</table>
-        <!-- 
+        <!--
             TTL will be 30 days until we've finished long running tests.
             After that, we can reduce it to a week or two.
         -->
