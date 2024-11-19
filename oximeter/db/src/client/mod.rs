@@ -123,23 +123,31 @@ impl backend::Connector for ReqwestConnector {
     }
 }
 
+// TODO-remove: https://github.com/oxidecomputer/omicron/issues/7094
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub(crate) struct ReqwestClient {
     url: String,
     client: reqwest::Client,
 }
 
+// TODO-remove: https://github.com/oxidecomputer/omicron/issues/7094
+#[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) enum ClientSource {
     Static(ReqwestClient),
     Pool { pool: DebugIgnore<Pool<ReqwestClient>> },
 }
 
+// TODO-remove: https://github.com/oxidecomputer/omicron/issues/7094
+#[allow(dead_code)]
 pub(crate) enum ClientVariant {
     Static(ReqwestClient),
     Handle(qorb::claim::Handle<ReqwestClient>),
 }
 
+// TODO-remove: https://github.com/oxidecomputer/omicron/issues/7094
+#[allow(dead_code)]
 impl ClientVariant {
     pub(crate) async fn new(source: &ClientSource) -> Result<Self, Error> {
         let client = match source {
