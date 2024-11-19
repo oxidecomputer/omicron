@@ -1062,6 +1062,7 @@ mod test {
     use crate::db::model::RegionReplacement;
     use crate::db::pub_test_utils::TestDatabase;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::DatasetUuid;
 
     #[tokio::test]
     async fn test_one_replacement_per_volume() {
@@ -1069,11 +1070,11 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let dataset_1_id = Uuid::new_v4();
+        let dataset_1_id = DatasetUuid::new_v4();
         let region_1_id = Uuid::new_v4();
         let snapshot_1_id = Uuid::new_v4();
 
-        let dataset_2_id = Uuid::new_v4();
+        let dataset_2_id = DatasetUuid::new_v4();
         let region_2_id = Uuid::new_v4();
         let snapshot_2_id = Uuid::new_v4();
 
@@ -1117,7 +1118,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let dataset_1_id = Uuid::new_v4();
+        let dataset_1_id = DatasetUuid::new_v4();
         let region_1_id = Uuid::new_v4();
         let snapshot_1_id = Uuid::new_v4();
 
@@ -1155,7 +1156,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let dataset_id = Uuid::new_v4();
+        let dataset_id = DatasetUuid::new_v4();
         let region_id = Uuid::new_v4();
         let snapshot_id = Uuid::new_v4();
 
@@ -1411,7 +1412,7 @@ mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let mut request = RegionSnapshotReplacement::new(
-            Uuid::new_v4(),
+            DatasetUuid::new_v4(),
             Uuid::new_v4(),
             Uuid::new_v4(),
         );
