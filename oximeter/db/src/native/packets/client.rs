@@ -9,6 +9,7 @@
 use super::server::ProfileInfo;
 use super::server::Progress;
 use crate::native::block::Block;
+use crate::QuerySummary;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -142,6 +143,17 @@ pub struct QueryResult {
     pub profile_info: Option<ProfileInfo>,
     /// Additional data describing resource usage during the query.
     pub profile_events: Option<Block>,
+}
+
+impl QueryResult {
+    /// Return a query summary from the full query result.
+    pub fn query_summary(&self) -> QuerySummary {
+        QuerySummary {
+            id: self.id,
+            elapsed: self.progress.query_time,
+            io_summary: self.progress.into(),
+        }
+    }
 }
 
 /// The stage through which we run a query.
