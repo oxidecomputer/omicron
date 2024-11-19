@@ -88,6 +88,7 @@ async fn perform_collection(
         .get(format!("http://{}/{}", producer.address, producer.id))
         .send()
         .await;
+    trace!(log, "sent collection request to producer");
     match res {
         Ok(res) => {
             if res.status().is_success() {
@@ -189,6 +190,7 @@ impl core::future::Future for OutstandingCollection {
 }
 
 impl OutstandingCollection {
+    /// Construct a new outstanding collection task.
     fn new(log: Logger) -> Self {
         let client = reqwest::Client::builder()
             .timeout(COLLECTION_TIMEOUT)
@@ -246,13 +248,10 @@ impl OutstandingCollection {
         self.token = token;
     }
 
-    fn reset(&mut self) {
+    /// Abort any running collection task and reset all internal state.
+    fn abort(&mut self) {
         if let Some(handle) = self.fut.take() {
-            warn!(
-                self.log,
-                "resetting an existing outstanding collection \
-                task, it will be aborted"
-            );
+            warn!(self.log, "aborting an existing outstanding collection task");
             handle.abort();
         }
         self.token.take();
@@ -334,7 +333,7 @@ async fn collection_loop(
                             log,
                             "collection task received shutdown request"
                         );
-                        outstanding_collection.reset();
+                        outstanding_collection.abort();
                         return;
                     },
                     Some(CollectionMessage::Collect(token)) => {
@@ -361,7 +360,7 @@ async fn collection_loop(
                         // Interrupt any running collection task, since the
                         // update here means it can't actually succeed. It will
                         // be spawned again on the next tick.
-                        outstanding_collection.reset();
+                        outstanding_collection.abort();
                     }
                     #[cfg(test)]
                     Some(CollectionMessage::Statistics { reply_tx }) => {
@@ -391,6 +390,11 @@ async fn collection_loop(
                 outbox.send((None, stats.sample())).await.unwrap();
             }
             _ = collection_timer.tick() => {
+                debug!(
+                    log,
+                    "producer collection timer expired, spawning \
+                    a collection task for it"
+                );
                 outstanding_collection.spawn_if_empty(&producer, None);
             }
         }
@@ -1029,11 +1033,20 @@ mod tests {
     use super::OximeterAgent;
     use super::ProducerEndpoint;
     use crate::self_stats::FailureReason;
+    use dropshot::HttpError;
+    use dropshot::HttpResponseOk;
+    use dropshot::Path;
+    use dropshot::RequestContext;
+    use dropshot::ServerBuilder;
     use omicron_common::api::internal::nexus::ProducerKind;
     use omicron_test_utils::dev::test_setup_log;
+    use oximeter::types::ProducerResults;
     use std::net::Ipv6Addr;
     use std::net::SocketAddr;
     use std::net::SocketAddrV6;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+    use std::sync::Arc;
     use std::time::Duration;
     use tokio::sync::oneshot;
     use tokio::time::Instant;
@@ -1057,6 +1070,63 @@ mod tests {
         COLLECTION_INTERVAL.as_millis() as u64 * N_COLLECTIONS,
     );
 
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        schemars::JsonSchema,
+        serde::Deserialize,
+        serde::Serialize,
+    )]
+    struct IdPath {
+        id: Uuid,
+    }
+
+    /// Simplified API for a producer, implemented for tests below.
+    #[dropshot::api_description]
+    trait ProducerApi {
+        type Context;
+
+        #[endpoint {
+            method = GET,
+            path = "/{id}",
+        }]
+        async fn collect(
+            request_context: RequestContext<Self::Context>,
+            path: Path<IdPath>,
+        ) -> Result<HttpResponseOk<ProducerResults>, HttpError>;
+    }
+
+    /// A producer that always responds successfully with no samples.
+    struct EmptyProducer;
+
+    impl ProducerApi for EmptyProducer {
+        type Context = Arc<AtomicUsize>;
+
+        async fn collect(
+            request_context: RequestContext<Self::Context>,
+            _: Path<IdPath>,
+        ) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
+            request_context.context().fetch_add(1, Ordering::SeqCst);
+            Ok(HttpResponseOk(vec![]))
+        }
+    }
+
+    /// A producer that always responds with a 500.
+    struct DedProducer;
+
+    impl ProducerApi for DedProducer {
+        type Context = Arc<AtomicUsize>;
+
+        async fn collect(
+            request_context: RequestContext<Self::Context>,
+            _: Path<IdPath>,
+        ) -> Result<HttpResponseOk<ProducerResults>, HttpError> {
+            request_context.context().fetch_add(1, Ordering::SeqCst);
+            Err(HttpError::for_internal_error(String::from("i'm ded")))
+        }
+    }
+
     // Test that we count successful collections from a target correctly.
     #[tokio::test]
     async fn test_self_stat_collection_count() {
@@ -1075,17 +1145,21 @@ mod tests {
         .unwrap();
 
         // Spawn the mock server that always reports empty statistics.
-        let server = httpmock::MockServer::start();
-        let mock_ok = server.mock(|when, then| {
-            when.any_request();
-            then.status(reqwest::StatusCode::OK).body("[]");
-        });
+        let collection_count = Arc::new(AtomicUsize::new(0));
+        let server = ServerBuilder::new(
+            producer_api_mod::api_description::<EmptyProducer>().unwrap(),
+            collection_count.clone(),
+            log.new(slog::o!("component" => "dropshot")),
+        )
+        .config(Default::default())
+        .start()
+        .expect("failed to spawn empty dropshot server");
 
         // Register the dummy producer.
         let endpoint = ProducerEndpoint {
             id: Uuid::new_v4(),
             kind: ProducerKind::Service,
-            address: *server.address(),
+            address: server.local_addr(),
             interval: COLLECTION_INTERVAL,
         };
         collector
@@ -1123,7 +1197,13 @@ mod tests {
         let count = stats.collections.datum.value() as usize;
 
         assert!(count != 0);
-        mock_ok.assert_calls(count);
+        assert_eq!(
+            count,
+            collection_count.load(Ordering::SeqCst),
+            "number of collections reported by the collection \
+            task differs from the number reported by the empty \
+            producer server itself"
+        );
         assert!(stats.failed_collections.is_empty());
         logctx.cleanup_successful();
     }
@@ -1215,17 +1295,21 @@ mod tests {
         .unwrap();
 
         // Spawn the mock server that always responds with a server error
-        let server = httpmock::MockServer::start();
-        let mock_fail = server.mock(|when, then| {
-            when.any_request();
-            then.status(500).body("im ded");
-        });
+        let collection_count = Arc::new(AtomicUsize::new(0));
+        let server = ServerBuilder::new(
+            producer_api_mod::api_description::<DedProducer>().unwrap(),
+            collection_count.clone(),
+            log.new(slog::o!("component" => "dropshot")),
+        )
+        .config(Default::default())
+        .start()
+        .expect("failed to spawn empty dropshot server");
 
         // Register the rather flaky producer.
         let endpoint = ProducerEndpoint {
             id: Uuid::new_v4(),
             kind: ProducerKind::Service,
-            address: *server.address(),
+            address: server.local_addr(),
             interval: COLLECTION_INTERVAL,
         };
         collector
@@ -1270,7 +1354,13 @@ mod tests {
 
         assert_eq!(stats.collections.datum.value(), 0);
         assert!(count != 0);
-        mock_fail.assert_calls(count);
+        assert_eq!(
+            count,
+            collection_count.load(Ordering::SeqCst),
+            "number of collections reported by the collection \
+            task differs from the number reported by the always-ded \
+            producer server itself"
+        );
         assert_eq!(stats.failed_collections.len(), 1);
         logctx.cleanup_successful();
     }
