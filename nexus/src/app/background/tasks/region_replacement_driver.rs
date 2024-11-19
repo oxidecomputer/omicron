@@ -251,6 +251,7 @@ mod test {
     use nexus_db_model::UpstairsRepairNotificationType;
     use nexus_db_model::UpstairsRepairType;
     use nexus_test_utils_macros::nexus_test;
+    use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::DownstairsRegionKind;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::TypedUuid;
@@ -352,7 +353,7 @@ mod test {
 
         // Insert some region records
         let old_region = {
-            let dataset_id = Uuid::new_v4();
+            let dataset_id = DatasetUuid::new_v4();
             let volume_id = Uuid::new_v4();
             Region::new(
                 dataset_id,
@@ -366,7 +367,7 @@ mod test {
         };
 
         let new_region = {
-            let dataset_id = Uuid::new_v4();
+            let dataset_id = DatasetUuid::new_v4();
             let volume_id = Uuid::new_v4();
             Region::new(
                 dataset_id,
@@ -465,7 +466,7 @@ mod test {
 
         // Insert some region records
         let old_region = {
-            let dataset_id = Uuid::new_v4();
+            let dataset_id = DatasetUuid::new_v4();
             let volume_id = Uuid::new_v4();
             Region::new(
                 dataset_id,
@@ -479,7 +480,7 @@ mod test {
         };
 
         let new_region = {
-            let dataset_id = Uuid::new_v4();
+            let dataset_id = DatasetUuid::new_v4();
             let volume_id = Uuid::new_v4();
             Region::new(
                 dataset_id,
@@ -628,7 +629,7 @@ mod test {
 
         // Insert some region records
         let old_region = {
-            let dataset_id = Uuid::new_v4();
+            let dataset_id = DatasetUuid::new_v4();
             let volume_id = Uuid::new_v4();
             Region::new(
                 dataset_id,
@@ -642,7 +643,7 @@ mod test {
         };
 
         let new_region = {
-            let dataset_id = Uuid::new_v4();
+            let dataset_id = DatasetUuid::new_v4();
             let volume_id = Uuid::new_v4();
             Region::new(
                 dataset_id,

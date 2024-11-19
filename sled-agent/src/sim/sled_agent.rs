@@ -17,7 +17,7 @@ use crate::sim::simulatable::Simulatable;
 use crate::updates::UpdateManager;
 use anyhow::bail;
 use anyhow::Context;
-use dropshot::{HttpError, HttpServer};
+use dropshot::HttpError;
 use futures::lock::Mutex;
 use nexus_sled_agent_shared::inventory::{
     Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
@@ -38,12 +38,15 @@ use omicron_common::disk::{
     DatasetsConfig, DatasetsManagementResult, DiskIdentity, DiskVariant,
     DisksManagementResult, OmicronPhysicalDisksConfig,
 };
-use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid, ZpoolUuid};
+use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv6Net;
 use propolis_client::{
     types::VolumeConstructionRequest, Client as PropolisClient,
 };
-use propolis_mock_server::Context as PropolisContext;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
@@ -81,7 +84,7 @@ pub struct SledAgent {
     disk_id_to_region_ids: Mutex<HashMap<String, Vec<Uuid>>>,
     pub v2p_mappings: Mutex<HashSet<VirtualNetworkInterfaceHost>>,
     mock_propolis:
-        Mutex<Option<(HttpServer<Arc<PropolisContext>>, PropolisClient)>>,
+        Mutex<Option<(propolis_mock_server::Server, PropolisClient)>>,
     /// lists of external IPs assigned to instances
     pub external_ips:
         Mutex<HashMap<PropolisUuid, HashSet<InstanceExternalIpBody>>>,
@@ -615,7 +618,7 @@ impl SledAgent {
     pub async fn get_datasets(
         &self,
         zpool_id: ZpoolUuid,
-    ) -> Vec<(Uuid, SocketAddr)> {
+    ) -> Vec<(DatasetUuid, SocketAddr)> {
         self.storage.lock().await.get_all_datasets(zpool_id)
     }
 
@@ -637,7 +640,7 @@ impl SledAgent {
     pub async fn create_crucible_dataset(
         &self,
         zpool_id: ZpoolUuid,
-        dataset_id: Uuid,
+        dataset_id: DatasetUuid,
     ) -> SocketAddr {
         self.storage.lock().await.insert_dataset(zpool_id, dataset_id).await
     }
@@ -646,7 +649,7 @@ impl SledAgent {
     pub async fn get_crucible_dataset(
         &self,
         zpool_id: ZpoolUuid,
-        dataset_id: Uuid,
+        dataset_id: DatasetUuid,
     ) -> Arc<CrucibleData> {
         self.storage.lock().await.get_dataset(zpool_id, dataset_id).await
     }
@@ -797,26 +800,18 @@ impl SledAgent {
         }
         let propolis_bind_address =
             SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0);
-        let dropshot_config = dropshot::ConfigDropshot {
+        let dropshot_config = propolis_mock_server::Config {
             bind_address: propolis_bind_address,
             ..Default::default()
         };
-        let propolis_log = log.new(o!("component" => "propolis-server-mock"));
-        let private = Arc::new(PropolisContext::new(propolis_log));
         info!(log, "Starting mock propolis-server...");
-        let dropshot_log = log.new(o!("component" => "dropshot"));
-        let mock_api = propolis_mock_server::api();
-
-        let srv = dropshot::HttpServerStarter::new(
-            &dropshot_config,
-            mock_api,
-            private,
-            &dropshot_log,
-        )
-        .map_err(|error| {
-            Error::unavail(&format!("initializing propolis-server: {}", error))
-        })?
-        .start();
+        let srv = propolis_mock_server::start(dropshot_config, log.clone())
+            .map_err(|error| {
+                Error::unavail(&format!(
+                    "initializing propolis-server: {}",
+                    error
+                ))
+            })?;
         let addr = srv.local_addr();
         let client = propolis_client::Client::new(&format!("http://{}", addr));
         *mock_lock = Some((srv, client));
@@ -938,7 +933,11 @@ impl SledAgent {
         *self.fake_zones.lock().await = requested_zones;
     }
 
-    pub async fn drop_dataset(&self, zpool_id: ZpoolUuid, dataset_id: Uuid) {
+    pub async fn drop_dataset(
+        &self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+    ) {
         self.storage.lock().await.drop_dataset(zpool_id, dataset_id)
     }
 

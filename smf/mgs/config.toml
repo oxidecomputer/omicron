@@ -91,13 +91,11 @@ interface = "psc0"
 ignition-target = 32
 location = { switch0 = ["power", 0], switch1 = ["power", 0] }
 
-# We have an ignition-target set aside for PSC1, but do not create an
-# interface for it since we don't have a second PSC.
-#[[switch.port]]
-#kind = "switch-zone-interface"
-#interface = "psc1"
-#ignition-target = 33
-#location = { switch0 = ["power", 1], switch1 = ["power", 1] }
+[[switch.port]]
+kind = "switch-zone-interface"
+interface = "psc1"
+ignition-target = 33
+location = { switch0 = ["power", 1], switch1 = ["power", 1] }
 
 [[switch.port]]
 kind = "switch-zone-interface"

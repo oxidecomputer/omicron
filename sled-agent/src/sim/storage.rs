@@ -28,6 +28,7 @@ use omicron_common::disk::DiskManagementStatus;
 use omicron_common::disk::DiskVariant;
 use omicron_common::disk::DisksManagementResult;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -786,14 +787,14 @@ impl CrucibleServer {
         };
         let dropshot_log = log
             .new(o!("component" => "Simulated CrucibleAgent Dropshot Server"));
-        let server = dropshot::HttpServerStarter::new(
-            &config,
+        let server = dropshot::ServerBuilder::new(
             super::http_entrypoints_storage::api(),
             data.clone(),
-            &dropshot_log,
+            dropshot_log,
         )
-        .expect("Could not initialize server")
-        .start();
+        .config(config)
+        .start()
+        .expect("Could not initialize server");
         info!(&log, "Created Simulated Crucible Server"; "address" => server.local_addr());
 
         CrucibleServer { server, data }
@@ -818,7 +819,7 @@ pub(crate) struct Zpool {
     id: ZpoolUuid,
     physical_disk_id: Uuid,
     total_size: u64,
-    datasets: HashMap<Uuid, CrucibleServer>,
+    datasets: HashMap<DatasetUuid, CrucibleServer>,
 }
 
 impl Zpool {
@@ -829,7 +830,7 @@ impl Zpool {
     fn insert_dataset(
         &mut self,
         log: &Logger,
-        id: Uuid,
+        id: DatasetUuid,
         crucible_ip: IpAddr,
         start_port: u16,
         end_port: u16,
@@ -884,7 +885,7 @@ impl Zpool {
         regions.pop()
     }
 
-    pub fn drop_dataset(&mut self, id: Uuid) {
+    pub fn drop_dataset(&mut self, id: DatasetUuid) {
         let _ = self.datasets.remove(&id).expect("Failed to get the dataset");
     }
 }
@@ -1032,7 +1033,7 @@ impl Storage {
     pub async fn insert_dataset(
         &mut self,
         zpool_id: ZpoolUuid,
-        dataset_id: Uuid,
+        dataset_id: DatasetUuid,
     ) -> SocketAddr {
         // Update our local data
         let dataset = self
@@ -1093,7 +1094,7 @@ impl Storage {
     pub fn get_all_datasets(
         &self,
         zpool_id: ZpoolUuid,
-    ) -> Vec<(Uuid, SocketAddr)> {
+    ) -> Vec<(DatasetUuid, SocketAddr)> {
         let zpool = self.zpools.get(&zpool_id).expect("Zpool does not exist");
 
         zpool
@@ -1106,7 +1107,7 @@ impl Storage {
     pub async fn get_dataset(
         &self,
         zpool_id: ZpoolUuid,
-        dataset_id: Uuid,
+        dataset_id: DatasetUuid,
     ) -> Arc<CrucibleData> {
         self.zpools
             .get(&zpool_id)
@@ -1146,7 +1147,11 @@ impl Storage {
         regions.pop()
     }
 
-    pub fn drop_dataset(&mut self, zpool_id: ZpoolUuid, dataset_id: Uuid) {
+    pub fn drop_dataset(
+        &mut self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+    ) {
         self.zpools
             .get_mut(&zpool_id)
             .expect("Zpool does not exist")
@@ -1453,21 +1458,21 @@ impl PantryServer {
     ) -> Self {
         let pantry = Arc::new(Pantry::new(sled_agent));
 
-        let server = dropshot::HttpServerStarter::new(
-            &dropshot::ConfigDropshot {
-                bind_address: SocketAddr::new(ip, 0),
-                // This has to be large enough to support:
-                // - bulk writes into disks
-                request_body_max_bytes: 8192 * 1024,
-                default_handler_task_mode: HandlerTaskMode::Detached,
-                log_headers: vec![],
-            },
+        let server = dropshot::ServerBuilder::new(
             super::http_entrypoints_pantry::api(),
             pantry.clone(),
-            &log.new(o!("component" => "dropshot")),
+            log.new(o!("component" => "dropshot")),
         )
-        .expect("Could not initialize pantry server")
-        .start();
+        .config(dropshot::ConfigDropshot {
+            bind_address: SocketAddr::new(ip, 0),
+            // This has to be large enough to support:
+            // - bulk writes into disks
+            request_body_max_bytes: 8192 * 1024,
+            default_handler_task_mode: HandlerTaskMode::Detached,
+            log_headers: vec![],
+        })
+        .start()
+        .expect("Could not initialize pantry server");
 
         info!(&log, "Started Simulated Crucible Pantry"; "address" => server.local_addr());
 

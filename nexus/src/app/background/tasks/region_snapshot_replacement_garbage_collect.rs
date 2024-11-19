@@ -155,6 +155,7 @@ mod test {
     use nexus_db_model::RegionSnapshotReplacementState;
     use nexus_test_utils_macros::nexus_test;
     use sled_agent_client::types::VolumeConstructionRequest;
+    use omicron_uuid_kinds::DatasetUuid;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -189,7 +190,7 @@ mod test {
         // Add two region snapshot requests that need garbage collection
 
         let mut request = RegionSnapshotReplacement::new(
-            Uuid::new_v4(),
+            DatasetUuid::new_v4(),
             Uuid::new_v4(),
             Uuid::new_v4(),
         );
@@ -223,7 +224,7 @@ mod test {
             .unwrap();
 
         let mut request = RegionSnapshotReplacement::new(
-            Uuid::new_v4(),
+            DatasetUuid::new_v4(),
             Uuid::new_v4(),
             Uuid::new_v4(),
         );

@@ -1229,7 +1229,7 @@ async fn do_switch_port_settings_create(
             lldp_config_id,
             link_name.clone(),
             c.mtu,
-            c.fec.into(),
+            c.fec.map(|fec| fec.into()),
             c.speed.into(),
             c.autoneg,
             tx_eq_config_id,

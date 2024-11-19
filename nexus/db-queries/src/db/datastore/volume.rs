@@ -13,6 +13,7 @@ use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::model::Dataset;
 use crate::db::model::Disk;
 use crate::db::model::DownstairsClientStopRequestNotification;
@@ -47,6 +48,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::nexus::DownstairsClientStopRequest;
 use omicron_common::api::internal::nexus::DownstairsClientStopped;
 use omicron_common::api::internal::nexus::RepairProgress;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::DownstairsKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -333,7 +335,7 @@ impl DataStore {
 
         if let Some(region_snapshot) = maybe_region_snapshot {
             return Ok(Some(VolumeResourceUsage::RegionSnapshot {
-                dataset_id: region_snapshot.dataset_id,
+                dataset_id: region_snapshot.dataset_id(),
                 region_id: region_snapshot.region_id,
                 snapshot_id: region_snapshot.snapshot_id,
             }));
@@ -489,7 +491,10 @@ impl DataStore {
                 .filter(
                     dsl::usage_type.eq(VolumeResourceUsageType::RegionSnapshot),
                 )
-                .filter(dsl::region_snapshot_dataset_id.eq(dataset_id))
+                .filter(
+                    dsl::region_snapshot_dataset_id
+                        .eq(to_db_typed_uuid(dataset_id)),
+                )
                 .filter(dsl::region_snapshot_region_id.eq(region_id))
                 .filter(dsl::region_snapshot_snapshot_id.eq(snapshot_id))
                 .into_boxed(),
@@ -547,7 +552,10 @@ impl DataStore {
                         dsl::usage_type
                             .eq(VolumeResourceUsageType::RegionSnapshot),
                     )
-                    .filter(dsl::region_snapshot_dataset_id.eq(dataset_id))
+                    .filter(
+                        dsl::region_snapshot_dataset_id
+                            .eq(to_db_typed_uuid(dataset_id)),
+                    )
                     .filter(dsl::region_snapshot_region_id.eq(region_id))
                     .filter(dsl::region_snapshot_snapshot_id.eq(snapshot_id))
                     .filter(dsl::volume_id.eq(from_volume_id))
@@ -1579,7 +1587,7 @@ impl DataStore {
                             )
                             .filter(
                                 ru_dsl::region_snapshot_dataset_id
-                                    .eq(Some(dataset_id)),
+                                    .eq(Some(to_db_typed_uuid(dataset_id))),
                             )
                             .filter(
                                 ru_dsl::region_snapshot_region_id
@@ -1612,7 +1620,7 @@ impl DataStore {
                             )
                             .filter(
                                 ru_dsl::region_snapshot_dataset_id
-                                    .eq(Some(dataset_id)),
+                                    .eq(Some(to_db_typed_uuid(dataset_id))),
                             )
                             .filter(
                                 ru_dsl::region_snapshot_region_id
@@ -1630,7 +1638,10 @@ impl DataStore {
                         // Don't forget to set `deleting`! see: omicron#4095
                         use db::schema::region_snapshot::dsl;
                         let updated_rows = diesel::update(dsl::region_snapshot)
-                            .filter(dsl::dataset_id.eq(dataset_id))
+                            .filter(
+                                dsl::dataset_id
+                                    .eq(to_db_typed_uuid(dataset_id)),
+                            )
                             .filter(dsl::region_id.eq(region_id))
                             .filter(dsl::snapshot_id.eq(snapshot_id))
                             .filter(
@@ -1967,7 +1978,7 @@ impl DataStore {
     pub async fn get_dataset_rw_regions_in_volume(
         &self,
         opctx: &OpContext,
-        dataset_id: Uuid,
+        dataset_id: DatasetUuid,
         volume_id: Uuid,
     ) -> LookupResult<Vec<SocketAddrV6>> {
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -1976,7 +1987,7 @@ impl DataStore {
             use db::schema::dataset::dsl;
 
             dsl::dataset
-                .filter(dsl::id.eq(dataset_id))
+                .filter(dsl::id.eq(to_db_typed_uuid(dataset_id)))
                 .select(Dataset::as_select())
                 .first_async(&*conn)
                 .await
@@ -2370,14 +2381,14 @@ pub struct CrucibleResourcesV2 {
     pub snapshots_to_delete: Vec<RegionSnapshot>,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct RegionSnapshotV3 {
-    dataset: Uuid,
+    dataset: DatasetUuid,
     region: Uuid,
     snapshot: Uuid,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CrucibleResourcesV3 {
     #[serde(deserialize_with = "null_to_empty_list")]
     pub regions: Vec<Uuid>,
@@ -2497,7 +2508,10 @@ impl DataStore {
 
                 for region_snapshots in &crucible_resources.region_snapshots {
                     let maybe_tuple = dsl::region_snapshot
-                        .filter(dsl::dataset_id.eq(region_snapshots.dataset))
+                        .filter(
+                            dsl::dataset_id
+                                .eq(to_db_typed_uuid(region_snapshots.dataset)),
+                        )
                         .filter(dsl::region_id.eq(region_snapshots.region))
                         .filter(dsl::snapshot_id.eq(region_snapshots.snapshot))
                         .inner_join(
@@ -4424,19 +4438,19 @@ mod tests {
 
         let region_snapshots = [
             RegionSnapshot::new(
-                Uuid::new_v4(),
+                DatasetUuid::new_v4(),
                 Uuid::new_v4(),
                 Uuid::new_v4(),
                 address_1.clone(),
             ),
             RegionSnapshot::new(
-                Uuid::new_v4(),
+                DatasetUuid::new_v4(),
                 Uuid::new_v4(),
                 Uuid::new_v4(),
                 address_2.clone(),
             ),
             RegionSnapshot::new(
-                Uuid::new_v4(),
+                DatasetUuid::new_v4(),
                 Uuid::new_v4(),
                 Uuid::new_v4(),
                 address_3.clone(),
@@ -4525,7 +4539,7 @@ mod tests {
             let usage = datastore
                 .volume_usage_records_for_resource(
                     VolumeResourceUsage::RegionSnapshot {
-                        dataset_id: region_snapshot.dataset_id,
+                        dataset_id: region_snapshot.dataset_id(),
                         region_id: region_snapshot.region_id,
                         snapshot_id: region_snapshot.snapshot_id,
                     },
@@ -4687,7 +4701,7 @@ mod tests {
             let usage = datastore
                 .volume_usage_records_for_resource(
                     VolumeResourceUsage::RegionSnapshot {
-                        dataset_id: region_snapshot.dataset_id,
+                        dataset_id: region_snapshot.dataset_id(),
                         region_id: region_snapshot.region_id,
                         snapshot_id: region_snapshot.snapshot_id,
                     },
@@ -4841,7 +4855,7 @@ mod tests {
             let usage = datastore
                 .volume_usage_records_for_resource(
                     VolumeResourceUsage::RegionSnapshot {
-                        dataset_id: region_snapshot.dataset_id,
+                        dataset_id: region_snapshot.dataset_id(),
                         region_id: region_snapshot.region_id,
                         snapshot_id: region_snapshot.snapshot_id,
                     },
@@ -4888,7 +4902,7 @@ mod tests {
 
         datastore
             .region_snapshot_create(RegionSnapshot::new(
-                Uuid::new_v4(),
+                DatasetUuid::new_v4(),
                 Uuid::new_v4(),
                 Uuid::new_v4(),
                 address_1.clone(),
@@ -4897,7 +4911,7 @@ mod tests {
             .unwrap();
         datastore
             .region_snapshot_create(RegionSnapshot::new(
-                Uuid::new_v4(),
+                DatasetUuid::new_v4(),
                 Uuid::new_v4(),
                 Uuid::new_v4(),
                 address_2.clone(),
@@ -4906,7 +4920,7 @@ mod tests {
             .unwrap();
         datastore
             .region_snapshot_create(RegionSnapshot::new(
-                Uuid::new_v4(),
+                DatasetUuid::new_v4(),
                 Uuid::new_v4(),
                 Uuid::new_v4(),
                 address_3.clone(),

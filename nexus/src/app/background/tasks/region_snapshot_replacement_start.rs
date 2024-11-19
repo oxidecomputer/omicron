@@ -275,6 +275,7 @@ mod test {
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external;
+    use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
     use sled_agent_client::types::VolumeConstructionRequest;
     use std::collections::BTreeMap;
@@ -311,9 +312,9 @@ mod test {
         // Add a region snapshot replacement request for a fake region snapshot
 
         let request = RegionSnapshotReplacement::new(
-            Uuid::new_v4(), // dataset id
-            Uuid::new_v4(), // region id
-            Uuid::new_v4(), // snapshot id
+            DatasetUuid::new_v4(), // dataset id
+            Uuid::new_v4(),        // region id
+            Uuid::new_v4(),        // snapshot id
         );
 
         let request_id = request.id;
