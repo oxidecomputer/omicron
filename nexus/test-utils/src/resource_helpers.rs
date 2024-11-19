@@ -1176,8 +1176,8 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                     *sled_id,
                     disk.id,
                     disk.pool_id,
-                    Uuid::new_v4(),
-                    1024,
+                    DatasetUuid::new_v4(),
+                    Self::DEFAULT_ZPOOL_SIZE_GIB,
                 )
                 .await;
             }
