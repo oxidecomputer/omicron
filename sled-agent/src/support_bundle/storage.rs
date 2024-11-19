@@ -4,11 +4,11 @@
 
 //! Management of and access to Support Bundles
 
-use crate::sled_agent::SledAgent;
+use bytes::Bytes;
 use camino::Utf8Path;
 use dropshot::Body;
 use dropshot::HttpError;
-use dropshot::StreamingBody;
+use futures::Stream;
 use futures::StreamExt;
 use omicron_common::api::external::Error as ExternalError;
 use omicron_common::disk::CompressionAlgorithm;
@@ -25,6 +25,8 @@ use sled_agent_api::*;
 use sled_storage::manager::NestedDatasetConfig;
 use sled_storage::manager::NestedDatasetListOptions;
 use sled_storage::manager::NestedDatasetLocation;
+use sled_storage::manager::StorageHandle;
+use slog::Logger;
 use std::io::Read;
 use std::io::Write;
 use tokio::io::AsyncReadExt;
@@ -121,13 +123,11 @@ fn stream_zip_entry_helper(
     let reader = archive.by_name(&entry_path)?;
 
     let mut reader: Box<dyn std::io::Read> = match range {
-        Some(range) => {
-            Box::new(skip_and_limit(
-                reader,
-                range.start() as usize,
-                range.content_length().get() as usize
-            )?)
-        },
+        Some(range) => Box::new(skip_and_limit(
+            reader,
+            range.start() as usize,
+            range.content_length().get() as usize,
+        )?),
         None => Box::new(reader),
     };
 
@@ -213,14 +213,29 @@ fn stream_zip_entry(
     }))
 }
 
-impl SledAgent {
-    /// Returns a dataset that the sled has been explicitly configured to use.
-    pub async fn get_configured_dataset(
+/// APIs to manage support bundle storage.
+pub struct SupportBundleManager<'a> {
+    log: &'a Logger,
+    storage: &'a StorageHandle,
+}
+
+impl<'a> SupportBundleManager<'a> {
+    /// Creates a new SupportBundleManager, which provides access
+    /// to support bundle CRUD APIs.
+    pub fn new(
+        log: &'a Logger,
+        storage: &'a StorageHandle,
+    ) -> SupportBundleManager<'a> {
+        Self { log, storage }
+    }
+
+    // Returns a dataset that the sled has been explicitly configured to use.
+    async fn get_configured_dataset(
         &self,
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
     ) -> Result<DatasetConfig, Error> {
-        let datasets_config = self.storage().datasets_config_list().await?;
+        let datasets_config = self.storage.datasets_config_list().await?;
         let dataset = datasets_config
             .datasets
             .get(&dataset_id)
@@ -232,7 +247,8 @@ impl SledAgent {
         Ok(dataset.clone())
     }
 
-    pub async fn support_bundle_list(
+    /// Lists all support bundles on a particular dataset.
+    pub async fn list(
         &self,
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
@@ -242,7 +258,7 @@ impl SledAgent {
         let dataset_location =
             NestedDatasetLocation { path: String::from(""), root };
         let datasets = self
-            .storage()
+            .storage
             .nested_dataset_list(
                 dataset_location,
                 NestedDatasetListOptions::ChildrenOnly,
@@ -310,9 +326,8 @@ impl SledAgent {
         from: &Utf8Path,
         to: &Utf8Path,
         expected_hash: ArtifactHash,
-        body: StreamingBody,
+        stream: impl Stream<Item = Result<Bytes, HttpError>>,
     ) -> Result<(), Error> {
-        let stream = body.into_stream();
         futures::pin_mut!(stream);
 
         // Write the body to the file
@@ -332,13 +347,14 @@ impl SledAgent {
         Ok(())
     }
 
-    pub async fn support_bundle_create(
+    /// Creates a new support bundle on a dataset.
+    pub async fn create(
         &self,
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
         support_bundle_id: SupportBundleUuid,
         expected_hash: ArtifactHash,
-        body: StreamingBody,
+        stream: impl Stream<Item = Result<Bytes, HttpError>>,
     ) -> Result<SupportBundleMetadata, Error> {
         let log = self.log.new(o!(
             "operation" => "support_bundle_create",
@@ -358,7 +374,7 @@ impl SledAgent {
 
         // Ensure that the dataset exists.
         info!(log, "Ensuring dataset exists for bundle");
-        self.storage()
+        self.storage
             .nested_dataset_ensure(NestedDatasetConfig {
                 name: dataset,
                 inner: SharedDatasetConfig {
@@ -399,7 +415,7 @@ impl SledAgent {
             &support_bundle_path_tmp,
             &support_bundle_path,
             expected_hash,
-            body,
+            stream,
         )
         .await
         {
@@ -420,7 +436,8 @@ impl SledAgent {
         Ok(metadata)
     }
 
-    pub async fn support_bundle_delete(
+    /// Destroys a support bundle that exists on a dataset.
+    pub async fn delete(
         &self,
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
@@ -435,7 +452,7 @@ impl SledAgent {
         info!(log, "Destroying support bundle");
         let root =
             self.get_configured_dataset(zpool_id, dataset_id).await?.name;
-        self.storage()
+        self.storage
             .nested_dataset_destroy(NestedDatasetLocation {
                 path: support_bundle_id.to_string(),
                 root,
@@ -464,7 +481,48 @@ impl SledAgent {
         Ok(f)
     }
 
-    pub async fn support_bundle_get(
+    /// Streams a support bundle (or portion of a support bundle) from a
+    /// dataset.
+    pub async fn get(
+        &self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+        support_bundle_id: SupportBundleUuid,
+        range: Option<PotentialRange>,
+        query: SupportBundleQueryType,
+    ) -> Result<http::Response<Body>, Error> {
+        self.get_inner(
+            zpool_id,
+            dataset_id,
+            support_bundle_id,
+            range,
+            query,
+            false,
+        )
+        .await
+    }
+
+    /// Returns metadata about a support bundle.
+    pub async fn head(
+        &self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+        support_bundle_id: SupportBundleUuid,
+        range: Option<PotentialRange>,
+        query: SupportBundleQueryType,
+    ) -> Result<http::Response<Body>, Error> {
+        self.get_inner(
+            zpool_id,
+            dataset_id,
+            support_bundle_id,
+            range,
+            query,
+            true,
+        )
+        .await
+    }
+
+    async fn get_inner(
         &self,
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
@@ -593,5 +651,225 @@ impl SledAgent {
                 )?);
             }
         };
+    }
+}
+
+// #[cfg(all(test, target_os = "illumos"))]
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use futures::stream;
+    use hyper::header::{ACCCPT_RANGES, CONTENT_LENGTH, CONTENT_TYPE};
+    use omicron_common::disk::DatasetConfig;
+    use omicron_common::disk::DatasetKind;
+    use omicron_common::disk::DatasetName;
+    use omicron_common::disk::DatasetsConfig;
+    use omicron_common::zpool_name::ZpoolName;
+    use omicron_test_utils::dev::test_setup_log;
+    use sled_storage::manager_test_harness::StorageManagerTestHarness;
+    use std::collections::BTreeMap;
+    use zip::write::SimpleFileOptions;
+    use zip::ZipWriter;
+
+    struct SingleU2StorageHarness {
+        storage_test_harness: StorageManagerTestHarness,
+        zpool_id: ZpoolUuid,
+    }
+
+    impl SingleU2StorageHarness {
+        async fn new(log: &Logger) -> Self {
+            let mut harness = StorageManagerTestHarness::new(log).await;
+            harness.handle().key_manager_ready().await;
+            let _raw_internal_disks =
+                harness.add_vdevs(&["m2_left.vdev", "m2_right.vdev"]).await;
+
+            let raw_disks = harness.add_vdevs(&["u2_0.vdev"]).await;
+
+            let config = harness.make_config(1, &raw_disks);
+            let result = harness
+                .handle()
+                .omicron_physical_disks_ensure(config.clone())
+                .await
+                .expect("Failed to ensure disks");
+            assert!(!result.has_error(), "{result:?}");
+
+            let zpool_id = config.disks[0].pool_id;
+            Self { storage_test_harness: harness, zpool_id }
+        }
+
+        async fn configure_dataset(
+            &self,
+            dataset_id: DatasetUuid,
+            kind: DatasetKind,
+        ) {
+            let result = self
+                .storage_test_harness
+                .handle()
+                .datasets_ensure(DatasetsConfig {
+                    datasets: BTreeMap::from([(
+                        dataset_id,
+                        DatasetConfig {
+                            id: dataset_id,
+                            name: DatasetName::new(
+                                ZpoolName::new_external(self.zpool_id),
+                                kind,
+                            ),
+                            inner: Default::default(),
+                        },
+                    )]),
+                    ..Default::default()
+                })
+                .await
+                .expect("Failed to ensure datasets");
+            assert!(!result.has_error(), "{result:?}");
+        }
+
+        async fn cleanup(mut self) {
+            self.storage_test_harness.cleanup().await
+        }
+    }
+
+    enum Data {
+        File(&'static [u8]),
+        Directory,
+    }
+    type NamedFile = (&'static str, Data);
+    fn example_files() -> [NamedFile; 5] {
+        [
+            ("greeting.txt", Data::File(b"Hello around the world!")),
+            ("english/", Data::Directory),
+            ("english/hello.txt", Data::File(b"Hello world!")),
+            ("spanish/", Data::Directory),
+            ("spanish/hello.txt", Data::File(b"Hola mundo!")),
+        ]
+    }
+
+    fn example_zipfile() -> Vec<u8> {
+        let mut buf = vec![0u8; 65536];
+        let len = {
+            let mut zip = ZipWriter::new(std::io::Cursor::new(&mut buf[..]));
+            let options = SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+
+            for (name, data) in example_files() {
+                match data {
+                    Data::File(data) => {
+                        zip.start_file(name, options).unwrap();
+                        zip.write(data).unwrap();
+                    }
+                    Data::Directory => {
+                        zip.add_directory(name, options).unwrap();
+                    }
+                }
+            }
+            zip.finish().unwrap().position()
+        };
+        buf.truncate(len as usize);
+        buf
+    }
+
+    async fn read_body(response: &mut http::Response<Body>) -> Vec<u8> {
+        use http_body_util::BodyExt;
+        let mut data = vec![];
+        while let Some(frame) = response.body_mut().frame().await {
+            data.append(&mut frame.unwrap().into_data().unwrap().to_vec());
+        }
+        data
+    }
+
+    #[tokio::test]
+    async fn basic_crud() {
+        let logctx = test_setup_log("basic_crud");
+        let log = &logctx.log;
+
+        // Set up storage
+        let harness = SingleU2StorageHarness::new(log).await;
+
+        // For this test, we'll add a dataset that can contain our bundles.
+        let dataset_id = DatasetUuid::new_v4();
+        harness.configure_dataset(dataset_id, DatasetKind::Debug).await;
+
+        // Access the Support Bundle API
+        let mgr = SupportBundleManager::new(
+            log,
+            harness.storage_test_harness.handle(),
+        );
+
+        // Create a fake support bundle -- really, just a zipfile.
+        let support_bundle_id = SupportBundleUuid::new_v4();
+        let data = example_zipfile();
+        let hash = ArtifactHash(
+            Sha256::digest(data.as_slice()).as_slice().try_into().unwrap(),
+        );
+
+        // Create a new bundle
+        let bundle = mgr
+            .create(
+                harness.zpool_id,
+                dataset_id,
+                support_bundle_id,
+                hash,
+                stream::once(async {
+                    Ok(Bytes::copy_from_slice(data.as_slice()))
+                }),
+            )
+            .await
+            .expect("Should have created support bundle");
+        assert_eq!(bundle.support_bundle_id, support_bundle_id);
+        assert_eq!(bundle.state, SupportBundleState::Complete);
+
+        // List the bundle we just created
+        let bundles = mgr
+            .list(harness.zpool_id, dataset_id)
+            .await
+            .expect("Should have been able to read bundles");
+        assert_eq!(bundles.len(), 1);
+        assert_eq!(bundles[0].support_bundle_id, support_bundle_id);
+
+        // "Head" the bundle we created - we can see it's a zipfile with the
+        // expected length, even without reading anything.
+        let mut response = mgr
+            .head(
+                harness.zpool_id,
+                dataset_id,
+                support_bundle_id,
+                None,
+                SupportBundleQueryType::Whole,
+            )
+            .await
+            .expect("Should have been able to HEAD bundle");
+        assert_eq!(read_body(&mut response).await, Vec::<u8>::new());
+        assert_eq!(response.headers().len(), 3);
+        assert_eq!(response.headers()[CONTENT_LENGTH], data.len().to_string());
+        assert_eq!(response.headers()[CONTENT_TYPE], "application/zip");
+        assert_eq!(response.headers()[ACCEPT_RANGES], "bytes");
+
+        let mut response = mgr
+            .head(
+                harness.zpool_id,
+                dataset_id,
+                support_bundle_id,
+                None,
+                SupportBundleQueryType::Index,
+            )
+            .await
+            .expect("Should have been able to HEAD bundle index");
+        assert_eq!(read_body(&mut response).await, Vec::<u8>::new());
+
+        let expected_index = example_files()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<&str>>()
+            .join("\n");
+        let expected_len = expected_index.len().to_string();
+
+        assert_eq!(response.headers().len(), 3);
+        assert_eq!(response.headers()[CONTENT_LENGTH], expected_len);
+        assert_eq!(response.headers()[CONTENT_TYPE], "text/plain");
+        assert_eq!(response.headers()[ACCEPT_RANGES], "bytes");
+
+        harness.cleanup().await;
+        logctx.cleanup_successful();
     }
 }

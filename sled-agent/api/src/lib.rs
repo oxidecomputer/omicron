@@ -712,7 +712,7 @@ pub enum SupportBundleQueryType {
     Path { file_path: String },
 }
 
-#[derive(Deserialize, Serialize, JsonSchema, PartialEq)]
+#[derive(Deserialize, Debug, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum SupportBundleState {
     Complete,

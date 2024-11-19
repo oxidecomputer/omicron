@@ -22,6 +22,7 @@ use crate::storage_monitor::StorageMonitorHandle;
 use crate::support_bundle::queries::{
     ipadm_info, zoneadm_info, SupportBundleCmdError, SupportBundleCmdOutput,
 };
+use crate::support_bundle::storage::SupportBundleManager;
 use crate::updates::{ConfigUpdates, UpdateManager};
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
 use crate::zone_bundle;
@@ -695,6 +696,11 @@ impl SledAgent {
         )
         .await
         .unwrap(); // we retry forever, so this can't fail
+    }
+
+    /// Accesses the [SupportBundleManager] API.
+    pub(crate) fn as_support_bundle_storage(&self) -> SupportBundleManager<'_> {
+        SupportBundleManager::new(&self.log, self.storage())
     }
 
     pub(crate) fn switch_zone_underlay_info(

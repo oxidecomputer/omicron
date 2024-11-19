@@ -235,7 +235,8 @@ impl SledAgentApi for SledAgentImpl {
         let SupportBundleListPathParam { zpool_id, dataset_id } =
             path_params.into_inner();
 
-        let bundles = sa.support_bundle_list(zpool_id, dataset_id).await?;
+        let bundles =
+            sa.as_support_bundle_storage().list(zpool_id, dataset_id).await?;
 
         Ok(HttpResponseOk(bundles))
     }
@@ -253,12 +254,13 @@ impl SledAgentApi for SledAgentImpl {
         let SupportBundleCreateQueryParams { hash } = query_params.into_inner();
 
         let metadata = sa
-            .support_bundle_create(
+            .as_support_bundle_storage()
+            .create(
                 zpool_id,
                 dataset_id,
                 support_bundle_id,
                 hash,
-                body,
+                body.into_stream(),
             )
             .await?;
 
@@ -276,16 +278,9 @@ impl SledAgentApi for SledAgentImpl {
 
         let range = rqctx.range();
         let query = body.into_inner().query_type;
-        let head_only = false;
         Ok(sa
-            .support_bundle_get(
-                zpool_id,
-                dataset_id,
-                support_bundle_id,
-                range,
-                query,
-                head_only,
-            )
+            .as_support_bundle_storage()
+            .get(zpool_id, dataset_id, support_bundle_id, range, query)
             .await?)
     }
 
@@ -300,16 +295,9 @@ impl SledAgentApi for SledAgentImpl {
 
         let range = rqctx.range();
         let query = body.into_inner().query_type;
-        let head_only = true;
         Ok(sa
-            .support_bundle_get(
-                zpool_id,
-                dataset_id,
-                support_bundle_id,
-                range,
-                query,
-                head_only,
-            )
+            .as_support_bundle_storage()
+            .head(zpool_id, dataset_id, support_bundle_id, range, query)
             .await?)
     }
 
@@ -322,7 +310,8 @@ impl SledAgentApi for SledAgentImpl {
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
-        sa.support_bundle_delete(zpool_id, dataset_id, support_bundle_id)
+        sa.as_support_bundle_storage()
+            .delete(zpool_id, dataset_id, support_bundle_id)
             .await?;
         Ok(HttpResponseDeleted())
     }
