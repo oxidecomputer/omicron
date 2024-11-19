@@ -368,8 +368,9 @@ impl<'a> Planner<'a> {
                 updated,
                 expunged,
                 removed,
-            } =
-                self.blueprint.sled_ensure_zone_datasets(sled_id, &sled_resources)?
+            } = self
+                .blueprint
+                .sled_ensure_zone_datasets(sled_id, &sled_resources)?
             {
                 info!(
                     &self.log,

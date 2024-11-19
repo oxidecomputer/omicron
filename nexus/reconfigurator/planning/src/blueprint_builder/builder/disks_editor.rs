@@ -114,10 +114,7 @@ impl<'a> SledDisksEditor<'a> {
         self.config.disks.keys().copied()
     }
 
-    pub fn ensure_disk(
-        &mut self,
-        disk: BlueprintPhysicalDiskConfig,
-    ) -> Ensure {
+    pub fn ensure_disk(&mut self, disk: BlueprintPhysicalDiskConfig) -> Ensure {
         let disk_id = PhysicalDiskUuid::from_untyped_uuid(disk.id);
         match self.config.disks.entry(disk_id) {
             Entry::Vacant(slot) => {

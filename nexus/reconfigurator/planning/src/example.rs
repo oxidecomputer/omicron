@@ -466,7 +466,9 @@ impl ExampleSystemBuilder {
                         .unwrap();
                 }
             }
-            builder.sled_ensure_zone_datasets(sled_id, &sled_resources).unwrap();
+            builder
+                .sled_ensure_zone_datasets(sled_id, &sled_resources)
+                .unwrap();
         }
 
         let blueprint = builder.build();

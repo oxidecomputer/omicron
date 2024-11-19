@@ -192,10 +192,7 @@ impl<'a> SledDatasetsEditor<'a> {
         num_expunged
     }
 
-    pub fn ensure_debug_dataset(
-        &mut self,
-        zpool: ZpoolName,
-    ) -> Ensure {
+    pub fn ensure_debug_dataset(&mut self, zpool: ZpoolName) -> Ensure {
         const DEBUG_QUOTA_SIZE_GB: u32 = 100;
 
         let address = None;
@@ -211,10 +208,7 @@ impl<'a> SledDatasetsEditor<'a> {
         )
     }
 
-    pub fn ensure_zone_root_dataset(
-        &mut self,
-        zpool: ZpoolName,
-    ) -> Ensure {
+    pub fn ensure_zone_root_dataset(&mut self, zpool: ZpoolName) -> Ensure {
         let address = None;
         let quota = None;
         let reservation = None;
