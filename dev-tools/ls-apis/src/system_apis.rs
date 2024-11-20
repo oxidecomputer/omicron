@@ -80,12 +80,15 @@ impl SystemApis {
             );
         }
 
-        // Create an index of server package names, mapping each one to the API
-        // that it corresponds to.
-        let server_packages: BTreeMap<_, _> = api_metadata
-            .apis()
-            .map(|api| (api.server_package_name.clone(), api))
-            .collect();
+        // Create an index of server package names, mapping each one to the list
+        // of APIs that it produces.
+        let mut server_packages = BTreeMap::new();
+        for api in api_metadata.apis() {
+            server_packages
+                .entry(api.server_package_name.clone())
+                .or_insert_with(Vec::new)
+                .push(api);
+        }
 
         // Walk the deployment units, then walk each one's list of packages, and
         // then walk all of its dependencies.  Along the way, record whenever we
@@ -405,7 +408,8 @@ impl SystemApis {
 /// See `SystemApis::load()` for how this is used.
 struct ServerComponentsTracker<'a> {
     // inputs
-    known_server_packages: &'a BTreeMap<ServerPackageName, &'a ApiMetadata>,
+    known_server_packages:
+        &'a BTreeMap<ServerPackageName, Vec<&'a ApiMetadata>>,
 
     // outputs (structures that we're building up)
     errors: Vec<anyhow::Error>,
@@ -417,7 +421,10 @@ struct ServerComponentsTracker<'a> {
 
 impl<'a> ServerComponentsTracker<'a> {
     pub fn new(
-        known_server_packages: &'a BTreeMap<ServerPackageName, &'a ApiMetadata>,
+        known_server_packages: &'a BTreeMap<
+            ServerPackageName,
+            Vec<&'a ApiMetadata>,
+        >,
     ) -> ServerComponentsTracker<'a> {
         ServerComponentsTracker {
             known_server_packages,
@@ -500,11 +507,13 @@ impl<'a> ServerComponentsTracker<'a> {
         pkgname: &str,
         dep_path: &DepPath,
     ) {
-        let Some(api) = self.known_server_packages.get(pkgname) else {
+        let Some(apis) = self.known_server_packages.get(pkgname) else {
             return;
         };
 
-        self.found_api_producer(api, dunit_pkgname, dep_path);
+        for api in apis {
+            self.found_api_producer(api, dunit_pkgname, dep_path);
+        }
     }
 
     /// Record that the given package is one of the deployment unit's top-level
