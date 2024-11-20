@@ -170,8 +170,8 @@ impl SystemApis {
                 if found_producer.is_none() {
                     bail!(
                         "error: found no producer for API with client package \
-                     name {:?} in any deployment unit (should have been one \
-                     that contains server package {:?})",
+                         name {:?} in any deployment unit (should have been \
+                         one that contains server package {:?})",
                         api.client_package_name,
                         api.server_package_name,
                     );
@@ -386,13 +386,7 @@ impl SystemApis {
             let consumed_apis =
                 self.component_apis_consumed(server_component, filter)?;
             for (client_pkg, _) in consumed_apis {
-                let other_component =
-                    self.api_producer(client_pkg).ok_or_else(|| {
-                        anyhow!(
-                            "missing producer for API with client package {:?}",
-                            client_pkg
-                        )
-                    })?;
+                let other_component = self.api_producer(client_pkg).unwrap();
                 let other_node = nodes.get(other_component).unwrap();
                 graph.add_edge(*my_node, *other_node, client_pkg.clone());
             }
