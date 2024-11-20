@@ -851,22 +851,15 @@ impl<'a> BlueprintBuilder<'a> {
             if !database_disk_ids.contains(&disk_id) {
                 if let Some(expunged_zpool) = sled_storage.remove_disk(&disk_id)
                 {
-                    for (zone, _) in self.zones.current_sled_zones(
-                        sled_id,
-                        BlueprintZoneFilter::ShouldBeRunning,
-                    ) {
-                        if let Some(fs_zpool) = &zone.filesystem_pool {
-                            if *fs_zpool == expunged_zpool {
-                                zones_to_expunge.insert(zone.id);
-                            }
-                        }
-                        if let Some(dataset) = zone.zone_type.durable_dataset()
-                        {
-                            if dataset.dataset.pool_name == expunged_zpool {
-                                zones_to_expunge.insert(zone.id);
-                            }
-                        }
-                    }
+                    zones_to_expunge.extend(
+                        self.zones
+                            .zones_using_zpool(
+                                sled_id,
+                                BlueprintZoneFilter::ShouldBeRunning,
+                                &expunged_zpool,
+                            )
+                            .map(|zone| zone.id),
+                    );
                 }
             }
         }
@@ -2049,6 +2042,27 @@ impl<'a> BlueprintZonesBuilder<'a> {
         } else {
             Box::new(std::iter::empty())
         }
+    }
+
+    /// Builds a set of all zones whose filesystem or durable dataset reside on
+    /// the given `zpool`.
+    pub fn zones_using_zpool<'b>(
+        &'b self,
+        sled_id: SledUuid,
+        filter: BlueprintZoneFilter,
+        zpool: &'b ZpoolName,
+    ) -> impl Iterator<Item = &'b BlueprintZoneConfig> + 'b {
+        self.current_sled_zones(sled_id, filter).filter_map(
+            move |(config, _state)| {
+                if Some(zpool) == config.filesystem_pool.as_ref()
+                    || Some(zpool) == config.zone_type.durable_zpool()
+                {
+                    Some(config)
+                } else {
+                    None
+                }
+            },
+        )
     }
 
     /// Produces an owned map of zones for the sleds recorded in this blueprint
