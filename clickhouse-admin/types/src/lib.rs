@@ -1043,14 +1043,15 @@ fn default_time_range() -> u64 {
     86400
 }
 
-// TODO: Have an enum?
 #[derive(Debug, Serialize, Deserialize, Display, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub struct MetricNamePath {
     /// Name of the metric to retrieve.
     pub metric: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub struct TimeSeriesSettingsQuery {
     /// The interval to collect monitoring metrics in seconds.
     /// Default is 60 seconds.
@@ -1063,9 +1064,9 @@ pub struct TimeSeriesSettingsQuery {
     pub time_range: u64,
 }
 
-// TODO: Should I have settings for each system table?
-// or should I just add an enum here?
+/// Settings to specify which time series to retrieve.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub struct SystemTimeSeriesSettings {
     pub settings: TimeSeriesSettingsQuery,
     /// Name of the metric to retrieve
@@ -1073,24 +1074,45 @@ pub struct SystemTimeSeriesSettings {
 }
 
 impl SystemTimeSeriesSettings {
-    pub fn query(&self) -> String {
+    // TODO: Use more aggregate functions than just avg?
+
+    pub fn query_metric_log(&self) -> String {
         let interval = self.settings.interval;
         let time_range = self.settings.time_range;
         let metric = &self.metric;
-        let query = format!("SELECT toStartOfInterval(event_time, INTERVAL {interval} SECOND) AS time, avg({metric}) AS value
-        FROM system.metric_log
-        WHERE event_date >= toDate(now() - {time_range}) AND event_time >= now() - {time_range}
-        GROUP BY time
-        ORDER BY time WITH FILL STEP {interval}
-        FORMAT JSONEachRow
-        SETTINGS date_time_output_format = 'iso'");
+        let query = format!(
+            "SELECT toStartOfInterval(event_time, INTERVAL {interval} SECOND) AS time, avg({metric}) AS value
+            FROM system.metric_log
+            WHERE event_date >= toDate(now() - {time_range}) AND event_time >= now() - {time_range}
+            GROUP BY time
+            ORDER BY time WITH FILL STEP {interval}
+            FORMAT JSONEachRow
+            SETTINGS date_time_output_format = 'iso'"
+        );
+        query
+    }
+
+    pub fn query_async_metric_log(&self) -> String {
+        let interval = self.settings.interval;
+        let time_range = self.settings.time_range;
+        let metric = &self.metric;
+        let query = format!(
+            "SELECT toStartOfInterval(event_time, INTERVAL {interval} SECOND) AS time, avg(value) AS value
+            FROM system.asynchronous_metric_log
+            WHERE event_date >= toDate(now() - {time_range}) AND event_time >= now() - {time_range}
+            AND metric = '{metric}'
+            GROUP BY time
+            ORDER BY time WITH FILL STEP {interval}
+            FORMAT JSONEachRow
+            SETTINGS date_time_output_format = 'iso'"
+        );
         query
     }
 }
 
-// TODO: Do the above for AsyncMetricLogTimeSeriesSettings
-
+/// Retrieved time series from the internal `system` database.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub struct SystemTimeSeries {
     pub time: DateTime<Utc>,
     pub value: f64,
@@ -1105,6 +1127,7 @@ impl SystemTimeSeries {
         info!(
             log,
             "Retrieved data from `system` database";
+            // TODO: Log output here? feels like a lot of noise?
             "output" => ?s
         );
 

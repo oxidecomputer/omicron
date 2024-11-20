@@ -6,7 +6,7 @@ use anyhow::Result;
 use camino::Utf8PathBuf;
 use clickhouse_admin_types::{
     ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
-    KeeperId, Lgif, SystemTimeSeriesSettings, RaftConfig, SystemTimeSeries,
+    KeeperId, Lgif, RaftConfig, SystemTimeSeries, SystemTimeSeriesSettings,
     OXIMETER_CLUSTER,
 };
 use dropshot::HttpError;
@@ -168,12 +168,30 @@ impl ClickhouseCli {
     ) -> Result<Vec<SystemTimeSeries>, ClickhouseCliError> {
         self.client_non_interactive(
             ClickhouseClientType::Server,
-            settings.query().as_str(),
+            settings.query_metric_log().as_str(),
             "Retrieve time series from the system.metric_log table",
             SystemTimeSeries::parse,
             self.log.clone().unwrap(),
         )
         .await
+
+        // TODO: log query?
+    }
+
+    pub async fn system_async_metric_log_timeseries(
+        &self,
+        settings: SystemTimeSeriesSettings,
+    ) -> Result<Vec<SystemTimeSeries>, ClickhouseCliError> {
+        self.client_non_interactive(
+            ClickhouseClientType::Server,
+            settings.query_async_metric_log().as_str(),
+            "Retrieve time series from the system.asynchronous_metric_log table",
+            SystemTimeSeries::parse,
+            self.log.clone().unwrap(),
+        )
+        .await
+
+        // TODO: log query?
     }
 
     async fn client_non_interactive<F, T>(

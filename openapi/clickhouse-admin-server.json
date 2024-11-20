@@ -74,6 +74,66 @@
         }
       }
     },
+    "/timeseries/async-metric-log/{metric}": {
+      "get": {
+        "summary": "Retrieve time series from the system.asynchronous_metric_log table.",
+        "description": "These are internal ClickHouse metrics.",
+        "operationId": "system_async_metric_log_timeseries",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "metric",
+            "description": "Name of the metric to retrieve.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "interval",
+            "description": "The interval to collect monitoring metrics in seconds. Default is 60 seconds.",
+            "schema": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "time_range",
+            "description": "Range of time to collect monitoring metrics in seconds. Default is 86400 seconds (24 hrs).",
+            "schema": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_SystemTimeSeries",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SystemTimeSeries"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/timeseries/metric-log/{metric}": {
       "get": {
         "summary": "Retrieve time series from the system.metric_log table.",
@@ -595,6 +655,7 @@
         ]
       },
       "SystemTimeSeries": {
+        "description": "Retrieved time series from the internal `system` database.",
         "type": "object",
         "properties": {
           "time": {

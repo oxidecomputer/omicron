@@ -6,9 +6,9 @@ use crate::context::{ServerContext, SingleServerContext};
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::{
     ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
-    KeeperConfig, KeeperConfigurableSettings, Lgif,
-    SystemTimeSeriesSettings, MetricNamePath, RaftConfig, ReplicaConfig,
-    ServerConfigurableSettings, SystemTimeSeries, TimeSeriesSettingsQuery,
+    KeeperConfig, KeeperConfigurableSettings, Lgif, MetricNamePath, RaftConfig,
+    ReplicaConfig, ServerConfigurableSettings, SystemTimeSeries,
+    SystemTimeSeriesSettings, TimeSeriesSettingsQuery,
 };
 use dropshot::{
     ApiDescription, HttpError, HttpResponseCreated, HttpResponseOk,
@@ -77,6 +77,22 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         let settings = SystemTimeSeriesSettings { settings, metric };
         let output =
             ctx.clickhouse_cli().system_metric_log_timeseries(settings).await?;
+        Ok(HttpResponseOk(output))
+    }
+
+    async fn system_async_metric_log_timeseries(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<MetricNamePath>,
+        query_params: Query<TimeSeriesSettingsQuery>,
+    ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError> {
+        let ctx = rqctx.context();
+        let settings = query_params.into_inner();
+        let metric = path_params.into_inner();
+        let settings = SystemTimeSeriesSettings { settings, metric };
+        let output = ctx
+            .clickhouse_cli()
+            .system_async_metric_log_timeseries(settings)
+            .await?;
         Ok(HttpResponseOk(output))
     }
 }
