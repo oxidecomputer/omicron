@@ -157,6 +157,15 @@ responsible for local configuration and monitoring.
 """
 
 [[apis]]
+client_package_name = "clickhouse-admin-single-client"
+label = "Clickhouse Single-Node Cluster Admin"
+server_package_name = "clickhouse-admin-api"
+notes = """
+This is the server running inside single-node Clickhouse server zones that's \
+responsible for local configuration and monitoring.
+"""
+
+[[apis]]
 client_package_name = "cockroach-admin-client"
 label = "CockroachDB Cluster Admin"
 server_package_name = "cockroach-admin-api"

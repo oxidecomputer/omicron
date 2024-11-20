@@ -13,7 +13,6 @@ use omicron_uuid_kinds::SledUuid;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-
 use super::Ensure;
 
 /// Helper for working with sets of disks on each sled
@@ -62,6 +61,15 @@ impl BlueprintDisksEditor {
         Some(&config.disks)
     }
 
+    /// Compile all edits into a new map suitable for a blueprint's
+    /// `blueprint_disks`, bumping the generation number for any sleds whose
+    /// disk config changed.
+    ///
+    /// Only sleds listed in `sled_ids` will be present in the returned map.
+    /// This primarily allows the caller to drop sleds that are no longer in
+    /// service. (Any new sleds will be given an empty set of disks, but
+    /// presumably any new sleds will have _some_ disks that will have already
+    /// been populated via a relevant `sled_disks_editor()` call.)
     pub fn build(
         mut self,
         sled_ids: impl Iterator<Item = SledUuid>,

@@ -4,9 +4,8 @@
 
 //! Helper for editing the datasets of a Blueprint
 
+use super::EnsureMultiple;
 use crate::planner::PlannerRng;
-
-use super::Ensure;
 use illumos_utils::zpool::ZpoolName;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
@@ -30,10 +29,11 @@ use std::net::SocketAddrV6;
 #[derive(Debug, thiserror::Error)]
 pub enum BlueprintDatasetsEditError {
     #[error(
-        "internal inconsistency: multiple datasets with kind {kind:?} \
+        "{data_source} inconsistency: multiple datasets with kind {kind:?} \
          on zpool {zpool_id}: {id1}, {id2}"
     )]
     MultipleDatasetsOfKind {
+        data_source: &'static str,
         zpool_id: ZpoolUuid,
         kind: DatasetKind,
         id1: DatasetUuid,
@@ -74,12 +74,13 @@ impl BlueprintDatasetsEditor {
             .entry(sled_id)
             .or_insert_with(empty_blueprint_datasets_config);
 
-        // Gather all dataset IDs known to the blueprint and to the database.
-        let blueprint_dataset_ids =
-            build_dataset_kind_id_map(config.datasets.values().map(
-                |dataset| (dataset.pool.id(), dataset.kind.clone(), dataset.id),
-            ))?;
+        // Gather all dataset IDs known to the database.
+        //
+        // See the comment below where this is used; this is a
+        // backwards-compatibility layer for
+        // https://github.com/oxidecomputer/omicron/issues/6645.
         let database_dataset_ids = build_dataset_kind_id_map(
+            "database",
             sled_resources.all_datasets(ZpoolFilter::InService).flat_map(
                 |(&zpool_id, configs)| {
                     configs.iter().map(move |config| {
@@ -89,14 +90,13 @@ impl BlueprintDatasetsEditor {
             ),
         )?;
 
-        Ok(SledDatasetsEditor::new(
+        SledDatasetsEditor::new(
             rng,
-            blueprint_dataset_ids,
             database_dataset_ids,
             sled_id,
             config,
             &mut self.changed,
-        ))
+        )
     }
 
     pub fn build(
@@ -130,14 +130,21 @@ pub(super) struct SledDatasetsEditor<'a> {
     database_dataset_ids:
         BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, DatasetUuid>>,
     config: &'a mut BlueprintDatasetsConfig,
-    changed: bool,
+    counts: EditCounts,
     sled_id: SledUuid,
     parent_changed_set: &'a mut BTreeSet<SledUuid>,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct EditCounts {
+    added: usize,
+    updated: usize,
+    expunged: usize,
+}
+
 impl Drop for SledDatasetsEditor<'_> {
     fn drop(&mut self) {
-        if self.changed {
+        if self.counts != EditCounts::default() {
             self.parent_changed_set.insert(self.sled_id);
         }
     }
@@ -146,10 +153,6 @@ impl Drop for SledDatasetsEditor<'_> {
 impl<'a> SledDatasetsEditor<'a> {
     fn new(
         rng: &'a mut PlannerRng,
-        blueprint_dataset_ids: BTreeMap<
-            ZpoolUuid,
-            BTreeMap<DatasetKind, DatasetUuid>,
-        >,
         database_dataset_ids: BTreeMap<
             ZpoolUuid,
             BTreeMap<DatasetKind, DatasetUuid>,
@@ -157,16 +160,22 @@ impl<'a> SledDatasetsEditor<'a> {
         sled_id: SledUuid,
         config: &'a mut BlueprintDatasetsConfig,
         parent_changed_set: &'a mut BTreeSet<SledUuid>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, BlueprintDatasetsEditError> {
+        let blueprint_dataset_ids = build_dataset_kind_id_map(
+            "parent blueprint",
+            config.datasets.values().map(|dataset| {
+                (dataset.pool.id(), dataset.kind.clone(), dataset.id)
+            }),
+        )?;
+        Ok(Self {
             rng,
             blueprint_dataset_ids,
             database_dataset_ids,
             config,
-            changed: false,
+            counts: EditCounts::default(),
             sled_id,
             parent_changed_set,
-        }
+        })
     }
 
     pub fn expunge_datasets_if<F>(&mut self, mut expunge_if: F) -> usize
@@ -185,14 +194,14 @@ impl<'a> SledDatasetsEditor<'a> {
             if expunge_if(&*dataset) {
                 dataset.disposition = BlueprintDatasetDisposition::Expunged;
                 num_expunged += 1;
-                self.changed = true;
+                self.counts.expunged += 1;
             }
         }
 
         num_expunged
     }
 
-    pub fn ensure_debug_dataset(&mut self, zpool: ZpoolName) -> Ensure {
+    pub fn ensure_debug_dataset(&mut self, zpool: ZpoolName) {
         const DEBUG_QUOTA_SIZE_GB: u32 = 100;
 
         let address = None;
@@ -208,7 +217,7 @@ impl<'a> SledDatasetsEditor<'a> {
         )
     }
 
-    pub fn ensure_zone_root_dataset(&mut self, zpool: ZpoolName) -> Ensure {
+    pub fn ensure_zone_root_dataset(&mut self, zpool: ZpoolName) {
         let address = None;
         let quota = None;
         let reservation = None;
@@ -227,7 +236,7 @@ impl<'a> SledDatasetsEditor<'a> {
     /// - If the dataset exists in the blueprint already, use it.
     /// - Otherwise, if the dataset exists in the database, re-use the UUID, but
     ///   add it to the blueprint.
-    /// - Otherwse, create a new dataset in the blueprint, which will propagate
+    /// - Otherwise, create a new dataset in the blueprint, which will propagate
     ///   to the database during execution.
     pub fn ensure_dataset(
         &mut self,
@@ -236,7 +245,7 @@ impl<'a> SledDatasetsEditor<'a> {
         quota: Option<ByteCount>,
         reservation: Option<ByteCount>,
         compression: CompressionAlgorithm,
-    ) -> Ensure {
+    ) {
         let zpool_id = dataset.pool().id();
         let kind = dataset.dataset();
 
@@ -258,19 +267,20 @@ impl<'a> SledDatasetsEditor<'a> {
             .get(&zpool_id)
             .and_then(|kind_to_id| kind_to_id.get(kind))
         {
+            // We built `self.blueprint_dataset_ids` based on the contents of
+            // `self.config.datasets`, so we know we can unwrap this `get_mut`.
             let old_config = self.config.datasets.get_mut(existing_id).expect(
                 "internal inconsistency: \
                  entry in blueprint_dataset_ids but not current",
             );
             let new_config = make_config(*existing_id);
 
-            return if new_config != *old_config {
+            if new_config != *old_config {
                 *old_config = new_config;
-                self.changed = true;
-                Ensure::Updated
-            } else {
-                Ensure::NotNeeded
-            };
+                self.counts.updated += 1;
+            }
+
+            return;
         }
 
         // Is there a dataset ID matching this one in the database? If so, use
@@ -287,7 +297,7 @@ impl<'a> SledDatasetsEditor<'a> {
             .unwrap_or_else(|| self.rng.next_dataset());
 
         self.config.datasets.insert(id, make_config(id));
-        self.changed = true;
+        self.counts.added += 1;
 
         // We updated our config, so also record this ID in our "present in
         // the blueprint" map. We know the entry doesn't exist or we would have
@@ -296,12 +306,21 @@ impl<'a> SledDatasetsEditor<'a> {
             .entry(zpool_id)
             .or_default()
             .insert(kind.clone(), id);
+    }
 
-        Ensure::Added
+    /// Consume this editor, returning a summary of changes made.
+    pub fn finalize(self) -> EnsureMultiple {
+        let EditCounts { added, updated, expunged } = self.counts;
+        if added == 0 && updated == 0 && expunged == 0 {
+            EnsureMultiple::NotNeeded
+        } else {
+            EnsureMultiple::Changed { added, updated, expunged, removed: 0 }
+        }
     }
 }
 
 fn build_dataset_kind_id_map(
+    data_source: &'static str,
     iter: impl Iterator<Item = (ZpoolUuid, DatasetKind, DatasetUuid)>,
 ) -> Result<
     BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, DatasetUuid>>,
@@ -320,6 +339,7 @@ fn build_dataset_kind_id_map(
             Entry::Occupied(prev) => {
                 return Err(
                     BlueprintDatasetsEditError::MultipleDatasetsOfKind {
+                        data_source,
                         zpool_id,
                         kind: prev.key().clone(),
                         id1: *prev.get(),

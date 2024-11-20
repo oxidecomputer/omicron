@@ -917,17 +917,15 @@ impl<'a> BlueprintBuilder<'a> {
             &mut self.rng,
         )?;
 
-        let mut ensure = EnsureMultiple::NotNeeded;
-
         // Ensure that datasets needed for zones exist.
         for (zone, _zone_state) in self
             .zones
             .current_sled_zones(sled_id, BlueprintZoneFilter::ShouldBeRunning)
         {
-            ensure = ensure.merge_with(sled_storage.ensure_zone_datasets(zone));
+            sled_storage.ensure_zone_datasets(zone);
         }
 
-        Ok(ensure)
+        Ok(sled_storage.finalize())
     }
 
     fn sled_add_zone_internal_dns(

@@ -139,11 +139,8 @@ impl SledStorageEditor<'_> {
     pub fn ensure_zone_datasets(
         &mut self,
         zone: &BlueprintZoneConfig,
-    ) -> EnsureMultiple {
+    ) {
         // TODO check that zpools are on valid disks?
-
-        let mut added = 0;
-        let mut updated = 0;
 
         // Dataset for transient zone filesystem
         if let Some(fs_zpool) = &zone.filesystem_pool {
@@ -151,7 +148,7 @@ impl SledStorageEditor<'_> {
             let address = None;
             let quota = None;
             let reservation = None;
-            match self.datasets.ensure_dataset(
+            self.datasets.ensure_dataset(
                 DatasetName::new(
                     fs_zpool.clone(),
                     DatasetKind::TransientZone { name },
@@ -160,11 +157,7 @@ impl SledStorageEditor<'_> {
                 quota,
                 reservation,
                 CompressionAlgorithm::Off,
-            ) {
-                Ensure::Added => added += 1,
-                Ensure::Updated => updated += 1,
-                Ensure::NotNeeded => (),
-            }
+            );
         }
 
         // Dataset for durable dataset co-located with zone
@@ -187,23 +180,13 @@ impl SledStorageEditor<'_> {
             };
             let quota = None;
             let reservation = None;
-            match self.datasets.ensure_dataset(
+            self.datasets.ensure_dataset(
                 DatasetName::new(zpool.clone(), dataset.kind),
                 address,
                 quota,
                 reservation,
                 CompressionAlgorithm::Off,
-            ) {
-                Ensure::Added => added += 1,
-                Ensure::Updated => updated += 1,
-                Ensure::NotNeeded => (),
-            }
-        }
-
-        if added == 0 && updated == 0 {
-            EnsureMultiple::NotNeeded
-        } else {
-            EnsureMultiple::Changed { added, updated, expunged: 0, removed: 0 }
+            );
         }
     }
 
@@ -238,6 +221,11 @@ impl SledStorageEditor<'_> {
                 removed: 0,
             }
         }
+    }
+
+    pub fn finalize(self) -> EnsureMultiple {
+        // TODO-john This doesn't account for changes made to self.disks!
+        self.datasets.finalize()
     }
 }
 
