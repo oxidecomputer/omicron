@@ -92,6 +92,17 @@ impl<T: ObjectIdentity> SimpleIdentity for T {
     }
 }
 
+/// Equivalent of `SimpleIdentity` for types that don't necessarily have names.
+pub trait UuidIdentity {
+    fn id(&self) -> Uuid;
+}
+
+impl<T: SimpleIdentity> UuidIdentity for T {
+    fn id(&self) -> Uuid {
+        <Self as SimpleIdentity>::id(self)
+    }
+}
+
 /// Parameters used to request a specific page of results when listing a
 /// collection of objects
 ///
@@ -949,6 +960,8 @@ impl JsonSchema for Hostname {
 pub enum ResourceType {
     AddressLot,
     AddressLotBlock,
+    AffinityGroup,
+    AntiAffinityGroup,
     AllowList,
     BackgroundTask,
     BgpConfig,
@@ -1304,9 +1317,25 @@ pub enum AffinityGroupMember {
     Instance(Uuid),
 }
 
+impl UuidIdentity for AffinityGroupMember {
+    fn id(&self) -> Uuid {
+        match self {
+            AffinityGroupMember::Instance(id) => *id,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub enum AntiAffinityGroupMember {
     Instance(Uuid),
+}
+
+impl UuidIdentity for AntiAffinityGroupMember {
+    fn id(&self) -> Uuid {
+        match self {
+            AntiAffinityGroupMember::Instance(id) => *id,
+        }
+    }
 }
 
 // DISKS

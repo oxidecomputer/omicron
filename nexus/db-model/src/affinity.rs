@@ -12,10 +12,15 @@ use crate::schema::affinity_group_instance_membership;
 use crate::schema::anti_affinity_group;
 use crate::schema::anti_affinity_group_instance_membership;
 use crate::typed_uuid::DbTypedUuid;
-use chrono::{DateTime, Utc};
+use db_macros::Resource;
+use nexus_types::external_api::views;
+use omicron_common::api::external;
+use omicron_common::api::external::IdentityMetadata;
 use omicron_uuid_kinds::AffinityGroupKind;
 use omicron_uuid_kinds::AntiAffinityGroupKind;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceKind;
+use uuid::Uuid;
 
 impl_enum_type!(
     #[derive(SqlType, Debug)]
@@ -31,6 +36,15 @@ impl_enum_type!(
     Allow => b"allow"
 );
 
+impl From<AffinityPolicy> for external::AffinityPolicy {
+    fn from(policy: AffinityPolicy) -> Self {
+        match policy {
+            AffinityPolicy::Fail => Self::Fail,
+            AffinityPolicy::Allow => Self::Allow,
+        }
+    }
+}
+
 impl_enum_type!(
     #[derive(SqlType, Debug)]
     #[diesel(postgres_type(name = "failure_domain", schema = "public"))]
@@ -44,30 +58,66 @@ impl_enum_type!(
     Sled => b"sled"
 );
 
-#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+impl From<FailureDomain> for external::FailureDomain {
+    fn from(domain: FailureDomain) -> Self {
+        match domain {
+            FailureDomain::Sled => Self::Sled,
+        }
+    }
+}
+
+#[derive(Queryable, Insertable, Clone, Debug, Resource, Selectable)]
 #[diesel(table_name = affinity_group)]
 pub struct AffinityGroup {
-    pub id: DbTypedUuid<AffinityGroupKind>,
-    pub name: String,
-    pub description: String,
-    pub time_created: DateTime<Utc>,
-    pub time_modified: DateTime<Utc>,
-    pub time_deleted: Option<DateTime<Utc>>,
+    #[diesel(embed)]
+    identity: AffinityGroupIdentity,
+    pub project_id: Uuid,
     pub policy: AffinityPolicy,
     pub failure_domain: FailureDomain,
 }
 
-#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+impl From<AffinityGroup> for views::AffinityGroup {
+    fn from(group: AffinityGroup) -> Self {
+        let identity = IdentityMetadata {
+            id: group.identity.id,
+            name: group.identity.name.into(),
+            description: group.identity.description,
+            time_created: group.identity.time_created,
+            time_modified: group.identity.time_modified,
+        };
+        Self {
+            identity,
+            policy: group.policy.into(),
+            failure_domain: group.failure_domain.into(),
+        }
+    }
+}
+
+#[derive(Queryable, Insertable, Clone, Debug, Resource, Selectable)]
 #[diesel(table_name = anti_affinity_group)]
 pub struct AntiAffinityGroup {
-    pub id: DbTypedUuid<AntiAffinityGroupKind>,
-    pub name: String,
-    pub description: String,
-    pub time_created: DateTime<Utc>,
-    pub time_modified: DateTime<Utc>,
-    pub time_deleted: Option<DateTime<Utc>>,
+    #[diesel(embed)]
+    identity: AntiAffinityGroupIdentity,
+    pub project_id: Uuid,
     pub policy: AffinityPolicy,
     pub failure_domain: FailureDomain,
+}
+
+impl From<AntiAffinityGroup> for views::AntiAffinityGroup {
+    fn from(group: AntiAffinityGroup) -> Self {
+        let identity = IdentityMetadata {
+            id: group.identity.id,
+            name: group.identity.name.into(),
+            description: group.identity.description,
+            time_created: group.identity.time_created,
+            time_modified: group.identity.time_modified,
+        };
+        Self {
+            identity,
+            policy: group.policy.into(),
+            failure_domain: group.failure_domain.into(),
+        }
+    }
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
@@ -77,9 +127,23 @@ pub struct AffinityGroupInstanceMembership {
     pub instance_id: DbTypedUuid<InstanceKind>,
 }
 
+impl From<AffinityGroupInstanceMembership> for external::AffinityGroupMember {
+    fn from(member: AffinityGroupInstanceMembership) -> Self {
+        Self::Instance(member.instance_id.into_untyped_uuid())
+    }
+}
+
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = anti_affinity_group_instance_membership)]
 pub struct AntiAffinityGroupInstanceMembership {
     pub group_id: DbTypedUuid<AntiAffinityGroupKind>,
     pub instance_id: DbTypedUuid<InstanceKind>,
+}
+
+impl From<AntiAffinityGroupInstanceMembership>
+    for external::AntiAffinityGroupMember
+{
+    fn from(member: AntiAffinityGroupInstanceMembership) -> Self {
+        Self::Instance(member.instance_id.into_untyped_uuid())
+    }
 }

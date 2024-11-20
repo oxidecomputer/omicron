@@ -49,6 +49,7 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 
 mod address_lot;
+mod affinity;
 mod allow_list;
 mod auth;
 mod bfd;

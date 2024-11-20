@@ -3997,6 +3997,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.affinity_group (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
+    project_id UUID NOT NULL,
     policy omicron.public.affinity_policy NOT NULL,
     failure_domain omicron.public.failure_domain NOT NULL,
 );
@@ -4017,6 +4018,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.anti_affinity_group (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
+    project_id UUID NOT NULL,
     policy omicron.public.affinity_policy NOT NULL,
     failure_domain omicron.public.failure_domain NOT NULL,
 );

@@ -49,6 +49,8 @@ use nexus_types::{
     },
 };
 use omicron_common::api::external::http_pagination::data_page_params_for;
+use omicron_common::api::external::http_pagination::id_pagination;
+use omicron_common::api::external::http_pagination::marker_for_id;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
 use omicron_common::api::external::http_pagination::name_or_id_pagination;
@@ -2505,18 +2507,74 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
     ) -> Result<HttpResponseOk<ResultsPage<views::AffinityGroup>>, HttpError>
     {
-        todo!();
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+            let project_lookup =
+                nexus.project_lookup(&opctx, scan_params.selector.clone())?;
+            let affinity_groups = nexus
+                .affinity_group_list(&opctx, &project_lookup, &paginated_by)
+                .await?;
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
+                &query,
+                affinity_groups,
+                &marker_for_name_or_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn affinity_group_member_list(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<
-            PaginatedByNameOrId<params::OptionalProjectSelector>,
-        >,
+        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
         path_params: Path<params::AffinityGroupPath>,
     ) -> Result<HttpResponseOk<ResultsPage<AffinityGroupMember>>, HttpError>
     {
-        todo!();
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanById::from_query(&query)?;
+            let paginated_by = id_pagination(&pag_params, scan_params)?;
+
+            let affinity_group_selector = params::AffinityGroupSelector {
+                project: scan_params.selector.project.clone(),
+                affinity_group: path.affinity_group,
+            };
+            let affinity_group_lookup =
+                nexus.affinity_group_lookup(&opctx, affinity_group_selector)?;
+            let affinity_group_members = nexus
+                .affinity_group_member_list(
+                    &opctx,
+                    &affinity_group_lookup,
+                    &paginated_by,
+                )
+                .await?;
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                affinity_group_members,
+                &marker_for_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn affinity_group_member_add(

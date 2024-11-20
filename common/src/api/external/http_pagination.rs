@@ -59,6 +59,7 @@ use std::num::NonZeroU32;
 use uuid::Uuid;
 
 use super::SimpleIdentity;
+use super::UuidIdentity;
 
 // General pagination infrastructure
 
@@ -139,9 +140,9 @@ pub fn marker_for_name<S, T: ObjectIdentity>(_: &S, t: &T) -> Name {
 /// Marker function that extracts the "id" from an object
 ///
 /// This is intended for use with [`ScanById::results_page`] with objects that
-/// impl [`ObjectIdentity`].
-pub fn marker_for_id<S, T: ObjectIdentity>(_: &S, t: &T) -> Uuid {
-    t.identity().id
+/// impl [`UuidIdentity`].
+pub fn marker_for_id<S, T: UuidIdentity>(_: &S, t: &T) -> Uuid {
+    t.id()
 }
 
 /// Marker function that extracts the "name" or "id" from an object, depending
@@ -310,6 +311,19 @@ pub type PaginatedByNameOrId<Selector = ()> = PaginationParams<
 /// Page selector for pagination by name or id
 pub type PageSelectorByNameOrId<Selector = ()> =
     PageSelector<ScanByNameOrId<Selector>, NameOrId>;
+
+pub fn id_pagination<'a, Selector>(
+    pag_params: &'a DataPageParams<Uuid>,
+    scan_params: &'a ScanById<Selector>,
+) -> Result<PaginatedBy<'a>, HttpError>
+where
+    Selector:
+        Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize,
+{
+    match scan_params.sort_by {
+        IdSortMode::IdAscending => Ok(PaginatedBy::Id(pag_params.clone())),
+    }
+}
 
 pub fn name_or_id_pagination<'a, Selector>(
     pag_params: &'a DataPageParams<NameOrId>,

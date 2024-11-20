@@ -476,6 +476,7 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        project_id -> Uuid,
         policy -> crate::AffinityPolicyEnum,
         failure_domain -> crate::FailureDomainEnum,
     }
@@ -489,6 +490,7 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        project_id -> Uuid,
         policy -> crate::AffinityPolicyEnum,
         failure_domain -> crate::FailureDomainEnum,
     }

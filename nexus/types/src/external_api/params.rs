@@ -833,6 +833,22 @@ pub struct AntiAffinityGroupCreate {
     pub failure_domain: FailureDomain,
 }
 
+#[derive(Deserialize, JsonSchema, Clone)]
+pub struct AffinityGroupSelector {
+    /// Name or ID of the project, only required if `affinity_group` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the Affinity Group
+    pub affinity_group: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema, Clone)]
+pub struct AntiAffinityGroupSelector {
+    /// Name or ID of the project, only required if `anti_affinity_group` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the Anti Affinity Group
+    pub anti_affinity_group: NameOrId,
+}
+
 // PROJECTS
 
 /// Create-time parameters for a `Project`
