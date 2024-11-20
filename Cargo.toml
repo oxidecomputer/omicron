@@ -9,6 +9,7 @@ members = [
     "clients/bootstrap-agent-client",
     "clients/clickhouse-admin-keeper-client",
     "clients/clickhouse-admin-server-client",
+    "clients/clickhouse-admin-single-client",
     "clients/cockroach-admin-client",
     "clients/ddm-admin-client",
     "clients/dns-service-client",
@@ -137,6 +138,7 @@ default-members = [
     "clients/bootstrap-agent-client",
     "clients/clickhouse-admin-keeper-client",
     "clients/clickhouse-admin-server-client",
+    "clients/clickhouse-admin-single-client",
     "clients/cockroach-admin-client",
     "clients/ddm-admin-client",
     "clients/dns-service-client",
@@ -329,6 +331,7 @@ clap = { version = "4.5", features = ["cargo", "derive", "env", "wrap_help"] }
 clickhouse-admin-api = { path = "clickhouse-admin/api" }
 clickhouse-admin-keeper-client = { path = "clients/clickhouse-admin-keeper-client" }
 clickhouse-admin-server-client = { path = "clients/clickhouse-admin-server-client" }
+clickhouse-admin-single-client = { path = "clients/clickhouse-admin-single-client" }
 clickhouse-admin-types = { path = "clickhouse-admin/types" }
 clickhouse-admin-test-utils = { path = "clickhouse-admin/test-utils" }
 clickward = { git = "https://github.com/oxidecomputer/clickward", rev = "a1b342c2558e835d09e6e39a40d3de798a29c2f" }
@@ -532,10 +535,10 @@ prettyplease = { version = "0.2.25", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = "0.8.0"
 progenitor-client = "0.8.0"
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "aadc0998c0f07f08ab15a95c006074291734800f" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "aadc0998c0f07f08ab15a95c006074291734800f" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "aadc0998c0f07f08ab15a95c006074291734800f" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "aadc0998c0f07f08ab15a95c006074291734800f" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "8f8fbb74662b4e19b643c500d55d2d384a6cee5e" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "8f8fbb74662b4e19b643c500d55d2d384a6cee5e" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "8f8fbb74662b4e19b643c500d55d2d384a6cee5e" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "8f8fbb74662b4e19b643c500d55d2d384a6cee5e" }
 proptest = "1.5.0"
 qorb = "0.2.0"
 quote = "1.0"
