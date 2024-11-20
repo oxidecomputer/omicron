@@ -693,7 +693,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=aadc0998c0f07f08ab15a95c006074291734800f#aadc0998c0f07f08ab15a95c006074291734800f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=8f8fbb74662b4e19b643c500d55d2d384a6cee5e#8f8fbb74662b4e19b643c500d55d2d384a6cee5e"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -703,7 +703,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=aadc0998c0f07f08ab15a95c006074291734800f#aadc0998c0f07f08ab15a95c006074291734800f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=8f8fbb74662b4e19b643c500d55d2d384a6cee5e#8f8fbb74662b4e19b643c500d55d2d384a6cee5e"
 dependencies = [
  "libc",
  "strum",
@@ -1838,7 +1838,7 @@ dependencies = [
 [[package]]
 name = "crucible-client-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=b7b9d5660b28ca5e865242b2bdecd032c0852d40#b7b9d5660b28ca5e865242b2bdecd032c0852d40"
+source = "git+https://github.com/oxidecomputer/crucible?rev=1d82cc9fd9925814d097d39f7cbafd62fb8cfb7e#1d82cc9fd9925814d097d39f7cbafd62fb8cfb7e"
 dependencies = [
  "base64 0.22.1",
  "crucible-workspace-hack",
@@ -6944,7 +6944,7 @@ dependencies = [
  "pq-sys",
  "pretty_assertions",
  "progenitor-client",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=aadc0998c0f07f08ab15a95c006074291734800f)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=8f8fbb74662b4e19b643c500d55d2d384a6cee5e)",
  "qorb",
  "rand",
  "rcgen",
@@ -7207,7 +7207,7 @@ dependencies = [
  "oximeter-producer",
  "oxnet",
  "pretty_assertions",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=aadc0998c0f07f08ab15a95c006074291734800f)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=8f8fbb74662b4e19b643c500d55d2d384a6cee5e)",
  "propolis-mock-server",
  "propolis_api_types",
  "rand",
@@ -8916,7 +8916,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=aadc0998c0f07f08ab15a95c006074291734800f#aadc0998c0f07f08ab15a95c006074291734800f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=8f8fbb74662b4e19b643c500d55d2d384a6cee5e#8f8fbb74662b4e19b643c500d55d2d384a6cee5e"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -8958,7 +8958,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=aadc0998c0f07f08ab15a95c006074291734800f#aadc0998c0f07f08ab15a95c006074291734800f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=8f8fbb74662b4e19b643c500d55d2d384a6cee5e#8f8fbb74662b4e19b643c500d55d2d384a6cee5e"
 dependencies = [
  "anyhow",
  "atty",
@@ -9000,7 +9000,7 @@ dependencies = [
 [[package]]
 name = "propolis_api_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=aadc0998c0f07f08ab15a95c006074291734800f#aadc0998c0f07f08ab15a95c006074291734800f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=8f8fbb74662b4e19b643c500d55d2d384a6cee5e#8f8fbb74662b4e19b643c500d55d2d384a6cee5e"
 dependencies = [
  "crucible-client-types",
  "propolis_types",
@@ -9013,7 +9013,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=aadc0998c0f07f08ab15a95c006074291734800f#aadc0998c0f07f08ab15a95c006074291734800f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=8f8fbb74662b4e19b643c500d55d2d384a6cee5e#8f8fbb74662b4e19b643c500d55d2d384a6cee5e"
 dependencies = [
  "schemars",
  "serde",
@@ -10656,7 +10656,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=aadc0998c0f07f08ab15a95c006074291734800f)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=8f8fbb74662b4e19b643c500d55d2d384a6cee5e)",
  "rcgen",
  "schemars",
  "serde",
