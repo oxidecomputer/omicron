@@ -4,7 +4,7 @@ to:   blueprint  e4aeb3b3-272f-4967-be34-2d34daa46aa1
 
   sled 08c7046b-c9c4-4368-881f-19a72df22143 (active):
 
-    physical disks at generation 1:
+    physical disks at generation 2:
     ----------------------------------------------------------------------
     vendor        model        serial                                     
     ----------------------------------------------------------------------
@@ -96,7 +96,7 @@ to:   blueprint  e4aeb3b3-272f-4967-be34-2d34daa46aa1
 
   sled 84ac367e-9b03-4e9d-a846-df1a08deee6c (active):
 
-    physical disks at generation 1:
+    physical disks at generation 2:
     ----------------------------------------------------------------------
     vendor        model        serial                                     
     ----------------------------------------------------------------------
@@ -185,7 +185,7 @@ to:   blueprint  e4aeb3b3-272f-4967-be34-2d34daa46aa1
 
   sled be7f4375-2a6b-457f-b1a4-3074a715e5fe (active):
 
-    physical disks at generation 1:
+    physical disks at generation 2:
     ----------------------------------------------------------------------
     vendor        model        serial                                     
     ----------------------------------------------------------------------
