@@ -74,11 +74,11 @@ impl BlueprintDatasetsEditor {
             .entry(sled_id)
             .or_insert_with(empty_blueprint_datasets_config);
 
-        // Gather all dataset IDs known to the blueprint and to the database.
-        let blueprint_dataset_ids =
-            build_dataset_kind_id_map(config.datasets.values().map(
-                |dataset| (dataset.pool.id(), dataset.kind.clone(), dataset.id),
-            ))?;
+        // Gather all dataset IDs known to the database.
+        //
+        // See the comment below where this is used; this is a
+        // backwards-compatibility layer for
+        // https://github.com/oxidecomputer/omicron/issues/6645.
         let database_dataset_ids = build_dataset_kind_id_map(
             sled_resources.all_datasets(ZpoolFilter::InService).flat_map(
                 |(&zpool_id, configs)| {
@@ -89,14 +89,13 @@ impl BlueprintDatasetsEditor {
             ),
         )?;
 
-        Ok(SledDatasetsEditor::new(
+        SledDatasetsEditor::new(
             rng,
-            blueprint_dataset_ids,
             database_dataset_ids,
             sled_id,
             config,
             &mut self.changed,
-        ))
+        )
     }
 
     pub fn build(
@@ -146,10 +145,6 @@ impl Drop for SledDatasetsEditor<'_> {
 impl<'a> SledDatasetsEditor<'a> {
     fn new(
         rng: &'a mut PlannerRng,
-        blueprint_dataset_ids: BTreeMap<
-            ZpoolUuid,
-            BTreeMap<DatasetKind, DatasetUuid>,
-        >,
         database_dataset_ids: BTreeMap<
             ZpoolUuid,
             BTreeMap<DatasetKind, DatasetUuid>,
@@ -157,8 +152,12 @@ impl<'a> SledDatasetsEditor<'a> {
         sled_id: SledUuid,
         config: &'a mut BlueprintDatasetsConfig,
         parent_changed_set: &'a mut BTreeSet<SledUuid>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, BlueprintDatasetsEditError> {
+        let blueprint_dataset_ids =
+            build_dataset_kind_id_map(config.datasets.values().map(
+                |dataset| (dataset.pool.id(), dataset.kind.clone(), dataset.id),
+            ))?;
+        Ok(Self {
             rng,
             blueprint_dataset_ids,
             database_dataset_ids,
@@ -166,7 +165,7 @@ impl<'a> SledDatasetsEditor<'a> {
             changed: false,
             sled_id,
             parent_changed_set,
-        }
+        })
     }
 
     pub fn database_dataset_ids(
