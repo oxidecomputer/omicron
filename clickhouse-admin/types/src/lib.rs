@@ -1033,10 +1033,43 @@ impl DistributedDdlQueue {
     }
 }
 
+#[inline]
+fn default_interval() -> u64 {
+    60
+}
+
+#[inline]
+fn default_time_range() -> u64 {
+    86400
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct MetricName {
+    // TODO: Have an enum?
+    /// Name of the metric to retrieve
+    pub metric: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct MetricSettings {
+    /// The interval to collect monitoring metrics in seconds.
+    /// Default is 60 seconds.
+    // TODO: How can I actually get the default in the API spec?
+    #[serde(default = "default_interval")]
+    pub interval: u64,
+    /// Range of time to collect monitoring metrics in seconds.
+    /// Default is 86400 seconds (24 hrs).
+    #[serde(default = "default_time_range")]
+    pub time_range: u64,
+}
+
+
 // TODO: Should I have settings for each system table?
 // or should I just add an enum here?
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct MonitoringSettings {
+pub struct MetricLogTimeSeriesSettings {
+    // TODO: Use the above structs here
+
     /// The interval to collect monitoring metrics in seconds.
     /// Default is 60 seconds.
     pub interval: u64,
@@ -1048,7 +1081,7 @@ pub struct MonitoringSettings {
     pub metric: String,
 }
 
-impl MonitoringSettings {
+impl MetricLogTimeSeriesSettings {
     pub fn query(&self) -> String {
         let interval = self.interval;
         let time_range = self.time_range;
@@ -1065,30 +1098,30 @@ impl MonitoringSettings {
     }
 }
 
+// TODO: Do the above for AsyncMetricLogTimeSeriesSettings
+
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-// TODO: Come up with a better name
-pub struct Monitoring {
+pub struct SystemTimeSeries {
     pub time: DateTime<Utc>,
-    pub value: u64,
+    pub value: f64,
     // TODO: Have an enum with possible units? (s, ms, bytes)
     // Not sure if I can even add this, the table doesn't mention units at all
     // pub unit: String,
 }
 
-impl Monitoring {
+impl SystemTimeSeries {
     pub fn parse(log: &Logger, data: &[u8]) -> Result<Vec<Self>> {
         let s = String::from_utf8_lossy(data);
         info!(
             log,
-            // TODO: Should this be per table? Is it necessary?
-            "Retrieved data from `system.metric_log`";
+            "Retrieved data from `system` database";
             "output" => ?s
         );
 
         let mut m = vec![];
 
         for line in s.lines() {
-            let item: Monitoring = serde_json::from_str(line)?;
+            let item: SystemTimeSeries = serde_json::from_str(line)?;
             m.push(item);
         }
 

@@ -6,7 +6,8 @@ use anyhow::Result;
 use camino::Utf8PathBuf;
 use clickhouse_admin_types::{
     ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
-    KeeperId, Lgif, Monitoring, RaftConfig, OXIMETER_CLUSTER,
+    KeeperId, Lgif, RaftConfig, MetricLogTimeSeriesSettings,SystemTimeSeries,
+    OXIMETER_CLUSTER,
 };
 use dropshot::HttpError;
 use illumos_utils::{output_to_exec_error, ExecutionError};
@@ -161,21 +162,15 @@ impl ClickhouseCli {
         .await
     }
 
-    pub async fn monitoring_queries_per_second_avg(
+    pub async fn system_metric_log_timeseries(
         &self,
-    ) -> Result<Vec<Monitoring>, ClickhouseCliError> {
+        settings: MetricLogTimeSeriesSettings
+    ) -> Result<Vec<SystemTimeSeries>, ClickhouseCliError> {
         self.client_non_interactive(
             ClickhouseClientType::Server,
-            // TODO: Have this query as a helper function?
-            "SELECT toStartOfInterval(event_time, INTERVAL 60 SECOND)::INT AS t, avg(ProfileEvent_Query)
-            FROM system.metric_log
-            WHERE event_date >= toDate(now() - 86400) AND event_time >= now() - 86400
-            GROUP BY t
-            ORDER BY t WITH FILL STEP 60
-            FORMAT JSONEachRow",
-            "Retrieve information about distributed ddl queries (ON CLUSTER clause) 
-            that were executed on a cluster",
-            Monitoring::parse,
+            settings.query().as_str(),
+            "Retrieve time series from the system.metric_log table",
+            SystemTimeSeries::parse,
             self.log.clone().unwrap(),
         )
         .await

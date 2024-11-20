@@ -6,12 +6,13 @@ use crate::context::{ServerContext, SingleServerContext};
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::{
     ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
-    KeeperConfig, KeeperConfigurableSettings, Lgif, RaftConfig, ReplicaConfig,
-    ServerConfigurableSettings,
+    KeeperConfig, KeeperConfigurableSettings, Lgif, MetricName, MetricSettings, 
+    MetricLogTimeSeriesSettings,RaftConfig, ReplicaConfig,
+    ServerConfigurableSettings, SystemTimeSeries,
 };
 use dropshot::{
     ApiDescription, HttpError, HttpResponseCreated, HttpResponseOk,
-    HttpResponseUpdatedNoContent, RequestContext, TypedBody,
+    HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
 };
 use illumos_utils::svcadm::Svcadm;
 use omicron_common::address::CLICKHOUSE_TCP_PORT;
@@ -62,6 +63,26 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
     ) -> Result<HttpResponseOk<Vec<DistributedDdlQueue>>, HttpError> {
         let ctx = rqctx.context();
         let output = ctx.clickhouse_cli().distributed_ddl_queue().await?;
+        Ok(HttpResponseOk(output))
+    }
+
+    async  fn system_metric_log_timeseries(
+        rqctx:RequestContext<Self::Context>,
+        path_params:Path<MetricName>,
+        query_params:Query<MetricSettings>,
+    ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError> {
+        let ctx = rqctx.context();
+        
+        // TODO: REMOVEME
+        println!("PATH PARAMS: {path_params:?}");
+        println!("QUERY PARAMS: {query_params:?}");
+
+        let settings = MetricLogTimeSeriesSettings{
+            interval: 60,
+            time_range: 86400,
+            metric: "ProfileEvent_Query".to_string(),
+        };
+        let output = ctx.clickhouse_cli().system_metric_log_timeseries(settings).await?;
         Ok(HttpResponseOk(output))
     }
 }

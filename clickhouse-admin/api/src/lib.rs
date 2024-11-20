@@ -4,12 +4,12 @@
 
 use clickhouse_admin_types::{
     ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
-    KeeperConfig, KeeperConfigurableSettings, Lgif, RaftConfig, ReplicaConfig,
-    ServerConfigurableSettings,
+    KeeperConfig, KeeperConfigurableSettings, Lgif, MetricName, MetricSettings,
+    RaftConfig, ReplicaConfig, SystemTimeSeries, ServerConfigurableSettings,
 };
 use dropshot::{
-    HttpError, HttpResponseCreated, HttpResponseOk,
-    HttpResponseUpdatedNoContent, RequestContext, TypedBody,
+    HttpError, HttpResponseCreated, HttpResponseOk, HttpResponseUpdatedNoContent,
+    Path, Query, RequestContext, TypedBody,
 };
 
 /// API interface for our clickhouse-admin-keeper server
@@ -116,6 +116,18 @@ pub trait ClickhouseAdminServerApi {
     async fn distributed_ddl_queue(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<DistributedDdlQueue>>, HttpError>;
+
+    /// Generate a ClickHouse configuration file for a server node on a specified
+    /// directory and enable the SMF service.
+    #[endpoint {
+        method = GET,
+        path = "/timeseries/metric-log/{metric}"
+    }]
+    async fn system_metric_log_timeseries(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<MetricName>,
+        query_params: Query<MetricSettings>,
+    ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError>;
 }
 
 /// API interface for our clickhouse-admin-single server
