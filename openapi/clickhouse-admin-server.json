@@ -76,8 +76,8 @@
     },
     "/timeseries/metric-log/{metric}": {
       "get": {
-        "summary": "Generate a ClickHouse configuration file for a server node on a specified",
-        "description": "directory and enable the SMF service.",
+        "summary": "Retrieve time series from the system.metric_log table.",
+        "description": "These are internal ClickHouse metrics.",
         "operationId": "system_metric_log_timeseries",
         "parameters": [
           {

@@ -6,9 +6,9 @@ use crate::context::{ServerContext, SingleServerContext};
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::{
     ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
-    KeeperConfig, KeeperConfigurableSettings, Lgif, MetricName, MetricSettings, 
-    MetricLogTimeSeriesSettings,RaftConfig, ReplicaConfig,
-    ServerConfigurableSettings, SystemTimeSeries,
+    KeeperConfig, KeeperConfigurableSettings, Lgif,
+    MetricLogTimeSeriesSettings, MetricName, RaftConfig, ReplicaConfig,
+    ServerConfigurableSettings, SystemTimeSeries, TimeSeriesSettings,
 };
 use dropshot::{
     ApiDescription, HttpError, HttpResponseCreated, HttpResponseOk,
@@ -66,23 +66,18 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         Ok(HttpResponseOk(output))
     }
 
-    async  fn system_metric_log_timeseries(
-        rqctx:RequestContext<Self::Context>,
-        path_params:Path<MetricName>,
-        query_params:Query<MetricSettings>,
+    async fn system_metric_log_timeseries(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<MetricName>,
+        query_params: Query<TimeSeriesSettings>,
     ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError> {
         let ctx = rqctx.context();
-        
-        // TODO: REMOVEME
-        println!("PATH PARAMS: {path_params:?}");
-        println!("QUERY PARAMS: {query_params:?}");
+        let settings = query_params.into_inner();
+        let metric = path_params.into_inner();
 
-        let settings = MetricLogTimeSeriesSettings{
-            interval: 60,
-            time_range: 86400,
-            metric: "ProfileEvent_Query".to_string(),
-        };
-        let output = ctx.clickhouse_cli().system_metric_log_timeseries(settings).await?;
+        let settings = MetricLogTimeSeriesSettings { settings, metric };
+        let output =
+            ctx.clickhouse_cli().system_metric_log_timeseries(settings).await?;
         Ok(HttpResponseOk(output))
     }
 }

@@ -1043,7 +1043,7 @@ fn default_time_range() -> u64 {
     86400
 }
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, Display, JsonSchema)]
 pub struct MetricName {
     // TODO: Have an enum?
     /// Name of the metric to retrieve
@@ -1051,7 +1051,7 @@ pub struct MetricName {
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct MetricSettings {
+pub struct TimeSeriesSettings {
     /// The interval to collect monitoring metrics in seconds.
     /// Default is 60 seconds.
     // TODO: How can I actually get the default in the API spec?
@@ -1063,30 +1063,21 @@ pub struct MetricSettings {
     pub time_range: u64,
 }
 
-
 // TODO: Should I have settings for each system table?
 // or should I just add an enum here?
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct MetricLogTimeSeriesSettings {
-    // TODO: Use the above structs here
-
-    /// The interval to collect monitoring metrics in seconds.
-    /// Default is 60 seconds.
-    pub interval: u64,
-    /// Range of time to collect monitoring metrics in seconds.
-    /// Default is 86400 seconds (24 hrs).
-    pub time_range: u64,
+    pub settings: TimeSeriesSettings,
     // TODO: Have an enum?
     /// Name of the metric to retrieve
-    pub metric: String,
+    pub metric: MetricName,
 }
 
 impl MetricLogTimeSeriesSettings {
     pub fn query(&self) -> String {
-        let interval = self.interval;
-        let time_range = self.time_range;
+        let interval = self.settings.interval;
+        let time_range = self.settings.time_range;
         let metric = &self.metric;
-        // TODO: Should there be different methods for each system table?
         let query = format!("SELECT toStartOfInterval(event_time, INTERVAL {interval} SECOND) AS time, avg({metric}) AS value
         FROM system.metric_log
         WHERE event_date >= toDate(now() - {time_range}) AND event_time >= now() - {time_range}
