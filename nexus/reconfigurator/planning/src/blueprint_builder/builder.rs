@@ -131,13 +131,12 @@ pub enum Error {
     BlueprintDatasetsEditError(#[from] BlueprintDatasetsEditError),
 }
 
-/// Describes the result of an idempotent "ensure" operation
+/// Describes whether an idempotent "ensure" operation resulted in action taken
+/// or no action was necessary
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Ensure {
-    /// a new item was added
+    /// action was taken
     Added,
-    /// an existing item was updated
-    Updated,
     /// no action was necessary
     NotNeeded,
 }
@@ -864,14 +863,6 @@ impl<'a> BlueprintBuilder<'a> {
             &mut self.rng,
         )?;
 
-        let mut added = 0;
-        let mut updated = 0;
-        let mut update_counts = |ensure: Ensure| match ensure {
-            Ensure::Added => added += 1,
-            Ensure::Updated => updated += 1,
-            Ensure::NotNeeded => (),
-        };
-
         let mut datasets_ensured = BTreeSet::new();
 
         // Ensure each zpool has a "Debug" and "Zone Root" dataset.
@@ -883,16 +874,11 @@ impl<'a> BlueprintBuilder<'a> {
         {
             let zpool = ZpoolName::new_external(zpool_id);
 
-            let (debug_id, debug_ensure) =
-                datasets_editor.ensure_debug_dataset(zpool.clone());
-            let (zone_root_id, zone_root_ensure) =
-                datasets_editor.ensure_zone_root_dataset(zpool);
+            let debug_id = datasets_editor.ensure_debug_dataset(zpool.clone());
+            let zone_root_id = datasets_editor.ensure_zone_root_dataset(zpool);
 
             datasets_ensured.insert(debug_id);
             datasets_ensured.insert(zone_root_id);
-
-            update_counts(debug_ensure);
-            update_counts(zone_root_ensure);
         }
 
         // Ensure that datasets needed for zones exist.
@@ -906,7 +892,7 @@ impl<'a> BlueprintBuilder<'a> {
                 let address = None;
                 let quota = None;
                 let reservation = None;
-                let (id, ensure) = datasets_editor.ensure_dataset(
+                let id = datasets_editor.ensure_dataset(
                     DatasetName::new(
                         fs_zpool.clone(),
                         DatasetKind::TransientZone { name },
@@ -917,7 +903,6 @@ impl<'a> BlueprintBuilder<'a> {
                     CompressionAlgorithm::Off,
                 );
                 datasets_ensured.insert(id);
-                update_counts(ensure);
             }
 
             // Dataset for durable dataset co-located with zone
@@ -931,7 +916,7 @@ impl<'a> BlueprintBuilder<'a> {
                 };
                 let quota = None;
                 let reservation = None;
-                let (id, ensure) = datasets_editor.ensure_dataset(
+                let id = datasets_editor.ensure_dataset(
                     DatasetName::new(zpool.clone(), dataset.kind),
                     address,
                     quota,
@@ -939,7 +924,6 @@ impl<'a> BlueprintBuilder<'a> {
                     CompressionAlgorithm::Off,
                 );
                 datasets_ensured.insert(id);
-                update_counts(ensure);
             }
         }
 
@@ -948,7 +932,7 @@ impl<'a> BlueprintBuilder<'a> {
 
         // Expunge any datasets that were present in the parent blueprint that
         // we didn't ensure above.
-        let expunged = datasets_editor.expunge_datasets_if(|dataset_config| {
+        datasets_editor.expunge_datasets_if(|dataset_config| {
             if datasets_ensured.contains(&dataset_config.id) {
                 false
             } else {
@@ -964,7 +948,6 @@ impl<'a> BlueprintBuilder<'a> {
         // remove datasets that are expunged and no longer present in the
         // database, but instead, opt to just log that the dataset is removable
         // and keep it in the blueprint.
-        let removed = 0;
         for dataset in datasets_editor.datasets() {
             match dataset.disposition {
                 BlueprintDatasetDisposition::InService => continue,
@@ -1014,11 +997,7 @@ impl<'a> BlueprintBuilder<'a> {
             }
         }
 
-        if added == 0 && updated == 0 && expunged == 0 && removed == 0 {
-            Ok(EnsureMultiple::NotNeeded)
-        } else {
-            Ok(EnsureMultiple::Changed { added, updated, expunged, removed: 0 })
-        }
+        Ok(datasets_editor.finalize())
     }
 
     fn sled_add_zone_internal_dns(

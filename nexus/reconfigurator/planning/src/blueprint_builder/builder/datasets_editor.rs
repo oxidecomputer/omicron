@@ -4,9 +4,8 @@
 
 //! Helper for editing the datasets of a Blueprint
 
+use super::EnsureMultiple;
 use crate::planner::PlannerRng;
-
-use super::Ensure;
 use illumos_utils::zpool::ZpoolName;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
@@ -131,14 +130,21 @@ pub(super) struct SledDatasetsEditor<'a> {
     database_dataset_ids:
         BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, DatasetUuid>>,
     config: &'a mut BlueprintDatasetsConfig,
-    changed: bool,
+    counts: EditCounts,
     sled_id: SledUuid,
     parent_changed_set: &'a mut BTreeSet<SledUuid>,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct EditCounts {
+    added: usize,
+    updated: usize,
+    expunged: usize,
+}
+
 impl Drop for SledDatasetsEditor<'_> {
     fn drop(&mut self) {
-        if self.changed {
+        if self.counts != EditCounts::default() {
             self.parent_changed_set.insert(self.sled_id);
         }
     }
@@ -166,7 +172,7 @@ impl<'a> SledDatasetsEditor<'a> {
             blueprint_dataset_ids,
             database_dataset_ids,
             config,
-            changed: false,
+            counts: EditCounts::default(),
             sled_id,
             parent_changed_set,
         })
@@ -198,17 +204,14 @@ impl<'a> SledDatasetsEditor<'a> {
             if expunge_if(&*dataset) {
                 dataset.disposition = BlueprintDatasetDisposition::Expunged;
                 num_expunged += 1;
-                self.changed = true;
+                self.counts.expunged += 1;
             }
         }
 
         num_expunged
     }
 
-    pub fn ensure_debug_dataset(
-        &mut self,
-        zpool: ZpoolName,
-    ) -> (DatasetUuid, Ensure) {
+    pub fn ensure_debug_dataset(&mut self, zpool: ZpoolName) -> DatasetUuid {
         const DEBUG_QUOTA_SIZE_GB: u32 = 100;
 
         let address = None;
@@ -227,7 +230,7 @@ impl<'a> SledDatasetsEditor<'a> {
     pub fn ensure_zone_root_dataset(
         &mut self,
         zpool: ZpoolName,
-    ) -> (DatasetUuid, Ensure) {
+    ) -> DatasetUuid {
         let address = None;
         let quota = None;
         let reservation = None;
@@ -255,7 +258,7 @@ impl<'a> SledDatasetsEditor<'a> {
         quota: Option<ByteCount>,
         reservation: Option<ByteCount>,
         compression: CompressionAlgorithm,
-    ) -> (DatasetUuid, Ensure) {
+    ) -> DatasetUuid {
         let zpool_id = dataset.pool().id();
         let kind = dataset.dataset();
 
@@ -285,15 +288,12 @@ impl<'a> SledDatasetsEditor<'a> {
             );
             let new_config = make_config(*existing_id);
 
-            let ensure = if new_config != *old_config {
+            if new_config != *old_config {
                 *old_config = new_config;
-                self.changed = true;
-                Ensure::Updated
-            } else {
-                Ensure::NotNeeded
-            };
+                self.counts.updated += 1;
+            }
 
-            return (old_config.id, ensure);
+            return old_config.id;
         }
 
         // Is there a dataset ID matching this one in the database? If so, use
@@ -310,7 +310,7 @@ impl<'a> SledDatasetsEditor<'a> {
             .unwrap_or_else(|| self.rng.next_dataset());
 
         self.config.datasets.insert(id, make_config(id));
-        self.changed = true;
+        self.counts.added += 1;
 
         // We updated our config, so also record this ID in our "present in
         // the blueprint" map. We know the entry doesn't exist or we would have
@@ -320,7 +320,17 @@ impl<'a> SledDatasetsEditor<'a> {
             .or_default()
             .insert(kind.clone(), id);
 
-        (id, Ensure::Added)
+        id
+    }
+
+    /// Consume this editor, returning a summary of changes made.
+    pub fn finalize(self) -> EnsureMultiple {
+        let EditCounts { added, updated, expunged } = self.counts;
+        if added == 0 && updated == 0 && expunged == 0 {
+            EnsureMultiple::NotNeeded
+        } else {
+            EnsureMultiple::Changed { added, updated, expunged, removed: 0 }
+        }
     }
 }
 
