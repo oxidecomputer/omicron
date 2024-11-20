@@ -504,7 +504,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .as_mut()
             .expect("Tests expect to set a port of Clickhouse")
             .set_port(http_port);
-        self.config.pkg.timeseries_db.native_address =
+        self.config.pkg.timeseries_db.address =
             Some(native_address.into());
 
         let pool_name = illumos_utils::zpool::ZpoolName::new_external(zpool_id)
@@ -623,7 +623,6 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let oximeter = start_oximeter(
             log.new(o!("component" => "oximeter")),
             nexus_internal_addr,
-            clickhouse.http_address().port(),
             clickhouse.native_address().port(),
             collector_id,
         )
@@ -1457,13 +1456,11 @@ pub async fn start_sled_agent(
 pub async fn start_oximeter(
     log: Logger,
     nexus_address: SocketAddr,
-    http_port: u16,
     native_port: u16,
     id: Uuid,
 ) -> Result<Oximeter, String> {
     let db = oximeter_collector::DbConfig {
-        address: Some(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), http_port)),
-        native_address: Some(SocketAddr::new(
+        address: Some(SocketAddr::new(
             Ipv6Addr::LOCALHOST.into(),
             native_port,
         )),

@@ -202,10 +202,8 @@ pub async fn wait_for_ping(
         &Duration::from_secs(30),
     )
     .await
-    .with_context(|| {
-        format!("failed to ping clickhouse server: {}", client.url())
-    })?;
-    info!(log, "Clickhouse server ready: {}", client.url());
+    .context("failed to ping ClickHouse server")?;
+    info!(log, "ClickHouse server ready");
     Ok(())
 }
 

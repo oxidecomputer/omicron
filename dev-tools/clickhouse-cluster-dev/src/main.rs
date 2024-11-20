@@ -37,13 +37,11 @@ async fn main() -> Result<()> {
     deployment.deploy().context("failed to deploy")?;
 
     let client1 = Client::new_with_request_timeout(
-        deployment.http_addr(1.into()),
         deployment.native_addr(1.into()),
         &logctx.log,
         request_timeout,
     );
     let client2 = Client::new_with_request_timeout(
-        deployment.http_addr(2.into()),
         deployment.native_addr(2.into()),
         &logctx.log,
         request_timeout,

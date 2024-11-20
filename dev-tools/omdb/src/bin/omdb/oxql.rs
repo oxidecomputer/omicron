@@ -56,7 +56,6 @@ impl OxqlArgs {
         omdb: &Omdb,
         log: &Logger,
     ) -> anyhow::Result<()> {
-        let http_addr = self.resolve_http_addr(omdb, log).await?;
         let native_addr = self.resolve_native_addr(omdb, log).await?;
 
         let opts = ShellOptions {
@@ -65,8 +64,7 @@ impl OxqlArgs {
         };
 
         oxql::shell(
-            http_addr.ip(),
-            http_addr.port(),
+            native_addr.ip(),
             native_addr.port(),
             log.new(slog::o!("component" => "clickhouse-client")),
             opts,
@@ -85,21 +83,6 @@ impl OxqlArgs {
             log,
             self.clickhouse_native_url.as_deref(),
             ServiceName::ClickhouseNative,
-        )
-        .await
-    }
-
-    /// Resolve the ClickHouse HTTP URL to a socket address.
-    async fn resolve_http_addr(
-        &self,
-        omdb: &Omdb,
-        log: &Logger,
-    ) -> anyhow::Result<SocketAddr> {
-        self.resolve_addr(
-            omdb,
-            log,
-            self.clickhouse_url.as_deref(),
-            ServiceName::Clickhouse,
         )
         .await
     }

@@ -130,18 +130,13 @@ impl ClickhouseAdminSingleApi for ClickhouseAdminSingleImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let log = &rqctx.log;
         let ctx = rqctx.context();
-        let http_address = ctx.clickhouse_cli().listen_address;
-        let native_address =
-            SocketAddrV6::new(*http_address.ip(), CLICKHOUSE_TCP_PORT, 0, 0);
-        let client = OximeterClient::new(
-            http_address.into(),
-            native_address.into(),
-            log,
-        );
+        let ip = ctx.clickhouse_cli().listen_address.ip();
+        let address = SocketAddrV6::new(*ip, CLICKHOUSE_TCP_PORT, 0, 0);
+        let client = OximeterClient::new(address.into(), log);
         debug!(
             log,
             "initializing single-node ClickHouse \
-             at {http_address} to version {OXIMETER_VERSION}"
+             at {address} to version {OXIMETER_VERSION}"
         );
 
         // Database initialization is idempotent, but not concurrency-safe.
@@ -154,7 +149,7 @@ impl ClickhouseAdminSingleApi for ClickhouseAdminSingleImpl {
             .map_err(|e| {
                 HttpError::for_internal_error(format!(
                     "can't initialize single-node ClickHouse \
-                     at {http_address} to version {OXIMETER_VERSION}: {e}",
+                     at {address} to version {OXIMETER_VERSION}: {e}",
                 ))
             })?;
 

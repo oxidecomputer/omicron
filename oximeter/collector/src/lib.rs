@@ -75,17 +75,11 @@ impl From<Error> for HttpError {
 /// Configuration for interacting with the metric database.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub struct DbConfig {
-    /// Optional address of the ClickHouse server's HTTP interface.
-    ///
-    /// If "None", will be inferred from DNS.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub address: Option<SocketAddr>,
-
     /// Optional address of the ClickHouse server's native TCP interface.
     ///
     /// If None, will be inferred from DNS.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_address: Option<SocketAddr>,
+    pub address: Option<SocketAddr>,
 
     /// Batch size of samples at which to insert.
     pub batch_size: usize,
@@ -117,7 +111,6 @@ impl DbConfig {
     fn with_address(address: SocketAddr) -> Self {
         Self {
             address: Some(address),
-            native_address: None,
             batch_size: Self::DEFAULT_BATCH_SIZE,
             batch_interval: Self::DEFAULT_BATCH_INTERVAL,
             replicated: Self::DEFAULT_REPLICATED,
@@ -256,38 +249,19 @@ impl Oximeter {
                 }
             };
 
-        // Closure to create _two_ resolvers, one to resolve the ClickHouse HTTP
-        // SRV record, and one for the native TCP record.
-        //
-        // TODO(cleanup): This should be removed if / when we entirely switch to
-        // the native protocol.
-        let make_clickhouse_resolvers = || -> (BoxedResolver, BoxedResolver) {
-            let http_resolver = make_resolver(
-                config.db.address,
-                if config.db.replicated {
-                    ServiceName::ClickhouseServer
-                } else {
-                    ServiceName::Clickhouse
-                },
-            );
-            let native_resolver = make_resolver(
-                config.db.native_address,
-                ServiceName::ClickhouseNative,
-            );
-            (http_resolver, native_resolver)
-        };
-
         let make_agent = || async {
             debug!(log, "creating ClickHouse client");
-            let (http_resolver, native_resolver) = make_clickhouse_resolvers();
+            let resolver = make_resolver(
+                config.db.address,
+                ServiceName::ClickhouseNative,
+            );
             Ok(Arc::new(
                 OximeterAgent::with_id(
                     args.id,
                     args.address,
                     config.refresh_interval,
                     config.db,
-                    http_resolver,
-                    native_resolver,
+                    resolver,
                     &log,
                     config.db.replicated,
                 )
