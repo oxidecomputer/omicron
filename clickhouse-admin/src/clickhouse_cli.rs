@@ -6,7 +6,7 @@ use anyhow::Result;
 use camino::Utf8PathBuf;
 use clickhouse_admin_types::{
     ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
-    KeeperId, Lgif, MetricLogTimeSeriesSettings, RaftConfig, SystemTimeSeries,
+    KeeperId, Lgif, SystemTimeSeriesSettings, RaftConfig, SystemTimeSeries,
     OXIMETER_CLUSTER,
 };
 use dropshot::HttpError;
@@ -164,7 +164,7 @@ impl ClickhouseCli {
 
     pub async fn system_metric_log_timeseries(
         &self,
-        settings: MetricLogTimeSeriesSettings,
+        settings: SystemTimeSeriesSettings,
     ) -> Result<Vec<SystemTimeSeries>, ClickhouseCliError> {
         self.client_non_interactive(
             ClickhouseClientType::Server,

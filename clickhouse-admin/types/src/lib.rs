@@ -1043,15 +1043,15 @@ fn default_time_range() -> u64 {
     86400
 }
 
+// TODO: Have an enum?
 #[derive(Debug, Serialize, Deserialize, Display, JsonSchema)]
-pub struct MetricName {
-    // TODO: Have an enum?
-    /// Name of the metric to retrieve
+pub struct MetricNamePath {
+    /// Name of the metric to retrieve.
     pub metric: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct TimeSeriesSettings {
+pub struct TimeSeriesSettingsQuery {
     /// The interval to collect monitoring metrics in seconds.
     /// Default is 60 seconds.
     // TODO: How can I actually get the default in the API spec?
@@ -1066,14 +1066,13 @@ pub struct TimeSeriesSettings {
 // TODO: Should I have settings for each system table?
 // or should I just add an enum here?
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct MetricLogTimeSeriesSettings {
-    pub settings: TimeSeriesSettings,
-    // TODO: Have an enum?
+pub struct SystemTimeSeriesSettings {
+    pub settings: TimeSeriesSettingsQuery,
     /// Name of the metric to retrieve
-    pub metric: MetricName,
+    pub metric: MetricNamePath,
 }
 
-impl MetricLogTimeSeriesSettings {
+impl SystemTimeSeriesSettings {
     pub fn query(&self) -> String {
         let interval = self.settings.interval;
         let time_range = self.settings.time_range;

@@ -4,9 +4,8 @@
 
 use clickhouse_admin_types::{
     ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
-    KeeperConfig, KeeperConfigurableSettings, Lgif, MetricName, RaftConfig,
-    ReplicaConfig, ServerConfigurableSettings, SystemTimeSeries,
-    TimeSeriesSettings,
+    KeeperConfig, KeeperConfigurableSettings, Lgif, MetricNamePath, RaftConfig,
+    ReplicaConfig, ServerConfigurableSettings, SystemTimeSeries, TimeSeriesSettingsQuery
 };
 use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk,
@@ -126,8 +125,8 @@ pub trait ClickhouseAdminServerApi {
     }]
     async fn system_metric_log_timeseries(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<MetricName>,
-        query_params: Query<TimeSeriesSettings>,
+        path_params: Path<MetricNamePath>,
+        query_params: Query<TimeSeriesSettingsQuery>,
     ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError>;
 }
 

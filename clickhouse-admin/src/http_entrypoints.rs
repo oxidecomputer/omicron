@@ -7,8 +7,8 @@ use clickhouse_admin_api::*;
 use clickhouse_admin_types::{
     ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
     KeeperConfig, KeeperConfigurableSettings, Lgif,
-    MetricLogTimeSeriesSettings, MetricName, RaftConfig, ReplicaConfig,
-    ServerConfigurableSettings, SystemTimeSeries, TimeSeriesSettings,
+    SystemTimeSeriesSettings, MetricNamePath, RaftConfig, ReplicaConfig,
+    ServerConfigurableSettings, SystemTimeSeries, TimeSeriesSettingsQuery,
 };
 use dropshot::{
     ApiDescription, HttpError, HttpResponseCreated, HttpResponseOk,
@@ -68,14 +68,13 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
 
     async fn system_metric_log_timeseries(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<MetricName>,
-        query_params: Query<TimeSeriesSettings>,
+        path_params: Path<MetricNamePath>,
+        query_params: Query<TimeSeriesSettingsQuery>,
     ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError> {
         let ctx = rqctx.context();
         let settings = query_params.into_inner();
         let metric = path_params.into_inner();
-
-        let settings = MetricLogTimeSeriesSettings { settings, metric };
+        let settings = SystemTimeSeriesSettings { settings, metric };
         let output =
             ctx.clickhouse_cli().system_metric_log_timeseries(settings).await?;
         Ok(HttpResponseOk(output))
