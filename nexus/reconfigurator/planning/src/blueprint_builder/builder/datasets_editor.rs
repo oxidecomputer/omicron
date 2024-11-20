@@ -4,7 +4,7 @@
 
 //! Helper for editing the datasets of a Blueprint
 
-use super::EnsureMultiple;
+use super::EditCounts;
 use crate::planner::PlannerRng;
 use illumos_utils::zpool::ZpoolName;
 use nexus_types::deployment::BlueprintDatasetConfig;
@@ -133,13 +133,6 @@ pub(super) struct SledDatasetsEditor<'a> {
     counts: EditCounts,
     sled_id: SledUuid,
     parent_changed_set: &'a mut BTreeSet<SledUuid>,
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-struct EditCounts {
-    added: usize,
-    updated: usize,
-    expunged: usize,
 }
 
 impl Drop for SledDatasetsEditor<'_> {
@@ -309,13 +302,8 @@ impl<'a> SledDatasetsEditor<'a> {
     }
 
     /// Consume this editor, returning a summary of changes made.
-    pub fn finalize(self) -> EnsureMultiple {
-        let EditCounts { added, updated, expunged } = self.counts;
-        if added == 0 && updated == 0 && expunged == 0 {
-            EnsureMultiple::NotNeeded
-        } else {
-            EnsureMultiple::Changed { added, updated, expunged, removed: 0 }
-        }
+    pub fn finalize(self) -> EditCounts {
+        self.counts
     }
 }
 

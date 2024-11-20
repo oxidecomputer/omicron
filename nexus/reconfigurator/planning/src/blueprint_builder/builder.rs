@@ -87,6 +87,8 @@ mod datasets_editor;
 mod disks_editor;
 mod storage_editor;
 
+pub use storage_editor::StorageEditCounts;
+
 /// Errors encountered while assembling blueprints
 #[derive(Debug, Error)]
 pub enum Error {
@@ -161,32 +163,30 @@ pub enum EnsureMultiple {
     NotNeeded,
 }
 
-impl EnsureMultiple {
-    pub fn merge_with(self, other: EnsureMultiple) -> Self {
-        match (self, other) {
-            (Self::NotNeeded, _) => other,
-            (_, Self::NotNeeded) => self,
-            (
-                Self::Changed {
-                    added: added0,
-                    updated: updated0,
-                    expunged: expunged0,
-                    removed: removed0,
-                },
-                Self::Changed {
-                    added: added1,
-                    updated: updated1,
-                    expunged: expunged1,
-                    removed: removed1,
-                },
-            ) => Self::Changed {
-                added: added0 + added1,
-                updated: updated0 + updated1,
-                expunged: expunged0 + expunged1,
-                removed: removed0 + removed1,
-            },
+impl From<EditCounts> for EnsureMultiple {
+    fn from(value: EditCounts) -> Self {
+        let EditCounts { added, updated, expunged, removed } = value;
+        if added == 0 && updated == 0 && expunged == 0 && removed == 0 {
+            Self::NotNeeded
+        } else {
+            Self::Changed { added, updated, expunged, removed }
         }
     }
+}
+
+/// Counts of changes made by an operation.
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+pub struct EditCounts {
+    /// An item was added to the blueprint
+    pub added: usize,
+    /// An item was updated within the blueprint
+    pub updated: usize,
+    /// An item was expunged in the blueprint
+    pub expunged: usize,
+    /// An item was removed from the blueprint.
+    ///
+    /// This usually happens after the work of expungment has completed.
+    pub removed: usize,
 }
 
 /// Describes operations which the BlueprintBuilder has performed to arrive
@@ -815,11 +815,7 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
         resources: &SledResources,
-    ) -> Result<EnsureMultiple, Error> {
-        let mut added = 0;
-        let mut updated = 0;
-        let mut removed = 0;
-
+    ) -> Result<StorageEditCounts, Error> {
         // These are the disks known to our (last?) blueprint
         let mut sled_storage = self.storage.sled_storage_editor(
             sled_id,
@@ -839,15 +835,11 @@ impl<'a> BlueprintBuilder<'a> {
         // blueprint
         for (disk_id, (zpool, disk)) in database_disks {
             database_disk_ids.insert(disk_id);
-            match sled_storage.ensure_disk(BlueprintPhysicalDiskConfig {
+            sled_storage.ensure_disk(BlueprintPhysicalDiskConfig {
                 identity: disk.disk_identity.clone(),
                 id: disk_id.into_untyped_uuid(),
                 pool_id: *zpool,
-            }) {
-                Ensure::Added => added += 1,
-                Ensure::Updated => updated += 1,
-                Ensure::NotNeeded => (),
-            }
+            });
         }
 
         // Remove any disks that appear in the blueprint, but not the database
@@ -872,12 +864,10 @@ impl<'a> BlueprintBuilder<'a> {
                             }
                         }
                     }
-
-                    removed += 1;
                 }
             }
         }
-        mem::drop(sled_storage);
+        let storage_edits = sled_storage.finalize();
 
         // Expunging a zpool necessarily requires also expunging any zones that
         // depended on it.
@@ -885,11 +875,7 @@ impl<'a> BlueprintBuilder<'a> {
             self.sled_expunge_zone(sled_id, zone_id)?;
         }
 
-        if added == 0 && removed == 0 {
-            return Ok(EnsureMultiple::NotNeeded);
-        }
-
-        Ok(EnsureMultiple::Changed { added, updated, expunged: 0, removed })
+        Ok(storage_edits)
     }
 
     /// Ensure that a sled in the blueprint has all the datasets it needs for
@@ -925,7 +911,15 @@ impl<'a> BlueprintBuilder<'a> {
             sled_storage.ensure_zone_datasets(zone);
         }
 
-        Ok(sled_storage.finalize())
+        let StorageEditCounts { disks: disk_edits, datasets: dataset_edits } =
+            sled_storage.finalize();
+        debug_assert_eq!(
+            disk_edits,
+            EditCounts::default(),
+            "we only edited datasets, not disks"
+        );
+
+        Ok(dataset_edits.into())
     }
 
     fn sled_add_zone_internal_dns(
@@ -2631,16 +2625,28 @@ pub mod test {
             for (sled_id, sled_resources) in
                 input.all_sled_resources(SledFilter::InService)
             {
+                let edits = builder
+                    .sled_ensure_disks(sled_id, &sled_resources)
+                    .unwrap();
                 assert_eq!(
-                    builder
-                        .sled_ensure_disks(sled_id, &sled_resources)
-                        .unwrap(),
-                    EnsureMultiple::Changed {
+                    edits.disks,
+                    EditCounts {
                         added: usize::from(SledBuilder::DEFAULT_NPOOLS),
                         updated: 0,
                         expunged: 0,
                         removed: 0
-                    },
+                    }
+                );
+                // Each disk addition should also result in a debug + zone root
+                // dataset addition.
+                assert_eq!(
+                    edits.datasets,
+                    EditCounts {
+                        added: 2 * usize::from(SledBuilder::DEFAULT_NPOOLS),
+                        updated: 0,
+                        expunged: 0,
+                        removed: 0
+                    }
                 );
             }
 

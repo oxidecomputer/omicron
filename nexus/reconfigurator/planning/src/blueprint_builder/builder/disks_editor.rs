@@ -4,6 +4,7 @@
 
 //! Helper for editing the disks of a Blueprint
 
+use super::EditCounts;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use omicron_common::api::external::Generation;
@@ -13,7 +14,6 @@ use omicron_uuid_kinds::SledUuid;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use super::Ensure;
 
 /// Helper for working with sets of disks on each sled
 ///
@@ -96,14 +96,14 @@ impl BlueprintDisksEditor {
 #[derive(Debug)]
 pub(super) struct SledDisksEditor<'a> {
     config: &'a mut DisksConfig,
-    changed: bool,
+    counts: EditCounts,
     sled_id: SledUuid,
     parent_changed_set: &'a mut BTreeSet<SledUuid>,
 }
 
 impl Drop for SledDisksEditor<'_> {
     fn drop(&mut self) {
-        if self.changed {
+        if self.counts != EditCounts::default() {
             self.parent_changed_set.insert(self.sled_id);
         }
     }
@@ -115,28 +115,29 @@ impl<'a> SledDisksEditor<'a> {
         config: &'a mut DisksConfig,
         parent_changed_set: &'a mut BTreeSet<SledUuid>,
     ) -> Self {
-        Self { config, changed: false, sled_id, parent_changed_set }
+        Self {
+            config,
+            counts: EditCounts::default(),
+            sled_id,
+            parent_changed_set,
+        }
     }
 
     pub fn disk_ids(&self) -> impl Iterator<Item = PhysicalDiskUuid> + '_ {
         self.config.disks.keys().copied()
     }
 
-    pub fn ensure_disk(&mut self, disk: BlueprintPhysicalDiskConfig) -> Ensure {
+    pub fn ensure_disk(&mut self, disk: BlueprintPhysicalDiskConfig) {
         let disk_id = PhysicalDiskUuid::from_untyped_uuid(disk.id);
         match self.config.disks.entry(disk_id) {
             Entry::Vacant(slot) => {
                 slot.insert(disk);
-                self.changed = true;
-                Ensure::Added
+                self.counts.added += 1;
             }
             Entry::Occupied(mut slot) => {
                 if *slot.get() != disk {
                     slot.insert(disk);
-                    self.changed = true;
-                    Ensure::Updated
-                } else {
-                    Ensure::NotNeeded
+                    self.counts.updated += 1;
                 }
             }
         }
@@ -146,8 +147,15 @@ impl<'a> SledDisksEditor<'a> {
         &mut self,
         disk_id: &PhysicalDiskUuid,
     ) -> Option<BlueprintPhysicalDiskConfig> {
-        self.changed = true;
-        self.config.disks.remove(disk_id)
+        let old = self.config.disks.remove(disk_id);
+        if old.is_some() {
+            self.counts.removed += 1;
+        }
+        old
+    }
+
+    pub fn finalize(self) -> EditCounts {
+        self.counts
     }
 }
 

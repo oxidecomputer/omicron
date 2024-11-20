@@ -237,7 +237,11 @@ impl<'a> Planner<'a> {
                 updated,
                 expunged: _,
                 removed,
-            } = self.blueprint.sled_ensure_disks(sled_id, &sled_resources)?
+            } = self
+                .blueprint
+                .sled_ensure_disks(sled_id, &sled_resources)?
+                .disks
+                .into()
             {
                 info!(
                     &self.log,

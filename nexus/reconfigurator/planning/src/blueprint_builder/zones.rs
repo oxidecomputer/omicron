@@ -90,9 +90,10 @@ impl BuilderZonesConfig {
         // in here should have had this check done to them already, but
         // in case they're not, or in case something else about those
         // zones changed in between, check again.
-        is_already_expunged(&zone.zone, zone.state)?;
-        zone.zone.disposition = BlueprintZoneDisposition::Expunged;
-        zone.state = BuilderZoneState::Modified;
+        if !is_already_expunged(&zone.zone, zone.state)? {
+            zone.zone.disposition = BlueprintZoneDisposition::Expunged;
+            zone.state = BuilderZoneState::Modified;
+        }
 
         Ok(&*zone)
     }

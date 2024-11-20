@@ -11,7 +11,7 @@ use super::datasets_editor::BlueprintDatasetsEditor;
 use super::datasets_editor::SledDatasetsEditor;
 use super::disks_editor::BlueprintDisksEditor;
 use super::disks_editor::SledDisksEditor;
-use super::Ensure;
+use super::EditCounts;
 use super::EnsureMultiple;
 use illumos_utils::zpool::ZpoolName;
 use nexus_types::deployment::blueprint_zone_type;
@@ -27,6 +27,13 @@ use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
+
+/// Counts of changes made by [`BlueprintStorageEditor`].
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct StorageEditCounts {
+    pub disks: EditCounts,
+    pub datasets: EditCounts,
+}
 
 #[derive(Debug)]
 pub(super) struct BlueprintStorageEditor {
@@ -110,18 +117,12 @@ impl SledStorageEditor<'_> {
         self.disks.disk_ids()
     }
 
-    pub fn ensure_disk(&mut self, disk: BlueprintPhysicalDiskConfig) -> Ensure {
+    pub fn ensure_disk(&mut self, disk: BlueprintPhysicalDiskConfig) {
         let zpool = ZpoolName::new_external(disk.pool_id);
 
-        let result = self.disks.ensure_disk(disk);
-
-        // We ignore the result of possibly adding or updating the disk's
-        // dataset. Do we care to log if they've changed even if the disk
-        // doesn't?
+        self.disks.ensure_disk(disk);
         self.datasets.ensure_debug_dataset(zpool.clone());
         self.datasets.ensure_zone_root_dataset(zpool);
-
-        result
     }
 
     pub fn remove_disk(
@@ -136,10 +137,7 @@ impl SledStorageEditor<'_> {
         Some(ZpoolName::new_external(disk.pool_id))
     }
 
-    pub fn ensure_zone_datasets(
-        &mut self,
-        zone: &BlueprintZoneConfig,
-    ) {
+    pub fn ensure_zone_datasets(&mut self, zone: &BlueprintZoneConfig) {
         // TODO check that zpools are on valid disks?
 
         // Dataset for transient zone filesystem
@@ -223,9 +221,11 @@ impl SledStorageEditor<'_> {
         }
     }
 
-    pub fn finalize(self) -> EnsureMultiple {
-        // TODO-john This doesn't account for changes made to self.disks!
-        self.datasets.finalize()
+    pub fn finalize(self) -> StorageEditCounts {
+        StorageEditCounts {
+            disks: self.disks.finalize(),
+            datasets: self.datasets.finalize(),
+        }
     }
 }
 
