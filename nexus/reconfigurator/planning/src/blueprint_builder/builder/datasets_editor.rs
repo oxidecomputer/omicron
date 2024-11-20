@@ -30,10 +30,11 @@ use std::net::SocketAddrV6;
 #[derive(Debug, thiserror::Error)]
 pub enum BlueprintDatasetsEditError {
     #[error(
-        "internal inconsistency: multiple datasets with kind {kind:?} \
+        "{data_source} inconsistency: multiple datasets with kind {kind:?} \
          on zpool {zpool_id}: {id1}, {id2}"
     )]
     MultipleDatasetsOfKind {
+        data_source: &'static str,
         zpool_id: ZpoolUuid,
         kind: DatasetKind,
         id1: DatasetUuid,
@@ -80,6 +81,7 @@ impl BlueprintDatasetsEditor {
         // backwards-compatibility layer for
         // https://github.com/oxidecomputer/omicron/issues/6645.
         let database_dataset_ids = build_dataset_kind_id_map(
+            "database",
             sled_resources.all_datasets(ZpoolFilter::InService).flat_map(
                 |(&zpool_id, configs)| {
                     configs.iter().map(move |config| {
@@ -153,10 +155,12 @@ impl<'a> SledDatasetsEditor<'a> {
         config: &'a mut BlueprintDatasetsConfig,
         parent_changed_set: &'a mut BTreeSet<SledUuid>,
     ) -> Result<Self, BlueprintDatasetsEditError> {
-        let blueprint_dataset_ids =
-            build_dataset_kind_id_map(config.datasets.values().map(
-                |dataset| (dataset.pool.id(), dataset.kind.clone(), dataset.id),
-            ))?;
+        let blueprint_dataset_ids = build_dataset_kind_id_map(
+            "parent blueprint",
+            config.datasets.values().map(|dataset| {
+                (dataset.pool.id(), dataset.kind.clone(), dataset.id)
+            }),
+        )?;
         Ok(Self {
             rng,
             blueprint_dataset_ids,
@@ -273,6 +277,8 @@ impl<'a> SledDatasetsEditor<'a> {
             .get(&zpool_id)
             .and_then(|kind_to_id| kind_to_id.get(kind))
         {
+            // We built `self.blueprint_dataset_ids` based on the contents of
+            // `self.config.datasets`, so we know we can unwrap this `get_mut`.
             let old_config = self.config.datasets.get_mut(existing_id).expect(
                 "internal inconsistency: \
                  entry in blueprint_dataset_ids but not current",
@@ -319,6 +325,7 @@ impl<'a> SledDatasetsEditor<'a> {
 }
 
 fn build_dataset_kind_id_map(
+    data_source: &'static str,
     iter: impl Iterator<Item = (ZpoolUuid, DatasetKind, DatasetUuid)>,
 ) -> Result<
     BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, DatasetUuid>>,
@@ -337,6 +344,7 @@ fn build_dataset_kind_id_map(
             Entry::Occupied(prev) => {
                 return Err(
                     BlueprintDatasetsEditError::MultipleDatasetsOfKind {
+                        data_source,
                         zpool_id,
                         kind: prev.key().clone(),
                         id1: *prev.get(),
