@@ -2325,16 +2325,18 @@ mod tests {
 
         // Ensure disks on our sled
         assert_eq!(
-            EnsureMultiple::from(builder
-                .sled_ensure_disks(
-                    new_sled_id,
-                    &planning_input
-                        .sled_lookup(SledFilter::Commissioned, new_sled_id)
-                        .unwrap()
-                        .resources,
-                )
-                .unwrap()
-                .disks),
+            EnsureMultiple::from(
+                builder
+                    .sled_ensure_disks(
+                        new_sled_id,
+                        &planning_input
+                            .sled_lookup(SledFilter::Commissioned, new_sled_id)
+                            .unwrap()
+                            .resources,
+                    )
+                    .unwrap()
+                    .disks
+            ),
             EnsureMultiple::Changed {
                 added: 4,
                 updated: 0,
