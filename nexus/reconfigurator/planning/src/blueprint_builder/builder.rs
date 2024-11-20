@@ -752,6 +752,9 @@ impl<'a> BlueprintBuilder<'a> {
         for zone in removed_zones {
             sled_storage.expunge_zone_datasets(zone);
         }
+
+        // We're done with `sled_storage`; drop it so the borrow checker is okay
+        // with calling other methods on `self` below.
         mem::drop(sled_storage);
 
         // Finally, add comments describing what happened.
