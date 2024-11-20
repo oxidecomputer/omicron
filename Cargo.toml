@@ -5,9 +5,11 @@ members = [
     "certificates",
     "clickhouse-admin",
     "clickhouse-admin/api",
+    "clickhouse-admin/test-utils",
     "clients/bootstrap-agent-client",
     "clients/clickhouse-admin-keeper-client",
     "clients/clickhouse-admin-server-client",
+    "clients/clickhouse-admin-single-client",
     "clients/cockroach-admin-client",
     "clients/ddm-admin-client",
     "clients/dns-service-client",
@@ -25,6 +27,7 @@ members = [
     "cockroach-admin/types",
     "common",
     "dev-tools/cert-dev",
+    "dev-tools/clickhouse-cluster-dev",
     "dev-tools/ch-dev",
     "dev-tools/crdb-seed",
     "dev-tools/db-dev",
@@ -78,6 +81,7 @@ members = [
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
     "nexus/reconfigurator/preparation",
+    "nexus/reconfigurator/simulation",
     "nexus/saga-recovery",
     "nexus/test-interface",
     "nexus/test-utils-macros",
@@ -130,9 +134,11 @@ default-members = [
     "clickhouse-admin",
     "clickhouse-admin/api",
     "clickhouse-admin/types",
+    "clickhouse-admin/test-utils",
     "clients/bootstrap-agent-client",
     "clients/clickhouse-admin-keeper-client",
     "clients/clickhouse-admin-server-client",
+    "clients/clickhouse-admin-single-client",
     "clients/cockroach-admin-client",
     "clients/ddm-admin-client",
     "clients/dns-service-client",
@@ -150,6 +156,7 @@ default-members = [
     "cockroach-admin/types",
     "common",
     "dev-tools/cert-dev",
+    "dev-tools/clickhouse-cluster-dev",
     "dev-tools/ch-dev",
     "dev-tools/crdb-seed",
     "dev-tools/db-dev",
@@ -205,6 +212,7 @@ default-members = [
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
     "nexus/reconfigurator/preparation",
+    "nexus/reconfigurator/simulation",
     "nexus/saga-recovery",
     "nexus/test-interface",
     "nexus/test-utils-macros",
@@ -309,7 +317,7 @@ bootstrap-agent-api = { path = "sled-agent/bootstrap-agent-api" }
 bootstrap-agent-client = { path = "clients/bootstrap-agent-client" }
 buf-list = { version = "1.0.3", features = ["tokio1"] }
 byteorder = "1.5.0"
-bytes = "1.7.2"
+bytes = "1.8.0"
 camino = { version = "1.1", features = ["serde1"] }
 camino-tempfile = "1.1.1"
 cancel-safe-futures = "0.1.5"
@@ -323,7 +331,9 @@ clap = { version = "4.5", features = ["cargo", "derive", "env", "wrap_help"] }
 clickhouse-admin-api = { path = "clickhouse-admin/api" }
 clickhouse-admin-keeper-client = { path = "clients/clickhouse-admin-keeper-client" }
 clickhouse-admin-server-client = { path = "clients/clickhouse-admin-server-client" }
+clickhouse-admin-single-client = { path = "clients/clickhouse-admin-single-client" }
 clickhouse-admin-types = { path = "clickhouse-admin/types" }
+clickhouse-admin-test-utils = { path = "clickhouse-admin/test-utils" }
 clickward = { git = "https://github.com/oxidecomputer/clickward", rev = "a1b342c2558e835d09e6e39a40d3de798a29c2f" }
 cockroach-admin-api = { path = "cockroach-admin/api" }
 cockroach-admin-client = { path = "clients/cockroach-admin-client" }
@@ -354,7 +364,7 @@ dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { path = "clients/dpd-client" }
-dropshot = { version = "0.12.0", features = [ "usdt-probes" ] }
+dropshot = { version = "0.13.0", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.17"
 either = "1.13.0"
 expectorate = "1.1.0"
@@ -407,7 +417,7 @@ illumos-utils = { path = "illumos-utils" }
 iana-time-zone = "0.1.61"
 indent_write = "2.2.0"
 indexmap = "2.6.0"
-indicatif = { version = "0.17.8", features = ["rayon"] }
+indicatif = { version = "0.17.9", features = ["rayon"] }
 indoc = "2.0.5"
 installinator = { path = "installinator" }
 installinator-api = { path = "installinator-api" }
@@ -452,6 +462,7 @@ nexus-networking = { path = "nexus/networking" }
 nexus-reconfigurator-execution = { path = "nexus/reconfigurator/execution" }
 nexus-reconfigurator-planning = { path = "nexus/reconfigurator/planning" }
 nexus-reconfigurator-preparation = { path = "nexus/reconfigurator/preparation" }
+nexus-reconfigurator-simulation = { path = "nexus/reconfigurator/simulation" }
 nexus-saga-recovery = { path = "nexus/saga-recovery" }
 nexus-sled-agent-shared = { path = "nexus-sled-agent-shared" }
 nexus-test-interface = { path = "nexus/test-interface" }
@@ -511,6 +522,10 @@ paste = "1.0.15"
 percent-encoding = "2.3.1"
 peg = "0.8.4"
 pem = "3.0"
+# petname's default features pull in clap for CLI parsing, which we don't need.
+# Note that if you depend on petname, you must also set default-features =
+# false: petname = { workspace = true, default-features = false }.
+petname = { version = "2.0.2", default-features = false, features = ["default-rng", "default-words"] }
 petgraph = "0.6.5"
 postgres-protocol = "0.6.7"
 predicates = "3.1.2"
@@ -520,10 +535,10 @@ prettyplease = { version = "0.2.25", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = "0.8.0"
 progenitor-client = "0.8.0"
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "86101eaf80b55e7f405b5cafe9b0de0e9f331656" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "86101eaf80b55e7f405b5cafe9b0de0e9f331656" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "86101eaf80b55e7f405b5cafe9b0de0e9f331656" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "86101eaf80b55e7f405b5cafe9b0de0e9f331656" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "8f8fbb74662b4e19b643c500d55d2d384a6cee5e" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "8f8fbb74662b4e19b643c500d55d2d384a6cee5e" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "8f8fbb74662b4e19b643c500d55d2d384a6cee5e" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "8f8fbb74662b4e19b643c500d55d2d384a6cee5e" }
 proptest = "1.5.0"
 qorb = "0.2.0"
 quote = "1.0"
@@ -601,6 +616,7 @@ strum = { version = "0.26", features = [ "derive" ] }
 subprocess = "0.2.9"
 supports-color = "3.0.1"
 swrite = "0.1.0"
+sync-ptr = "0.1.1"
 libsw = { version = "3.3.1", features = ["tokio"] }
 syn = { version = "2.0" }
 tabled = "0.15.0"
@@ -809,7 +825,7 @@ opt-level = 3
 # It's common during development to use a local copy of various complex
 # dependencies.  If you want to use those, uncomment one of these blocks.
 #
-#[patch."https://github.com/oxidecomputer/dropshot"]
+#[patch."crates-io"]
 #dropshot = { path = "../dropshot/dropshot" }
 #[patch.crates-io]
 #steno = { path = "../steno" }

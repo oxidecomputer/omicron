@@ -61,44 +61,6 @@ impl slog::KV for FileKv {
 
 pub const OMICRON_DPD_TAG: &str = "omicron";
 
-use crate::api::external::Error;
-use crate::progenitor_operation_retry::ProgenitorOperationRetry;
-use crate::progenitor_operation_retry::ProgenitorOperationRetryError;
-use std::future::Future;
-
-/// Retry a progenitor client operation until a known result is returned.
-///
-/// See [`ProgenitorOperationRetry`] for more information.
-// TODO mark this deprecated, `never_bail` is a bad idea
-pub async fn retry_until_known_result<F, T, E, Fut>(
-    log: &slog::Logger,
-    f: F,
-) -> Result<T, progenitor_client::Error<E>>
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = Result<T, progenitor_client::Error<E>>>,
-    E: std::fmt::Debug,
-{
-    match ProgenitorOperationRetry::new(f, never_bail).run(log).await {
-        Ok(v) => Ok(v),
-
-        Err(e) => match e {
-            ProgenitorOperationRetryError::ProgenitorError(e) => Err(e),
-
-            ProgenitorOperationRetryError::Gone
-            | ProgenitorOperationRetryError::GoneCheckError(_) => {
-                // ProgenitorOperationRetry::new called with `never_bail` as the
-                // bail check should never return these variants!
-                unreachable!();
-            }
-        },
-    }
-}
-
-async fn never_bail() -> Result<bool, Error> {
-    Ok(false)
-}
-
 /// A wrapper struct that does nothing other than elide the inner value from
 /// [`std::fmt::Debug`] output.
 ///

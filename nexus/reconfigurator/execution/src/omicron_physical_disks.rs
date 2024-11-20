@@ -155,6 +155,7 @@ mod test {
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::DiskIdentity;
+    use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
@@ -442,7 +443,7 @@ mod test {
 
         let dataset = datastore
             .dataset_upsert(Dataset::new(
-                Uuid::new_v4(),
+                DatasetUuid::new_v4(),
                 zpool.id(),
                 Some(std::net::SocketAddrV6::new(
                     std::net::Ipv6Addr::LOCALHOST,

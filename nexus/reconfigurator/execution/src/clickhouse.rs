@@ -9,6 +9,7 @@ use anyhow::anyhow;
 use camino::Utf8PathBuf;
 use clickhouse_admin_keeper_client::Client as ClickhouseKeeperClient;
 use clickhouse_admin_server_client::Client as ClickhouseServerClient;
+use clickhouse_admin_single_client::Client as ClickhouseSingleClient;
 use clickhouse_admin_types::ClickhouseHost;
 use clickhouse_admin_types::KeeperConfigurableSettings;
 use clickhouse_admin_types::KeeperSettings;
@@ -19,6 +20,8 @@ use futures::future::Either;
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use nexus_db_queries::context::OpContext;
+use nexus_sled_agent_shared::inventory::OmicronZoneType;
+use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use omicron_common::address::CLICKHOUSE_ADMIN_PORT;
@@ -158,6 +161,42 @@ pub(crate) async fn deploy_nodes(
     );
 
     Ok(())
+}
+
+pub(crate) async fn deploy_single_node(
+    opctx: &OpContext,
+    zones: &BTreeMap<SledUuid, BlueprintZonesConfig>,
+) -> Result<(), anyhow::Error> {
+    if let Some(zone) = zones
+        .values()
+        .flat_map(|zones| {
+            zones
+                .to_omicron_zones_config(BlueprintZoneFilter::ShouldBeRunning)
+                .zones
+                .into_iter()
+                .find(|zone| {
+                    matches!(zone.zone_type, OmicronZoneType::Clickhouse { .. })
+                })
+        })
+        .next()
+    {
+        let admin_addr = SocketAddr::V6(SocketAddrV6::new(
+            zone.underlay_ip(),
+            CLICKHOUSE_ADMIN_PORT,
+            0,
+            0,
+        ));
+        let admin_url = format!("http://{admin_addr}");
+        let log = opctx.log.new(slog::o!("admin_url" => admin_url.clone()));
+        let client = ClickhouseSingleClient::new(&admin_url, log.clone());
+        client.init_db().await.map(|_| ()).map_err(|e| {
+            anyhow!(
+                "failed to initialize single-node clickhouse database: {e}",
+            )
+        })
+    } else {
+        Ok(())
+    }
 }
 
 fn server_configs(

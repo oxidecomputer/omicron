@@ -147,12 +147,17 @@ fn decode_value_array(
         }
         DataType::Uuid => {
             // See notes on serialization method.
+            let n_bytes = n_rows * std::mem::size_of::<Uuid>();
+            let Some((mut data, rest)) = src.split_at_checked(n_bytes) else {
+                return Ok(None);
+            };
             let mut values = Vec::with_capacity(n_rows);
             for _ in 0..n_rows {
-                let a = src.get_u64_le();
-                let b = src.get_u64_le();
+                let a = data.get_u64_le();
+                let b = data.get_u64_le();
                 values.push(Uuid::from_u64_pair(a, b));
             }
+            *src = rest;
             ValueArray::from(values)
         }
         DataType::Ipv4 => {
@@ -788,5 +793,21 @@ mod tests {
                 .expect_err("Should fail to encode date-like column with out of range value");
             assert!(matches!(err, Error::OutOfRange { .. }));
         }
+    }
+
+    #[test]
+    fn check_uuid_buffer_length_on_decode() {
+        let id = Uuid::new_v4();
+        let mut bytes = BytesMut::new();
+        encode_value_array(ValueArray::Uuid(vec![id]), &mut bytes)
+            .expect("Should have encoded array");
+        let res = decode_value_array(&mut &bytes[..2], 1, &DataType::Uuid)
+            .expect("Should not fail when given partial byte array");
+        assert_eq!(res, None, "Should not panic on short array of Uuids");
+
+        let res = decode_value_array(&mut &bytes[..], 1, &DataType::Uuid)
+            .expect("Should succceed when given full byte array")
+            .expect("Should have decoded value array");
+        assert_eq!(res, ValueArray::Uuid(vec![id]));
     }
 }

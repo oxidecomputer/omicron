@@ -4,6 +4,9 @@
 
 use super::impl_enum_type;
 use crate::schema::volume_resource_usage;
+use crate::typed_uuid::DbTypedUuid;
+use omicron_uuid_kinds::DatasetKind;
+use omicron_uuid_kinds::DatasetUuid;
 use uuid::Uuid;
 
 impl_enum_type!(
@@ -54,16 +57,22 @@ pub struct VolumeResourceUsageRecord {
 
     pub region_id: Option<Uuid>,
 
-    pub region_snapshot_dataset_id: Option<Uuid>,
+    pub region_snapshot_dataset_id: Option<DbTypedUuid<DatasetKind>>,
     pub region_snapshot_region_id: Option<Uuid>,
     pub region_snapshot_snapshot_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone)]
 pub enum VolumeResourceUsage {
-    ReadOnlyRegion { region_id: Uuid },
+    ReadOnlyRegion {
+        region_id: Uuid,
+    },
 
-    RegionSnapshot { dataset_id: Uuid, region_id: Uuid, snapshot_id: Uuid },
+    RegionSnapshot {
+        dataset_id: DatasetUuid,
+        region_id: Uuid,
+        snapshot_id: Uuid,
+    },
 }
 
 impl VolumeResourceUsageRecord {
@@ -94,7 +103,7 @@ impl VolumeResourceUsageRecord {
 
                 region_id: None,
 
-                region_snapshot_dataset_id: Some(dataset_id),
+                region_snapshot_dataset_id: Some(dataset_id.into()),
                 region_snapshot_region_id: Some(region_id),
                 region_snapshot_snapshot_id: Some(snapshot_id),
             },
@@ -132,7 +141,7 @@ impl TryFrom<VolumeResourceUsageRecord> for VolumeResourceUsage {
                 };
 
                 Ok(VolumeResourceUsage::RegionSnapshot {
-                    dataset_id,
+                    dataset_id: dataset_id.into(),
                     region_id,
                     snapshot_id,
                 })

@@ -402,7 +402,7 @@ async fn rsrss_new_region_ensure(
     let region_snapshot = osagactx
         .datastore()
         .region_snapshot_get(
-            params.request.old_dataset_id,
+            params.request.old_dataset_id.into(),
             params.request.old_region_id,
             params.request.old_snapshot_id,
         )
@@ -597,7 +597,7 @@ async fn get_replace_params(
     let region_snapshot = osagactx
         .datastore()
         .region_snapshot_get(
-            params.request.old_dataset_id,
+            params.request.old_dataset_id.into(),
             params.request.old_region_id,
             params.request.old_snapshot_id,
         )

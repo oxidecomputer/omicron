@@ -455,6 +455,7 @@ async fn wait_for_num_points(
     Ok(())
 }
 
+// TODO: Use the function in the other package
 /// Try to ping the server until it responds.
 async fn wait_for_ping(log: &Logger, client: &Client) -> anyhow::Result<()> {
     poll::wait_for_condition(

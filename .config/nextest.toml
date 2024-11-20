@@ -23,6 +23,13 @@ fail-fast = false
 # invocations of nextest happen.
 command = 'cargo run -p crdb-seed --profile test'
 
+[[profile.default.scripts]]
+filter = 'package(omicron-clickhouse-admin)'
+setup = 'clickhouse-cluster'
+
+[script.clickhouse-cluster]
+command = 'cargo run -p clickhouse-cluster-dev'
+
 [test-groups]
 # The ClickHouse cluster tests currently rely on a hard-coded set of ports for
 # the nodes in the cluster. We would like to relax this in the future, at which
@@ -39,7 +46,7 @@ live-tests = { max-threads = 1 }
 default-filter = 'all() - package(omicron-live-tests) - package(end-to-end-tests)'
 
 [[profile.default.overrides]]
-filter = 'package(oximeter-db) and test(replicated)'
+filter = 'package(oximeter-db) and test(replicated) + package(omicron-clickhouse-admin)'
 test-group = 'clickhouse-cluster'
 
 [[profile.default.overrides]]
