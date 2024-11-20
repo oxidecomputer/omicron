@@ -493,7 +493,6 @@ fn register_cleanup_expunged_zones_step<'a>(
         )
         .register();
 }
-// TODO: I don't think we can safely do this if we fail to expunge zones/disks
 fn register_decommission_sleds_step<'a>(
     registrar: &ComponentRegistrar<'_, 'a>,
     opctx: &'a OpContext,
@@ -505,7 +504,7 @@ fn register_decommission_sleds_step<'a>(
             ExecutionStepId::Remove,
             "Decommission sleds",
             move |_cx| async move {
-                sled_state::decommission_sleds(
+                if let Err(e) = sled_state::decommission_sleds(
                     &opctx,
                     datastore,
                     blueprint
@@ -517,7 +516,10 @@ fn register_decommission_sleds_step<'a>(
                         .map(|(&sled_id, _)| sled_id),
                 )
                 .await
-                .map_err(merge_anyhow_list)?;
+                .map_err(merge_anyhow_list)
+                {
+                    return StepWarning::new((), e.to_string()).into();
+                }
 
                 StepSuccess::new(()).into()
             },
