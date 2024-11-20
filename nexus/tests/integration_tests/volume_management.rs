@@ -12,6 +12,7 @@ use dropshot::test_util::ClientTestContext;
 use http::method::Method;
 use http::StatusCode;
 use nexus_config::RegionAllocationStrategy;
+use nexus_db_model::to_db_typed_uuid;
 use nexus_db_model::RegionSnapshotReplacement;
 use nexus_db_model::RegionSnapshotReplacementState;
 use nexus_db_model::Volume;
@@ -61,7 +62,6 @@ use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsKind;
 use omicron_uuid_kinds::UpstairsRepairKind;
 use omicron_uuid_kinds::UpstairsSessionKind;
-use omicron_uuid_kinds::ZpoolUuid;
 use rand::prelude::SliceRandom;
 use rand::{rngs::StdRng, SeedableRng};
 use sled_agent_client::types::{CrucibleOpts, VolumeConstructionRequest};
@@ -2321,6 +2321,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
 
     for i in 0..3 {
         let (dataset_id, region_id, snapshot_id, _) = region_snapshots[i];
+
         let usage = datastore
             .volume_usage_records_for_resource(
                 VolumeResourceUsage::RegionSnapshot {
@@ -2343,6 +2344,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
 
     for i in 0..3 {
         let (dataset_id, region_id, snapshot_id, _) = region_snapshots[i];
+
         let usage = datastore
             .volume_usage_records_for_resource(
                 VolumeResourceUsage::RegionSnapshot {
@@ -2440,6 +2442,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
 
     for i in 0..3 {
         let (dataset_id, region_id, snapshot_id, _) = region_snapshots[i];
+
         let usage = datastore
             .volume_usage_records_for_resource(
                 VolumeResourceUsage::RegionSnapshot {
@@ -2456,6 +2459,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
 
     for i in 3..6 {
         let (dataset_id, region_id, snapshot_id, _) = region_snapshots[i];
+
         let usage = datastore
             .volume_usage_records_for_resource(
                 VolumeResourceUsage::RegionSnapshot {
@@ -2480,6 +2484,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
 
     for i in 0..6 {
         let (dataset_id, region_id, snapshot_id, _) = region_snapshots[i];
+
         let usage = datastore
             .volume_usage_records_for_resource(
                 VolumeResourceUsage::RegionSnapshot {
@@ -4217,7 +4222,7 @@ async fn test_read_only_region_reference_counting(
             .sled_agent
             .sled_agent
             .get_crucible_dataset(
-                ZpoolUuid::from_untyped_uuid(db_read_only_dataset.pool_id),
+                TypedUuid::from_untyped_uuid(db_read_only_dataset.pool_id),
                 db_read_only_dataset.id(),
             )
             .await
@@ -4289,7 +4294,7 @@ async fn test_read_only_region_reference_counting(
             .sled_agent
             .sled_agent
             .get_crucible_dataset(
-                ZpoolUuid::from_untyped_uuid(db_read_only_dataset.pool_id),
+                TypedUuid::from_untyped_uuid(db_read_only_dataset.pool_id),
                 db_read_only_dataset.id(),
             )
             .await
@@ -5404,7 +5409,7 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
 
         datastore
             .region_snapshot_create(nexus_db_model::RegionSnapshot {
-                dataset_id: (*dataset_id).into(),
+                dataset_id: to_db_typed_uuid(*dataset_id),
                 region_id: *region_id,
                 snapshot_id: *snapshot_id,
                 snapshot_addr: snapshot_addr.clone(),
@@ -5509,7 +5514,7 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
 
     assert_eq!(
         region_snapshot_to_delete.dataset_id,
-        region_snapshots[0].0.into()
+        to_db_typed_uuid(region_snapshots[0].0)
     );
     assert_eq!(region_snapshot_to_delete.region_id, region_snapshots[0].1);
     assert_eq!(region_snapshot_to_delete.snapshot_id, region_snapshots[0].2);
