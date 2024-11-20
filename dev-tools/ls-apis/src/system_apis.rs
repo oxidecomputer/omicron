@@ -160,6 +160,30 @@ impl SystemApis {
         let (apis_consumed, api_consumers) =
             (deps_tracker.apis_consumed, deps_tracker.api_consumers);
 
+        // Make sure that each API is produced by at least one producer.
+        for api in api_metadata.apis() {
+            let found_producer = api_producers.get(&api.client_package_name);
+            if api.deployed() {
+                if found_producer.is_none() {
+                    bail!(
+                        "error: found no producer for API with client package \
+                     name {:?} in any deployment unit (should have been one \
+                     that contains server package {:?})",
+                        api.client_package_name,
+                        api.server_package_name,
+                    );
+                }
+            } else if let Some(found) = found_producer {
+                bail!(
+                    "error: metadata says there should be no deployed \
+                     producer for API with client package name {:?}, but found \
+                     one: {:?}",
+                    api.client_package_name,
+                    found
+                );
+            }
+        }
+
         Ok(SystemApis {
             server_component_units,
             unit_server_components,
@@ -359,7 +383,13 @@ impl SystemApis {
             let consumed_apis =
                 self.component_apis_consumed(server_component, filter)?;
             for (client_pkg, _) in consumed_apis {
-                let other_component = self.api_producer(client_pkg).unwrap();
+                let other_component =
+                    self.api_producer(client_pkg).ok_or_else(|| {
+                        anyhow!(
+                            "missing producer for API with client package {:?}",
+                            client_pkg
+                        )
+                    })?;
                 let other_node = nodes.get(other_component).unwrap();
                 graph.add_edge(*my_node, *other_node, client_pkg.clone());
             }

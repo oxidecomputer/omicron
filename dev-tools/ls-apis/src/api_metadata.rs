@@ -199,6 +199,14 @@ pub struct ApiMetadata {
     pub server_package_name: ServerPackageName,
     /// human-readable notes about this API
     pub notes: Option<String>,
+    /// whether this package is ever expected to be deployed in a real system
+    dev_only: Option<bool>,
+}
+
+impl ApiMetadata {
+    pub fn deployed(&self) -> bool {
+        !(self.dev_only.unwrap_or(false))
+    }
 }
 
 /// Describes a unit that combines one or more servers that get deployed

@@ -96,11 +96,14 @@ label = "Crucible Pantry"
 packages = [ "crucible-pantry" ]
 
 [[deployment_units]]
-label = "Cockroach Admin"
+label = "Cockroach"
 packages = [ "omicron-cockroach-admin" ]
 
+# These are really three distinct deployment units, but they behave the same for
+# our purposes, and the tooling doesn't support multiple deployment units
+# that each expose a particular service.
 [[deployment_units]]
-label = "Clickhouse Admin"
+label = "Clickhouse (single-node) / Clickhouse Server (multi-node) / Clickhouse Keeper (multi-node)"
 packages = [ "omicron-clickhouse-admin" ]
 
 [[deployment_units]]
@@ -312,6 +315,7 @@ Exposed by Crucible upstairs for debugging via the `cmon` debugging tool.
 client_package_name = "dsc-client"
 label = "Downstairs Controller (debugging only)"
 server_package_name = "dsc"
+dev_only = true
 notes = """
 `dsc` is a control program for spinning up and controlling instances of Crucible
 downstairs for testing.  You can use the same program to control a running `dsc`
