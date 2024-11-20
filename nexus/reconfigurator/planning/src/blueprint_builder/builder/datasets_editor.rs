@@ -246,7 +246,7 @@ impl<'a> SledDatasetsEditor<'a> {
     /// - If the dataset exists in the blueprint already, use it.
     /// - Otherwise, if the dataset exists in the database, re-use the UUID, but
     ///   add it to the blueprint.
-    /// - Otherwse, create a new dataset in the blueprint, which will propagate
+    /// - Otherwise, create a new dataset in the blueprint, which will propagate
     ///   to the database during execution.
     pub fn ensure_dataset(
         &mut self,
