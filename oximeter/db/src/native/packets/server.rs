@@ -6,6 +6,8 @@
 
 //! Packets sent from the server.
 
+use crate::client::query_summary::IoCount;
+use crate::client::query_summary::IoSummary;
 use crate::native::block::Block;
 use crate::native::block::DataType;
 use std::fmt;
@@ -177,7 +179,7 @@ impl Exception {
 /// As the server runs large queries, it may send these periodically. They are
 /// always deltas, and need to be summed on the client to understand the current
 /// or total progress of the query.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Progress {
     pub rows_read: u64,
     pub bytes_read: u64,
@@ -186,6 +188,18 @@ pub struct Progress {
     pub rows_written: u64,
     pub bytes_written: u64,
     pub query_time: Duration,
+}
+
+impl From<Progress> for IoSummary {
+    fn from(value: Progress) -> Self {
+        IoSummary {
+            read: IoCount { bytes: value.bytes_read, rows: value.rows_read },
+            written: IoCount {
+                bytes: value.bytes_written,
+                rows: value.rows_written,
+            },
+        }
+    }
 }
 
 impl core::ops::Add for Progress {

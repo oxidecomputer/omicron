@@ -793,7 +793,7 @@ pub(crate) mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::identity::Asset;
     use omicron_common::api::internal::shared::DatasetKind;
-    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::DatasetUuid;
     use sled_agent_client::types::VolumeConstructionRequest;
     use uuid::Uuid;
 
@@ -906,25 +906,25 @@ pub(crate) mod test {
 
         let datasets = vec![
             Dataset::new(
-                Uuid::new_v4(),
+                DatasetUuid::new_v4(),
                 Uuid::new_v4(),
                 Some("[fd00:1122:3344:101::1]:12345".parse().unwrap()),
                 DatasetKind::Crucible,
             ),
             Dataset::new(
-                Uuid::new_v4(),
+                DatasetUuid::new_v4(),
                 Uuid::new_v4(),
                 Some("[fd00:1122:3344:102::1]:12345".parse().unwrap()),
                 DatasetKind::Crucible,
             ),
             Dataset::new(
-                Uuid::new_v4(),
+                DatasetUuid::new_v4(),
                 Uuid::new_v4(),
                 Some("[fd00:1122:3344:103::1]:12345".parse().unwrap()),
                 DatasetKind::Crucible,
             ),
             Dataset::new(
-                Uuid::new_v4(),
+                DatasetUuid::new_v4(),
                 Uuid::new_v4(),
                 Some("[fd00:1122:3344:104::1]:12345".parse().unwrap()),
                 DatasetKind::Crucible,
@@ -1041,7 +1041,7 @@ pub(crate) mod test {
         for zpool in test.zpools() {
             for dataset in &zpool.datasets {
                 if datastore
-                    .regions_total_occupied_size(*dataset.id.as_untyped_uuid())
+                    .regions_total_occupied_size(dataset.id)
                     .await
                     .unwrap()
                     != 0

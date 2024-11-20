@@ -28,6 +28,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use update_engine::merge_anyhow_list;
+use update_engine::StepWarning;
 
 mod clickhouse;
 mod cockroachdb;
@@ -177,6 +178,12 @@ pub async fn realize_blueprint_with_overrides(
     );
 
     register_deploy_clickhouse_cluster_nodes_step(
+        &engine.for_component(ExecutionComponent::Clickhouse),
+        &opctx,
+        blueprint,
+    );
+
+    register_deploy_clickhouse_single_node_step(
         &engine.for_component(ExecutionComponent::Clickhouse),
         &opctx,
         blueprint,
@@ -544,6 +551,31 @@ fn register_deploy_clickhouse_cluster_nodes_step<'a>(
                 }
 
                 StepSuccess::new(()).into()
+            },
+        )
+        .register();
+}
+
+fn register_deploy_clickhouse_single_node_step<'a>(
+    registrar: &ComponentRegistrar<'_, 'a>,
+    opctx: &'a OpContext,
+    blueprint: &'a Blueprint,
+) {
+    registrar
+        .new_step(
+            ExecutionStepId::Ensure,
+            "Deploy single-node clickhouse cluster",
+            move |_cx| async move {
+                if let Err(e) = clickhouse::deploy_single_node(
+                    &opctx,
+                    &blueprint.blueprint_zones,
+                )
+                .await
+                {
+                    StepWarning::new((), e.to_string()).into()
+                } else {
+                    StepSuccess::new(()).into()
+                }
             },
         )
         .register();

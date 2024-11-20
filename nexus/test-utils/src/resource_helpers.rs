@@ -1300,7 +1300,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 .upsert_crucible_dataset(
                     physical_disk_request.clone(),
                     zpool_request.clone(),
-                    *dataset.id.as_untyped_uuid(),
+                    dataset.id,
                     address,
                 )
                 .await;

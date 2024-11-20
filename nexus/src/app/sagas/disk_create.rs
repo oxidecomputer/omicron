@@ -845,7 +845,6 @@ pub(crate) mod test {
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Name;
     use omicron_sled_agent::sim::SledAgent;
-    use omicron_uuid_kinds::GenericUuid;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -1023,7 +1022,7 @@ pub(crate) mod test {
         for zpool in test.zpools() {
             for dataset in &zpool.datasets {
                 if datastore
-                    .regions_total_occupied_size(*dataset.id.as_untyped_uuid())
+                    .regions_total_occupied_size(dataset.id)
                     .await
                     .unwrap()
                     != 0

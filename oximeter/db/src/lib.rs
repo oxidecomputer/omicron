@@ -20,14 +20,11 @@ pub use oximeter::Field;
 pub use oximeter::FieldType;
 pub use oximeter::Measurement;
 pub use oximeter::Sample;
-use parse_display::Display;
-use parse_display::FromStr;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use slog::Logger;
 use std::collections::BTreeMap;
-use std::convert::TryFrom;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU32;
@@ -172,32 +169,15 @@ pub enum Error {
 
     #[error("Native protocol error")]
     Native(#[from] crate::native::Error),
+
+    #[error("Query unexpectedly contained no data: '{query}'")]
+    QueryMissingData { query: String },
 }
 
 #[cfg(any(feature = "oxql", test))]
 impl From<crate::oxql::Error> for Error {
     fn from(e: crate::oxql::Error) -> Self {
         Error::Oxql(e)
-    }
-}
-
-impl From<model::DbTimeseriesSchema> for TimeseriesSchema {
-    fn from(schema: model::DbTimeseriesSchema) -> TimeseriesSchema {
-        TimeseriesSchema {
-            timeseries_name: TimeseriesName::try_from(
-                schema.timeseries_name.as_str(),
-            )
-            .expect("Invalid timeseries name in database"),
-            // TODO-cleanup: Fill these in from the values in the database. See
-            // https://github.com/oxidecomputer/omicron/issues/5942.
-            description: Default::default(),
-            version: oximeter::schema::default_schema_version(),
-            authz_scope: oximeter::schema::AuthzScope::Fleet,
-            units: oximeter::schema::Units::Count,
-            field_schema: schema.field_schema.into(),
-            datum_type: schema.datum_type.into(),
-            created: schema.created,
-        }
     }
 }
 
@@ -223,41 +203,6 @@ pub struct Timeseries {
     pub target: Target,
     pub metric: Metric,
     pub measurements: Vec<Measurement>,
-}
-
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Deserialize,
-    Serialize,
-    FromStr,
-    Display,
-)]
-pub enum DbFieldSource {
-    Target,
-    Metric,
-}
-
-impl From<DbFieldSource> for FieldSource {
-    fn from(src: DbFieldSource) -> Self {
-        match src {
-            DbFieldSource::Target => FieldSource::Target,
-            DbFieldSource::Metric => FieldSource::Metric,
-        }
-    }
-}
-impl From<FieldSource> for DbFieldSource {
-    fn from(src: FieldSource) -> Self {
-        match src {
-            FieldSource::Target => DbFieldSource::Target,
-            FieldSource::Metric => DbFieldSource::Metric,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -360,17 +305,14 @@ const VERSION_TABLE_NAME: &str = "version";
 // per line, in the file inside the schema version directory with this name.
 const TIMESERIES_TO_DELETE_FILE: &str = "timeseries-to-delete.txt";
 
-// The output format used for the result of select queries
-//
-// See https://clickhouse.com/docs/en/interfaces/formats/#jsoneachrow for details.
-const DATABASE_SELECT_FORMAT: &str = "JSONEachRow";
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::model::DbFieldList;
-    use crate::model::DbTimeseriesSchema;
+    use crate::timeseries_key;
+    use crate::timeseries_key_for;
+    use oximeter::DatumType;
+    use oximeter::Sample;
     use std::borrow::Cow;
+    use std::collections::BTreeMap;
     use uuid::Uuid;
 
     // Validates that the timeseries_key stability for a sample is stable.
@@ -391,7 +333,7 @@ mod tests {
         let target = TestTarget { name: String::from("Hello"), num: 1337 };
         let metric = TestMetric { id: Uuid::nil(), datum: 0x1de };
         let sample = Sample::new(&target, &metric).unwrap();
-        let key = super::timeseries_key(&sample);
+        let key = timeseries_key(&sample);
 
         expectorate::assert_contents(
             "test-output/sample-timeseries-key.txt",
@@ -455,58 +397,5 @@ mod tests {
             "test-output/field-timeseries-keys.txt",
             &output.join("\n"),
         );
-    }
-
-    #[test]
-    fn test_unsorted_db_fields_are_sorted_on_read() {
-        let target_field = FieldSchema {
-            name: String::from("later"),
-            field_type: FieldType::U64,
-            source: FieldSource::Target,
-            description: String::new(),
-        };
-        let metric_field = FieldSchema {
-            name: String::from("earlier"),
-            field_type: FieldType::U64,
-            source: FieldSource::Metric,
-            description: String::new(),
-        };
-        let timeseries_name: TimeseriesName = "foo:bar".parse().unwrap();
-        let datum_type = DatumType::U64;
-        let field_schema =
-            [target_field.clone(), metric_field.clone()].into_iter().collect();
-        let expected_schema = TimeseriesSchema {
-            timeseries_name: timeseries_name.clone(),
-            description: Default::default(),
-            version: oximeter::schema::default_schema_version(),
-            authz_scope: oximeter::schema::AuthzScope::Fleet,
-            units: oximeter::schema::Units::Count,
-            field_schema,
-            datum_type,
-            created: Utc::now(),
-        };
-
-        // The fields here are sorted by target and then metric, which is how we
-        // used to insert them into the DB. We're checking that they are totally
-        // sorted when we read them out of the DB, even though they are not in
-        // the extracted model type.
-        let db_fields = DbFieldList {
-            names: vec![target_field.name.clone(), metric_field.name.clone()],
-            types: vec![
-                target_field.field_type.into(),
-                metric_field.field_type.into(),
-            ],
-            sources: vec![
-                target_field.source.into(),
-                metric_field.source.into(),
-            ],
-        };
-        let db_schema = DbTimeseriesSchema {
-            timeseries_name: timeseries_name.to_string(),
-            field_schema: db_fields,
-            datum_type: datum_type.into(),
-            created: expected_schema.created,
-        };
-        assert_eq!(expected_schema, TimeseriesSchema::from(db_schema));
     }
 }
