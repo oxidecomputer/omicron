@@ -67,7 +67,7 @@ impl From<Error> for HttpError {
         match err {
             Error::HttpError(err) => err,
             Error::HashMismatch => {
-                HttpError::for_internal_error("Hash mismatch".to_string())
+                HttpError::for_bad_request(None, "Hash mismatch".to_string())
             }
             Error::DatasetNotFound => {
                 HttpError::for_not_found(None, "Dataset not found".to_string())
@@ -156,7 +156,6 @@ struct ZipEntryStream {
 // Possible responses from the success case of `stream_zip_entry`
 enum ZipStreamOutput {
     // Returns the zip entry, as a byte stream
-    // TODO: do we need to pass the size back? or are we good?
     Stream(ZipEntryStream),
     // Returns an HTTP response indicating the accepted ranges
     RangeResponse(http::Response<Body>),
@@ -560,15 +559,21 @@ impl<'a> SupportBundleManager<'a> {
                         Err(err_response) => return Ok(err_response),
                     };
 
+                    info!(
+                        &self.log,
+                        "SupportBundle GET whole file (ranged)";
+                        "bundle_id" => %support_bundle_id,
+                        "start" => range.start(),
+                        "limit" => range.content_length().get(),
+                    );
+
                     file.seek(std::io::SeekFrom::Start(range.start())).await?;
-                    let limit: usize = std::num::NonZeroUsize::try_from(
-                        range.content_length()
-                    ).expect("Cannot convert u64 to usize; are you on a 64-bit machine?").get();
+                    let limit = range.content_length().get();
                     return Ok(range_requests::make_get_response(
                         Some(range),
                         len,
                         content_type,
-                        ReaderStream::new(file).take(limit),
+                        ReaderStream::new(file.take(limit)),
                     )?);
                 } else {
                     return Ok(range_requests::make_get_response(
@@ -654,13 +659,15 @@ impl<'a> SupportBundleManager<'a> {
     }
 }
 
-// #[cfg(all(test, target_os = "illumos"))]
-#[cfg(test)]
+#[cfg(all(test, target_os = "illumos"))]
 mod tests {
     use super::*;
 
     use futures::stream;
-    use hyper::header::{ACCCPT_RANGES, CONTENT_LENGTH, CONTENT_TYPE};
+    use http::status::StatusCode;
+    use hyper::header::{
+        ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE,
+    };
     use omicron_common::disk::DatasetConfig;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
@@ -735,9 +742,13 @@ mod tests {
         Directory,
     }
     type NamedFile = (&'static str, Data);
+
+    const GREET_PATH: &'static str = "greeting.txt";
+    const GREET_DATA: &'static [u8] = b"Hello around the world!";
+
     fn example_files() -> [NamedFile; 5] {
         [
-            ("greeting.txt", Data::File(b"Hello around the world!")),
+            (GREET_PATH, Data::File(GREET_DATA)),
             ("english/", Data::Directory),
             ("english/hello.txt", Data::File(b"Hello world!")),
             ("spanish/", Data::Directory),
@@ -756,7 +767,7 @@ mod tests {
                 match data {
                     Data::File(data) => {
                         zip.start_file(name, options).unwrap();
-                        zip.write(data).unwrap();
+                        zip.write_all(data).unwrap();
                     }
                     Data::Directory => {
                         zip.add_directory(name, options).unwrap();
@@ -798,9 +809,12 @@ mod tests {
 
         // Create a fake support bundle -- really, just a zipfile.
         let support_bundle_id = SupportBundleUuid::new_v4();
-        let data = example_zipfile();
+        let zipfile_data = example_zipfile();
         let hash = ArtifactHash(
-            Sha256::digest(data.as_slice()).as_slice().try_into().unwrap(),
+            Sha256::digest(zipfile_data.as_slice())
+                .as_slice()
+                .try_into()
+                .unwrap(),
         );
 
         // Create a new bundle
@@ -811,7 +825,7 @@ mod tests {
                 support_bundle_id,
                 hash,
                 stream::once(async {
-                    Ok(Bytes::copy_from_slice(data.as_slice()))
+                    Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
                 }),
             )
             .await
@@ -827,7 +841,7 @@ mod tests {
         assert_eq!(bundles.len(), 1);
         assert_eq!(bundles[0].support_bundle_id, support_bundle_id);
 
-        // "Head" the bundle we created - we can see it's a zipfile with the
+        // HEAD the bundle we created - we can see it's a zipfile with the
         // expected length, even without reading anything.
         let mut response = mgr
             .head(
@@ -841,10 +855,35 @@ mod tests {
             .expect("Should have been able to HEAD bundle");
         assert_eq!(read_body(&mut response).await, Vec::<u8>::new());
         assert_eq!(response.headers().len(), 3);
-        assert_eq!(response.headers()[CONTENT_LENGTH], data.len().to_string());
+        assert_eq!(
+            response.headers()[CONTENT_LENGTH],
+            zipfile_data.len().to_string()
+        );
         assert_eq!(response.headers()[CONTENT_TYPE], "application/zip");
         assert_eq!(response.headers()[ACCEPT_RANGES], "bytes");
 
+        // GET the bundle we created, and observe the contents of the bundle
+        let mut response = mgr
+            .get(
+                harness.zpool_id,
+                dataset_id,
+                support_bundle_id,
+                None,
+                SupportBundleQueryType::Whole,
+            )
+            .await
+            .expect("Should have been able to GET bundle");
+        assert_eq!(read_body(&mut response).await, zipfile_data);
+        assert_eq!(response.headers().len(), 3);
+        assert_eq!(
+            response.headers()[CONTENT_LENGTH],
+            zipfile_data.len().to_string()
+        );
+        assert_eq!(response.headers()[CONTENT_TYPE], "application/zip");
+        assert_eq!(response.headers()[ACCEPT_RANGES], "bytes");
+
+        // HEAD the index of the bundle - it should report the size of all
+        // files.
         let mut response = mgr
             .head(
                 harness.zpool_id,
@@ -856,18 +895,497 @@ mod tests {
             .await
             .expect("Should have been able to HEAD bundle index");
         assert_eq!(read_body(&mut response).await, Vec::<u8>::new());
-
         let expected_index = example_files()
             .into_iter()
             .map(|(name, _)| name)
             .collect::<Vec<&str>>()
             .join("\n");
         let expected_len = expected_index.len().to_string();
-
         assert_eq!(response.headers().len(), 3);
         assert_eq!(response.headers()[CONTENT_LENGTH], expected_len);
         assert_eq!(response.headers()[CONTENT_TYPE], "text/plain");
         assert_eq!(response.headers()[ACCEPT_RANGES], "bytes");
+
+        // GET the index of the bundle.
+        let mut response = mgr
+            .get(
+                harness.zpool_id,
+                dataset_id,
+                support_bundle_id,
+                None,
+                SupportBundleQueryType::Index,
+            )
+            .await
+            .expect("Should have been able to GET bundle index");
+        assert_eq!(read_body(&mut response).await, expected_index.as_bytes());
+        assert_eq!(response.headers().len(), 3);
+        assert_eq!(response.headers()[CONTENT_LENGTH], expected_len);
+        assert_eq!(response.headers()[CONTENT_TYPE], "text/plain");
+        assert_eq!(response.headers()[ACCEPT_RANGES], "bytes");
+
+        // HEAD a single file from within the bundle.
+        let mut response = mgr
+            .head(
+                harness.zpool_id,
+                dataset_id,
+                support_bundle_id,
+                None,
+                SupportBundleQueryType::Path {
+                    file_path: GREET_PATH.to_string(),
+                },
+            )
+            .await
+            .expect("Should have been able to HEAD single file");
+        assert_eq!(read_body(&mut response).await, Vec::<u8>::new());
+        assert_eq!(response.headers().len(), 3);
+        assert_eq!(
+            response.headers()[CONTENT_LENGTH],
+            GREET_DATA.len().to_string()
+        );
+        assert_eq!(
+            response.headers()[CONTENT_TYPE],
+            "application/octet-stream"
+        );
+        assert_eq!(response.headers()[ACCEPT_RANGES], "bytes");
+
+        // GET a single file within the bundle
+        let mut response = mgr
+            .get(
+                harness.zpool_id,
+                dataset_id,
+                support_bundle_id,
+                None,
+                SupportBundleQueryType::Path {
+                    file_path: GREET_PATH.to_string(),
+                },
+            )
+            .await
+            .expect("Should have been able to GET single file");
+        assert_eq!(read_body(&mut response).await, GREET_DATA);
+        assert_eq!(response.headers().len(), 3);
+        assert_eq!(
+            response.headers()[CONTENT_LENGTH],
+            GREET_DATA.len().to_string()
+        );
+        assert_eq!(
+            response.headers()[CONTENT_TYPE],
+            "application/octet-stream"
+        );
+        assert_eq!(response.headers()[ACCEPT_RANGES], "bytes");
+
+        // DELETE the bundle on the dataset
+        mgr.delete(harness.zpool_id, dataset_id, support_bundle_id)
+            .await
+            .expect("Should have been able to DELETE bundle");
+
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn creation_without_dataset() {
+        let logctx = test_setup_log("creation_without_dataset");
+        let log = &logctx.log;
+
+        // Set up storage (zpool, but not dataset!)
+        let harness = SingleU2StorageHarness::new(log).await;
+
+        // Access the Support Bundle API
+        let mgr = SupportBundleManager::new(
+            log,
+            harness.storage_test_harness.handle(),
+        );
+
+        // Get a support bundle that we're ready to store...
+        let support_bundle_id = SupportBundleUuid::new_v4();
+        let zipfile_data = example_zipfile();
+        let hash = ArtifactHash(
+            Sha256::digest(zipfile_data.as_slice())
+                .as_slice()
+                .try_into()
+                .unwrap(),
+        );
+
+        // ... storing a bundle without a dataset should throw an error.
+        let dataset_id = DatasetUuid::new_v4();
+        let err = mgr
+            .create(
+                harness.zpool_id,
+                dataset_id,
+                support_bundle_id,
+                hash,
+                stream::once(async {
+                    Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
+                }),
+            )
+            .await
+            .expect_err("Bundle creation should fail without dataset");
+        assert!(matches!(err, Error::Storage(_)), "Unexpected error: {err:?}");
+        assert_eq!(HttpError::from(err).status_code, StatusCode::NOT_FOUND);
+
+        // Configure the dataset now, so it'll exist for future requests.
+        harness.configure_dataset(dataset_id, DatasetKind::Debug).await;
+
+        mgr.create(
+            harness.zpool_id,
+            dataset_id,
+            support_bundle_id,
+            hash,
+            stream::once(async {
+                Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
+            }),
+        )
+        .await
+        .expect("Should have created support bundle");
+
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn creation_bad_hash() {
+        let logctx = test_setup_log("creation_bad_hash");
+        let log = &logctx.log;
+
+        // Set up storage (zpool, but not dataset!)
+        let harness = SingleU2StorageHarness::new(log).await;
+
+        // Access the Support Bundle API
+        let mgr = SupportBundleManager::new(
+            log,
+            harness.storage_test_harness.handle(),
+        );
+
+        // Get a support bundle that we're ready to store...
+        let support_bundle_id = SupportBundleUuid::new_v4();
+        let zipfile_data = example_zipfile();
+        let hash = ArtifactHash(
+            Sha256::digest(zipfile_data.as_slice())
+                .as_slice()
+                .try_into()
+                .unwrap(),
+        );
+
+        // Configure the dataset now, so it'll exist for future requests.
+        let dataset_id = DatasetUuid::new_v4();
+        harness.configure_dataset(dataset_id, DatasetKind::Debug).await;
+
+        let bad_hash = ArtifactHash(
+            Sha256::digest(b"Hey, this ain't right")
+                .as_slice()
+                .try_into()
+                .unwrap(),
+        );
+
+        // Creating the bundle with a bad hash should fail.
+        let err = mgr
+            .create(
+                harness.zpool_id,
+                dataset_id,
+                support_bundle_id,
+                bad_hash,
+                stream::once(async {
+                    Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
+                }),
+            )
+            .await
+            .expect_err("Bundle creation should fail with bad hash");
+        assert!(
+            matches!(err, Error::HashMismatch),
+            "Unexpected error: {err:?}"
+        );
+        assert_eq!(HttpError::from(err).status_code, StatusCode::BAD_REQUEST);
+
+        // As long as the dataset exists, we'll make storage for it, which means
+        // the bundle will be visible, but incomplete.
+        let bundles = mgr.list(harness.zpool_id, dataset_id).await.unwrap();
+        assert_eq!(bundles.len(), 1);
+        assert_eq!(bundles[0].support_bundle_id, support_bundle_id);
+        assert_eq!(bundles[0].state, SupportBundleState::Incomplete);
+
+        // Creating the bundle with bad data should fail
+        let err = mgr
+            .create(
+                harness.zpool_id,
+                dataset_id,
+                support_bundle_id,
+                hash,
+                stream::once(async {
+                    Ok(Bytes::from_static(b"Not a zipfile"))
+                }),
+            )
+            .await
+            .expect_err("Bundle creation should fail with bad hash");
+        assert!(
+            matches!(err, Error::HashMismatch),
+            "Unexpected error: {err:?}"
+        );
+        assert_eq!(HttpError::from(err).status_code, StatusCode::BAD_REQUEST);
+
+        let bundles = mgr.list(harness.zpool_id, dataset_id).await.unwrap();
+        assert_eq!(bundles.len(), 1);
+        assert_eq!(bundles[0].support_bundle_id, support_bundle_id);
+        assert_eq!(bundles[0].state, SupportBundleState::Incomplete);
+
+        // Good hash + Good data -> creation should succeed
+        mgr.create(
+            harness.zpool_id,
+            dataset_id,
+            support_bundle_id,
+            hash,
+            stream::once(async {
+                Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
+            }),
+        )
+        .await
+        .expect("Should have created support bundle");
+
+        // The bundle should now appear "Complete"
+        let bundles = mgr.list(harness.zpool_id, dataset_id).await.unwrap();
+        assert_eq!(bundles.len(), 1);
+        assert_eq!(bundles[0].support_bundle_id, support_bundle_id);
+        assert_eq!(bundles[0].state, SupportBundleState::Complete);
+
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn creation_idempotency() {
+        let logctx = test_setup_log("creation_idempotency");
+        let log = &logctx.log;
+
+        // Set up storage (zpool, but not dataset!)
+        let harness = SingleU2StorageHarness::new(log).await;
+
+        // Access the Support Bundle API
+        let mgr = SupportBundleManager::new(
+            log,
+            harness.storage_test_harness.handle(),
+        );
+
+        // Get a support bundle that we're ready to store...
+        let support_bundle_id = SupportBundleUuid::new_v4();
+        let zipfile_data = example_zipfile();
+        let hash = ArtifactHash(
+            Sha256::digest(zipfile_data.as_slice())
+                .as_slice()
+                .try_into()
+                .unwrap(),
+        );
+
+        // Configure the dataset now, so it'll exist for future requests.
+        let dataset_id = DatasetUuid::new_v4();
+        harness.configure_dataset(dataset_id, DatasetKind::Debug).await;
+
+        // Create the bundle
+        mgr.create(
+            harness.zpool_id,
+            dataset_id,
+            support_bundle_id,
+            hash,
+            stream::once(async {
+                Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
+            }),
+        )
+        .await
+        .expect("Should have created support bundle");
+
+        // Creating the dataset again should work.
+        mgr.create(
+            harness.zpool_id,
+            dataset_id,
+            support_bundle_id,
+            hash,
+            stream::once(async {
+                Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
+            }),
+        )
+        .await
+        .expect("Support bundle should already exist");
+
+        // This is an edge-case, but just to make sure the behavior
+        // is codified: If we are creating a bundle that already exists,
+        // we'll skip reading the body.
+        mgr.create(
+            harness.zpool_id,
+            dataset_id,
+            support_bundle_id,
+            hash,
+            stream::once(async {
+                // NOTE: This is different from the call above.
+                Ok(Bytes::from_static(b"Ignored"))
+            }),
+        )
+        .await
+        .expect("Support bundle should already exist");
+
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn ranges() {
+        let logctx = test_setup_log("ranges");
+        let log = &logctx.log;
+
+        // Set up storage
+        let harness = SingleU2StorageHarness::new(log).await;
+
+        // For this test, we'll add a dataset that can contain our bundles.
+        let dataset_id = DatasetUuid::new_v4();
+        harness.configure_dataset(dataset_id, DatasetKind::Debug).await;
+
+        // Access the Support Bundle API
+        let mgr = SupportBundleManager::new(
+            log,
+            harness.storage_test_harness.handle(),
+        );
+
+        // Create a fake support bundle -- really, just a zipfile.
+        let support_bundle_id = SupportBundleUuid::new_v4();
+        let zipfile_data = example_zipfile();
+        let hash = ArtifactHash(
+            Sha256::digest(zipfile_data.as_slice())
+                .as_slice()
+                .try_into()
+                .unwrap(),
+        );
+
+        // Create a new bundle
+        let bundle = mgr
+            .create(
+                harness.zpool_id,
+                dataset_id,
+                support_bundle_id,
+                hash,
+                stream::once(async {
+                    Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
+                }),
+            )
+            .await
+            .expect("Should have created support bundle");
+        assert_eq!(bundle.support_bundle_id, support_bundle_id);
+        assert_eq!(bundle.state, SupportBundleState::Complete);
+
+        // GET the bundle we created, and observe the contents of the bundle
+        let ranges = [
+            (0, 5),
+            (5, 100),
+            (0, 100),
+            (1000, 1000),
+            (1000, 1001),
+            (1000, zipfile_data.len() - 1),
+        ];
+
+        for (first, last) in ranges.into_iter() {
+            eprintln!("Trying whole-file range: {first}-{last}");
+            let range =
+                PotentialRange::new(format!("bytes={first}-{last}").as_bytes());
+            let expected_data = &zipfile_data[first..=last];
+
+            let mut response = mgr
+                .get(
+                    harness.zpool_id,
+                    dataset_id,
+                    support_bundle_id,
+                    Some(range),
+                    SupportBundleQueryType::Whole,
+                )
+                .await
+                .expect("Should have been able to GET bundle");
+            assert_eq!(read_body(&mut response).await, expected_data);
+            assert_eq!(response.headers().len(), 4);
+            assert_eq!(
+                response.headers()[CONTENT_RANGE],
+                format!("bytes {first}-{last}/{}", zipfile_data.len())
+            );
+            assert_eq!(
+                response.headers()[CONTENT_LENGTH],
+                ((last + 1) - first).to_string()
+            );
+            assert_eq!(response.headers()[CONTENT_TYPE], "application/zip");
+            assert_eq!(response.headers()[ACCEPT_RANGES], "bytes");
+        }
+
+        // GET the index of the bundle.
+        let expected_index_str = example_files()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<&str>>()
+            .join("\n");
+        let expected_index = expected_index_str.as_bytes();
+        let ranges = [(0, 5), (5, 10), (10, expected_index.len() - 1)];
+
+        for (first, last) in ranges.into_iter() {
+            eprintln!("Trying index range: {first}-{last}");
+            let range =
+                PotentialRange::new(format!("bytes={first}-{last}").as_bytes());
+            let expected_data = &expected_index[first..=last];
+            let mut response = mgr
+                .get(
+                    harness.zpool_id,
+                    dataset_id,
+                    support_bundle_id,
+                    Some(range),
+                    SupportBundleQueryType::Index,
+                )
+                .await
+                .expect("Should have been able to GET bundle index");
+            assert_eq!(read_body(&mut response).await, expected_data);
+            assert_eq!(response.headers().len(), 4);
+            assert_eq!(
+                response.headers()[CONTENT_RANGE],
+                format!("bytes {first}-{last}/{}", expected_index.len())
+            );
+            assert_eq!(
+                response.headers()[CONTENT_LENGTH],
+                ((last + 1) - first).to_string(),
+            );
+            assert_eq!(response.headers()[CONTENT_TYPE], "text/plain");
+            assert_eq!(response.headers()[ACCEPT_RANGES], "bytes");
+        }
+
+        // GET a single file within the bundle
+        let ranges = [(0, 5), (5, 10), (5, GREET_DATA.len() - 1)];
+        for (first, last) in ranges.into_iter() {
+            eprintln!("Trying single file range: {first}-{last}");
+            let range =
+                PotentialRange::new(format!("bytes={first}-{last}").as_bytes());
+            let expected_data = &GREET_DATA[first..=last];
+            let mut response = mgr
+                .get(
+                    harness.zpool_id,
+                    dataset_id,
+                    support_bundle_id,
+                    Some(range),
+                    SupportBundleQueryType::Path {
+                        file_path: GREET_PATH.to_string(),
+                    },
+                )
+                .await
+                .expect("Should have been able to GET single file");
+            assert_eq!(read_body(&mut response).await, expected_data);
+            assert_eq!(response.headers().len(), 4);
+            assert_eq!(
+                response.headers()[CONTENT_RANGE],
+                format!("bytes {first}-{last}/{}", GREET_DATA.len())
+            );
+            assert_eq!(
+                response.headers()[CONTENT_LENGTH],
+                ((last + 1) - first).to_string(),
+            );
+            assert_eq!(
+                response.headers()[CONTENT_TYPE],
+                "application/octet-stream"
+            );
+            assert_eq!(response.headers()[ACCEPT_RANGES], "bytes");
+        }
+
+        // DELETE the bundle on the dataset
+        mgr.delete(harness.zpool_id, dataset_id, support_bundle_id)
+            .await
+            .expect("Should have been able to DELETE bundle");
 
         harness.cleanup().await;
         logctx.cleanup_successful();

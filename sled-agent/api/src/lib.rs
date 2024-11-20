@@ -720,7 +720,7 @@ pub enum SupportBundleState {
 }
 
 /// Metadata about a support bundle
-#[derive(Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SupportBundleMetadata {
     pub support_bundle_id: SupportBundleUuid,
     pub state: SupportBundleState,

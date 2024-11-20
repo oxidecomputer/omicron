@@ -132,6 +132,10 @@ fn make_response_common(
 pub struct PotentialRange(Vec<u8>);
 
 impl PotentialRange {
+    pub fn new(bytes: &[u8]) -> Self {
+        Self(Vec::from(bytes))
+    }
+
     /// Parses a single range request out of the range request.
     ///
     /// `len` is the total length of the document, for the range request being made.
