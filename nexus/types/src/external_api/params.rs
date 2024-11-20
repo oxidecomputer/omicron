@@ -1193,6 +1193,12 @@ pub struct InstanceCreate {
 /// Parameters of an `Instance` that can be reconfigured after creation.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceUpdate {
+    /// The number of CPUs to assign to this instance.
+    pub ncpus: InstanceCpuCount,
+
+    /// The amount of memory to assign to this instance.
+    pub memory: ByteCount,
+
     /// Name or ID of the disk the instance should be instructed to boot from.
     ///
     /// If not provided, unset the instance's boot disk.
@@ -1752,7 +1758,9 @@ pub struct LinkConfigCreate {
     /// The link-layer discovery protocol (LLDP) configuration for the link.
     pub lldp: LldpLinkConfigCreate,
 
-    /// The forward error correction mode of the link.
+    /// The requested forward-error correction method.  If this is not
+    /// specified, the standard FEC for the underlying media will be applied
+    /// if it can be determined.
     pub fec: Option<LinkFec>,
 
     /// The speed of the link.

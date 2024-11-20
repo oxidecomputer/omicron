@@ -544,4 +544,8 @@ pub struct InstanceUpdate {
     /// set the instance's auto-restart policy to `NULL`.
     #[diesel(column_name = auto_restart_policy)]
     pub auto_restart_policy: Option<InstanceAutoRestartPolicy>,
+
+    pub ncpus: InstanceCpuCount,
+
+    pub memory: ByteCount,
 }

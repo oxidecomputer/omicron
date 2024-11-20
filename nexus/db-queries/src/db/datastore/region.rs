@@ -13,6 +13,7 @@ use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::lookup::LookupPath;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::model::Dataset;
 use crate::db::model::PhysicalDiskPolicy;
 use crate::db::model::Region;
@@ -33,6 +34,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
+use omicron_uuid_kinds::DatasetUuid;
 use slog::Logger;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
@@ -389,13 +391,13 @@ impl DataStore {
     /// Return the total occupied size for a dataset
     pub async fn regions_total_occupied_size(
         &self,
-        dataset_id: Uuid,
+        dataset_id: DatasetUuid,
     ) -> Result<u64, Error> {
         use db::schema::region::dsl as region_dsl;
 
         let total_occupied_size: Option<diesel::pg::data_types::PgNumeric> =
             region_dsl::region
-                .filter(region_dsl::dataset_id.eq(dataset_id))
+                .filter(region_dsl::dataset_id.eq(to_db_typed_uuid(dataset_id)))
                 .select(diesel::dsl::sum(
                     region_dsl::block_size
                         * region_dsl::blocks_per_extent

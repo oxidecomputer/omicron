@@ -693,7 +693,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=aadc0998c0f07f08ab15a95c006074291734800f#aadc0998c0f07f08ab15a95c006074291734800f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=8f8fbb74662b4e19b643c500d55d2d384a6cee5e#8f8fbb74662b4e19b643c500d55d2d384a6cee5e"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -703,7 +703,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=aadc0998c0f07f08ab15a95c006074291734800f#aadc0998c0f07f08ab15a95c006074291734800f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=8f8fbb74662b4e19b643c500d55d2d384a6cee5e#8f8fbb74662b4e19b643c500d55d2d384a6cee5e"
 dependencies = [
  "libc",
  "strum",
@@ -1376,6 +1376,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "clickhouse-admin-single-client"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "clickhouse-admin-types",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "progenitor",
+ "reqwest",
+ "schemars",
+ "serde",
+ "slog",
+]
+
+[[package]]
 name = "clickhouse-admin-test-utils"
 version = "0.1.0"
 dependencies = [
@@ -1823,7 +1838,7 @@ dependencies = [
 [[package]]
 name = "crucible-client-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=b7b9d5660b28ca5e865242b2bdecd032c0852d40#b7b9d5660b28ca5e865242b2bdecd032c0852d40"
+source = "git+https://github.com/oxidecomputer/crucible?rev=1d82cc9fd9925814d097d39f7cbafd62fb8cfb7e#1d82cc9fd9925814d097d39f7cbafd62fb8cfb7e"
 dependencies = [
  "base64 0.22.1",
  "crucible-workspace-hack",
@@ -5967,6 +5982,7 @@ dependencies = [
  "chrono",
  "clickhouse-admin-keeper-client",
  "clickhouse-admin-server-client",
+ "clickhouse-admin-single-client",
  "clickhouse-admin-types",
  "cockroach-admin-client",
  "diesel",
@@ -6135,6 +6151,7 @@ dependencies = [
  "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "slog",
  "uuid",
@@ -6845,6 +6862,7 @@ dependencies = [
  "clap",
  "clickhouse-admin-keeper-client",
  "clickhouse-admin-server-client",
+ "clickhouse-admin-single-client",
  "cockroach-admin-client",
  "criterion",
  "crucible-agent-client",
@@ -6926,7 +6944,7 @@ dependencies = [
  "pq-sys",
  "pretty_assertions",
  "progenitor-client",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=aadc0998c0f07f08ab15a95c006074291734800f)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=8f8fbb74662b4e19b643c500d55d2d384a6cee5e)",
  "qorb",
  "rand",
  "rcgen",
@@ -7189,7 +7207,7 @@ dependencies = [
  "oximeter-producer",
  "oxnet",
  "pretty_assertions",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=aadc0998c0f07f08ab15a95c006074291734800f)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=8f8fbb74662b4e19b643c500d55d2d384a6cee5e)",
  "propolis-mock-server",
  "propolis_api_types",
  "rand",
@@ -7542,9 +7560,9 @@ dependencies = [
 
 [[package]]
 name = "openssl"
-version = "0.10.68"
+version = "0.10.66"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6174bc48f102d208783c2c84bf931bb75927a617866870de8a4ea85597f871f5"
+checksum = "9529f4786b70a3e8c61e11179af17ab6188ad8d0ded78c5529441ed39d4bd9c1"
 dependencies = [
  "bitflags 2.6.0",
  "cfg-if",
@@ -7574,9 +7592,9 @@ checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.104"
+version = "0.9.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45abf306cbf99debc8195b66b7346498d7b10c210de50418b5ccd7ceba08c741"
+checksum = "7f9e8deee91df40a943c71b917e5874b951d32a802526c85721ce3b776c929d6"
 dependencies = [
  "cc",
  "libc",
@@ -8898,7 +8916,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=aadc0998c0f07f08ab15a95c006074291734800f#aadc0998c0f07f08ab15a95c006074291734800f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=8f8fbb74662b4e19b643c500d55d2d384a6cee5e#8f8fbb74662b4e19b643c500d55d2d384a6cee5e"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -8940,7 +8958,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=aadc0998c0f07f08ab15a95c006074291734800f#aadc0998c0f07f08ab15a95c006074291734800f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=8f8fbb74662b4e19b643c500d55d2d384a6cee5e#8f8fbb74662b4e19b643c500d55d2d384a6cee5e"
 dependencies = [
  "anyhow",
  "atty",
@@ -8982,7 +9000,7 @@ dependencies = [
 [[package]]
 name = "propolis_api_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=aadc0998c0f07f08ab15a95c006074291734800f#aadc0998c0f07f08ab15a95c006074291734800f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=8f8fbb74662b4e19b643c500d55d2d384a6cee5e#8f8fbb74662b4e19b643c500d55d2d384a6cee5e"
 dependencies = [
  "crucible-client-types",
  "propolis_types",
@@ -8995,7 +9013,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=aadc0998c0f07f08ab15a95c006074291734800f#aadc0998c0f07f08ab15a95c006074291734800f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=8f8fbb74662b4e19b643c500d55d2d384a6cee5e#8f8fbb74662b4e19b643c500d55d2d384a6cee5e"
 dependencies = [
  "schemars",
  "serde",
@@ -10638,7 +10656,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=aadc0998c0f07f08ab15a95c006074291734800f)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=8f8fbb74662b4e19b643c500d55d2d384a6cee5e)",
  "rcgen",
  "schemars",
  "serde",
@@ -11422,9 +11440,9 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
 name = "tar"
-version = "0.4.43"
+version = "0.4.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c65998313f8e17d0d553d28f91a0df93e4dbbbf770279c7bc21ca0f09ea1a1f6"
+checksum = "4ff6c40d3aedb5e06b57c6f669ad17ab063dd1e63d977c6a88e7f4dfa4f04020"
 dependencies = [
  "filetime",
  "libc",

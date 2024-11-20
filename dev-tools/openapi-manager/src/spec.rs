@@ -49,6 +49,17 @@ pub fn all_apis() -> Vec<ApiSpec> {
             extra_validation: None,
         },
         ApiSpec {
+            title: "ClickHouse Single-Node Admin Server API",
+            version: semver::Version::new(0, 0, 1),
+            description: "API for interacting with the Oxide \
+                control plane's single-node ClickHouse database",
+            boundary: ApiBoundary::Internal,
+            api_description:
+                clickhouse_admin_api::clickhouse_admin_single_api_mod::stub_api_description,
+            filename: "clickhouse-admin-single.json",
+            extra_validation: None,
+        },
+        ApiSpec {
             title: "CockroachDB Cluster Admin API",
             version: semver::Version::new(0, 0, 1),
             description: "API for interacting with the Oxide \
