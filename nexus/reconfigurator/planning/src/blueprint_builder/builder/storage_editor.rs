@@ -11,8 +11,8 @@ use super::datasets_editor::BlueprintDatasetsEditor;
 use super::datasets_editor::SledDatasetsEditor;
 use super::disks_editor::BlueprintDisksEditor;
 use super::disks_editor::SledDisksEditor;
-use super::EditCounts;
 use super::EnsureMultiple;
+use super::StorageEditCounts;
 use illumos_utils::zpool::ZpoolName;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::BlueprintDatasetsConfig;
@@ -27,13 +27,6 @@ use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
-
-/// Counts of changes made by [`BlueprintStorageEditor`].
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub struct StorageEditCounts {
-    pub disks: EditCounts,
-    pub datasets: EditCounts,
-}
 
 #[derive(Debug)]
 pub(super) struct BlueprintStorageEditor {

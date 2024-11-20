@@ -87,8 +87,6 @@ mod datasets_editor;
 mod disks_editor;
 mod storage_editor;
 
-pub use storage_editor::StorageEditCounts;
-
 /// Errors encountered while assembling blueprints
 #[derive(Debug, Error)]
 pub enum Error {
@@ -187,6 +185,49 @@ pub struct EditCounts {
     ///
     /// This usually happens after the work of expungment has completed.
     pub removed: usize,
+}
+
+impl EditCounts {
+    fn accum(self, other: Self) -> Self {
+        Self {
+            added: self.added + other.added,
+            updated: self.updated + other.updated,
+            expunged: self.expunged + other.expunged,
+            removed: self.removed + other.removed,
+        }
+    }
+}
+
+/// Counts of changes made by [`BlueprintStorageEditor`].
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct StorageEditCounts {
+    pub disks: EditCounts,
+    pub datasets: EditCounts,
+}
+
+/// Counts of changes made by operations that may affect multiple resources.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct SledEditCounts {
+    pub disks: EditCounts,
+    pub datasets: EditCounts,
+    pub zones: EditCounts,
+}
+
+impl SledEditCounts {
+    fn accum(self, other: Self) -> Self {
+        Self {
+            disks: self.disks.accum(other.disks),
+            datasets: self.datasets.accum(other.datasets),
+            zones: self.zones.accum(other.zones),
+        }
+    }
+}
+
+impl From<StorageEditCounts> for SledEditCounts {
+    fn from(value: StorageEditCounts) -> Self {
+        let StorageEditCounts { disks, datasets } = value;
+        Self { disks, datasets, zones: EditCounts::default() }
+    }
 }
 
 /// Describes operations which the BlueprintBuilder has performed to arrive
@@ -818,7 +859,7 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
         resources: &SledResources,
-    ) -> Result<StorageEditCounts, Error> {
+    ) -> Result<SledEditCounts, Error> {
         // These are the disks known to our (last?) blueprint
         let mut sled_storage = self.storage.sled_storage_editor(
             sled_id,
@@ -863,15 +904,16 @@ impl<'a> BlueprintBuilder<'a> {
                 }
             }
         }
-        let storage_edits = sled_storage.finalize();
+        let mut edit_counts: SledEditCounts = sled_storage.finalize().into();
 
         // Expunging a zpool necessarily requires also expunging any zones that
         // depended on it.
         for zone_id in zones_to_expunge {
-            self.sled_expunge_zone(sled_id, zone_id)?;
+            edit_counts =
+                edit_counts.accum(self.sled_expunge_zone(sled_id, zone_id)?);
         }
 
-        Ok(storage_edits)
+        Ok(edit_counts)
     }
 
     /// Ensure that a sled in the blueprint has all the datasets it needs for
@@ -1771,29 +1813,32 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
         zone_id: OmicronZoneUuid,
-    ) -> Result<(), Error> {
+    ) -> Result<SledEditCounts, Error> {
         let sled_resources = self.sled_resources(sled_id)?;
 
         let sled_zones = self.zones.change_sled_zones(sled_id);
-        let zone_config = sled_zones
-            .expunge_zone(zone_id)
-            .map_err(|error| {
+        let (builder_config, did_expunge) =
+            sled_zones.expunge_zone(zone_id).map_err(|error| {
                 Error::Planner(
                     anyhow!(error)
                         .context("failed to expunge zone from sled {sled_id}"),
                 )
-            })?
-            .zone()
-            .clone();
+            })?;
+        let zone_config = builder_config.zone();
 
         let mut storage = self.storage.sled_storage_editor(
             sled_id,
             sled_resources,
             &mut self.rng,
         )?;
-        storage.expunge_zone_datasets(&zone_config);
+        storage.expunge_zone_datasets(zone_config);
 
-        Ok(())
+        let mut edit_counts: SledEditCounts = storage.finalize().into();
+        if did_expunge {
+            edit_counts.zones.expunged += 1;
+        }
+
+        Ok(edit_counts)
     }
 
     fn sled_add_zone(

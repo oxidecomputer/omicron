@@ -232,21 +232,20 @@ impl<'a> Planner<'a> {
         {
             // First, we need to ensure that sleds are using their expected
             // disks. This is necessary before we can allocate any zones.
+            let sled_edits =
+                self.blueprint.sled_ensure_disks(sled_id, &sled_resources)?;
             if let EnsureMultiple::Changed {
                 added,
                 updated,
                 expunged: _,
                 removed,
-            } = self
-                .blueprint
-                .sled_ensure_disks(sled_id, &sled_resources)?
-                .disks
-                .into()
+            } = sled_edits.disks.into()
             {
                 info!(
                     &self.log,
                     "altered physical disks";
-                    "sled_id" => %sled_id
+                    "sled_id" => %sled_id,
+                    "sled_edits" => ?sled_edits,
                 );
                 self.blueprint.record_operation(Operation::UpdateDisks {
                     sled_id,

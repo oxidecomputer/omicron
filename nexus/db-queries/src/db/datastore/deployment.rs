@@ -2325,7 +2325,7 @@ mod tests {
 
         // Ensure disks on our sled
         assert_eq!(
-            builder
+            EnsureMultiple::from(builder
                 .sled_ensure_disks(
                     new_sled_id,
                     &planning_input
@@ -2333,7 +2333,8 @@ mod tests {
                         .unwrap()
                         .resources,
                 )
-                .unwrap(),
+                .unwrap()
+                .disks),
             EnsureMultiple::Changed {
                 added: 4,
                 updated: 0,

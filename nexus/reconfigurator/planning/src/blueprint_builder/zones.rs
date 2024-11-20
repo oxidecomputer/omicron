@@ -72,10 +72,12 @@ impl BuilderZonesConfig {
         Ok(())
     }
 
+    // On success, returns the now-expunged zone and whether or not it was set
+    // to expunged (as opposed to already being marked expunged).
     pub(super) fn expunge_zone(
         &mut self,
         zone_id: OmicronZoneUuid,
-    ) -> Result<&BuilderZoneConfig, BuilderZonesConfigError> {
+    ) -> Result<(&BuilderZoneConfig, bool), BuilderZonesConfigError> {
         let zone = self
             .zones
             .iter_mut()
@@ -90,12 +92,14 @@ impl BuilderZonesConfig {
         // in here should have had this check done to them already, but
         // in case they're not, or in case something else about those
         // zones changed in between, check again.
-        if !is_already_expunged(&zone.zone, zone.state)? {
+        let needs_expunged = !is_already_expunged(&zone.zone, zone.state)?;
+
+        if needs_expunged {
             zone.zone.disposition = BlueprintZoneDisposition::Expunged;
             zone.state = BuilderZoneState::Modified;
         }
 
-        Ok(&*zone)
+        Ok((&*zone, needs_expunged))
     }
 
     pub(super) fn expunge_zones(
