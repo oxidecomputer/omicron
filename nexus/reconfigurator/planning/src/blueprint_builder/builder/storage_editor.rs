@@ -65,37 +65,14 @@ impl BlueprintStorageEditor {
         self.disks.current_sled_disks(sled_id)
     }
 
-    pub fn into_builders(
+    pub fn into_blueprint_maps(
         self,
-    ) -> (BlueprintDisksBuilder, BlueprintDatasetsBuilder) {
-        (
-            BlueprintDisksBuilder(self.disks),
-            BlueprintDatasetsBuilder(self.datasets),
-        )
-    }
-}
-
-#[derive(Debug)]
-pub(super) struct BlueprintDisksBuilder(BlueprintDisksEditor);
-
-impl BlueprintDisksBuilder {
-    pub fn build(
-        self,
-        sled_ids: impl Iterator<Item = SledUuid>,
-    ) -> BTreeMap<SledUuid, BlueprintPhysicalDisksConfig> {
-        self.0.build(sled_ids)
-    }
-}
-
-#[derive(Debug)]
-pub(super) struct BlueprintDatasetsBuilder(BlueprintDatasetsEditor);
-
-impl BlueprintDatasetsBuilder {
-    pub fn build(
-        self,
-        sled_ids: impl Iterator<Item = SledUuid>,
-    ) -> BTreeMap<SledUuid, BlueprintDatasetsConfig> {
-        self.0.build(sled_ids)
+        sled_ids: impl Iterator<Item = SledUuid> + Clone,
+    ) -> (
+        BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
+        BTreeMap<SledUuid, BlueprintDatasetsConfig>,
+    ) {
+        (self.disks.build(sled_ids.clone()), self.datasets.build(sled_ids))
     }
 }
 

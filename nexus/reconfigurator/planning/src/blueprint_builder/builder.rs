@@ -556,11 +556,10 @@ impl<'a> BlueprintBuilder<'a> {
         let blueprint_zones = self
             .zones
             .into_zones_map(self.input.all_sled_ids(SledFilter::Commissioned));
-        let (disks, datasets) = self.storage.into_builders();
-        let blueprint_disks =
-            disks.build(self.input.all_sled_ids(SledFilter::InService));
-        let blueprint_datasets =
-            datasets.build(self.input.all_sled_ids(SledFilter::InService));
+        let (blueprint_disks, blueprint_datasets) =
+            self.storage.into_blueprint_maps(
+                self.input.all_sled_ids(SledFilter::InService),
+            );
 
         // If we have the clickhouse cluster setup enabled via policy and we
         // don't yet have a `ClickhouseClusterConfiguration`, then we must create
@@ -2714,9 +2713,8 @@ pub mod test {
 
             let new_disks = builder
                 .storage
-                .into_builders()
-                .0
-                .build(input.all_sled_ids(SledFilter::InService));
+                .into_blueprint_maps(input.all_sled_ids(SledFilter::InService))
+                .0;
             // We should have disks and a generation bump for every sled.
             let parent_disk_gens = parent
                 .blueprint_disks
