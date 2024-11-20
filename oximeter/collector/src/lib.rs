@@ -251,10 +251,8 @@ impl Oximeter {
 
         let make_agent = || async {
             debug!(log, "creating ClickHouse client");
-            let resolver = make_resolver(
-                config.db.address,
-                ServiceName::ClickhouseNative,
-            );
+            let resolver =
+                make_resolver(config.db.address, ServiceName::ClickhouseNative);
             Ok(Arc::new(
                 OximeterAgent::with_id(
                     args.id,

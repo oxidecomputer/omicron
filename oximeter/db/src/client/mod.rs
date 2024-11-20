@@ -92,10 +92,7 @@ pub struct Client {
 
 impl Client {
     /// Construct a Clickhouse client of the database with a connection pool.
-    pub fn new_with_pool(
-        native_resolver: BoxedResolver,
-        log: &Logger,
-    ) -> Self {
+    pub fn new_with_pool(native_resolver: BoxedResolver, log: &Logger) -> Self {
         let id = Uuid::new_v4();
         let log = log.new(slog::o!(
             "component" => "clickhouse-client",
