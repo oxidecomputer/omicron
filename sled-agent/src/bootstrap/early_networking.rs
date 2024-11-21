@@ -358,7 +358,7 @@ impl<'a> EarlyNetworkSetup<'a> {
     ///
     /// This should be called by a scrimlet after it brings up its own switch
     /// zone. `switch_zone_underlay_ip` should be the IP address of the switch
-    /// zone it brought up
+    /// zone it brought up.
     ///
     /// Returns the list of uplinks configured via DPD.
     pub async fn init_switch_config(
@@ -433,6 +433,8 @@ impl<'a> EarlyNetworkSetup<'a> {
 
         // configure uplink for each requested uplink in configuration that
         // matches our switch_location
+        let mut uplink_configuration_errors = vec![];
+
         for port_config in &our_ports {
             let (dpd_port_settings, port_id) =
                 self.build_port_config(port_config)?;
@@ -472,9 +474,18 @@ impl<'a> EarlyNetworkSetup<'a> {
                         "port_id" => ?port_id,
                         "configuration" => ?dpd_port_settings
                     );
+                    uplink_configuration_errors.push(e);
+
                     break;
                 }
             }
+        }
+
+        if uplink_configuration_errors.len() == our_ports.len() {
+            let message = format!(
+                "unable to configure any uplinks for {switch_location}"
+            );
+            return Err(EarlyNetworkSetupError::Dendrite(message));
         }
 
         let mgd = MgdClient::new(
@@ -659,7 +670,7 @@ impl<'a> EarlyNetworkSetup<'a> {
         if let Err(e) = mgd.static_add_v4_route(&rq).await {
             error!(
                 self.log,
-                "BGP peer configuration failed";
+                "static route configuration failed";
                 "error" => ?e,
                 "configuration" => ?rq,
             );
