@@ -295,13 +295,19 @@ fn run_dag_check(api: &SystemApis, args: DagCheckArgs) -> Result<()> {
         );
     }
 
-    println!("\nAPIs with unknown versioning strategy:");
-    for api in api
+    let unknown: Vec<_> = api
         .api_metadata()
         .apis()
         .filter(|f| f.versioned_how == VersionedHow::Unknown)
-    {
-        println!("    {} ({})", api.label, api.client_package_name);
+        .collect();
+    print!("\nAPIs with unknown versioning strategy:");
+    if unknown.is_empty() {
+        println!(" none");
+    } else {
+        println!();
+        for api in unknown {
+            println!("    {} ({})", api.label, api.client_package_name);
+        }
     }
 
     Ok(())

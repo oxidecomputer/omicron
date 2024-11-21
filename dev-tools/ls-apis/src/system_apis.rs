@@ -485,12 +485,23 @@ impl SystemApis {
 
         for api in self.api_metadata.apis() {
             if !api.deployed() {
+                if api.versioned_how == VersionedHow::Unknown {
+                    dag_check.propose_server(
+                        &api.client_package_name,
+                        String::from("not produced by a deployed component"),
+                    );
+                }
                 continue;
             }
             let producer = self.api_producer(&api.client_package_name).unwrap();
             let apis_consumed: BTreeSet<_> = self
                 .component_apis_consumed(producer, filter)?
                 .map(|(client_pkgname, _dep_path)| client_pkgname)
+                .collect();
+            let dependents: BTreeSet<_> = self
+                .api_consumers(&api.client_package_name, filter)
+                .unwrap()
+                .map(|(dependent, _dep_path)| dependent)
                 .collect();
 
             if api.versioned_how == VersionedHow::Unknown {
@@ -517,11 +528,14 @@ impl SystemApis {
                         &api.client_package_name,
                         String::from("depends on itself"),
                     );
-                } else {
-                    // XXX-dap
-                    eprintln!(
-                        "dap: not sure what to do with: {:?} (produced by {}): {:?}",
-                        api.client_package_name, producer, apis_consumed
+                } else if dependents.is_empty() {
+                    // If something has no consumers in deployed components, it
+                    // can be server-managed.  (These are generally debug APIs.)
+                    dag_check.propose_server(
+                        &api.client_package_name,
+                        String::from(
+                            "has no consumers among deployed components",
+                        ),
                     );
                 }
 
@@ -536,11 +550,6 @@ impl SystemApis {
                         *dependency_clientpkg,
                     )
                 })
-                .collect();
-            let dependents: BTreeSet<_> = self
-                .api_consumers(&api.client_package_name, filter)
-                .unwrap()
-                .map(|(dependent, _dep_path)| dependent)
                 .collect();
 
             // Look for one-step circular dependencies (i.e., API API A1 is
