@@ -1,11 +1,10 @@
 use std::{process::Command, time::Duration};
 
-use futures::{stream::FuturesUnordered, StreamExt};
-use illumos_utils::{zone::IPADM, PFEXEC, ZONEADM};
+use illumos_utils::{zone::IPADM, PARGS, PFEXEC, PSTACK, ZONEADM};
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
 
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub trait SupportBundleCommandHttpOutput {
     fn get_output(self) -> String;
@@ -122,7 +121,7 @@ async fn execute(
 }
 
 /// Spawn a command that's allowed to execute within a given time limit.
-async fn execute_command_with_timeout(
+pub async fn execute_command_with_timeout(
     command: Command,
     duration: Duration,
 ) -> Result<SupportBundleCmdOutput, SupportBundleCmdError> {
@@ -137,58 +136,47 @@ async fn execute_command_with_timeout(
     }
 }
 
-fn zoneadm_list() -> Command {
+pub fn zoneadm_list() -> Command {
     let mut cmd = std::process::Command::new(PFEXEC);
     cmd.env_clear().arg(ZONEADM).arg("list").arg("-cip");
     cmd
 }
 
-fn ipadm_show_interface() -> Command {
+pub fn ipadm_show_interface() -> Command {
     let mut cmd = std::process::Command::new(PFEXEC);
     cmd.env_clear().arg(IPADM).arg("show-if");
     cmd
 }
 
-fn ipadm_show_addr() -> Command {
+pub fn ipadm_show_addr() -> Command {
     let mut cmd = std::process::Command::new(PFEXEC);
     cmd.env_clear().arg(IPADM).arg("show-addr");
     cmd
 }
 
-fn ipadm_show_prop() -> Command {
+pub fn ipadm_show_prop() -> Command {
     let mut cmd = std::process::Command::new(PFEXEC);
     cmd.env_clear().arg(IPADM).arg("show-prop");
     cmd
 }
 
-/*
- * Public API
- */
-
-/// List all zones on a sled.
-pub async fn zoneadm_info(
-) -> Result<SupportBundleCmdOutput, SupportBundleCmdError> {
-    execute_command_with_timeout(zoneadm_list(), DEFAULT_TIMEOUT).await
+pub fn pargs_process(pid: i32) -> Command {
+    let mut cmd = std::process::Command::new(PFEXEC);
+    cmd.env_clear().arg(PARGS).arg("-ae").arg(pid.to_string());
+    cmd
 }
 
-/// Retrieve various `ipadm` command output for the system.
-pub async fn ipadm_info(
-) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
-    [ipadm_show_interface(), ipadm_show_addr(), ipadm_show_prop()]
-        .into_iter()
-        .map(|c| async move {
-            execute_command_with_timeout(c, DEFAULT_TIMEOUT).await
-        })
-        .collect::<FuturesUnordered<_>>()
-        .collect::<Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>>>()
-        .await
+pub fn pstack_process(pid: i32) -> Command {
+    let mut cmd = std::process::Command::new(PFEXEC);
+    cmd.env_clear().arg(PSTACK).arg(pid.to_string());
+    cmd
 }
 
 #[cfg(test)]
 mod test {
     use std::{process::Command, time::Duration};
 
-    use crate::support_bundle::*;
+    use crate::support_bundle::command::*;
 
     #[tokio::test]
     async fn test_long_running_command_is_aborted() {

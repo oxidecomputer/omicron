@@ -35,6 +35,8 @@ pub mod zpool;
 
 pub const PFEXEC: &str = "/usr/bin/pfexec";
 pub const ZONEADM: &str = "/usr/sbin/zoneadm";
+pub const PARGS: &str = "/usr/bin/pargs";
+pub const PSTACK: &str = "/usr/bin/pstack";
 
 #[derive(Debug)]
 pub struct CommandFailureInfo {

@@ -545,6 +545,22 @@ pub trait SledAgentApi {
     async fn support_ipadm_info(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<FreeformBody>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/pargs-info",
+    }]
+    async fn support_pargs_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<FreeformBody>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/pstack-info",
+    }]
+    async fn support_pstack_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<FreeformBody>, HttpError>;
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]

@@ -32,6 +32,7 @@ display-error-chain.workspace = true
 dropshot.workspace = true
 flate2.workspace = true
 flume.workspace = true
+fs-err.workspace = true
 futures.workspace = true
 glob.workspace = true
 hex.workspace = true
