@@ -189,6 +189,7 @@ impl TryFrom<RawApiMetadata> for AllApiMetadata {
 /// Describes how an API in the system manages drift between client and server
 #[derive(Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[serde(tag = "versioned_how", content = "versioned_how_reason")]
 pub enum VersionedHow {
     /// We have not yet determined how this API will be versioned.
     #[default]
@@ -200,7 +201,7 @@ pub enum VersionedHow {
 
     /// This API will be versioned on the client.  (The update system cannot
     /// ensure that servers are always updated before clients.)
-    Client,
+    Client(String),
 }
 
 /// Describes one API in the system
@@ -217,7 +218,7 @@ pub struct ApiMetadata {
     /// human-readable notes about this API
     pub notes: Option<String>,
     /// describes how we've decided this API will be versioned
-    #[serde(default)]
+    #[serde(default, flatten)]
     pub versioned_how: VersionedHow,
     /// If `dev_only` is true, then this API's server is not deployed in a
     /// production system.  It's only used in development environments.  The

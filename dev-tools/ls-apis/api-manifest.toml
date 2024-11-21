@@ -140,8 +140,8 @@ packages = [ "oximeter-collector" ]
 client_package_name = "bootstrap-agent-client"
 label = "Bootstrap Agent"
 server_package_name = "bootstrap-agent-api"
-# Instances of this API call each other directly.
 versioned_how = "client"
+versioned_how_reason = "depends on itself (i.e., instances call each other)"
 
 [[apis]]
 client_package_name = "clickhouse-admin-keeper-client"
@@ -193,8 +193,8 @@ versioned_how = "server"
 client_package_name = "repair-client"
 label = "Crucible Repair"
 server_package_name = "crucible-downstairs"
-# Instances of this API call each other directly.
 versioned_how = "client"
+versioned_how_reason = "depends on itself (i.e., instances call each other)"
 notes = """
 The repair service offered by a crucible-downstairs supports both repairing \
 one downstairs from another, and making a clone of a read-only downstairs \
@@ -233,9 +233,11 @@ versioned_how = "server"
 client_package_name = "dpd-client"
 label = "Dendrite DPD"
 server_package_name = "dpd"
-# dpd-client has to be client-versioned today because it's got a cyclic
-# dependency with sled-agent-client, which is server-versioned.
+# TODO We might need to pick this apart more carefully.  DPD invokes and is
+# invoked by several different services.  It's possible that some of them can
+# treat it as server-managed.
 versioned_how = "client"
+versioned_how_reason = "Sled Agent calling DPD creates a circular dependency"
 notes = """
 Dendrite's data plane daemon (`dpd`) is the interface to configure and manage \
 the rack switches. It's consumed by sled-agent to get the rack off the \
@@ -266,6 +268,7 @@ server_package_name = "installinator-api"
 # compatible with the API served by Wicket on the deployed system.  In practice,
 # we're almost certainly just going to avoid changing this API.
 versioned_how = "client"
+versioned_how_reason = "client is provided implicitly by the operator"
 
 [[apis]]
 client_package_name = "mg-admin-client"
@@ -287,6 +290,7 @@ server_package_name = "nexus-internal-api"
 # nexus-client has to be client-versioned today because it's got a cyclic
 # dependency with sled-agent-client, which is server-versioned.
 versioned_how = "client"
+versioned_how_reason = "Circular dependencies between Nexus and other services"
 
 [[apis]]
 client_package_name = "oxide-client"
@@ -329,8 +333,8 @@ versioned_how = "server"
 client_package_name = "repo-depot-client"
 label = "Repo Depot API"
 server_package_name = "repo-depot-api"
-# Instances of this API call each other directly.
 versioned_how = "client"
+versioned_how_reason = "depends on itself (i.e., instances call each other)"
 
 [[apis]]
 client_package_name = "wicketd-client"
