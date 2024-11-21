@@ -446,7 +446,7 @@ impl SystemApis {
         // but it would just make this tool less useful because it wouldn't be
         // able to propose some useful additions to the DAG.
         //
-        // XXX verify that all non-dag filter targets are indeed marked
+        // XXX-dap verify that all non-dag filter targets are indeed marked
         // client-managed.
         let filter = ApiDependencyFilter::Default;
 

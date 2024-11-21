@@ -132,6 +132,28 @@ packages = [ "oximeter-collector" ]
 #
 # `server_package_name`: the package that contains the Dropshot API definition.
 #
+# `versioned_how`: one of:
+#
+#   "server":  this component uses server-side versioning only, meaning that the
+#              update system can ensure that servers are always updated before
+#              clients.
+#
+#   "client":  this component uses client-side versioning, meaning that the
+#              update system cannot ensure that servers are always updated
+#              before clients, so clients need to deal with multiple different
+#              server versions.
+#
+#              You must also specify `versioned_how_reason` if you use "client".
+#
+#   "unknown": this has not been determined.  This will break tests.  But the
+#              tooling supports this value so that during development you can
+#              relax these constraints.
+#
+# [`versioned_how_reason`]: free text string explaining why `versioned_how` must
+# be "client" for this API.  This is printed in documentation and command output
+# and serves as documentation for developers to understand why we made this
+# choice.  This should be present only if `versioned_how = "client"`.
+#
 # [`notes`]: optional free-form human-readable summary documentation about this
 # API
 ################################################################################
