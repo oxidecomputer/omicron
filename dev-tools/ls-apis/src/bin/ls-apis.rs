@@ -4,7 +4,7 @@
 
 //! Show information about Progenitor-based APIs
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use omicron_ls_apis::{
@@ -268,8 +268,8 @@ impl TryFrom<&LsApis> for LoadArgs {
 #[derive(Args)]
 struct DagCheckArgs {}
 
-fn run_dag_check(api: &SystemApis, args: DagCheckArgs) -> Result<()> {
-    let dag_check = api.dag_check()?;
+fn run_dag_check(apis: &SystemApis, args: DagCheckArgs) -> Result<()> {
+    let dag_check = apis.dag_check()?;
 
     for (pkg, reasons) in &dag_check.proposed_server_managed {
         println!(
@@ -295,19 +295,55 @@ fn run_dag_check(api: &SystemApis, args: DagCheckArgs) -> Result<()> {
         );
     }
 
-    let unknown: Vec<_> = api
+    println!("\n");
+    println!("Server-managed APIs:\n");
+    for api in apis
+        .api_metadata()
+        .apis()
+        .filter(|f| f.deployed() && f.versioned_how == VersionedHow::Server)
+    {
+        println!(
+            "    {} ({}, exposed by {})",
+            api.label,
+            api.client_package_name,
+            apis.api_producer(&api.client_package_name).unwrap()
+        );
+    }
+
+    println!("\n");
+    println!("Client-managed API:\n");
+    for api in apis.api_metadata().apis().filter(|f| f.deployed()) {
+        if let VersionedHow::Client(reason) = &api.versioned_how {
+            println!(
+                "    {} ({}, exposed by {})",
+                api.label,
+                api.client_package_name,
+                apis.api_producer(&api.client_package_name).unwrap()
+            );
+            println!("        reason: {}", reason);
+        }
+    }
+
+    println!("\n");
+    print!("APIs with unknown version management:");
+    let unknown: Vec<_> = apis
         .api_metadata()
         .apis()
         .filter(|f| f.versioned_how == VersionedHow::Unknown)
         .collect();
-    print!("\nAPIs with unknown versioning strategy:");
     if unknown.is_empty() {
         println!(" none");
     } else {
-        println!();
+        println!("\n");
         for api in unknown {
-            println!("    {} ({})", api.label, api.client_package_name);
+            println!(
+                "    {} ({}, exposed by {})",
+                api.label,
+                api.client_package_name,
+                apis.api_producer(&api.client_package_name).unwrap()
+            );
         }
+        bail!("at least one API has unknown version strategy (see above)");
     }
 
     Ok(())
