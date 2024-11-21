@@ -186,6 +186,23 @@ impl TryFrom<RawApiMetadata> for AllApiMetadata {
     }
 }
 
+/// Describes how an API in the system manages drift between client and server
+#[derive(Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VersionedHow {
+    /// We have not yet determined how this API will be versioned.
+    #[default]
+    Unknown,
+
+    /// This API will be versioned solely on the server.  (The update system
+    /// will ensure that servers are always updated before clients.)
+    Server,
+
+    /// This API will be versioned on the client.  (The update system cannot
+    /// ensure that servers are always updated before clients.)
+    Client,
+}
+
 /// Describes one API in the system
 #[derive(Deserialize)]
 pub struct ApiMetadata {
@@ -199,6 +216,9 @@ pub struct ApiMetadata {
     pub server_package_name: ServerPackageName,
     /// human-readable notes about this API
     pub notes: Option<String>,
+    /// describes how we've decided this API will be versioned
+    #[serde(default)]
+    pub versioned_how: VersionedHow,
     /// If `dev_only` is true, then this API's server is not deployed in a
     /// production system.  It's only used in development environments.  The
     /// default (if unspecified and this comes in as `None`) is that APIs *are*

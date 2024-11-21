@@ -4,6 +4,8 @@
 
 = ls-apis: list information about Dropshot/Progenitor-based APIs
 
+// XXX-dap update this for the changes here
+
 This tool attempts to identify Progenitor-based API dependencies between Rust components and show information about them.  The focus is on providing information to inform the online upgrade project.
 
 == Quick start

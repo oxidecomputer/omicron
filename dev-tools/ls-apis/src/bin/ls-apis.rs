@@ -9,7 +9,7 @@ use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use omicron_ls_apis::{
     AllApiMetadata, ApiDependencyFilter, LoadArgs, ServerComponentName,
-    SystemApis,
+    SystemApis, VersionedHow,
 };
 use parse_display::{Display, FromStr};
 
@@ -34,6 +34,8 @@ enum Cmds {
     Adoc,
     /// print out each API, what exports it, and what consumes it
     Apis(ShowDepsArgs),
+    /// check the update DAG and propose changes
+    DagCheck(DagCheckArgs),
     /// print out APIs exported and consumed by each deployment unit
     DeploymentUnits(DotArgs),
     /// print out APIs exported and consumed, by server component
@@ -81,6 +83,7 @@ fn main() -> Result<()> {
     match cli_args.cmd {
         Cmds::Adoc => run_adoc(&apis),
         Cmds::Apis(args) => run_apis(&apis, args),
+        Cmds::DagCheck(args) => run_dag_check(&apis, args),
         Cmds::DeploymentUnits(args) => run_deployment_units(&apis, args),
         Cmds::Servers(args) => run_servers(&apis, args),
     }
@@ -260,4 +263,46 @@ impl TryFrom<&LsApis> for LoadArgs {
             .unwrap_or_else(|| self_manifest_dir.join("api-manifest.toml"));
         Ok(LoadArgs { api_manifest_path })
     }
+}
+
+#[derive(Args)]
+struct DagCheckArgs {}
+
+fn run_dag_check(api: &SystemApis, args: DagCheckArgs) -> Result<()> {
+    let dag_check = api.dag_check()?;
+
+    for (pkg, reasons) in &dag_check.proposed_server_managed {
+        println!(
+            "proposal: make {:?} server-managed: {}",
+            pkg,
+            reasons.join(", ")
+        );
+    }
+
+    for (pkg, reasons) in &dag_check.proposed_client_managed {
+        println!(
+            "proposal: make {:?} client-managed: {}",
+            pkg,
+            reasons.join(", ")
+        );
+    }
+
+    for (pkg1, pkg2) in &dag_check.proposed_upick {
+        println!(
+            "proposal: choose either {:?} or {:?} to be client-managed \
+             (they directly depend on each other)",
+            pkg1, pkg2,
+        );
+    }
+
+    println!("\nAPIs with unknown versioning strategy:");
+    for api in api
+        .api_metadata()
+        .apis()
+        .filter(|f| f.versioned_how == VersionedHow::Unknown)
+    {
+        println!("    {} ({})", api.label, api.client_package_name);
+    }
+
+    Ok(())
 }
