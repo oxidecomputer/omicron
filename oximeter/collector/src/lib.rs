@@ -6,7 +6,7 @@
 
 // Copyright 2023 Oxide Computer Company
 
-pub use agent::ForcedCollectionQueueFull;
+pub use agent::ForcedCollectionError;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::HttpError;
@@ -489,9 +489,7 @@ impl Oximeter {
     /// already outstanding calls to force a collection. It rarely makes sense
     /// to have multiple concurrent calls here, so that should not impact most
     /// callers.
-    pub async fn try_force_collect(
-        &self,
-    ) -> Result<(), ForcedCollectionQueueFull> {
+    pub async fn try_force_collect(&self) -> Result<(), ForcedCollectionError> {
         self.server.app_private().try_force_collection().await
     }
 

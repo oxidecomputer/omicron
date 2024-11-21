@@ -60,12 +60,16 @@ use uuid::Uuid;
 ///
 /// If the collection could not be queued because there are too many outstanding
 /// force collection attempts, an `Err(ForcedCollectionQueueFull)` is returned.
-type CollectionToken = oneshot::Sender<Result<(), ForcedCollectionQueueFull>>;
+type CollectionToken = oneshot::Sender<Result<(), ForcedCollectionError>>;
 
-/// Error returned when a forced collection fails because the internal queue is
-/// full.
+/// Error returned when a forced collection fails.
 #[derive(Clone, Copy, Debug)]
-pub struct ForcedCollectionQueueFull;
+pub enum ForcedCollectionError {
+    /// The internal queue of requests is full.
+    QueueFull,
+    /// We failed to send the request because the channel was closed.
+    Closed,
+}
 
 /// Timeout on any single collection from a producer.
 const COLLECTION_TIMEOUT: Duration = Duration::from_secs(30);
@@ -203,7 +207,7 @@ async fn inner_collection_loop(
         let mut collection_fut = Box::pin(perform_collection(
             log.clone(),
             client.clone(),
-            producer_info_rx.borrow_and_update().clone(),
+            *producer_info_rx.borrow_and_update(),
         ));
 
         // Wait for that collection to complete or fail, or for an update to the
@@ -216,7 +220,7 @@ async fn inner_collection_loop(
                 maybe_update = producer_info_rx.changed() => {
                     match maybe_update {
                         Ok(_) => {
-                            let update = producer_info_rx.borrow().clone();
+                            let update = *producer_info_rx.borrow_and_update();
                             debug!(
                                 log,
                                 "received producer info update with an outstanding \
@@ -352,7 +356,7 @@ async fn collection_loop(
                                             queue is closed. Attempting to \
                                             notify caller and exiting.",
                                         );
-                                        let _ = tok.send(Ok(()));
+                                        let _ = tok.send(Err(ForcedCollectionError::Closed));
                                         return;
                                     }
                                     TrySendError::Full(tok) => {
@@ -366,7 +370,7 @@ async fn collection_loop(
                                             times"
                                         );
                                         if tok
-                                            .send(Err(ForcedCollectionQueueFull))
+                                            .send(Err(ForcedCollectionError::QueueFull))
                                             .is_err()
                                         {
                                             warn!(
@@ -942,7 +946,7 @@ impl OximeterAgent {
     /// rarely makes sense to do that.
     pub async fn try_force_collection(
         &self,
-    ) -> Result<(), ForcedCollectionQueueFull> {
+    ) -> Result<(), ForcedCollectionError> {
         let mut collection_oneshots = vec![];
         let collection_tasks = self.collection_tasks.lock().await;
         for (_id, (_endpoint, task)) in collection_tasks.iter() {
@@ -960,10 +964,20 @@ impl OximeterAgent {
         //
         // NOTE: This can either mean that the collection completed
         // successfully, or an error occurred in the collection pathway.
-        futures::future::try_join_all(collection_oneshots)
-            .await
-            .map(|_| ())
-            .map_err(|_| ForcedCollectionQueueFull)
+        //
+        // We use `join_all` to ensure that all futures are run, rather than
+        // bailing on the first error. We extract the first error we received,
+        // or map an actual `RecvError` to `Closed`, since it does really mean
+        // the other side hung up without sending.
+        let results = futures::future::join_all(collection_oneshots).await;
+        for result in results.into_iter() {
+            match result {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => return Err(e),
+                Err(_) => return Err(ForcedCollectionError::Closed),
+            }
+        }
+        Ok(())
     }
 
     /// List existing producers.
