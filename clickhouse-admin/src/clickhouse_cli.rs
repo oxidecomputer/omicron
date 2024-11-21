@@ -11,7 +11,7 @@ use clickhouse_admin_types::{
 };
 use dropshot::HttpError;
 use illumos_utils::{output_to_exec_error, ExecutionError};
-use slog::Logger;
+use slog::{info, Logger};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
@@ -172,13 +172,17 @@ impl ClickhouseCli {
         &self,
         settings: SystemTimeSeriesSettings,
     ) -> Result<Vec<SystemTimeSeries>, ClickhouseCliError> {
-        // TODO: log query
+        let log = self.log.clone().unwrap();
+        let query = settings.query_avg();
+
+        info!(&log, "Querying system database"; "query" => &query);
+
         self.client_non_interactive(
             ClickhouseClientType::Server,
-            settings.query_avg().as_str(),
-            "Retrieve time series from the system.metric_log table",
+            &query,
+            "Retrieve time series from the system database",
             SystemTimeSeries::parse,
-            self.log.clone().unwrap(),
+            log,
         )
         .await
     }
@@ -222,7 +226,7 @@ impl ClickhouseCli {
                 ClickhouseCliError::Run {
                     description: subcommand_description,
                     subcommand: err_args_str,
-                    err: err.into(),
+                    err,
                 }
             })?,
             Err(e) => {

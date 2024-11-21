@@ -118,11 +118,12 @@ pub trait ClickhouseAdminServerApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<DistributedDdlQueue>>, HttpError>;
 
-    /// Retrieve time series from the system database.
+    /// Retrieve time series from the system database. The value the average of all
+    /// values within the interval.
     /// These are internal ClickHouse metrics.
     #[endpoint {
         method = GET,
-        path = "/timeseries/{table}/{metric}"
+        path = "/timeseries/{table}/{metric}/avg"
     }]
     async fn system_timeseries_avg(
         rqctx: RequestContext<Self::Context>,
