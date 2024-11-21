@@ -132,6 +132,7 @@ fn make_response_common(
 pub struct PotentialRange(Vec<u8>);
 
 impl PotentialRange {
+    /// Creates a new [PotentialRange] from raw bytes.
     pub fn new(bytes: &[u8]) -> Self {
         Self(Vec::from(bytes))
     }
