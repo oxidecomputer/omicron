@@ -400,6 +400,7 @@ mod test {
             let sled = SledUpdate::new(
                 Uuid::new_v4(),
                 SocketAddrV6::new(Ipv6Addr::LOCALHOST, 1200 + i, 0, 0),
+                1200 + i,
                 SledBaseboard {
                     serial_number: format!("serial-{}", i),
                     part_number: String::from("fake-sled"),

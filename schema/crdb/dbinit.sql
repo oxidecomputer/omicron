@@ -188,7 +188,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled (
     sled_state omicron.public.sled_state NOT NULL,
 
     /* Generation number owned and incremented by the sled-agent */
-    sled_agent_gen INT8 NOT NULL DEFAULT 1
+    sled_agent_gen INT8 NOT NULL DEFAULT 1,
+
+    /* The bound port of the Repo Depot API server, running on the same IP as
+       the sled agent server. */
+    repo_depot_port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL
 );
 
 -- Add an index that ensures a given physical sled (identified by serial and
