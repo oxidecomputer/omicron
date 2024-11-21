@@ -112,7 +112,7 @@ impl StandaloneNexus {
                     ));
                 };
                 let assignment =
-                    ProducerAssignment { producer: info.clone(), collector_id };
+                    ProducerAssignment { producer: *info, collector_id };
                 assignment
             }
             Some(existing_assignment) => {
@@ -126,7 +126,7 @@ impl StandaloneNexus {
                 // changed its IP address. The collector will learn of this when
                 // it next fetches its list.
                 let collector_id = existing_assignment.collector_id;
-                ProducerAssignment { producer: info.clone(), collector_id }
+                ProducerAssignment { producer: *info, collector_id }
             }
         };
         inner.producers.insert(info.id, assignment);

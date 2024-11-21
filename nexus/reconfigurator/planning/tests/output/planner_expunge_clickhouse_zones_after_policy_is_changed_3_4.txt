@@ -21,7 +21,7 @@ to:   blueprint d895ef50-9978-454c-bdfb-b8dbe2c9a918
     fake-vendor   fake-model   serial-fbc5bdf2-9644-4d0a-b349-f490486da25d
 
 
-    datasets generation 3 -> 4:
+    datasets generation 4 -> 5:
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                     dataset uuid                           quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -117,18 +117,18 @@ to:   blueprint d895ef50-9978-454c-bdfb-b8dbe2c9a918
     fake-vendor   fake-model   serial-f52832ea-60d7-443b-9847-df5384bfc8e2
 
 
-    datasets generation 2 -> 3:
+    datasets generation 3 -> 4:
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                     dataset uuid                           quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     oxp_21b01477-48d0-4b65-9089-4a48277af033/crucible                                                                5cfe414e-d8a1-411c-a249-984e7eb70964   none      none          off        
     oxp_21b01477-48d0-4b65-9089-4a48277af033/crypt/clickhouse_keeper                                                 6236e227-f345-4ec5-af7f-47c3dbe3eb2c   none      none          off        
-    oxp_21b01477-48d0-4b65-9089-4a48277af033/crypt/clickhouse_server                                                 f8e1c7d5-00cf-4d71-93eb-bec0af2ffa3b   none      none          off        
+    oxp_21b01477-48d0-4b65-9089-4a48277af033/crypt/clickhouse_server                                                 e181ab51-2eb2-4552-a38c-9bafcaf7765b   none      none          off        
     oxp_21b01477-48d0-4b65-9089-4a48277af033/crypt/debug                                                             2e4a20b0-00f0-4ac6-aef6-46bc64781f1b   100 GiB   none          gzip-9     
     oxp_21b01477-48d0-4b65-9089-4a48277af033/crypt/internal_dns                                                      18abe482-6dda-45be-a9e6-ff215c6919f1   none      none          off        
     oxp_21b01477-48d0-4b65-9089-4a48277af033/crypt/zone                                                              37fc74a2-7d29-48bf-8ab2-ef0c1286df1e   none      none          off        
     oxp_21b01477-48d0-4b65-9089-4a48277af033/crypt/zone/oxz_clickhouse_keeper_2bae8ad4-3d1f-43aa-8c9b-5dcce65c0480   0a04d1c9-57c7-43c8-b46f-f428f0549575   none      none          off        
-    oxp_21b01477-48d0-4b65-9089-4a48277af033/crypt/zone/oxz_clickhouse_server_c0951435-7d95-4356-bcd3-9d92756d911a   736579c3-0687-43d1-9dd5-cd44add5b932   none      none          off        
+    oxp_21b01477-48d0-4b65-9089-4a48277af033/crypt/zone/oxz_clickhouse_server_c0951435-7d95-4356-bcd3-9d92756d911a   849d2000-dab1-4f5f-b9b9-79294aefe298   none      none          off        
     oxp_21b01477-48d0-4b65-9089-4a48277af033/crypt/zone/oxz_crucible_45644bcc-ea79-4a03-b829-43a27acd5c90            94ec0204-f723-45a1-8521-78d2eb3c8538   none      none          off        
     oxp_21b01477-48d0-4b65-9089-4a48277af033/crypt/zone/oxz_crucible_pantry_c1c9fd43-8a57-4e43-9b09-abe849743076     82276fd0-1da4-446a-918e-3c0f9a859d6c   none      none          off        
     oxp_21b01477-48d0-4b65-9089-4a48277af033/crypt/zone/oxz_internal_dns_68c89612-31f2-4509-b757-44f8e65f2168        fb72c758-0fad-461e-9b7a-43fe8d59075a   none      none          off        
@@ -214,17 +214,17 @@ to:   blueprint d895ef50-9978-454c-bdfb-b8dbe2c9a918
     fake-vendor   fake-model   serial-facb28ca-94fd-47a0-bf63-ee394d32c43b
 
 
-    datasets generation 2 -> 3:
+    datasets generation 3 -> 4:
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                     dataset uuid                           quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     oxp_288d864c-3a9e-4f21-8c6e-720702c82a29/crucible                                                                d76f6218-ca13-40d6-bea4-fc7ceeb2926b   none      none          off        
-    oxp_288d864c-3a9e-4f21-8c6e-720702c82a29/crypt/clickhouse_keeper                                                 e181ab51-2eb2-4552-a38c-9bafcaf7765b   none      none          off        
+    oxp_288d864c-3a9e-4f21-8c6e-720702c82a29/crypt/clickhouse_keeper                                                 f8e1c7d5-00cf-4d71-93eb-bec0af2ffa3b   none      none          off        
     oxp_288d864c-3a9e-4f21-8c6e-720702c82a29/crypt/clickhouse_server                                                 b0d669e6-1faf-4562-82fa-040422a06c9b   none      none          off        
     oxp_288d864c-3a9e-4f21-8c6e-720702c82a29/crypt/debug                                                             2de28d6e-987e-42bd-9323-10e4bc772d33   100 GiB   none          gzip-9     
     oxp_288d864c-3a9e-4f21-8c6e-720702c82a29/crypt/internal_dns                                                      a3ce0f4d-a253-4284-907b-f59e777564df   none      none          off        
     oxp_288d864c-3a9e-4f21-8c6e-720702c82a29/crypt/zone                                                              10877dd7-7567-4226-9033-b2af0d88529e   none      none          off        
-    oxp_288d864c-3a9e-4f21-8c6e-720702c82a29/crypt/zone/oxz_clickhouse_keeper_b8f84002-e213-4311-9d0a-f5a100735ea5   849d2000-dab1-4f5f-b9b9-79294aefe298   none      none          off        
+    oxp_288d864c-3a9e-4f21-8c6e-720702c82a29/crypt/zone/oxz_clickhouse_keeper_b8f84002-e213-4311-9d0a-f5a100735ea5   736579c3-0687-43d1-9dd5-cd44add5b932   none      none          off        
     oxp_288d864c-3a9e-4f21-8c6e-720702c82a29/crypt/zone/oxz_clickhouse_server_c3c0a7b9-2829-4b2d-a2d9-bd2bab02af0f   4aeb359a-4f04-4267-8316-291871cbf89b   none      none          off        
     oxp_288d864c-3a9e-4f21-8c6e-720702c82a29/crypt/zone/oxz_crucible_f25ab7b4-e3e7-4cad-aae3-3cefd2040506            fcea9a6f-5b9c-45c7-953d-feceb00a2e9a   none      none          off        
     oxp_288d864c-3a9e-4f21-8c6e-720702c82a29/crypt/zone/oxz_crucible_pantry_61386aeb-5feb-4cae-9da2-9a169dd79a09     8da2ea7c-1fdc-40d3-a9ac-aa7792969525   none      none          off        
