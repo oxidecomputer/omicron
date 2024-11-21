@@ -23,6 +23,7 @@ use camino::Utf8PathBuf;
 use cargo_metadata::Package;
 use parse_display::{Display, FromStr};
 use petgraph::dot::Dot;
+use petgraph::graph::NodeIndex;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
@@ -371,12 +372,24 @@ impl SystemApis {
         &self,
         filter: ApiDependencyFilter,
     ) -> Result<String> {
+        let (graph, _nodes) = self.make_component_graph(filter, false)?;
+        Ok(Dot::new(&graph).to_string())
+    }
+
+    fn make_component_graph(
+        &self,
+        dependency_filter: ApiDependencyFilter,
+        versioned_on_server_only: bool,
+    ) -> Result<(
+        petgraph::graph::Graph<&'_ ServerComponentName, &'_ ClientPackageName>,
+        BTreeMap<&'_ ServerComponentName, NodeIndex>,
+    )> {
         let mut graph = petgraph::graph::Graph::new();
         let nodes: BTreeMap<_, _> = self
             .server_component_units
             .keys()
             .map(|server_component| {
-                (server_component.clone(), graph.add_node(server_component))
+                (server_component, graph.add_node(server_component))
             })
             .collect();
 
@@ -385,16 +398,26 @@ impl SystemApis {
         for server_component in self.apis_consumed.keys() {
             // unwrap(): we created a node for each server component above.
             let my_node = nodes.get(server_component).unwrap();
-            let consumed_apis =
-                self.component_apis_consumed(server_component, filter)?;
+            let consumed_apis = self
+                .component_apis_consumed(server_component, dependency_filter)?;
             for (client_pkg, _) in consumed_apis {
+                if versioned_on_server_only {
+                    let api = self
+                        .api_metadata
+                        .client_pkgname_lookup(client_pkg)
+                        .unwrap();
+                    if api.versioned_how != VersionedHow::Server {
+                        continue;
+                    }
+                }
+
                 let other_component = self.api_producer(client_pkg).unwrap();
                 let other_node = nodes.get(other_component).unwrap();
-                graph.add_edge(*my_node, *other_node, client_pkg.clone());
+                graph.add_edge(*my_node, *other_node, client_pkg);
             }
         }
 
-        Ok(Dot::new(&graph).to_string())
+        Ok((graph, nodes))
     }
 
     /// Verifies various important properties about the assignment of which APIs
@@ -434,40 +457,9 @@ impl SystemApis {
         //   APIs
         //
         // Check if this DAG is cyclic.  This can't be made to work.
-        let mut graph = petgraph::graph::Graph::new();
-
-        // XXX-dap commonize with dot_by_server_component()?
-        let nodes: BTreeMap<_, _> = self
-            .server_component_units
-            .keys()
-            .map(|server_component| {
-                (server_component.clone(), graph.add_node(server_component))
-            })
-            .collect();
-
+        let (graph, nodes) = self.make_component_graph(filter, true)?;
         let reverse_nodes: BTreeMap<_, _> =
             nodes.iter().map(|(s_c, node)| (node, s_c)).collect();
-
-        for server_component in self.apis_consumed.keys() {
-            // unwrap(): we created a node for each server component above.
-            let my_node = nodes.get(server_component).unwrap();
-            // XXX-dap unwrap
-            let consumed_apis =
-                self.component_apis_consumed(server_component, filter).unwrap();
-            for (client_pkg, _) in consumed_apis {
-                let api = self
-                    .api_metadata
-                    .client_pkgname_lookup(client_pkg)
-                    .unwrap();
-                if api.versioned_how == VersionedHow::Server {
-                    let other_component =
-                        self.api_producer(client_pkg).unwrap();
-                    let other_node = nodes.get(other_component).unwrap();
-                    graph.add_edge(*my_node, *other_node, client_pkg.clone());
-                }
-            }
-        }
-
         if let Err(error) = petgraph::algo::toposort(&graph, None) {
             bail!(
                 "graph of server-managed components has a cycle (includes \
