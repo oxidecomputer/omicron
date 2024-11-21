@@ -84,6 +84,39 @@
       }
     },
     "/producers/{producer_id}": {
+      "get": {
+        "summary": "Get details about a producer by ID.",
+        "operationId": "producer_details",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "producer_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProducerDetails"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
       "delete": {
         "summary": "Delete a producer by ID.",
         "operationId": "producer_delete",
@@ -169,6 +202,98 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "ProducerDetails": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "description": "The current collection address.",
+            "type": "string"
+          },
+          "id": {
+            "description": "The producer's ID.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "interval": {
+            "description": "The current collection interval.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "last_collection_duration": {
+            "nullable": true,
+            "description": "The duration of the last successful collection.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "last_collection_started": {
+            "nullable": true,
+            "description": "The last time we started to collect from this producer.\n\nThis is None if we've never attempted to collect from the producer.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_failed_collection": {
+            "nullable": true,
+            "description": "The last time we failed to collect from this producer.\n\nThis is None if we've never failed to collect from the producer. Note that this can be before `last_collection_started`, when we're in the middle of a collection or the last collection was successful.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_failure_reason": {
+            "nullable": true,
+            "description": "A string describing why the last collection failed.",
+            "type": "string"
+          },
+          "last_successful_collection": {
+            "nullable": true,
+            "description": "The last time we successfully completed a collection from this producer.\n\nThis is None if we've never successfully collected from the producer. Note that this can be before `last_collection_started`, when we're in the middle of a collection or the last collection has failed.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "n_collections": {
+            "description": "The total number of successful collections we've made.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "n_failures": {
+            "description": "The total number of failed collections.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "n_samples_in_last_collection": {
+            "nullable": true,
+            "description": "The number of samples collected in the last successful collection.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "registered": {
+            "description": "The time the producer was first registered with us.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated": {
+            "description": "The last time the producer's information was updated.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "address",
+          "id",
+          "interval",
+          "n_collections",
+          "n_failures",
+          "registered",
+          "updated"
         ]
       },
       "ProducerEndpoint": {

@@ -99,6 +99,21 @@ impl CollectionTaskStats {
         }
     }
 
+    /// Update this information with a new producer endpoint.
+    ///
+    /// # Panics
+    ///
+    /// This panics if `new_info` refers to a different ID.
+    pub fn update(&mut self, new_info: &ProducerEndpoint) {
+        assert_eq!(self.collections.producer_id, new_info.id);
+        self.collections.producer_ip = new_info.address.ip();
+        self.collections.producer_port = new_info.address.port();
+        for each in self.failed_collections.values_mut() {
+            each.producer_ip = new_info.address.ip();
+            each.producer_port = new_info.address.port();
+        }
+    }
+
     pub fn failures_for_reason(
         &mut self,
         reason: FailureReason,
