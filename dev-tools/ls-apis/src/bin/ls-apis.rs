@@ -280,7 +280,7 @@ struct DagCheckArgs {}
 fn run_dag_check(apis: &SystemApis, args: DagCheckArgs) -> Result<()> {
     let dag_check = apis.dag_check()?;
 
-    for (pkg, reasons) in &dag_check.proposed_server_managed {
+    for (pkg, reasons) in dag_check.proposed_server_managed() {
         println!(
             "proposal: make {:?} server-managed: {}",
             pkg,
@@ -288,7 +288,7 @@ fn run_dag_check(apis: &SystemApis, args: DagCheckArgs) -> Result<()> {
         );
     }
 
-    for (pkg, reasons) in &dag_check.proposed_client_managed {
+    for (pkg, reasons) in dag_check.proposed_client_managed() {
         println!(
             "proposal: make {:?} client-managed: {}",
             pkg,
@@ -296,7 +296,7 @@ fn run_dag_check(apis: &SystemApis, args: DagCheckArgs) -> Result<()> {
         );
     }
 
-    for (pkg1, pkg2) in &dag_check.proposed_upick {
+    for (pkg1, pkg2) in dag_check.proposed_upick() {
         println!(
             "proposal: choose either {:?} or {:?} to be client-managed \
              (they directly depend on each other)",

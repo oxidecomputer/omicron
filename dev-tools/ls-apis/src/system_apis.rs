@@ -594,10 +594,9 @@ impl SystemApis {
 }
 
 pub struct DagCheck<'a> {
-    // XXX-dap make non-pub, use accessors
-    pub proposed_server_managed: BTreeMap<&'a ClientPackageName, Vec<String>>,
-    pub proposed_client_managed: BTreeMap<&'a ClientPackageName, Vec<String>>,
-    pub proposed_upick:
+    proposed_server_managed: BTreeMap<&'a ClientPackageName, Vec<String>>,
+    proposed_client_managed: BTreeMap<&'a ClientPackageName, Vec<String>>,
+    proposed_upick:
         BTreeMap<&'a ClientPackageName, BTreeSet<&'a ClientPackageName>>,
 }
 
@@ -650,6 +649,36 @@ impl<'a> DagCheck<'a> {
             .entry(client_pkgname1)
             .or_insert_with(BTreeSet::new)
             .insert(client_pkgname2);
+    }
+
+    /// Returns a list of APIs (identified by client package name) that look
+    /// like they could use server-side versioning, along with reasons
+    pub fn proposed_server_managed(
+        &self,
+    ) -> impl Iterator<Item = (&'_ ClientPackageName, &Vec<String>)> {
+        self.proposed_server_managed.iter().map(|(c, r)| (*c, r))
+    }
+
+    /// Returns a list of APIs (identified by client package name) that look
+    /// like they should use client-side versioning, along with reasons
+    pub fn proposed_client_managed(
+        &self,
+    ) -> impl Iterator<Item = (&'_ ClientPackageName, &Vec<String>)> {
+        self.proposed_client_managed.iter().map(|(c, r)| (*c, r))
+    }
+
+    /// Returns a list of pairs of APIs (identified by client package names) for
+    /// which we have not yet picked client-side or server-side versioning and
+    /// where there is a direct mutual dependency
+    ///
+    /// At least one of these APIs will need to be marked client-managed.
+    pub fn proposed_upick(
+        &self,
+    ) -> impl Iterator<Item = (&'_ ClientPackageName, &'_ ClientPackageName)>
+    {
+        self.proposed_upick
+            .iter()
+            .flat_map(|(c, others)| others.iter().map(|o| (*c, *o)))
     }
 }
 
