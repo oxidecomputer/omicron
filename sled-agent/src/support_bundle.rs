@@ -163,7 +163,7 @@ fn ipadm_show_prop() -> Command {
 
 fn dladm_show_phys() -> Command {
     let mut cmd = std::process::Command::new(PFEXEC);
-    cmd.env_clear().arg(DLADM).arg("show-phys");
+    cmd.env_clear().arg(DLADM).args(["show-phys", "-m"]);
     cmd
 }
 
