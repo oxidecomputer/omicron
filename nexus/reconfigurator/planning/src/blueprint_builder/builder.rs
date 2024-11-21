@@ -198,7 +198,7 @@ impl EditCounts {
     }
 }
 
-/// Counts of changes made by [`BlueprintStorageEditor`].
+/// Counts of changes made by `BlueprintStorageEditor`.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct StorageEditCounts {
     pub disks: EditCounts,
