@@ -4,6 +4,8 @@
 
 //! Affinity groups
 
+use nexus_db_model::AffinityGroup;
+use nexus_db_model::AntiAffinityGroup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::lookup;
@@ -138,10 +140,13 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-        affinity_group: params::AffinityGroupCreate,
+        affinity_group_params: params::AffinityGroupCreate,
     ) -> CreateResult<views::AffinityGroup> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
+
+        let affinity_group =
+            AffinityGroup::new(authz_project.id(), affinity_group_params);
         self.db_datastore
             .affinity_group_create(opctx, &authz_project, affinity_group)
             .await
@@ -152,10 +157,15 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-        anti_affinity_group: params::AntiAffinityGroupCreate,
+        anti_affinity_group_params: params::AntiAffinityGroupCreate,
     ) -> CreateResult<views::AntiAffinityGroup> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
+
+        let anti_affinity_group = AntiAffinityGroup::new(
+            authz_project.id(),
+            anti_affinity_group_params,
+        );
         self.db_datastore
             .anti_affinity_group_create(
                 opctx,

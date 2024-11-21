@@ -3997,6 +3997,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.affinity_group (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
+    -- Affinity groups are contained within projects
     project_id UUID NOT NULL,
     policy omicron.public.affinity_policy NOT NULL,
     failure_domain omicron.public.failure_domain NOT NULL,
@@ -4004,8 +4005,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.affinity_group (
 
 -- Describes an instance's membership within an affinity group
 CREATE TABLE IF NOT EXISTS omicron.public.affinity_group_instance_membership (
-    group_id UUID,
-    instance_id UUID,
+    group_id UUID NOT NULL,
+    instance_id UUID NOT NULL,
 
     PRIMARY KEY (group_id, instance_id);
 );
@@ -4018,6 +4019,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.anti_affinity_group (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
+    -- Anti-Affinity groups are contained within projects
     project_id UUID NOT NULL,
     policy omicron.public.affinity_policy NOT NULL,
     failure_domain omicron.public.failure_domain NOT NULL,
@@ -4025,8 +4027,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.anti_affinity_group (
 
 -- Describes an instance's membership within an anti-affinity group
 CREATE TABLE IF NOT EXISTS omicron.public.anti_affinity_group_instance_membership (
-    group_id UUID,
-    instance_id UUID,
+    group_id UUID NOT NULL,
+    instance_id UUID NOT NULL,
 
     PRIMARY KEY (group_id, instance_id);
 );

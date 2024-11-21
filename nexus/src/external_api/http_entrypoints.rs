@@ -2664,7 +2664,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     new_affinity_group,
                 )
                 .await?;
-            Ok(HttpResponseCreated(affinity_group.into()))
+            Ok(HttpResponseCreated(affinity_group))
         };
         apictx
             .context
@@ -2871,7 +2871,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     new_anti_affinity_group,
                 )
                 .await?;
-            Ok(HttpResponseCreated(anti_affinity_group.into()))
+            Ok(HttpResponseCreated(anti_affinity_group))
         };
         apictx
             .context
