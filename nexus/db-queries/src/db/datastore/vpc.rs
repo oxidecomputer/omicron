@@ -3058,6 +3058,7 @@ mod tests {
                 .sled_upsert(SledUpdate::new(
                     sled_id.into_untyped_uuid(),
                     "[::1]:0".parse().unwrap(),
+                    0,
                     sled_baseboard_for_test(),
                     sled_system_hardware_for_test(),
                     rack_id,

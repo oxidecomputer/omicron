@@ -59,7 +59,7 @@ use nexus_db_queries::db::{
 use nexus_networking::sled_client_from_address;
 use nexus_types::deployment::SledFilter;
 use nexus_types::internal_api::background::TufArtifactReplicationStatus;
-use omicron_common::{address::REPO_DEPOT_PORT, update::ArtifactHash};
+use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::{GenericUuid, SledUuid};
 use rand::seq::SliceRandom;
 use slog_error_chain::InlineErrorChain;
@@ -200,7 +200,7 @@ impl ArtifactReplication {
                 ),
                 depot_base_url: format!(
                     "http://{}",
-                    sled.address_with_port(REPO_DEPOT_PORT)
+                    sled.address_with_port(sled.repo_depot_port.into())
                 ),
             })
             .collect::<Vec<_>>();
