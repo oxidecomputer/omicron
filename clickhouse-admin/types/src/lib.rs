@@ -17,6 +17,7 @@ use schemars::{
 use serde::{Deserialize, Serialize};
 use slog::{info, Logger};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::fs::create_dir;
 use std::io::{ErrorKind, Write};
 use std::net::Ipv6Addr;
@@ -1043,9 +1044,29 @@ fn default_time_range() -> u64 {
     86400
 }
 
-#[derive(Debug, Serialize, Deserialize, Display, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct MetricNamePath {
+/// Available metrics tables in the `system` database
+pub enum SystemTable {
+    AsynchronousMetricLog,
+    MetricLog,
+}
+
+impl fmt::Display for SystemTable {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let table = match self {
+            SystemTable::MetricLog => "metric_log",
+            SystemTable::AsynchronousMetricLog => "asynchronous_metric_log"
+        };
+        write!(f, "{}", table)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct MetricInfoPath {
+    /// Table to query in the `system` database
+    pub table: SystemTable,
     /// Name of the metric to retrieve.
     pub metric: String,
 }
@@ -1069,45 +1090,58 @@ pub struct TimeSeriesSettingsQuery {
 #[serde(rename_all = "snake_case")]
 pub struct SystemTimeSeriesSettings {
     pub settings: TimeSeriesSettingsQuery,
-    /// Name of the metric to retrieve
-    pub metric: MetricNamePath,
+    /// Database table and name of the metric to retrieve
+    pub metric_info: MetricInfoPath,
 }
 
 impl SystemTimeSeriesSettings {
     // TODO: Use more aggregate functions than just avg?
 
-    pub fn query_metric_log(&self) -> String {
+    pub fn query(&self) -> String {
         let interval = self.settings.interval;
         let time_range = self.settings.time_range;
-        let metric = &self.metric;
-        let query = format!(
-            "SELECT toStartOfInterval(event_time, INTERVAL {interval} SECOND) AS time, avg({metric}) AS value
-            FROM system.metric_log
+        let metric_name = &self.metric_info.metric;
+        let table = &self.metric_info.table;
+        let query = match table { 
+            SystemTable::MetricLog => format!(
+            "SELECT toStartOfInterval(event_time, INTERVAL {interval} SECOND) AS time, avg({metric_name}) AS value
+            FROM system.{table}
             WHERE event_date >= toDate(now() - {time_range}) AND event_time >= now() - {time_range}
             GROUP BY time
             ORDER BY time WITH FILL STEP {interval}
             FORMAT JSONEachRow
             SETTINGS date_time_output_format = 'iso'"
-        );
+        ),
+        SystemTable::AsynchronousMetricLog => format!(
+            "SELECT toStartOfInterval(event_time, INTERVAL {interval} SECOND) AS time, avg(value) AS value
+            FROM system.{table}
+            WHERE event_date >= toDate(now() - {time_range}) AND event_time >= now() - {time_range}
+            AND metric = '{metric_name}'
+            GROUP BY time
+            ORDER BY time WITH FILL STEP {interval}
+            FORMAT JSONEachRow
+            SETTINGS date_time_output_format = 'iso'"
+        ),
+    };
         query
     }
 
-    pub fn query_async_metric_log(&self) -> String {
-        let interval = self.settings.interval;
-        let time_range = self.settings.time_range;
-        let metric = &self.metric;
-        let query = format!(
-            "SELECT toStartOfInterval(event_time, INTERVAL {interval} SECOND) AS time, avg(value) AS value
-            FROM system.asynchronous_metric_log
-            WHERE event_date >= toDate(now() - {time_range}) AND event_time >= now() - {time_range}
-            AND metric = '{metric}'
-            GROUP BY time
-            ORDER BY time WITH FILL STEP {interval}
-            FORMAT JSONEachRow
-            SETTINGS date_time_output_format = 'iso'"
-        );
-        query
-    }
+//    pub fn query_async_metric_log(&self) -> String {
+//        let interval = self.settings.interval;
+//        let time_range = self.settings.time_range;
+//        let metric = &self.metric;
+//        let query = format!(
+//            "SELECT toStartOfInterval(event_time, INTERVAL {interval} SECOND) AS time, avg(value) AS value
+//            FROM system.asynchronous_metric_log
+//            WHERE event_date >= toDate(now() - {time_range}) AND event_time >= now() - {time_range}
+//            AND metric = '{metric}'
+//            GROUP BY time
+//            ORDER BY time WITH FILL STEP {interval}
+//            FORMAT JSONEachRow
+//            SETTINGS date_time_output_format = 'iso'"
+//        );
+//        query
+//    }
 }
 
 /// Retrieved time series from the internal `system` database.

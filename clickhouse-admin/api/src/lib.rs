@@ -4,7 +4,7 @@
 
 use clickhouse_admin_types::{
     ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
-    KeeperConfig, KeeperConfigurableSettings, Lgif, MetricNamePath, RaftConfig,
+    KeeperConfig, KeeperConfigurableSettings, Lgif, MetricInfoPath, RaftConfig,
     ReplicaConfig, ServerConfigurableSettings, SystemTimeSeries,
     TimeSeriesSettingsQuery,
 };
@@ -122,25 +122,25 @@ pub trait ClickhouseAdminServerApi {
     /// These are internal ClickHouse metrics.
     #[endpoint {
         method = GET,
-        path = "/timeseries/metric-log/{metric}"
+        path = "/timeseries/{table}/{metric}"
     }]
     async fn system_metric_log_timeseries(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<MetricNamePath>,
+        path_params: Path<MetricInfoPath>,
         query_params: Query<TimeSeriesSettingsQuery>,
     ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError>;
 
-    /// Retrieve time series from the system.asynchronous_metric_log table.
-    /// These are internal ClickHouse metrics.
-    #[endpoint {
-        method = GET,
-        path = "/timeseries/async-metric-log/{metric}"
-    }]
-    async fn system_async_metric_log_timeseries(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<MetricNamePath>,
-        query_params: Query<TimeSeriesSettingsQuery>,
-    ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError>;
+ //   /// Retrieve time series from the system.asynchronous_metric_log table.
+ //   /// These are internal ClickHouse metrics.
+ //   #[endpoint {
+ //       method = GET,
+ //       path = "/timeseries/async-metric-log/{metric}"
+ //   }]
+ //   async fn system_async_metric_log_timeseries(
+ //       rqctx: RequestContext<Self::Context>,
+ //       path_params: Path<MetricNamePath>,
+ //       query_params: Query<TimeSeriesSettingsQuery>,
+ //   ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError>;
 }
 
 /// API interface for our clickhouse-admin-single server

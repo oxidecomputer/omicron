@@ -1156,7 +1156,7 @@ impl Client {
     // block.
     //
     // TODO-robustness This currently does no validation of the statement.
-    async fn execute_with_block(
+    pub async fn execute_with_block(
         &self,
         sql: &str,
     ) -> Result<QueryResult, Error> {
