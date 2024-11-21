@@ -42,6 +42,7 @@ use omicron_common::api::internal::shared::{
     AllowedSourceIps, ExternalPortDiscovery, RackNetworkConfig, SwitchLocation,
 };
 use omicron_common::FileKv;
+use omicron_uuid_kinds::DatasetUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_producer::Server as ProducerServer;
 use slog::Logger;
@@ -83,12 +84,13 @@ impl InternalServer {
         .await?;
 
         // Launch the internal server.
-        let server_starter_internal = match dropshot::HttpServerStarter::new(
-            &config.deployment.dropshot_internal,
+        let http_server_internal = match dropshot::ServerBuilder::new(
             internal_api(),
             context.clone(),
-            &log.new(o!("component" => "dropshot_internal")),
+            log.new(o!("component" => "dropshot_internal")),
         )
+        .config(config.deployment.dropshot_internal.clone())
+        .start()
         .map_err(|error| format!("initializing internal server: {}", error))
         {
             Ok(server) => server,
@@ -97,7 +99,6 @@ impl InternalServer {
                 return Err(err);
             }
         };
-        let http_server_internal = server_starter_internal.start();
 
         Ok(Self {
             apictx: context,
@@ -157,32 +158,30 @@ impl Server {
         };
 
         let http_server_external = {
-            let server_starter_external =
-                dropshot::HttpServerStarter::new_with_tls(
-                    &config.deployment.dropshot_external.dropshot,
-                    external_api(),
-                    apictx.for_external(),
-                    &log.new(o!("component" => "dropshot_external")),
-                    tls_config.clone().map(dropshot::ConfigTls::Dynamic),
-                )
-                .map_err(|error| {
-                    format!("initializing external server: {}", error)
-                })?;
-            server_starter_external.start()
+            dropshot::ServerBuilder::new(
+                external_api(),
+                apictx.for_external(),
+                log.new(o!("component" => "dropshot_external")),
+            )
+            .config(config.deployment.dropshot_external.dropshot.clone())
+            .tls(tls_config.clone().map(dropshot::ConfigTls::Dynamic))
+            .start()
+            .map_err(|error| {
+                format!("initializing external server: {}", error)
+            })?
         };
         let http_server_techport_external = {
-            let server_starter_external_techport =
-                dropshot::HttpServerStarter::new_with_tls(
-                    &techport_server_config,
-                    external_api(),
-                    apictx.for_techport(),
-                    &log.new(o!("component" => "dropshot_external_techport")),
-                    tls_config.map(dropshot::ConfigTls::Dynamic),
-                )
-                .map_err(|error| {
-                    format!("initializing external techport server: {}", error)
-                })?;
-            server_starter_external_techport.start()
+            dropshot::ServerBuilder::new(
+                external_api(),
+                apictx.for_techport(),
+                log.new(o!("component" => "dropshot_external_techport")),
+            )
+            .config(techport_server_config)
+            .tls(tls_config.map(dropshot::ConfigTls::Dynamic))
+            .start()
+            .map_err(|error| {
+                format!("initializing external techport server: {}", error)
+            })?
         };
 
         // Start the metric producer server that oximeter uses to fetch our
@@ -370,7 +369,7 @@ impl nexus_test_interface::NexusServer for Server {
         &self,
         physical_disk: PhysicalDiskPutRequest,
         zpool: ZpoolPutRequest,
-        dataset_id: Uuid,
+        dataset_id: DatasetUuid,
         address: SocketAddrV6,
     ) {
         let opctx = self.apictx.context.nexus.opctx_for_internal_api();

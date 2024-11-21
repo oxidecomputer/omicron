@@ -42,6 +42,7 @@ use omicron_common::backoff::{
 };
 use omicron_common::disk::DiskIdentity;
 use omicron_common::FileKv;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -99,14 +100,14 @@ impl Server {
         .await;
 
         let dropshot_log = log.new(o!("component" => "dropshot"));
-        let http_server = dropshot::HttpServerStarter::new(
-            &config.dropshot,
+        let http_server = dropshot::ServerBuilder::new(
             http_api(),
             sled_agent.clone(),
-            &dropshot_log,
+            dropshot_log,
         )
-        .map_err(|error| anyhow!("initializing server: {}", error))?
-        .start();
+        .config(config.dropshot.clone())
+        .start()
+        .map_err(|error| anyhow!("initializing server: {}", error))?;
 
         // Notify the control plane that we're up, and continue trying this
         // until it succeeds. We retry with an randomized, capped exponential
@@ -197,7 +198,7 @@ impl Server {
             sled_agent
                 .create_zpool(zpool_id, physical_disk_id, zpool.size)
                 .await;
-            let dataset_id = Uuid::new_v4();
+            let dataset_id = DatasetUuid::new_v4();
             let address =
                 sled_agent.create_crucible_dataset(zpool_id, dataset_id).await;
 
@@ -205,7 +206,7 @@ impl Server {
                 zpool_id: zpool_id.into_untyped_uuid(),
                 dataset_id,
                 request: NexusTypes::DatasetPutRequest {
-                    address: address.to_string(),
+                    address: Some(address.to_string()),
                     kind: DatasetKind::Crucible,
                 },
             });
@@ -522,7 +523,7 @@ pub async fn run_standalone_server(
                 zpool_id: zpool.id,
                 dataset_id,
                 request: NexusTypes::DatasetPutRequest {
-                    address: address.to_string(),
+                    address: Some(address.to_string()),
                     kind: DatasetKind::Crucible,
                 },
             });

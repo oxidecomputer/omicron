@@ -22,28 +22,11 @@ use std::sync::Arc;
 pub struct RegionSnapshotReplacementGarbageCollect {
     datastore: Arc<DataStore>,
     sagas: Arc<dyn StartSaga>,
-    disabled: bool,
 }
 
 impl RegionSnapshotReplacementGarbageCollect {
-    #[allow(dead_code)]
     pub fn new(datastore: Arc<DataStore>, sagas: Arc<dyn StartSaga>) -> Self {
-        RegionSnapshotReplacementGarbageCollect {
-            datastore,
-            sagas,
-            disabled: false,
-        }
-    }
-
-    pub fn disabled(
-        datastore: Arc<DataStore>,
-        sagas: Arc<dyn StartSaga>,
-    ) -> Self {
-        RegionSnapshotReplacementGarbageCollect {
-            datastore,
-            sagas,
-            disabled: true,
-        }
+        RegionSnapshotReplacementGarbageCollect { datastore, sagas }
     }
 
     async fn send_garbage_collect_request(
@@ -152,10 +135,6 @@ impl BackgroundTask for RegionSnapshotReplacementGarbageCollect {
             let mut status =
                 RegionSnapshotReplacementGarbageCollectStatus::default();
 
-            if self.disabled {
-                return json!(status);
-            }
-
             self.clean_up_region_snapshot_replacement_volumes(
                 opctx,
                 &mut status,
@@ -175,6 +154,7 @@ mod test {
     use nexus_db_model::RegionSnapshotReplacement;
     use nexus_db_model::RegionSnapshotReplacementState;
     use nexus_test_utils_macros::nexus_test;
+    use omicron_uuid_kinds::DatasetUuid;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -209,7 +189,7 @@ mod test {
         // Add two region snapshot requests that need garbage collection
 
         let mut request = RegionSnapshotReplacement::new(
-            Uuid::new_v4(),
+            DatasetUuid::new_v4(),
             Uuid::new_v4(),
             Uuid::new_v4(),
         );
@@ -229,7 +209,7 @@ mod test {
             .unwrap();
 
         let mut request = RegionSnapshotReplacement::new(
-            Uuid::new_v4(),
+            DatasetUuid::new_v4(),
             Uuid::new_v4(),
             Uuid::new_v4(),
         );

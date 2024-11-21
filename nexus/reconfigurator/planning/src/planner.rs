@@ -28,7 +28,6 @@ use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
-use rng::PlannerRng;
 use slog::error;
 use slog::{info, warn, Logger};
 use std::collections::BTreeMap;
@@ -38,6 +37,7 @@ use std::str::FromStr;
 pub(crate) use self::omicron_zone_placement::DiscretionaryOmicronZone;
 use self::omicron_zone_placement::OmicronZonePlacement;
 use self::omicron_zone_placement::OmicronZonePlacementSledState;
+pub use self::rng::PlannerRng;
 
 mod omicron_zone_placement;
 pub(crate) mod rng;
@@ -232,17 +232,20 @@ impl<'a> Planner<'a> {
         {
             // First, we need to ensure that sleds are using their expected
             // disks. This is necessary before we can allocate any zones.
+            let sled_edits =
+                self.blueprint.sled_ensure_disks(sled_id, &sled_resources)?;
             if let EnsureMultiple::Changed {
                 added,
                 updated,
                 expunged: _,
                 removed,
-            } = self.blueprint.sled_ensure_disks(sled_id, &sled_resources)?
+            } = sled_edits.disks.into()
             {
                 info!(
                     &self.log,
                     "altered physical disks";
-                    "sled_id" => %sled_id
+                    "sled_id" => %sled_id,
+                    "sled_edits" => ?sled_edits,
                 );
                 self.blueprint.record_operation(Operation::UpdateDisks {
                     sled_id,
@@ -368,8 +371,9 @@ impl<'a> Planner<'a> {
                 updated,
                 expunged,
                 removed,
-            } =
-                self.blueprint.sled_ensure_datasets(sled_id, &sled_resources)?
+            } = self
+                .blueprint
+                .sled_ensure_zone_datasets(sled_id, &sled_resources)?
             {
                 info!(
                     &self.log,
@@ -2833,6 +2837,12 @@ mod test {
         .plan()
         .expect("plan");
 
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        assert_contents(
+            "tests/output/planner_deploy_all_keeper_nodes_1_2.txt",
+            &diff.display().to_string(),
+        );
+
         // We should see zones for 3 clickhouse keepers, and 2 servers created
         let active_zones: Vec<_> = blueprint2
             .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
@@ -2942,6 +2952,19 @@ mod test {
         .plan()
         .expect("plan");
 
+        let diff = blueprint4.diff_since_blueprint(&blueprint3);
+        assert_contents(
+            "tests/output/planner_deploy_all_keeper_nodes_3_4.txt",
+            &diff.display().to_string(),
+        );
+
+        let coll_diff = blueprint4.diff_since_collection(&collection);
+        println!("coll_diff = {coll_diff:#?}");
+        assert_contents(
+            "tests/output/planner_deploy_all_keeper_nodes_4_collection.txt",
+            &coll_diff.display().to_string(),
+        );
+
         let bp3_config = blueprint3.clickhouse_cluster_config.as_ref().unwrap();
         let bp4_config = blueprint4.clickhouse_cluster_config.as_ref().unwrap();
         assert_eq!(bp4_config.generation, bp3_config.generation);
@@ -2984,6 +3007,12 @@ mod test {
         .plan()
         .expect("plan");
 
+        let diff = blueprint5.diff_since_blueprint(&blueprint4);
+        assert_contents(
+            "tests/output/planner_deploy_all_keeper_nodes_4_5.txt",
+            &diff.display().to_string(),
+        );
+
         let active_zones: Vec<_> = blueprint5
             .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
             .map(|(_, z)| z.clone())
@@ -3024,6 +3053,12 @@ mod test {
         .with_rng(PlannerRng::from_seed((TEST_NAME, "bp6")))
         .plan()
         .expect("plan");
+
+        let diff = blueprint6.diff_since_blueprint(&blueprint5);
+        assert_contents(
+            "tests/output/planner_deploy_all_keeper_nodes_5_6.txt",
+            &diff.display().to_string(),
+        );
 
         let bp6_config = blueprint6.clickhouse_cluster_config.as_ref().unwrap();
         assert_eq!(bp5_config, bp6_config);
@@ -3248,6 +3283,12 @@ mod test {
         .plan()
         .expect("plan");
 
+        let diff = blueprint4.diff_since_blueprint(&blueprint3);
+        assert_contents(
+            "tests/output/planner_expunge_clickhouse_clusters_3_4.txt",
+            &diff.display().to_string(),
+        );
+
         // The planner should expunge a zone based on the sled being expunged. Since this
         // is a clickhouse keeper zone, the clickhouse keeper configuration should change
         // to reflect this.
@@ -3306,6 +3347,12 @@ mod test {
         .plan()
         .expect("plan");
 
+        let diff = blueprint6.diff_since_blueprint(&blueprint5);
+        assert_contents(
+            "tests/output/planner_expunge_clickhouse_clusters_5_6.txt",
+            &diff.display().to_string(),
+        );
+
         let old_config = blueprint5.clickhouse_cluster_config.as_ref().unwrap();
         let config = blueprint6.clickhouse_cluster_config.as_ref().unwrap();
 
@@ -3328,7 +3375,7 @@ mod test {
     #[test]
     fn test_expunge_clickhouse_zones_after_policy_is_changed() {
         static TEST_NAME: &str =
-            "planner_expunge_clickhouse__zones_after_policy_is_changed";
+            "planner_expunge_clickhouse_zones_after_policy_is_changed";
         let logctx = test_setup_log(TEST_NAME);
         let log = logctx.log.clone();
 
@@ -3435,6 +3482,12 @@ mod test {
         .plan()
         .expect("plan");
 
+        let diff = blueprint4.diff_since_blueprint(&blueprint3);
+        assert_contents(
+            "tests/output/planner_expunge_clickhouse_zones_after_policy_is_changed_3_4.txt",
+            &diff.display().to_string(),
+        );
+
         // All our clickhouse keeper and server zones that we created when we
         // enabled our clickhouse policy should be expunged when we disable it.
         let expunged_zones: Vec<_> = blueprint4
@@ -3456,7 +3509,7 @@ mod test {
         assert_eq!(keeper_zone_ids, expunged_keeper_zone_ids);
         assert_eq!(server_zone_ids, expunged_server_zone_ids);
 
-        // We should have a new single-node clickhouze zone
+        // We should have a new single-node clickhouse zone
         assert_eq!(
             1,
             blueprint4

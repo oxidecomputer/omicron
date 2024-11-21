@@ -16,23 +16,14 @@ jobs:
     env:
       RUSTFLAGS: -D warnings
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event.pull_request.head.sha }} # see omicron#4461
-      - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af # v1
-        with:
-          toolchain: stable
       - name: Install cargo-hakari
-        uses: taiki-e/install-action@4b40a9728e3c110fabe8850443d8bbe69daddb22 # v2
-        with:
-          tool: cargo-hakari
+        env:
+          version: 0.9.33
+        run: curl -L "https://github.com/guppy-rs/guppy/releases/download/cargo-hakari-$version/cargo-hakari-$version-x86_64-unknown-linux-gnu.tar.gz" | tar -xzC ~/.cargo/bin
       - name: Check workspace-hack Cargo.toml is up-to-date
-        uses: actions-rs/cargo@844f36862e911db73fe0815f00a4a2602c279505 # v1
-        with:
-          command: hakari
-          args: generate --diff
+        run: cargo hakari generate --diff
       - name: Check all crates depend on workspace-hack
-        uses: actions-rs/cargo@844f36862e911db73fe0815f00a4a2602c279505 # v1
-        with:
-          command: hakari
-          args: manage-deps --dry-run
+        run: cargo hakari manage-deps --dry-run

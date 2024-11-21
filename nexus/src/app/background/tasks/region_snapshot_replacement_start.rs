@@ -29,20 +29,11 @@ use std::sync::Arc;
 pub struct RegionSnapshotReplacementDetector {
     datastore: Arc<DataStore>,
     sagas: Arc<dyn StartSaga>,
-    disabled: bool,
 }
 
 impl RegionSnapshotReplacementDetector {
-    #[allow(dead_code)]
     pub fn new(datastore: Arc<DataStore>, sagas: Arc<dyn StartSaga>) -> Self {
-        RegionSnapshotReplacementDetector { datastore, sagas, disabled: false }
-    }
-
-    pub fn disabled(
-        datastore: Arc<DataStore>,
-        sagas: Arc<dyn StartSaga>,
-    ) -> Self {
-        RegionSnapshotReplacementDetector { datastore, sagas, disabled: true }
+        RegionSnapshotReplacementDetector { datastore, sagas }
     }
 
     async fn send_start_request(
@@ -246,10 +237,6 @@ impl BackgroundTask for RegionSnapshotReplacementDetector {
         async {
             let mut status = RegionSnapshotReplacementStartStatus::default();
 
-            if self.disabled {
-                return json!(status);
-            }
-
             self.create_requests_for_region_snapshots_on_expunged_disks(
                 opctx,
                 &mut status,
@@ -287,6 +274,7 @@ mod test {
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external;
+    use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
     use std::collections::BTreeMap;
     use uuid::Uuid;
@@ -322,9 +310,9 @@ mod test {
         // Add a region snapshot replacement request for a fake region snapshot
 
         let request = RegionSnapshotReplacement::new(
-            Uuid::new_v4(), // dataset id
-            Uuid::new_v4(), // region id
-            Uuid::new_v4(), // snapshot id
+            DatasetUuid::new_v4(), // dataset id
+            Uuid::new_v4(),        // region id
+            Uuid::new_v4(),        // snapshot id
         );
 
         let request_id = request.id;

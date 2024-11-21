@@ -4707,6 +4707,7 @@
             ]
           },
           "uplink_port_fec": {
+            "nullable": true,
             "description": "Port forward error correction type.",
             "allOf": [
               {
@@ -4729,7 +4730,6 @@
           "port",
           "routes",
           "switch",
-          "uplink_port_fec",
           "uplink_port_speed"
         ]
       },

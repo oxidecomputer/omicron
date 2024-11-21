@@ -4,9 +4,12 @@
 
 use super::ByteCount;
 use crate::schema::region;
+use crate::typed_uuid::DbTypedUuid;
 use crate::SqlU16;
 use db_macros::Asset;
 use omicron_common::api::external;
+use omicron_uuid_kinds::DatasetKind;
+use omicron_uuid_kinds::DatasetUuid;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -30,7 +33,7 @@ pub struct Region {
     #[diesel(embed)]
     identity: RegionIdentity,
 
-    dataset_id: Uuid,
+    dataset_id: DbTypedUuid<DatasetKind>,
     volume_id: Uuid,
 
     block_size: ByteCount,
@@ -46,11 +49,15 @@ pub struct Region {
 
     // A region may be read-only
     read_only: bool,
+
+    // Shared read-only regions require a "deleting" flag to avoid a
+    // use-after-free scenario
+    deleting: bool,
 }
 
 impl Region {
     pub fn new(
-        dataset_id: Uuid,
+        dataset_id: DatasetUuid,
         volume_id: Uuid,
         block_size: ByteCount,
         blocks_per_extent: u64,
@@ -60,13 +67,14 @@ impl Region {
     ) -> Self {
         Self {
             identity: RegionIdentity::new(Uuid::new_v4()),
-            dataset_id,
+            dataset_id: dataset_id.into(),
             volume_id,
             block_size,
             blocks_per_extent: blocks_per_extent as i64,
             extent_count: extent_count as i64,
             port: Some(port.into()),
             read_only,
+            deleting: false,
         }
     }
 
@@ -76,8 +84,8 @@ impl Region {
     pub fn volume_id(&self) -> Uuid {
         self.volume_id
     }
-    pub fn dataset_id(&self) -> Uuid {
-        self.dataset_id
+    pub fn dataset_id(&self) -> DatasetUuid {
+        self.dataset_id.into()
     }
     pub fn block_size(&self) -> external::ByteCount {
         self.block_size.0
@@ -98,5 +106,8 @@ impl Region {
     }
     pub fn read_only(&self) -> bool {
         self.read_only
+    }
+    pub fn deleting(&self) -> bool {
+        self.deleting
     }
 }

@@ -107,6 +107,8 @@ impl DatasetName {
         &self.pool_name
     }
 
+    // TODO(https://github.com/oxidecomputer/omicron/issues/7115): Rename
+    // this to "kind?
     pub fn dataset(&self) -> &DatasetKind {
         &self.kind
     }

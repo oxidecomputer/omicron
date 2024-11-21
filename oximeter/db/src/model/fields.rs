@@ -7,16 +7,239 @@
 // Copyright 2024 Oxide Computer Company
 
 use super::columns;
+use super::from_block::FromBlock;
 use crate::native::block::Block;
 use crate::native::block::Column;
 use crate::native::block::DataType;
 use crate::native::block::ValueArray;
+use crate::native::Error;
 use crate::query::field_table_name;
+use crate::Metric;
+use crate::Target;
 use indexmap::IndexMap;
+use oximeter::schema::TimeseriesKey;
+use oximeter::Field;
+use oximeter::FieldSchema;
+use oximeter::FieldSource;
 use oximeter::FieldType;
 use oximeter::FieldValue;
 use oximeter::Sample;
+use oximeter::TimeseriesSchema;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::net::IpAddr;
+
+/// A row selected from a "field select query", used in the older query
+/// interface.
+///
+/// This is used in `select_matching_timeseries_info()` to pull out the fields
+/// that match a query.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FieldSelectRow {
+    pub timeseries_key: TimeseriesKey,
+    pub target: Target,
+    pub metric: Metric,
+}
+
+impl FromBlock for FieldSelectRow {
+    type Context = TimeseriesSchema;
+
+    fn from_block(
+        block: &Block,
+        schema: &Self::Context,
+    ) -> Result<Vec<Self>, Error> {
+        let n_rows = block.n_rows();
+        if n_rows == 0 {
+            return Ok(vec![]);
+        }
+        let timeseries_keys = block
+            .column_values(columns::TIMESERIES_KEY)?
+            .as_u64()
+            .map_err(|actual| {
+                Error::unexpected_column_type(
+                    block,
+                    columns::TIMESERIES_KEY,
+                    actual.to_string(),
+                )
+            })?;
+        let field_rows =
+            extract_field_rows_from_block(block, &schema.field_schema)?;
+        let mut out = Vec::with_capacity(n_rows);
+        let (target_name, metric_name) = schema.component_names();
+        for (timeseries_key, field_rows) in
+            timeseries_keys.iter().copied().zip(field_rows)
+        {
+            out.push(FieldSelectRow {
+                timeseries_key,
+                target: Target {
+                    name: target_name.to_string(),
+                    fields: field_rows.target,
+                },
+                metric: Metric {
+                    name: metric_name.to_string(),
+                    fields: field_rows.metric,
+                    datum_type: schema.datum_type,
+                },
+            });
+        }
+        Ok(out)
+    }
+}
+
+struct FieldRow {
+    target: Vec<Field>,
+    metric: Vec<Field>,
+}
+
+/// Extract the fields from every row in `block`, using the provided schema.
+fn extract_field_rows_from_block(
+    block: &Block,
+    field_schema: &BTreeSet<FieldSchema>,
+) -> Result<Vec<FieldRow>, Error> {
+    let mut out = Vec::with_capacity(block.n_rows());
+    for row in 0..block.n_rows() {
+        let mut target = Vec::with_capacity(1);
+        let mut metric = Vec::new();
+        for field in field_schema.iter() {
+            let col = block.column_values(&field.name)?;
+            let field_value = match field.field_type {
+                FieldType::String => {
+                    let ValueArray::String(x) = col else {
+                        return Err(Error::unexpected_column_type(
+                            block,
+                            &field.name,
+                            "String",
+                        ));
+                    };
+                    FieldValue::from(x[row].clone())
+                }
+                FieldType::I8 => {
+                    let ValueArray::Int8(x) = col else {
+                        return Err(Error::unexpected_column_type(
+                            block,
+                            &field.name,
+                            "Int8",
+                        ));
+                    };
+                    FieldValue::from(x[row])
+                }
+                FieldType::U8 => {
+                    let ValueArray::UInt8(x) = col else {
+                        return Err(Error::unexpected_column_type(
+                            block,
+                            &field.name,
+                            "UInt8",
+                        ));
+                    };
+                    FieldValue::from(x[row])
+                }
+                FieldType::I16 => {
+                    let ValueArray::Int16(x) = col else {
+                        return Err(Error::unexpected_column_type(
+                            block,
+                            &field.name,
+                            "Int16",
+                        ));
+                    };
+                    FieldValue::from(x[row])
+                }
+                FieldType::U16 => {
+                    let ValueArray::UInt16(x) = col else {
+                        return Err(Error::unexpected_column_type(
+                            block,
+                            &field.name,
+                            "UInt16",
+                        ));
+                    };
+                    FieldValue::from(x[row])
+                }
+                FieldType::I32 => {
+                    let ValueArray::Int32(x) = col else {
+                        return Err(Error::unexpected_column_type(
+                            block,
+                            &field.name,
+                            "Int32",
+                        ));
+                    };
+                    FieldValue::from(x[row])
+                }
+                FieldType::U32 => {
+                    let ValueArray::UInt32(x) = col else {
+                        return Err(Error::unexpected_column_type(
+                            block,
+                            &field.name,
+                            "UInt32",
+                        ));
+                    };
+                    FieldValue::from(x[row])
+                }
+                FieldType::I64 => {
+                    let ValueArray::Int64(x) = col else {
+                        return Err(Error::unexpected_column_type(
+                            block,
+                            &field.name,
+                            "Int64",
+                        ));
+                    };
+                    FieldValue::from(x[row])
+                }
+                FieldType::U64 => {
+                    let ValueArray::UInt64(x) = col else {
+                        return Err(Error::unexpected_column_type(
+                            block,
+                            &field.name,
+                            "String",
+                        ));
+                    };
+                    FieldValue::from(x[row])
+                }
+                FieldType::IpAddr => {
+                    let ValueArray::Ipv6(x) = col else {
+                        return Err(Error::unexpected_column_type(
+                            block,
+                            &field.name,
+                            "IpAddr",
+                        ));
+                    };
+                    let v6 = x[row];
+                    let addr = match v6.to_ipv4_mapped() {
+                        Some(v4) => IpAddr::V4(v4),
+                        None => IpAddr::V6(v6),
+                    };
+                    FieldValue::from(addr)
+                }
+                FieldType::Uuid => {
+                    let ValueArray::Uuid(x) = col else {
+                        return Err(Error::unexpected_column_type(
+                            block,
+                            &field.name,
+                            "Uuid",
+                        ));
+                    };
+                    FieldValue::from(x[row])
+                }
+                FieldType::Bool => {
+                    let ValueArray::Bool(x) = col else {
+                        return Err(Error::unexpected_column_type(
+                            block,
+                            &field.name,
+                            "Bool",
+                        ));
+                    };
+                    FieldValue::from(x[row])
+                }
+            };
+            let this_field =
+                Field { name: field.name.clone(), value: field_value };
+            match field.source {
+                FieldSource::Target => target.push(this_field),
+                FieldSource::Metric => metric.push(this_field),
+            }
+        }
+        out.push(FieldRow { target, metric });
+    }
+    Ok(out)
+}
 
 /// Extract `Block`s for all fields in a `Sample`.
 ///
