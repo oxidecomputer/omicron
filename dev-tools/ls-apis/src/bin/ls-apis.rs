@@ -96,12 +96,13 @@ fn run_adoc(apis: &SystemApis) -> Result<()> {
     println!(
         ".List of OpenAPI/Progenitor-based interfaces for online upgrade."
     );
-    println!(r#"[cols="1h,2,2,2a,2", options="header"]"#);
+    println!(r#"[cols="1h,2,2,2a,2,2", options="header"]"#);
     println!("|===");
     println!("|API");
     println!("|Server location (`repo:path`)");
     println!("|Client packages (`repo:path`)");
     println!("|Consumers (`repo:path`; excluding omdb and tests)");
+    println!("|Versioning");
     println!("|Notes");
     println!("");
 
@@ -124,6 +125,14 @@ fn run_adoc(apis: &SystemApis) -> Result<()> {
         )? {
             println!("* {}", apis.adoc_label(c)?);
         }
+
+        match &api.versioned_how {
+            VersionedHow::Unknown => println!("|TBD"),
+            VersionedHow::Server => println!("|Server-side only"),
+            VersionedHow::Client(reason) => {
+                println!("|Client-side ({})", reason);
+            }
+        };
 
         print!("|{}", api.notes.as_deref().unwrap_or("-\n"));
         println!("");
