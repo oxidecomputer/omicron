@@ -31,15 +31,6 @@ pub struct OxqlArgs {
     )]
     clickhouse_url: Option<String>,
 
-    /// URL of the ClickHouse server to connect to for the native protcol.
-    #[arg(
-        long,
-        env = "OMDB_CLICKHOUSE_NATIVE_URL",
-        global = true,
-        help_heading = CONNECTION_OPTIONS_HEADING,
-    )]
-    clickhouse_native_url: Option<String>,
-
     /// Print summaries of each SQL query run against the database.
     #[clap(long = "summaries")]
     print_summaries: bool,
@@ -81,7 +72,7 @@ impl OxqlArgs {
         self.resolve_addr(
             omdb,
             log,
-            self.clickhouse_native_url.as_deref(),
+            self.clickhouse_url.as_deref(),
             ServiceName::ClickhouseNative,
         )
         .await
