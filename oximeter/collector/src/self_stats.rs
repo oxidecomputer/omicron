@@ -33,6 +33,12 @@ pub enum FailureReason {
     Unreachable,
     /// Error during deserialization.
     Deserialization,
+    /// The collection interval has expired while an outstanding collection is
+    /// already in progress.
+    ///
+    /// This may indicate that the producer's collection interval is too short
+    /// for the amount of data it generates, and the collector cannot keep up.
+    CollectionsInProgress,
     /// Some other reason, which includes the status code.
     Other(StatusCode),
 }
@@ -42,6 +48,9 @@ impl std::fmt::Display for FailureReason {
         match self {
             Self::Unreachable => f.write_str(Self::UNREACHABLE),
             Self::Deserialization => f.write_str(Self::DESERIALIZATION),
+            Self::CollectionsInProgress => {
+                f.write_str(Self::COLLECTIONS_IN_PROGRESS)
+            }
             Self::Other(c) => write!(f, "{}", c.as_u16()),
         }
     }
@@ -50,11 +59,15 @@ impl std::fmt::Display for FailureReason {
 impl FailureReason {
     const UNREACHABLE: &'static str = "unreachable";
     const DESERIALIZATION: &'static str = "deserialization";
+    const COLLECTIONS_IN_PROGRESS: &'static str = "collections in progress";
 
     fn as_string(&self) -> Cow<'static, str> {
         match self {
             Self::Unreachable => Cow::Borrowed(Self::UNREACHABLE),
             Self::Deserialization => Cow::Borrowed(Self::DESERIALIZATION),
+            Self::CollectionsInProgress => {
+                Cow::Borrowed(Self::COLLECTIONS_IN_PROGRESS)
+            }
             Self::Other(c) => Cow::Owned(c.as_u16().to_string()),
         }
     }
