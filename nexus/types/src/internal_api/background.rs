@@ -195,7 +195,7 @@ impl std::fmt::Display for ReincarnatableInstance {
 }
 
 /// The status of a `tuf_artifact_replication` background task activation
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct TufArtifactReplicationStatus {
     /// Number of requests handled by sled agents successfully.
     pub requests_ok: usize,
