@@ -28,6 +28,7 @@ use omicron_common::disk::DiskManagementStatus;
 use omicron_common::disk::DiskVariant;
 use omicron_common::disk::DisksManagementResult;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -818,7 +819,7 @@ pub(crate) struct Zpool {
     id: ZpoolUuid,
     physical_disk_id: Uuid,
     total_size: u64,
-    datasets: HashMap<Uuid, CrucibleServer>,
+    datasets: HashMap<DatasetUuid, CrucibleServer>,
 }
 
 impl Zpool {
@@ -829,7 +830,7 @@ impl Zpool {
     fn insert_dataset(
         &mut self,
         log: &Logger,
-        id: Uuid,
+        id: DatasetUuid,
         crucible_ip: IpAddr,
         start_port: u16,
         end_port: u16,
@@ -884,7 +885,7 @@ impl Zpool {
         regions.pop()
     }
 
-    pub fn drop_dataset(&mut self, id: Uuid) {
+    pub fn drop_dataset(&mut self, id: DatasetUuid) {
         let _ = self.datasets.remove(&id).expect("Failed to get the dataset");
     }
 }
@@ -1032,7 +1033,7 @@ impl Storage {
     pub async fn insert_dataset(
         &mut self,
         zpool_id: ZpoolUuid,
-        dataset_id: Uuid,
+        dataset_id: DatasetUuid,
     ) -> SocketAddr {
         // Update our local data
         let dataset = self
@@ -1093,7 +1094,7 @@ impl Storage {
     pub fn get_all_datasets(
         &self,
         zpool_id: ZpoolUuid,
-    ) -> Vec<(Uuid, SocketAddr)> {
+    ) -> Vec<(DatasetUuid, SocketAddr)> {
         let zpool = self.zpools.get(&zpool_id).expect("Zpool does not exist");
 
         zpool
@@ -1106,7 +1107,7 @@ impl Storage {
     pub async fn get_dataset(
         &self,
         zpool_id: ZpoolUuid,
-        dataset_id: Uuid,
+        dataset_id: DatasetUuid,
     ) -> Arc<CrucibleData> {
         self.zpools
             .get(&zpool_id)
@@ -1146,7 +1147,11 @@ impl Storage {
         regions.pop()
     }
 
-    pub fn drop_dataset(&mut self, zpool_id: ZpoolUuid, dataset_id: Uuid) {
+    pub fn drop_dataset(
+        &mut self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+    ) {
         self.zpools
             .get_mut(&zpool_id)
             .expect("Zpool does not exist")

@@ -72,10 +72,12 @@ impl BuilderZonesConfig {
         Ok(())
     }
 
+    // On success, returns the now-expunged zone and whether or not it was set
+    // to expunged (as opposed to already being marked expunged).
     pub(super) fn expunge_zone(
         &mut self,
         zone_id: OmicronZoneUuid,
-    ) -> Result<(), BuilderZonesConfigError> {
+    ) -> Result<(&BuilderZoneConfig, bool), BuilderZonesConfigError> {
         let zone = self
             .zones
             .iter_mut()
@@ -90,17 +92,22 @@ impl BuilderZonesConfig {
         // in here should have had this check done to them already, but
         // in case they're not, or in case something else about those
         // zones changed in between, check again.
-        is_already_expunged(&zone.zone, zone.state)?;
-        zone.zone.disposition = BlueprintZoneDisposition::Expunged;
-        zone.state = BuilderZoneState::Modified;
+        let needs_expunged = !is_already_expunged(&zone.zone, zone.state)?;
 
-        Ok(())
+        if needs_expunged {
+            zone.zone.disposition = BlueprintZoneDisposition::Expunged;
+            zone.state = BuilderZoneState::Modified;
+        }
+
+        Ok((&*zone, needs_expunged))
     }
 
     pub(super) fn expunge_zones(
         &mut self,
         mut zones: BTreeSet<OmicronZoneUuid>,
-    ) -> Result<(), BuilderZonesConfigError> {
+    ) -> Result<Vec<&BlueprintZoneConfig>, BuilderZonesConfigError> {
+        let mut removed = Vec::new();
+
         for zone in &mut self.zones {
             if zones.remove(&zone.zone.id) {
                 // Check that the zone is expungeable. Typically, zones passed
@@ -110,6 +117,7 @@ impl BuilderZonesConfig {
                 is_already_expunged(&zone.zone, zone.state)?;
                 zone.zone.disposition = BlueprintZoneDisposition::Expunged;
                 zone.state = BuilderZoneState::Modified;
+                removed.push(&zone.zone);
             }
         }
 
@@ -121,7 +129,7 @@ impl BuilderZonesConfig {
             });
         }
 
-        Ok(())
+        Ok(removed)
     }
 
     pub(super) fn iter_zones(
@@ -438,7 +446,7 @@ mod tests {
         for (sled_id, resources) in
             input2.all_sled_resources(SledFilter::Commissioned)
         {
-            builder.sled_ensure_datasets(sled_id, resources).unwrap();
+            builder.sled_ensure_zone_datasets(sled_id, resources).unwrap();
         }
 
         // Now build the blueprint and ensure that all the changes we described

@@ -9,6 +9,7 @@ members = [
     "clients/bootstrap-agent-client",
     "clients/clickhouse-admin-keeper-client",
     "clients/clickhouse-admin-server-client",
+    "clients/clickhouse-admin-single-client",
     "clients/cockroach-admin-client",
     "clients/ddm-admin-client",
     "clients/dns-service-client",
@@ -137,6 +138,7 @@ default-members = [
     "clients/bootstrap-agent-client",
     "clients/clickhouse-admin-keeper-client",
     "clients/clickhouse-admin-server-client",
+    "clients/clickhouse-admin-single-client",
     "clients/cockroach-admin-client",
     "clients/ddm-admin-client",
     "clients/dns-service-client",
@@ -329,6 +331,7 @@ clap = { version = "4.5", features = ["cargo", "derive", "env", "wrap_help"] }
 clickhouse-admin-api = { path = "clickhouse-admin/api" }
 clickhouse-admin-keeper-client = { path = "clients/clickhouse-admin-keeper-client" }
 clickhouse-admin-server-client = { path = "clients/clickhouse-admin-server-client" }
+clickhouse-admin-single-client = { path = "clients/clickhouse-admin-single-client" }
 clickhouse-admin-types = { path = "clickhouse-admin/types" }
 clickhouse-admin-test-utils = { path = "clickhouse-admin/test-utils" }
 clickward = { git = "https://github.com/oxidecomputer/clickward", rev = "a1b342c2558e835d09e6e39a40d3de798a29c2f" }
@@ -440,8 +443,8 @@ macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 mockall = "0.13"
 newtype_derive = "0.1.6"
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "056283eb02b6887fbf27f66a215662520f7c159c" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "056283eb02b6887fbf27f66a215662520f7c159c" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "93cd0d642cf1b58f9f4528275e2a2aa758e9feb3" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "93cd0d642cf1b58f9f4528275e2a2aa758e9feb3" }
 multimap = "0.10.0"
 nexus-auth = { path = "nexus/auth" }
 nexus-client = { path = "clients/nexus-client" }
@@ -485,7 +488,7 @@ omicron-test-utils = { path = "test-utils" }
 omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.11.1"
 oxide-client = { path = "clients/oxide-client" }
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "f3002b356da7d0e4ca15beb66a5566a92919baaa", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "98247c27846133a80fdb8f730f0c57e72d766561", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = { git = "https://github.com/oxidecomputer/oxnet" }
 once_cell = "1.20.2"
@@ -495,7 +498,7 @@ openapiv3 = "2.0.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "f3002b356da7d0e4ca15beb66a5566a92919baaa" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "98247c27846133a80fdb8f730f0c57e72d766561" }
 oso = "0.27"
 owo-colors = "4.1.0"
 oximeter = { path = "oximeter/oximeter" }
@@ -532,10 +535,10 @@ prettyplease = { version = "0.2.25", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = "0.8.0"
 progenitor-client = "0.8.0"
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "aadc0998c0f07f08ab15a95c006074291734800f" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "aadc0998c0f07f08ab15a95c006074291734800f" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "aadc0998c0f07f08ab15a95c006074291734800f" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "aadc0998c0f07f08ab15a95c006074291734800f" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "8f8fbb74662b4e19b643c500d55d2d384a6cee5e" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "8f8fbb74662b4e19b643c500d55d2d384a6cee5e" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "8f8fbb74662b4e19b643c500d55d2d384a6cee5e" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "8f8fbb74662b4e19b643c500d55d2d384a6cee5e" }
 proptest = "1.5.0"
 qorb = "0.2.0"
 quote = "1.0"

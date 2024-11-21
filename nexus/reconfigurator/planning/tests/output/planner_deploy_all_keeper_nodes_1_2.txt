@@ -5,7 +5,7 @@ to:   blueprint 31ef2071-2ec9-49d9-8827-fd83b17a0e3d
 
   sled 164d275d-a936-4f06-ad53-a32cb3c8d3c8 (active):
 
-    physical disks at generation 1:
+    physical disks at generation 2:
     ----------------------------------------------------------------------
     vendor        model        serial                                     
     ----------------------------------------------------------------------
@@ -21,7 +21,7 @@ to:   blueprint 31ef2071-2ec9-49d9-8827-fd83b17a0e3d
     fake-vendor   fake-model   serial-fbf997ef-52d3-438a-b036-b9117322e569
 
 
-    datasets generation 1 -> 2:
+    datasets generation 2 -> 3:
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                     dataset uuid                           quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -100,7 +100,7 @@ to:   blueprint 31ef2071-2ec9-49d9-8827-fd83b17a0e3d
 
   sled 6a4c45f6-e02f-490c-bbfa-b32fb89e8e86 (active):
 
-    physical disks at generation 1:
+    physical disks at generation 2:
     ----------------------------------------------------------------------
     vendor        model        serial                                     
     ----------------------------------------------------------------------
@@ -116,7 +116,7 @@ to:   blueprint 31ef2071-2ec9-49d9-8827-fd83b17a0e3d
     fake-vendor   fake-model   serial-f635c28a-e5ca-4d22-ac94-d8f278a6ea0e
 
 
-    datasets generation 1 -> 2:
+    datasets generation 2 -> 3:
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                     dataset uuid                           quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -166,9 +166,9 @@ to:   blueprint 31ef2071-2ec9-49d9-8827-fd83b17a0e3d
     oxp_f635c28a-e5ca-4d22-ac94-d8f278a6ea0e/crypt/zone                                                              fc9765c5-0a89-4050-ba3e-e0625dbefb5f   none      none          off        
     oxp_f635c28a-e5ca-4d22-ac94-d8f278a6ea0e/crypt/zone/oxz_crucible_93535f54-4919-4c4d-9a07-f7ab6245c01f            109f44de-d1ed-4ce3-9670-76aceb206ee4   none      none          off        
 +   oxp_0bf9d028-2b4a-4bff-82a1-6eb5fcefd985/crypt/clickhouse_keeper                                                 a3eed313-d886-4c1d-8023-8d2ec9e97ddd   none      none          off        
-+   oxp_0bf9d028-2b4a-4bff-82a1-6eb5fcefd985/crypt/clickhouse_server                                                 886f2522-8122-465f-8996-2d8c2acd9d0d   none      none          off        
++   oxp_0bf9d028-2b4a-4bff-82a1-6eb5fcefd985/crypt/clickhouse_server                                                 ce930007-8ed6-4675-a24a-57c227950d43   none      none          off        
 +   oxp_0bf9d028-2b4a-4bff-82a1-6eb5fcefd985/crypt/zone/oxz_clickhouse_keeper_b36c16d5-de6e-411a-a32a-d35a26f2e151   48720037-5b8e-4478-9bb5-c86ee8a6e250   none      none          off        
-+   oxp_0bf9d028-2b4a-4bff-82a1-6eb5fcefd985/crypt/zone/oxz_clickhouse_server_122e30d3-d541-49b5-88de-1543b38123cc   095cf066-5a68-40b4-afc6-baf5bcbadd05   none      none          off        
++   oxp_0bf9d028-2b4a-4bff-82a1-6eb5fcefd985/crypt/zone/oxz_clickhouse_server_122e30d3-d541-49b5-88de-1543b38123cc   748c9607-71dd-4f81-be08-c1eee262f69c   none      none          off        
 
 
     omicron zones generation 2 -> 3:
@@ -195,7 +195,7 @@ to:   blueprint 31ef2071-2ec9-49d9-8827-fd83b17a0e3d
 
   sled be531a62-9897-430d-acd2-ce14b4632627 (active):
 
-    physical disks at generation 1:
+    physical disks at generation 2:
     ----------------------------------------------------------------------
     vendor        model        serial                                     
     ----------------------------------------------------------------------
@@ -211,7 +211,7 @@ to:   blueprint 31ef2071-2ec9-49d9-8827-fd83b17a0e3d
     fake-vendor   fake-model   serial-e3b45593-8f0c-47b2-a381-802a7dad1f54
 
 
-    datasets generation 1 -> 2:
+    datasets generation 2 -> 3:
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                     dataset uuid                           quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -260,9 +260,9 @@ to:   blueprint 31ef2071-2ec9-49d9-8827-fd83b17a0e3d
     oxp_e3b45593-8f0c-47b2-a381-802a7dad1f54/crypt/debug                                                             96798a17-be94-44bb-9e12-2eb458e9a5ba   100 GiB   none          gzip-9     
     oxp_e3b45593-8f0c-47b2-a381-802a7dad1f54/crypt/zone                                                              64e62d15-e813-461d-9a50-403d9bd1df7c   none      none          off        
     oxp_e3b45593-8f0c-47b2-a381-802a7dad1f54/crypt/zone/oxz_crucible_8a36ef67-bf66-40b9-a2f4-34ac70e90e39            c44e20e1-7cce-46df-ba71-db7fb3e3a5ff   none      none          off        
-+   oxp_2a76ab1a-fb16-412d-93f9-b8cd9aa94e85/crypt/clickhouse_keeper                                                 ce930007-8ed6-4675-a24a-57c227950d43   none      none          off        
++   oxp_2a76ab1a-fb16-412d-93f9-b8cd9aa94e85/crypt/clickhouse_keeper                                                 886f2522-8122-465f-8996-2d8c2acd9d0d   none      none          off        
 +   oxp_2a76ab1a-fb16-412d-93f9-b8cd9aa94e85/crypt/clickhouse_server                                                 3d339942-c2d0-4615-a099-433a8b5a1543   none      none          off        
-+   oxp_2a76ab1a-fb16-412d-93f9-b8cd9aa94e85/crypt/zone/oxz_clickhouse_keeper_39fd3357-4de8-433e-9c07-1ec65de7ca59   748c9607-71dd-4f81-be08-c1eee262f69c   none      none          off        
++   oxp_2a76ab1a-fb16-412d-93f9-b8cd9aa94e85/crypt/zone/oxz_clickhouse_keeper_39fd3357-4de8-433e-9c07-1ec65de7ca59   095cf066-5a68-40b4-afc6-baf5bcbadd05   none      none          off        
 +   oxp_2a76ab1a-fb16-412d-93f9-b8cd9aa94e85/crypt/zone/oxz_clickhouse_server_71be6bff-666a-4f2b-a7dc-d80a88a71af5   a9e2160a-688f-4bbd-9a77-b2e695df86f4   none      none          off        
 
 

@@ -382,25 +382,44 @@ async fn collection_loop(
                         }
                     },
                     Some(CollectionMessage::Update(new_info)) => {
+                        // If the collection interval is shorter than the
+                        // interval on which we receive these update messages,
+                        // we'll never actually collect anything! Instead, only
+                        // do the update if the information has changed. This
+                        // should also be guarded against by the main agent, but
+                        // we're being cautious here.
+                        let updated_producer_info = |info: &mut ProducerEndpoint| {
+                            if new_info == *info {
+                                false
+                            } else {
+                                *info = new_info;
+                                true
+                            }
+                        };
+                        if !producer_info_tx.send_if_modified(updated_producer_info) {
+                            trace!(
+                                log,
+                                "collection task received update with \
+                                identical producer information, no \
+                                updates will be sent to the collection task"
+                            );
+                            continue;
+                        }
+
+                        // We have an actual update to the producer information.
+                        //
+                        // Rebuild our timer to reflect the possibly-new
+                        // interval. The collection task has already been
+                        // notified above.
                         debug!(
                             log,
-                            "collection task received request to update its producer information";
+                            "collection task received request to update \
+                            its producer information";
                             "interval" => ?new_info.interval,
                             "address" => new_info.address,
                         );
-
-                        // Update our own collection timer, and notify the
-                        // collection task of the new data as well.
                         collection_timer = interval(new_info.interval);
                         collection_timer.tick().await; // completes immediately
-                        if let Err(_) = producer_info_tx.send(new_info) {
-                            error!(
-                                log,
-                                "failed to send producer info update to collection \
-                                task, the watch channel is closed, exiting"
-                            );
-                            return;
-                        }
                     }
                     #[cfg(test)]
                     Some(CollectionMessage::Statistics { reply_tx }) => {
@@ -871,7 +890,7 @@ impl OximeterAgent {
                     "component" => "collection-task",
                     "producer_id" => id.to_string(),
                 ));
-                let info_clone = info.clone();
+                let info_clone = info;
                 let target = self.collection_target;
                 let task = tokio::spawn(async move {
                     collection_loop(log, target, info_clone, rx, q).await;
@@ -879,22 +898,35 @@ impl OximeterAgent {
                 value.insert((info, CollectionTask { inbox: tx, task }));
             }
             Entry::Occupied(mut value) => {
-                debug!(
-                    self.log,
-                    "received request to register existing metric \
-                    producer, updating collection information";
-                   "producer_id" => id.to_string(),
-                   "interval" => ?info.interval,
-                   "address" => info.address,
-                );
-                value.get_mut().0 = info.clone();
-                value
-                    .get()
-                    .1
-                    .inbox
-                    .send(CollectionMessage::Update(info))
-                    .await
-                    .unwrap();
+                // Only update the endpoint information if it's actually
+                // different, to avoid indefinitely delaying the collection
+                // timer from expiring.
+                if value.get().0 == info {
+                    trace!(
+                        self.log,
+                        "ignoring request to update existing metric \
+                        producer, since the endpoint information is \
+                        the same as the existing";
+                        "producer_id" => %id,
+                    );
+                } else {
+                    debug!(
+                        self.log,
+                        "received request to register existing metric \
+                        producer, updating collection information";
+                        "producer_id" => id.to_string(),
+                        "interval" => ?info.interval,
+                        "address" => info.address,
+                    );
+                    value.get_mut().0 = info;
+                    value
+                        .get()
+                        .1
+                        .inbox
+                        .send(CollectionMessage::Update(info))
+                        .await
+                        .unwrap();
+                }
             }
         }
     }
@@ -950,7 +982,7 @@ impl OximeterAgent {
             .await
             .range((start, Bound::Unbounded))
             .take(limit)
-            .map(|(_id, (info, _t))| info.clone())
+            .map(|(_id, (info, _t))| *info)
             .collect()
     }
 
@@ -1041,7 +1073,14 @@ async fn refresh_producer_list(
     agent: OximeterAgent,
     nexus_pool: Pool<NexusClient>,
 ) {
+    // Setup our refresh timer.
+    //
+    // If we miss a tick, we'll skip until the next multiple of the interval
+    // from the start time. This is a good compromise between taking a bunch of
+    // quick updates (burst) and shifting our interval (delay).
     let mut interval = tokio::time::interval(agent.refresh_interval);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
     loop {
         interval.tick().await;
         info!(agent.log, "refreshing list of producers from Nexus");
@@ -1058,11 +1097,28 @@ async fn refresh_producer_list(
         loop {
             match stream.try_next().await {
                 Err(e) => {
+                    // TODO-robustness: Some errors here may not be "fatal", in
+                    // the sense that we can continue to process the list we
+                    // receive from Nexus. It's not clear which ones though,
+                    // since most of these are either impossible (pre-hook
+                    // errors) or indicate we've made a serious programming
+                    // error or updated to incompatible versions of Nexus /
+                    // Oximeter. One that we might be able to handle is a
+                    // communication error, say failing to fetch the last page
+                    // when we've already fetched the first few. But for now,
+                    // we'll simply keep the list we have and try again on the
+                    // next refresh.
+                    //
+                    // For now, let's just avoid doing anything at all here, on
+                    // the theory that if we hit this, we should just continue
+                    // collecting from the last known-good set of producers.
                     error!(
                         agent.log,
-                        "error fetching next assigned producer";
+                        "error fetching next assigned producer, \
+                        abandoning this refresh attempt";
                         "err" => ?e,
                     );
+                    return;
                 }
                 Ok(Some(p)) => {
                     let endpoint = match ProducerEndpoint::try_from(p) {

@@ -14,6 +14,7 @@ anyhow.workspace = true
 camino.workspace = true
 clickhouse-admin-keeper-client.workspace = true
 clickhouse-admin-server-client.workspace = true
+clickhouse-admin-single-client.workspace = true
 clickhouse-admin-types.workspace = true
 cockroach-admin-client.workspace = true
 chrono.workspace = true

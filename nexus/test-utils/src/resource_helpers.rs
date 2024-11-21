@@ -49,6 +49,7 @@ use omicron_common::disk::DiskIdentity;
 use omicron_sled_agent::sim::SledAgent;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -1010,7 +1011,7 @@ pub async fn projects_list(
 }
 
 pub struct TestDataset {
-    pub id: Uuid,
+    pub id: DatasetUuid,
 }
 
 pub struct TestZpool {
@@ -1172,7 +1173,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
             sled_id,
             Uuid::new_v4(),
             ZpoolUuid::new_v4(),
-            Uuid::new_v4(),
+            DatasetUuid::new_v4(),
             Self::DEFAULT_ZPOOL_SIZE_GIB,
         )
         .await
@@ -1205,7 +1206,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         sled_id: SledUuid,
         physical_disk_id: Uuid,
         zpool_id: ZpoolUuid,
-        dataset_id: Uuid,
+        dataset_id: DatasetUuid,
         gibibytes: u32,
     ) {
         let cptestctx = self.cptestctx;

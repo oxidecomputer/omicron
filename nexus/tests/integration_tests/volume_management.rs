@@ -12,6 +12,7 @@ use dropshot::test_util::ClientTestContext;
 use http::method::Method;
 use http::StatusCode;
 use nexus_config::RegionAllocationStrategy;
+use nexus_db_model::to_db_typed_uuid;
 use nexus_db_model::RegionSnapshotReplacement;
 use nexus_db_model::RegionSnapshotReplacementState;
 use nexus_db_model::Volume;
@@ -2254,7 +2255,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
             &region_snapshots[i];
         datastore
             .region_snapshot_create(nexus_db_model::RegionSnapshot {
-                dataset_id: *dataset_id,
+                dataset_id: (*dataset_id).into(),
                 region_id: *region_id,
                 snapshot_id: *snapshot_id,
                 snapshot_addr: snapshot_addr.clone(),
@@ -2375,7 +2376,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
             &region_snapshots[i];
         datastore
             .region_snapshot_create(nexus_db_model::RegionSnapshot {
-                dataset_id: *dataset_id,
+                dataset_id: (*dataset_id).into(),
                 region_id: *region_id,
                 snapshot_id: *snapshot_id,
                 snapshot_addr: snapshot_addr.clone(),
@@ -4837,7 +4838,7 @@ async fn test_volume_remove_rop_respects_accounting(
         let usage = datastore
             .volume_usage_records_for_resource(
                 VolumeResourceUsage::RegionSnapshot {
-                    dataset_id: region_snapshot.dataset_id,
+                    dataset_id: region_snapshot.dataset_id.into(),
                     region_id: region_snapshot.region_id,
                     snapshot_id: region_snapshot.snapshot_id,
                 },
@@ -4897,7 +4898,7 @@ async fn test_volume_remove_rop_respects_accounting(
         let usage = datastore
             .volume_usage_records_for_resource(
                 VolumeResourceUsage::RegionSnapshot {
-                    dataset_id: region_snapshot.dataset_id,
+                    dataset_id: region_snapshot.dataset_id.into(),
                     region_id: region_snapshot.region_id,
                     snapshot_id: region_snapshot.snapshot_id,
                 },
@@ -5017,7 +5018,7 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
         let usage = datastore
             .volume_usage_records_for_resource(
                 VolumeResourceUsage::RegionSnapshot {
-                    dataset_id: region_snapshot.dataset_id,
+                    dataset_id: region_snapshot.dataset_id.into(),
                     region_id: region_snapshot.region_id,
                     snapshot_id: region_snapshot.snapshot_id,
                 },
@@ -5081,7 +5082,7 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
         let usage = datastore
             .volume_usage_records_for_resource(
                 VolumeResourceUsage::RegionSnapshot {
-                    dataset_id: region_snapshot.dataset_id,
+                    dataset_id: region_snapshot.dataset_id.into(),
                     region_id: region_snapshot.region_id,
                     snapshot_id: region_snapshot.snapshot_id,
                 },
@@ -5408,7 +5409,7 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
 
         datastore
             .region_snapshot_create(nexus_db_model::RegionSnapshot {
-                dataset_id: *dataset_id,
+                dataset_id: to_db_typed_uuid(*dataset_id),
                 region_id: *region_id,
                 snapshot_id: *snapshot_id,
                 snapshot_addr: snapshot_addr.clone(),
@@ -5511,7 +5512,10 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
 
     let region_snapshot_to_delete = &snapshots_to_delete[0].1;
 
-    assert_eq!(region_snapshot_to_delete.dataset_id, region_snapshots[0].0);
+    assert_eq!(
+        region_snapshot_to_delete.dataset_id,
+        to_db_typed_uuid(region_snapshots[0].0)
+    );
     assert_eq!(region_snapshot_to_delete.region_id, region_snapshots[0].1);
     assert_eq!(region_snapshot_to_delete.snapshot_id, region_snapshots[0].2);
     assert_eq!(region_snapshot_to_delete.snapshot_addr, region_snapshots[0].3);

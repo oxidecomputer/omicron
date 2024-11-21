@@ -4,9 +4,12 @@
 
 use super::impl_enum_type;
 use crate::schema::region_snapshot_replacement;
+use crate::typed_uuid::DbTypedUuid;
 use crate::RegionSnapshot;
 use chrono::DateTime;
 use chrono::Utc;
+use omicron_uuid_kinds::DatasetKind;
+use omicron_uuid_kinds::DatasetUuid;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -118,7 +121,7 @@ pub struct RegionSnapshotReplacement {
     pub request_time: DateTime<Utc>,
 
     // These are a copy of fields from the corresponding region snapshot record
-    pub old_dataset_id: Uuid,
+    pub old_dataset_id: DbTypedUuid<DatasetKind>,
     pub old_region_id: Uuid,
     pub old_snapshot_id: Uuid,
 
@@ -135,21 +138,21 @@ pub struct RegionSnapshotReplacement {
 impl RegionSnapshotReplacement {
     pub fn for_region_snapshot(region_snapshot: &RegionSnapshot) -> Self {
         Self::new(
-            region_snapshot.dataset_id,
+            region_snapshot.dataset_id(),
             region_snapshot.region_id,
             region_snapshot.snapshot_id,
         )
     }
 
     pub fn new(
-        old_dataset_id: Uuid,
+        old_dataset_id: DatasetUuid,
         old_region_id: Uuid,
         old_snapshot_id: Uuid,
     ) -> Self {
         Self {
             id: Uuid::new_v4(),
             request_time: Utc::now(),
-            old_dataset_id,
+            old_dataset_id: old_dataset_id.into(),
             old_region_id,
             old_snapshot_id,
             old_snapshot_volume_id: None,

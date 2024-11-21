@@ -5,10 +5,7 @@
 //! Functions for querying the timeseries database.
 // Copyright 2024 Oxide Computer Company
 
-use crate::{
-    Error, FieldSchema, FieldSource, TimeseriesSchema, DATABASE_NAME,
-    DATABASE_SELECT_FORMAT,
-};
+use crate::{Error, FieldSchema, FieldSource, TimeseriesSchema, DATABASE_NAME};
 use chrono::{DateTime, Utc};
 use dropshot::PaginationOrder;
 use oximeter::schema::TimeseriesKey;
@@ -669,12 +666,10 @@ impl SelectQuery {
                     concat!(
                         "SELECT {top_level_columns} ",
                         "FROM {from_statements}",
-                        "ORDER BY (filter0.timeseries_name, filter0.timeseries_key) ",
-                        "FORMAT {fmt};",
+                        "ORDER BY (filter0.timeseries_name, filter0.timeseries_key)",
                     ),
                     top_level_columns = top_level_columns.join(", "),
                     from_statements = from_statements,
-                    fmt = DATABASE_SELECT_FORMAT,
                 );
                 Some(query)
             }
@@ -721,7 +716,6 @@ impl SelectQuery {
                 "{timestamp_clause}",
                 "ORDER BY (timeseries_name, timeseries_key, timestamp) {order_dir}",
                 "{pagination_clause}",
-                "FORMAT {fmt};",
             ),
             db_name = DATABASE_NAME,
             table_name =
@@ -731,7 +725,6 @@ impl SelectQuery {
             timestamp_clause = self.time_range.as_query(),
             pagination_clause = pagination_clause,
             order_dir = order_dir,
-            fmt = DATABASE_SELECT_FORMAT,
         )
     }
 }
@@ -973,13 +966,12 @@ mod tests {
         let query = SelectQueryBuilder::new(&schema).build();
         assert!(query.field_query().is_none());
         assert_eq!(
-            query.measurement_query(&[]),
+            query.measurement_query(&[]).trim(),
             concat!(
                 "SELECT * ",
                 "FROM oximeter.measurements_i64 ",
                 "WHERE timeseries_name = 'foo:bar' ",
-                "ORDER BY (timeseries_name, timeseries_key, timestamp) ",
-                "FORMAT JSONEachRow;"
+                "ORDER BY (timeseries_name, timeseries_key, timestamp)",
             )
         );
     }
@@ -1002,14 +994,13 @@ mod tests {
             .build();
         assert!(query.field_query().is_none());
         assert_eq!(
-            query.measurement_query(&[]),
+            query.measurement_query(&[]).trim(),
             concat!(
                 "SELECT * ",
                 "FROM oximeter.measurements_i64 ",
                 "WHERE timeseries_name = 'foo:bar' ",
                 "ORDER BY (timeseries_name, timeseries_key, timestamp) ",
-                "LIMIT 10 OFFSET 5 ",
-                "FORMAT JSONEachRow;"
+                "LIMIT 10 OFFSET 5",
             )
         );
     }
@@ -1107,22 +1098,20 @@ mod tests {
                 ") AS filter1 ON (",
                 "filter0.timeseries_name = filter1.timeseries_name AND ",
                 "filter0.timeseries_key = filter1.timeseries_key) ",
-                "ORDER BY (filter0.timeseries_name, filter0.timeseries_key) ",
-                "FORMAT JSONEachRow;",
+                "ORDER BY (filter0.timeseries_name, filter0.timeseries_key)",
             )
         );
 
         let keys = &[0, 1];
         let measurement_query = query.measurement_query(keys);
         assert_eq!(
-            measurement_query,
+            measurement_query.trim(),
             concat!(
                 "SELECT * ",
                 "FROM oximeter.measurements_i64 ",
                 "WHERE timeseries_name = 'foo:bar' AND ",
                 "timeseries_key IN (0, 1) ",
-                "ORDER BY (timeseries_name, timeseries_key, timestamp) ",
-                "FORMAT JSONEachRow;",
+                "ORDER BY (timeseries_name, timeseries_key, timestamp)",
             )
         );
     }
@@ -1178,8 +1167,7 @@ mod tests {
                 ") AS filter1 ON (",
                 "filter0.timeseries_name = filter1.timeseries_name AND ",
                 "filter0.timeseries_key = filter1.timeseries_key) ",
-                "ORDER BY (filter0.timeseries_name, filter0.timeseries_key) ",
-                "FORMAT JSONEachRow;",
+                "ORDER BY (filter0.timeseries_name, filter0.timeseries_key)",
             )
         );
     }
@@ -1241,12 +1229,11 @@ mod tests {
                 ") AS filter1 ON (",
                 "filter0.timeseries_name = filter1.timeseries_name AND ",
                 "filter0.timeseries_key = filter1.timeseries_key) ",
-                "ORDER BY (filter0.timeseries_name, filter0.timeseries_key) ",
-                "FORMAT JSONEachRow;",
+                "ORDER BY (filter0.timeseries_name, filter0.timeseries_key)",
             ));
         let keys = &[0, 1];
         assert_eq!(
-            query.measurement_query(keys),
+            query.measurement_query(keys).trim(),
             format!(
                 concat!(
                     "SELECT * ",
@@ -1256,8 +1243,7 @@ mod tests {
                     " AND timestamp >= '{start_time}' ",
                     "AND timestamp < '{end_time}' ",
                     "ORDER BY (timeseries_name, timeseries_key, timestamp) ",
-                    "LIMIT 10 OFFSET 5 ",
-                    "FORMAT JSONEachRow;",
+                    "LIMIT 10 OFFSET 5",
                 ),
                 start_time =
                     start_time.format(crate::DATABASE_TIMESTAMP_FORMAT),
