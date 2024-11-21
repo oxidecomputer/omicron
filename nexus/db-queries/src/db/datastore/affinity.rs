@@ -27,6 +27,8 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
+use nexus_types::external_api::params;
+use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -49,12 +51,100 @@ impl DataStore {
         todo!();
     }
 
+    pub async fn anti_affinity_group_list(
+        &self,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<AntiAffinityGroup> {
+        todo!();
+    }
+
+    pub async fn affinity_group_create(
+        &self,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        group: params::AffinityGroupCreate,
+    ) -> CreateResult<AffinityGroup> {
+        todo!();
+    }
+
+    pub async fn anti_affinity_group_create(
+        &self,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        group: params::AntiAffinityGroupCreate,
+    ) -> CreateResult<AntiAffinityGroup> {
+        todo!();
+    }
+
+    pub async fn affinity_group_delete(
+        &self,
+        opctx: &OpContext,
+        authz_affinity_group: &authz::AffinityGroup,
+    ) -> DeleteResult {
+        todo!();
+    }
+
+    pub async fn anti_affinity_group_delete(
+        &self,
+        opctx: &OpContext,
+        authz_anti_affinity_group: &authz::AntiAffinityGroup,
+    ) -> DeleteResult {
+        todo!();
+    }
+
     pub async fn affinity_group_member_list(
         &self,
         opctx: &OpContext,
         authz_affinity_group: &authz::AffinityGroup,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<AffinityGroupInstanceMembership> {
+        todo!();
+    }
+
+    pub async fn anti_affinity_group_member_list(
+        &self,
+        opctx: &OpContext,
+        authz_anti_affinity_group: &authz::AntiAffinityGroup,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<AntiAffinityGroupInstanceMembership> {
+        todo!();
+    }
+
+    pub async fn affinity_group_member_add(
+        &self,
+        opctx: &OpContext,
+        authz_affinity_group: &authz::AffinityGroup,
+        member: external::AffinityGroupMember,
+    ) -> Result<(), Error> {
+        todo!();
+    }
+
+    pub async fn anti_affinity_group_member_add(
+        &self,
+        opctx: &OpContext,
+        authz_anti_affinity_group: &authz::AntiAffinityGroup,
+        member: external::AntiAffinityGroupMember,
+    ) -> Result<(), Error> {
+        todo!();
+    }
+
+    pub async fn affinity_group_member_delete(
+        &self,
+        opctx: &OpContext,
+        authz_affinity_group: &authz::AffinityGroup,
+        member: external::AffinityGroupMember,
+    ) -> Result<(), Error> {
+        todo!();
+    }
+
+    pub async fn anti_affinity_group_member_delete(
+        &self,
+        opctx: &OpContext,
+        authz_anti_affinity_group: &authz::AntiAffinityGroup,
+        member: external::AntiAffinityGroupMember,
+    ) -> Result<(), Error> {
         todo!();
     }
 }

@@ -1341,9 +1341,7 @@ pub trait NexusExternalApi {
     }]
     async fn anti_affinity_group_member_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<
-            PaginatedByNameOrId<params::OptionalProjectSelector>,
-        >,
+        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
         path_params: Path<params::AntiAffinityGroupPath>,
     ) -> Result<HttpResponseOk<ResultsPage<AntiAffinityGroupMember>>, HttpError>;
 

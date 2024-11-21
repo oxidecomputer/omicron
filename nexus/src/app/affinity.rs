@@ -4,8 +4,6 @@
 
 //! Affinity groups
 
-use std::sync::Arc;
-
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::lookup;
@@ -20,10 +18,6 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
-use omicron_common::api::external::UpdateResult;
-use omicron_uuid_kinds::AffinityGroupUuid;
-use omicron_uuid_kinds::AntiAffinityGroupUuid;
-use omicron_uuid_kinds::GenericUuid;
 
 impl super::Nexus {
     pub fn affinity_group_lookup<'a>(
@@ -122,6 +116,76 @@ impl super::Nexus {
             .collect())
     }
 
+    pub(crate) async fn anti_affinity_group_list(
+        &self,
+        opctx: &OpContext,
+        project_lookup: &lookup::Project<'_>,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<views::AntiAffinityGroup> {
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::ListChildren).await?;
+
+        Ok(self
+            .db_datastore
+            .anti_affinity_group_list(opctx, &authz_project, pagparams)
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect())
+    }
+
+    pub(crate) async fn affinity_group_create(
+        &self,
+        opctx: &OpContext,
+        project_lookup: &lookup::Project<'_>,
+        affinity_group: params::AffinityGroupCreate,
+    ) -> CreateResult<views::AffinityGroup> {
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::CreateChild).await?;
+        self.db_datastore
+            .affinity_group_create(opctx, &authz_project, affinity_group)
+            .await
+            .map(Into::into)
+    }
+
+    pub(crate) async fn anti_affinity_group_create(
+        &self,
+        opctx: &OpContext,
+        project_lookup: &lookup::Project<'_>,
+        anti_affinity_group: params::AntiAffinityGroupCreate,
+    ) -> CreateResult<views::AntiAffinityGroup> {
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::CreateChild).await?;
+        self.db_datastore
+            .anti_affinity_group_create(
+                opctx,
+                &authz_project,
+                anti_affinity_group,
+            )
+            .await
+            .map(Into::into)
+    }
+
+    pub(crate) async fn affinity_group_delete(
+        &self,
+        opctx: &OpContext,
+        group_lookup: &lookup::AffinityGroup<'_>,
+    ) -> DeleteResult {
+        let (.., authz_group) =
+            group_lookup.lookup_for(authz::Action::Delete).await?;
+        self.db_datastore.affinity_group_delete(opctx, &authz_group).await
+    }
+
+    pub(crate) async fn anti_affinity_group_delete(
+        &self,
+        opctx: &OpContext,
+        group_lookup: &lookup::AntiAffinityGroup<'_>,
+    ) -> DeleteResult {
+        let (.., authz_group) =
+            group_lookup.lookup_for(authz::Action::Delete).await?;
+        self.db_datastore.anti_affinity_group_delete(opctx, &authz_group).await
+    }
+
     pub(crate) async fn affinity_group_member_list(
         &self,
         opctx: &OpContext,
@@ -138,5 +202,89 @@ impl super::Nexus {
             .into_iter()
             .map(Into::into)
             .collect())
+    }
+
+    pub(crate) async fn anti_affinity_group_member_list(
+        &self,
+        opctx: &OpContext,
+        anti_affinity_group_lookup: &lookup::AntiAffinityGroup<'_>,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<external::AntiAffinityGroupMember> {
+        let (.., authz_anti_affinity_group) = anti_affinity_group_lookup
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+        Ok(self
+            .db_datastore
+            .anti_affinity_group_member_list(
+                opctx,
+                &authz_anti_affinity_group,
+                pagparams,
+            )
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect())
+    }
+
+    pub(crate) async fn affinity_group_member_add(
+        &self,
+        opctx: &OpContext,
+        affinity_group_lookup: &lookup::AffinityGroup<'_>,
+        member: external::AffinityGroupMember,
+    ) -> Result<(), Error> {
+        let (.., authz_affinity_group) =
+            affinity_group_lookup.lookup_for(authz::Action::Modify).await?;
+        self.db_datastore
+            .affinity_group_member_add(opctx, &authz_affinity_group, member)
+            .await
+    }
+
+    pub(crate) async fn anti_affinity_group_member_add(
+        &self,
+        opctx: &OpContext,
+        anti_affinity_group_lookup: &lookup::AntiAffinityGroup<'_>,
+        member: external::AntiAffinityGroupMember,
+    ) -> Result<(), Error> {
+        let (.., authz_anti_affinity_group) = anti_affinity_group_lookup
+            .lookup_for(authz::Action::Modify)
+            .await?;
+        self.db_datastore
+            .anti_affinity_group_member_add(
+                opctx,
+                &authz_anti_affinity_group,
+                member,
+            )
+            .await
+    }
+
+    pub(crate) async fn affinity_group_member_delete(
+        &self,
+        opctx: &OpContext,
+        affinity_group_lookup: &lookup::AffinityGroup<'_>,
+        member: external::AffinityGroupMember,
+    ) -> Result<(), Error> {
+        let (.., authz_affinity_group) =
+            affinity_group_lookup.lookup_for(authz::Action::Modify).await?;
+        self.db_datastore
+            .affinity_group_member_delete(opctx, &authz_affinity_group, member)
+            .await
+    }
+
+    pub(crate) async fn anti_affinity_group_member_delete(
+        &self,
+        opctx: &OpContext,
+        anti_affinity_group_lookup: &lookup::AntiAffinityGroup<'_>,
+        member: external::AntiAffinityGroupMember,
+    ) -> Result<(), Error> {
+        let (.., authz_anti_affinity_group) = anti_affinity_group_lookup
+            .lookup_for(authz::Action::Modify)
+            .await?;
+        self.db_datastore
+            .anti_affinity_group_member_delete(
+                opctx,
+                &authz_anti_affinity_group,
+                member,
+            )
+            .await
     }
 }
