@@ -698,7 +698,7 @@ impl OximeterAgent {
             .await
             .range((start, Bound::Unbounded))
             .take(limit)
-            .map(|(_id, (info, _t))| info.clone())
+            .map(|(_id, (info, _t))| *info)
             .collect()
     }
 
