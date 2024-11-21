@@ -988,7 +988,7 @@ impl Storage {
         config: OmicronPhysicalDisksConfig,
     ) -> Result<DisksManagementResult, HttpError> {
         if let Some(stored_config) = self.config.as_ref() {
-            if stored_config.generation < config.generation {
+            if stored_config.generation > config.generation {
                 return Err(HttpError::for_client_error(
                     None,
                     http::StatusCode::BAD_REQUEST,
