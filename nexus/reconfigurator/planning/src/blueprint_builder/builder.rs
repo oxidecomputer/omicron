@@ -1916,7 +1916,7 @@ impl<'a> BlueprintBuilder<'a> {
     }
 
     #[cfg(test)]
-    pub(crate) fn sled_select_zpool_impl(
+    pub(crate) fn sled_select_zpool_for_tests(
         &self,
         sled_id: SledUuid,
         zone_kind: ZoneKind,

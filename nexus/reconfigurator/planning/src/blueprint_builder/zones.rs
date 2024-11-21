@@ -357,7 +357,7 @@ mod tests {
         // Now, test adding a new zone (Oximeter, picked arbitrarily) to an
         // existing sled.
         let filesystem_pool = builder
-            .sled_select_zpool_impl(existing_sled_id, ZoneKind::Oximeter)
+            .sled_select_zpool_for_tests(existing_sled_id, ZoneKind::Oximeter)
             .expect("chose zpool for new zone");
         let change = builder.zones.change_sled_zones(existing_sled_id);
         let new_zone_id = OmicronZoneUuid::new_v4();
