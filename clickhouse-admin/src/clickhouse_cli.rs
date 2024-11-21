@@ -162,37 +162,20 @@ impl ClickhouseCli {
         .await
     }
 
-    pub async fn system_metric_log_timeseries(
+    pub async fn system_timeseries_avg(
         &self,
         settings: SystemTimeSeriesSettings,
     ) -> Result<Vec<SystemTimeSeries>, ClickhouseCliError> {
+        // TODO: log query
         self.client_non_interactive(
             ClickhouseClientType::Server,
-            settings.query().as_str(),
+            settings.query_avg().as_str(),
             "Retrieve time series from the system.metric_log table",
             SystemTimeSeries::parse,
             self.log.clone().unwrap(),
         )
         .await
-
-        // TODO: log query?
     }
-
-//    pub async fn system_async_metric_log_timeseries(
-//        &self,
-//        settings: SystemTimeSeriesSettings,
-//    ) -> Result<Vec<SystemTimeSeries>, ClickhouseCliError> {
-//        self.client_non_interactive(
-//            ClickhouseClientType::Server,
-//            settings.query_async_metric_log().as_str(),
-//            "Retrieve time series from the system.asynchronous_metric_log table",
-//            SystemTimeSeries::parse,
-//            self.log.clone().unwrap(),
-//        )
-//        .await
-//
-//        // TODO: log query?
-//    }
 
     async fn client_non_interactive<F, T>(
         &self,

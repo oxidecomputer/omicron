@@ -118,29 +118,17 @@ pub trait ClickhouseAdminServerApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<DistributedDdlQueue>>, HttpError>;
 
-    /// Retrieve time series from the system.metric_log table.
+    /// Retrieve time series from the system database.
     /// These are internal ClickHouse metrics.
     #[endpoint {
         method = GET,
         path = "/timeseries/{table}/{metric}"
     }]
-    async fn system_metric_log_timeseries(
+    async fn system_timeseries_avg(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<MetricInfoPath>,
         query_params: Query<TimeSeriesSettingsQuery>,
     ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError>;
-
- //   /// Retrieve time series from the system.asynchronous_metric_log table.
- //   /// These are internal ClickHouse metrics.
- //   #[endpoint {
- //       method = GET,
- //       path = "/timeseries/async-metric-log/{metric}"
- //   }]
- //   async fn system_async_metric_log_timeseries(
- //       rqctx: RequestContext<Self::Context>,
- //       path_params: Path<MetricNamePath>,
- //       query_params: Query<TimeSeriesSettingsQuery>,
- //   ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError>;
 }
 
 /// API interface for our clickhouse-admin-single server

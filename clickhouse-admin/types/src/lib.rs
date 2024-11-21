@@ -1056,7 +1056,7 @@ impl fmt::Display for SystemTable {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let table = match self {
             SystemTable::MetricLog => "metric_log",
-            SystemTable::AsynchronousMetricLog => "asynchronous_metric_log"
+            SystemTable::AsynchronousMetricLog => "asynchronous_metric_log",
         };
         write!(f, "{}", table)
     }
@@ -1089,7 +1089,8 @@ pub struct TimeSeriesSettingsQuery {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct SystemTimeSeriesSettings {
-    pub settings: TimeSeriesSettingsQuery,
+    /// Time series retrieval settings (time range and interval)
+    pub retrieval_settings: TimeSeriesSettingsQuery,
     /// Database table and name of the metric to retrieve
     pub metric_info: MetricInfoPath,
 }
@@ -1097,51 +1098,39 @@ pub struct SystemTimeSeriesSettings {
 impl SystemTimeSeriesSettings {
     // TODO: Use more aggregate functions than just avg?
 
-    pub fn query(&self) -> String {
-        let interval = self.settings.interval;
-        let time_range = self.settings.time_range;
+    pub fn query_avg(&self) -> String {
+        let interval = self.retrieval_settings.interval;
+        let time_range = self.retrieval_settings.time_range;
         let metric_name = &self.metric_info.metric;
         let table = &self.metric_info.table;
-        let query = match table { 
+
+        let mut query = match table {
             SystemTable::MetricLog => format!(
-            "SELECT toStartOfInterval(event_time, INTERVAL {interval} SECOND) AS time, avg({metric_name}) AS value
-            FROM system.{table}
-            WHERE event_date >= toDate(now() - {time_range}) AND event_time >= now() - {time_range}
-            GROUP BY time
-            ORDER BY time WITH FILL STEP {interval}
-            FORMAT JSONEachRow
-            SETTINGS date_time_output_format = 'iso'"
-        ),
-        SystemTable::AsynchronousMetricLog => format!(
-            "SELECT toStartOfInterval(event_time, INTERVAL {interval} SECOND) AS time, avg(value) AS value
-            FROM system.{table}
-            WHERE event_date >= toDate(now() - {time_range}) AND event_time >= now() - {time_range}
-            AND metric = '{metric_name}'
-            GROUP BY time
-            ORDER BY time WITH FILL STEP {interval}
-            FORMAT JSONEachRow
-            SETTINGS date_time_output_format = 'iso'"
-        ),
-    };
+                "SELECT toStartOfInterval(event_time, INTERVAL {interval} SECOND) AS time, avg({metric_name}) AS value
+                FROM system.{table}
+                WHERE event_date >= toDate(now() - {time_range}) AND event_time >= now() - {time_range}
+                "
+            ),
+            SystemTable::AsynchronousMetricLog => format!(
+                "SELECT toStartOfInterval(event_time, INTERVAL {interval} SECOND) AS time, avg(value) AS value
+                FROM system.{table}
+                WHERE event_date >= toDate(now() - {time_range}) AND event_time >= now() - {time_range}
+                AND metric = '{metric_name}'
+                "
+            ),
+        };
+
+        query.push_str(
+            format!(
+                "GROUP BY time
+                ORDER BY time WITH FILL STEP {interval}
+                FORMAT JSONEachRow
+                SETTINGS date_time_output_format = 'iso'"
+            )
+            .as_str(),
+        );
         query
     }
-
-//    pub fn query_async_metric_log(&self) -> String {
-//        let interval = self.settings.interval;
-//        let time_range = self.settings.time_range;
-//        let metric = &self.metric;
-//        let query = format!(
-//            "SELECT toStartOfInterval(event_time, INTERVAL {interval} SECOND) AS time, avg(value) AS value
-//            FROM system.asynchronous_metric_log
-//            WHERE event_date >= toDate(now() - {time_range}) AND event_time >= now() - {time_range}
-//            AND metric = '{metric}'
-//            GROUP BY time
-//            ORDER BY time WITH FILL STEP {interval}
-//            FORMAT JSONEachRow
-//            SETTINGS date_time_output_format = 'iso'"
-//        );
-//        query
-//    }
 }
 
 /// Retrieved time series from the internal `system` database.
@@ -1150,9 +1139,8 @@ impl SystemTimeSeriesSettings {
 pub struct SystemTimeSeries {
     pub time: DateTime<Utc>,
     pub value: f64,
-    // TODO: Have an enum with possible units? (s, ms, bytes)
-    // Not sure if I can even add this, the table doesn't mention units at all
-    // pub unit: String,
+    // TODO: Would be really nice to have an enum with possible units (s, ms, bytes)
+    // Not sure if I can even add this, the system tables don't mention units at all.
 }
 
 impl SystemTimeSeries {

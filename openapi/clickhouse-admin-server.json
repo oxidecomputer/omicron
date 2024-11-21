@@ -74,11 +74,11 @@
         }
       }
     },
-    "/timeseries/async-metric-log/{metric}": {
+    "/timeseries/{table}/{metric}": {
       "get": {
-        "summary": "Retrieve time series from the system.asynchronous_metric_log table.",
+        "summary": "Retrieve time series from the system database.",
         "description": "These are internal ClickHouse metrics.",
-        "operationId": "system_async_metric_log_timeseries",
+        "operationId": "system_timeseries_avg",
         "parameters": [
           {
             "in": "path",
@@ -90,63 +90,12 @@
             }
           },
           {
-            "in": "query",
-            "name": "interval",
-            "description": "The interval to collect monitoring metrics in seconds. Default is 60 seconds.",
-            "schema": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            }
-          },
-          {
-            "in": "query",
-            "name": "time_range",
-            "description": "Range of time to collect monitoring metrics in seconds. Default is 86400 seconds (24 hrs).",
-            "schema": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Array_of_SystemTimeSeries",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SystemTimeSeries"
-                  }
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/timeseries/metric-log/{metric}": {
-      "get": {
-        "summary": "Retrieve time series from the system.metric_log table.",
-        "description": "These are internal ClickHouse metrics.",
-        "operationId": "system_metric_log_timeseries",
-        "parameters": [
-          {
             "in": "path",
-            "name": "metric",
-            "description": "Name of the metric to retrieve.",
+            "name": "table",
+            "description": "Table to query in the `system` database",
             "required": true,
             "schema": {
-              "type": "string"
+              "$ref": "#/components/schemas/SystemTable"
             }
           },
           {
@@ -670,6 +619,14 @@
         "required": [
           "time",
           "value"
+        ]
+      },
+      "SystemTable": {
+        "description": "Available metrics tables in the `system` database",
+        "type": "string",
+        "enum": [
+          "asynchronous_metric_log",
+          "metric_log"
         ]
       }
     },
