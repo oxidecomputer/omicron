@@ -18,13 +18,11 @@
 
 // Copyright 2024 Oxide Computer Company
 
+use crate::client::Client;
+use crate::sql::QueryResult;
 pub use crate::sql::RestrictedQuery;
+use crate::sql::Table;
 use crate::Error;
-use crate::{
-    client::Client,
-    sql::{QueryResult, Table},
-};
-use anyhow::Context as _;
 use slog::debug;
 
 impl Client {
@@ -52,7 +50,11 @@ impl Client {
         );
         let result = self.execute_with_block(&rewritten).await?;
         let summary = result.query_summary();
-        let block = result.data.as_ref().context("expected a data block")?;
+        let Some(block) = result.data.as_ref() else {
+            return Err(Error::Database(String::from(
+                "Got an empty data block",
+            )));
+        };
         let mut table = Table {
             column_names: block.columns.keys().cloned().collect(),
             rows: vec![],
