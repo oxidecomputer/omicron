@@ -188,7 +188,15 @@ pub struct EditCounts {
 }
 
 impl EditCounts {
-    fn accum(self, other: Self) -> Self {
+    pub fn zeroes() -> Self {
+        Self::default()
+    }
+
+    pub fn has_nonzero_counts(&self) -> bool {
+        *self != Self::zeroes()
+    }
+
+    pub fn accum(self, other: Self) -> Self {
         Self {
             added: self.added + other.added,
             updated: self.updated + other.updated,
@@ -226,7 +234,7 @@ impl SledEditCounts {
 impl From<StorageEditCounts> for SledEditCounts {
     fn from(value: StorageEditCounts) -> Self {
         let StorageEditCounts { disks, datasets } = value;
-        Self { disks, datasets, zones: EditCounts::default() }
+        Self { disks, datasets, zones: EditCounts::zeroes() }
     }
 }
 
@@ -952,7 +960,7 @@ impl<'a> BlueprintBuilder<'a> {
             sled_storage.finalize();
         debug_assert_eq!(
             disk_edits,
-            EditCounts::default(),
+            EditCounts::zeroes(),
             "we only edited datasets, not disks"
         );
 

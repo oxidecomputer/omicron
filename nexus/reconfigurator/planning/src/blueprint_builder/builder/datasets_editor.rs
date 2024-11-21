@@ -137,7 +137,7 @@ pub(super) struct SledDatasetsEditor<'a> {
 
 impl Drop for SledDatasetsEditor<'_> {
     fn drop(&mut self) {
-        if self.counts != EditCounts::default() {
+        if self.counts.has_nonzero_counts() {
             self.parent_changed_set.insert(self.sled_id);
         }
     }
@@ -165,7 +165,7 @@ impl<'a> SledDatasetsEditor<'a> {
             blueprint_dataset_ids,
             database_dataset_ids,
             config,
-            counts: EditCounts::default(),
+            counts: EditCounts::zeroes(),
             sled_id,
             parent_changed_set,
         })

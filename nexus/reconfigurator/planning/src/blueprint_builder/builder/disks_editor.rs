@@ -103,7 +103,7 @@ pub(super) struct SledDisksEditor<'a> {
 
 impl Drop for SledDisksEditor<'_> {
     fn drop(&mut self) {
-        if self.counts != EditCounts::default() {
+        if self.counts.has_nonzero_counts() {
             self.parent_changed_set.insert(self.sled_id);
         }
     }
@@ -117,7 +117,7 @@ impl<'a> SledDisksEditor<'a> {
     ) -> Self {
         Self {
             config,
-            counts: EditCounts::default(),
+            counts: EditCounts::zeroes(),
             sled_id,
             parent_changed_set,
         }
