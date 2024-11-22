@@ -4003,6 +4003,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.affinity_group (
     failure_domain omicron.public.failure_domain NOT NULL
 );
 
+-- Names for affinity groups within a project should be unique
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_affinity_group_by_project ON omicron.public.affinity_group (
+    project_id,
+    name
+) WHERE
+    time_deleted IS NULL;
+
 -- Describes an instance's membership within an affinity group
 CREATE TABLE IF NOT EXISTS omicron.public.affinity_group_instance_membership (
     group_id UUID NOT NULL,
@@ -4024,6 +4031,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.anti_affinity_group (
     policy omicron.public.affinity_policy NOT NULL,
     failure_domain omicron.public.failure_domain NOT NULL
 );
+
+-- Names for anti-affinity groups within a project should be unique
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_anti_affinity_group_by_project ON omicron.public.anti_affinity_group (
+    project_id,
+    name
+) WHERE
+    time_deleted IS NULL;
 
 -- Describes an instance's membership within an anti-affinity group
 CREATE TABLE IF NOT EXISTS omicron.public.anti_affinity_group_instance_membership (

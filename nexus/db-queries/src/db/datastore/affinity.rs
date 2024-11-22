@@ -720,3 +720,95 @@ impl DataStore {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::db::pub_test_utils::TestDatabase;
+    use nexus_types::external_api::params;
+    use omicron_test_utils::dev;
+    use omicron_common::api::external::{
+        DataPageParams, IdentityMetadataCreateParams,
+    };
+    use std::num::NonZeroU32;
+
+
+    async fn create_project(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        name: &str,
+    ) -> (authz::Project, Project) {
+        let authz_silo = opctx.authn.silo_required().unwrap();
+        let project = Project::new(
+            authz_silo.id(),
+            params::ProjectCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: name.parse().unwrap(),
+                    description: "".to_string(),
+                },
+            },
+        );
+        datastore.project_create(&opctx, project).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn affinity_crud() {
+        // Setup
+        let logctx = dev::test_setup_log("affinity_crud");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let (authz_project, _) = create_project(
+            &opctx,
+            &datastore,
+            "my-project",
+        ).await;
+
+        let pagparams_id = DataPageParams {
+            marker: None,
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        };
+        let pagbyid = PaginatedBy::Id(pagparams_id);
+
+        datastore.affinity_group_list(
+            &opctx,
+            &authz_project,
+            &pagbyid,
+        ).await.unwrap();
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // TODO:
+    // - [ ] List affinity group (empty)
+    //   Create affinity group
+    //   List affinity group (see it)
+    //   List affinity group in another project (empty)
+    //
+    // - [ ] Delete project with affinity group (fail)
+    //   Delete affinty group
+    //   List affinity group (empty)
+    //   Delete project with affinity group (OK)
+    //
+    // - [ ] Test that names are unique?
+    //
+    // - [ ] Ensure that deleting group deletes members
+    //
+    // - [ ] Create group, add members. List. Remove members. List.
+    //
+    // - [ ] Try adding members to group that has been deleted.
+    //
+    // - [ ] Try "mocking up" instance with VMM. ensure that we see
+    // "invalid_request".
+    //
+    // - [ ] Test that deleting instance removes membership.
+    //
+    // - [ ] Test deleting membership when each of instance, group doesn't
+    // exist.
+    //
+    // - [ ] Test idempotency of member add / delete
+}
