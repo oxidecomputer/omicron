@@ -41,6 +41,22 @@ mkdir -p "$OUTPUT_DIR"
 banner prerequisites
 ptime -m bash ./tools/install_builder_prerequisites.sh -y
 
+#
+# Write a machine-readable file with information about our build environment for
+# later analysis of test results.
+#
+jq --null-input >/work/environment.json \
+    --arg bmat_factory_name "$(bmat factory name)" \
+    --arg bmat_factory_private "$(bmat factory private)" \
+    '{
+        buildomat: {
+            factory: {
+                name: $bmat_factory_name,
+                private: $bmat_factory_private,
+            },
+        },
+    }'
+
 # Do some test runs of the `ls-apis` command.
 #
 # This may require cloning some dependent private repos.  We do this before the

@@ -19,5 +19,11 @@
 #: series = "junit-helios"
 #: name = "junit.xml"
 #: from_output = "/work/oxidecomputer/omicron/target/nextest/ci/junit.xml"
+#:
+#: [[publish]]
+#: series = "junit-linux"
+#: name = "environment.json"
+#: from_output = "/work/environment.json"
+#:
 
 exec .github/buildomat/build-and-test.sh illumos
