@@ -988,18 +988,37 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
 
     // Ensure the region snapshot replacement request went to Complete
 
-    let region_snapshot_replacement = datastore
-        .get_region_snapshot_replacement_request_by_id(
-            &opctx,
-            region_snapshot_replacements[0].id,
-        )
-        .await
-        .unwrap();
+    wait_for_condition(
+        || {
+            let opctx = OpContext::for_tests(
+                cptestctx.logctx.log.new(o!()),
+                datastore.clone(),
+            );
+            let request_id = region_snapshot_replacements[0].id;
 
-    assert_eq!(
-        region_snapshot_replacement.replacement_state,
-        RegionSnapshotReplacementState::Complete,
-    );
+            async move {
+                let region_snapshot_replacement = datastore
+                    .get_region_snapshot_replacement_request_by_id(
+                        &opctx, request_id,
+                    )
+                    .await
+                    .unwrap();
+
+                let state = region_snapshot_replacement.replacement_state;
+
+                if state == RegionSnapshotReplacementState::Complete {
+                    Ok(())
+                } else {
+                    // Any other state is not expected
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            }
+        },
+        &std::time::Duration::from_millis(500),
+        &std::time::Duration::from_secs(60),
+    )
+    .await
+    .expect("request transitioned to expected state");
 
     // Delete the snapshot
 
