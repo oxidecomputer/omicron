@@ -1915,6 +1915,15 @@ impl<'a> BlueprintBuilder<'a> {
         allocator.alloc().ok_or(Error::OutOfAddresses { sled_id })
     }
 
+    #[cfg(test)]
+    pub(crate) fn sled_select_zpool_for_tests(
+        &self,
+        sled_id: SledUuid,
+        zone_kind: ZoneKind,
+    ) -> Result<ZpoolName, Error> {
+        self.sled_select_zpool(sled_id, zone_kind)
+    }
+
     /// Selects a zpool for this zone type.
     ///
     /// This zpool may be used for either durable storage or transient
@@ -1927,6 +1936,17 @@ impl<'a> BlueprintBuilder<'a> {
         sled_id: SledUuid,
         zone_kind: ZoneKind,
     ) -> Result<ZpoolName, Error> {
+        // We'll check both the disks available to this sled per our current
+        // blueprint and the list of all in-service zpools on this sled per our
+        // planning input, and only pick zpools that are available in both.
+        let current_sled_disks = self
+            .storage
+            .current_sled_disks(&sled_id)
+            .ok_or(Error::NoAvailableZpool { sled_id, kind: zone_kind })?
+            .values()
+            .map(|disk_config| disk_config.pool_id)
+            .collect::<BTreeSet<_>>();
+
         let all_in_service_zpools =
             self.sled_resources(sled_id)?.all_zpools(ZpoolFilter::InService);
 
@@ -1946,7 +1966,9 @@ impl<'a> BlueprintBuilder<'a> {
 
         for &zpool_id in all_in_service_zpools {
             let zpool_name = ZpoolName::new_external(zpool_id);
-            if !skip_zpools.contains(&zpool_name) {
+            if !skip_zpools.contains(&zpool_name)
+                && current_sled_disks.contains(&zpool_id)
+            {
                 return Ok(zpool_name);
             }
         }
@@ -2161,6 +2183,7 @@ pub mod test {
     use nexus_inventory::CollectionBuilder;
     use nexus_types::deployment::BlueprintDatasetConfig;
     use nexus_types::deployment::BlueprintDatasetDisposition;
+    use nexus_types::deployment::BlueprintDatasetFilter;
     use nexus_types::deployment::BlueprintOrCollectionZoneConfig;
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::OmicronZoneNetworkResources;
@@ -2297,6 +2320,7 @@ pub mod test {
                 );
             }
         }
+
         // All zones should have dataset records.
         for (sled_id, zone_config) in
             blueprint.all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
@@ -2331,6 +2355,28 @@ pub mod test {
                 assert_eq!(
                     dataset.disposition,
                     BlueprintDatasetDisposition::InService
+                );
+            }
+        }
+
+        // All datasets should be on zpools that have disk records.
+        for (sled_id, datasets) in &blueprint.blueprint_datasets {
+            let sled_disk_zpools = blueprint
+                .blueprint_disks
+                .get(&sled_id)
+                .expect("no disks for sled")
+                .disks
+                .iter()
+                .map(|disk| disk.pool_id)
+                .collect::<BTreeSet<_>>();
+
+            for dataset in datasets.datasets.values().filter(|dataset| {
+                dataset.disposition.matches(BlueprintDatasetFilter::InService)
+            }) {
+                assert!(
+                    sled_disk_zpools.contains(&dataset.pool.id()),
+                    "sled {sled_id} has dataset {dataset:?}, \
+                     which references a zpool without an associated disk",
                 );
             }
         }
@@ -2430,6 +2476,7 @@ pub mod test {
         for (sled_id, sled_resources) in
             example.input.all_sled_resources(SledFilter::Commissioned)
         {
+            builder.sled_ensure_disks(sled_id, sled_resources).unwrap();
             builder.sled_ensure_zone_ntp(sled_id).unwrap();
             for pool_id in sled_resources.zpools.keys() {
                 builder.sled_ensure_zone_crucible(sled_id, *pool_id).unwrap();
@@ -2462,11 +2509,12 @@ pub mod test {
             "test_basic",
         )
         .expect("failed to create builder");
-        builder.sled_ensure_zone_ntp(new_sled_id).unwrap();
         let new_sled_resources = &input
             .sled_lookup(SledFilter::Commissioned, new_sled_id)
             .unwrap()
             .resources;
+        builder.sled_ensure_disks(new_sled_id, new_sled_resources).unwrap();
+        builder.sled_ensure_zone_ntp(new_sled_id).unwrap();
         for pool_id in new_sled_resources.zpools.keys() {
             builder.sled_ensure_zone_crucible(new_sled_id, *pool_id).unwrap();
         }
