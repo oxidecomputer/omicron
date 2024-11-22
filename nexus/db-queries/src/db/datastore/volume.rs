@@ -2692,8 +2692,11 @@ pub enum VolumeReplaceResult {
     // this call performed the replacement
     Done,
 
-    // the "existing" volume was deleted
-    ExistingVolumeDeleted,
+    // the "existing" volume was soft deleted
+    ExistingVolumeSoftDeleted,
+
+    // the "existing" volume was hard deleted
+    ExistingVolumeHardDeleted,
 }
 
 impl DataStore {
@@ -2818,14 +2821,14 @@ impl DataStore {
             // perform the region replacement now, and this will short-circuit
             // the rest of the process.
 
-            return Ok(VolumeReplaceResult::ExistingVolumeDeleted);
+            return Ok(VolumeReplaceResult::ExistingVolumeHardDeleted);
         };
 
         if old_volume.time_deleted.is_some() {
             // Existing volume was soft-deleted, so return here for the same
             // reason: the region replacement process should be short-circuited
             // now.
-            return Ok(VolumeReplaceResult::ExistingVolumeDeleted);
+            return Ok(VolumeReplaceResult::ExistingVolumeSoftDeleted);
         }
 
         let old_vcr: VolumeConstructionRequest =
@@ -3072,14 +3075,14 @@ impl DataStore {
             // perform the region replacement now, and this will short-circuit
             // the rest of the process.
 
-            return Ok(VolumeReplaceResult::ExistingVolumeDeleted);
+            return Ok(VolumeReplaceResult::ExistingVolumeHardDeleted);
         };
 
         if old_volume.time_deleted.is_some() {
             // Existing volume was soft-deleted, so return here for the same
             // reason: the region replacement process should be short-circuited
             // now.
-            return Ok(VolumeReplaceResult::ExistingVolumeDeleted);
+            return Ok(VolumeReplaceResult::ExistingVolumeSoftDeleted);
         }
 
         let old_vcr: VolumeConstructionRequest =

@@ -375,7 +375,8 @@ async fn rsrss_replace_snapshot_in_volume(
             // with the saga.
         }
 
-        VolumeReplaceResult::ExistingVolumeDeleted => {
+        VolumeReplaceResult::ExistingVolumeSoftDeleted
+        | VolumeReplaceResult::ExistingVolumeHardDeleted => {
             // Proceed with the saga but skip the notification step.
         }
     }
@@ -432,7 +433,8 @@ async fn rsrss_notify_upstairs(
         .lookup::<VolumeReplaceResult>("volume_replace_snapshot_result")?;
     if matches!(
         volume_replace_snapshot_result,
-        VolumeReplaceResult::ExistingVolumeDeleted
+        VolumeReplaceResult::ExistingVolumeSoftDeleted
+            | VolumeReplaceResult::ExistingVolumeHardDeleted
     ) {
         return Ok(());
     }

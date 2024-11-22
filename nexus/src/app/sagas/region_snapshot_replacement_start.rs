@@ -796,7 +796,8 @@ async fn rsrss_replace_snapshot_in_volume(
             Ok(volume_replace_snapshot_result)
         }
 
-        VolumeReplaceResult::ExistingVolumeDeleted => {
+        VolumeReplaceResult::ExistingVolumeSoftDeleted
+        | VolumeReplaceResult::ExistingVolumeHardDeleted => {
             // If the snapshot volume was deleted, we still want to proceed with
             // replacing the rest of the uses of the region snapshot. Note this
             // also covers the case where this saga node runs (performing the

@@ -566,7 +566,8 @@ async fn srrs_replace_region_in_volume(
             Ok(volume_replace_region_result)
         }
 
-        VolumeReplaceResult::ExistingVolumeDeleted => {
+        VolumeReplaceResult::ExistingVolumeSoftDeleted
+        | VolumeReplaceResult::ExistingVolumeHardDeleted => {
             // Unwind the saga here to clean up the resources allocated during
             // this saga. The associated background task will transition this
             // request's state to Completed.
