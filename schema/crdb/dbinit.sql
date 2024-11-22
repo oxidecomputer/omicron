@@ -4000,7 +4000,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.affinity_group (
     -- Affinity groups are contained within projects
     project_id UUID NOT NULL,
     policy omicron.public.affinity_policy NOT NULL,
-    failure_domain omicron.public.failure_domain NOT NULL,
+    failure_domain omicron.public.failure_domain NOT NULL
 );
 
 -- Describes an instance's membership within an affinity group
@@ -4008,7 +4008,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.affinity_group_instance_membership (
     group_id UUID NOT NULL,
     instance_id UUID NOT NULL,
 
-    PRIMARY KEY (group_id, instance_id);
+    PRIMARY KEY (group_id, instance_id)
 );
 
 -- Describes a collection of instances that should not be co-located.
@@ -4022,7 +4022,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.anti_affinity_group (
     -- Anti-Affinity groups are contained within projects
     project_id UUID NOT NULL,
     policy omicron.public.affinity_policy NOT NULL,
-    failure_domain omicron.public.failure_domain NOT NULL,
+    failure_domain omicron.public.failure_domain NOT NULL
 );
 
 -- Describes an instance's membership within an anti-affinity group
@@ -4030,7 +4030,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.anti_affinity_group_instance_membershi
     group_id UUID NOT NULL,
     instance_id UUID NOT NULL,
 
-    PRIMARY KEY (group_id, instance_id);
+    PRIMARY KEY (group_id, instance_id)
 );
 
 -- Per-VMM state.
