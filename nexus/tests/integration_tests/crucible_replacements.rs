@@ -942,6 +942,10 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
                 } else if state == RegionReplacementState::Driving {
                     // The saga is still running
                     Err(CondCheckError::<()>::NotYet)
+                } else if state == RegionReplacementState::Completing {
+                    // The saga transitioned the request ok, and it's now being
+                    // finished by the region replacement finish saga
+                    Ok(())
                 } else {
                     // Any other state is not expected
                     panic!("unexpected state {state:?}!");
