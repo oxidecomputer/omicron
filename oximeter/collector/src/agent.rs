@@ -16,7 +16,6 @@ use chrono::Utc;
 use futures::TryStreamExt;
 use nexus_client::types::IdSortMode;
 use nexus_client::Client as NexusClient;
-use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
 use oximeter::types::ProducerResults;
@@ -35,7 +34,6 @@ use slog::warn;
 use slog::Logger;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
-use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::ops::Bound;
 use std::sync::Arc;
@@ -394,14 +392,11 @@ pub struct OximeterAgent {
 
 impl OximeterAgent {
     /// Construct a new agent with the given ID and logger.
-    // TODO(cleanup): Remove this lint when we have only a native resolver.
-    #[allow(clippy::too_many_arguments)]
     pub async fn with_id(
         id: Uuid,
         address: SocketAddrV6,
         refresh_interval: Duration,
         db_config: DbConfig,
-        http_resolver: BoxedResolver,
         native_resolver: BoxedResolver,
         log: &Logger,
         replicated: bool,
@@ -428,8 +423,7 @@ impl OximeterAgent {
         // - The DB doesn't exist at all. This reports a version number of 0. We
         // need to create the DB here, at the latest version. This is used in
         // fresh installations and tests.
-        let client =
-            Client::new_with_pool(http_resolver, native_resolver, &log);
+        let client = Client::new_with_pool(native_resolver, &log);
         match client.check_db_is_at_expected_version().await {
             Ok(_) => {}
             Err(oximeter_db::Error::DatabaseVersionMismatch {
@@ -521,18 +515,15 @@ impl OximeterAgent {
         // prints the results as they're received.
         let insertion_log = log.new(o!("component" => "results-sink"));
         if let Some(db_config) = db_config {
-            let Some(http_address) = db_config.address else {
+            // Take the explicit native TCP address if provided, or the HTTP
+            // IP address and use the default TCP port. One of these has to be
+            // provided.
+            let Some(address) = db_config.address else {
                 return Err(Error::Standalone(anyhow!(
                     "Must provide explicit IP address in standalone mode"
                 )));
             };
-
-            // Grab the native TCP address, or construct one from the defaults.
-            let native_address =
-                db_config.native_address.unwrap_or_else(|| {
-                    SocketAddr::new(http_address.ip(), CLICKHOUSE_TCP_PORT)
-                });
-            let client = Client::new(http_address, native_address, &log);
+            let client = Client::new(address, &log);
             let replicated = client.is_oximeter_cluster().await?;
             if !replicated {
                 client.init_single_node_db().await?;
