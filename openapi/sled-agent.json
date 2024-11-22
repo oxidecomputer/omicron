@@ -673,6 +673,27 @@
         }
       }
     },
+    "/support/dladm-info": {
+      "get": {
+        "operationId": "support_dladm_info",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/support/ipadm-info": {
       "get": {
         "operationId": "support_ipadm_info",

@@ -1344,6 +1344,12 @@ impl SledAgent {
     ) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
         support_bundle::ipadm_info().await
     }
+
+    pub(crate) async fn support_dladm_info(
+        &self,
+    ) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
+        support_bundle::dladm_info().await
+    }
 }
 
 #[derive(From, thiserror::Error, Debug)]
