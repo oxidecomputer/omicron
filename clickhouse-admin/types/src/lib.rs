@@ -1130,24 +1130,30 @@ impl SystemTimeSeriesSettings {
         let time_range = self.retrieval_settings.time_range;
         let metric_name = &self.metric_info.metric;
         let table = &self.metric_info.table;
-        let timestamp_format = match &self.retrieval_settings.timestamp_format {
-            TimestampFormat::Utc => "",
-            TimestampFormat::UnixEpoch => "::INT"
+        let ts_fmt = match &self.retrieval_settings.timestamp_format {
+            TimestampFormat::Utc => "iso",
+            TimestampFormat::UnixEpoch => "unix_timestamp",
+        };
+        let avg_value = match table {
+            SystemTable::MetricLog => metric_name,
+            SystemTable::AsynchronousMetricLog => "value",
         };
 
-        let mut query = match table {
-            SystemTable::MetricLog => format!(
-                "SELECT toStartOfInterval(event_time, INTERVAL {interval} SECOND){timestamp_format} AS time, avg({metric_name}) AS value
-                FROM system.{table}
-                WHERE event_date >= toDate(now() - {time_range}) AND event_time >= now() - {time_range}
+        let mut query = format!(
+            "SELECT toStartOfInterval(event_time, INTERVAL {interval} SECOND) AS time, avg({avg_value}) AS value
+            FROM system.{table}
+            WHERE event_date >= toDate(now() - {time_range}) AND event_time >= now() - {time_range}
+            "
+        );
+
+        match table {
+            SystemTable::MetricLog => (),
+            SystemTable::AsynchronousMetricLog => query.push_str(
+                format!(
+                    "AND metric = '{metric_name}'
                 "
-            ),
-            SystemTable::AsynchronousMetricLog => format!(
-                "SELECT toStartOfInterval(event_time, INTERVAL {interval} SECOND){timestamp_format} AS time, avg(value) AS value
-                FROM system.{table}
-                WHERE event_date >= toDate(now() - {time_range}) AND event_time >= now() - {time_range}
-                AND metric = '{metric_name}'
-                "
+                )
+                .as_str(),
             ),
         };
 
@@ -1156,7 +1162,7 @@ impl SystemTimeSeriesSettings {
                 "GROUP BY time
                 ORDER BY time WITH FILL STEP {interval}
                 FORMAT JSONEachRow
-                SETTINGS date_time_output_format = 'iso'"
+                SETTINGS date_time_output_format = '{ts_fmt}'"
             )
             .as_str(),
         );
@@ -1167,7 +1173,7 @@ impl SystemTimeSeriesSettings {
 #[derive(Debug, Display, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum Timestamp {
-    Unix(u64),
+    Unix(String),
     Utc(DateTime<Utc>),
 }
 
@@ -1175,7 +1181,7 @@ pub enum Timestamp {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct SystemTimeSeries {
-    pub time: Timestamp,//DateTime<Utc>,
+    pub time: Timestamp,
     pub value: f64,
     // TODO: Would be really nice to have an enum with possible units (s, ms, bytes)
     // Not sure if I can even add this, the system tables don't mention units at all.
