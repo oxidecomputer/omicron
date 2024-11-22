@@ -142,6 +142,8 @@ fn main() -> Result<()> {
         Cmds::Openapi(external) => external.exec_bin("openapi-manager"),
         #[cfg(target_os = "illumos")]
         Cmds::Releng(external) => {
+            // Build releng with the release profile, as most of its deps will
+            // be built with `--release` by build tooling anyway.
             external.cargo_args(["--release"]).exec_bin("omicron-releng")
         }
         #[cfg(target_os = "illumos")]
