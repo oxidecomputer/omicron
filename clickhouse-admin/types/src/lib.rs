@@ -1044,6 +1044,11 @@ fn default_time_range() -> u64 {
     86400
 }
 
+#[inline]
+fn default_timestamp_format() -> TimestampFormat {
+    TimestampFormat::Utc
+}
+
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 /// Available metrics tables in the `system` database
@@ -1057,6 +1062,24 @@ impl fmt::Display for SystemTable {
         let table = match self {
             SystemTable::MetricLog => "metric_log",
             SystemTable::AsynchronousMetricLog => "asynchronous_metric_log",
+        };
+        write!(f, "{}", table)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+/// Which format should the timestamp be in.
+pub enum TimestampFormat {
+    Utc,
+    UnixEpoch,
+}
+
+impl fmt::Display for TimestampFormat {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let table = match self {
+            TimestampFormat::Utc => "utc",
+            TimestampFormat::UnixEpoch => "unix_epoch",
         };
         write!(f, "{}", table)
     }
@@ -1083,6 +1106,10 @@ pub struct TimeSeriesSettingsQuery {
     /// Default is 86400 seconds (24 hrs).
     #[serde(default = "default_time_range")]
     pub time_range: u64,
+    /// Format in which each timeseries timestamp will be in.
+    /// Default is UTC
+    #[serde(default = "default_timestamp_format")]
+    pub timestamp_format: TimestampFormat,
 }
 
 /// Settings to specify which time series to retrieve.
@@ -1103,16 +1130,20 @@ impl SystemTimeSeriesSettings {
         let time_range = self.retrieval_settings.time_range;
         let metric_name = &self.metric_info.metric;
         let table = &self.metric_info.table;
+        let timestamp_format = match &self.retrieval_settings.timestamp_format {
+            TimestampFormat::Utc => "",
+            TimestampFormat::UnixEpoch => "::INT"
+        };
 
         let mut query = match table {
             SystemTable::MetricLog => format!(
-                "SELECT toStartOfInterval(event_time, INTERVAL {interval} SECOND) AS time, avg({metric_name}) AS value
+                "SELECT toStartOfInterval(event_time, INTERVAL {interval} SECOND){timestamp_format} AS time, avg({metric_name}) AS value
                 FROM system.{table}
                 WHERE event_date >= toDate(now() - {time_range}) AND event_time >= now() - {time_range}
                 "
             ),
             SystemTable::AsynchronousMetricLog => format!(
-                "SELECT toStartOfInterval(event_time, INTERVAL {interval} SECOND) AS time, avg(value) AS value
+                "SELECT toStartOfInterval(event_time, INTERVAL {interval} SECOND){timestamp_format} AS time, avg(value) AS value
                 FROM system.{table}
                 WHERE event_date >= toDate(now() - {time_range}) AND event_time >= now() - {time_range}
                 AND metric = '{metric_name}'
@@ -1133,11 +1164,18 @@ impl SystemTimeSeriesSettings {
     }
 }
 
+#[derive(Debug, Display, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum Timestamp {
+    Unix(u64),
+    Utc(DateTime<Utc>),
+}
+
 /// Retrieved time series from the internal `system` database.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct SystemTimeSeries {
-    pub time: DateTime<Utc>,
+    pub time: Timestamp,//DateTime<Utc>,
     pub value: f64,
     // TODO: Would be really nice to have an enum with possible units (s, ms, bytes)
     // Not sure if I can even add this, the system tables don't mention units at all.
