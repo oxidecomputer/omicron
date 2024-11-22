@@ -98,7 +98,10 @@ impl DataStore {
                     // constructed, and therefore won't ever have an associated
                     // Upstairs that receives a volume replacement request.
                     // However it's being done in an attempt to be overly
-                    // cautious.
+                    // cautious, and it validates that the volume exist:
+                    // otherwise it would be possible to create a region
+                    // snapshot replacement request for a volume that didn't
+                    // exist!
 
                     Self::volume_repair_insert_in_txn(
                         &conn, err, volume_id, request.id,
