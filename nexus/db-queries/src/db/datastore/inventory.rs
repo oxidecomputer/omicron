@@ -889,6 +889,10 @@ impl DataStore {
                                 sled_agent.reservoir_size,
                             )
                             .into_sql::<diesel::sql_types::Int8>(),
+                            nexus_db_model::Generation(
+                                sled_agent.omicron_physical_disks_generation,
+                            )
+                            .into_sql::<diesel::sql_types::Int8>(),
                         ))
                         .filter(
                             baseboard_dsl::part_number
@@ -914,6 +918,7 @@ impl DataStore {
                                 sa_dsl::usable_hardware_threads,
                                 sa_dsl::usable_physical_ram,
                                 sa_dsl::reservoir_size,
+                                sa_dsl::omicron_physical_disks_generation,
                             ))
                             .execute_async(&conn)
                             .await?;
@@ -933,6 +938,7 @@ impl DataStore {
                         _usable_hardware_threads,
                         _usable_physical_ram,
                         _reservoir_size,
+                        _omicron_physical_disks_generation,
                     ) = sa_dsl::inv_sled_agent::all_columns();
                 }
 
@@ -2377,6 +2383,9 @@ impl DataStore {
                     .get(sled_id.as_untyped_uuid())
                     .map(|datasets| datasets.to_vec())
                     .unwrap_or_default(),
+                omicron_physical_disks_generation: s
+                    .omicron_physical_disks_generation
+                    .into(),
             };
             sled_agents.insert(sled_id, sled_agent);
         }
