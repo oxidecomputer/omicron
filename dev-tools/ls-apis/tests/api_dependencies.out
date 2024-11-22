@@ -80,7 +80,6 @@ Repo Depot API (client: repo-depot-client)
 Sled Agent (client: sled-agent-client)
     consumed by: dpd (dendrite/dpd) via 1 path
     consumed by: omicron-nexus (omicron/nexus) via 7 paths
-    consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
 
 Wicketd (client: wicketd-client)
 
