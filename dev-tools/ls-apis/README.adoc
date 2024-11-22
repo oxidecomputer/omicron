@@ -113,7 +113,7 @@ As of this writing:
 * The API metadata specifies whether versioning for the API is managed on the server side exclusively or using client-side versioning as well.  We've made this choice for every existing API.
 * There are no cycles in the server-side-managed-API dependency graph.
 
-This tool verifies these properties.  If you add a new API or a new dependency that breaks these constraints, you will have to fix that before you can land the change to Omicron.
+This tool verifies these properties.  If you add a new API or a new API dependency without adding valid metadata, or if that metadata breaks these constraints, you will have to fix this up before you can land the change to Omicron.
 
 You can verify the versioning metadata using:
 
