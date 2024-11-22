@@ -423,31 +423,52 @@ impl SystemApis {
     /// Verifies various important properties about the assignment of which APIs
     /// are server-managed vs. client-managed.
     pub fn dag_check(&self) -> Result<DagCheck<'_>> {
-        // In this function, we use this filter a bunch.  "Default" is the
-        // correct one to use here.  It excludes relationships that are totally
-        // bogus, only affect components that are never actually deployed, or
-        // are part of an edge that we've already determined will be "non-DAG".
+        // In this function, we'll use the following ApiDependencyFilter a bunch
+        // when walking the component dependency graph.  "Default" is the
+        // correct filter to use here.  This excludes relationships that are
+        // totally bogus, only affect components that are never actually
+        // deployed, or are part of an edge that we've already determined will
+        // be "non-DAG".
         //
-        // This last bit is kind of subtle.  We actually have two ways in
-        // metadata of characterizing a node or edge as part of the DAG or not:
+        // This last case might be a little confusing.  The whole point of this
+        // function is to help developers figure out which edges should be part
+        // of the DAG or not.  Why would we ignore edges based on whether
+        // they're already in the DAG or not?
         //
-        // - a specific kind of Cargo dependency can be marked "non-DAG", as in
-        //   the filter rule that says that a Cargo dependency from
-        //   "oximeter-producer" to "nexus-client" is "non-DAG".  This means we
-        //   promise to make the Nexus internal API client-managed (i.e., not
-        //   part of the update DAG).  We will verify this promise here.
-        //   However, we otherwise want to ignore these edges because they're
-        //   already covered and they make iterating on the DAG more difficult.
+        // Recall that there are two ways that the metadata can specify that a
+        // particular API is "not part of the update DAG" (which is equivalent
+        // to client-side-managed):
+        //
+        // - a specific class of Cargo dependencies can be marked "non-DAG" via
+        //   a dependency filter rule.  The only case of this today is where we
+        //   say that Cargo dependencies from "oximeter-producer" to
+        //   "nexus-client" are "non-DAG".  This means we promise to make the
+        //   Nexus internal API client-managed (i.e., not part of the update
+        //   DAG).  We verify this promise below.
         // - a specific API can be marked as server-managed (meaning it's part
-        //   of the update DAG) or not.  That's what we're verifying here, and
-        //   also proposing changes to.
+        //   of the update DAG) or not.  That's most of what this function deals
+        //   with and proposes changes to.
         //
-        // It would be okay to use `ApiDependencyFilter::IncludeNonDag` here,
-        // but it would just make this tool less useful because it wouldn't be
-        // able to propose some useful additions to the DAG.
+        // In the long term, it might be nice to combine these.  But that's more
+        // work than it sounds like: we'd probably want to convert everything
+        // to filter rules, but that requires (tediously) writing out every
+        // single edge that we care about.  An alternative would be to eliminate
+        // the non-DAG dependency filter rules and only use the property at the
+        // API level.  However right now it seems quite possible that we do want
+        // this on a per-edge basis, rather than a per-API basis (i.e., there
+        // are some client-side-versioned APIs that have consumers that could
+        // treat them as server-side-versioned).
         //
-        // XXX-dap verify that all non-dag filter targets are indeed marked
-        // client-managed.
+        // Anyway, what we're talking about here is ignoring the first category
+        // of information and looking only at the second.  This is *safe* (i.e.,
+        // correct) because we verify below that the second category (the
+        // API-level `versioned_for` property) contains the same information
+        // provided by the first category (the non-DAG dependency filter rules).
+        // We *choose* to do this because it makes the heuristics below more
+        // useful.  For example, excluding the non-DAG edges makes it easy for
+        // the heuristic below to tell that crucible-pantry ought to be
+        // server-side-managed because it has no (other) dependencies and so
+        // can't be part of a cycle.
         let filter = ApiDependencyFilter::Default;
 
         // Construct a graph where:
@@ -466,6 +487,20 @@ impl SystemApis {
                  node: {:?})",
                 reverse_nodes.get(&error.node_id()).unwrap()
             );
+        }
+
+        // Verify that the targets of any "non-dag" dependency filter rules are
+        // indeed not part of the server-side-versioned DAG.
+        for api in self.api_metadata.non_dag_apis() {
+            if !matches!(api.versioned_how, VersionedHow::Client(..)) {
+                bail!(
+                    "API identified by client package {:?} ({}) is the \
+                     \"client\" in a \"non-dag\" dependency rule, but its \
+                     \"versioned_how\" is not \"client\"",
+                    api.client_package_name,
+                    api.label,
+                );
+            }
         }
 
         // Use some heuristics to propose next steps.

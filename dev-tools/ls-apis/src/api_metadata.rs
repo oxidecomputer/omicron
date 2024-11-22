@@ -108,6 +108,20 @@ impl AllApiMetadata {
 
         Ok(which_rules[0].evaluation)
     }
+
+    /// Returns the list of APIs that have non-DAG dependency rules
+    pub(crate) fn non_dag_apis(&self) -> impl Iterator<Item = &ApiMetadata> {
+        self.dependency_rules.iter().filter_map(|(client_pkgname, rules)| {
+            rules.iter().any(|r| r.evaluation == Evaluation::NonDag).then(
+                || {
+                    // unwrap(): we previously verified that the "client" for
+                    // all dependency rules corresponds to an API that we have
+                    // metadata for.
+                    self.apis.get(client_pkgname).unwrap()
+                },
+            )
+        })
+    }
 }
 
 /// Format of the `api-manifest.toml` file
