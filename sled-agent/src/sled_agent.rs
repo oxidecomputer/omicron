@@ -19,7 +19,8 @@ use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::StorageMonitorHandle;
 use crate::support_bundle::queries::{
-    ipadm_info, zoneadm_info, SupportBundleCmdError, SupportBundleCmdOutput,
+    dladm_info, ipadm_info, zoneadm_info, SupportBundleCmdError,
+    SupportBundleCmdOutput,
 };
 use crate::support_bundle::storage::SupportBundleManager;
 use crate::updates::{ConfigUpdates, UpdateManager};
@@ -1354,6 +1355,12 @@ impl SledAgent {
         &self,
     ) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
         ipadm_info().await
+    }
+
+    pub(crate) async fn support_dladm_info(
+        &self,
+    ) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
+        dladm_info().await
     }
 }
 

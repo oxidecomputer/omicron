@@ -886,4 +886,20 @@ impl SledAgentApi for SledAgentImpl {
 
         Ok(HttpResponseOk(FreeformBody(output.into())))
     }
+
+    async fn support_dladm_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+        let sa = request_context.context();
+        let output = sa
+            .support_dladm_info()
+            .await
+            .into_iter()
+            .map(|cmd| cmd.get_output())
+            .collect::<Vec<_>>()
+            .as_slice()
+            .join("\n\n");
+
+        Ok(HttpResponseOk(FreeformBody(output.into())))
+    }
 }

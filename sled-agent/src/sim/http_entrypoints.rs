@@ -647,6 +647,12 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
         method_unimplemented()
     }
+
+    async fn support_dladm_info(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+        method_unimplemented()
+    }
 }
 
 fn method_unimplemented<T>() -> Result<T, HttpError> {

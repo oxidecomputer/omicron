@@ -601,6 +601,14 @@ pub trait SledAgentApi {
     async fn support_ipadm_info(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<FreeformBody>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/dladm-info",
+    }]
+    async fn support_dladm_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<FreeformBody>, HttpError>;
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]

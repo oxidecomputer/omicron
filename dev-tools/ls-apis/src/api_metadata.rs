@@ -201,16 +201,16 @@ pub struct ApiMetadata {
     pub notes: Option<String>,
     /// If `dev_only` is true, then this API's server is not deployed in a
     /// production system.  It's only used in development environments.  The
-    /// default (if unspecified and this comes in as `None`) is that APIs *are*
-    /// deployed (equivalent to `dev_only = Some(false)`).
-    dev_only: Option<bool>,
+    /// default is that APIs *are* deployed.
+    #[serde(default)]
+    dev_only: bool,
 }
 
 impl ApiMetadata {
     /// Returns whether this API's server component gets deployed on real
     /// systems
     pub fn deployed(&self) -> bool {
-        !(self.dev_only.unwrap_or(false))
+        !self.dev_only
     }
 }
 
