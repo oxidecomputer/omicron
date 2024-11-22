@@ -376,13 +376,16 @@ impl SystemApis {
         Ok(Dot::new(&graph).to_string())
     }
 
+    // The complex type below is only used in this one place: the return value
+    // of an internal helper function.  A type alias doesn't seem better.
+    #[allow(clippy::type_complexity)]
     fn make_component_graph(
         &self,
         dependency_filter: ApiDependencyFilter,
         versioned_on_server_only: bool,
     ) -> Result<(
-        petgraph::graph::Graph<&'_ ServerComponentName, &'_ ClientPackageName>,
-        BTreeMap<&'_ ServerComponentName, NodeIndex>,
+        petgraph::graph::Graph<&ServerComponentName, &ClientPackageName>,
+        BTreeMap<&ServerComponentName, NodeIndex>,
     )> {
         let mut graph = petgraph::graph::Graph::new();
         let nodes: BTreeMap<_, _> = self
@@ -602,7 +605,7 @@ impl SystemApis {
                         && dependency_api.versioned_how == VersionedHow::Unknown
                     {
                         dag_check.propose_client(
-                            *dependency_clientpkg,
+                            dependency_clientpkg,
                             format!(
                                 "has cyclic dependency on {:?}, which is \
                                  server-managed",
@@ -617,7 +620,7 @@ impl SystemApis {
                     {
                         dag_check.propose_upick(
                             &api.client_package_name,
-                            *dependency_clientpkg,
+                            dependency_clientpkg,
                         );
                     }
                 }
