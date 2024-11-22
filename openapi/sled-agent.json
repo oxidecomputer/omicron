@@ -765,7 +765,7 @@
     },
     "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}": {
       "get": {
-        "summary": "Fetch a service bundle from a particular dataset",
+        "summary": "Fetch a support bundle from a particular dataset",
         "operationId": "support_bundle_get",
         "parameters": [
           {
@@ -818,7 +818,7 @@
         }
       },
       "post": {
-        "summary": "Create a service bundle within a particular dataset",
+        "summary": "Create a support bundle within a particular dataset",
         "operationId": "support_bundle_create",
         "parameters": [
           {
@@ -889,7 +889,7 @@
         }
       },
       "delete": {
-        "summary": "Delete a service bundle from a particular dataset",
+        "summary": "Delete a support bundle from a particular dataset",
         "operationId": "support_bundle_delete",
         "parameters": [
           {
@@ -933,7 +933,7 @@
         }
       },
       "head": {
-        "summary": "Fetch a service bundle from a particular dataset",
+        "summary": "Fetch a support bundle from a particular dataset",
         "operationId": "support_bundle_head",
         "parameters": [
           {

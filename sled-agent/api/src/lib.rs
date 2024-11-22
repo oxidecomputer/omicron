@@ -169,7 +169,7 @@ pub trait SledAgentApi {
         path_params: Path<SupportBundleListPathParam>,
     ) -> Result<HttpResponseOk<Vec<SupportBundleMetadata>>, HttpError>;
 
-    /// Create a service bundle within a particular dataset
+    /// Create a support bundle within a particular dataset
     #[endpoint {
         method = POST,
         path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}"
@@ -181,7 +181,7 @@ pub trait SledAgentApi {
         body: StreamingBody,
     ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError>;
 
-    /// Fetch a service bundle from a particular dataset
+    /// Fetch a support bundle from a particular dataset
     #[endpoint {
         method = GET,
         path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}"
@@ -192,7 +192,7 @@ pub trait SledAgentApi {
         body: TypedBody<SupportBundleGetQueryParams>,
     ) -> Result<http::Response<Body>, HttpError>;
 
-    /// Fetch a service bundle from a particular dataset
+    /// Fetch a support bundle from a particular dataset
     #[endpoint {
         method = HEAD,
         path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}"
@@ -203,7 +203,7 @@ pub trait SledAgentApi {
         body: TypedBody<SupportBundleGetQueryParams>,
     ) -> Result<http::Response<Body>, HttpError>;
 
-    /// Delete a service bundle from a particular dataset
+    /// Delete a support bundle from a particular dataset
     #[endpoint {
         method = DELETE,
         path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}"

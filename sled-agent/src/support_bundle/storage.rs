@@ -18,6 +18,8 @@ use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use rand::distributions::Alphanumeric;
+use rand::{thread_rng, Rng};
 use range_requests::PotentialRange;
 use range_requests::SingleRange;
 use sha2::{Digest, Sha256};
@@ -27,7 +29,7 @@ use sled_storage::manager::NestedDatasetListOptions;
 use sled_storage::manager::NestedDatasetLocation;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
-use std::io::Read;
+use slog_error_chain::InlineErrorChain;
 use std::io::Write;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
@@ -49,6 +51,12 @@ pub enum Error {
     #[error("Dataset not found")]
     DatasetNotFound,
 
+    #[error("Dataset exists, but has an invalid configuration: (wanted {wanted}, saw {actual})")]
+    DatasetExistsBadConfig { wanted: DatasetUuid, actual: DatasetUuid },
+
+    #[error("Dataset exists, but appears on the wrong zpool (wanted {wanted}, saw {actual})")]
+    DatasetExistsOnWrongZpool { wanted: ZpoolUuid, actual: ZpoolUuid },
+
     #[error(transparent)]
     Storage(#[from] sled_storage::error::Error),
 
@@ -60,6 +68,10 @@ pub enum Error {
 
     #[error(transparent)]
     Zip(#[from] ZipError),
+}
+
+fn err_str(err: &dyn std::error::Error) -> String {
+    InlineErrorChain::new(err).to_string()
 }
 
 impl From<Error> for HttpError {
@@ -76,15 +88,14 @@ impl From<Error> for HttpError {
                 HttpError::for_bad_request(None, "Not a file".to_string())
             }
             Error::Storage(err) => HttpError::from(ExternalError::from(err)),
-            Error::Io(err) => HttpError::for_internal_error(err.to_string()),
-            Error::Range(err) => HttpError::for_internal_error(err.to_string()),
             Error::Zip(err) => match err {
                 ZipError::FileNotFound => HttpError::for_not_found(
                     None,
                     "Entry not found".to_string(),
                 ),
-                err => HttpError::for_internal_error(err.to_string()),
+                err => HttpError::for_internal_error(err_str(&err)),
             },
+            err => HttpError::for_internal_error(err_str(&err)),
         }
     }
 }
@@ -120,15 +131,15 @@ fn stream_zip_entry_helper(
 ) -> Result<(), Error> {
     // TODO: When https://github.com/zip-rs/zip2/issues/231 is resolved,
     // this should call "by_name_seek" instead.
-    let reader = archive.by_name(&entry_path)?;
+    let mut reader = archive.by_name(&entry_path)?;
 
-    let mut reader: Box<dyn std::io::Read> = match range {
-        Some(range) => Box::new(skip_and_limit(
+    let reader: &mut dyn std::io::Read = match range {
+        Some(range) => &mut skip_and_limit(
             reader,
             range.start() as usize,
             range.content_length().get() as usize,
-        )?),
-        None => Box::new(reader),
+        )?,
+        None => &mut reader,
     };
 
     loop {
@@ -240,8 +251,18 @@ impl<'a> SupportBundleManager<'a> {
             .get(&dataset_id)
             .ok_or_else(|| Error::DatasetNotFound)?;
 
-        if dataset.id != dataset_id || dataset.name.pool().id() != zpool_id {
-            return Err(Error::DatasetNotFound);
+        if dataset.id != dataset_id {
+            return Err(Error::DatasetExistsBadConfig {
+                wanted: dataset_id,
+                actual: dataset.id,
+            });
+        }
+        let actual = dataset.name.pool().id();
+        if actual != zpool_id {
+            return Err(Error::DatasetExistsOnWrongZpool {
+                wanted: zpool_id,
+                actual,
+            });
         }
         Ok(dataset.clone())
     }
@@ -296,7 +317,8 @@ impl<'a> SupportBundleManager<'a> {
         Ok(bundles)
     }
 
-    /// Returns the hex, lowercase sha2 checksum of a file at `path`.
+    /// Validates that the sha2 checksum of the file at `path` matches the
+    /// expected value.
     async fn sha2_checksum_matches(
         path: &Utf8Path,
         expected: &ArtifactHash,
@@ -369,7 +391,14 @@ impl<'a> SupportBundleManager<'a> {
         let support_bundle_dir = dataset
             .mountpoint(illumos_utils::zpool::ZPOOL_MOUNTPOINT_ROOT.into());
         let support_bundle_path = support_bundle_dir.join("bundle");
-        let support_bundle_path_tmp = support_bundle_dir.join("bundle.tmp");
+        let support_bundle_path_tmp = support_bundle_dir.join(format!(
+            "bundle-{}.tmp",
+            thread_rng()
+                .sample_iter(Alphanumeric)
+                .take(6)
+                .map(char::from)
+                .collect::<String>()
+        ));
 
         // Ensure that the dataset exists.
         info!(log, "Ensuring dataset exists for bundle");
@@ -745,9 +774,11 @@ mod tests {
 
     const GREET_PATH: &'static str = "greeting.txt";
     const GREET_DATA: &'static [u8] = b"Hello around the world!";
+    const ARBITRARY_DIRECTORY: &'static str = "look-a-directory/";
 
-    fn example_files() -> [NamedFile; 5] {
+    fn example_files() -> [NamedFile; 6] {
         [
+            (ARBITRARY_DIRECTORY, Data::Directory),
             (GREET_PATH, Data::File(GREET_DATA)),
             ("english/", Data::Directory),
             ("english/hello.txt", Data::File(b"Hello world!")),
@@ -973,6 +1004,35 @@ mod tests {
         );
         assert_eq!(response.headers()[ACCEPT_RANGES], "bytes");
 
+        // Cannot GET nor HEAD a directory
+        let err = mgr
+            .get(
+                harness.zpool_id,
+                dataset_id,
+                support_bundle_id,
+                None,
+                SupportBundleQueryType::Path {
+                    file_path: ARBITRARY_DIRECTORY.to_string(),
+                },
+            )
+            .await
+            .expect_err("Should not be able to GET directory");
+        assert!(matches!(err, Error::NotAFile), "Unexpected error: {err:?}");
+
+        let err = mgr
+            .head(
+                harness.zpool_id,
+                dataset_id,
+                support_bundle_id,
+                None,
+                SupportBundleQueryType::Path {
+                    file_path: ARBITRARY_DIRECTORY.to_string(),
+                },
+            )
+            .await
+            .expect_err("Should not be able to HEAD directory");
+        assert!(matches!(err, Error::NotAFile), "Unexpected error: {err:?}");
+
         // DELETE the bundle on the dataset
         mgr.delete(harness.zpool_id, dataset_id, support_bundle_id)
             .await
@@ -996,7 +1056,7 @@ mod tests {
             harness.storage_test_harness.handle(),
         );
 
-        // Get a support bundle that we're ready to store...
+        // Get a support bundle that we're ready to store.
         let support_bundle_id = SupportBundleUuid::new_v4();
         let zipfile_data = example_zipfile();
         let hash = ArtifactHash(
@@ -1006,7 +1066,7 @@ mod tests {
                 .unwrap(),
         );
 
-        // ... storing a bundle without a dataset should throw an error.
+        // Storing a bundle without a dataset should throw an error.
         let dataset_id = DatasetUuid::new_v4();
         let err = mgr
             .create(
@@ -1056,7 +1116,7 @@ mod tests {
             harness.storage_test_harness.handle(),
         );
 
-        // Get a support bundle that we're ready to store...
+        // Get a support bundle that we're ready to store.
         let support_bundle_id = SupportBundleUuid::new_v4();
         let zipfile_data = example_zipfile();
         let hash = ArtifactHash(
@@ -1146,6 +1206,79 @@ mod tests {
         assert_eq!(bundles[0].support_bundle_id, support_bundle_id);
         assert_eq!(bundles[0].state, SupportBundleState::Complete);
 
+        // We can delete the bundle, and it should no longer appear.
+        mgr.delete(harness.zpool_id, dataset_id, support_bundle_id)
+            .await
+            .expect("Should have been able to DELETE bundle");
+        let bundles = mgr.list(harness.zpool_id, dataset_id).await.unwrap();
+        assert_eq!(bundles.len(), 0);
+
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn creation_bad_hash_still_deleteable() {
+        let logctx = test_setup_log("creation_bad_hash_still_deleteable");
+        let log = &logctx.log;
+
+        // Set up storage (zpool, but not dataset!)
+        let harness = SingleU2StorageHarness::new(log).await;
+
+        // Access the Support Bundle API
+        let mgr = SupportBundleManager::new(
+            log,
+            harness.storage_test_harness.handle(),
+        );
+
+        // Get a support bundle that we're ready to store
+        let support_bundle_id = SupportBundleUuid::new_v4();
+        let zipfile_data = example_zipfile();
+
+        // Configure the dataset now, so it'll exist for future requests.
+        let dataset_id = DatasetUuid::new_v4();
+        harness.configure_dataset(dataset_id, DatasetKind::Debug).await;
+
+        let bad_hash = ArtifactHash(
+            Sha256::digest(b"Hey, this ain't right")
+                .as_slice()
+                .try_into()
+                .unwrap(),
+        );
+
+        // Creating the bundle with a bad hash should fail.
+        let err = mgr
+            .create(
+                harness.zpool_id,
+                dataset_id,
+                support_bundle_id,
+                bad_hash,
+                stream::once(async {
+                    Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
+                }),
+            )
+            .await
+            .expect_err("Bundle creation should fail with bad hash");
+        assert!(
+            matches!(err, Error::HashMismatch),
+            "Unexpected error: {err:?}"
+        );
+        assert_eq!(HttpError::from(err).status_code, StatusCode::BAD_REQUEST);
+
+        // The bundle still appears to exist, as storage gets allocated after
+        // the "create" call.
+        let bundles = mgr.list(harness.zpool_id, dataset_id).await.unwrap();
+        assert_eq!(bundles.len(), 1);
+        assert_eq!(bundles[0].support_bundle_id, support_bundle_id);
+        assert_eq!(bundles[0].state, SupportBundleState::Incomplete);
+
+        // We can delete the bundle, and it should no longer appear.
+        mgr.delete(harness.zpool_id, dataset_id, support_bundle_id)
+            .await
+            .expect("Should have been able to DELETE bundle");
+        let bundles = mgr.list(harness.zpool_id, dataset_id).await.unwrap();
+        assert_eq!(bundles.len(), 0);
+
         harness.cleanup().await;
         logctx.cleanup_successful();
     }
@@ -1164,7 +1297,7 @@ mod tests {
             harness.storage_test_harness.handle(),
         );
 
-        // Get a support bundle that we're ready to store...
+        // Get a support bundle that we're ready to store.
         let support_bundle_id = SupportBundleUuid::new_v4();
         let zipfile_data = example_zipfile();
         let hash = ArtifactHash(
@@ -1381,6 +1514,37 @@ mod tests {
             );
             assert_eq!(response.headers()[ACCEPT_RANGES], "bytes");
         }
+
+        // Cannot GET nor HEAD a directory, even with range requests
+        let range = PotentialRange::new(format!("bytes=0-1").as_bytes());
+        let err = mgr
+            .get(
+                harness.zpool_id,
+                dataset_id,
+                support_bundle_id,
+                Some(range),
+                SupportBundleQueryType::Path {
+                    file_path: ARBITRARY_DIRECTORY.to_string(),
+                },
+            )
+            .await
+            .expect_err("Should not be able to GET directory");
+        assert!(matches!(err, Error::NotAFile), "Unexpected error: {err:?}");
+
+        let range = PotentialRange::new(format!("bytes=0-1").as_bytes());
+        let err = mgr
+            .head(
+                harness.zpool_id,
+                dataset_id,
+                support_bundle_id,
+                Some(range),
+                SupportBundleQueryType::Path {
+                    file_path: ARBITRARY_DIRECTORY.to_string(),
+                },
+            )
+            .await
+            .expect_err("Should not be able to HEAD directory");
+        assert!(matches!(err, Error::NotAFile), "Unexpected error: {err:?}");
 
         // DELETE the bundle on the dataset
         mgr.delete(harness.zpool_id, dataset_id, support_bundle_id)
