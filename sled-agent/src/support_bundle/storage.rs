@@ -1516,7 +1516,7 @@ mod tests {
         }
 
         // Cannot GET nor HEAD a directory, even with range requests
-        let range = PotentialRange::new(format!("bytes=0-1").as_bytes());
+        let range = PotentialRange::new(b"bytes=0-1");
         let err = mgr
             .get(
                 harness.zpool_id,
@@ -1531,7 +1531,7 @@ mod tests {
             .expect_err("Should not be able to GET directory");
         assert!(matches!(err, Error::NotAFile), "Unexpected error: {err:?}");
 
-        let range = PotentialRange::new(format!("bytes=0-1").as_bytes());
+        let range = PotentialRange::new(b"bytes=0-1");
         let err = mgr
             .head(
                 harness.zpool_id,
