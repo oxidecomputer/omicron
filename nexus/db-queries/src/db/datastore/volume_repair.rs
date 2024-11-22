@@ -27,6 +27,24 @@ impl DataStore {
         volume_id: Uuid,
         repair_id: Uuid,
     ) -> Result<(), diesel::result::Error> {
+        use db::schema::volume_repair::dsl;
+
+        // If a lock that matches the arguments exists already, return Ok
+        //
+        // Note: if rerunning this function (for example if a saga node was
+        // rerun), the volume could have existed when this lock was inserted the
+        // first time, but have been deleted now.
+        let maybe_lock = dsl::volume_repair
+            .filter(dsl::repair_id.eq(repair_id))
+            .filter(dsl::volume_id.eq(volume_id))
+            .first_async::<VolumeRepair>(conn)
+            .await
+            .optional()?;
+
+        if maybe_lock.is_some() {
+            return Ok(());
+        }
+
         // Do not allow a volume repair record to be created if the volume does
         // not exist, or was hard-deleted!
         let maybe_volume = Self::volume_get_impl(conn, volume_id).await?;
@@ -37,7 +55,8 @@ impl DataStore {
             ))));
         }
 
-        use db::schema::volume_repair::dsl;
+        // Do not check for soft-deletion here: We may want to request locks for
+        // soft-deleted volumes.
 
         match diesel::insert_into(dsl::volume_repair)
             .values(VolumeRepair { volume_id, repair_id })
@@ -193,6 +212,36 @@ mod test {
             .volume_repair_lock(&opctx, volume_id, lock_1)
             .await
             .unwrap_err();
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn volume_lock_relock_allowed() {
+        let logctx = dev::test_setup_log("volume_lock_relock_allowed");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let lock_id = Uuid::new_v4();
+        let volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: volume_id,
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
+        datastore.volume_repair_lock(&opctx, volume_id, lock_id).await.unwrap();
+        datastore.volume_repair_lock(&opctx, volume_id, lock_id).await.unwrap();
 
         db.terminate().await;
         logctx.cleanup_successful();
