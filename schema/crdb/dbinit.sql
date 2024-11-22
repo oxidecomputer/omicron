@@ -3353,6 +3353,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     usable_physical_ram INT8 NOT NULL,
     reservoir_size INT8 CHECK (reservoir_size < usable_physical_ram) NOT NULL,
 
+    -- The last generation of OmicronPhysicalDisksConfig seen by the sled-agent
+    omicrion_physical_disks_generation INT8 NOT NULL,
+
     PRIMARY KEY (inv_collection_id, sled_id)
 );
 
@@ -4684,7 +4687,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '114.0.0', NULL)
+    (TRUE, NOW(), NOW(), '115.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

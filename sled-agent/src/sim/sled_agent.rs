@@ -893,6 +893,7 @@ impl SledAgent {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_else(|_| vec![]),
+            omicron_physical_disks_generation: Generation::new(),
         })
     }
 

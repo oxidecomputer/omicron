@@ -1349,6 +1349,7 @@ impl SledAgent {
             disks,
             zpools,
             datasets,
+            omicron_physical_disks_generation: *all_disks.generation(),
         })
     }
 
