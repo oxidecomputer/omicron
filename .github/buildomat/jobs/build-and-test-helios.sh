@@ -21,7 +21,7 @@
 #: from_output = "/work/oxidecomputer/omicron/target/nextest/ci/junit.xml"
 #:
 #: [[publish]]
-#: series = "junit-linux"
+#: series = "junit-helios"
 #: name = "environment.json"
 #: from_output = "/work/environment.json"
 #:
