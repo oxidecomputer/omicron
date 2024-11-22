@@ -9,7 +9,7 @@ use clap::{Args, Parser, Subcommand};
 use dropshot::test_util::LogContext;
 use futures::StreamExt;
 use libc::SIGINT;
-use omicron_common::address::{CLICKHOUSE_HTTP_PORT, CLICKHOUSE_TCP_PORT};
+use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use omicron_test_utils::dev::{self, clickhouse::ClickHousePorts};
 use signal_hook_tokio::Signals;
 
@@ -43,14 +43,11 @@ enum ChDevCmd {
 
 #[derive(Clone, Debug, Args)]
 struct ChRunArgs {
-    /// The HTTP port on which the server will listen
-    #[clap(short = 'H', long, default_value_t = CLICKHOUSE_HTTP_PORT, action)]
-    http_port: u16,
     /// The port on which the native protocol server will listen
     #[clap(short, long, default_value_t = CLICKHOUSE_TCP_PORT, action)]
-    native_port: u16,
+    port: u16,
     /// Starts a ClickHouse replicated cluster of 2 replicas and 3 keeper nodes
-    #[clap(long, conflicts_with_all = ["http_port", "native_port"], action)]
+    #[clap(long, conflicts_with_all = ["port"], action)]
     replicated: bool,
 }
 
@@ -65,8 +62,7 @@ impl ChRunArgs {
         if self.replicated {
             start_replicated_cluster(&logctx).await?;
         } else {
-            start_single_node(&logctx, self.http_port, self.native_port)
-                .await?;
+            start_single_node(&logctx, self.port).await?;
         }
         Ok(())
     }
@@ -74,7 +70,6 @@ impl ChRunArgs {
 
 async fn start_single_node(
     logctx: &LogContext,
-    http_port: u16,
     native_port: u16,
 ) -> Result<(), anyhow::Error> {
     // Start a stream listening for SIGINT
@@ -82,7 +77,7 @@ async fn start_single_node(
     let mut signal_stream = signals.fuse();
 
     // Start the database server process, possibly on a specific port
-    let ports = ClickHousePorts::new(http_port, native_port)?;
+    let ports = ClickHousePorts::new(0, native_port)?;
     let mut deployment =
         dev::clickhouse::ClickHouseDeployment::new_single_node_with_ports(
             logctx, ports,

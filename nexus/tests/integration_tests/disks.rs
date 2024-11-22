@@ -1827,7 +1827,10 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
             .await;
     assert!(measurements.items.is_empty());
 
-    oximeter.force_collect().await;
+    oximeter
+        .try_force_collect()
+        .await
+        .expect("Could not force oximeter collection");
     assert_eq!(
         get_latest_silo_metric(
             cptestctx,
@@ -1841,7 +1844,10 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     // Create an instance, attach the disk to it.
     create_instance_with_disk(client).await;
     wait_for_producer(&cptestctx.oximeter, disk.id()).await;
-    oximeter.force_collect().await;
+    oximeter
+        .try_force_collect()
+        .await
+        .expect("Could not force oximeter collection");
 
     for metric in &ALL_METRICS {
         let measurements = query_for_metrics(client, &metric_url(metric)).await;
@@ -1878,7 +1884,10 @@ async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
     wait_for_producer(&cptestctx.oximeter, disk.id()).await;
 
     let oximeter = &cptestctx.oximeter;
-    oximeter.force_collect().await;
+    oximeter
+        .try_force_collect()
+        .await
+        .expect("Could not force oximeter collection");
     for metric in &ALL_METRICS {
         let collection_url = format!(
             "/v1/disks/{}/metrics/{}?project={}",

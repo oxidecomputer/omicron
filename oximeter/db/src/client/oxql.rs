@@ -1271,11 +1271,7 @@ mod tests {
         let db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         client
             .init_single_node_db()
             .await
