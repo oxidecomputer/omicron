@@ -106,7 +106,25 @@ impl<'a> Planner<'a> {
         Ok(())
     }
 
+    /// Decommission any `ExpungedButActive` disks that the sled-agent knows
+    /// are expunged.
+    ///
+    /// We need to find the set of all `ExpungedButActive` disks that no
+    /// longer exist in `parent_blueprint.blueprint_disks`. Then we need to
+    /// look at the inventory and see if the corresponding sled-agent has seen
+    /// a the omicron_physical_disks_generation from the parent_blueprint.
+    /// Alternatively, we can mark a disk decommissioned if the sled it's on
+    /// has been expunged.
+    fn do_plan_decommission_disks(&mut self) -> Result<(), Error> {
+        todo!()
+    }
+
     fn do_plan_decommission(&mut self) -> Result<(), Error> {
+        self.do_plan_decommission_disks()?;
+        self.do_plan_decommission_sleds()
+    }
+
+    fn do_plan_decommission_sleds(&mut self) -> Result<(), Error> {
         // Check for any sleds that are currently commissioned but can be
         // decommissioned. Our gates for decommissioning are:
         //

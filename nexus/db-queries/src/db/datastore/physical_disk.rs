@@ -281,6 +281,25 @@ impl DataStore {
     }
 
     /// Decommissions all expunged disks.
+    //
+    // TODO: This is not safe to do.
+    //
+    // We have multliple nexuses running, and one can be lagging behind the others.
+    // It may think it knows which disks have been expunged at the current sled,
+    // but new disks could have been added in the `ExpungedButActive` state
+    // that will now get decommissioned prematurely.
+    //
+    // The planner needs to explicitly decide which disks to decommission based
+    // on the omicron_physical_disks_config field in sled_agent inventory. If
+    // the sled the disk is on has already been expunged the planner can use
+    // that instead of the sled-agent field in inventory to decide that its safe
+    // to decommission the disk. It needs to mark these as decommissioned in the
+    // blueprint and the executor needs to then perform the decommissioning for
+    // all disk ids.
+    //
+    // The planner on the next round will then go ahead and see that the given
+    // disks are decommissioned in the planning input (database) and remove the
+    // disks to decommission from the new blueprint.
     pub async fn physical_disk_decommission_all_expunged(
         &self,
         opctx: &OpContext,
