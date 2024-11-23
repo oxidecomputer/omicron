@@ -313,10 +313,12 @@ pub async fn timeseries_query_until_success(
         &Duration::from_secs(30),
     )
     .await
-    .expect(&format!(
-        "Timeseries named in query are not available, query: '{}'",
-        query.to_string(),
-    ))
+    .unwrap_or_else(|_| {
+        panic!(
+            "Timeseries named in query are not available, query: '{}'",
+            query.to_string(),
+        )
+    })
 }
 
 /// Run an OxQL query.
