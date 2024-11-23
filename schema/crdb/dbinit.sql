@@ -4018,6 +4018,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.affinity_group_instance_membership (
     PRIMARY KEY (group_id, instance_id)
 );
 
+-- We need to look up all memberships of an instance so we can revoke these
+-- memberships efficiently when instances are deleted.
+CREATE INDEX IF NOT EXISTS lookup_affinity_group_instance_membership_by_instance ON omicron.public.affinity_group_instance_membership (
+    instance_id
+);
+
 -- Describes a collection of instances that should not be co-located.
 CREATE TABLE IF NOT EXISTS omicron.public.anti_affinity_group (
     id UUID PRIMARY KEY,
@@ -4045,6 +4051,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.anti_affinity_group_instance_membershi
     instance_id UUID NOT NULL,
 
     PRIMARY KEY (group_id, instance_id)
+);
+
+-- We need to look up all memberships of an instance so we can revoke these
+-- memberships efficiently when instances are deleted.
+CREATE INDEX IF NOT EXISTS lookup_anti_affinity_group_instance_membership_by_instance ON omicron.public.anti_affinity_group_instance_membership (
+    instance_id
 );
 
 -- Per-VMM state.

@@ -1312,7 +1312,7 @@ pub enum FailureDomain {
     Sled,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub enum AffinityGroupMember {
     Instance(Uuid),
 }

@@ -87,11 +87,13 @@ impl From<external::FailureDomain> for FailureDomain {
     }
 }
 
-#[derive(Queryable, Insertable, Clone, Debug, Resource, Selectable)]
+#[derive(
+    Queryable, Insertable, Clone, Debug, Resource, Selectable, PartialEq,
+)]
 #[diesel(table_name = affinity_group)]
 pub struct AffinityGroup {
     #[diesel(embed)]
-    identity: AffinityGroupIdentity,
+    pub identity: AffinityGroupIdentity,
     pub project_id: Uuid,
     pub policy: AffinityPolicy,
     pub failure_domain: FailureDomain,
