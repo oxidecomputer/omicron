@@ -173,7 +173,9 @@ impl BackgroundTask for RegionReplacementDetector {
                 // If the replacement request is in the `requested` state and
                 // the request's volume was soft-deleted or hard-deleted, avoid
                 // sending the start request and instead transition the request
-                // to completed
+                // to completed. Note the saga will do the right thing if the
+                // volume is deleted, but this avoids the overhead of starting
+                // it.
 
                 let volume_deleted = match self
                     .datastore

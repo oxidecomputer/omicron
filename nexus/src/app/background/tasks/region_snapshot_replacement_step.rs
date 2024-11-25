@@ -410,7 +410,9 @@ impl RegionSnapshotReplacementFindAffected {
             let request_step_id = request.id;
 
             // Check if the volume was deleted _after_ the replacement step was
-            // created.
+            // created. Avoid launching the region snapshot replacement step
+            // saga if it was deleted: the saga will do the right thing if it is
+            // deleted, but this avoids the overhead of starting it.
 
             let volume_deleted =
                 match self.datastore.volume_deleted(request.volume_id).await {
