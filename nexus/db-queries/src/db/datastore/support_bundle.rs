@@ -28,7 +28,6 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_uuid_kinds::BlueprintUuid;
-use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
@@ -131,7 +130,7 @@ impl DataStore {
                     let bundle = SupportBundle::new(
                         reason_for_creation,
                         ZpoolUuid::from_untyped_uuid(dataset.pool_id),
-                        DatasetUuid::from_untyped_uuid(dataset.id()),
+                        dataset.id(),
                         this_nexus_id,
                     );
 
@@ -485,6 +484,7 @@ mod test {
     use nexus_types::deployment::BlueprintZoneType;
     use omicron_common::api::internal::shared::DatasetKind::Debug as DebugDatasetKind;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::SledUuid;
     use rand::Rng;
 
@@ -581,7 +581,7 @@ mod test {
                     .expect("failed to upsert zpool");
 
                 let dataset = Dataset::new(
-                    pool.dataset.into_untyped_uuid(),
+                    pool.dataset,
                     pool.pool.into_untyped_uuid(),
                     None,
                     DebugDatasetKind,
