@@ -81,12 +81,12 @@ impl std::str::FromStr for RegionSnapshotReplacementState {
 ///          |                        |
 ///          v                        ---
 ///                                   ---
-///       Running                     |
-///                                   |
-///          |                        |
-///          v                        |
-///                                   | responsibility of region snapshot
-///     Completing                    | replacement finish saga
+///       Running  <--                |
+///                  |                |
+///          |       |                |
+///          v       |                |
+///                  |                | responsibility of region snapshot
+///     Completing --                 | replacement finish saga
 ///                                   |
 ///          |                        |
 ///          v                        |
