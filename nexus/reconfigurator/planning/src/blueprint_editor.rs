@@ -2,13 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Omicron deployment manager
+//! High-level facilities for editing Blueprints
 //!
-//! See docs/reconfigurator.adoc for an overview.
+//! See crate-level documentation for details.
 
-pub mod blueprint_builder;
-pub mod blueprint_editor;
-pub mod example;
-mod ip_allocator;
-pub mod planner;
-pub mod system;
+mod sled_editor;

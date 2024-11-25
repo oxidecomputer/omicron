@@ -736,6 +736,17 @@ impl BlueprintZoneConfig {
     pub fn underlay_ip(&self) -> Ipv6Addr {
         self.zone_type.underlay_ip()
     }
+
+    /// Returns the dataset used for the the zone's (transient) root filesystem.
+    pub fn filesystem_dataset(&self) -> Option<DatasetName> {
+        let pool_name = self.filesystem_pool.clone()?;
+        let name = illumos_utils::zone::zone_name(
+            self.zone_type.kind().zone_prefix(),
+            Some(self.id),
+        );
+        let kind = DatasetKind::TransientZone { name };
+        Some(DatasetName::new(pool_name, kind))
+    }
 }
 
 impl From<BlueprintZoneConfig> for OmicronZoneConfig {
