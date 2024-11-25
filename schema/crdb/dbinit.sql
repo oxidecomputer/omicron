@@ -3354,7 +3354,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     reservoir_size INT8 CHECK (reservoir_size < usable_physical_ram) NOT NULL,
 
     -- The last generation of OmicronPhysicalDisksConfig seen by the sled-agent
-    omicrion_physical_disks_generation INT8 NOT NULL,
+    omicron_physical_disks_generation INT8 NOT NULL,
 
     PRIMARY KEY (inv_collection_id, sled_id)
 );
