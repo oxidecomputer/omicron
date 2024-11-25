@@ -110,7 +110,7 @@ impl BlueprintDatasetsEditor {
                         // Bump generation number for any sled whose
                         // DatasetsConfig changed
                         if self.changed.contains(&sled_id) {
-                            config.generation = config.generation.next()
+                            config.generation = config.generation.next();
                         }
                         config
                     }

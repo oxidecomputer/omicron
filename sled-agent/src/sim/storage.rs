@@ -940,11 +940,20 @@ impl Storage {
         config: DatasetsConfig,
     ) -> Result<DatasetsManagementResult, HttpError> {
         if let Some(stored_config) = self.dataset_config.as_ref() {
-            if stored_config.generation < config.generation {
+            if stored_config.generation > config.generation {
                 return Err(HttpError::for_client_error(
                     None,
                     http::StatusCode::BAD_REQUEST,
                     "Generation number too old".to_string(),
+                ));
+            } else if stored_config.generation == config.generation
+                && *stored_config != config
+            {
+                return Err(HttpError::for_client_error(
+                    None,
+                    http::StatusCode::BAD_REQUEST,
+                    "Generation number unchanged but data is different"
+                        .to_string(),
                 ));
             }
         }
@@ -979,11 +988,20 @@ impl Storage {
         config: OmicronPhysicalDisksConfig,
     ) -> Result<DisksManagementResult, HttpError> {
         if let Some(stored_config) = self.config.as_ref() {
-            if stored_config.generation < config.generation {
+            if stored_config.generation > config.generation {
                 return Err(HttpError::for_client_error(
                     None,
                     http::StatusCode::BAD_REQUEST,
                     "Generation number too old".to_string(),
+                ));
+            } else if stored_config.generation == config.generation
+                && *stored_config != config
+            {
+                return Err(HttpError::for_client_error(
+                    None,
+                    http::StatusCode::BAD_REQUEST,
+                    "Generation number unchanged but data is different"
+                        .to_string(),
                 ));
             }
         }

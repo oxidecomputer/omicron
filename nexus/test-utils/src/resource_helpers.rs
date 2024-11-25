@@ -14,6 +14,7 @@ use dropshot::Method;
 use http::StatusCode;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_interface::NexusServer;
+use nexus_types::deployment::Blueprint;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::Baseboard;
@@ -1166,6 +1167,21 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         }
 
         disk_test
+    }
+
+    pub async fn add_blueprint_disks(&mut self, blueprint: &Blueprint) {
+        for (sled_id, disks_config) in blueprint.blueprint_disks.iter() {
+            for disk in &disks_config.disks {
+                self.add_zpool_with_dataset_ext(
+                    *sled_id,
+                    disk.id,
+                    disk.pool_id,
+                    DatasetUuid::new_v4(),
+                    Self::DEFAULT_ZPOOL_SIZE_GIB,
+                )
+                .await;
+            }
+        }
     }
 
     pub async fn add_zpool_with_dataset(&mut self, sled_id: SledUuid) {

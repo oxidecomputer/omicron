@@ -18,6 +18,9 @@ setup = 'crdb-seed'
 [profile.ci]
 fail-fast = false
 
+[profile.ci.junit]
+path = "junit.xml"
+
 [script.crdb-seed]
 # Use the test profile for this executable since that's how almost all
 # invocations of nextest happen.

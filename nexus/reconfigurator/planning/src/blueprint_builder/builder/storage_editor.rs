@@ -57,7 +57,6 @@ impl BlueprintStorageEditor {
         Ok(SledStorageEditor { disks, datasets })
     }
 
-    #[cfg(test)]
     pub fn current_sled_disks(
         &self,
         sled_id: &SledUuid,
