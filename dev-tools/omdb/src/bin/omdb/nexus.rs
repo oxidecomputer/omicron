@@ -1655,6 +1655,14 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                     println!("    > {line}");
                 }
 
+                println!(
+                    "    total requests completed ok: {}",
+                    status.requests_completed_ok.len(),
+                );
+                for line in &status.requests_completed_ok {
+                    println!("    > {line}");
+                }
+
                 println!("    errors: {}", status.errors.len());
                 for line in &status.errors {
                     println!("    > {line}");
@@ -1717,6 +1725,14 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                     status.step_invoked_ok.len(),
                 );
                 for line in &status.step_invoked_ok {
+                    println!("    > {line}");
+                }
+
+                println!(
+                    "    total steps set to volume_deleted ok: {}",
+                    status.step_set_volume_deleted_ok.len(),
+                );
+                for line in &status.step_set_volume_deleted_ok {
                     println!("    > {line}");
                 }
 
@@ -1831,10 +1847,11 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
 
             Ok(status) => {
                 println!(
-                    "    total records transitioned to done: {}",
-                    status.records_set_to_done.len(),
+                    "    region snapshot replacement finish sagas started \
+                    ok: {}",
+                    status.finish_invoked_ok.len()
                 );
-                for line in &status.records_set_to_done {
+                for line in &status.finish_invoked_ok {
                     println!("    > {line}");
                 }
 

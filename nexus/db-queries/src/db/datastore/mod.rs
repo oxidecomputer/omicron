@@ -125,16 +125,7 @@ pub use sled::TransitionError;
 pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use virtual_provisioning_collection::StorageType;
 pub use vmm::VmmStateUpdateResult;
-pub use volume::read_only_resources_associated_with_volume;
-pub use volume::CrucibleResources;
-pub use volume::CrucibleTargets;
-pub use volume::ExistingTarget;
-pub use volume::ReplacementTarget;
-pub use volume::VolumeCheckoutReason;
-pub use volume::VolumeReplaceResult;
-pub use volume::VolumeReplacementParams;
-pub use volume::VolumeToDelete;
-pub use volume::VolumeWithTarget;
+pub use volume::*;
 
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.

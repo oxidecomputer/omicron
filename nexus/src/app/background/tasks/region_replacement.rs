@@ -173,7 +173,9 @@ impl BackgroundTask for RegionReplacementDetector {
                 // If the replacement request is in the `requested` state and
                 // the request's volume was soft-deleted or hard-deleted, avoid
                 // sending the start request and instead transition the request
-                // to completed
+                // to completed. Note the saga will do the right thing if the
+                // volume is deleted, but this avoids the overhead of starting
+                // it.
 
                 let volume_deleted = match self
                     .datastore
@@ -314,6 +316,21 @@ mod test {
 
         // Add a region replacement request for a fake region
         let volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: volume_id,
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
         let request = RegionReplacement::new(Uuid::new_v4(), volume_id);
         let request_id = request.id;
 
