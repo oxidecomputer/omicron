@@ -1099,7 +1099,6 @@ pub struct MetricInfoPath {
 pub struct TimeSeriesSettingsQuery {
     /// The interval to collect monitoring metrics in seconds.
     /// Default is 60 seconds.
-    // TODO: How can I actually get the default in the API spec?
     #[serde(default = "default_interval")]
     pub interval: u64,
     /// Range of time to collect monitoring metrics in seconds.
