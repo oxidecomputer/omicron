@@ -1155,8 +1155,14 @@ impl SystemTimeSeriesSettings {
             SystemTable::AsynchronousMetricLog => "value",
         };
 
+        // This formats the unix timestamp as an integer rather than a string
+        let int_timestamp = match ts_fmt {
+            TimestampFormat::UnixEpoch => "::INT",
+            TimestampFormat::Utc => "",
+        };
+
         let mut query = format!(
-            "SELECT toStartOfInterval(event_time, INTERVAL {interval} SECOND) AS time, avg({avg_value}) AS value
+            "SELECT toStartOfInterval(event_time, INTERVAL {interval} SECOND){int_timestamp} AS time, avg({avg_value}) AS value
             FROM system.{table}
             WHERE event_date >= toDate(now() - {time_range}) AND event_time >= now() - {time_range}
             "
@@ -1190,25 +1196,7 @@ impl SystemTimeSeriesSettings {
 #[serde(untagged)]
 pub enum Timestamp {
     Utc(DateTime<Utc>),
-    Unix(String),
-}
-
-impl FromStr for Timestamp {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Ok(t) = s.parse() {
-            Ok(Timestamp::Utc(t))
-        } else if let Some(_) = DateTime::from_timestamp(
-            s.parse()
-                .with_context(|| format!("{s} is not a valid time format"))?,
-            0,
-        ) {
-            Ok(Timestamp::Unix(s.to_string()))
-        } else {
-            bail!("{s} is not a valid time format")
-        }
-    }
+    Unix(u64),
 }
 
 /// Retrieved time series from the internal `system` database.
@@ -1227,7 +1215,6 @@ impl SystemTimeSeries {
         info!(
             log,
             "Retrieved data from `system` database";
-            // TODO: Log output here? feels like a lot of noise?
             "output" => ?s
         );
 
@@ -2107,23 +2094,23 @@ snapshot_storage_disk=LocalSnapshotDisk
     #[test]
     fn test_unix_epoch_system_timeseries_parse_success() {
         let log = log();
-        let data = "{\"time\":\"1732494720\",\"value\":110220450825.75238}
-{\"time\":\"1732494840\",\"value\":110339992917.33333}
-{\"time\":\"1732494960\",\"value\":110421854037.33333}\n"
+        let data = "{\"time\":1732494720,\"value\":110220450825.75238}
+{\"time\":1732494840,\"value\":110339992917.33333}
+{\"time\":1732494960,\"value\":110421854037.33333}\n"
             .as_bytes();
         let timeseries = SystemTimeSeries::parse(&log, data).unwrap();
 
         let expected = vec![
             SystemTimeSeries {
-                time: crate::Timestamp::Unix("1732494720".to_string()),
+                time: crate::Timestamp::Unix(1732494720),
                 value: 110220450825.75238,
             },
             SystemTimeSeries {
-                time: crate::Timestamp::Unix("1732494840".to_string()),
+                time: crate::Timestamp::Unix(1732494840),
                 value: 110339992917.33331,
             },
             SystemTimeSeries {
-                time: crate::Timestamp::Unix("1732494960".to_string()),
+                time: crate::Timestamp::Unix(1732494960),
                 value: 110421854037.33331,
             },
         ];
@@ -2184,7 +2171,8 @@ snapshot_storage_disk=LocalSnapshotDisk
     #[test]
     fn test_time_format_system_timeseries_parse_fail() {
         let log = log();
-        let data = "{\"time\":2024,\"value\":110220450825.75238}\n".as_bytes();
+        let data = "{\"time\":\"2024-11-25\",\"value\":110220450825.75238}\n"
+            .as_bytes();
         let result = SystemTimeSeries::parse(&log, data);
 
         let error = result.unwrap_err();
@@ -2192,7 +2180,7 @@ snapshot_storage_disk=LocalSnapshotDisk
 
         assert_eq!(
             format!("{}", root_cause),
-           "data did not match any variant of untagged enum Timestamp at line 1 column 12",
+           "data did not match any variant of untagged enum Timestamp at line 1 column 20",
         );
     }
 }
