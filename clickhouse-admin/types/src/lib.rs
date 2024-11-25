@@ -1186,15 +1186,33 @@ impl SystemTimeSeriesSettings {
     }
 }
 
-#[derive(Debug, Display, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Display, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(untagged)]
 pub enum Timestamp {
-    Unix(String),
     Utc(DateTime<Utc>),
+    Unix(String),
+}
+
+impl FromStr for Timestamp {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Ok(t) = s.parse() {
+            Ok(Timestamp::Utc(t))
+        } else if let Some(_) = DateTime::from_timestamp(
+            s.parse()
+                .with_context(|| format!("{s} is not a valid time format"))?,
+            0,
+        ) {
+            Ok(Timestamp::Unix(s.to_string()))
+        } else {
+            bail!("{s} is not a valid time format")
+        }
+    }
 }
 
 /// Retrieved time series from the internal `system` database.
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct SystemTimeSeries {
     pub time: Timestamp,
@@ -1216,6 +1234,12 @@ impl SystemTimeSeries {
         let mut m = vec![];
 
         for line in s.lines() {
+            // serde_json deserialises f64 types with loss of precision at times.
+            // For example, in our tests some of the values to serialize have a
+            // fractional value of `.33333`, but once parsed, they become `.33331`.
+            //
+            // We do not require this level of precision, so we'll leave as is.
+            // Just noting that we are aware of this slight inaccuracy.
             let item: SystemTimeSeries = serde_json::from_str(line)?;
             m.push(item);
         }
@@ -1239,6 +1263,7 @@ mod tests {
         ClickhouseHost, DistributedDdlQueue, KeeperConf, KeeperId,
         KeeperServerInfo, KeeperServerType, KeeperSettings, Lgif, LogLevel,
         RaftConfig, RaftServerSettings, ServerId, ServerSettings,
+        SystemTimeSeries,
     };
 
     fn log() -> slog::Logger {
@@ -2076,6 +2101,98 @@ snapshot_storage_disk=LocalSnapshotDisk
         assert_eq!(
             format!("{}", root_cause),
             "missing field `entry_version` at line 1 column 454",
+        );
+    }
+
+    #[test]
+    fn test_unix_epoch_system_timeseries_parse_success() {
+        let log = log();
+        let data = "{\"time\":\"1732494720\",\"value\":110220450825.75238}
+{\"time\":\"1732494840\",\"value\":110339992917.33333}
+{\"time\":\"1732494960\",\"value\":110421854037.33333}\n"
+            .as_bytes();
+        let timeseries = SystemTimeSeries::parse(&log, data).unwrap();
+
+        let expected = vec![
+            SystemTimeSeries {
+                time: crate::Timestamp::Unix("1732494720".to_string()),
+                value: 110220450825.75238,
+            },
+            SystemTimeSeries {
+                time: crate::Timestamp::Unix("1732494840".to_string()),
+                value: 110339992917.33331,
+            },
+            SystemTimeSeries {
+                time: crate::Timestamp::Unix("1732494960".to_string()),
+                value: 110421854037.33331,
+            },
+        ];
+
+        assert_eq!(timeseries, expected);
+    }
+
+    #[test]
+    fn test_utc_system_timeseries_parse_success() {
+        let log = log();
+        let data =
+            "{\"time\":\"2024-11-25T00:34:00Z\",\"value\":110220450825.75238}
+{\"time\":\"2024-11-25T00:35:00Z\",\"value\":110339992917.33333}
+{\"time\":\"2024-11-25T00:36:00Z\",\"value\":110421854037.33333}\n"
+                .as_bytes();
+        let timeseries = SystemTimeSeries::parse(&log, data).unwrap();
+
+        let expected = vec![
+            SystemTimeSeries {
+                time: crate::Timestamp::Utc(
+                    "2024-11-25T00:34:00Z".parse::<DateTime<Utc>>().unwrap(),
+                ),
+                value: 110220450825.75238,
+            },
+            SystemTimeSeries {
+                time: crate::Timestamp::Utc(
+                    "2024-11-25T00:35:00Z".parse::<DateTime<Utc>>().unwrap(),
+                ),
+                value: 110339992917.33331,
+            },
+            SystemTimeSeries {
+                time: crate::Timestamp::Utc(
+                    "2024-11-25T00:36:00Z".parse::<DateTime<Utc>>().unwrap(),
+                ),
+                value: 110421854037.33331,
+            },
+        ];
+
+        assert_eq!(timeseries, expected);
+    }
+
+    #[test]
+    fn test_misshapen_system_timeseries_parse_fail() {
+        let log = log();
+        let data = "{\"bob\":\"1732494720\",\"value\":110220450825.75238}\n"
+            .as_bytes();
+        let result = SystemTimeSeries::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+            "missing field `time` at line 1 column 47",
+        );
+    }
+
+    #[test]
+    fn test_time_format_system_timeseries_parse_fail() {
+        let log = log();
+        let data = "{\"time\":2024,\"value\":110220450825.75238}\n".as_bytes();
+        let result = SystemTimeSeries::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+           "data did not match any variant of untagged enum Timestamp at line 1 column 12",
         );
     }
 }

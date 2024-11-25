@@ -631,11 +631,11 @@
       "Timestamp": {
         "anyOf": [
           {
-            "type": "string"
-          },
-          {
             "type": "string",
             "format": "date-time"
+          },
+          {
+            "type": "string"
           }
         ]
       },
