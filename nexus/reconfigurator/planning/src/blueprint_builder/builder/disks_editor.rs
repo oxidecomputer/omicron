@@ -8,7 +8,6 @@ use super::EditCounts;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use omicron_common::api::external::Generation;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::btree_map::Entry;
@@ -127,7 +126,7 @@ impl<'a> SledDisksEditor<'a> {
     }
 
     pub fn ensure_disk(&mut self, disk: BlueprintPhysicalDiskConfig) {
-        let disk_id = PhysicalDiskUuid::from_untyped_uuid(disk.id);
+        let disk_id = disk.id;
         match self.config.disks.entry(disk_id) {
             Entry::Vacant(slot) => {
                 slot.insert(disk);
@@ -189,9 +188,7 @@ impl From<BlueprintPhysicalDisksConfig> for DisksConfig {
             disks: config
                 .disks
                 .into_iter()
-                .map(|disk| {
-                    (PhysicalDiskUuid::from_untyped_uuid(disk.id), disk)
-                })
+                .map(|disk| (disk.id, disk))
                 .collect(),
         }
     }

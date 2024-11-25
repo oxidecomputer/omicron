@@ -10,11 +10,13 @@ use crate::schema::{physical_disk, zpool};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_types::{external_api::views, identity::Asset};
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use uuid::Uuid;
 
 /// Physical disk attached to sled.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
 #[diesel(table_name = physical_disk)]
+#[asset(uuid_kind = PhysicalDiskKind)]
 pub struct PhysicalDisk {
     #[diesel(embed)]
     identity: PhysicalDiskIdentity,
@@ -34,7 +36,7 @@ pub struct PhysicalDisk {
 impl PhysicalDisk {
     /// Creates a new in-service, active disk
     pub fn new(
-        id: Uuid,
+        id: PhysicalDiskUuid,
         vendor: String,
         serial: String,
         model: String,
@@ -55,8 +57,8 @@ impl PhysicalDisk {
         }
     }
 
-    pub fn id(&self) -> Uuid {
-        self.identity.id
+    pub fn id(&self) -> PhysicalDiskUuid {
+        self.identity.id.into()
     }
 
     pub fn time_deleted(&self) -> Option<DateTime<Utc>> {

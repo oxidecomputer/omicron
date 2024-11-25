@@ -11,6 +11,7 @@ use nexus_auth::authz;
 use nexus_db_model::SemverVersion;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use oso::PolarClass;
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -102,12 +103,12 @@ pub async fn make_resources(
 
     make_services(&mut builder).await;
 
-    let physical_disk_id =
+    let physical_disk_id: PhysicalDiskUuid =
         "c9f923f6-caf3-4c83-96f9-8ffe8c627dd2".parse().unwrap();
     builder.new_resource(authz::PhysicalDisk::new(
         authz::FLEET,
         physical_disk_id,
-        LookupType::ById(physical_disk_id),
+        LookupType::ById(physical_disk_id.into_untyped_uuid()),
     ));
 
     let device_user_code = String::from("a-device-user-code");

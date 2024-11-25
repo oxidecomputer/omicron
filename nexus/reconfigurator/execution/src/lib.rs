@@ -717,6 +717,7 @@ mod tests {
     use nexus_db_model::SledUpdate;
     use nexus_db_model::Zpool;
     use omicron_common::api::external::Error;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
     use std::collections::BTreeSet;
     use uuid::Uuid;
 
@@ -776,7 +777,7 @@ mod tests {
                 continue;
             };
 
-            let physical_disk_id = Uuid::new_v4();
+            let physical_disk_id = PhysicalDiskUuid::new_v4();
             let pool_id = dataset.dataset.pool_name.id();
 
             let disk = PhysicalDisk::new(

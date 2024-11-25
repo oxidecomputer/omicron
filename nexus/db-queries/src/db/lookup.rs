@@ -21,6 +21,7 @@ use nexus_db_model::Name;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
 use uuid::Uuid;
@@ -385,7 +386,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type PhysicalDisk, identified by its id
-    pub fn physical_disk(self, id: Uuid) -> PhysicalDisk<'a> {
+    pub fn physical_disk(self, id: PhysicalDiskUuid) -> PhysicalDisk<'a> {
         PhysicalDisk::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -874,7 +875,7 @@ lookup_resource! {
     children = [],
     lookup_by_name = false,
     soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = PhysicalDiskKind } ]
 }
 
 lookup_resource! {

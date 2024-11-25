@@ -76,6 +76,7 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oximeter_collector::Oximeter;
@@ -838,7 +839,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                                         "nexus-test-disk-{disk_index}"
                                     ),
                                 },
-                                id: Uuid::new_v4(),
+                                id: PhysicalDiskUuid::new_v4(),
                                 pool_id: zpool.id(),
                             });
                             disk_index += 1;
@@ -875,7 +876,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                                         "nexus-test-disk-{disk_index}"
                                     ),
                                 },
-                                id: Uuid::new_v4(),
+                                id: PhysicalDiskUuid::new_v4(),
                                 pool_id: ZpoolUuid::new_v4(),
                             });
                             disk_index += 1;

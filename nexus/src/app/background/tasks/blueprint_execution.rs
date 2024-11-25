@@ -195,6 +195,7 @@ mod test {
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use serde::Deserialize;
@@ -454,7 +455,7 @@ mod test {
             let zpool = Zpool::new(
                 pool_id.into_untyped_uuid(),
                 sled_id.into_untyped_uuid(),
-                Uuid::new_v4(), // physical_disk_id
+                PhysicalDiskUuid::new_v4(),
             );
             datastore
                 .zpool_insert(&opctx, zpool)
