@@ -63,6 +63,7 @@ impl_typed_uuid_kind! {
     Propolis => "propolis",
     RackInit => "rack_init",
     RackReset => "rack_reset",
+    ReconfiguratorSim => "reconfigurator_sim",
     Region => "region",
     Sled => "sled",
     SupportBundle => "support_bundle",

@@ -24,6 +24,7 @@ clap.workspace = true
 chrono.workspace = true
 clickhouse-admin-keeper-client.workspace = true
 clickhouse-admin-server-client.workspace = true
+clickhouse-admin-single-client.workspace = true
 cockroach-admin-client.workspace = true
 crucible-agent-client.workspace = true
 crucible-pantry-client.workspace = true
@@ -49,7 +50,6 @@ itertools.workspace = true
 macaddr.workspace = true
 # Not under "dev-dependencies"; these also need to be implemented for
 # integration tests.
-nexus-client.workspace = true
 nexus-config.workspace = true
 nexus-external-api.workspace = true
 nexus-internal-api.workspace = true
@@ -132,6 +132,7 @@ gateway-messages.workspace = true
 gateway-test-utils.workspace = true
 hubtools.workspace = true
 nexus-db-queries = { workspace = true, features = ["testing"] }
+nexus-client.workspace = true
 nexus-test-utils-macros.workspace = true
 nexus-test-utils.workspace = true
 omicron-sled-agent.workspace = true

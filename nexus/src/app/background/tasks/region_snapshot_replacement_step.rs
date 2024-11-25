@@ -207,7 +207,7 @@ impl RegionSnapshotReplacementFindAffected {
             let region_snapshot = match self
                 .datastore
                 .region_snapshot_get(
-                    request.old_dataset_id,
+                    request.old_dataset_id.into(),
                     request.old_region_id,
                     request.old_snapshot_id,
                 )
@@ -468,6 +468,7 @@ mod test {
     use nexus_db_model::RegionSnapshotReplacementStepState;
     use nexus_db_model::Volume;
     use nexus_test_utils_macros::nexus_test;
+    use omicron_uuid_kinds::DatasetUuid;
     use sled_agent_client::types::CrucibleOpts;
     use sled_agent_client::types::VolumeConstructionRequest;
     use uuid::Uuid;
@@ -486,7 +487,7 @@ mod test {
 
         datastore
             .region_snapshot_create(RegionSnapshot::new(
-                Uuid::new_v4(),
+                DatasetUuid::new_v4(),
                 Uuid::new_v4(),
                 Uuid::new_v4(),
                 snapshot_addr.clone(),
@@ -555,7 +556,7 @@ mod test {
 
         // Add a region snapshot replacement request for a fake region snapshot.
 
-        let dataset_id = Uuid::new_v4();
+        let dataset_id = DatasetUuid::new_v4();
         let region_id = Uuid::new_v4();
         let snapshot_id = Uuid::new_v4();
         let snapshot_addr = String::from("[fd00:1122:3344::101]:9876");

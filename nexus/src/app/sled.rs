@@ -23,7 +23,9 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::internal::shared::DatasetKind;
-use omicron_uuid_kinds::{GenericUuid, SledUuid};
+use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use sled_agent_client::Client as SledAgentClient;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -307,7 +309,7 @@ impl super::Nexus {
     /// Upserts a crucible dataset into the database, updating it if it already exists.
     pub(crate) async fn upsert_crucible_dataset(
         &self,
-        id: Uuid,
+        id: DatasetUuid,
         zpool_id: Uuid,
         address: SocketAddrV6,
     ) -> Result<(), Error> {

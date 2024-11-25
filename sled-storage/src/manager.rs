@@ -952,8 +952,8 @@ impl StorageManager {
             err: None,
         };
 
-        let mountpoint_path =
-            config.name.mountpoint(ZPOOL_MOUNTPOINT_ROOT.into());
+        let mountpoint_root = &self.resources.disks().mount_config().root;
+        let mountpoint_path = config.name.mountpoint(mountpoint_root);
         let details = DatasetCreationDetails {
             zoned: config.name.dataset().zoned(),
             mountpoint: Mountpoint::Path(mountpoint_path),

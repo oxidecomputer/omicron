@@ -332,7 +332,7 @@ pub async fn run_replacement_tasks_to_completion(
             }
         },
         &Duration::from_secs(1),
-        &Duration::from_secs(20),
+        &Duration::from_secs(60),
     )
     .await
     .unwrap();

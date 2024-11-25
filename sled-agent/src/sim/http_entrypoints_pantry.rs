@@ -421,7 +421,10 @@ mod tests {
         let Value::String(ref version) = real_api["info"]["version"] else {
             unreachable!();
         };
-        let sim_api = super::api().openapi(title, version).json().unwrap();
+        let sim_api = super::api()
+            .openapi(title, version.parse().unwrap())
+            .json()
+            .unwrap();
 
         // We'll assert that anything which apppears in the simulated API must
         // appear exactly as-is in the real API. I.e., the simulated is a subset

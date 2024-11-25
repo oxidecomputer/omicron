@@ -8,11 +8,11 @@
 //! named by the client, since it is expected that multiple services will
 //! implement it.
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use dropshot::{
     Body, ConfigDropshot, FreeformBody, HandlerTaskMode, HttpError,
-    HttpResponseHeaders, HttpResponseOk, HttpResponseUpdatedNoContent,
-    HttpServerStarter, Path, RequestContext, TypedBody,
+    HttpResponseHeaders, HttpResponseOk, HttpResponseUpdatedNoContent, Path,
+    RequestContext, TypedBody,
 };
 use hyper::{header, StatusCode};
 use installinator_common::EventReport;
@@ -133,37 +133,4 @@ pub fn default_config(bind_address: std::net::SocketAddr) -> ConfigDropshot {
         default_handler_task_mode: HandlerTaskMode::Detached,
         log_headers: vec![],
     }
-}
-
-/// Make an `HttpServerStarter` for the installinator API with default settings.
-pub fn make_server_starter<T: InstallinatorApi>(
-    context: T::Context,
-    bind_address: std::net::SocketAddr,
-    log: &slog::Logger,
-) -> Result<HttpServerStarter<T::Context>> {
-    let dropshot_config = dropshot::ConfigDropshot {
-        bind_address,
-        // Even though the installinator sets an upper bound on the number
-        // of items in a progress report, they can get pretty large if they
-        // haven't gone through for a bit. Ensure that hitting the max
-        // request size won't cause a failure by setting a generous upper
-        // bound for the request size.
-        //
-        // TODO: replace with an endpoint-specific option once
-        // https://github.com/oxidecomputer/dropshot/pull/618 lands and is
-        // available in omicron.
-        request_body_max_bytes: 4 * 1024 * 1024,
-        default_handler_task_mode: HandlerTaskMode::Detached,
-        log_headers: vec![],
-    };
-
-    let api = crate::installinator_api_mod::api_description::<T>()?;
-    let server =
-        dropshot::HttpServerStarter::new(&dropshot_config, api, context, &log)
-            .map_err(|error| {
-                anyhow!(error)
-                    .context("failed to create installinator artifact server")
-            })?;
-
-    Ok(server)
 }

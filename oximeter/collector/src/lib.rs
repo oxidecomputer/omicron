@@ -6,11 +6,12 @@
 
 // Copyright 2023 Oxide Computer Company
 
+pub use agent::ForcedCollectionError;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::HttpError;
 use dropshot::HttpServer;
-use dropshot::HttpServerStarter;
+use dropshot::ServerBuilder;
 use internal_dns_types::names::ServiceName;
 use omicron_common::address::get_internal_dns_server_addresses;
 use omicron_common::address::DNS_PORT;
@@ -75,17 +76,11 @@ impl From<Error> for HttpError {
 /// Configuration for interacting with the metric database.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub struct DbConfig {
-    /// Optional address of the ClickHouse server's HTTP interface.
-    ///
-    /// If "None", will be inferred from DNS.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub address: Option<SocketAddr>,
-
     /// Optional address of the ClickHouse server's native TCP interface.
     ///
     /// If None, will be inferred from DNS.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_address: Option<SocketAddr>,
+    pub address: Option<SocketAddr>,
 
     /// Batch size of samples at which to insert.
     pub batch_size: usize,
@@ -117,7 +112,6 @@ impl DbConfig {
     fn with_address(address: SocketAddr) -> Self {
         Self {
             address: Some(address),
-            native_address: None,
             batch_size: Self::DEFAULT_BATCH_SIZE,
             batch_interval: Self::DEFAULT_BATCH_INTERVAL,
             replicated: Self::DEFAULT_REPLICATED,
@@ -256,38 +250,17 @@ impl Oximeter {
                 }
             };
 
-        // Closure to create _two_ resolvers, one to resolve the ClickHouse HTTP
-        // SRV record, and one for the native TCP record.
-        //
-        // TODO(cleanup): This should be removed if / when we entirely switch to
-        // the native protocol.
-        let make_clickhouse_resolvers = || -> (BoxedResolver, BoxedResolver) {
-            let http_resolver = make_resolver(
-                config.db.address,
-                if config.db.replicated {
-                    ServiceName::ClickhouseServer
-                } else {
-                    ServiceName::Clickhouse
-                },
-            );
-            let native_resolver = make_resolver(
-                config.db.native_address,
-                ServiceName::ClickhouseNative,
-            );
-            (http_resolver, native_resolver)
-        };
-
         let make_agent = || async {
             debug!(log, "creating ClickHouse client");
-            let (http_resolver, native_resolver) = make_clickhouse_resolvers();
+            let resolver =
+                make_resolver(config.db.address, ServiceName::ClickhouseNative);
             Ok(Arc::new(
                 OximeterAgent::with_id(
                     args.id,
                     args.address,
                     config.refresh_interval,
                     config.db,
-                    http_resolver,
-                    native_resolver,
+                    resolver,
                     &log,
                     config.db.replicated,
                 )
@@ -311,17 +284,17 @@ impl Oximeter {
         .expect("Expected an infinite retry loop initializing the timeseries database");
 
         let dropshot_log = log.new(o!("component" => "dropshot"));
-        let server = HttpServerStarter::new(
-            &ConfigDropshot {
-                bind_address: SocketAddr::V6(args.address),
-                ..Default::default()
-            },
+        let server = ServerBuilder::new(
             oximeter_api(),
             Arc::clone(&agent),
-            &dropshot_log,
+            dropshot_log,
         )
-        .map_err(|e| Error::Server(e.to_string()))?
-        .start();
+        .config(ConfigDropshot {
+            bind_address: SocketAddr::V6(args.address),
+            ..Default::default()
+        })
+        .start()
+        .map_err(|e| Error::Server(e.to_string()))?;
 
         // Notify Nexus that this oximeter instance is available.
         let our_info = nexus_client::types::OximeterInfo {
@@ -422,17 +395,17 @@ impl Oximeter {
         );
 
         let dropshot_log = log.new(o!("component" => "dropshot"));
-        let server = HttpServerStarter::new(
-            &ConfigDropshot {
-                bind_address: SocketAddr::V6(args.address),
-                ..Default::default()
-            },
+        let server = ServerBuilder::new(
             oximeter_api(),
             Arc::clone(&agent),
-            &dropshot_log,
+            dropshot_log,
         )
-        .map_err(|e| Error::Server(e.to_string()))?
-        .start();
+        .config(ConfigDropshot {
+            bind_address: SocketAddr::V6(args.address),
+            ..Default::default()
+        })
+        .start()
+        .map_err(|e| Error::Server(e.to_string()))?;
         info!(log, "started oximeter standalone server");
 
         // Notify the standalone nexus.
@@ -483,8 +456,13 @@ impl Oximeter {
     ///
     /// This is particularly useful during tests, which would prefer to
     /// avoid waiting until a collection interval completes.
-    pub async fn force_collect(&self) {
-        self.server.app_private().force_collection().await
+    ///
+    /// NOTE: As the name implies, this is best effort. It can fail if there are
+    /// already outstanding calls to force a collection. It rarely makes sense
+    /// to have multiple concurrent calls here, so that should not impact most
+    /// callers.
+    pub async fn try_force_collect(&self) -> Result<(), ForcedCollectionError> {
+        self.server.app_private().try_force_collection().await
     }
 
     /// List producers.

@@ -315,7 +315,6 @@ mod test {
     use nexus_inventory::now_db_precision;
     use nexus_inventory::CollectionBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
-    use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_preparation::PlanningInputFromDb;
     use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
@@ -323,7 +322,7 @@ mod test {
     use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_test_utils::resource_helpers::create_silo;
-    use nexus_test_utils::resource_helpers::DiskTestBuilder;
+    use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::Blueprint;
@@ -1249,14 +1248,6 @@ mod test {
     async fn test_silos_external_dns_end_to_end(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        // Add a zpool to all sleds, just to ensure that all new zones can find
-        // a transient filesystem wherever they end up being placed.
-        DiskTestBuilder::new(&cptestctx)
-            .on_all_sleds()
-            .with_zpool_count(1)
-            .build()
-            .await;
-
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let resolver = nexus.resolver();
@@ -1290,10 +1281,8 @@ mod test {
 
         // Record the zpools so we don't fail to ensure datasets (unrelated to
         // DNS) during blueprint execution.
-        crate::tests::create_disks_for_zones_using_datasets(
-            datastore, &opctx, &blueprint,
-        )
-        .await;
+        let mut disk_test = DiskTest::new(&cptestctx).await;
+        disk_test.add_blueprint_disks(&blueprint).await;
 
         // Now, execute the initial blueprint.
         let overrides = overridables_for_test(cptestctx);
@@ -1394,20 +1383,7 @@ mod test {
         .unwrap();
         let sled_id =
             blueprint.sleds().next().expect("expected at least one sled");
-        let nalready =
-            builder.sled_num_running_zones_of_kind(sled_id, ZoneKind::Nexus);
-        let rv = builder
-            .sled_ensure_zone_multiple_nexus(sled_id, nalready + 1)
-            .unwrap();
-        assert_eq!(
-            rv,
-            EnsureMultiple::Changed {
-                added: 1,
-                updated: 0,
-                expunged: 0,
-                removed: 0
-            }
-        );
+        builder.sled_add_zone_nexus(sled_id).unwrap();
         let blueprint2 = builder.build();
         eprintln!("blueprint2: {}", blueprint2.display());
         // Figure out the id of the new zone.

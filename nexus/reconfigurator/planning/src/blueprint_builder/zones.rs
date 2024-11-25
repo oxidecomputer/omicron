@@ -72,10 +72,12 @@ impl BuilderZonesConfig {
         Ok(())
     }
 
+    // On success, returns the now-expunged zone and whether or not it was set
+    // to expunged (as opposed to already being marked expunged).
     pub(super) fn expunge_zone(
         &mut self,
         zone_id: OmicronZoneUuid,
-    ) -> Result<(), BuilderZonesConfigError> {
+    ) -> Result<(&BuilderZoneConfig, bool), BuilderZonesConfigError> {
         let zone = self
             .zones
             .iter_mut()
@@ -90,17 +92,22 @@ impl BuilderZonesConfig {
         // in here should have had this check done to them already, but
         // in case they're not, or in case something else about those
         // zones changed in between, check again.
-        is_already_expunged(&zone.zone, zone.state)?;
-        zone.zone.disposition = BlueprintZoneDisposition::Expunged;
-        zone.state = BuilderZoneState::Modified;
+        let needs_expunged = !is_already_expunged(&zone.zone, zone.state)?;
 
-        Ok(())
+        if needs_expunged {
+            zone.zone.disposition = BlueprintZoneDisposition::Expunged;
+            zone.state = BuilderZoneState::Modified;
+        }
+
+        Ok((&*zone, needs_expunged))
     }
 
     pub(super) fn expunge_zones(
         &mut self,
         mut zones: BTreeSet<OmicronZoneUuid>,
-    ) -> Result<(), BuilderZonesConfigError> {
+    ) -> Result<Vec<&BlueprintZoneConfig>, BuilderZonesConfigError> {
+        let mut removed = Vec::new();
+
         for zone in &mut self.zones {
             if zones.remove(&zone.zone.id) {
                 // Check that the zone is expungeable. Typically, zones passed
@@ -110,6 +117,7 @@ impl BuilderZonesConfig {
                 is_already_expunged(&zone.zone, zone.state)?;
                 zone.zone.disposition = BlueprintZoneDisposition::Expunged;
                 zone.state = BuilderZoneState::Modified;
+                removed.push(&zone.zone);
             }
         }
 
@@ -121,7 +129,7 @@ impl BuilderZonesConfig {
             });
         }
 
-        Ok(())
+        Ok(removed)
     }
 
     pub(super) fn iter_zones(
@@ -223,6 +231,7 @@ mod tests {
     };
 
     use maplit::btreeset;
+    use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_types::deployment::SledDisk;
     use nexus_types::external_api::views::PhysicalDiskPolicy;
     use nexus_types::external_api::views::PhysicalDiskState;
@@ -235,7 +244,6 @@ mod tests {
     };
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::disk::DiskIdentity;
-    use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::ZpoolUuid;
@@ -318,8 +326,13 @@ mod tests {
         )
         .expect("creating blueprint builder");
         builder.set_rng(PlannerRng::from_seed((TEST_NAME, "bp2")));
+        let new_sled_resources = &input2
+            .sled_lookup(SledFilter::Commissioned, new_sled_id)
+            .unwrap()
+            .resources;
 
         // Test adding a new sled with an NTP zone.
+        builder.sled_ensure_disks(new_sled_id, new_sled_resources).unwrap();
         assert_eq!(
             builder.sled_ensure_zone_ntp(new_sled_id).unwrap(),
             Ensure::Added
@@ -343,12 +356,11 @@ mod tests {
 
         // Now, test adding a new zone (Oximeter, picked arbitrarily) to an
         // existing sled.
+        let filesystem_pool = builder
+            .sled_select_zpool_for_tests(existing_sled_id, ZoneKind::Oximeter)
+            .expect("chose zpool for new zone");
         let change = builder.zones.change_sled_zones(existing_sled_id);
-
         let new_zone_id = OmicronZoneUuid::new_v4();
-        // NOTE: This pool doesn't actually exist on the sled, but nothing is
-        // checking for that in this test?
-        let filesystem_pool = ZpoolName::new_external(ZpoolUuid::new_v4());
         change
             .add_zone(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
@@ -438,7 +450,7 @@ mod tests {
         for (sled_id, resources) in
             input2.all_sled_resources(SledFilter::Commissioned)
         {
-            builder.sled_ensure_datasets(sled_id, resources).unwrap();
+            builder.sled_ensure_zone_datasets(sled_id, resources).unwrap();
         }
 
         // Now build the blueprint and ensure that all the changes we described

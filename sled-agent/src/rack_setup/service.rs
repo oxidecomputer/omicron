@@ -834,7 +834,7 @@ impl ServiceInner {
                     (dataset.name.pool().id(), dataset.name.dataset().clone()),
                     NexusTypes::DatasetCreateRequest {
                         zpool_id: dataset.name.pool().id().into_untyped_uuid(),
-                        dataset_id: dataset.id.into_untyped_uuid(),
+                        dataset_id: dataset.id,
                         request: NexusTypes::DatasetPutRequest {
                             address: None,
                             kind: dataset.name.dataset().clone(),
@@ -906,7 +906,9 @@ impl ServiceInner {
                             .collect(),
                         switch: config.switch.into(),
                         uplink_port_speed: config.uplink_port_speed.into(),
-                        uplink_port_fec: config.uplink_port_fec.into(),
+                        uplink_port_fec: config
+                            .uplink_port_fec
+                            .map(|fec| fec.into()),
                         autoneg: config.autoneg,
                         bgp_peers: config
                             .bgp_peers
