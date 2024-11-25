@@ -92,6 +92,17 @@ impl<T: ObjectIdentity> SimpleIdentity for T {
     }
 }
 
+/// Equivalent of `SimpleIdentity` for types that don't necessarily have names.
+pub trait UuidIdentity {
+    fn id(&self) -> Uuid;
+}
+
+impl<T: SimpleIdentity> UuidIdentity for T {
+    fn id(&self) -> Uuid {
+        <Self as SimpleIdentity>::id(self)
+    }
+}
+
 /// Parameters used to request a specific page of results when listing a
 /// collection of objects
 ///
@@ -949,6 +960,8 @@ impl JsonSchema for Hostname {
 pub enum ResourceType {
     AddressLot,
     AddressLotBlock,
+    AffinityGroup,
+    AntiAffinityGroup,
     AllowList,
     BackgroundTask,
     BgpConfig,
@@ -1275,6 +1288,54 @@ pub enum InstanceAutoRestartPolicy {
     /// best-effort attempt to restart it. The control plane may choose not to
     /// restart the instance to preserve the overall availability of the system.
     BestEffort,
+}
+
+// AFFINITY GROUPS
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AffinityPolicy {
+    /// If the affinity request cannot be satisfied, allow it anyway.
+    ///
+    /// This enables a "best-effort" attempt to satisfy the affinity policy.
+    Allow,
+
+    /// If the affinity request cannot be satisfied, fail explicitly.
+    Fail,
+}
+
+/// Describes the scope of affinity for the purposes of co-location.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureDomain {
+    /// Instances are considered co-located if they are on the same sled
+    Sled,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub enum AffinityGroupMember {
+    Instance(Uuid),
+}
+
+impl UuidIdentity for AffinityGroupMember {
+    fn id(&self) -> Uuid {
+        match self {
+            AffinityGroupMember::Instance(id) => *id,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub enum AntiAffinityGroupMember {
+    Instance(Uuid),
+}
+
+impl UuidIdentity for AntiAffinityGroupMember {
+    fn id(&self) -> Uuid {
+        match self {
+            AntiAffinityGroupMember::Instance(id) => *id,
+        }
+    }
 }
 
 // DISKS

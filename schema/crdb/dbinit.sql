@@ -3971,6 +3971,94 @@ CREATE TABLE IF NOT EXISTS omicron.public.cockroachdb_zone_id_to_node_id (
 COMMIT;
 BEGIN;
 
+-- Describes what happens when
+-- (for affinity groups) instance cannot be co-located, or
+-- (for ani-affinity groups) instance must be co-located, or
+CREATE TYPE IF NOT EXISTS omicron.public.affinity_policy AS ENUM (
+    -- If the affinity request cannot be satisfied, fail.
+    'fail',
+
+    -- If the affinity request cannot be satisfied, allow it anyway.
+    'allow'
+);
+
+-- Determines what "co-location" means for instances within an affinity
+-- or anti-affinity group.
+CREATE TYPE IF NOT EXISTS omicron.public.failure_domain AS ENUM (
+    -- Instances are co-located if they are on the same sled.
+    'sled'
+);
+
+-- Describes a grouping of related instances that should be co-located.
+CREATE TABLE IF NOT EXISTS omicron.public.affinity_group (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    -- Affinity groups are contained within projects
+    project_id UUID NOT NULL,
+    policy omicron.public.affinity_policy NOT NULL,
+    failure_domain omicron.public.failure_domain NOT NULL
+);
+
+-- Names for affinity groups within a project should be unique
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_affinity_group_by_project ON omicron.public.affinity_group (
+    project_id,
+    name
+) WHERE
+    time_deleted IS NULL;
+
+-- Describes an instance's membership within an affinity group
+CREATE TABLE IF NOT EXISTS omicron.public.affinity_group_instance_membership (
+    group_id UUID NOT NULL,
+    instance_id UUID NOT NULL,
+
+    PRIMARY KEY (group_id, instance_id)
+);
+
+-- We need to look up all memberships of an instance so we can revoke these
+-- memberships efficiently when instances are deleted.
+CREATE INDEX IF NOT EXISTS lookup_affinity_group_instance_membership_by_instance ON omicron.public.affinity_group_instance_membership (
+    instance_id
+);
+
+-- Describes a collection of instances that should not be co-located.
+CREATE TABLE IF NOT EXISTS omicron.public.anti_affinity_group (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    -- Anti-Affinity groups are contained within projects
+    project_id UUID NOT NULL,
+    policy omicron.public.affinity_policy NOT NULL,
+    failure_domain omicron.public.failure_domain NOT NULL
+);
+
+-- Names for anti-affinity groups within a project should be unique
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_anti_affinity_group_by_project ON omicron.public.anti_affinity_group (
+    project_id,
+    name
+) WHERE
+    time_deleted IS NULL;
+
+-- Describes an instance's membership within an anti-affinity group
+CREATE TABLE IF NOT EXISTS omicron.public.anti_affinity_group_instance_membership (
+    group_id UUID NOT NULL,
+    instance_id UUID NOT NULL,
+
+    PRIMARY KEY (group_id, instance_id)
+);
+
+-- We need to look up all memberships of an instance so we can revoke these
+-- memberships efficiently when instances are deleted.
+CREATE INDEX IF NOT EXISTS lookup_anti_affinity_group_instance_membership_by_instance ON omicron.public.anti_affinity_group_instance_membership (
+    instance_id
+);
+
 -- Per-VMM state.
 CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     id UUID PRIMARY KEY,
@@ -4684,7 +4772,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '114.0.0', NULL)
+    (TRUE, NOW(), NOW(), '115.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
