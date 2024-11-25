@@ -2387,8 +2387,6 @@ async fn cmd_db_region_used_by(
         String::from("listing regions")
     });
 
-    // XXX it'd be nice to do VolumeUuid here but the eq_any doesn't have an
-    // equivalent function like to_db_typed_uuid that can be applied.
     let volumes: Vec<Uuid> =
         regions.iter().map(|x| x.volume_id().into_untyped_uuid()).collect();
 
