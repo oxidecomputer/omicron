@@ -967,11 +967,35 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(dataset_edits.into())
     }
 
-    fn sled_add_zone_internal_dns(
+    fn next_internal_dns_gz_address_index(&self, sled_id: SledUuid) -> u32 {
+        let used_internal_dns_gz_address_indices = self
+            .current_sled_zones(sled_id, BlueprintZoneFilter::ShouldBeRunning)
+            .filter_map(|z| match z.zone_type {
+                BlueprintZoneType::InternalDns(
+                    blueprint_zone_type::InternalDns {
+                        gz_address_index, ..
+                    },
+                ) => Some(gz_address_index),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+
+        // In production, we expect any given sled to have 0 or 1 internal DNS
+        // zones. In test environments, we might have as many as 5. Either way,
+        // an O(n^2) loop here to find the next unused index is probably fine.
+        for i in 0.. {
+            if !used_internal_dns_gz_address_indices.contains(&i) {
+                return i;
+            }
+        }
+        unreachable!("more than u32::MAX internal DNS zones on one sled");
+    }
+
+    pub fn sled_add_zone_internal_dns(
         &mut self,
         sled_id: SledUuid,
-        gz_address_index: u32,
-    ) -> Result<Ensure, Error> {
+    ) -> Result<(), Error> {
+        let gz_address_index = self.next_internal_dns_gz_address_index(sled_id);
         let sled_subnet = self.sled_resources(sled_id)?.subnet;
         let rack_subnet = ReservedRackSubnet::from_subnet(sled_subnet);
         let dns_subnet = self.internal_dns_subnets()?.alloc(rack_subnet)?;
@@ -993,51 +1017,13 @@ impl<'a> BlueprintBuilder<'a> {
             zone_type,
         };
 
-        self.sled_add_zone(sled_id, zone)?;
-        Ok(Ensure::Added)
+        self.sled_add_zone(sled_id, zone)
     }
 
-    pub fn sled_ensure_zone_multiple_internal_dns(
+    pub fn sled_add_zone_external_dns(
         &mut self,
         sled_id: SledUuid,
-        desired_zone_count: usize,
-    ) -> Result<EnsureMultiple, Error> {
-        // How many internal DNS zones do we need to add?
-        let count =
-            self.sled_num_running_zones_of_kind(sled_id, ZoneKind::InternalDns);
-        let to_add = match desired_zone_count.checked_sub(count) {
-            Some(0) => return Ok(EnsureMultiple::NotNeeded),
-            Some(n) => n,
-            None => {
-                return Err(Error::Planner(anyhow!(
-                    "removing an internal DNS zone not yet supported \
-                     (sled {sled_id} has {count}; \
-                     planner wants {desired_zone_count})"
-                )));
-            }
-        };
-
-        for i in count..desired_zone_count {
-            self.sled_add_zone_internal_dns(
-                sled_id,
-                i.try_into().map_err(|_| {
-                    Error::Planner(anyhow!("zone index overflow"))
-                })?,
-            )?;
-        }
-
-        Ok(EnsureMultiple::Changed {
-            added: to_add,
-            removed: 0,
-            expunged: 0,
-            updated: 0,
-        })
-    }
-
-    fn sled_add_zone_external_dns(
-        &mut self,
-        sled_id: SledUuid,
-    ) -> Result<Ensure, Error> {
+    ) -> Result<(), Error> {
         let id = self.rng.next_zone();
         let ExternalNetworkingChoice {
             external_ip,
@@ -1081,52 +1067,7 @@ impl<'a> BlueprintBuilder<'a> {
             filesystem_pool: Some(pool_name),
             zone_type,
         };
-        self.sled_add_zone(sled_id, zone)?;
-        Ok(Ensure::Added)
-    }
-
-    pub fn sled_ensure_zone_multiple_external_dns(
-        &mut self,
-        sled_id: SledUuid,
-        desired_zone_count: usize,
-    ) -> Result<EnsureMultiple, Error> {
-        // How many external DNS zones do we want to add?
-        let count =
-            self.sled_num_running_zones_of_kind(sled_id, ZoneKind::ExternalDns);
-        let to_add = match desired_zone_count.checked_sub(count) {
-            Some(0) => return Ok(EnsureMultiple::NotNeeded),
-            Some(n) => n,
-            None => {
-                return Err(Error::Planner(anyhow!(
-                    "removing an external DNS zone not yet supported \
-                     (sled {sled_id} has {count}; \
-                     planner wants {desired_zone_count})"
-                )));
-            }
-        };
-
-        // Running out of DNS addresses is not a fatal error. This happens,
-        // for instance, when a sled is first marked expunged, since the
-        // available addresses are collected before planning, but the
-        // zones on the sled aren't marked expunged until after planning
-        // has begun. The *next* round of planning will add them back in,
-        // since it will see the zones as expunged and recycle their
-        // addresses.
-        let mut added = 0;
-        for _ in 0..to_add {
-            match self.sled_add_zone_external_dns(sled_id) {
-                Ok(_) => added += 1,
-                Err(Error::NoExternalDnsIpAvailable) => break,
-                Err(e) => return Err(e),
-            }
-        }
-
-        Ok(EnsureMultiple::Changed {
-            added,
-            updated: 0,
-            removed: 0,
-            expunged: 0,
-        })
+        self.sled_add_zone(sled_id, zone)
     }
 
     pub fn sled_ensure_zone_ntp(
@@ -1235,11 +1176,10 @@ impl<'a> BlueprintBuilder<'a> {
             .count()
     }
 
-    pub fn sled_ensure_zone_multiple_nexus(
+    pub fn sled_add_zone_nexus(
         &mut self,
         sled_id: SledUuid,
-        desired_zone_count: usize,
-    ) -> Result<EnsureMultiple, Error> {
+    ) -> Result<(), Error> {
         // Whether Nexus should use TLS and what the external DNS servers it
         // should use are currently provided at rack-setup time, and should be
         // consistent across all Nexus instances. We'll assume we can copy them
@@ -1262,193 +1202,113 @@ impl<'a> BlueprintBuilder<'a> {
                 _ => None,
             })
             .ok_or(Error::NoNexusZonesInParentBlueprint)?;
-        self.sled_ensure_zone_multiple_nexus_with_config(
+        self.sled_add_zone_nexus_with_config(
             sled_id,
-            desired_zone_count,
             external_tls,
             external_dns_servers,
         )
     }
 
-    pub fn sled_ensure_zone_multiple_nexus_with_config(
+    pub fn sled_add_zone_nexus_with_config(
         &mut self,
         sled_id: SledUuid,
-        desired_zone_count: usize,
         external_tls: bool,
         external_dns_servers: Vec<IpAddr>,
-    ) -> Result<EnsureMultiple, Error> {
-        // How many Nexus zones do we need to add?
-        let nexus_count =
-            self.sled_num_running_zones_of_kind(sled_id, ZoneKind::Nexus);
-        let num_nexus_to_add = match desired_zone_count.checked_sub(nexus_count)
-        {
-            Some(0) => return Ok(EnsureMultiple::NotNeeded),
-            Some(n) => n,
-            None => {
-                return Err(Error::Planner(anyhow!(
-                    "removing a Nexus zone not yet supported \
-                     (sled {sled_id} has {nexus_count}; \
-                     planner wants {desired_zone_count})"
-                )));
-            }
+    ) -> Result<(), Error> {
+        let nexus_id = self.rng.next_zone();
+        let ExternalNetworkingChoice {
+            external_ip,
+            nic_ip,
+            nic_subnet,
+            nic_mac,
+        } = self.external_networking()?.for_new_nexus()?;
+        let external_ip = OmicronZoneExternalFloatingIp {
+            id: self.rng.next_external_ip(),
+            ip: external_ip,
         };
 
-        for _ in 0..num_nexus_to_add {
-            let nexus_id = self.rng.next_zone();
-            let ExternalNetworkingChoice {
-                external_ip,
-                nic_ip,
-                nic_subnet,
-                nic_mac,
-            } = self.external_networking()?.for_new_nexus()?;
-            let external_ip = OmicronZoneExternalFloatingIp {
-                id: self.rng.next_external_ip(),
-                ip: external_ip,
-            };
+        let nic = NetworkInterface {
+            id: self.rng.next_network_interface(),
+            kind: NetworkInterfaceKind::Service {
+                id: nexus_id.into_untyped_uuid(),
+            },
+            name: format!("nexus-{nexus_id}").parse().unwrap(),
+            ip: nic_ip,
+            mac: nic_mac,
+            subnet: nic_subnet,
+            vni: Vni::SERVICES_VNI,
+            primary: true,
+            slot: 0,
+            transit_ips: vec![],
+        };
 
-            let nic = NetworkInterface {
-                id: self.rng.next_network_interface(),
-                kind: NetworkInterfaceKind::Service {
-                    id: nexus_id.into_untyped_uuid(),
-                },
-                name: format!("nexus-{nexus_id}").parse().unwrap(),
-                ip: nic_ip,
-                mac: nic_mac,
-                subnet: nic_subnet,
-                vni: Vni::SERVICES_VNI,
-                primary: true,
-                slot: 0,
-                transit_ips: vec![],
-            };
+        let ip = self.sled_alloc_ip(sled_id)?;
+        let port = omicron_common::address::NEXUS_INTERNAL_PORT;
+        let internal_address = SocketAddrV6::new(ip, port, 0, 0);
+        let zone_type = BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+            internal_address,
+            external_ip,
+            nic,
+            external_tls,
+            external_dns_servers: external_dns_servers.clone(),
+        });
+        let filesystem_pool =
+            self.sled_select_zpool(sled_id, zone_type.kind())?;
 
-            let ip = self.sled_alloc_ip(sled_id)?;
-            let port = omicron_common::address::NEXUS_INTERNAL_PORT;
-            let internal_address = SocketAddrV6::new(ip, port, 0, 0);
-            let zone_type =
-                BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                    internal_address,
-                    external_ip,
-                    nic,
-                    external_tls,
-                    external_dns_servers: external_dns_servers.clone(),
-                });
-            let filesystem_pool =
-                self.sled_select_zpool(sled_id, zone_type.kind())?;
-
-            let zone = BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::InService,
-                id: nexus_id,
-                filesystem_pool: Some(filesystem_pool),
-                zone_type,
-            };
-            self.sled_add_zone(sled_id, zone)?;
-        }
-
-        Ok(EnsureMultiple::Changed {
-            added: num_nexus_to_add,
-            updated: 0,
-            expunged: 0,
-            removed: 0,
-        })
+        let zone = BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
+            id: nexus_id,
+            filesystem_pool: Some(filesystem_pool),
+            zone_type,
+        };
+        self.sled_add_zone(sled_id, zone)
     }
 
-    pub fn sled_ensure_zone_multiple_oximeter(
+    pub fn sled_add_zone_oximeter(
         &mut self,
         sled_id: SledUuid,
-        desired_zone_count: usize,
-    ) -> Result<EnsureMultiple, Error> {
-        // How many Oximeter zones do we need to add?
-        let oximeter_count =
-            self.sled_num_running_zones_of_kind(sled_id, ZoneKind::Oximeter);
-        let num_oximeter_to_add =
-            match desired_zone_count.checked_sub(oximeter_count) {
-                Some(0) => return Ok(EnsureMultiple::NotNeeded),
-                Some(n) => n,
-                None => {
-                    return Err(Error::Planner(anyhow!(
-                        "removing an Oximeter zone not yet supported \
-                         (sled {sled_id} has {oximeter_count}; \
-                         planner wants {desired_zone_count})"
-                    )));
-                }
-            };
+    ) -> Result<(), Error> {
+        let oximeter_id = self.rng.next_zone();
+        let ip = self.sled_alloc_ip(sled_id)?;
+        let port = omicron_common::address::OXIMETER_PORT;
+        let address = SocketAddrV6::new(ip, port, 0, 0);
+        let zone_type =
+            BlueprintZoneType::Oximeter(blueprint_zone_type::Oximeter {
+                address,
+            });
+        let filesystem_pool =
+            self.sled_select_zpool(sled_id, zone_type.kind())?;
 
-        for _ in 0..num_oximeter_to_add {
-            let oximeter_id = self.rng.next_zone();
-            let ip = self.sled_alloc_ip(sled_id)?;
-            let port = omicron_common::address::OXIMETER_PORT;
-            let address = SocketAddrV6::new(ip, port, 0, 0);
-            let zone_type =
-                BlueprintZoneType::Oximeter(blueprint_zone_type::Oximeter {
-                    address,
-                });
-            let filesystem_pool =
-                self.sled_select_zpool(sled_id, zone_type.kind())?;
-
-            let zone = BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::InService,
-                id: oximeter_id,
-                filesystem_pool: Some(filesystem_pool),
-                zone_type,
-            };
-            self.sled_add_zone(sled_id, zone)?;
-        }
-
-        Ok(EnsureMultiple::Changed {
-            added: num_oximeter_to_add,
-            updated: 0,
-            expunged: 0,
-            removed: 0,
-        })
+        let zone = BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
+            id: oximeter_id,
+            filesystem_pool: Some(filesystem_pool),
+            zone_type,
+        };
+        self.sled_add_zone(sled_id, zone)
     }
 
-    pub fn sled_ensure_zone_multiple_crucible_pantry(
+    pub fn sled_add_zone_crucible_pantry(
         &mut self,
         sled_id: SledUuid,
-        desired_zone_count: usize,
-    ) -> Result<EnsureMultiple, Error> {
-        // How many zones do we need to add?
-        let pantry_count = self
-            .sled_num_running_zones_of_kind(sled_id, ZoneKind::CruciblePantry);
-        let num_pantry_to_add =
-            match desired_zone_count.checked_sub(pantry_count) {
-                Some(0) => return Ok(EnsureMultiple::NotNeeded),
-                Some(n) => n,
-                None => {
-                    return Err(Error::Planner(anyhow!(
-                        "removing a Crucible pantry zone not yet supported \
-                         (sled {sled_id} has {pantry_count}; \
-                         planner wants {desired_zone_count})"
-                    )));
-                }
-            };
+    ) -> Result<(), Error> {
+        let pantry_id = self.rng.next_zone();
+        let ip = self.sled_alloc_ip(sled_id)?;
+        let port = omicron_common::address::CRUCIBLE_PANTRY_PORT;
+        let address = SocketAddrV6::new(ip, port, 0, 0);
+        let zone_type = BlueprintZoneType::CruciblePantry(
+            blueprint_zone_type::CruciblePantry { address },
+        );
+        let filesystem_pool =
+            self.sled_select_zpool(sled_id, zone_type.kind())?;
 
-        for _ in 0..num_pantry_to_add {
-            let pantry_id = self.rng.next_zone();
-            let ip = self.sled_alloc_ip(sled_id)?;
-            let port = omicron_common::address::CRUCIBLE_PANTRY_PORT;
-            let address = SocketAddrV6::new(ip, port, 0, 0);
-            let zone_type = BlueprintZoneType::CruciblePantry(
-                blueprint_zone_type::CruciblePantry { address },
-            );
-            let filesystem_pool =
-                self.sled_select_zpool(sled_id, zone_type.kind())?;
-
-            let zone = BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::InService,
-                id: pantry_id,
-                filesystem_pool: Some(filesystem_pool),
-                zone_type,
-            };
-            self.sled_add_zone(sled_id, zone)?;
-        }
-
-        Ok(EnsureMultiple::Changed {
-            added: num_pantry_to_add,
-            updated: 0,
-            expunged: 0,
-            removed: 0,
-        })
+        let zone = BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
+            id: pantry_id,
+            filesystem_pool: Some(filesystem_pool),
+            zone_type,
+        };
+        self.sled_add_zone(sled_id, zone)
     }
 
     pub fn cockroachdb_preserve_downgrade(
@@ -1458,63 +1318,36 @@ impl<'a> BlueprintBuilder<'a> {
         self.cockroachdb_setting_preserve_downgrade = version;
     }
 
-    pub fn sled_ensure_zone_multiple_cockroachdb(
+    pub fn sled_add_zone_cockroachdb(
         &mut self,
         sled_id: SledUuid,
-        desired_zone_count: usize,
-    ) -> Result<EnsureMultiple, Error> {
-        // How many CRDB zones do we need to add?
-        let crdb_count =
-            self.sled_num_running_zones_of_kind(sled_id, ZoneKind::CockroachDb);
-        let num_crdb_to_add = match desired_zone_count.checked_sub(crdb_count) {
-            Some(0) => return Ok(EnsureMultiple::NotNeeded),
-            Some(n) => n,
-            None => {
-                return Err(Error::Planner(anyhow!(
-                    "removing a CockroachDb zone not yet supported \
-                     (sled {sled_id} has {crdb_count}; \
-                     planner wants {desired_zone_count})"
-                )));
-            }
+    ) -> Result<(), Error> {
+        let zone_id = self.rng.next_zone();
+        let underlay_ip = self.sled_alloc_ip(sled_id)?;
+        let pool_name =
+            self.sled_select_zpool(sled_id, ZoneKind::CockroachDb)?;
+        let port = omicron_common::address::COCKROACH_PORT;
+        let address = SocketAddrV6::new(underlay_ip, port, 0, 0);
+        let zone_type =
+            BlueprintZoneType::CockroachDb(blueprint_zone_type::CockroachDb {
+                address,
+                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+            });
+        let filesystem_pool = pool_name;
+
+        let zone = BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
+            id: zone_id,
+            filesystem_pool: Some(filesystem_pool),
+            zone_type,
         };
-        for _ in 0..num_crdb_to_add {
-            let zone_id = self.rng.next_zone();
-            let underlay_ip = self.sled_alloc_ip(sled_id)?;
-            let pool_name =
-                self.sled_select_zpool(sled_id, ZoneKind::CockroachDb)?;
-            let port = omicron_common::address::COCKROACH_PORT;
-            let address = SocketAddrV6::new(underlay_ip, port, 0, 0);
-            let zone_type = BlueprintZoneType::CockroachDb(
-                blueprint_zone_type::CockroachDb {
-                    address,
-                    dataset: OmicronZoneDataset {
-                        pool_name: pool_name.clone(),
-                    },
-                },
-            );
-            let filesystem_pool = pool_name;
-
-            let zone = BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::InService,
-                id: zone_id,
-                filesystem_pool: Some(filesystem_pool),
-                zone_type,
-            };
-            self.sled_add_zone(sled_id, zone)?;
-        }
-
-        Ok(EnsureMultiple::Changed {
-            added: num_crdb_to_add,
-            updated: 0,
-            expunged: 0,
-            removed: 0,
-        })
+        self.sled_add_zone(sled_id, zone)
     }
 
-    fn sled_add_zone_clickhouse(
+    pub fn sled_add_zone_clickhouse(
         &mut self,
         sled_id: SledUuid,
-    ) -> Result<Ensure, Error> {
+    ) -> Result<(), Error> {
         let id = self.rng.next_zone();
         let underlay_address = self.sled_alloc_ip(sled_id)?;
         let address =
@@ -1533,157 +1366,67 @@ impl<'a> BlueprintBuilder<'a> {
             filesystem_pool: Some(pool_name),
             zone_type,
         };
-        self.sled_add_zone(sled_id, zone)?;
-        Ok(Ensure::Added)
+        self.sled_add_zone(sled_id, zone)
     }
 
-    pub fn sled_ensure_zone_multiple_clickhouse(
+    pub fn sled_add_zone_clickhouse_server(
         &mut self,
         sled_id: SledUuid,
-        desired_zone_count: usize,
-    ) -> Result<EnsureMultiple, Error> {
-        // How many single-node ClickHouse zones do we want to add?
-        let count =
-            self.sled_num_running_zones_of_kind(sled_id, ZoneKind::Clickhouse);
-        let to_add = match desired_zone_count.checked_sub(count) {
-            Some(0) => return Ok(EnsureMultiple::NotNeeded),
-            Some(n) => n,
-            None => {
-                return Err(Error::Planner(anyhow!(
-                    "removing a single-node ClickHouse zone not yet supported \
-                     (sled {sled_id} has {count}; \
-                     planner wants {desired_zone_count})"
-                )));
-            }
+    ) -> Result<(), Error> {
+        let zone_id = self.rng.next_zone();
+        let underlay_ip = self.sled_alloc_ip(sled_id)?;
+        let pool_name =
+            self.sled_select_zpool(sled_id, ZoneKind::ClickhouseServer)?;
+        let address =
+            SocketAddrV6::new(underlay_ip, CLICKHOUSE_HTTP_PORT, 0, 0);
+        let zone_type = BlueprintZoneType::ClickhouseServer(
+            blueprint_zone_type::ClickhouseServer {
+                address,
+                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+            },
+        );
+        let filesystem_pool = pool_name;
+
+        let zone = BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
+            id: zone_id,
+            filesystem_pool: Some(filesystem_pool),
+            zone_type,
         };
-        for _ in 0..to_add {
-            self.sled_add_zone_clickhouse(sled_id)?;
-        }
-        Ok(EnsureMultiple::Changed {
-            added: to_add,
-            updated: 0,
-            expunged: 0,
-            removed: 0,
-        })
+        self.sled_add_zone(sled_id, zone)
     }
 
-    pub fn sled_ensure_zone_multiple_clickhouse_server(
+    pub fn sled_add_zone_clickhouse_keeper(
         &mut self,
         sled_id: SledUuid,
-        desired_zone_count: usize,
-    ) -> Result<EnsureMultiple, Error> {
-        //  How many clickhouse server zones do we want to add?
-        let clickhouse_server_count = self.sled_num_running_zones_of_kind(
-            sled_id,
-            ZoneKind::ClickhouseServer,
+    ) -> Result<(), Error> {
+        let zone_id = self.rng.next_zone();
+        let underlay_ip = self.sled_alloc_ip(sled_id)?;
+        let pool_name =
+            self.sled_select_zpool(sled_id, ZoneKind::ClickhouseKeeper)?;
+        let port = omicron_common::address::CLICKHOUSE_KEEPER_TCP_PORT;
+        let address = SocketAddrV6::new(underlay_ip, port, 0, 0);
+        let zone_type = BlueprintZoneType::ClickhouseKeeper(
+            blueprint_zone_type::ClickhouseKeeper {
+                address,
+                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+            },
         );
-        let num_clickhouse_servers_to_add =
-            match desired_zone_count.checked_sub(clickhouse_server_count) {
-                Some(0) => return Ok(EnsureMultiple::NotNeeded),
-                Some(n) => n,
-                None => {
-                    return Err(Error::Planner(anyhow!(
-                        "removing a ClickhouseServer zone not yet supported \
-                     (sled {sled_id} has {clickhouse_server_count}; \
-                     planner wants {desired_zone_count})"
-                    )));
-                }
-            };
-        for _ in 0..num_clickhouse_servers_to_add {
-            let zone_id = self.rng.next_zone();
-            let underlay_ip = self.sled_alloc_ip(sled_id)?;
-            let pool_name =
-                self.sled_select_zpool(sled_id, ZoneKind::ClickhouseServer)?;
-            let address =
-                SocketAddrV6::new(underlay_ip, CLICKHOUSE_HTTP_PORT, 0, 0);
-            let zone_type = BlueprintZoneType::ClickhouseServer(
-                blueprint_zone_type::ClickhouseServer {
-                    address,
-                    dataset: OmicronZoneDataset {
-                        pool_name: pool_name.clone(),
-                    },
-                },
-            );
-            let filesystem_pool = pool_name;
+        let filesystem_pool = pool_name;
 
-            let zone = BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::InService,
-                id: zone_id,
-                filesystem_pool: Some(filesystem_pool),
-                zone_type,
-            };
-            self.sled_add_zone(sled_id, zone)?;
-        }
-
-        Ok(EnsureMultiple::Changed {
-            added: num_clickhouse_servers_to_add,
-            updated: 0,
-            expunged: 0,
-            removed: 0,
-        })
-    }
-
-    pub fn sled_ensure_zone_multiple_clickhouse_keeper(
-        &mut self,
-        sled_id: SledUuid,
-        desired_zone_count: usize,
-    ) -> Result<EnsureMultiple, Error> {
-        //  How many clickhouse keeper zones do we want to add?
-        let clickhouse_keeper_count = self.sled_num_running_zones_of_kind(
-            sled_id,
-            ZoneKind::ClickhouseKeeper,
-        );
-        let num_clickhouse_keepers_to_add =
-            match desired_zone_count.checked_sub(clickhouse_keeper_count) {
-                Some(0) => return Ok(EnsureMultiple::NotNeeded),
-                Some(n) => n,
-                None => {
-                    return Err(Error::Planner(anyhow!(
-                        "removing a ClickhouseKeeper zone not yet supported \
-                     (sled {sled_id} has {clickhouse_keeper_count}; \
-                     planner wants {desired_zone_count})"
-                    )));
-                }
-            };
-
-        for _ in 0..num_clickhouse_keepers_to_add {
-            let zone_id = self.rng.next_zone();
-            let underlay_ip = self.sled_alloc_ip(sled_id)?;
-            let pool_name =
-                self.sled_select_zpool(sled_id, ZoneKind::ClickhouseKeeper)?;
-            let port = omicron_common::address::CLICKHOUSE_KEEPER_TCP_PORT;
-            let address = SocketAddrV6::new(underlay_ip, port, 0, 0);
-            let zone_type = BlueprintZoneType::ClickhouseKeeper(
-                blueprint_zone_type::ClickhouseKeeper {
-                    address,
-                    dataset: OmicronZoneDataset {
-                        pool_name: pool_name.clone(),
-                    },
-                },
-            );
-            let filesystem_pool = pool_name;
-
-            let zone = BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::InService,
-                id: zone_id,
-                filesystem_pool: Some(filesystem_pool),
-                zone_type,
-            };
-            self.sled_add_zone(sled_id, zone)?;
-        }
-
-        Ok(EnsureMultiple::Changed {
-            added: num_clickhouse_keepers_to_add,
-            updated: 0,
-            expunged: 0,
-            removed: 0,
-        })
+        let zone = BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
+            id: zone_id,
+            filesystem_pool: Some(filesystem_pool),
+            zone_type,
+        };
+        self.sled_add_zone(sled_id, zone)
     }
 
     pub fn sled_promote_internal_ntp_to_boundary_ntp(
         &mut self,
         sled_id: SledUuid,
-    ) -> Result<EnsureMultiple, Error> {
+    ) -> Result<(), Error> {
         // The upstream NTP/DNS servers and domain _should_ come from Nexus and
         // be modifiable by the operator, but currently can only be set at RSS.
         // We can only promote a new boundary NTP zone by copying these settings
@@ -1715,7 +1458,7 @@ impl<'a> BlueprintBuilder<'a> {
         ntp_servers: Vec<String>,
         dns_servers: Vec<IpAddr>,
         domain: Option<String>,
-    ) -> Result<EnsureMultiple, Error> {
+    ) -> Result<(), Error> {
         // Check the sled id and return an appropriate error if it's invalid.
         let _ = self.sled_resources(sled_id)?;
 
@@ -1806,14 +1549,7 @@ impl<'a> BlueprintBuilder<'a> {
                 filesystem_pool: Some(filesystem_pool),
                 zone_type,
             },
-        )?;
-
-        Ok(EnsureMultiple::Changed {
-            added: 1,
-            updated: 0,
-            expunged: 0,
-            removed: 1,
-        })
+        )
     }
 
     pub fn sled_expunge_zone(
@@ -3008,14 +2744,13 @@ pub mod test {
         .expect("failed to create builder");
 
         let err = builder
-            .sled_ensure_zone_multiple_nexus(
+            .sled_add_zone_nexus(
                 collection
                     .sled_agents
                     .keys()
                     .next()
                     .copied()
                     .expect("no sleds present"),
-                1,
             )
             .unwrap_err();
 
@@ -3107,19 +2842,7 @@ pub mod test {
                 "test",
             )
             .expect("failed to create builder");
-            let added = builder
-                .sled_ensure_zone_multiple_nexus(sled_id, 1)
-                .expect("failed to ensure nexus zone");
-
-            assert_eq!(
-                added,
-                EnsureMultiple::Changed {
-                    added: 1,
-                    updated: 0,
-                    expunged: 0,
-                    removed: 0
-                }
-            );
+            builder.sled_add_zone_nexus(sled_id).expect("added nexus zone");
         }
 
         {
@@ -3134,19 +2857,9 @@ pub mod test {
                 "test",
             )
             .expect("failed to create builder");
-            let added = builder
-                .sled_ensure_zone_multiple_nexus(sled_id, 3)
-                .expect("failed to ensure nexus zone");
-
-            assert_eq!(
-                added,
-                EnsureMultiple::Changed {
-                    added: 3,
-                    updated: 0,
-                    expunged: 0,
-                    removed: 0
-                }
-            );
+            for _ in 0..3 {
+                builder.sled_add_zone_nexus(sled_id).expect("added nexus zone");
+            }
         }
 
         {
@@ -3176,9 +2889,7 @@ pub mod test {
                 "test",
             )
             .expect("failed to create builder");
-            let err = builder
-                .sled_ensure_zone_multiple_nexus(sled_id, 1)
-                .unwrap_err();
+            let err = builder.sled_add_zone_nexus(sled_id).unwrap_err();
 
             assert!(
                 matches!(err, Error::NoExternalServiceIpAvailable),
@@ -3232,21 +2943,11 @@ pub mod test {
             "test",
         )
         .expect("constructed builder");
-        let ensure_result = builder
-            .sled_ensure_zone_multiple_cockroachdb(
-                target_sled_id,
-                num_sled_zpools,
-            )
-            .expect("ensured multiple CRDB zones");
-        assert_eq!(
-            ensure_result,
-            EnsureMultiple::Changed {
-                added: num_sled_zpools,
-                updated: 0,
-                expunged: 0,
-                removed: 0
-            }
-        );
+        for _ in 0..num_sled_zpools {
+            builder
+                .sled_add_zone_cockroachdb(target_sled_id)
+                .expect("added CRDB zone");
+        }
         builder
             .sled_ensure_zone_datasets(target_sled_id, sled_resources)
             .unwrap();
@@ -3282,18 +2983,20 @@ pub mod test {
             "test",
         )
         .expect("constructed builder");
-        let ensure_error = builder
-            .sled_ensure_zone_multiple_cockroachdb(
-                target_sled_id,
-                num_sled_zpools + 1,
-            )
+        for _ in 0..num_sled_zpools {
+            builder
+                .sled_add_zone_cockroachdb(target_sled_id)
+                .expect("added CRDB zone");
+        }
+        let err = builder
+            .sled_add_zone_cockroachdb(target_sled_id)
             .expect_err("failed to create too many CRDB zones");
-        match ensure_error {
+        match err {
             Error::NoAvailableZpool { sled_id, kind } => {
                 assert_eq!(target_sled_id, sled_id);
                 assert_eq!(kind, ZoneKind::CockroachDb);
             }
-            _ => panic!("unexpected error {ensure_error}"),
+            _ => panic!("unexpected error {err}"),
         }
 
         logctx.cleanup_successful();

@@ -72,8 +72,8 @@ to:   blueprint 31ef2071-2ec9-49d9-8827-fd83b17a0e3d
     oxp_fbf997ef-52d3-438a-b036-b9117322e569/crypt/debug                                                             17ffe1be-b38b-4f39-90af-57af25dbfe30   100 GiB   none          gzip-9     
     oxp_e9c238f6-87a3-4087-8ba4-aa594a82d012/crypt/debug                                                             2288ff91-8e52-4817-825f-2f8b8eb1681d   100 GiB   none          gzip-9     
     oxp_71a07ac0-d24e-446c-a202-1998e7f6ac8c/crypt/debug                                                             e0bcc415-f8f9-401f-a507-cee5587756b1   100 GiB   none          gzip-9     
-+   oxp_60e6b021-79d6-4a6b-917c-6637e0769558/crypt/clickhouse_keeper                                                 c16a00f5-8830-400d-89e0-9a77cce8780e   none      none          off        
-+   oxp_60e6b021-79d6-4a6b-917c-6637e0769558/crypt/zone/oxz_clickhouse_keeper_f3279a8b-32fa-4426-b946-08aff9ded482   26c79a0e-a2e4-4093-ba43-5e7979609651   none      none          off        
++   oxp_60e6b021-79d6-4a6b-917c-6637e0769558/crypt/clickhouse_keeper                                                 886f2522-8122-465f-8996-2d8c2acd9d0d   none      none          off        
++   oxp_60e6b021-79d6-4a6b-917c-6637e0769558/crypt/zone/oxz_clickhouse_keeper_39fd3357-4de8-433e-9c07-1ec65de7ca59   095cf066-5a68-40b4-afc6-baf5bcbadd05   none      none          off        
 
 
     omicron zones generation 2 -> 3:
@@ -95,7 +95,7 @@ to:   blueprint 31ef2071-2ec9-49d9-8827-fd83b17a0e3d
     internal_dns        c89ac05f-d9b2-47f4-9d48-2f38130e4ad9   in service    fd00:1122:3344:1::1   
     internal_ntp        66695827-17c4-4885-b6c0-2cb6b6d3ad1c   in service    fd00:1122:3344:101::21
     nexus               a6032c9e-a365-45d7-ad9f-07ac0fa7079a   in service    fd00:1122:3344:101::22
-+   clickhouse_keeper   f3279a8b-32fa-4426-b946-08aff9ded482   in service    fd00:1122:3344:101::2f
++   clickhouse_keeper   39fd3357-4de8-433e-9c07-1ec65de7ca59   in service    fd00:1122:3344:101::2f
 
 
   sled 6a4c45f6-e02f-490c-bbfa-b32fb89e8e86 (active):
@@ -166,9 +166,9 @@ to:   blueprint 31ef2071-2ec9-49d9-8827-fd83b17a0e3d
     oxp_f635c28a-e5ca-4d22-ac94-d8f278a6ea0e/crypt/debug                                                             765b4728-8d6e-4fac-9a1b-ae2258d5c52b   100 GiB   none          gzip-9     
     oxp_af85eec8-36b3-4b88-966d-a717b9b58fe5/crypt/debug                                                             98d65e73-01df-4525-a45d-acb2fc8d4a74   100 GiB   none          gzip-9     
 +   oxp_0bf9d028-2b4a-4bff-82a1-6eb5fcefd985/crypt/clickhouse_keeper                                                 a3eed313-d886-4c1d-8023-8d2ec9e97ddd   none      none          off        
-+   oxp_0bf9d028-2b4a-4bff-82a1-6eb5fcefd985/crypt/clickhouse_server                                                 ce930007-8ed6-4675-a24a-57c227950d43   none      none          off        
++   oxp_0bf9d028-2b4a-4bff-82a1-6eb5fcefd985/crypt/clickhouse_server                                                 3d339942-c2d0-4615-a099-433a8b5a1543   none      none          off        
 +   oxp_0bf9d028-2b4a-4bff-82a1-6eb5fcefd985/crypt/zone/oxz_clickhouse_keeper_b36c16d5-de6e-411a-a32a-d35a26f2e151   48720037-5b8e-4478-9bb5-c86ee8a6e250   none      none          off        
-+   oxp_0bf9d028-2b4a-4bff-82a1-6eb5fcefd985/crypt/zone/oxz_clickhouse_server_122e30d3-d541-49b5-88de-1543b38123cc   748c9607-71dd-4f81-be08-c1eee262f69c   none      none          off        
++   oxp_0bf9d028-2b4a-4bff-82a1-6eb5fcefd985/crypt/zone/oxz_clickhouse_server_71be6bff-666a-4f2b-a7dc-d80a88a71af5   a9e2160a-688f-4bbd-9a77-b2e695df86f4   none      none          off        
 
 
     omicron zones generation 2 -> 3:
@@ -190,7 +190,7 @@ to:   blueprint 31ef2071-2ec9-49d9-8827-fd83b17a0e3d
     internal_ntp        bba31b23-d112-4cde-bd4a-635812c28c0e   in service    fd00:1122:3344:103::21
     nexus               c3c7b0bd-dce3-467b-919d-668cc6b06711   in service    fd00:1122:3344:103::22
 +   clickhouse_keeper   b36c16d5-de6e-411a-a32a-d35a26f2e151   in service    fd00:1122:3344:103::2e
-+   clickhouse_server   122e30d3-d541-49b5-88de-1543b38123cc   in service    fd00:1122:3344:103::2f
++   clickhouse_server   71be6bff-666a-4f2b-a7dc-d80a88a71af5   in service    fd00:1122:3344:103::2f
 
 
   sled be531a62-9897-430d-acd2-ce14b4632627 (active):
@@ -260,10 +260,10 @@ to:   blueprint 31ef2071-2ec9-49d9-8827-fd83b17a0e3d
     oxp_e3b45593-8f0c-47b2-a381-802a7dad1f54/crypt/debug                                                             96798a17-be94-44bb-9e12-2eb458e9a5ba   100 GiB   none          gzip-9     
     oxp_2f02a5c6-fcf5-4b5a-bc7d-7f65369918ba/crypt/debug                                                             daeded95-0145-4b97-b1fb-60d44856d1e4   100 GiB   none          gzip-9     
     oxp_2a76ab1a-fb16-412d-93f9-b8cd9aa94e85/crypt/debug                                                             c55ba154-4f4b-48a5-997b-2a1579671c74   100 GiB   none          gzip-9     
-+   oxp_2a76ab1a-fb16-412d-93f9-b8cd9aa94e85/crypt/clickhouse_keeper                                                 886f2522-8122-465f-8996-2d8c2acd9d0d   none      none          off        
-+   oxp_2a76ab1a-fb16-412d-93f9-b8cd9aa94e85/crypt/clickhouse_server                                                 3d339942-c2d0-4615-a099-433a8b5a1543   none      none          off        
-+   oxp_2a76ab1a-fb16-412d-93f9-b8cd9aa94e85/crypt/zone/oxz_clickhouse_keeper_39fd3357-4de8-433e-9c07-1ec65de7ca59   095cf066-5a68-40b4-afc6-baf5bcbadd05   none      none          off        
-+   oxp_2a76ab1a-fb16-412d-93f9-b8cd9aa94e85/crypt/zone/oxz_clickhouse_server_71be6bff-666a-4f2b-a7dc-d80a88a71af5   a9e2160a-688f-4bbd-9a77-b2e695df86f4   none      none          off        
++   oxp_2a76ab1a-fb16-412d-93f9-b8cd9aa94e85/crypt/clickhouse_keeper                                                 c16a00f5-8830-400d-89e0-9a77cce8780e   none      none          off        
++   oxp_2a76ab1a-fb16-412d-93f9-b8cd9aa94e85/crypt/clickhouse_server                                                 ce930007-8ed6-4675-a24a-57c227950d43   none      none          off        
++   oxp_2a76ab1a-fb16-412d-93f9-b8cd9aa94e85/crypt/zone/oxz_clickhouse_keeper_f3279a8b-32fa-4426-b946-08aff9ded482   26c79a0e-a2e4-4093-ba43-5e7979609651   none      none          off        
++   oxp_2a76ab1a-fb16-412d-93f9-b8cd9aa94e85/crypt/zone/oxz_clickhouse_server_122e30d3-d541-49b5-88de-1543b38123cc   748c9607-71dd-4f81-be08-c1eee262f69c   none      none          off        
 
 
     omicron zones generation 2 -> 3:
@@ -284,8 +284,8 @@ to:   blueprint 31ef2071-2ec9-49d9-8827-fd83b17a0e3d
     internal_dns        832c71a1-357d-482b-8661-3193d59ed776   in service    fd00:1122:3344:3::1   
     internal_ntp        816afef9-e5cd-40ba-8cc5-71e783943e43   in service    fd00:1122:3344:102::21
     nexus               da39dead-64e2-45b6-9d01-d99584504dfd   in service    fd00:1122:3344:102::22
-+   clickhouse_keeper   39fd3357-4de8-433e-9c07-1ec65de7ca59   in service    fd00:1122:3344:102::2e
-+   clickhouse_server   71be6bff-666a-4f2b-a7dc-d80a88a71af5   in service    fd00:1122:3344:102::2f
++   clickhouse_keeper   f3279a8b-32fa-4426-b946-08aff9ded482   in service    fd00:1122:3344:102::2e
++   clickhouse_server   122e30d3-d541-49b5-88de-1543b38123cc   in service    fd00:1122:3344:102::2f
 
 
  COCKROACHDB SETTINGS:

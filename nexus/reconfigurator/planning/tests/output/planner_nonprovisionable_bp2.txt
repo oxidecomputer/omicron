@@ -74,10 +74,10 @@ parent:    4d4e6c38-cd95-4c4e-8f45-6af4d686964b
     crucible       f0ff59e8-4105-4980-a4bb-a1f4c58de1e3   in service    fd00:1122:3344:104::24
     crucible       f1a7b9a7-fc6a-4b23-b829-045ff33117ff   in service    fd00:1122:3344:104::26
     internal_ntp   621509d6-3772-4009-aca1-35eefd1098fb   in service    fd00:1122:3344:104::21
-    nexus          2ec75441-3d7d-4b4b-9614-af03de5a3666   in service    fd00:1122:3344:104::2d
-    nexus          508abd03-cbfe-4654-9a6d-7f15a1ad32e5   in service    fd00:1122:3344:104::2e
-    nexus          59950bc8-1497-44dd-8cbf-b6502ba921b2   in service    fd00:1122:3344:104::2f
+    nexus          508abd03-cbfe-4654-9a6d-7f15a1ad32e5   in service    fd00:1122:3344:104::2d
+    nexus          99f6d544-8599-4e2b-a55a-82d9e0034662   in service    fd00:1122:3344:104::2e
     nexus          a732c489-d29a-4f75-b900-5966385943af   in service    fd00:1122:3344:104::22
+    nexus          c26b3bda-5561-44a1-a69f-22103fe209a1   in service    fd00:1122:3344:104::2f
 
 
 
@@ -114,10 +114,10 @@ parent:    4d4e6c38-cd95-4c4e-8f45-6af4d686964b
     crucible       d47f4996-fac0-4657-bcea-01b1fee6404d   in service    fd00:1122:3344:101::24
     crucible       e001fea0-6594-4ece-97e3-6198c293e931   in service    fd00:1122:3344:101::28
     internal_ntp   bf79a56a-97af-4cc4-94a5-8b20d64c2cda   in service    fd00:1122:3344:101::21
-    nexus          3ca5292f-8a59-4475-bb72-0f43714d0fff   in service    fd00:1122:3344:101::2e
+    nexus          2ec75441-3d7d-4b4b-9614-af03de5a3666   in service    fd00:1122:3344:101::2d
+    nexus          3ca5292f-8a59-4475-bb72-0f43714d0fff   in service    fd00:1122:3344:101::2f
     nexus          4ad0e9da-08f8-4d40-b4d3-d17e711b5bbf   in service    fd00:1122:3344:101::22
-    nexus          99f6d544-8599-4e2b-a55a-82d9e0034662   in service    fd00:1122:3344:101::2d
-    nexus          c26b3bda-5561-44a1-a69f-22103fe209a1   in service    fd00:1122:3344:101::2f
+    nexus          59950bc8-1497-44dd-8cbf-b6502ba921b2   in service    fd00:1122:3344:101::2e
 
 
 
