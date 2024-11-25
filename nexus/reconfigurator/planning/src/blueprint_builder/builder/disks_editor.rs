@@ -126,7 +126,7 @@ impl<'a> SledDisksEditor<'a> {
     }
 
     pub fn ensure_disk(&mut self, disk: BlueprintPhysicalDiskConfig) {
-        let disk_id = disk.id;
+        let disk_id = disk.config.id;
         match self.config.disks.entry(disk_id) {
             Entry::Vacant(slot) => {
                 slot.insert(disk);
@@ -188,7 +188,7 @@ impl From<BlueprintPhysicalDisksConfig> for DisksConfig {
             disks: config
                 .disks
                 .into_iter()
-                .map(|disk| (disk.id, disk))
+                .map(|disk| (disk.config.id, disk))
                 .collect(),
         }
     }

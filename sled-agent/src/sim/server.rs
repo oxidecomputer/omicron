@@ -25,7 +25,10 @@ use nexus_client::types as NexusTypes;
 use nexus_client::types::{IpRange, Ipv4Range, Ipv6Range};
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-use nexus_types::deployment::blueprint_zone_type;
+use nexus_types::deployment::{
+    blueprint_zone_type, BlueprintPhysicalDiskConfig,
+    BlueprintPhysicalDiskDisposition, BlueprintPhysicalDisksConfig,
+};
 use nexus_types::deployment::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
 };
@@ -536,11 +539,24 @@ pub async fn run_standalone_server(
         None => vec![],
     };
 
+    let omicron_physical_disks_config =
+        server.sled_agent.omicron_physical_disks_list().await?;
     let mut sled_configs = BTreeMap::new();
     sled_configs.insert(
         config.id,
         SledConfig {
-            disks: server.sled_agent.omicron_physical_disks_list().await?,
+            disks: BlueprintPhysicalDisksConfig {
+                generation: omicron_physical_disks_config.generation,
+                disks: omicron_physical_disks_config
+                    .disks
+                    .into_iter()
+                    .map(|config| BlueprintPhysicalDiskConfig {
+                        disposition:
+                            BlueprintPhysicalDiskDisposition::InService,
+                        config,
+                    })
+                    .collect(),
+            },
             datasets: server.sled_agent.datasets_config_list().await?,
             zones,
         },

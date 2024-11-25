@@ -103,8 +103,7 @@ use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::disk::{
-    DatasetKind, DatasetsConfig, OmicronPhysicalDiskConfig,
-    OmicronPhysicalDisksConfig,
+    DatasetKind, DatasetsConfig, OmicronPhysicalDisksConfig,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
@@ -329,19 +328,7 @@ impl ServiceInner {
                 // Ensure all the physical disks are initialized
                 self.initialize_disks_on_sled(
                     *sled_address,
-                    OmicronPhysicalDisksConfig {
-                        generation: config.disks.generation,
-                        disks: config
-                            .disks
-                            .disks
-                            .iter()
-                            .map(|disk| OmicronPhysicalDiskConfig {
-                                identity: disk.identity.clone(),
-                                id: disk.id,
-                                pool_id: disk.pool_id,
-                            })
-                            .collect(),
-                    },
+                    config.disks.clone().into(),
                 )
                 .await?;
 
@@ -1017,10 +1004,10 @@ impl ServiceInner {
             .flat_map(|(sled_id, config)| {
                 config.disks.disks.iter().map(|config| {
                     NexusTypes::PhysicalDiskPutRequest {
-                        id: config.id,
-                        vendor: config.identity.vendor.clone(),
-                        serial: config.identity.serial.clone(),
-                        model: config.identity.model.clone(),
+                        id: config.config.id,
+                        vendor: config.config.identity.vendor.clone(),
+                        serial: config.config.identity.serial.clone(),
+                        model: config.config.identity.model.clone(),
                         variant: NexusTypes::PhysicalDiskKind::U2,
                         sled_id: sled_id.into_untyped_uuid(),
                     }
@@ -1033,8 +1020,8 @@ impl ServiceInner {
             .flat_map(|(sled_id, config)| {
                 config.disks.disks.iter().map(|config| {
                     NexusTypes::ZpoolPutRequest {
-                        id: config.pool_id.into_untyped_uuid(),
-                        physical_disk_id: config.id,
+                        id: config.config.pool_id.into_untyped_uuid(),
+                        physical_disk_id: config.config.id,
                         sled_id: sled_id.into_untyped_uuid(),
                     }
                 })

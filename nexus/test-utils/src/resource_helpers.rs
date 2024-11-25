@@ -1175,8 +1175,8 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
             for disk in &disks_config.disks {
                 self.add_zpool_with_dataset_ext(
                     *sled_id,
-                    disk.id,
-                    disk.pool_id,
+                    disk.config.id,
+                    disk.config.pool_id,
                     DatasetUuid::new_v4(),
                     Self::DEFAULT_ZPOOL_SIZE_GIB,
                 )

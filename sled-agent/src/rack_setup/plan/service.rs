@@ -14,8 +14,9 @@ use nexus_sled_agent_shared::inventory::{
     Inventory, OmicronZoneDataset, SledRole,
 };
 use nexus_types::deployment::{
-    blueprint_zone_type, BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
-    BlueprintZoneDisposition, BlueprintZoneType,
+    blueprint_zone_type, BlueprintPhysicalDiskConfig,
+    BlueprintPhysicalDiskDisposition, BlueprintPhysicalDisksConfig,
+    BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
     OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
     OmicronZoneExternalSnatIp,
 };
@@ -36,7 +37,7 @@ use omicron_common::backoff::{
 use omicron_common::disk::{
     CompressionAlgorithm, DatasetConfig, DatasetKind, DatasetName,
     DatasetsConfig, DiskVariant, OmicronPhysicalDiskConfig,
-    OmicronPhysicalDisksConfig, SharedDatasetConfig,
+    SharedDatasetConfig,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_common::policy::{
@@ -512,13 +513,16 @@ impl Plan {
                 .disks
                 .iter()
                 .filter(|disk| matches!(disk.variant, DiskVariant::U2))
-                .map(|disk| OmicronPhysicalDiskConfig {
-                    identity: disk.identity.clone(),
-                    id: PhysicalDiskUuid::new_v4(),
-                    pool_id: ZpoolUuid::new_v4(),
+                .map(|disk| BlueprintPhysicalDiskConfig {
+                    disposition: BlueprintPhysicalDiskDisposition::InService,
+                    config: OmicronPhysicalDiskConfig {
+                        identity: disk.identity.clone(),
+                        id: PhysicalDiskUuid::new_v4(),
+                        pool_id: ZpoolUuid::new_v4(),
+                    },
                 })
                 .collect();
-            sled_info.request.disks = OmicronPhysicalDisksConfig {
+            sled_info.request.disks = BlueprintPhysicalDisksConfig {
                 generation: Generation::new(),
                 disks,
             };
@@ -527,7 +531,7 @@ impl Plan {
                 .disks
                 .disks
                 .iter()
-                .map(|disk| ZpoolName::new_external(disk.pool_id))
+                .map(|disk| ZpoolName::new_external(disk.config.pool_id))
                 .collect();
 
             // Add all non-discretionary datasets, self-provisioned on the U.2, to the blueprint.

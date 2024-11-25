@@ -87,7 +87,7 @@ impl SledStorageEditor<'_> {
     }
 
     pub fn ensure_disk(&mut self, disk: BlueprintPhysicalDiskConfig) {
-        let zpool = ZpoolName::new_external(disk.pool_id);
+        let zpool = ZpoolName::new_external(disk.config.pool_id);
 
         self.disks.ensure_disk(disk);
         self.datasets.ensure_debug_dataset(zpool.clone());
@@ -101,9 +101,10 @@ impl SledStorageEditor<'_> {
         let Some(disk) = self.disks.remove_disk(disk_id) else {
             return None;
         };
-        self.datasets
-            .expunge_datasets_if(|dataset| dataset.pool.id() == disk.pool_id);
-        Some(ZpoolName::new_external(disk.pool_id))
+        self.datasets.expunge_datasets_if(|dataset| {
+            dataset.pool.id() == disk.config.pool_id
+        });
+        Some(ZpoolName::new_external(disk.config.pool_id))
     }
 
     pub fn ensure_zone_datasets(&mut self, zone: &BlueprintZoneConfig) {

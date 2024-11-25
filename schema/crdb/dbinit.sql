@@ -3633,6 +3633,11 @@ CREATE TYPE IF NOT EXISTS omicron.public.bp_dataset_disposition AS ENUM (
     'expunged'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.bp_physical_disk_disposition AS ENUM (
+    'in_service',
+    'expunged'
+);
+
 -- list of all blueprints
 CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     id UUID PRIMARY KEY,
@@ -3723,6 +3728,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_physical_disk  (
     -- it's conceivable a blueprint could refer to a sled that no longer exists,
     -- particularly if the blueprint is older than the current target)
     sled_id UUID NOT NULL,
+
+    disposition omicron.public.bp_physical_disk_disposition NOT NULL,
 
     vendor TEXT NOT NULL,
     serial TEXT NOT NULL,
@@ -4687,7 +4694,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '115.0.0', NULL)
+    (TRUE, NOW(), NOW(), '116.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

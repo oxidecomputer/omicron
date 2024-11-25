@@ -31,6 +31,7 @@ use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
 use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::DiskIdentity;
+use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::CollectionUuid;
@@ -376,14 +377,14 @@ impl Blueprint {
     }
 }
 
-impl BpTableData for &OmicronPhysicalDisksConfig {
+impl BpTableData for &BlueprintPhysicalDisksConfig {
     fn bp_generation(&self) -> BpGeneration {
         BpGeneration::Value(self.generation)
     }
 
     fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
         let sorted_disk_ids: BTreeSet<DiskIdentity> =
-            self.disks.iter().map(|d| d.identity.clone()).collect();
+            self.disks.iter().map(|d| d.config.identity.clone()).collect();
 
         sorted_disk_ids.into_iter().map(move |d| {
             BpTableRow::from_strings(state, vec![d.vendor, d.model, d.serial])
@@ -890,14 +891,74 @@ pub enum BlueprintDatasetFilter {
     InService,
 }
 
-/// Information about an Omicron physical disk as recorded in a blueprint.
+/// The desired state of an Omicron-managed physical disk in a blueprint.
+#[derive(
+    Debug,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    JsonSchema,
+    Deserialize,
+    Serialize,
+    EnumIter,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum BlueprintPhysicalDiskDisposition {
+    /// The physical disk is in-service.
+    InService,
+
+    /// The physical disk is permanently gone.
+    Expunged,
+}
+
+/// Information about an Omicron physical disk as recorded in a bluerprint.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct BlueprintPhysicalDiskConfig {
+    pub disposition: BlueprintPhysicalDiskDisposition,
+    pub config: OmicronPhysicalDiskConfig,
+}
+
+/// Information about Omicron physical disks as recorded in a blueprint.
 ///
 /// Part of [`Blueprint`].
-pub type BlueprintPhysicalDisksConfig =
-    omicron_common::disk::OmicronPhysicalDisksConfig;
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct BlueprintPhysicalDisksConfig {
+    pub generation: Generation,
+    pub disks: Vec<BlueprintPhysicalDiskConfig>,
+}
 
-pub type BlueprintPhysicalDiskConfig =
-    omicron_common::disk::OmicronPhysicalDiskConfig;
+// Required by RSS
+impl Default for BlueprintPhysicalDisksConfig {
+    fn default() -> Self {
+        BlueprintPhysicalDisksConfig {
+            generation: Generation::new(),
+            disks: vec![],
+        }
+    }
+}
+
+impl From<BlueprintPhysicalDiskConfig> for OmicronPhysicalDiskConfig {
+    fn from(value: BlueprintPhysicalDiskConfig) -> Self {
+        value.config
+    }
+}
+
+impl From<BlueprintPhysicalDisksConfig> for OmicronPhysicalDisksConfig {
+    fn from(value: BlueprintPhysicalDisksConfig) -> Self {
+        OmicronPhysicalDisksConfig {
+            generation: value.generation,
+            disks: value
+                .disks
+                .into_iter()
+                .map(OmicronPhysicalDiskConfig::from)
+                .collect(),
+        }
+    }
+}
 
 /// Information about Omicron datasets as recorded in a blueprint.
 #[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
@@ -1339,7 +1400,7 @@ impl BlueprintOrCollectionDisksConfig {
         match self {
             BlueprintOrCollectionDisksConfig::Collection(c) => c.disks.clone(),
             BlueprintOrCollectionDisksConfig::Blueprint(c) => {
-                c.disks.iter().map(|d| d.identity.clone()).collect()
+                c.disks.iter().map(|d| d.config.identity.clone()).collect()
             }
         }
     }
