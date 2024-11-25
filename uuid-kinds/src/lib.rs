@@ -66,6 +66,7 @@ impl_typed_uuid_kind! {
     ReconfiguratorSim => "reconfigurator_sim",
     Region => "region",
     Sled => "sled",
+    SupportBundle => "support_bundle",
     TufRepo => "tuf_repo",
     Upstairs => "upstairs",
     UpstairsRepair => "upstairs_repair",

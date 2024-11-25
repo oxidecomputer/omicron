@@ -52,6 +52,7 @@ use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv4Net;
@@ -1187,7 +1188,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     pub async fn add_zpool_with_dataset(&mut self, sled_id: SledUuid) {
         self.add_zpool_with_dataset_ext(
             sled_id,
-            Uuid::new_v4(),
+            PhysicalDiskUuid::new_v4(),
             ZpoolUuid::new_v4(),
             DatasetUuid::new_v4(),
             Self::DEFAULT_ZPOOL_SIZE_GIB,
@@ -1220,7 +1221,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     pub async fn add_zpool_with_dataset_ext(
         &mut self,
         sled_id: SledUuid,
-        physical_disk_id: Uuid,
+        physical_disk_id: PhysicalDiskUuid,
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
         gibibytes: u32,
@@ -1243,7 +1244,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
 
         let physical_disk_request =
             nexus_types::internal_api::params::PhysicalDiskPutRequest {
-                id: physical_disk_id,
+                id: *physical_disk_id.as_untyped_uuid(),
                 vendor: disk_identity.vendor.clone(),
                 serial: disk_identity.serial.clone(),
                 model: disk_identity.model.clone(),
@@ -1255,7 +1256,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         let zpool_request =
             nexus_types::internal_api::params::ZpoolPutRequest {
                 id: zpool.id.into_untyped_uuid(),
-                physical_disk_id,
+                physical_disk_id: *physical_disk_id.as_untyped_uuid(),
                 sled_id: sled_id.into_untyped_uuid(),
             };
 

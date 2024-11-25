@@ -235,9 +235,8 @@ pub async fn dladm_info(
 
 #[cfg(test)]
 mod test {
+    use super::*;
     use std::{process::Command, time::Duration};
-
-    use crate::support_bundle::*;
 
     #[tokio::test]
     async fn test_long_running_command_is_aborted() {
