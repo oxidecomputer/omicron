@@ -118,8 +118,10 @@ pub trait ClickhouseAdminServerApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<DistributedDdlQueue>>, HttpError>;
 
-    /// Retrieve time series from the system database. The value the average of all
-    /// values within the interval.
+    /// Retrieve time series from the system database.
+    ///
+    /// The value of each data point is the average of all stored data points
+    /// within the interval.
     /// These are internal ClickHouse metrics.
     #[endpoint {
         method = GET,
@@ -151,8 +153,10 @@ pub trait ClickhouseAdminSingleApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// Retrieve time series from the system database. The value the average of all
-    /// values within the interval.
+    /// Retrieve time series from the system database.
+    ///
+    /// The value of each data point is the average of all stored data points
+    /// within the interval.
     /// These are internal ClickHouse metrics.
     #[endpoint {
         method = GET,

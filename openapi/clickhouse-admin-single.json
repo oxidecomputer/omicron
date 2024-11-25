@@ -29,8 +29,8 @@
     },
     "/timeseries/{table}/{metric}/avg": {
       "get": {
-        "summary": "Retrieve time series from the system database. The value the average of all",
-        "description": "values within the interval. These are internal ClickHouse metrics.",
+        "summary": "Retrieve time series from the system database.",
+        "description": "The value of each data point is the average of all stored data points within the interval. These are internal ClickHouse metrics.",
         "operationId": "system_timeseries_avg",
         "parameters": [
           {

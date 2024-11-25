@@ -11,7 +11,7 @@ use clickhouse_admin_types::{
 };
 use dropshot::HttpError;
 use illumos_utils::{output_to_exec_error, ExecutionError};
-use slog::{info, Logger};
+use slog::{debug, Logger};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
@@ -175,7 +175,7 @@ impl ClickhouseCli {
         let log = self.log.clone().unwrap();
         let query = settings.query_avg();
 
-        info!(&log, "Querying system database"; "query" => &query);
+        debug!(&log, "Querying system database"; "query" => &query);
 
         self.client_non_interactive(
             ClickhouseClientType::Server,
