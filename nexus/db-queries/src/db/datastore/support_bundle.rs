@@ -484,6 +484,7 @@ mod test {
     use nexus_types::deployment::BlueprintZoneType;
     use omicron_common::api::internal::shared::DatasetKind::Debug as DebugDatasetKind;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::SledUuid;
     use rand::Rng;
 
