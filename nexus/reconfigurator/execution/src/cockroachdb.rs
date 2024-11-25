@@ -37,6 +37,7 @@ mod test {
     use crate::test_utils::realize_blueprint_and_expect;
     use nexus_db_queries::authn;
     use nexus_db_queries::authz;
+    use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use std::sync::Arc;
@@ -93,10 +94,9 @@ mod test {
         );
         // Record the zpools so we don't fail to ensure datasets (unrelated to
         // crdb settings) during blueprint execution.
-        crate::tests::create_disks_for_zones_using_datasets(
-            datastore, &opctx, &blueprint,
-        )
-        .await;
+        let mut disk_test = DiskTest::new(&cptestctx).await;
+        disk_test.add_blueprint_disks(&blueprint).await;
+
         // Execute the initial blueprint.
         let overrides = overridables_for_test(cptestctx);
         _ = realize_blueprint_and_expect(

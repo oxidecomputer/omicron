@@ -228,14 +228,35 @@ pub enum Error {
     #[error("Too many rows to create block")]
     TooManyRows,
 
-    #[error("Column has unexpected type")]
-    UnexpectedColumnType,
+    #[error(
+        "Column '{name}' was expected to have type '{expected}', \
+        but it actually has type '{actual}'"
+    )]
+    UnexpectedColumnType { name: String, expected: String, actual: String },
 
     #[error("Data block is too large")]
     BlockTooLarge,
 
     #[error("Expected an empty data block")]
     ExpectedEmptyDataBlock,
+}
+
+impl Error {
+    pub(crate) fn unexpected_column_type(
+        block: &block::Block,
+        name: &str,
+        expected: impl std::fmt::Display,
+    ) -> Self {
+        Error::UnexpectedColumnType {
+            name: name.to_string(),
+            expected: expected.to_string(),
+            actual: block
+                .columns
+                .get(name)
+                .map(|col| col.data_type.to_string())
+                .unwrap_or_else(|| String::from("unknown")),
+        }
+    }
 }
 
 /// Error codes and related constants.

@@ -15,6 +15,7 @@ use crate::metrics::MetricsManager;
 use crate::nexus::{
     NexusClient, NexusNotifierHandle, NexusNotifierInput, NexusNotifierTask,
 };
+use crate::params::OmicronZoneTypeExt;
 use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::StorageMonitorHandle;
@@ -942,6 +943,24 @@ impl SledAgent {
         &self,
         requested_zones: OmicronZonesConfig,
     ) -> Result<(), Error> {
+        // TODO(https://github.com/oxidecomputer/omicron/issues/6043):
+        // - If these are the set of filesystems, we should also consider
+        // removing the ones which are not listed here.
+        // - It's probably worth sending a bulk request to the storage system,
+        // rather than requesting individual datasets.
+        for zone in &requested_zones.zones {
+            let Some(dataset_name) = zone.dataset_name() else {
+                continue;
+            };
+
+            // First, ensure the dataset exists
+            let dataset_id = zone.id.into_untyped_uuid();
+            self.inner
+                .storage
+                .upsert_filesystem(dataset_id, dataset_name)
+                .await?;
+        }
+
         self.inner
             .services
             .ensure_all_omicron_zones_persistent(requested_zones, None)
@@ -1343,6 +1362,12 @@ impl SledAgent {
         &self,
     ) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
         support_bundle::ipadm_info().await
+    }
+
+    pub(crate) async fn support_dladm_info(
+        &self,
+    ) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
+        support_bundle::dladm_info().await
     }
 }
 

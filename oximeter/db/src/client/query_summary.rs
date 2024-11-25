@@ -96,6 +96,8 @@ pub struct QuerySummary {
     pub io_summary: IoSummary,
 }
 
+// TODO-remove: https://github.com/oxidecomputer/omicron/issues/7094
+#[allow(dead_code)]
 impl QuerySummary {
     /// Construct a SQL query summary from the headers received from the DB.
     pub(crate) fn from_headers(

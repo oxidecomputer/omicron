@@ -1620,7 +1620,11 @@ async fn assert_metrics(
     cpus: i64,
     ram: i64,
 ) {
-    cptestctx.oximeter.force_collect().await;
+    cptestctx
+        .oximeter
+        .try_force_collect()
+        .await
+        .expect("Could not force oximeter collection");
 
     for id in &[None, Some(project_id)] {
         assert_eq!(

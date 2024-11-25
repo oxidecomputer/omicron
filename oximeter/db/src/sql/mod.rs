@@ -673,11 +673,12 @@ impl RestrictedQuery {
         field_name: &str,
         field_type: &FieldType,
     ) -> Select {
-        // FROM fields_{field_type}
+        // FROM oximeter.fields_{field_type}
         let from = TableWithJoins {
             relation: TableFactor::Table {
-                name: ObjectName(vec![Self::str_to_ident(&field_table_name(
-                    *field_type,
+                name: ObjectName(vec![Self::str_to_ident(&format!(
+                    "oximeter.{}",
+                    field_table_name(*field_type)
                 ))]),
                 alias: None,
                 args: None,
@@ -760,9 +761,10 @@ impl RestrictedQuery {
         // FROM measurements_{datum_type}
         let from = TableWithJoins {
             relation: TableFactor::Table {
-                name: ObjectName(vec![Self::str_to_ident(
-                    &measurement_table_name(*datum_type),
-                )]),
+                name: ObjectName(vec![Self::str_to_ident(&format!(
+                    "oximeter.{}",
+                    measurement_table_name(*datum_type)
+                ))]),
                 alias: None,
                 args: None,
                 with_hints: vec![],
