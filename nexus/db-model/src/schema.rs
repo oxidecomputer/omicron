@@ -1658,6 +1658,8 @@ table! {
         blueprint_id -> Uuid,
         sled_id -> Uuid,
 
+        disposition -> crate::DbBpPhysicalDiskDispositionEnum,
+
         vendor -> Text,
         serial -> Text,
         model -> Text,

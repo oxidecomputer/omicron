@@ -41,6 +41,8 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintDatasetsConfig;
+use nexus_types::deployment::BlueprintPhysicalDiskConfig;
+use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -830,16 +832,22 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     let mut datasets = BTreeMap::new();
                     for zone in zones {
                         if let Some(zpool) = &zone.filesystem_pool {
-                            disks.push(OmicronPhysicalDiskConfig {
-                                identity: omicron_common::disk::DiskIdentity {
-                                    vendor: "nexus-tests".to_string(),
-                                    model: "nexus-test-model".to_string(),
-                                    serial: format!(
-                                        "nexus-test-disk-{disk_index}"
-                                    ),
+                            disks.push(BlueprintPhysicalDiskConfig {
+                                disposition:
+                                    BlueprintPhysicalDiskDisposition::InService,
+                                config: OmicronPhysicalDiskConfig {
+                                    identity:
+                                        omicron_common::disk::DiskIdentity {
+                                            vendor: "nexus-tests".to_string(),
+                                            model: "nexus-test-model"
+                                                .to_string(),
+                                            serial: format!(
+                                                "nexus-test-disk-{disk_index}"
+                                            ),
+                                        },
+                                    id: Uuid::new_v4(),
+                                    pool_id: zpool.id(),
                                 },
-                                id: Uuid::new_v4(),
-                                pool_id: zpool.id(),
                             });
                             disk_index += 1;
                             let id = DatasetUuid::new_v4();
@@ -867,16 +875,22 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     // Populate extra fake disks, giving each sled 10 total.
                     if disks.len() < 10 {
                         for _ in disks.len()..10 {
-                            disks.push(OmicronPhysicalDiskConfig {
-                                identity: omicron_common::disk::DiskIdentity {
-                                    vendor: "nexus-tests".to_string(),
-                                    model: "nexus-test-model".to_string(),
-                                    serial: format!(
-                                        "nexus-test-disk-{disk_index}"
-                                    ),
+                            disks.push(BlueprintPhysicalDiskConfig {
+                                disposition:
+                                    BlueprintPhysicalDiskDisposition::InService,
+                                config: OmicronPhysicalDiskConfig {
+                                    identity:
+                                        omicron_common::disk::DiskIdentity {
+                                            vendor: "nexus-tests".to_string(),
+                                            model: "nexus-test-model"
+                                                .to_string(),
+                                            serial: format!(
+                                                "nexus-test-disk-{disk_index}"
+                                            ),
+                                        },
+                                    id: Uuid::new_v4(),
+                                    pool_id: ZpoolUuid::new_v4(),
                                 },
-                                id: Uuid::new_v4(),
-                                pool_id: ZpoolUuid::new_v4(),
                             });
                             disk_index += 1;
                         }

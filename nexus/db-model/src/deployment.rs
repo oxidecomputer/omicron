@@ -30,6 +30,7 @@ use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
+use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
@@ -43,7 +44,7 @@ use nexus_types::deployment::{
     OmicronZoneExternalSnatIp,
 };
 use omicron_common::api::internal::shared::NetworkInterface;
-use omicron_common::disk::DiskIdentity;
+use omicron_common::disk::{DiskIdentity, OmicronPhysicalDiskConfig};
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::{
     DatasetKind, ExternalIpKind, ExternalIpUuid, GenericUuid, OmicronZoneKind,
@@ -145,6 +146,54 @@ pub struct BpSledState {
     pub sled_state: SledState,
 }
 
+impl_enum_type!(
+    #[derive(Clone, SqlType, Debug, QueryId)]
+    #[diesel(postgres_type(name = "bp_physical_disk_disposition", schema = "public"))]
+    pub struct DbBpPhysicalDiskDispositionEnum;
+
+    /// This type is not actually public, because [`BlueprintPhysicalDiskDisposition`]
+    /// interacts with external logic.
+    ///
+    /// However, it must be marked `pub` to avoid errors like `crate-private
+    /// type `BpPhysicalDiskDispositionEnum` in public interface`. Marking this type `pub`,
+    /// without actually making it public, tricks rustc in a desirable way.
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
+    #[diesel(sql_type = DbBpPhysicalDiskDispositionEnum)]
+    pub enum DbBpPhysicalDiskDisposition;
+
+    // Enum values
+    InService => b"in_service"
+    Expunged => b"expunged"
+);
+
+/// Converts a [`BlueprintPhysicalDiskDisposition`] to a version that can be inserted
+/// into a database.
+pub fn to_db_bp_physical_disk_disposition(
+    disposition: BlueprintPhysicalDiskDisposition,
+) -> DbBpPhysicalDiskDisposition {
+    match disposition {
+        BlueprintPhysicalDiskDisposition::InService => {
+            DbBpPhysicalDiskDisposition::InService
+        }
+        BlueprintPhysicalDiskDisposition::Expunged => {
+            DbBpPhysicalDiskDisposition::Expunged
+        }
+    }
+}
+
+impl From<DbBpPhysicalDiskDisposition> for BlueprintPhysicalDiskDisposition {
+    fn from(disposition: DbBpPhysicalDiskDisposition) -> Self {
+        match disposition {
+            DbBpPhysicalDiskDisposition::InService => {
+                BlueprintPhysicalDiskDisposition::InService
+            }
+            DbBpPhysicalDiskDisposition::Expunged => {
+                BlueprintPhysicalDiskDisposition::Expunged
+            }
+        }
+    }
+}
+
 /// See [`nexus_types::deployment::BlueprintPhysicalDisksConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_sled_omicron_physical_disks)]
@@ -175,6 +224,8 @@ pub struct BpOmicronPhysicalDisk {
     pub blueprint_id: Uuid,
     pub sled_id: Uuid,
 
+    pub disposition: DbBpPhysicalDiskDisposition,
+
     pub vendor: String,
     pub serial: String,
     pub model: String,
@@ -192,11 +243,14 @@ impl BpOmicronPhysicalDisk {
         Self {
             blueprint_id,
             sled_id,
-            vendor: disk_config.identity.vendor.clone(),
-            serial: disk_config.identity.serial.clone(),
-            model: disk_config.identity.model.clone(),
-            id: disk_config.id,
-            pool_id: disk_config.pool_id.into_untyped_uuid(),
+            disposition: to_db_bp_physical_disk_disposition(
+                disk_config.disposition,
+            ),
+            vendor: disk_config.config.identity.vendor.clone(),
+            serial: disk_config.config.identity.serial.clone(),
+            model: disk_config.config.identity.model.clone(),
+            id: disk_config.config.id,
+            pool_id: disk_config.config.pool_id.into_untyped_uuid(),
         }
     }
 }
@@ -204,13 +258,16 @@ impl BpOmicronPhysicalDisk {
 impl From<BpOmicronPhysicalDisk> for BlueprintPhysicalDiskConfig {
     fn from(disk: BpOmicronPhysicalDisk) -> Self {
         Self {
-            identity: DiskIdentity {
-                vendor: disk.vendor,
-                serial: disk.serial,
-                model: disk.model,
+            disposition: disk.disposition.into(),
+            config: OmicronPhysicalDiskConfig {
+                identity: DiskIdentity {
+                    vendor: disk.vendor,
+                    serial: disk.serial,
+                    model: disk.model,
+                },
+                id: disk.id,
+                pool_id: ZpoolUuid::from_untyped_uuid(disk.pool_id),
             },
-            id: disk.id,
-            pool_id: ZpoolUuid::from_untyped_uuid(disk.pool_id),
         }
     }
 }
