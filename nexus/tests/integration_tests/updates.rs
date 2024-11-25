@@ -9,11 +9,14 @@
 
 use anyhow::{ensure, Context, Result};
 use camino::Utf8Path;
-use camino_tempfile::{Builder, Utf8TempDir, Utf8TempPath};
+use camino_tempfile::{Builder, Utf8TempPath};
 use clap::Parser;
 use dropshot::test_util::LogContext;
 use http::{Method, StatusCode};
 use nexus_config::UpdatesConfig;
+use nexus_test_utils::background::run_tuf_artifact_replication_step;
+use nexus_test_utils::background::run_tuf_artifact_replication_to_completion;
+use nexus_test_utils::background::wait_tuf_artifact_replication_step;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::{load_test_config, test_setup, test_setup_with_config};
 use omicron_common::api::external::{
@@ -24,32 +27,15 @@ use omicron_common::api::internal::nexus::KnownArtifactKind;
 use omicron_sled_agent::sim;
 use pretty_assertions::assert_eq;
 use serde::Deserialize;
+use std::collections::HashSet;
 use std::fmt::Debug;
-use std::fs::File;
 use std::io::Write;
 use tufaceous_lib::assemble::{DeserializedManifest, ManifestTweak};
 
-const FAKE_MANIFEST_PATH: &'static str = "../tufaceous/manifests/fake.toml";
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_update_uninitialized() -> Result<()> {
+async fn test_repo_upload_uninitialized() -> Result<()> {
     let mut config = load_test_config();
     let logctx = LogContext::new("test_update_uninitialized", &config.pkg.log);
-
-    // Build a fake TUF repo
-    let temp_dir = Utf8TempDir::new()?;
-    let archive_path = temp_dir.path().join("archive.zip");
-
-    let args = tufaceous::Args::try_parse_from([
-        "tufaceous",
-        "assemble",
-        FAKE_MANIFEST_PATH,
-        archive_path.as_str(),
-    ])
-    .context("error parsing args")?;
-
-    args.exec(&logctx.log).await.context("error executing assemble command")?;
-
     let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
         "test_update_uninitialized",
         &mut config,
@@ -58,6 +44,9 @@ async fn test_update_uninitialized() -> Result<()> {
     )
     .await;
     let client = &cptestctx.external_client;
+
+    // Build a fake TUF repo
+    let archive_path = make_archive(&logctx.log).await?;
 
     // Attempt to upload the repository to Nexus. This should fail with a 500
     // error because the updates system is not configured.
@@ -71,6 +60,13 @@ async fn test_update_uninitialized() -> Result<()> {
         .await
         .context("repository upload should have failed with 500 error")?;
     }
+
+    // The artifact replication background task should have nothing to do.
+    let status =
+        run_tuf_artifact_replication_step(&cptestctx.internal_client).await;
+    assert_eq!(status.requests_ok, 0);
+    assert_eq!(status.requests_outstanding, 0);
+    assert_eq!(status.local_repos, 0);
 
     // Attempt to fetch a repository description from Nexus. This should also
     // fail with a 500 error.
@@ -92,7 +88,7 @@ async fn test_update_uninitialized() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_update_end_to_end() -> Result<()> {
+async fn test_repo_upload() -> Result<()> {
     let mut config = load_test_config();
     config.pkg.updates = Some(UpdatesConfig {
         // XXX: This is currently not used by the update system, but
@@ -100,21 +96,6 @@ async fn test_update_end_to_end() -> Result<()> {
         trusted_root: "does-not-exist.json".into(),
     });
     let logctx = LogContext::new("test_update_end_to_end", &config.pkg.log);
-
-    // Build a fake TUF repo
-    let temp_dir = Utf8TempDir::new()?;
-    let archive_path = temp_dir.path().join("archive.zip");
-
-    let args = tufaceous::Args::try_parse_from([
-        "tufaceous",
-        "assemble",
-        FAKE_MANIFEST_PATH,
-        archive_path.as_str(),
-    ])
-    .context("error parsing args")?;
-
-    args.exec(&logctx.log).await.context("error executing assemble command")?;
-
     let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
         "test_update_end_to_end",
         &mut config,
@@ -123,6 +104,9 @@ async fn test_update_end_to_end() -> Result<()> {
     )
     .await;
     let client = &cptestctx.external_client;
+
+    // Build a fake TUF repo
+    let archive_path = make_archive(&logctx.log).await?;
 
     // Upload the repository to Nexus.
     let mut initial_description = {
@@ -138,6 +122,30 @@ async fn test_update_end_to_end() -> Result<()> {
         assert_eq!(response.status, TufRepoInsertStatus::Inserted);
         response.recorded
     };
+    let unique_sha256_count = initial_description
+        .artifacts
+        .iter()
+        .map(|artifact| artifact.hash)
+        .collect::<HashSet<_>>()
+        .len();
+
+    // The artifact replication background task should have been activated, and
+    // we should see a local repo, successful tasks, and pending tasks.
+    let status =
+        wait_tuf_artifact_replication_step(&cptestctx.internal_client).await;
+    eprintln!("{status:?}");
+    assert!(status.requests_ok > 0);
+    assert!(status.requests_outstanding > 0);
+    // The total number of requests (ok and outstanding) should be the same as the number of
+    // artifacts.
+    assert_eq!(
+        status.requests_ok + status.requests_outstanding,
+        unique_sha256_count,
+    );
+    assert_eq!(status.local_repos, 1);
+    // Given a few more executions, the task should stabilize.
+    run_tuf_artifact_replication_to_completion(&cptestctx.internal_client)
+        .await;
 
     // Upload the repository to Nexus again. This should return a 200 with an
     // `AlreadyExists` status.
@@ -187,7 +195,15 @@ async fn test_update_end_to_end() -> Result<()> {
         "initial description matches fetched description"
     );
 
-    // TODO: attempt to download extracted artifacts.
+    // Even though the repository already exists, the artifacts are sent to the
+    // replication task ahead of database insertion. The task should have run
+    // once, found nothing to do, and deleted the artifacts.
+    let status =
+        wait_tuf_artifact_replication_step(&cptestctx.internal_client).await;
+    eprintln!("{status:?}");
+    assert_eq!(status.requests_ok, 0);
+    assert_eq!(status.requests_outstanding, 0);
+    assert_eq!(status.local_repos, 0);
 
     // Upload a new repository with the same system version but a different
     // version for one of the components. This will produce a different hash,
@@ -197,8 +213,7 @@ async fn test_update_end_to_end() -> Result<()> {
             kind: KnownArtifactKind::GimletSp,
             version: "2.0.0".parse().unwrap(),
         }];
-        let archive_path =
-            make_tweaked_archive(&logctx.log, &temp_dir, tweaks).await?;
+        let archive_path = make_tweaked_archive(&logctx.log, tweaks).await?;
 
         let response = make_upload_request(
             client,
@@ -217,6 +232,16 @@ async fn test_update_end_to_end() -> Result<()> {
         )?;
     }
 
+    // Even though the repository was rejected, the artifacts are sent to the
+    // replication task ahead of database insertion. The task should have run
+    // once, found nothing to do, and deleted the artifacts.
+    let status =
+        wait_tuf_artifact_replication_step(&cptestctx.internal_client).await;
+    eprintln!("{status:?}");
+    assert_eq!(status.requests_ok, 0);
+    assert_eq!(status.requests_outstanding, 0);
+    assert_eq!(status.local_repos, 0);
+
     // Upload a new repository with a different system version and different
     // contents (but same version) for an artifact.
     {
@@ -227,8 +252,7 @@ async fn test_update_end_to_end() -> Result<()> {
                 size_delta: 1024,
             },
         ];
-        let archive_path =
-            make_tweaked_archive(&logctx.log, &temp_dir, tweaks).await?;
+        let archive_path = make_tweaked_archive(&logctx.log, tweaks).await?;
 
         let response =
             make_upload_request(client, &archive_path, StatusCode::CONFLICT)
@@ -244,12 +268,21 @@ async fn test_update_end_to_end() -> Result<()> {
         )?;
     }
 
+    // Even though the repository was rejected, the artifacts are sent to the
+    // replication task ahead of database insertion. The task should have run
+    // once, found nothing to do, and deleted the artifacts.
+    let status =
+        wait_tuf_artifact_replication_step(&cptestctx.internal_client).await;
+    eprintln!("{status:?}");
+    assert_eq!(status.requests_ok, 0);
+    assert_eq!(status.requests_outstanding, 0);
+    assert_eq!(status.local_repos, 0);
+
     // Upload a new repository with a different system version but no other
     // changes. This should be accepted.
     {
         let tweaks = &[ManifestTweak::SystemVersion("2.0.0".parse().unwrap())];
-        let archive_path =
-            make_tweaked_archive(&logctx.log, &temp_dir, tweaks).await?;
+        let archive_path = make_tweaked_archive(&logctx.log, tweaks).await?;
 
         let response =
             make_upload_request(client, &archive_path, StatusCode::OK)
@@ -263,35 +296,49 @@ async fn test_update_end_to_end() -> Result<()> {
         assert_eq!(response.status, TufRepoInsertStatus::Inserted);
     }
 
+    // No artifacts changed, so the task should have nothing to do and should
+    // delete the local artifacts.
+    let status =
+        wait_tuf_artifact_replication_step(&cptestctx.internal_client).await;
+    eprintln!("{status:?}");
+    assert_eq!(status.requests_ok, 0);
+    assert_eq!(status.requests_outstanding, 0);
+    assert_eq!(status.local_repos, 0);
+
     cptestctx.teardown().await;
     logctx.cleanup_successful();
 
     Ok(())
 }
 
+async fn make_archive(log: &slog::Logger) -> anyhow::Result<Utf8TempPath> {
+    make_tweaked_archive(log, &[]).await
+}
+
 async fn make_tweaked_archive(
     log: &slog::Logger,
-    temp_dir: &Utf8TempDir,
     tweaks: &[ManifestTweak],
 ) -> anyhow::Result<Utf8TempPath> {
     let manifest = DeserializedManifest::tweaked_fake(tweaks);
-    let manifest_path = temp_dir.path().join("fake2.toml");
-    let mut manifest_file =
-        File::create(&manifest_path).context("error creating manifest file")?;
+    let mut manifest_file = Builder::new()
+        .prefix("manifest")
+        .suffix(".toml")
+        .tempfile()
+        .context("error creating temp file for manifest")?;
     let manifest_to_toml = manifest.to_toml()?;
     manifest_file.write_all(manifest_to_toml.as_bytes())?;
 
     let archive_path = Builder::new()
         .prefix("archive")
         .suffix(".zip")
-        .tempfile_in(temp_dir.path())
-        .context("error creating temp file for tweaked archive")?
+        .tempfile()
+        .context("error creating temp file for archive")?
         .into_temp_path();
 
     let args = tufaceous::Args::try_parse_from([
         "tufaceous",
         "assemble",
-        manifest_path.as_str(),
+        manifest_file.path().as_str(),
         archive_path.as_str(),
     ])
     .context("error parsing args")?;

@@ -164,6 +164,7 @@ type GetSledAgentInfo = Box<dyn Fn(Generation) -> SledAgentInfo + Send>;
 pub struct NexusNotifierInput {
     pub sled_id: SledUuid,
     pub sled_address: SocketAddrV6,
+    pub repo_depot_port: u16,
     pub nexus_client: NexusClient,
     pub hardware: HardwareManager,
     pub vmm_reservoir_manager: VmmReservoirManagerHandle,
@@ -248,6 +249,7 @@ impl NexusNotifierTask {
         let NexusNotifierInput {
             sled_id,
             sled_address,
+            repo_depot_port,
             nexus_client,
             hardware,
             vmm_reservoir_manager,
@@ -265,6 +267,7 @@ impl NexusNotifierTask {
             };
             SledAgentInfo {
                 sa_address: sled_address.to_string(),
+                repo_depot_port,
                 role,
                 baseboard: hardware.baseboard().convert(),
                 usable_hardware_threads: hardware.online_processor_count(),
@@ -643,6 +646,7 @@ mod test {
         let latest_sled_agent_info =
             Arc::new(std::sync::Mutex::new(SledAgentInfo {
                 sa_address: sa_address.clone(),
+                repo_depot_port: 0,
                 role: nexus_client::types::SledRole::Gimlet,
                 baseboard: Baseboard::new_pc("test".into(), "test".into())
                     .convert(),

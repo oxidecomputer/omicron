@@ -188,7 +188,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled (
     sled_state omicron.public.sled_state NOT NULL,
 
     /* Generation number owned and incremented by the sled-agent */
-    sled_agent_gen INT8 NOT NULL DEFAULT 1
+    sled_agent_gen INT8 NOT NULL DEFAULT 1,
+
+    /* The bound port of the Repo Depot API server, running on the same IP as
+       the sled agent server. */
+    repo_depot_port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL
 );
 
 -- Add an index that ensures a given physical sled (identified by serial and
@@ -2321,12 +2325,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
 
+    -- TODO: Repos fetched over HTTP will not have a SHA256 hash; this is an
+    -- implementation detail of our ZIP archives.
     sha256 STRING(64) NOT NULL,
 
     -- The version of the targets.json role that was used to generate the repo.
     targets_role_version INT NOT NULL,
 
     -- The valid_until time for the repo.
+    -- TODO: Figure out timestamp validity policy for uploaded repos vs those
+    -- fetched over HTTP; my (iliana's) current presumption is that we will make
+    -- this NULL for uploaded ZIP archives of repos.
     valid_until TIMESTAMPTZ NOT NULL,
 
     -- The system version described in the TUF repo.
@@ -2370,6 +2379,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
 
     PRIMARY KEY (name, version, kind)
 );
+
+CREATE INDEX IF NOT EXISTS tuf_artifact_sha256 ON omicron.public.tuf_artifact (sha256);
 
 -- Reflects that a particular artifact was provided by a particular TUF repo.
 -- This is a many-many mapping.
@@ -4684,7 +4695,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '114.0.0', NULL)
+    (TRUE, NOW(), NOW(), '115.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

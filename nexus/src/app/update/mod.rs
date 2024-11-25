@@ -56,17 +56,30 @@ impl super::Nexus {
             ArtifactsWithPlan::from_stream(body, Some(file_name), &self.log)
                 .await
                 .map_err(|error| error.to_http_error())?;
-
-        // Now store the artifacts in the database.
         let tuf_repo_description = TufRepoDescription::from_external(
             artifacts_with_plan.description().clone(),
         );
-
+        // Move the `ArtifactsWithPlan`, which carries with it the
+        // `Utf8TempDir`s storing the artifacts, into the artifact replication
+        // background task. This is done before the database insert because if
+        // this fails, we shouldn't record the artifacts in the database.
+        self.tuf_artifact_replication_tx
+            .send(artifacts_with_plan)
+            .await
+            .map_err(|err| {
+                Error::internal_error(&format!(
+                    "failed to send artifacts for replication: {err}"
+                ))
+            })?;
+        // Now store the artifacts in the database.
         let response = self
             .db_datastore
             .update_tuf_repo_insert(opctx, tuf_repo_description)
             .await
             .map_err(HttpError::from)?;
+        // Finally, immediately activate the artifact replication task.
+        self.background_tasks.task_tuf_artifact_replication.activate();
+
         Ok(response.into_external())
     }
 
