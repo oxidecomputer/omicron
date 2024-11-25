@@ -63,6 +63,10 @@ impl SimRngState {
         }
     }
 
+    pub fn seed(&self) -> &str {
+        &self.seed
+    }
+
     pub fn next_system_rng(&mut self) -> ExampleSystemRng {
         // Different behavior for the first system_rng_gen is a bit weird, but
         // it retains backwards compatibility with existing tests -- it means
@@ -82,10 +86,8 @@ impl SimRngState {
         self.collection_rng_gen += 1;
         // We don't need to pass in extra bits unique to collections, because
         // `CollectionBuilderRng` adds its own.
-        CollectionBuilderRng::from_seed((
-            self.seed.as_str(),
-            self.collection_rng_gen,
-        ))
+        let seed = (self.seed.as_str(), self.collection_rng_gen);
+        CollectionBuilderRng::from_seed(seed)
     }
 
     pub fn next_planner_rng(&mut self) -> PlannerRng {
@@ -420,42 +422,29 @@ impl ExampleSystemBuilder {
         for (i, (sled_id, sled_resources)) in
             base_input.all_sled_resources(SledFilter::Commissioned).enumerate()
         {
-            if self.create_zones {
-                let _ = builder.sled_ensure_zone_ntp(sled_id).unwrap();
-                let _ = builder
-                    .sled_ensure_zone_multiple_nexus_with_config(
-                        sled_id,
-                        nexus_count.on(i, self.nsleds),
-                        false,
-                        vec![],
-                    )
-                    .unwrap();
-                if i == 0 {
-                    let _ = builder
-                        .sled_ensure_zone_multiple_clickhouse(sled_id, 1);
-                }
-                let _ = builder
-                    .sled_ensure_zone_multiple_internal_dns(
-                        sled_id,
-                        self.internal_dns_count.on(i, self.nsleds),
-                    )
-                    .unwrap();
-                let _ = builder
-                    .sled_ensure_zone_multiple_external_dns(
-                        sled_id,
-                        self.external_dns_count.on(i, self.nsleds),
-                    )
-                    .unwrap();
-                let _ = builder
-                    .sled_ensure_zone_multiple_crucible_pantry(
-                        sled_id,
-                        self.crucible_pantry_count.on(i, self.nsleds),
-                    )
-                    .unwrap();
-            }
             if self.create_disks_in_blueprint {
                 let _ =
                     builder.sled_ensure_disks(sled_id, sled_resources).unwrap();
+            }
+            if self.create_zones {
+                let _ = builder.sled_ensure_zone_ntp(sled_id).unwrap();
+                for _ in 0..nexus_count.on(i, self.nsleds) {
+                    builder
+                        .sled_add_zone_nexus_with_config(sled_id, false, vec![])
+                        .unwrap();
+                }
+                if i == 0 {
+                    builder.sled_add_zone_clickhouse(sled_id).unwrap();
+                }
+                for _ in 0..self.internal_dns_count.on(i, self.nsleds) {
+                    builder.sled_add_zone_internal_dns(sled_id).unwrap();
+                }
+                for _ in 0..self.external_dns_count.on(i, self.nsleds) {
+                    builder.sled_add_zone_external_dns(sled_id).unwrap();
+                }
+                for _ in 0..self.crucible_pantry_count.on(i, self.nsleds) {
+                    builder.sled_add_zone_crucible_pantry(sled_id).unwrap();
+                }
             }
             if self.create_zones {
                 for pool_name in sled_resources.zpools.keys() {
@@ -464,7 +453,9 @@ impl ExampleSystemBuilder {
                         .unwrap();
                 }
             }
-            builder.sled_ensure_datasets(sled_id, &sled_resources).unwrap();
+            builder
+                .sled_ensure_zone_datasets(sled_id, &sled_resources)
+                .unwrap();
         }
 
         let blueprint = builder.build();

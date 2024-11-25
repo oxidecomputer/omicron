@@ -39,6 +39,7 @@ use nexus_types::internal_api::params::{
 };
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::DatasetUuid;
 use slog::Logger;
 use std::net::{SocketAddr, SocketAddrV6};
 use uuid::Uuid;
@@ -111,7 +112,7 @@ pub trait NexusServer: Send + Sync + 'static {
         &self,
         physical_disk: PhysicalDiskPutRequest,
         zpool: ZpoolPutRequest,
-        dataset_id: Uuid,
+        dataset_id: DatasetUuid,
         address: SocketAddrV6,
     );
 

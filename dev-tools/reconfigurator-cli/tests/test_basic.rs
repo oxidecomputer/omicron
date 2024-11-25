@@ -8,7 +8,7 @@ use expectorate::assert_contents;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_test_utils::resource_helpers::DiskTestBuilder;
+use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::Blueprint;
@@ -38,7 +38,10 @@ fn path_to_cli() -> PathBuf {
     path_to_executable(env!("CARGO_BIN_EXE_reconfigurator-cli"))
 }
 
-fn run_cli(file: impl AsRef<Utf8Path>) -> (ExitStatus, String, String) {
+fn run_cli(
+    file: impl AsRef<Utf8Path>,
+    args: &[&str],
+) -> (ExitStatus, String, String) {
     let file = file.as_ref();
 
     // Turn the path into an absolute one, because we're going to set a custom
@@ -49,7 +52,7 @@ fn run_cli(file: impl AsRef<Utf8Path>) -> (ExitStatus, String, String) {
     // Create a temporary directory for the CLI to use -- that will let it
     // read and write files in its own sandbox.
     let tmpdir = camino_tempfile::tempdir().expect("failed to create tmpdir");
-    let exec = Exec::cmd(path_to_cli()).arg(file).cwd(tmpdir.path());
+    let exec = Exec::cmd(path_to_cli()).arg(file).args(args).cwd(tmpdir.path());
     run_command(exec)
 }
 
@@ -57,9 +60,11 @@ fn run_cli(file: impl AsRef<Utf8Path>) -> (ExitStatus, String, String) {
 #[test]
 fn test_basic() {
     let (exit_status, stdout_text, stderr_text) =
-        run_cli("tests/input/cmds.txt");
+        run_cli("tests/input/cmds.txt", &["--seed", "test_basic"]);
     assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
-    let stdout_text = Redactor::default().do_redact(&stdout_text);
+
+    // Everything is deterministic, so we don't need to redact UUIDs.
+    let stdout_text = Redactor::default().uuids(false).do_redact(&stdout_text);
     assert_contents("tests/output/cmd-stdout", &stdout_text);
     assert_contents("tests/output/cmd-stderr", &stderr_text);
 }
@@ -68,7 +73,7 @@ fn test_basic() {
 #[test]
 fn test_example() {
     let (exit_status, stdout_text, stderr_text) =
-        run_cli("tests/input/cmds-example.txt");
+        run_cli("tests/input/cmds-example.txt", &["--seed", "test_example"]);
     assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
 
     // The example system uses a fixed seed, which means that UUIDs are
@@ -88,18 +93,9 @@ type ControlPlaneTestContext =
 // import it back.
 #[nexus_test]
 async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
-    // Setup
-    //
-    // Add a zpool to all sleds, just to ensure that all new zones can find
-    // a transient filesystem wherever they end up being placed.
-    DiskTestBuilder::new(&cptestctx)
-        .on_all_sleds()
-        .with_zpool_count(1)
-        .build()
-        .await;
-
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
+
     let log = &cptestctx.logctx.log;
     let opctx = OpContext::for_background(
         log.clone(),
@@ -107,6 +103,20 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
         authn::Context::internal_api(),
         datastore.clone(),
     );
+
+    // Setup
+    //
+    // For all the disks our blueprint says each sled should have, actually
+    // insert them into the DB. This is working around nexus-test-utils's setup
+    // being a little scattershot and spread out; tests are supposed to do their
+    // own disk setup.
+    let (_blueprint_target, initial_blueprint) = datastore
+        .blueprint_target_get_current_full(&opctx)
+        .await
+        .expect("failed to read current target blueprint");
+    let mut disk_test = DiskTest::new(&cptestctx).await;
+    disk_test.add_blueprint_disks(&initial_blueprint).await;
+
     let tmpdir = camino_tempfile::tempdir().expect("failed to create tmpdir");
     // Save the path and prevent the temporary directory from being cleaned up
     // automatically.  We want to be preserve the contents if this test fails.

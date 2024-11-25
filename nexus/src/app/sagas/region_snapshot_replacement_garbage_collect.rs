@@ -218,6 +218,7 @@ pub(crate) mod test {
     use nexus_db_queries::authn::saga::Serialized;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
+    use omicron_uuid_kinds::DatasetUuid;
     use sled_agent_client::types::CrucibleOpts;
     use sled_agent_client::types::VolumeConstructionRequest;
     use uuid::Uuid;
@@ -275,7 +276,7 @@ pub(crate) mod test {
             .unwrap();
 
         let mut request = RegionSnapshotReplacement::new(
-            Uuid::new_v4(),
+            DatasetUuid::new_v4(),
             Uuid::new_v4(),
             Uuid::new_v4(),
         );

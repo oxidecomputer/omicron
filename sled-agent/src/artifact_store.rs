@@ -23,8 +23,8 @@ use std::time::Duration;
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::{NamedUtf8TempFile, Utf8TempPath};
 use dropshot::{
-    Body, ConfigDropshot, FreeformBody, HttpError, HttpResponseOk,
-    HttpServerStarter, Path, RequestContext, StreamingBody,
+    Body, ConfigDropshot, FreeformBody, HttpError, HttpResponseOk, Path,
+    RequestContext, ServerBuilder, StreamingBody,
 };
 use futures::{Stream, TryStreamExt};
 use http::StatusCode;
@@ -130,18 +130,18 @@ impl ArtifactStore<StorageHandle> {
         depot_address.set_port(REPO_DEPOT_PORT);
 
         let log = self.log.new(o!("component" => "dropshot (Repo Depot)"));
-        Ok(HttpServerStarter::new(
-            &ConfigDropshot {
-                bind_address: depot_address.into(),
-                ..dropshot_config.clone()
-            },
+        ServerBuilder::new(
             repo_depot_api_mod::api_description::<RepoDepotImpl>()
                 .expect("registered entrypoints"),
             self,
-            &log,
+            log,
         )
-        .map_err(StartError::Dropshot)?
-        .start())
+        .config(ConfigDropshot {
+            bind_address: depot_address.into(),
+            ..dropshot_config.clone()
+        })
+        .start()
+        .map_err(StartError::Dropshot)
     }
 }
 
@@ -151,7 +151,7 @@ pub enum StartError {
     DatasetConfig(#[source] sled_storage::error::Error),
 
     #[error("Dropshot error while starting Repo Depot service")]
-    Dropshot(#[source] Box<dyn std::error::Error + Send + Sync>),
+    Dropshot(#[source] dropshot::BuildError),
 }
 
 macro_rules! log_and_store {

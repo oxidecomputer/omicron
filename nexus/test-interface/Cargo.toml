@@ -16,3 +16,4 @@ omicron-common.workspace = true
 slog.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
+omicron-uuid-kinds.workspace = true

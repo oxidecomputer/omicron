@@ -17,6 +17,7 @@ extern crate self as oximeter;
 use anyhow::Context;
 use clickward::{Deployment, KeeperClient, KeeperError, KeeperId};
 use omicron_test_utils::dev::poll;
+use oximeter_db::Client;
 use oximeter_macro_impl::{Metric, Target};
 use oximeter_types::histogram;
 use oximeter_types::histogram::{Histogram, Record};
@@ -182,6 +183,27 @@ pub async fn wait_for_keepers(
     .with_context(|| format!("failed to contact all keepers: {ids:?}"))?;
 
     info!(log, "Keepers ready: {ids:?}");
+    Ok(())
+}
+
+/// Try to ping the server until it responds.
+pub async fn wait_for_ping(
+    log: &Logger,
+    client: &Client,
+) -> anyhow::Result<()> {
+    poll::wait_for_condition(
+        || async {
+            client
+                .ping()
+                .await
+                .map_err(|_| poll::CondCheckError::<oximeter_db::Error>::NotYet)
+        },
+        &Duration::from_millis(100),
+        &Duration::from_secs(30),
+    )
+    .await
+    .context("failed to ping ClickHouse server")?;
+    info!(log, "ClickHouse server ready");
     Ok(())
 }
 

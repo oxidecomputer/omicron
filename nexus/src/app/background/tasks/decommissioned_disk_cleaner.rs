@@ -237,7 +237,7 @@ mod tests {
 
         let dataset = datastore
             .dataset_upsert(Dataset::new(
-                Uuid::new_v4(),
+                DatasetUuid::new_v4(),
                 zpool.id(),
                 Some(std::net::SocketAddrV6::new(
                     std::net::Ipv6Addr::LOCALHOST,
@@ -275,7 +275,7 @@ mod tests {
 
         (
             ZpoolUuid::from_untyped_uuid(zpool.id()),
-            DatasetUuid::from_untyped_uuid(dataset.id()),
+            dataset.id(),
             RegionUuid::from_untyped_uuid(region_id),
         )
     }

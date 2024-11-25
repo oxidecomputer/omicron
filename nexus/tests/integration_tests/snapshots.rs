@@ -10,6 +10,7 @@ use dropshot::test_util::ClientTestContext;
 use http::method::Method;
 use http::StatusCode;
 use nexus_config::RegionAllocationStrategy;
+use nexus_db_model::to_db_typed_uuid;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -38,6 +39,7 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
 use omicron_nexus::app::MIN_DISK_SIZE_BYTES;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use uuid::Uuid;
@@ -1217,7 +1219,7 @@ async fn test_region_snapshot_create_idempotent(
     let datastore = nexus.datastore();
 
     let region_snapshot = db::model::RegionSnapshot {
-        dataset_id: Uuid::new_v4(),
+        dataset_id: to_db_typed_uuid(DatasetUuid::new_v4()),
         region_id: Uuid::new_v4(),
         snapshot_id: Uuid::new_v4(),
 
@@ -1573,7 +1575,10 @@ async fn test_region_allocation_for_snapshot(
 
             let region_snapshots: Vec<db::model::RegionSnapshot> =
                 dsl::region_snapshot
-                    .filter(dsl::dataset_id.eq(region.dataset_id()))
+                    .filter(
+                        dsl::dataset_id
+                            .eq(to_db_typed_uuid(region.dataset_id())),
+                    )
                     .filter(dsl::snapshot_id.eq(snapshot.identity.id))
                     .select(db::model::RegionSnapshot::as_select())
                     .load_async::<db::model::RegionSnapshot>(&*conn)

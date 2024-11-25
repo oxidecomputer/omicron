@@ -38,6 +38,10 @@ use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintDatasetConfig;
+use nexus_types::deployment::BlueprintDatasetDisposition;
+use nexus_types::deployment::BlueprintDatasetsConfig;
+use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
@@ -63,9 +67,12 @@ use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::SwitchLocation;
+use omicron_common::disk::CompressionAlgorithm;
+use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -240,8 +247,9 @@ impl RackInitRequestBuilder {
     // - The internal DNS configuration for this service
     fn add_dataset(
         &mut self,
+        zone_id: OmicronZoneUuid,
         zpool_id: ZpoolUuid,
-        dataset_id: Uuid,
+        dataset_id: DatasetUuid,
         address: SocketAddrV6,
         kind: DatasetKind,
         service_name: ServiceName,
@@ -253,11 +261,7 @@ impl RackInitRequestBuilder {
         });
         let zone = self
             .internal_dns_config
-            .host_zone(
-                // TODO-cleanup use TypedUuid everywhere
-                OmicronZoneUuid::from_untyped_uuid(dataset_id),
-                *address.ip(),
-            )
+            .host_zone(zone_id, *address.ip())
             .expect("Failed to set up DNS for {kind}");
         self.internal_dns_config
             .service_backend_zone(service_name, &zone, address.port())
@@ -268,8 +272,9 @@ impl RackInitRequestBuilder {
     // single zone.
     fn add_clickhouse_dataset(
         &mut self,
+        zone_id: OmicronZoneUuid,
         zpool_id: ZpoolUuid,
-        dataset_id: Uuid,
+        dataset_id: DatasetUuid,
         address: SocketAddrV6,
     ) {
         self.datasets.push(DatasetCreateRequest {
@@ -281,11 +286,7 @@ impl RackInitRequestBuilder {
             },
         });
         self.internal_dns_config
-            .host_zone_clickhouse(
-                OmicronZoneUuid::from_untyped_uuid(dataset_id),
-                ServiceName::Clickhouse,
-                address,
-            )
+            .host_zone_clickhouse(zone_id, ServiceName::Clickhouse, address)
             .expect("Failed to setup ClickHouse DNS");
     }
 }
@@ -443,10 +444,12 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .parse::<std::net::SocketAddrV6>()
             .expect("Failed to parse port");
 
+        let zone_id = OmicronZoneUuid::new_v4();
         let zpool_id = ZpoolUuid::new_v4();
-        let dataset_id = Uuid::new_v4();
+        let dataset_id = DatasetUuid::new_v4();
         eprintln!("DB address: {}", address);
         self.rack_init_builder.add_dataset(
+            zone_id,
             zpool_id,
             dataset_id,
             address,
@@ -459,7 +462,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .unwrap();
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
-            id: OmicronZoneUuid::from_untyped_uuid(dataset_id),
+            id: zone_id,
             filesystem_pool: Some(ZpoolName::new_external(zpool_id)),
             zone_type: BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb {
@@ -482,12 +485,14 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .await
             .unwrap();
 
+        let zone_id = OmicronZoneUuid::new_v4();
         let zpool_id = ZpoolUuid::new_v4();
-        let dataset_id = Uuid::new_v4();
+        let dataset_id = DatasetUuid::new_v4();
         let http_address = clickhouse.http_address();
         let http_port = http_address.port();
         let native_address = clickhouse.native_address();
         self.rack_init_builder.add_clickhouse_dataset(
+            zone_id,
             zpool_id,
             dataset_id,
             http_address,
@@ -505,8 +510,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .as_mut()
             .expect("Tests expect to set a port of Clickhouse")
             .set_port(http_port);
-        self.config.pkg.timeseries_db.native_address =
-            Some(native_address.into());
+        self.config.pkg.timeseries_db.address = Some(native_address.into());
 
         let pool_name = illumos_utils::zpool::ZpoolName::new_external(zpool_id)
             .to_string()
@@ -514,7 +518,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .unwrap();
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
-            id: OmicronZoneUuid::from_untyped_uuid(dataset_id),
+            id: zone_id,
             filesystem_pool: Some(ZpoolName::new_external(zpool_id)),
             zone_type: BlueprintZoneType::Clickhouse(
                 blueprint_zone_type::Clickhouse {
@@ -624,7 +628,6 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let oximeter = start_oximeter(
             log.new(o!("component" => "oximeter")),
             nexus_internal_addr,
-            clickhouse.http_address().port(),
             clickhouse.native_address().port(),
             collector_id,
         )
@@ -804,6 +807,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
         let blueprint = {
             let mut blueprint_zones = BTreeMap::new();
+            let mut blueprint_disks = BTreeMap::new();
+            let mut disk_index = 0;
+            let mut blueprint_datasets = BTreeMap::new();
             let mut sled_state = BTreeMap::new();
             for (maybe_sled_agent, zones) in [
                 (self.sled_agent.as_ref(), &self.blueprint_zones),
@@ -819,17 +825,83 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         },
                     );
                     sled_state.insert(sled_id, SledState::Active);
+
+                    let mut disks = Vec::new();
+                    let mut datasets = BTreeMap::new();
+                    for zone in zones {
+                        if let Some(zpool) = &zone.filesystem_pool {
+                            disks.push(OmicronPhysicalDiskConfig {
+                                identity: omicron_common::disk::DiskIdentity {
+                                    vendor: "nexus-tests".to_string(),
+                                    model: "nexus-test-model".to_string(),
+                                    serial: format!(
+                                        "nexus-test-disk-{disk_index}"
+                                    ),
+                                },
+                                id: Uuid::new_v4(),
+                                pool_id: zpool.id(),
+                            });
+                            disk_index += 1;
+                            let id = DatasetUuid::new_v4();
+                            datasets.insert(
+                                id,
+                                BlueprintDatasetConfig {
+                                    disposition:
+                                        BlueprintDatasetDisposition::InService,
+                                    id,
+                                    pool: zpool.clone(),
+                                    kind: DatasetKind::TransientZone {
+                                        name: illumos_utils::zone::zone_name(
+                                            zone.zone_type.kind().zone_prefix(),
+                                            Some(zone.id),
+                                        ),
+                                    },
+                                    address: None,
+                                    quota: None,
+                                    reservation: None,
+                                    compression: CompressionAlgorithm::Off,
+                                },
+                            );
+                        }
+                    }
+                    // Populate extra fake disks, giving each sled 10 total.
+                    if disks.len() < 10 {
+                        for _ in disks.len()..10 {
+                            disks.push(OmicronPhysicalDiskConfig {
+                                identity: omicron_common::disk::DiskIdentity {
+                                    vendor: "nexus-tests".to_string(),
+                                    model: "nexus-test-model".to_string(),
+                                    serial: format!(
+                                        "nexus-test-disk-{disk_index}"
+                                    ),
+                                },
+                                id: Uuid::new_v4(),
+                                pool_id: ZpoolUuid::new_v4(),
+                            });
+                            disk_index += 1;
+                        }
+                    }
+                    blueprint_disks.insert(
+                        sled_id,
+                        BlueprintPhysicalDisksConfig {
+                            generation: Generation::new().next(),
+                            disks,
+                        },
+                    );
+                    blueprint_datasets.insert(
+                        sled_id,
+                        BlueprintDatasetsConfig {
+                            generation: Generation::new().next(),
+                            datasets,
+                        },
+                    );
                 }
             }
             Blueprint {
                 id: Uuid::new_v4(),
                 blueprint_zones,
-                // NOTE: We'll probably need to actually add disks here
-                // when the Blueprint contains "which disks back zones".
-                //
-                // However, for now, this isn't necessary.
-                blueprint_disks: BTreeMap::new(),
-                blueprint_datasets: BTreeMap::new(),
+                blueprint_disks,
+                blueprint_datasets,
                 sled_state,
                 parent_blueprint_id: None,
                 internal_dns_version: dns_config.generation,
@@ -1458,16 +1530,11 @@ pub async fn start_sled_agent(
 pub async fn start_oximeter(
     log: Logger,
     nexus_address: SocketAddr,
-    http_port: u16,
     native_port: u16,
     id: Uuid,
 ) -> Result<Oximeter, String> {
     let db = oximeter_collector::DbConfig {
-        address: Some(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), http_port)),
-        native_address: Some(SocketAddr::new(
-            Ipv6Addr::LOCALHOST.into(),
-            native_port,
-        )),
+        address: Some(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), native_port)),
         batch_size: 10,
         batch_interval: 1,
         replicated: false,

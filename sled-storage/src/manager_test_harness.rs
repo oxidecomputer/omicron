@@ -83,10 +83,9 @@ pub struct StorageManagerTestHarness {
 impl Drop for StorageManagerTestHarness {
     fn drop(&mut self) {
         if let Some(vdev_dir) = self.vdev_dir.take() {
-            eprintln!(
+            eprint!(
                 "WARNING: StorageManagerTestHarness called without 'cleanup()'.\n\
-                 We may have leaked zpools, and not correctly deleted {}",
-                vdev_dir.path()
+                 Attempting automated cleanup ... ",
             );
 
             let pools = [
@@ -100,25 +99,49 @@ impl Drop for StorageManagerTestHarness {
                 ),
             ];
 
-            eprintln!(
-                "The following commands may need to be run to clean up state:"
-            );
-            eprintln!("---");
+            let mut failed_commands = vec![];
+
             for (prefix, pool) in pools {
                 let Ok(entries) = pool.read_dir_utf8() else {
                     continue;
                 };
                 for entry in entries.flatten() {
-                    eprintln!(
-                        "  pfexec zpool destroy {prefix}{} ",
-                        entry.file_name()
-                    );
+                    let pool_name = format!("{prefix}{}", entry.file_name());
+                    if let Err(_) =
+                        std::process::Command::new(illumos_utils::PFEXEC)
+                            .args(["zpool", "destroy", &pool_name])
+                            .status()
+                    {
+                        failed_commands
+                            .push(format!("pfexec zpool destroy {pool_name}"));
+                    }
                 }
             }
-            eprintln!("  pfexec rm -rf {}", vdev_dir.path());
-            eprintln!("---");
 
-            panic!("Dropped without cleanup. See stderr for cleanup advice");
+            let vdev_path = vdev_dir.path();
+            if let Err(_) = std::process::Command::new(illumos_utils::PFEXEC)
+                .args(["rm", "-rf", vdev_path.as_str()])
+                .status()
+            {
+                failed_commands.push(format!("pfexec rm -rf {vdev_path}"));
+            }
+
+            if !failed_commands.is_empty() {
+                eprintln!("FAILED");
+                eprintln!(
+                    "The following commands may need to be run to clean up state:"
+                );
+                eprintln!("---");
+                for cmd in failed_commands {
+                    eprintln!("{cmd}");
+                }
+                eprintln!("---");
+                panic!(
+                    "Dropped without cleanup. See stderr for cleanup advice"
+                );
+            } else {
+                eprintln!("OK");
+            }
         }
     }
 }
