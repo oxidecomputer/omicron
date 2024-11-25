@@ -512,6 +512,8 @@ pub static DEMO_INSTANCE_UPDATE: Lazy<params::InstanceUpdate> =
     Lazy::new(|| params::InstanceUpdate {
         boot_disk: None,
         auto_restart_policy: None,
+        ncpus: InstanceCpuCount(1),
+        memory: ByteCount::from_gibibytes_u32(16),
     });
 
 // The instance needs a network interface, too.
@@ -947,10 +949,10 @@ pub static DEMO_SILO_METRICS_URL: Lazy<String> = Lazy::new(|| {
 });
 
 pub static TIMESERIES_LIST_URL: Lazy<String> =
-    Lazy::new(|| String::from("/v1/timeseries/schema"));
+    Lazy::new(|| String::from("/v1/system/timeseries/schemas"));
 
 pub static TIMESERIES_QUERY_URL: Lazy<String> =
-    Lazy::new(|| String::from("/v1/timeseries/query"));
+    Lazy::new(|| String::from("/v1/system/timeseries/query"));
 
 pub static DEMO_TIMESERIES_QUERY: Lazy<params::TimeseriesQuery> =
     Lazy::new(|| params::TimeseriesQuery {

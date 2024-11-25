@@ -18,10 +18,20 @@ setup = 'crdb-seed'
 [profile.ci]
 fail-fast = false
 
+[profile.ci.junit]
+path = "junit.xml"
+
 [script.crdb-seed]
 # Use the test profile for this executable since that's how almost all
 # invocations of nextest happen.
 command = 'cargo run -p crdb-seed --profile test'
+
+[[profile.default.scripts]]
+filter = 'package(omicron-clickhouse-admin)'
+setup = 'clickhouse-cluster'
+
+[script.clickhouse-cluster]
+command = 'cargo run -p clickhouse-cluster-dev'
 
 [test-groups]
 # The ClickHouse cluster tests currently rely on a hard-coded set of ports for
@@ -39,7 +49,7 @@ live-tests = { max-threads = 1 }
 default-filter = 'all() - package(omicron-live-tests) - package(end-to-end-tests)'
 
 [[profile.default.overrides]]
-filter = 'package(oximeter-db) and test(replicated)'
+filter = 'package(oximeter-db) and test(replicated) + package(omicron-clickhouse-admin)'
 test-group = 'clickhouse-cluster'
 
 [[profile.default.overrides]]

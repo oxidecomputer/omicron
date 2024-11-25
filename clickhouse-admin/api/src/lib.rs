@@ -8,7 +8,8 @@ use clickhouse_admin_types::{
     ServerConfigurableSettings,
 };
 use dropshot::{
-    HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
+    HttpError, HttpResponseCreated, HttpResponseOk,
+    HttpResponseUpdatedNoContent, RequestContext, TypedBody,
 };
 
 /// API interface for our clickhouse-admin-keeper server
@@ -115,4 +116,24 @@ pub trait ClickhouseAdminServerApi {
     async fn distributed_ddl_queue(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<DistributedDdlQueue>>, HttpError>;
+}
+
+/// API interface for our clickhouse-admin-single server
+///
+/// The single-node server is distinct from the both the multi-node servers
+/// and its keepers. The sole purpose of this API is to serialize database
+/// initialization requests from reconfigurator execution. Multi-node clusters
+/// must provide a similar interface via [`ClickhouseAdminServerApi`].
+#[dropshot::api_description]
+pub trait ClickhouseAdminSingleApi {
+    type Context;
+
+    /// Idempotently initialize a single-node ClickHouse database.
+    #[endpoint {
+        method = PUT,
+        path = "/init"
+    }]
+    async fn init_db(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 }

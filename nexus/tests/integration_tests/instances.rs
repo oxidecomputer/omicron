@@ -1620,7 +1620,11 @@ async fn assert_metrics(
     cpus: i64,
     ram: i64,
 ) {
-    cptestctx.oximeter.force_collect().await;
+    cptestctx
+        .oximeter
+        .try_force_collect()
+        .await
+        .expect("Could not force oximeter collection");
 
     for id in &[None, Some(project_id)] {
         assert_eq!(
@@ -4160,7 +4164,12 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
     let instance = expect_instance_reconfigure_ok(
         &client,
         &instance.identity.id,
-        params::InstanceUpdate { boot_disk: None, auto_restart_policy: None },
+        params::InstanceUpdate {
+            boot_disk: None,
+            auto_restart_policy: None,
+            ncpus: InstanceCpuCount::try_from(2).unwrap(),
+            memory: ByteCount::from_gibibytes_u32(4),
+        },
     )
     .await;
     assert_eq!(instance.boot_disk_id, None);
@@ -4260,6 +4269,8 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
         params::InstanceUpdate {
             boot_disk: Some(alsodata.clone().into()),
             auto_restart_policy: None,
+            ncpus: InstanceCpuCount::try_from(2).unwrap(),
+            memory: ByteCount::from_gibibytes_u32(4),
         },
         http::StatusCode::CONFLICT,
     )
@@ -4276,6 +4287,8 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
             // was created.
             boot_disk: Some(probablydata.clone().into()),
             auto_restart_policy: Some(InstanceAutoRestartPolicy::BestEffort),
+            ncpus: InstanceCpuCount::try_from(2).unwrap(),
+            memory: ByteCount::from_gibibytes_u32(4),
         },
     )
     .await;
@@ -4293,7 +4306,12 @@ async fn test_updating_missing_instance_is_not_found(
     let error = expect_instance_reconfigure_err(
         &client,
         &UUID_THAT_DOESNT_EXIST,
-        params::InstanceUpdate { boot_disk: None, auto_restart_policy: None },
+        params::InstanceUpdate {
+            boot_disk: None,
+            auto_restart_policy: None,
+            ncpus: InstanceCpuCount::try_from(0).unwrap(),
+            memory: ByteCount::from_gibibytes_u32(0),
+        },
         http::StatusCode::NOT_FOUND,
     )
     .await;
@@ -4355,6 +4373,214 @@ async fn expect_instance_reconfigure_err(
         .parsed_body::<HttpErrorResponseBody>()
         .expect("error response should parse successfully")
 }
+
+// Test reconfiguring an instance's size in CPUs and memory.
+#[nexus_test]
+async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let instance_name = "downloading-more-ram";
+
+    create_project_and_pool(&client).await;
+
+    let initial_ncpus = InstanceCpuCount::try_from(2).unwrap();
+    let initial_memory = ByteCount::from_gibibytes_u32(4);
+
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: String::from("stuff"),
+        },
+        ncpus: initial_ncpus,
+        memory: initial_memory,
+        hostname: instance_name.parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        boot_disk: None,
+        disks: Vec::new(),
+        start: true,
+        // Start out with None
+        auto_restart_policy: None,
+    };
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to work!");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+    let boot_disk_nameorid: Option<NameOrId> =
+        instance.boot_disk_id.map(|x| x.into());
+    let auto_restart_policy = instance.auto_restart_status.policy;
+
+    let new_ncpus = InstanceCpuCount::try_from(4).unwrap();
+    let new_memory = ByteCount::from_gibibytes_u32(8);
+
+    // Resizing the instance immediately will error; the instance is running.
+    let err = expect_instance_reconfigure_err(
+        client,
+        &instance.identity.id,
+        params::InstanceUpdate {
+            auto_restart_policy,
+            boot_disk: boot_disk_nameorid.clone(),
+            ncpus: new_ncpus,
+            memory: new_memory,
+        },
+        StatusCode::CONFLICT,
+    )
+    .await;
+
+    assert_eq!(err.message, "instance must be stopped to be resized");
+
+    instance_post(&client, instance_name, InstanceOp::Stop).await;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
+    // Now that the instance is stopped, we can resize it..
+    let instance = expect_instance_reconfigure_ok(
+        client,
+        &instance.identity.id,
+        params::InstanceUpdate {
+            auto_restart_policy,
+            boot_disk: boot_disk_nameorid.clone(),
+            ncpus: new_ncpus,
+            memory: new_memory,
+        },
+    )
+    .await;
+    assert_eq!(instance.ncpus.0, new_ncpus.0);
+    assert_eq!(instance.memory, new_memory);
+
+    // No harm in reverting to the original size one field at a time though:
+    let instance = expect_instance_reconfigure_ok(
+        client,
+        &instance.identity.id,
+        params::InstanceUpdate {
+            auto_restart_policy,
+            boot_disk: boot_disk_nameorid.clone(),
+            ncpus: initial_ncpus,
+            memory: new_memory,
+        },
+    )
+    .await;
+    assert_eq!(instance.ncpus.0, initial_ncpus.0);
+    assert_eq!(instance.memory, new_memory);
+
+    let instance = expect_instance_reconfigure_ok(
+        client,
+        &instance.identity.id,
+        params::InstanceUpdate {
+            auto_restart_policy,
+            boot_disk: boot_disk_nameorid.clone(),
+            ncpus: initial_ncpus,
+            memory: initial_memory,
+        },
+    )
+    .await;
+    assert_eq!(instance.ncpus.0, initial_ncpus.0);
+    assert_eq!(instance.memory, initial_memory);
+
+    // Now try a few invalid sizes. These all should fail for slightly different
+    // reasons.
+
+    // Too many CPUs.
+    let err = expect_instance_reconfigure_err(
+        client,
+        &instance.identity.id,
+        params::InstanceUpdate {
+            auto_restart_policy,
+            boot_disk: boot_disk_nameorid.clone(),
+            ncpus: InstanceCpuCount(MAX_VCPU_PER_INSTANCE + 1),
+            memory: instance.memory,
+        },
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        err.message,
+        format!(
+            "cannot have more than {} vCPUs per instance",
+            MAX_VCPU_PER_INSTANCE
+        )
+    );
+
+    // Too little memory.
+    let err = expect_instance_reconfigure_err(
+        client,
+        &instance.identity.id,
+        params::InstanceUpdate {
+            auto_restart_policy,
+            boot_disk: boot_disk_nameorid.clone(),
+            ncpus: instance.ncpus,
+            memory: ByteCount::from_mebibytes_u32(0),
+        },
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(err.message.contains("memory must be at least"));
+
+    // Enough memory, but not an amount we want to accept.
+    let err = expect_instance_reconfigure_err(
+        client,
+        &instance.identity.id,
+        params::InstanceUpdate {
+            auto_restart_policy,
+            boot_disk: boot_disk_nameorid.clone(),
+            ncpus: instance.ncpus,
+            memory: ByteCount::try_from(MAX_MEMORY_BYTES_PER_INSTANCE - 1)
+                .unwrap(),
+        },
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(err.message.contains("memory must be divisible by"));
+
+    // Too much memory, but an otherwise-acceptable amount.
+    let max_mib = MAX_MEMORY_BYTES_PER_INSTANCE / (1024 * 1024);
+    let err = expect_instance_reconfigure_err(
+        client,
+        &instance.identity.id,
+        params::InstanceUpdate {
+            auto_restart_policy,
+            boot_disk: boot_disk_nameorid.clone(),
+            ncpus: instance.ncpus,
+            memory: ByteCount::from_mebibytes_u32(
+                (max_mib + 1024).try_into().unwrap(),
+            ),
+        },
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(err.message.contains("must be less than or equal"));
+
+    // Now delete the instance; we should not be able to resize (or really
+    // interact at all!) with a deleted instance..
+    expect_instance_delete_ok(client, instance_name).await;
+
+    // Attempt to send a previously-valid update again. The only reason this
+    // will not work is that we just deleted the instance we'd be updating.
+    expect_instance_reconfigure_err(
+        client,
+        &instance.identity.id,
+        params::InstanceUpdate {
+            auto_restart_policy,
+            boot_disk: boot_disk_nameorid.clone(),
+            ncpus: new_ncpus,
+            memory: new_memory,
+        },
+        StatusCode::NOT_FOUND,
+    )
+    .await;
+}
+
 // Test reconfiguring an instance's auto-restart policy.
 #[nexus_test]
 async fn test_auto_restart_policy_can_be_changed(
@@ -4406,6 +4632,8 @@ async fn test_auto_restart_policy_can_be_changed(
             dbg!(params::InstanceUpdate {
                 auto_restart_policy,
                 boot_disk: None,
+                ncpus: InstanceCpuCount::try_from(2).unwrap(),
+                memory: ByteCount::from_gibibytes_u32(4),
             }),
         )
         .await;
@@ -4499,6 +4727,8 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         params::InstanceUpdate {
             boot_disk: Some(disks[1].identity.id.into()),
             auto_restart_policy: None,
+            ncpus: InstanceCpuCount::try_from(2).unwrap(),
+            memory: ByteCount::from_gibibytes_u32(4),
         },
     )
     .await;
@@ -4563,6 +4793,8 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
         params::InstanceUpdate {
             boot_disk: Some(disks[0].identity.id.into()),
             auto_restart_policy: None,
+            ncpus: InstanceCpuCount::try_from(2).unwrap(),
+            memory: ByteCount::from_gibibytes_u32(4),
         },
         http::StatusCode::CONFLICT,
     )
@@ -4594,6 +4826,8 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
         params::InstanceUpdate {
             boot_disk: Some(disks[0].identity.id.into()),
             auto_restart_policy: None,
+            ncpus: InstanceCpuCount::try_from(2).unwrap(),
+            memory: ByteCount::from_gibibytes_u32(4),
         },
     )
     .await;

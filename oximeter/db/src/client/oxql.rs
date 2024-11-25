@@ -8,7 +8,8 @@
 
 use super::query_summary::QuerySummary;
 use crate::client::Client;
-use crate::model;
+use crate::model::columns;
+use crate::model::from_block::FromBlock as _;
 use crate::oxql;
 use crate::oxql::ast::table_ops::filter;
 use crate::oxql::ast::table_ops::filter::Filter;
@@ -19,6 +20,7 @@ use crate::Error;
 use crate::Metric;
 use crate::Target;
 use oximeter::schema::TimeseriesKey;
+use oximeter::Measurement;
 use oximeter::TimeseriesSchema;
 use slog::debug;
 use slog::trace;
@@ -596,12 +598,28 @@ impl Client {
                 limit,
                 total_rows_fetched,
             )?;
-            let (summary, body) =
-                self.execute_with_body(&measurements_query).await?;
+            let result = self.execute_with_block(&measurements_query).await?;
+            let summary = result.query_summary();
             summaries.push(summary);
-            for line in body.lines() {
-                let (key, measurement) =
-                    model::parse_measurement_from_row(line, schema.datum_type);
+            let Some(block) = result.data.as_ref() else {
+                return Err(Error::QueryMissingData {
+                    query: measurements_query,
+                });
+            };
+            let timeseries_keys = block
+                .column_values(columns::TIMESERIES_KEY)?
+                .as_u64()
+                .map_err(|_| {
+                    crate::native::Error::unexpected_column_type(
+                        block,
+                        columns::TIMESERIES_KEY,
+                        "UInt64",
+                    )
+                })?;
+            let measurements = Measurement::from_block(block, &())?;
+            for (key, measurement) in
+                timeseries_keys.iter().copied().zip(measurements)
+            {
                 measurements_by_key.entry(key).or_default().push(measurement);
                 n_measurements += 1;
             }
@@ -831,10 +849,6 @@ impl Client {
         let remainder = MAX_DATABASE_ROWS - *total_rows_fetched;
         query.push_str(" LIMIT ");
         write!(query, "{}", remainder + 1).unwrap();
-
-        // Finally, use JSON format.
-        query.push_str(" FORMAT ");
-        query.push_str(crate::DATABASE_SELECT_FORMAT);
         Ok(query)
     }
 
@@ -887,8 +901,6 @@ impl Client {
             }
             query.push_str(&preds);
         }
-        query.push_str(" FORMAT ");
-        query.push_str(crate::DATABASE_SELECT_FORMAT);
         Ok(query)
     }
 
@@ -1259,11 +1271,7 @@ mod tests {
         let db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         client
             .init_single_node_db()
             .await

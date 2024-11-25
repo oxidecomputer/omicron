@@ -16,7 +16,8 @@ mod sql;
 pub use self::dbwrite::DbWrite;
 pub use self::dbwrite::TestDbWrite;
 use crate::client::query_summary::QuerySummary;
-use crate::model;
+use crate::model::columns;
+use crate::model::fields::FieldSelectRow;
 use crate::model::from_block::FromBlock;
 use crate::native;
 use crate::native::block::Block;
@@ -30,7 +31,6 @@ use crate::Timeseries;
 use crate::TimeseriesPageSelector;
 use crate::TimeseriesScanParams;
 use crate::TimeseriesSchema;
-use anyhow::anyhow;
 use debug_ignore::DebugIgnore;
 use dropshot::EmptyScanParams;
 use dropshot::PaginationOrder;
@@ -39,9 +39,8 @@ use dropshot::WhichPage;
 use omicron_common::backoff;
 use oximeter::schema::TimeseriesKey;
 use oximeter::types::Sample;
+use oximeter::Measurement;
 use oximeter::TimeseriesName;
-use qorb::backend;
-use qorb::backend::Error as QorbError;
 use qorb::pool::Pool;
 use qorb::resolver::BoxedResolver;
 use qorb::resolvers::single_host::SingleHostResolver;
@@ -66,7 +65,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
-use std::time::Instant;
 use tokio::fs;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -82,112 +80,19 @@ mod probes {
     fn sql__query__done(_: &usdt::UniqueId) {}
 }
 
-// A "qorb connector" which creates a ReqwestClient for the backend.
-//
-// This also keeps track of the underlying address, so we can use it
-// for making HTTP requests directly to the backend.
-struct ReqwestConnector {}
-
-#[async_trait::async_trait]
-impl backend::Connector for ReqwestConnector {
-    type Connection = ReqwestClient;
-
-    async fn connect(
-        &self,
-        backend: &backend::Backend,
-    ) -> Result<Self::Connection, backend::Error> {
-        Ok(ReqwestClient {
-            client: reqwest::Client::builder()
-                .pool_max_idle_per_host(1)
-                .build()
-                .map_err(|e| QorbError::Other(anyhow!(e)))?,
-            url: format!("http://{}", backend.address),
-        })
-    }
-
-    async fn is_valid(
-        &self,
-        conn: &mut Self::Connection,
-    ) -> Result<(), backend::Error> {
-        handle_db_response(
-            conn.client
-                .get(format!("{}/ping", conn.url))
-                .send()
-                .await
-                .map_err(|err| QorbError::Other(anyhow!(err.to_string())))?,
-        )
-        .await
-        .map_err(|e| QorbError::Other(anyhow!(e)))?;
-        Ok(())
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct ReqwestClient {
-    url: String,
-    client: reqwest::Client,
-}
-
-#[derive(Debug)]
-pub(crate) enum ClientSource {
-    Static(ReqwestClient),
-    Pool { pool: DebugIgnore<Pool<ReqwestClient>> },
-}
-
-pub(crate) enum ClientVariant {
-    Static(ReqwestClient),
-    Handle(qorb::claim::Handle<ReqwestClient>),
-}
-
-impl ClientVariant {
-    pub(crate) async fn new(source: &ClientSource) -> Result<Self, Error> {
-        let client = match source {
-            ClientSource::Static(client) => {
-                ClientVariant::Static(client.clone())
-            }
-            ClientSource::Pool { pool } => {
-                let handle = pool.claim().await?;
-                ClientVariant::Handle(handle)
-            }
-        };
-        Ok(client)
-    }
-
-    pub(crate) fn url(&self) -> &str {
-        match self {
-            ClientVariant::Static(client) => &client.url,
-            ClientVariant::Handle(handle) => &handle.url,
-        }
-    }
-
-    pub(crate) fn reqwest(&self) -> &reqwest::Client {
-        match self {
-            ClientVariant::Static(client) => &client.client,
-            ClientVariant::Handle(handle) => &handle.client,
-        }
-    }
-}
-
 /// A `Client` to the ClickHouse metrics database.
 #[derive(Debug)]
 pub struct Client {
     _id: Uuid,
     log: Logger,
-    // Source for creating HTTP connections.
-    source: ClientSource,
-    // qorb pool for native TCP connections.
-    native_pool: DebugIgnore<native::connection::Pool>,
+    pool: DebugIgnore<native::connection::Pool>,
     schema: Mutex<BTreeMap<TimeseriesName, TimeseriesSchema>>,
     request_timeout: Duration,
 }
 
 impl Client {
     /// Construct a Clickhouse client of the database with a connection pool.
-    pub fn new_with_pool(
-        http_resolver: BoxedResolver,
-        native_resolver: BoxedResolver,
-        log: &Logger,
-    ) -> Self {
+    pub fn new_with_pool(native_resolver: BoxedResolver, log: &Logger) -> Self {
         let id = Uuid::new_v4();
         let log = log.new(slog::o!(
             "component" => "clickhouse-client",
@@ -195,20 +100,6 @@ impl Client {
         ));
         let schema = Mutex::new(BTreeMap::new());
         let request_timeout = DEFAULT_REQUEST_TIMEOUT;
-        let pool = match Pool::new(
-            http_resolver,
-            Arc::new(ReqwestConnector {}),
-            qorb::policy::Policy::default(),
-        ) {
-            Ok(pool) => {
-                debug!(log, "registered USDT probes");
-                pool
-            }
-            Err(err) => {
-                error!(log, "failed to register USDT probes");
-                err.into_inner()
-            }
-        };
         let native_pool = match Pool::new(
             native_resolver,
             Arc::new(native::connection::Connector),
@@ -226,32 +117,25 @@ impl Client {
         Self {
             _id: id,
             log,
-            source: ClientSource::Pool { pool: DebugIgnore(pool) },
-            native_pool: DebugIgnore(native_pool),
+            pool: DebugIgnore(native_pool),
             schema,
             request_timeout,
         }
     }
 
     /// Construct a new ClickHouse client of the database at `address`.
-    pub fn new(
-        http_address: SocketAddr,
-        native_address: SocketAddr,
-        log: &Logger,
-    ) -> Self {
-        Self::new_with_request_timeout(
-            http_address,
-            native_address,
-            log,
-            DEFAULT_REQUEST_TIMEOUT,
-        )
+    ///
+    /// NOTE: The address here is that of the native TCP client.
+    pub fn new(address: SocketAddr, log: &Logger) -> Self {
+        Self::new_with_request_timeout(address, log, DEFAULT_REQUEST_TIMEOUT)
     }
 
     /// Construct a new ClickHouse client of the database at `address`, and a
     /// custom request timeout.
+    ///
+    /// NOTE: The address here is that of the native TCP client.
     pub fn new_with_request_timeout(
-        http_address: SocketAddr,
-        native_address: SocketAddr,
+        address: SocketAddr,
         log: &Logger,
         request_timeout: Duration,
     ) -> Self {
@@ -260,11 +144,9 @@ impl Client {
             "component" => "clickhouse-client",
             "id" => id.to_string(),
         ));
-        let client = reqwest::Client::new();
-        let url = format!("http://{}", http_address);
         let schema = Mutex::new(BTreeMap::new());
         let native_pool = match Pool::new(
-            Box::new(SingleHostResolver::new(native_address)),
+            Box::new(SingleHostResolver::new(address)),
             Arc::new(native::connection::Connector),
             Default::default(),
         ) {
@@ -280,8 +162,7 @@ impl Client {
         Self {
             _id: id,
             log,
-            source: ClientSource::Static(ReqwestClient { url, client }),
-            native_pool: DebugIgnore(native_pool),
+            pool: DebugIgnore(native_pool),
             schema,
             request_timeout,
         }
@@ -291,16 +172,16 @@ impl Client {
     ///
     /// For pool-based clients, this returns "dynamic", as the URL may change
     /// between accesses.
+    #[deprecated(
+        note = "This cannot be relied on since we use Qorb for pooling"
+    )]
     pub fn url(&self) -> &str {
-        match &self.source {
-            ClientSource::Static(client) => &client.url,
-            ClientSource::Pool { .. } => "dynamic",
-        }
+        "dynamic"
     }
 
     /// Ping the ClickHouse server to verify connectivity.
     pub async fn ping(&self) -> Result<(), Error> {
-        let mut handle = self.native_pool.claim().await?;
+        let mut handle = self.pool.claim().await?;
         trace!(self.log, "acquired native pool claim");
         handle.ping().await.map_err(Error::Native)?;
         trace!(self.log, "successful ping of ClickHouse server");
@@ -491,7 +372,7 @@ impl Client {
                 any data from the database",
             )));
         };
-        let schema = TimeseriesSchema::from_block(block)?;
+        let schema = TimeseriesSchema::from_block(block, &())?;
         ResultsPage::new(schema, &dropshot::EmptyScanParams {}, |schema, _| {
             schema.timeseries_name.clone()
         })
@@ -1069,16 +950,26 @@ impl Client {
         schema: &TimeseriesSchema,
     ) -> Result<(QuerySummary, BTreeMap<TimeseriesKey, (Target, Metric)>), Error>
     {
-        let (summary, body) = self.execute_with_body(field_query).await?;
-        let mut results = BTreeMap::new();
-        for line in body.lines() {
-            let row: model::FieldSelectRow = serde_json::from_str(line)
-                .expect("Unable to deserialize an expected row");
-            let (id, target, metric) =
-                model::parse_field_select_row(&row, schema);
-            results.insert(id, (target, metric));
-        }
-        Ok((summary, results))
+        let result = self.execute_with_block(field_query).await?;
+        let summary = result.query_summary();
+        let Some(block) = &result.data else {
+            error!(
+                self.log,
+                "query for matching timeseries info \
+                returned no data blocks";
+                "query" => field_query,
+            );
+            return Err(Error::QueryMissingData {
+                query: field_query.to_string(),
+            });
+        };
+        let info = FieldSelectRow::from_block(block, schema)?
+            .into_iter()
+            .map(|FieldSelectRow { timeseries_key, target, metric }| {
+                (timeseries_key, (target, metric))
+            })
+            .collect();
+        Ok((summary, info))
     }
 
     // Given information returned from `select_matching_timeseries_info`, select the actual
@@ -1092,15 +983,38 @@ impl Client {
         let mut timeseries_by_key = BTreeMap::new();
         let keys = info.keys().copied().collect::<Vec<_>>();
         let measurement_query = query.measurement_query(&keys);
-        for line in self.execute_with_body(&measurement_query).await?.1.lines()
+        let Some(block) =
+            self.execute_with_block(&measurement_query).await?.data
+        else {
+            error!(
+                self.log,
+                "query for timeseries data returned no data blocks";
+                "query" => &measurement_query,
+            );
+            return Err(Error::QueryMissingData { query: measurement_query });
+        };
+        let timeseries_keys = block
+            .column_values(columns::TIMESERIES_KEY)?
+            .as_u64()
+            .map_err(|_| {
+                native::Error::unexpected_column_type(
+                    &block,
+                    columns::TIMESERIES_KEY,
+                    "UInt64",
+                )
+            })?;
+        let measurements = Measurement::from_block(&block, &())?;
+        for (key, measurement) in
+            timeseries_keys.iter().copied().zip(measurements)
         {
-            let (key, measurement) =
-                model::parse_measurement_from_row(line, schema.datum_type);
-            let timeseries = timeseries_by_key.entry(key).or_insert_with(
-                || {
+            let timeseries =
+                timeseries_by_key.entry(key).or_insert_with(|| {
                     let (target, metric) = info
                         .get(&key)
-                        .expect("Timeseries key in measurement query but not field query")
+                        .expect(
+                            "Timeseries key in measurement query \
+                            but not field query",
+                        )
                         .clone();
                     Timeseries {
                         timeseries_name: schema.timeseries_name.to_string(),
@@ -1108,8 +1022,7 @@ impl Client {
                         metric,
                         measurements: Vec::new(),
                     }
-                }
-            );
+                });
             timeseries.measurements.push(measurement);
         }
         Ok(timeseries_by_key.into_values().collect())
@@ -1128,7 +1041,7 @@ impl Client {
             "n_rows" => block.n_rows(),
             "n_columns" => block.n_columns(),
         );
-        let mut handle = self.native_pool.claim().await?;
+        let mut handle = self.pool.claim().await?;
         let id = usdt::UniqueId::new();
         probes::sql__query__start!(|| (&id, sql));
         let now = tokio::time::Instant::now();
@@ -1166,7 +1079,7 @@ impl Client {
             "sql" => sql,
         );
 
-        let mut handle = self.native_pool.claim().await?;
+        let mut handle = self.pool.claim().await?;
         let id = usdt::UniqueId::new();
         probes::sql__query__start!(|| (&id, sql));
         let now = tokio::time::Instant::now();
@@ -1180,77 +1093,6 @@ impl Client {
                 "SQL query timed out after {elapsed:?}"
             ))),
         }
-    }
-
-    // Execute a generic SQL statement, awaiting the response as text
-    //
-    // TODO-robustness This currently does no validation of the statement.
-    async fn execute_with_body<S>(
-        &self,
-        sql: S,
-    ) -> Result<(QuerySummary, String), Error>
-    where
-        S: Into<String>,
-    {
-        let sql = sql.into();
-        trace!(
-            self.log,
-            "executing SQL query";
-            "sql" => &sql,
-        );
-
-        // Run the SQL query itself.
-        //
-        // This code gets a bit convoluted, so that we can fire the USDT probe
-        // in all situations, even when the various fallible operations
-        // complete.
-        let id = usdt::UniqueId::new();
-        probes::sql__query__start!(|| (&id, &sql));
-        let start = Instant::now();
-
-        // Submit the SQL request itself.
-        let client = ClientVariant::new(&self.source).await?;
-
-        let response = client
-            .reqwest()
-            .post(client.url())
-            .timeout(self.request_timeout)
-            .query(&[
-                ("output_format_json_quote_64bit_integers", "0"),
-                // TODO-performance: This is needed to get the correct counts of
-                // rows/bytes accessed during a query, but implies larger memory
-                // consumption on the server and higher latency for the request.
-                // We may want to sacrifice accuracy of those counts.
-                ("wait_end_of_query", "1"),
-            ])
-            .body(sql)
-            .send()
-            .await
-            .map_err(|err| {
-                probes::sql__query__done!(|| (&id));
-                Error::DatabaseUnavailable(err.to_string())
-            })?;
-
-        // Convert the HTTP response into a database response.
-        let response =
-            handle_db_response(response).await.inspect_err(|_| {
-                probes::sql__query__done!(|| (&id));
-            })?;
-
-        // Extract the query summary, measuring resource usage and duration.
-        let summary =
-            QuerySummary::from_headers(start.elapsed(), response.headers())
-                .inspect_err(|_| {
-                    probes::sql__query__done!(|| (&id));
-                })?;
-
-        // Extract the actual text of the response.
-        let text = response.text().await.map_err(|err| {
-            probes::sql__query__done!(|| (&id));
-            Error::Database(err.to_string())
-        })?;
-        probes::sql__query__done!(|| (&id));
-        Ok((summary, text))
     }
 
     // Get timeseries schema from the database.
@@ -1300,7 +1142,7 @@ impl Client {
             "retrieved new timeseries schema";
             "n_schema" => data.n_rows(),
         );
-        for new_schema in TimeseriesSchema::from_block(data)?.into_iter() {
+        for new_schema in TimeseriesSchema::from_block(data, &())?.into_iter() {
             schema.insert(new_schema.timeseries_name.clone(), new_schema);
         }
         Ok(())
@@ -1520,27 +1362,12 @@ fn schema_validation_regex() -> &'static Regex {
         .expect("Invalid regex")
     })
 }
-// Return Ok if the response indicates success, otherwise return either the reqwest::Error, if this
-// is a client-side error, or the body of the actual error retrieved from ClickHouse if the error
-// was generated there.
-async fn handle_db_response(
-    response: reqwest::Response,
-) -> Result<reqwest::Response, Error> {
-    let status = response.status();
-    if status.is_success() {
-        Ok(response)
-    } else {
-        // NOTE: ClickHouse returns 404 for all errors (so far encountered). We pull the text from
-        // the body if possible, which contains the actual error from the database.
-        let body = response.text().await.unwrap_or_else(|e| e.to_string());
-        Err(Error::Database(format!("Query failed: {body}")))
-    }
-}
 
 #[cfg(test)]
 mod tests {
     use super::dbwrite::UnrolledSampleRows;
     use super::*;
+    use crate::model;
     use crate::model::OXIMETER_VERSION;
     use crate::query;
     use crate::query::field_table_name;
@@ -1548,6 +1375,8 @@ mod tests {
     use chrono::Utc;
     use dropshot::test_util::LogContext;
     use futures::Future;
+    use indexmap::IndexMap;
+    use native::block::Column;
     use omicron_test_utils::dev::clickhouse::ClickHouseDeployment;
     use omicron_test_utils::dev::test_setup_log;
     use oximeter::histogram::Histogram;
@@ -1621,7 +1450,7 @@ mod tests {
     //    let logctx = test_setup_log("test_do_the_thing");
     //    let mut db =
     //        ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-    //    let client = Client::new(db.http_address().into(), &logctx.log);
+    //    let client = Client::new(db.native_address().into(), &logctx.log);
     //    init_db(&db, &client).await;
     //    test_do_the_thing_impl(&db, client).await;
     //    db.cleanup().await.unwrap();
@@ -1682,9 +1511,8 @@ mod tests {
     async fn test_replicated() {
         let logctx = test_setup_log("test_replicated");
         let mut cluster = create_cluster(&logctx).await;
-        let address = cluster.http_address().into();
-        let native_address = cluster.native_address().into();
-        let client = Client::new(address, native_address, &logctx.log);
+        let address = cluster.native_address().into();
+        let client = Client::new(address, &logctx.log);
         let futures: Vec<(&'static str, AsyncTest)> = vec![
             (
                 "test_is_oximeter_cluster_replicated",
@@ -1840,8 +1668,7 @@ mod tests {
         for (test_name, mut test) in futures {
             let testctx = test_setup_log(test_name);
             init_db(&cluster, &client).await;
-            test(&cluster, Client::new(address, native_address, &logctx.log))
-                .await;
+            test(&cluster, Client::new(address, &logctx.log)).await;
             wipe_db(&cluster, &client).await;
             testctx.cleanup_successful();
         }
@@ -1853,9 +1680,8 @@ mod tests {
     async fn cannot_ping_nonexistent_server() {
         let logctx = test_setup_log("cannot_ping_nonexistent_server");
         let log = &logctx.log;
-        let dont_care = "127.0.0.1:443".parse().unwrap();
         let bad_addr = "[::1]:80".parse().unwrap();
-        let client = Client::new(dont_care, bad_addr, &log);
+        let client = Client::new(bad_addr, &log);
         let e = client
             .ping()
             .await
@@ -1871,11 +1697,7 @@ mod tests {
         let logctx = test_setup_log("can_ping_clickhouse");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         client.ping().await.expect("Should be able to ping existing server");
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
@@ -1886,11 +1708,7 @@ mod tests {
         let logctx = test_setup_log("test_is_oximeter_cluster");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
         test_is_oximeter_cluster_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -1913,11 +1731,7 @@ mod tests {
         let logctx = test_setup_log("test_insert_samples");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
         test_insert_samples_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -1966,11 +1780,7 @@ mod tests {
         let logctx = test_setup_log("test_schema_mismatch");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
         test_schema_mismatch_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -2003,11 +1813,7 @@ mod tests {
         let logctx = test_setup_log("test_schema_update");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
         test_schema_updated_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -2064,19 +1870,19 @@ mod tests {
         );
 
         // Verify that it's actually in the database!
-        let sql = String::from(
-            "SELECT * FROM oximeter.timeseries_schema FORMAT JSONEachRow;",
-        );
-        let result = client.execute_with_body(sql).await.unwrap().1;
-        let schema = result
-            .lines()
-            .map(|line| {
-                TimeseriesSchema::from(
-                    serde_json::from_str::<model::DbTimeseriesSchema>(&line)
-                        .unwrap(),
-                )
-            })
-            .collect::<Vec<_>>();
+        let sql =
+            "SELECT * FROM oximeter.timeseries_schema FORMAT JSONEachRow;";
+        let schema = TimeseriesSchema::from_block(
+            client
+                .execute_with_block(sql)
+                .await
+                .expect("Failed to select schema")
+                .data
+                .as_ref()
+                .expect("Query should have returned data"),
+            &(),
+        )
+        .expect("Failed to convert timeseries schema from block");
         assert_eq!(schema.len(), 1);
         assert_eq!(expected_schema, schema[0]);
     }
@@ -2086,11 +1892,7 @@ mod tests {
         let logctx = test_setup_log("test_client_select_timeseries_one");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
         test_client_select_timeseries_one_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -2178,11 +1980,7 @@ mod tests {
         let logctx = test_setup_log("test_field_record_cont");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
         test_field_record_count_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -2205,18 +2003,25 @@ mod tests {
             table: &str,
             expected_count: usize,
         ) {
-            let body = client
-                .execute_with_body(format!(
+            let ValueArray::UInt64(counts) = client
+                .execute_with_block(&format!(
                     "SELECT COUNT() FROM oximeter.{};",
                     table
                 ))
                 .await
-                .unwrap()
-                .1;
-            let actual_count =
-                body.lines().next().unwrap().trim().parse::<usize>().expect(
-                    "Expected a count of the number of rows from ClickHouse",
-                );
+                .expect("Failed to select count of rows")
+                .data
+                .expect("Query should have returned data")
+                .columns
+                .into_iter()
+                .next()
+                .expect("Must have at least 1 column")
+                .1
+                .values
+            else {
+                panic!("COUNT() should return a column of type UInt64");
+            };
+            let actual_count = counts[0] as usize;
             assert_eq!(actual_count, expected_count);
         }
 
@@ -2236,53 +2041,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_unquoted_64bit_integers() {
-        let logctx = test_setup_log("test_unquoted_64bit_integers");
-        let mut db =
-            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
-        init_db(&db, &client).await;
-        test_unquoted_64bit_integers_impl(&db, client).await;
-        db.cleanup().await.unwrap();
-        logctx.cleanup_successful();
-    }
-
-    // Regression test verifying that integers are returned in the expected format from the
-    // database.
-    //
-    // By default, ClickHouse _quotes_ 64-bit integers, which is apparently to support JavaScript
-    // implementations of JSON. See https://github.com/ClickHouse/ClickHouse/issues/2375 for
-    // details. This test verifies that we get back _unquoted_ integers from the database.
-    async fn test_unquoted_64bit_integers_impl(
-        _: &ClickHouseDeployment,
-        client: Client,
-    ) {
-        use serde_json::Value;
-        let output = client
-            .execute_with_body(
-                "SELECT toUInt64(1) AS foo FORMAT JSONEachRow;".to_string(),
-            )
-            .await
-            .unwrap()
-            .1;
-        let json: Value = serde_json::from_str(&output).unwrap();
-        assert_eq!(json["foo"], Value::Number(1u64.into()));
-    }
-
-    #[tokio::test]
     async fn test_differentiate_by_timeseries_name() {
         let logctx = test_setup_log("test_differentiate_by_timeseries_name");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
         test_differentiate_by_timeseries_name_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -2352,11 +2115,7 @@ mod tests {
         let logctx = test_setup_log("test_select_timeseries_with_select_one");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
         test_select_timeseries_with_select_one_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -2421,11 +2180,7 @@ mod tests {
         );
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
         test_select_timeseries_with_select_one_field_with_multiple_values_impl(
             &db, client,
@@ -2498,11 +2253,7 @@ mod tests {
             test_setup_log("test_select_timeseries_with_select_multiple_fields_with_multiple_values");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
         test_select_timeseries_with_select_multiple_fields_with_multiple_values_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -2578,11 +2329,7 @@ mod tests {
         let logctx = test_setup_log("test_select_timeseries_with_all");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
         test_select_timeseries_with_all_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -2643,11 +2390,7 @@ mod tests {
         let logctx = test_setup_log("test_select_timeseries_with_start_time");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
         test_select_timeseries_with_start_time_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -2698,11 +2441,7 @@ mod tests {
         let logctx = test_setup_log("test_select_timeseries_with_limit");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
         test_select_timeseries_with_limit_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -2821,11 +2560,7 @@ mod tests {
         let logctx = test_setup_log("test_select_timeseries_with_order");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
         test_select_timeseries_with_order_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -2927,11 +2662,7 @@ mod tests {
         let logctx = test_setup_log("test_get_schema_no_new_values");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
         test_get_schema_no_new_values_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -2959,11 +2690,7 @@ mod tests {
         let logctx = test_setup_log("test_timeseries_schema_list");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
         test_timeseries_schema_list_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -3002,11 +2729,7 @@ mod tests {
         let logctx = test_setup_log("test_list_timeseries");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
         test_list_timeseries_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -3083,99 +2806,67 @@ mod tests {
     async fn recall_field_value_bool_test(
         client: &Client,
     ) -> Result<(), Error> {
-        let field = FieldValue::Bool(true);
-        let as_json = serde_json::Value::from(true);
-        test_recall_field_value_impl(field, as_json, client).await?;
-        Ok(())
+        test_recall_field_value_impl(FieldValue::Bool(true), client).await
     }
 
     async fn recall_field_value_u8_test(client: &Client) -> Result<(), Error> {
-        let field = FieldValue::U8(1);
-        let as_json = serde_json::Value::from(1_u8);
-        test_recall_field_value_impl(field, as_json, client).await?;
-        Ok(())
+        test_recall_field_value_impl(FieldValue::U8(1), client).await
     }
 
     async fn recall_field_value_i8_test(client: &Client) -> Result<(), Error> {
-        let field = FieldValue::I8(1);
-        let as_json = serde_json::Value::from(1_i8);
-        test_recall_field_value_impl(field, as_json, client).await?;
-        Ok(())
+        test_recall_field_value_impl(FieldValue::I8(1), client).await
     }
 
     async fn recall_field_value_u16_test(client: &Client) -> Result<(), Error> {
-        let field = FieldValue::U16(1);
-        let as_json = serde_json::Value::from(1_u16);
-        test_recall_field_value_impl(field, as_json, client).await?;
-        Ok(())
+        test_recall_field_value_impl(FieldValue::U16(1), client).await
     }
 
     async fn recall_field_value_i16_test(client: &Client) -> Result<(), Error> {
-        let field = FieldValue::I16(1);
-        let as_json = serde_json::Value::from(1_i16);
-        test_recall_field_value_impl(field, as_json, client).await?;
-        Ok(())
+        test_recall_field_value_impl(FieldValue::I16(1), client).await
     }
 
     async fn recall_field_value_u32_test(client: &Client) -> Result<(), Error> {
-        let field = FieldValue::U32(1);
-        let as_json = serde_json::Value::from(1_u32);
-        test_recall_field_value_impl(field, as_json, client).await?;
-        Ok(())
+        test_recall_field_value_impl(FieldValue::U32(1), client).await
     }
 
     async fn recall_field_value_i32_test(client: &Client) -> Result<(), Error> {
-        let field = FieldValue::I32(1);
-        let as_json = serde_json::Value::from(1_i32);
-        test_recall_field_value_impl(field, as_json, client).await?;
-        Ok(())
+        test_recall_field_value_impl(FieldValue::I32(1), client).await
     }
 
     async fn recall_field_value_u64_test(client: &Client) -> Result<(), Error> {
-        let field = FieldValue::U64(1);
-        let as_json = serde_json::Value::from(1_u64);
-        test_recall_field_value_impl(field, as_json, client).await?;
-        Ok(())
+        test_recall_field_value_impl(FieldValue::U64(1), client).await
     }
 
     async fn recall_field_value_i64_test(client: &Client) -> Result<(), Error> {
-        let field = FieldValue::I64(1);
-        let as_json = serde_json::Value::from(1_i64);
-        test_recall_field_value_impl(field, as_json, client).await?;
-        Ok(())
+        test_recall_field_value_impl(FieldValue::I64(1), client).await
     }
 
     async fn recall_field_value_string_test(
         client: &Client,
     ) -> Result<(), Error> {
-        let field = FieldValue::String("foo".into());
-        let as_json = serde_json::Value::from("foo");
-        test_recall_field_value_impl(field, as_json, client).await?;
-        Ok(())
+        test_recall_field_value_impl(FieldValue::String("foo".into()), client)
+            .await
     }
 
     async fn recall_field_value_ipv6addr_test(
         client: &Client,
     ) -> Result<(), Error> {
-        let field = FieldValue::from(Ipv6Addr::LOCALHOST);
-        let as_json = serde_json::Value::from(Ipv6Addr::LOCALHOST.to_string());
-        test_recall_field_value_impl(field, as_json, client).await?;
-        Ok(())
+        test_recall_field_value_impl(
+            FieldValue::from(Ipv6Addr::LOCALHOST),
+            client,
+        )
+        .await
     }
 
     async fn recall_field_value_uuid_test(
         client: &Client,
     ) -> Result<(), Error> {
-        let id = Uuid::new_v4();
-        let field = FieldValue::from(id);
-        let as_json = serde_json::Value::from(id.to_string());
-        test_recall_field_value_impl(field, as_json, client).await?;
-        Ok(())
+        test_recall_field_value_impl(FieldValue::from(Uuid::new_v4()), client)
+            .await
     }
 
     async fn test_recall_field_value_impl(
         field_value: FieldValue,
-        as_json: serde_json::Value,
         client: &Client,
     ) -> Result<(), Error> {
         // Insert a record from this field.
@@ -3183,43 +2874,66 @@ mod tests {
         const TIMESERIES_KEY: u64 = 101;
         const FIELD_NAME: &str = "baz";
 
-        let mut inserted_row = serde_json::Map::new();
-        inserted_row
-            .insert("timeseries_name".to_string(), TIMESERIES_NAME.into());
-        inserted_row
-            .insert("timeseries_key".to_string(), TIMESERIES_KEY.into());
-        inserted_row.insert("field_name".to_string(), FIELD_NAME.into());
-        inserted_row.insert("field_value".to_string(), as_json);
-        let inserted_row = serde_json::Value::from(inserted_row);
-
-        let row = serde_json::to_string(&inserted_row).unwrap();
+        let values = match &field_value {
+            FieldValue::String(x) => ValueArray::from(vec![x.to_string()]),
+            FieldValue::I8(x) => ValueArray::from(vec![*x]),
+            FieldValue::U8(x) => ValueArray::from(vec![*x]),
+            FieldValue::I16(x) => ValueArray::from(vec![*x]),
+            FieldValue::U16(x) => ValueArray::from(vec![*x]),
+            FieldValue::I32(x) => ValueArray::from(vec![*x]),
+            FieldValue::U32(x) => ValueArray::from(vec![*x]),
+            FieldValue::I64(x) => ValueArray::from(vec![*x]),
+            FieldValue::U64(x) => ValueArray::from(vec![*x]),
+            FieldValue::IpAddr(x) => ValueArray::from(vec![*x]),
+            FieldValue::Uuid(x) => ValueArray::from(vec![*x]),
+            FieldValue::Bool(x) => ValueArray::from(vec![*x]),
+        };
+        let inserted_block = Block {
+            columns: IndexMap::from([
+                (
+                    "timeseries_name".to_string(),
+                    Column::from(ValueArray::String(vec![
+                        TIMESERIES_NAME.to_string()
+                    ])),
+                ),
+                (
+                    "timeseries_key".to_string(),
+                    Column::from(ValueArray::UInt64(vec![TIMESERIES_KEY])),
+                ),
+                (
+                    "field_name".to_string(),
+                    Column::from(ValueArray::String(vec![
+                        FIELD_NAME.to_string()
+                    ])),
+                ),
+                ("field_value".to_string(), Column::from(values)),
+            ]),
+            ..Default::default()
+        };
         let field_table = field_table_name(field_value.field_type());
-        let insert_sql = format!(
-            "INSERT INTO oximeter.{field_table} FORMAT JSONEachRow {row}"
-        );
+        let insert_sql =
+            format!("INSERT INTO oximeter.{field_table} FORMAT NATIVE");
         client
-            .execute_native(&insert_sql)
+            .insert_native(&insert_sql, inserted_block.clone())
             .await
             .expect("Failed to insert field row");
 
         // Select it exactly back out.
-        let select_sql = format!(
-            "SELECT * FROM oximeter.{} LIMIT 1 FORMAT {};",
-            field_table_name(field_value.field_type()),
-            crate::DATABASE_SELECT_FORMAT,
-        );
-        let body = client
-            .execute_with_body(&select_sql)
+        let select_sql =
+            format!("SELECT * FROM oximeter.{field_table} LIMIT 1",);
+        let block = client
+            .execute_with_block(&select_sql)
             .await
             .expect("Failed to select field row")
-            .1;
-        let actual_row: serde_json::Value = serde_json::from_str(&body)
-            .expect("Failed to parse field row JSON");
-        println!("{actual_row:?}");
-        println!("{inserted_row:?}");
+            .data
+            .expect("Query should have returned data");
+        println!("{inserted_block:?}");
+        println!("{block:?}");
         assert_eq!(
-            actual_row, inserted_row,
-            "Actual and expected field rows do not match"
+            inserted_block, block,
+            "Actual and expected field blocks do not match, when inserting \
+            field value {:?}",
+            field_value,
         );
         Ok(())
     }
@@ -3558,7 +3272,7 @@ mod tests {
             .expect("Failed to select measurement row")
             .data
             .expect("Should have selected some data block");
-        let actual_measurements = Measurement::from_block(&selected_block)
+        let actual_measurements = Measurement::from_block(&selected_block, &())
             .expect("Failed to extract measurement from block");
         println!("Actual measurements: {actual_measurements:#?}");
         assert_eq!(actual_measurements.len(), 1);
@@ -3569,17 +3283,30 @@ mod tests {
         Ok(())
     }
 
-    // Returns the number of timeseries schemas being used.
-    async fn get_schema_count(client: &Client) -> usize {
+    // Returns the number of timeseries schemas in the database, optionally
+    // applying a filtering clause. The clause must be valid as a SQL `WHERE`
+    // clause.
+    async fn get_schema_count(
+        client: &Client,
+        maybe_filter: Option<&str>,
+    ) -> usize {
         client
-            .execute_with_body(
-                "SELECT * FROM oximeter.timeseries_schema FORMAT JSONEachRow;",
-            )
+            .execute_with_block(&format!(
+                "SELECT COUNT() AS count \
+            FROM oximeter.timeseries_schema \
+            {}",
+                maybe_filter
+                    .map(|f| format!("WHERE {f}"))
+                    .unwrap_or_else(String::new)
+            ))
             .await
             .expect("Failed to SELECT from database")
-            .1
-            .lines()
-            .count()
+            .data
+            .expect("Should have a data block")
+            .column_values("count")
+            .expect("Should have a column named `count`")
+            .as_u64()
+            .expect("Should have a column of u64s")[0] as usize
     }
 
     #[tokio::test]
@@ -3587,11 +3314,7 @@ mod tests {
         let logctx = test_setup_log("test_recall_of_all_fields");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
         test_recall_of_all_fields_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -3647,11 +3370,7 @@ mod tests {
             test_setup_log("test_database_version_update_is_idempotent");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         // NOTE: We don't init the DB, because the test explicitly tests that.
         test_database_version_update_is_idempotent_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -3673,10 +3392,10 @@ mod tests {
         //
         // The values here don't matter much, we just want to check that
         // the database data hasn't been dropped.
-        assert_eq!(0, get_schema_count(&client).await);
+        assert_eq!(0, get_schema_count(&client, None).await);
         let sample = oximeter_test_utils::make_sample();
         client.insert_samples(&[sample.clone()]).await.unwrap();
-        assert_eq!(1, get_schema_count(&client).await);
+        assert_eq!(1, get_schema_count(&client, None).await);
 
         // Re-initialize the database, see that our data still exists
         client
@@ -3684,7 +3403,7 @@ mod tests {
             .await
             .expect("Failed to initialize timeseries database");
 
-        assert_eq!(1, get_schema_count(&client).await);
+        assert_eq!(1, get_schema_count(&client, None).await);
     }
 
     #[tokio::test]
@@ -3692,11 +3411,7 @@ mod tests {
         let logctx = test_setup_log("test_database_version_will_not_downgrade");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         // NOTE: We don't init the DB, because the test explicitly tests that.
         test_database_version_will_not_downgrade_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -3735,11 +3450,7 @@ mod tests {
         let logctx = test_setup_log("test_database_version_wipes_old_version");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         // NOTE: We don't init the DB, because the test explicitly tests that.
         test_database_version_wipes_old_version_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -3761,17 +3472,17 @@ mod tests {
         //
         // The values here don't matter much, we just want to check that
         // the database data gets dropped later.
-        assert_eq!(0, get_schema_count(&client).await);
+        assert_eq!(0, get_schema_count(&client, None).await);
         let sample = oximeter_test_utils::make_sample();
         client.insert_samples(&[sample.clone()]).await.unwrap();
-        assert_eq!(1, get_schema_count(&client).await);
+        assert_eq!(1, get_schema_count(&client, None).await);
 
         // If we try to upgrade to a newer version, we'll drop old data.
         client
             .initialize_db_with_version(replicated, model::OXIMETER_VERSION + 1)
             .await
             .expect("Should have initialized database successfully");
-        assert_eq!(0, get_schema_count(&client).await);
+        assert_eq!(0, get_schema_count(&client, None).await);
     }
 
     #[tokio::test]
@@ -3779,11 +3490,7 @@ mod tests {
         let logctx = test_setup_log("test_update_schema_cache_on_new_sample");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
         test_update_schema_cache_on_new_sample_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -3799,10 +3506,8 @@ mod tests {
 
         // Get the count of schema directly from the DB, which should have just
         // one.
-        let response = client.execute_with_body(
-            "SELECT COUNT() FROM oximeter.timeseries_schema FORMAT JSONEachRow;
-        ").await.unwrap().1;
-        assert_eq!(response.lines().count(), 1, "Expected exactly 1 schema");
+        let count = get_schema_count(&client, None).await;
+        assert_eq!(count, 1, "Expected exactly 1 schema");
         assert_eq!(client.schema.lock().await.len(), 1);
 
         // Clear the internal cache, and insert the sample again.
@@ -3816,14 +3521,8 @@ mod tests {
 
         // Get the count of schema directly from the DB, which should still have
         // only the one schema.
-        let response = client.execute_with_body(
-            "SELECT COUNT() FROM oximeter.timeseries_schema FORMAT JSONEachRow;
-        ").await.unwrap().1;
-        assert_eq!(
-            response.lines().count(),
-            1,
-            "Expected exactly 1 schema again"
-        );
+        let count = get_schema_count(&client, None).await;
+        assert_eq!(count, 1, "Expected exactly 1 schema again");
         assert_eq!(client.schema.lock().await.len(), 1);
     }
 
@@ -3832,11 +3531,7 @@ mod tests {
         let logctx = test_setup_log("test_select_all_datum_types");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
         test_select_all_datum_types_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -3855,15 +3550,8 @@ mod tests {
         use strum::IntoEnumIterator;
         // Attempt to select all schema with each datum type.
         for ty in oximeter::DatumType::iter() {
-            let sql = format!(
-                "SELECT COUNT() \
-                FROM {}.timeseries_schema WHERE \
-                datum_type = '{:?}'",
-                crate::DATABASE_NAME,
-                crate::model::DbDatumType::from(ty),
-            );
-            let res = client.execute_with_body(sql).await.unwrap().1;
-            let count = res.trim().parse::<usize>().unwrap();
+            let filter = format!("datum_type = '{}'", ty);
+            let count = get_schema_count(&client, Some(&filter)).await;
             assert_eq!(count, 0);
         }
     }
@@ -3874,11 +3562,7 @@ mod tests {
             test_setup_log("test_new_schema_removed_when_not_inserted");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
         test_new_schema_removed_when_not_inserted_impl(&db, client).await;
         db.cleanup().await.unwrap();
@@ -4095,15 +3779,14 @@ mod tests {
 
     async fn test_apply_one_schema_upgrade_impl(
         log: &Logger,
-        http_address: SocketAddr,
-        native_address: SocketAddr,
+        address: SocketAddr,
         replicated: bool,
     ) {
         let test_name = format!(
             "test_apply_one_schema_upgrade_{}",
             if replicated { "replicated" } else { "single_node" }
         );
-        let client = Client::new(http_address, native_address, &log);
+        let client = Client::new(address, &log);
 
         // We'll test moving from version 1, which just creates a database and
         // table, to version 2, which adds two columns to that table in
@@ -4157,23 +3840,35 @@ mod tests {
             .expect("Failed to apply one schema upgrade");
 
         // Check that it actually worked!
-        let body = client
-            .execute_with_body(&format!(
+        let block = client
+            .execute_with_block(&format!(
                 "\
             SELECT name, type FROM system.columns \
             WHERE database = '{test_name}' AND table = 'tbl' \
-            ORDER BY name \
-            FORMAT CSV;\
-        "
+            ORDER BY name"
             ))
             .await
-            .unwrap()
-            .1;
-        let mut lines = body.lines();
-        assert_eq!(lines.next().unwrap(), "\"col0\",\"UInt8\"");
-        assert_eq!(lines.next().unwrap(), "\"col1\",\"UInt16\"");
-        assert_eq!(lines.next().unwrap(), "\"col2\",\"String\"");
-        assert!(lines.next().is_none());
+            .expect("Failed to run query")
+            .data
+            .expect("Query should have returned data");
+        assert_eq!(block.n_rows(), 3);
+        assert_eq!(block.n_columns(), 2);
+        assert_eq!(
+            block
+                .column_values("name")
+                .expect("Should have a column named `name`")
+                .as_string()
+                .expect("Expected a column of strings"),
+            &["col0", "col1", "col2"],
+        );
+        assert_eq!(
+            block
+                .column_values("type")
+                .expect("Should have a column named `type`")
+                .as_string()
+                .expect("Expected a column of strings"),
+            &["UInt8", "UInt16", "String"],
+        );
     }
 
     #[tokio::test]
@@ -4182,10 +3877,8 @@ mod tests {
         let logctx = test_setup_log(TEST_NAME);
         let log = &logctx.log;
         let mut cluster = create_cluster(&logctx).await;
-        let address = cluster.http_address().into();
         test_apply_one_schema_upgrade_impl(
             log,
-            address,
             cluster.native_address().into(),
             true,
         )
@@ -4202,10 +3895,8 @@ mod tests {
         let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let address = db.http_address().into();
         test_apply_one_schema_upgrade_impl(
             log,
-            address,
             db.native_address().into(),
             false,
         )
@@ -4222,8 +3913,7 @@ mod tests {
         let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let address = db.http_address().into();
-        let client = Client::new(address, db.native_address().into(), &log);
+        let client = Client::new(db.native_address().into(), &log);
         const REPLICATED: bool = false;
         client
             .initialize_db_with_version(
@@ -4265,8 +3955,7 @@ mod tests {
         let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let address = db.http_address().into();
-        let client = Client::new(address, db.native_address().into(), &log);
+        let client = Client::new(db.native_address().into(), &log);
         const REPLICATED: bool = false;
         client
             .initialize_db_with_version(
@@ -4300,15 +3989,14 @@ mod tests {
 
     async fn test_ensure_schema_walks_through_multiple_steps_impl(
         log: &Logger,
-        http_address: SocketAddr,
-        native_address: SocketAddr,
+        address: SocketAddr,
         replicated: bool,
     ) {
         let test_name = format!(
             "test_ensure_schema_walks_through_multiple_steps_{}",
             if replicated { "replicated" } else { "single_node" }
         );
-        let client = Client::new(http_address, native_address, &log);
+        let client = Client::new(address, &log);
 
         // We need to actually have the oximeter DB here, and the version table,
         // since `ensure_schema()` writes out versions to the DB as they're
@@ -4367,23 +4055,35 @@ mod tests {
             .expect("Failed to apply one schema upgrade");
 
         // Check that it actually worked!
-        let body = client
-            .execute_with_body(format!(
+        let block = client
+            .execute_with_block(&format!(
                 "\
             SELECT name, type FROM system.columns \
             WHERE database = '{test_name}' AND table = 'tbl' \
-            ORDER BY name \
-            FORMAT CSV;\
-        "
+            ORDER BY name"
             ))
             .await
-            .unwrap()
-            .1;
-        let mut lines = body.lines();
-        assert_eq!(lines.next().unwrap(), "\"col0\",\"UInt8\"");
-        assert_eq!(lines.next().unwrap(), "\"col1\",\"UInt16\"");
-        assert_eq!(lines.next().unwrap(), "\"col2\",\"String\"");
-        assert!(lines.next().is_none());
+            .expect("Failed to run query")
+            .data
+            .expect("Query should have returned data");
+        assert_eq!(block.n_rows(), 3);
+        assert_eq!(block.n_columns(), 2);
+        assert_eq!(
+            block
+                .column_values("name")
+                .expect("Should have a column named `name`")
+                .as_string()
+                .expect("Expected a column of strings"),
+            &["col0", "col1", "col2"],
+        );
+        assert_eq!(
+            block
+                .column_values("type")
+                .expect("Should have a column named `type`")
+                .as_string()
+                .expect("Expected a column of strings"),
+            &["UInt8", "UInt16", "String"],
+        );
 
         let latest_version = client.read_latest_version().await.unwrap();
         assert_eq!(
@@ -4402,10 +4102,8 @@ mod tests {
         let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let address = db.http_address().into();
         test_ensure_schema_walks_through_multiple_steps_impl(
             log,
-            address,
             db.native_address().into(),
             false,
         )
@@ -4421,10 +4119,8 @@ mod tests {
         let logctx = test_setup_log(TEST_NAME);
         let log = &logctx.log;
         let mut cluster = create_cluster(&logctx).await;
-        let address = cluster.http_address().into();
         test_ensure_schema_walks_through_multiple_steps_impl(
             log,
-            address,
             cluster.native_address().into(),
             true,
         )
@@ -4504,8 +4200,7 @@ mod tests {
         let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let address = db.http_address().into();
-        let client = Client::new(address, db.native_address().into(), &log);
+        let client = Client::new(db.native_address().into(), &log);
         client
             .init_single_node_db()
             .await
@@ -4513,15 +4208,9 @@ mod tests {
 
         // Attempt to select all schema with each field type.
         for ty in oximeter::FieldType::iter() {
-            let sql = format!(
-                "SELECT COUNT() \
-                FROM {}.timeseries_schema \
-                WHERE arrayFirstIndex(x -> x = '{:?}', fields.type) > 0;",
-                crate::DATABASE_NAME,
-                crate::model::DbFieldType::from(ty),
-            );
-            let res = client.execute_with_body(sql).await.unwrap().1;
-            let count = res.trim().parse::<usize>().unwrap();
+            let filter =
+                format!("arrayFirstIndex(x -> x = '{}', fields.type) > 0", ty);
+            let count = get_schema_count(&client, Some(&filter)).await;
             assert_eq!(count, 0);
         }
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
@@ -4536,8 +4225,7 @@ mod tests {
         let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let address = db.http_address().into();
-        let client = Client::new(address, db.native_address().into(), &log);
+        let client = Client::new(db.native_address().into(), &log);
         client
             .initialize_db_with_version(false, OXIMETER_VERSION)
             .await
@@ -4686,11 +4374,7 @@ mod tests {
                 .await
                 .expect("Failed to start ClickHouse")
         };
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &log,
-        );
+        let client = Client::new(db.native_address().into(), &log);
 
         // Let's start with version 2, which is the first tracked and contains
         // the full SQL files we need to populate the DB.
@@ -4773,28 +4457,25 @@ mod tests {
     async fn fetch_oximeter_table_details(
         client: &Client,
     ) -> BTreeMap<String, serde_json::Map<String, serde_json::Value>> {
-        let out = client
-            .execute_with_body(
+        let block = client
+            .execute_with_block(
                 "SELECT \
-                name,
-                engine_full,
-                create_table_query,
-                sorting_key,
-                primary_key
-            FROM system.tables \
-            WHERE database = 'oximeter'\
-            FORMAT JSONEachRow;",
+                    name, \
+                    engine_full, \
+                    create_table_query, \
+                    sorting_key, \
+                    primary_key \
+                FROM system.tables \
+                WHERE database = 'oximeter'",
             )
             .await
-            .unwrap()
-            .1;
-        out.lines()
-            .map(|line| {
-                let json: serde_json::Map<String, serde_json::Value> =
-                    serde_json::from_str(&line).unwrap();
-                let name = json.get("name").unwrap().to_string();
-                (name, json)
-            })
+            .expect("Failed to run query")
+            .data
+            .expect("Query should have returned data");
+        block
+            .json_rows()
+            .into_iter()
+            .map(|row| (row["name"].as_str().unwrap().to_string(), row))
             .collect()
     }
 
@@ -4882,7 +4563,6 @@ mod tests {
             .expect("Failed to start ClickHouse");
         test_expunge_timeseries_by_name_impl(
             log,
-            db.http_address().into(),
             db.native_address().into(),
             false,
         )
@@ -4896,10 +4576,8 @@ mod tests {
         const TEST_NAME: &str = "test_expunge_timeseries_by_name_replicated";
         let logctx = test_setup_log(TEST_NAME);
         let mut cluster = create_cluster(&logctx).await;
-        let address = cluster.http_address().into();
         test_expunge_timeseries_by_name_impl(
             &logctx.log,
-            address,
             cluster.native_address().into(),
             true,
         )
@@ -4912,11 +4590,10 @@ mod tests {
     // upgrade.
     async fn test_expunge_timeseries_by_name_impl(
         log: &Logger,
-        http_address: SocketAddr,
-        native_address: SocketAddr,
+        address: SocketAddr,
         replicated: bool,
     ) {
-        let client = Client::new(http_address, native_address, &log);
+        let client = Client::new(address, &log);
 
         const STARTING_VERSION: u64 = 1;
         const NEXT_VERSION: u64 = 2;
@@ -4955,17 +4632,20 @@ mod tests {
             .await
             .unwrap();
         for table in all_tables.iter() {
-            let sql = format!(
-                "SELECT * FROM {}.{} FORMAT JSONEachRow",
-                crate::DATABASE_NAME,
-                table,
-            );
-            let body = client.execute_with_body(sql).await.unwrap().1;
-            for line in body.lines() {
-                let json: serde_json::Value =
-                    serde_json::from_str(line.trim()).unwrap();
-                let name = json["timeseries_name"].to_string();
-                records_by_timeseries.entry(name).or_default().push(json);
+            let sql =
+                format!("SELECT * FROM {}.{}", crate::DATABASE_NAME, table,);
+            for row in client
+                .execute_with_block(&sql)
+                .await
+                .expect("failed to execute query")
+                .data
+                .expect("query should have returned data")
+                .json_rows()
+            {
+                records_by_timeseries
+                    .entry(row["timeseries_name"].as_str().unwrap().to_string())
+                    .or_default()
+                    .push(row);
             }
         }
 
@@ -4999,26 +4679,28 @@ mod tests {
         // First, we should have zero mentions of the timeseries we've deleted.
         for table in all_tables.iter() {
             let sql = format!(
-                "SELECT COUNT() \
+                "SELECT COUNT() AS count \
                 FROM {}.{} \
-                WHERE timeseries_name = '{}'
-                FORMAT CSV",
+                WHERE timeseries_name = '{}'",
                 crate::DATABASE_NAME,
                 table,
                 &to_delete[0].to_string(),
             );
-            let count: u64 = client
-                .execute_with_body(sql)
+            let count = client
+                .execute_with_block(&sql)
                 .await
                 .expect("failed to get count of timeseries")
-                .1
-                .trim()
-                .parse()
-                .expect("invalid record count from query");
+                .data
+                .expect("query should have returned data")
+                .column_values("count")
+                .expect("should have a column named `count`")
+                .as_u64()
+                .expect("should have type u64")[0];
             assert_eq!(
                 count, 0,
                 "Should not have any rows associated with the deleted \
-                but found {count} records in table {table}",
+                timeseries '{}', but found {} records in table {}",
+                to_delete[0], count, table,
             );
         }
 
@@ -5026,17 +4708,20 @@ mod tests {
         // did _not_ expunge.
         let mut found: BTreeMap<_, Vec<_>> = BTreeMap::new();
         for table in all_tables.iter() {
-            let sql = format!(
-                "SELECT * FROM {}.{} FORMAT JSONEachRow",
-                crate::DATABASE_NAME,
-                table,
-            );
-            let body = client.execute_with_body(sql).await.unwrap().1;
-            for line in body.lines() {
-                let json: serde_json::Value =
-                    serde_json::from_str(line.trim()).unwrap();
-                let name = json["timeseries_name"].to_string();
-                found.entry(name).or_default().push(json);
+            let sql =
+                format!("SELECT * FROM {}.{}", crate::DATABASE_NAME, table,);
+            for row in client
+                .execute_with_block(&sql)
+                .await
+                .expect("failed to execute query")
+                .data
+                .expect("query should have returned data")
+                .json_rows()
+            {
+                found
+                    .entry(row["timeseries_name"].as_str().unwrap().to_string())
+                    .or_default()
+                    .push(row);
             }
         }
 
@@ -5102,11 +4787,7 @@ mod tests {
             test_setup_log("read_latest_version_with_no_database_reports_zero");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         assert_eq!(
             client.read_latest_version().await.unwrap(),
             0,
@@ -5124,11 +4805,7 @@ mod tests {
         );
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
         client.execute_native("DROP TABLE oximeter.version").await.unwrap();
         assert_eq!(
@@ -5148,11 +4825,7 @@ mod tests {
         );
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
         assert_eq!(
             client.read_latest_version().await.unwrap(),
@@ -5169,11 +4842,7 @@ mod tests {
         let logctx = test_setup_log("read_latest_version_reports_max");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
-        let client = Client::new(
-            db.http_address().into(),
-            db.native_address().into(),
-            &logctx.log,
-        );
+        let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
         client.insert_version(1).await.unwrap();
         client.insert_version(10).await.unwrap();

@@ -107,7 +107,11 @@ async fn assert_system_metrics(
     cpus: i64,
     ram: i64,
 ) {
-    cptestctx.oximeter.force_collect().await;
+    cptestctx
+        .oximeter
+        .try_force_collect()
+        .await
+        .expect("Could not force oximeter collection");
     assert_eq!(
         get_latest_system_metric(
             cptestctx,
@@ -134,7 +138,11 @@ async fn assert_silo_metrics(
     cpus: i64,
     ram: i64,
 ) {
-    cptestctx.oximeter.force_collect().await;
+    cptestctx
+        .oximeter
+        .try_force_collect()
+        .await
+        .expect("Could not force oximeter collection");
     assert_eq!(
         get_latest_silo_metric(
             cptestctx,
@@ -270,9 +278,13 @@ async fn test_timeseries_schema_list(
     // Nexus's HTTP latency distribution. This is defined in Nexus itself, and
     // should always exist after we've registered as a producer and start
     // producing data. Force a collection to ensure that happens.
-    cptestctx.oximeter.force_collect().await;
+    cptestctx
+        .oximeter
+        .try_force_collect()
+        .await
+        .expect("Could not force oximeter collection");
     let client = &cptestctx.external_client;
-    let url = "/v1/timeseries/schema";
+    let url = "/v1/system/timeseries/schemas";
     let schema =
         objects_list_page_authz::<TimeseriesSchema>(client, &url).await;
     schema
@@ -289,7 +301,11 @@ pub async fn timeseries_query(
     query: impl ToString,
 ) -> Vec<oxql_types::Table> {
     // first, make sure the latest timeseries have been collected.
-    cptestctx.oximeter.force_collect().await;
+    cptestctx
+        .oximeter
+        .try_force_collect()
+        .await
+        .expect("Could not force oximeter collection");
 
     // okay, do the query
     let body = nexus_types::external_api::params::TimeseriesQuery {
@@ -300,7 +316,7 @@ pub async fn timeseries_query(
         nexus_test_utils::http_testing::RequestBuilder::new(
             &cptestctx.external_client,
             http::Method::POST,
-            "/v1/timeseries/query",
+            "/v1/system/timeseries/query",
         )
         .body(Some(&body)),
     )
@@ -365,7 +381,11 @@ async fn test_instance_watcher_metrics(
             .await;
 
         // Make sure that the latest metrics have been collected.
-        oximeter.force_collect().await;
+        cptestctx
+            .oximeter
+            .try_force_collect()
+            .await
+            .expect("Could not force oximeter collection");
     };
 
     #[track_caller]
@@ -688,7 +708,11 @@ async fn test_mgs_metrics(
             query: &str,
             expected: &HashMap<String, usize>,
         ) -> anyhow::Result<()> {
-            cptestctx.oximeter.force_collect().await;
+            cptestctx
+                .oximeter
+                .try_force_collect()
+                .await
+                .expect("Could not force oximeter collection");
             let table = timeseries_query(&cptestctx, &query)
                 .await
                 .into_iter()

@@ -5494,7 +5494,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn timeseries_schema_list(
+    async fn system_timeseries_schema_list(
         rqctx: RequestContext<ApiContext>,
         pag_params: Query<TimeseriesSchemaPaginationParams>,
     ) -> Result<
@@ -5521,7 +5521,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn timeseries_query(
+    async fn system_timeseries_query(
         rqctx: RequestContext<ApiContext>,
         body: TypedBody<params::TimeseriesQuery>,
     ) -> Result<HttpResponseOk<views::OxqlQueryResult>, HttpError> {

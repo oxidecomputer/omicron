@@ -85,7 +85,7 @@ impl RegionSnapshotReplacementFinishDetector {
                 match self
                     .datastore
                     .region_snapshot_get(
-                        request.old_dataset_id,
+                        request.old_dataset_id.into(),
                         request.old_region_id,
                         request.old_snapshot_id,
                     )
@@ -169,6 +169,7 @@ mod test {
     use nexus_db_model::RegionSnapshotReplacementStepState;
     use nexus_db_queries::db::datastore::region_snapshot_replacement;
     use nexus_test_utils_macros::nexus_test;
+    use omicron_uuid_kinds::DatasetUuid;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -195,7 +196,7 @@ mod test {
 
         // Add a region snapshot replacement request for a fake region snapshot.
 
-        let dataset_id = Uuid::new_v4();
+        let dataset_id = DatasetUuid::new_v4();
         let region_id = Uuid::new_v4();
         let snapshot_id = Uuid::new_v4();
 
