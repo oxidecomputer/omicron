@@ -171,4 +171,19 @@ impl ClickhouseAdminSingleApi for ClickhouseAdminSingleImpl {
 
         Ok(HttpResponseUpdatedNoContent())
     }
+
+    async fn system_timeseries_avg(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<MetricInfoPath>,
+        query_params: Query<TimeSeriesSettingsQuery>,
+    ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError> {
+        let ctx = rqctx.context();
+        let retrieval_settings = query_params.into_inner();
+        let metric_info = path_params.into_inner();
+        let settings =
+            SystemTimeSeriesSettings { retrieval_settings, metric_info };
+        let output =
+            ctx.clickhouse_cli().system_timeseries_avg(settings).await?;
+        Ok(HttpResponseOk(output))
+    }
 }

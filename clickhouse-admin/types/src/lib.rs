@@ -1049,7 +1049,7 @@ fn default_timestamp_format() -> TimestampFormat {
     TimestampFormat::Utc
 }
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 /// Available metrics tables in the `system` database
 pub enum SystemTable {
@@ -1067,7 +1067,7 @@ impl fmt::Display for SystemTable {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 /// Which format should the timestamp be in.
 pub enum TimestampFormat {
@@ -1078,8 +1078,8 @@ pub enum TimestampFormat {
 impl fmt::Display for TimestampFormat {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let table = match self {
-            TimestampFormat::Utc => "utc",
-            TimestampFormat::UnixEpoch => "unix_epoch",
+            TimestampFormat::Utc => "iso",
+            TimestampFormat::UnixEpoch => "unix_timestamp",
         };
         write!(f, "{}", table)
     }
@@ -1122,17 +1122,34 @@ pub struct SystemTimeSeriesSettings {
 }
 
 impl SystemTimeSeriesSettings {
-    // TODO: Use more aggregate functions than just avg?
+    fn interval(&self) -> u64 {
+        self.retrieval_settings.interval
+    }
 
+    fn time_range(&self) -> u64 {
+        self.retrieval_settings.time_range
+    }
+
+    fn timestamp_format(&self) -> TimestampFormat {
+        self.retrieval_settings.timestamp_format
+    }
+
+    fn metric_name(&self) -> &str {
+        &self.metric_info.metric
+    }
+
+    fn table(&self) -> SystemTable {
+        self.metric_info.table
+    }
+
+    // TODO: Use more aggregate functions than just avg?
     pub fn query_avg(&self) -> String {
-        let interval = self.retrieval_settings.interval;
-        let time_range = self.retrieval_settings.time_range;
-        let metric_name = &self.metric_info.metric;
-        let table = &self.metric_info.table;
-        let ts_fmt = match &self.retrieval_settings.timestamp_format {
-            TimestampFormat::Utc => "iso",
-            TimestampFormat::UnixEpoch => "unix_timestamp",
-        };
+        let interval = self.interval();
+        let time_range = self.time_range();
+        let metric_name = self.metric_name();
+        let table = self.table();
+        let ts_fmt = self.timestamp_format();
+
         let avg_value = match table {
             SystemTable::MetricLog => metric_name,
             SystemTable::AsynchronousMetricLog => "value",

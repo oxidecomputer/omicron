@@ -151,5 +151,16 @@ pub trait ClickhouseAdminSingleApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    // TODO: Retrieve time series here too
+    /// Retrieve time series from the system database. The value the average of all
+    /// values within the interval.
+    /// These are internal ClickHouse metrics.
+    #[endpoint {
+        method = GET,
+        path = "/timeseries/{table}/{metric}/avg"
+    }]
+    async fn system_timeseries_avg(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<MetricInfoPath>,
+        query_params: Query<TimeSeriesSettingsQuery>,
+    ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError>;
 }
