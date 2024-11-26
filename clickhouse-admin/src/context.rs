@@ -3,7 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{ClickhouseCli, Clickward};
+use omicron_common::address::CLICKHOUSE_TCP_PORT;
+use oximeter_db::Client as OximeterClient;
 use slog::Logger;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -33,16 +36,32 @@ impl ServerContext {
 
 pub struct SingleServerContext {
     clickhouse_cli: ClickhouseCli,
+    oximeter_client: OximeterClient,
     initialization_lock: Arc<Mutex<()>>,
 }
 
 impl SingleServerContext {
     pub fn new(clickhouse_cli: ClickhouseCli) -> Self {
-        Self { clickhouse_cli, initialization_lock: Arc::new(Mutex::new(())) }
+        let ip = clickhouse_cli.listen_address.ip();
+        let address = SocketAddrV6::new(*ip, CLICKHOUSE_TCP_PORT, 0, 0);
+        let log = clickhouse_cli
+            .log
+            .as_ref()
+            .expect("should have configured logging via CLI or config");
+        let oximeter_client = OximeterClient::new(address.into(), log);
+        Self {
+            clickhouse_cli,
+            oximeter_client,
+            initialization_lock: Arc::new(Mutex::new(())),
+        }
     }
 
     pub fn clickhouse_cli(&self) -> &ClickhouseCli {
         &self.clickhouse_cli
+    }
+
+    pub fn oximeter_client(&self) -> &OximeterClient {
+        &self.oximeter_client
     }
 
     pub fn initialization_lock(&self) -> Arc<Mutex<()>> {

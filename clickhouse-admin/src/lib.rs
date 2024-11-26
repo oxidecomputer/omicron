@@ -139,7 +139,10 @@ pub async fn start_single_admin_server(
         }
     }
 
-    let context = SingleServerContext::new(clickhouse_cli);
+    let context = SingleServerContext::new(
+        clickhouse_cli
+            .with_log(log.new(slog::o!("component" => "ClickhouseCli"))),
+    );
     dropshot::ServerBuilder::new(
         http_entrypoints::clickhouse_admin_single_api(),
         Arc::new(context),
