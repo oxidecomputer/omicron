@@ -555,7 +555,15 @@ impl BpTableData for DiffDatasetsDetails {
     }
 
     fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
-        self.datasets.values().map(move |dataset| {
+        // `self.datasets` is naturally ordered by ID, but that doesn't play
+        // well with expectorate-based tests: We end up sorted by (random)
+        // UUIDs. We redact the UUIDs, but that still results in test-to-test
+        // variance in the _order_ of the rows. We can work around this for now
+        // by sorting by dataset kind: after UUID redaction, that produces
+        // a stable table ordering for datasets.
+        let mut rows = self.datasets.values().collect::<Vec<_>>();
+        rows.sort_unstable_by_key(|d| &d.kind);
+        rows.into_iter().map(move |dataset| {
             BpTableRow::from_strings(state, dataset.as_strings())
         })
     }

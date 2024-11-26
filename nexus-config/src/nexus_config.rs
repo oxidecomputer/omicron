@@ -250,12 +250,9 @@ pub struct SchemaConfig {
 /// Optional configuration for the timeseries database.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct TimeseriesDbConfig {
-    /// The HTTP address of the ClickHouse server.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub address: Option<SocketAddr>,
     /// The native TCP address of the ClickHouse server.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_address: Option<SocketAddr>,
+    pub address: Option<SocketAddr>,
 }
 
 /// Configuration for the `Dendrite` dataplane daemon.
@@ -779,7 +776,7 @@ mod test {
     use super::*;
 
     use omicron_common::address::{
-        Ipv6Subnet, CLICKHOUSE_HTTP_PORT, CLICKHOUSE_TCP_PORT, RACK_PREFIX,
+        Ipv6Subnet, CLICKHOUSE_TCP_PORT, RACK_PREFIX,
     };
     use omicron_common::api::internal::shared::SwitchLocation;
 
@@ -894,8 +891,7 @@ mod test {
             path = "/nonexistent/path"
             if_exists = "fail"
             [timeseries_db]
-            address = "[::1]:8123"
-            native_address = "[::1]:9000"
+            address = "[::1]:9000"
             [updates]
             trusted_root = "/path/to/root.json"
             [tunables]
@@ -1016,18 +1012,10 @@ mod test {
                     timeseries_db: TimeseriesDbConfig {
                         address: Some(SocketAddr::V6(SocketAddrV6::new(
                             Ipv6Addr::LOCALHOST,
-                            CLICKHOUSE_HTTP_PORT,
+                            CLICKHOUSE_TCP_PORT,
                             0,
                             0,
                         ))),
-                        native_address: Some(SocketAddr::V6(
-                            SocketAddrV6::new(
-                                Ipv6Addr::LOCALHOST,
-                                CLICKHOUSE_TCP_PORT,
-                                0,
-                                0,
-                            )
-                        )),
                     },
                     updates: Some(UpdatesConfig {
                         trusted_root: Utf8PathBuf::from("/path/to/root.json"),
@@ -1180,7 +1168,7 @@ mod test {
             path = "/nonexistent/path"
             if_exists = "fail"
             [timeseries_db]
-            address = "[::1]:8123"
+            address = "[::1]:9000"
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
@@ -1267,7 +1255,7 @@ mod test {
             path = "/nonexistent/path"
             if_exists = "fail"
             [timeseries_db]
-            address = "[::1]:8123"
+            address = "[::1]:9000"
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
@@ -1319,7 +1307,7 @@ mod test {
             path = "/nonexistent/path"
             if_exists = "fail"
             [timeseries_db]
-            address = "[::1]:8123"
+            address = "[::1]:9000"
             [updates]
             trusted_root = "/path/to/root.json"
             default_base_url = "http://example.invalid/"

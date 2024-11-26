@@ -30,7 +30,6 @@ use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
 use slog::error;
 use slog::{info, warn, Logger};
-use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::str::FromStr;
 
@@ -232,17 +231,20 @@ impl<'a> Planner<'a> {
         {
             // First, we need to ensure that sleds are using their expected
             // disks. This is necessary before we can allocate any zones.
+            let sled_edits =
+                self.blueprint.sled_ensure_disks(sled_id, &sled_resources)?;
             if let EnsureMultiple::Changed {
                 added,
                 updated,
                 expunged: _,
                 removed,
-            } = self.blueprint.sled_ensure_disks(sled_id, &sled_resources)?
+            } = sled_edits.disks.into()
             {
                 info!(
                     &self.log,
                     "altered physical disks";
-                    "sled_id" => %sled_id
+                    "sled_id" => %sled_id,
+                    "sled_edits" => ?sled_edits,
                 );
                 self.blueprint.record_operation(Operation::UpdateDisks {
                     sled_id,
@@ -368,8 +370,9 @@ impl<'a> Planner<'a> {
                 updated,
                 expunged,
                 removed,
-            } =
-                self.blueprint.sled_ensure_datasets(sled_id, &sled_resources)?
+            } = self
+                .blueprint
+                .sled_ensure_zone_datasets(sled_id, &sled_resources)?
             {
                 info!(
                     &self.log,
@@ -540,16 +543,11 @@ impl<'a> Planner<'a> {
         &mut self,
         zone_placement: &mut OmicronZonePlacement,
         kind: DiscretionaryOmicronZone,
-        mut num_zones_to_add: usize,
+        num_zones_to_add: usize,
     ) -> Result<(), Error> {
-        // Build a map of sled -> new zones to add.
-        let mut sleds_to_change: BTreeMap<SledUuid, usize> = BTreeMap::new();
-
         for i in 0..num_zones_to_add {
-            match zone_placement.place_zone(kind) {
-                Ok(sled_id) => {
-                    *sleds_to_change.entry(sled_id).or_default() += 1;
-                }
+            let sled_id = match zone_placement.place_zone(kind) {
+                Ok(sled_id) => sled_id,
                 Err(PlacementError::NoSledsEligible { .. }) => {
                     // We won't treat this as a hard error; it's possible
                     // (albeit unlikely?) we're in a weird state where we need
@@ -562,120 +560,48 @@ impl<'a> Planner<'a> {
                         "wanted_to_place" => num_zones_to_add,
                     );
 
-                    // Adjust `num_zones_to_add` downward so it's consistent
-                    // with the number of zones we're actually adding.
-                    num_zones_to_add = i;
-
                     break;
                 }
-            }
-        }
+            };
 
-        // For each sled we need to change, actually do so.
-        let mut new_zones_added = 0;
-        for (sled_id, additional_zone_count) in sleds_to_change {
-            // TODO-cleanup This is awkward: the builder wants to know how many
-            // total zones go on a given sled, but we have a count of how many
-            // we want to add. Construct a new target count. Maybe the builder
-            // should provide a different interface here?
-            let new_total_zone_count = self
-                .blueprint
-                .sled_num_running_zones_of_kind(sled_id, kind.into())
-                + additional_zone_count;
-
-            let result = match kind {
+            match kind {
                 DiscretionaryOmicronZone::BoundaryNtp => self
                     .blueprint
                     .sled_promote_internal_ntp_to_boundary_ntp(sled_id)?,
                 DiscretionaryOmicronZone::Clickhouse => {
-                    self.blueprint.sled_ensure_zone_multiple_clickhouse(
-                        sled_id,
-                        new_total_zone_count,
-                    )?
+                    self.blueprint.sled_add_zone_clickhouse(sled_id)?
                 }
                 DiscretionaryOmicronZone::ClickhouseKeeper => {
-                    self.blueprint.sled_ensure_zone_multiple_clickhouse_keeper(
-                        sled_id,
-                        new_total_zone_count,
-                    )?
+                    self.blueprint.sled_add_zone_clickhouse_keeper(sled_id)?
                 }
                 DiscretionaryOmicronZone::ClickhouseServer => {
-                    self.blueprint.sled_ensure_zone_multiple_clickhouse_server(
-                        sled_id,
-                        new_total_zone_count,
-                    )?
+                    self.blueprint.sled_add_zone_clickhouse_server(sled_id)?
                 }
                 DiscretionaryOmicronZone::CockroachDb => {
-                    self.blueprint.sled_ensure_zone_multiple_cockroachdb(
-                        sled_id,
-                        new_total_zone_count,
-                    )?
+                    self.blueprint.sled_add_zone_cockroachdb(sled_id)?
                 }
                 DiscretionaryOmicronZone::CruciblePantry => {
-                    self.blueprint.sled_ensure_zone_multiple_crucible_pantry(
-                        sled_id,
-                        new_total_zone_count,
-                    )?
+                    self.blueprint.sled_add_zone_crucible_pantry(sled_id)?
                 }
                 DiscretionaryOmicronZone::InternalDns => {
-                    self.blueprint.sled_ensure_zone_multiple_internal_dns(
-                        sled_id,
-                        new_total_zone_count,
-                    )?
+                    self.blueprint.sled_add_zone_internal_dns(sled_id)?
                 }
                 DiscretionaryOmicronZone::ExternalDns => {
-                    self.blueprint.sled_ensure_zone_multiple_external_dns(
-                        sled_id,
-                        new_total_zone_count,
-                    )?
+                    self.blueprint.sled_add_zone_external_dns(sled_id)?
                 }
                 DiscretionaryOmicronZone::Nexus => {
-                    self.blueprint.sled_ensure_zone_multiple_nexus(
-                        sled_id,
-                        new_total_zone_count,
-                    )?
+                    self.blueprint.sled_add_zone_nexus(sled_id)?
                 }
                 DiscretionaryOmicronZone::Oximeter => {
-                    self.blueprint.sled_ensure_zone_multiple_oximeter(
-                        sled_id,
-                        new_total_zone_count,
-                    )?
+                    self.blueprint.sled_add_zone_oximeter(sled_id)?
                 }
             };
-            match result {
-                EnsureMultiple::Changed {
-                    added,
-                    updated,
-                    expunged,
-                    removed,
-                } => {
-                    info!(
-                        self.log, "modified zones on sled";
-                        "sled_id" => %sled_id,
-                        "kind" => ?kind,
-                        "added" => added,
-                        "updated" => updated,
-                        "expunged" => expunged,
-                        "removed" => removed,
-                    );
-                    new_zones_added += added;
-                }
-                // This is only possible if we asked the sled to ensure the same
-                // number of zones it already has, but that's impossible based
-                // on the way we built up `sleds_to_change`.
-                EnsureMultiple::NotNeeded => unreachable!(
-                    "sled on which we added {kind:?} zones did not add any"
-                ),
-            }
+            info!(
+                self.log, "added zone to sled";
+                "sled_id" => %sled_id,
+                "kind" => ?kind,
+            );
         }
-
-        // Double check that we didn't make any arithmetic mistakes. If we've
-        // arrived here, we think we've added the number of `kind` zones we
-        // needed to.
-        assert_eq!(
-            new_zones_added, num_zones_to_add,
-            "internal error counting {kind:?} zones"
-        );
 
         Ok(())
     }
@@ -866,7 +792,6 @@ mod test {
     use crate::blueprint_builder::test::assert_planning_makes_no_changes;
     use crate::blueprint_builder::test::verify_blueprint;
     use crate::blueprint_builder::BlueprintBuilder;
-    use crate::blueprint_builder::EnsureMultiple;
     use crate::example::example;
     use crate::example::ExampleSystemBuilder;
     use crate::example::SimRngState;
@@ -1512,17 +1437,9 @@ mod test {
         )
         .expect("failed to build blueprint builder");
         let sled_id = builder.sled_ids_with_zones().next().expect("no sleds");
-        assert_eq!(
-            builder
-                .sled_ensure_zone_multiple_external_dns(sled_id, 3)
-                .expect("can't add external DNS zones"),
-            EnsureMultiple::Changed {
-                added: 0,
-                updated: 0,
-                removed: 0,
-                expunged: 0
-            },
-        );
+        builder
+            .sled_add_zone_external_dns(sled_id)
+            .expect_err("can't add external DNS zones");
 
         // Build a builder for a modfied blueprint that will include
         // some external DNS addresses.
@@ -1556,28 +1473,15 @@ mod test {
                 sleds.next().expect("no second sled"),
             )
         };
-        assert!(matches!(
-            blueprint_builder
-                .sled_ensure_zone_multiple_external_dns(sled_1, 2)
-                .expect("can't add external DNS zones to blueprint"),
-            EnsureMultiple::Changed {
-                added: 2,
-                updated: 0,
-                removed: 0,
-                expunged: 0
-            }
-        ));
-        assert!(matches!(
-            blueprint_builder
-                .sled_ensure_zone_multiple_external_dns(sled_2, 1)
-                .expect("can't add external DNS zones to blueprint"),
-            EnsureMultiple::Changed {
-                added: 1,
-                updated: 0,
-                removed: 0,
-                expunged: 0
-            }
-        ));
+        blueprint_builder
+            .sled_add_zone_external_dns(sled_1)
+            .expect("added external DNS zone");
+        blueprint_builder
+            .sled_add_zone_external_dns(sled_1)
+            .expect("added external DNS zone");
+        blueprint_builder
+            .sled_add_zone_external_dns(sled_2)
+            .expect("added external DNS zone");
 
         let blueprint1a = blueprint_builder.build();
         assert_eq!(

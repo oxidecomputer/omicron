@@ -4,7 +4,7 @@
 
 //! Helper for editing the datasets of a Blueprint
 
-use super::EnsureMultiple;
+use super::EditCounts;
 use crate::planner::PlannerRng;
 use illumos_utils::zpool::ZpoolName;
 use nexus_types::deployment::BlueprintDatasetConfig;
@@ -110,7 +110,7 @@ impl BlueprintDatasetsEditor {
                         // Bump generation number for any sled whose
                         // DatasetsConfig changed
                         if self.changed.contains(&sled_id) {
-                            config.generation = config.generation.next()
+                            config.generation = config.generation.next();
                         }
                         config
                     }
@@ -135,16 +135,9 @@ pub(super) struct SledDatasetsEditor<'a> {
     parent_changed_set: &'a mut BTreeSet<SledUuid>,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-struct EditCounts {
-    added: usize,
-    updated: usize,
-    expunged: usize,
-}
-
 impl Drop for SledDatasetsEditor<'_> {
     fn drop(&mut self) {
-        if self.counts != EditCounts::default() {
+        if self.counts.has_nonzero_counts() {
             self.parent_changed_set.insert(self.sled_id);
         }
     }
@@ -172,20 +165,10 @@ impl<'a> SledDatasetsEditor<'a> {
             blueprint_dataset_ids,
             database_dataset_ids,
             config,
-            counts: EditCounts::default(),
+            counts: EditCounts::zeroes(),
             sled_id,
             parent_changed_set,
         })
-    }
-
-    pub fn database_dataset_ids(
-        &self,
-    ) -> &BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, DatasetUuid>> {
-        &self.database_dataset_ids
-    }
-
-    pub fn datasets(&self) -> impl Iterator<Item = &BlueprintDatasetConfig> {
-        self.config.datasets.values()
     }
 
     pub fn expunge_datasets_if<F>(&mut self, mut expunge_if: F) -> usize
@@ -211,7 +194,7 @@ impl<'a> SledDatasetsEditor<'a> {
         num_expunged
     }
 
-    pub fn ensure_debug_dataset(&mut self, zpool: ZpoolName) -> DatasetUuid {
+    pub fn ensure_debug_dataset(&mut self, zpool: ZpoolName) {
         const DEBUG_QUOTA_SIZE_GB: u32 = 100;
 
         let address = None;
@@ -227,10 +210,7 @@ impl<'a> SledDatasetsEditor<'a> {
         )
     }
 
-    pub fn ensure_zone_root_dataset(
-        &mut self,
-        zpool: ZpoolName,
-    ) -> DatasetUuid {
+    pub fn ensure_zone_root_dataset(&mut self, zpool: ZpoolName) {
         let address = None;
         let quota = None;
         let reservation = None;
@@ -258,7 +238,7 @@ impl<'a> SledDatasetsEditor<'a> {
         quota: Option<ByteCount>,
         reservation: Option<ByteCount>,
         compression: CompressionAlgorithm,
-    ) -> DatasetUuid {
+    ) {
         let zpool_id = dataset.pool().id();
         let kind = dataset.dataset();
 
@@ -293,7 +273,7 @@ impl<'a> SledDatasetsEditor<'a> {
                 self.counts.updated += 1;
             }
 
-            return old_config.id;
+            return;
         }
 
         // Is there a dataset ID matching this one in the database? If so, use
@@ -319,18 +299,11 @@ impl<'a> SledDatasetsEditor<'a> {
             .entry(zpool_id)
             .or_default()
             .insert(kind.clone(), id);
-
-        id
     }
 
     /// Consume this editor, returning a summary of changes made.
-    pub fn finalize(self) -> EnsureMultiple {
-        let EditCounts { added, updated, expunged } = self.counts;
-        if added == 0 && updated == 0 && expunged == 0 {
-            EnsureMultiple::NotNeeded
-        } else {
-            EnsureMultiple::Changed { added, updated, expunged, removed: 0 }
-        }
+    pub fn finalize(self) -> EditCounts {
+        self.counts
     }
 }
 

@@ -130,7 +130,7 @@ impl Server {
     ) -> Result<Self, Error> {
         Self::new_impl(
             registry,
-            config.server_info.clone(),
+            config.server_info,
             config.registration_address.as_ref(),
             config.request_body_max_bytes,
             &config.log,

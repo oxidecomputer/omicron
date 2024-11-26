@@ -101,6 +101,7 @@ members = [
     "oximeter/types",
     "package",
     "passwords",
+    "range-requests",
     "rpaths",
     "sled-agent",
     "sled-agent/api",
@@ -232,6 +233,7 @@ default-members = [
     "oximeter/types",
     "package",
     "passwords",
+    "range-requests",
     "rpaths",
     "sled-agent",
     "sled-agent/api",
@@ -334,7 +336,7 @@ clickhouse-admin-server-client = { path = "clients/clickhouse-admin-server-clien
 clickhouse-admin-single-client = { path = "clients/clickhouse-admin-single-client" }
 clickhouse-admin-types = { path = "clickhouse-admin/types" }
 clickhouse-admin-test-utils = { path = "clickhouse-admin/test-utils" }
-clickward = { git = "https://github.com/oxidecomputer/clickward", rev = "a1b342c2558e835d09e6e39a40d3de798a29c2f" }
+clickward = { git = "https://github.com/oxidecomputer/clickward", rev = "242fd812aaeafec99ba01b5505ffbb2bd2370917" }
 cockroach-admin-api = { path = "cockroach-admin/api" }
 cockroach-admin-client = { path = "clients/cockroach-admin-client" }
 cockroach-admin-types = { path = "cockroach-admin/types" }
@@ -404,7 +406,9 @@ hickory-server = "0.24.1"
 highway = "1.2.0"
 hkdf = "0.12.4"
 http = "1.1.0"
+http-body = "1.0.1"
 http-body-util = "0.1.2"
+http-range = "0.1.5"
 httpmock = "0.8.0-alpha.1"
 httptest = "0.16.1"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
@@ -443,8 +447,8 @@ macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 mockall = "0.13"
 newtype_derive = "0.1.6"
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "056283eb02b6887fbf27f66a215662520f7c159c" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "056283eb02b6887fbf27f66a215662520f7c159c" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "93cd0d642cf1b58f9f4528275e2a2aa758e9feb3" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "93cd0d642cf1b58f9f4528275e2a2aa758e9feb3" }
 multimap = "0.10.0"
 nexus-auth = { path = "nexus/auth" }
 nexus-client = { path = "clients/nexus-client" }
@@ -488,7 +492,7 @@ omicron-test-utils = { path = "test-utils" }
 omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.11.1"
 oxide-client = { path = "clients/oxide-client" }
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "f3002b356da7d0e4ca15beb66a5566a92919baaa", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "98247c27846133a80fdb8f730f0c57e72d766561", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = { git = "https://github.com/oxidecomputer/oxnet" }
 once_cell = "1.20.2"
@@ -498,7 +502,7 @@ openapiv3 = "2.0.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "f3002b356da7d0e4ca15beb66a5566a92919baaa" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "98247c27846133a80fdb8f730f0c57e72d766561" }
 oso = "0.27"
 owo-colors = "4.1.0"
 oximeter = { path = "oximeter/oximeter" }
@@ -546,6 +550,7 @@ rand = "0.8.5"
 rand_core = "0.6.4"
 rand_distr = "0.4.3"
 rand_seeder = "0.3.0"
+range-requests = { path = "range-requests" }
 ratatui = "0.28.1"
 rayon = "1.10"
 rcgen = "0.12.1"
