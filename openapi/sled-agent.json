@@ -3942,6 +3942,9 @@
               "$ref": "#/components/schemas/InventoryDisk"
             }
           },
+          "omicron_physical_disks_generation": {
+            "$ref": "#/components/schemas/Generation"
+          },
           "omicron_zones": {
             "$ref": "#/components/schemas/OmicronZonesConfig"
           },
@@ -3976,6 +3979,7 @@
           "baseboard",
           "datasets",
           "disks",
+          "omicron_physical_disks_generation",
           "omicron_zones",
           "reservoir_size",
           "sled_agent_address",

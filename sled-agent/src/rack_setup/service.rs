@@ -1805,6 +1805,7 @@ mod test {
                     .collect(),
                 zpools: vec![],
                 datasets: vec![],
+                omicron_physical_disks_generation: Generation::new(),
             },
             true,
         )
