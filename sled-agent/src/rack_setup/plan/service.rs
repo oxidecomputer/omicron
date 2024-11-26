@@ -14,8 +14,9 @@ use nexus_sled_agent_shared::inventory::{
     Inventory, OmicronZoneDataset, SledRole,
 };
 use nexus_types::deployment::{
-    blueprint_zone_type, BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
-    BlueprintZoneDisposition, BlueprintZoneType,
+    blueprint_zone_type, BlueprintPhysicalDiskConfig,
+    BlueprintPhysicalDiskDisposition, BlueprintPhysicalDisksConfig,
+    BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
     OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
     OmicronZoneExternalSnatIp,
 };
@@ -35,8 +36,7 @@ use omicron_common::backoff::{
 };
 use omicron_common::disk::{
     CompressionAlgorithm, DatasetConfig, DatasetKind, DatasetName,
-    DatasetsConfig, DiskVariant, OmicronPhysicalDiskConfig,
-    OmicronPhysicalDisksConfig, SharedDatasetConfig,
+    DatasetsConfig, DiskVariant, SharedDatasetConfig,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_common::policy::{
@@ -512,14 +512,16 @@ impl Plan {
                 .disks
                 .iter()
                 .filter(|disk| matches!(disk.variant, DiskVariant::U2))
-                .map(|disk| OmicronPhysicalDiskConfig {
+                .map(|disk| BlueprintPhysicalDiskConfig {
+                    disposition: BlueprintPhysicalDiskDisposition::InService,
                     identity: disk.identity.clone(),
                     id: PhysicalDiskUuid::new_v4(),
                     pool_id: ZpoolUuid::new_v4(),
                 })
                 .collect();
-            sled_info.request.disks = OmicronPhysicalDisksConfig {
-                generation: Generation::new(),
+            sled_info.request.disks = BlueprintPhysicalDisksConfig {
+                // Any non-empty config must start at generation 2
+                generation: Generation::new().next(),
                 disks,
             };
             sled_info.u2_zpools = sled_info

@@ -29,6 +29,9 @@ progenitor::generate_api!(
         // as "blueprint" this way, but we have really useful functionality
         // (e.g., diff'ing) that's implemented on our local type.
         Blueprint = nexus_types::deployment::Blueprint,
+        BlueprintPhysicalDiskConfig = nexus_types::deployment::BlueprintPhysicalDiskConfig,
+        BlueprintPhysicalDisksConfig = nexus_types::deployment::BlueprintPhysicalDisksConfig,
+        BlueprintPhysicalDiskDisposition = nexus_types::deployment::BlueprintPhysicalDiskDisposition,
         Certificate = omicron_common::api::internal::nexus::Certificate,
         ClickhouseMode = nexus_types::deployment::ClickhouseMode,
         ClickhousePolicy = nexus_types::deployment::ClickhousePolicy,
@@ -43,8 +46,8 @@ progenitor::generate_api!(
         NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
         NetworkInterfaceKind = omicron_common::api::internal::shared::NetworkInterfaceKind,
         NewPasswordHash = omicron_passwords::NewPasswordHash,
-        OmicronPhysicalDiskConfig = nexus_types::disk::OmicronPhysicalDiskConfig,
-        OmicronPhysicalDisksConfig = nexus_types::disk::OmicronPhysicalDisksConfig,
+        OmicronPhysicalDiskConfig = omicron_common::disk::OmicronPhysicalDiskConfig,
+        OmicronPhysicalDisksConfig = omicron_common::disk::OmicronPhysicalDisksConfig,
         RecoverySiloConfig = nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
         Srv = nexus_types::internal_api::params::Srv,
         TypedUuidForCollectionKind = omicron_uuid_kinds::CollectionUuid,
