@@ -225,14 +225,14 @@ pub struct BpOmicronPhysicalDisk {
     pub blueprint_id: Uuid,
     pub sled_id: Uuid,
 
-    pub disposition: DbBpPhysicalDiskDisposition,
-
     pub vendor: String,
     pub serial: String,
     pub model: String,
 
     pub id: DbTypedUuid<PhysicalDiskKind>,
     pub pool_id: Uuid,
+
+    pub disposition: DbBpPhysicalDiskDisposition,
 }
 
 impl BpOmicronPhysicalDisk {
@@ -244,14 +244,14 @@ impl BpOmicronPhysicalDisk {
         Self {
             blueprint_id,
             sled_id,
-            disposition: to_db_bp_physical_disk_disposition(
-                disk_config.disposition,
-            ),
             vendor: disk_config.config.identity.vendor.clone(),
             serial: disk_config.config.identity.serial.clone(),
             model: disk_config.config.identity.model.clone(),
             id: disk_config.config.id.into(),
             pool_id: disk_config.config.pool_id.into_untyped_uuid(),
+            disposition: to_db_bp_physical_disk_disposition(
+                disk_config.disposition,
+            ),
         }
     }
 }

@@ -3729,14 +3729,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_physical_disk  (
     -- particularly if the blueprint is older than the current target)
     sled_id UUID NOT NULL,
 
-    disposition omicron.public.bp_physical_disk_disposition NOT NULL,
-
     vendor TEXT NOT NULL,
     serial TEXT NOT NULL,
     model TEXT NOT NULL,
 
     id UUID NOT NULL,
     pool_id UUID NOT NULL,
+
+    disposition omicron.public.bp_physical_disk_disposition NOT NULL,
 
     PRIMARY KEY (blueprint_id, id)
 );
