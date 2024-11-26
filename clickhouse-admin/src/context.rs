@@ -17,12 +17,10 @@ pub struct ServerContext {
 }
 
 impl ServerContext {
-    pub fn new(
-        clickward: Clickward,
-        clickhouse_cli: ClickhouseCli,
-        _log: Logger,
-    ) -> Self {
-        Self { clickward, clickhouse_cli, _log }
+    pub fn new(clickward: Clickward, clickhouse_cli: ClickhouseCli) -> Self {
+        let log =
+            clickhouse_cli.log.new(slog::o!("component" => "ServerContext"));
+        Self { clickward, clickhouse_cli, _log: log }
     }
 
     pub fn clickward(&self) -> &Clickward {
@@ -44,11 +42,8 @@ impl SingleServerContext {
     pub fn new(clickhouse_cli: ClickhouseCli) -> Self {
         let ip = clickhouse_cli.listen_address.ip();
         let address = SocketAddrV6::new(*ip, CLICKHOUSE_TCP_PORT, 0, 0);
-        let log = clickhouse_cli
-            .log
-            .as_ref()
-            .expect("should have configured logging via CLI or config");
-        let oximeter_client = OximeterClient::new(address.into(), log);
+        let oximeter_client =
+            OximeterClient::new(address.into(), &clickhouse_cli.log);
         Self {
             clickhouse_cli,
             oximeter_client,
