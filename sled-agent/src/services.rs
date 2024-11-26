@@ -1239,7 +1239,6 @@ impl ServiceManager {
                 floating_ips,
                 firewall_rules: &[],
                 dhcp_config: DhcpCfg::default(),
-                is_service: true,
             })
             .map_err(|err| Error::ServicePortCreation {
                 service: zone_kind,
