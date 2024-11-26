@@ -2191,16 +2191,24 @@
         "description": "Information about an Omicron physical disk as recorded in a bluerprint.",
         "type": "object",
         "properties": {
-          "config": {
-            "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
-          },
           "disposition": {
             "$ref": "#/components/schemas/BlueprintPhysicalDiskDisposition"
+          },
+          "id": {
+            "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
+          },
+          "identity": {
+            "$ref": "#/components/schemas/DiskIdentity"
+          },
+          "pool_id": {
+            "$ref": "#/components/schemas/TypedUuidForZpoolKind"
           }
         },
         "required": [
-          "config",
-          "disposition"
+          "disposition",
+          "id",
+          "identity",
+          "pool_id"
         ]
       },
       "BlueprintPhysicalDiskDisposition": {
@@ -4502,25 +4510,6 @@
       "NodeName": {
         "description": "Unique name for a saga [`Node`]\n\nEach node requires a string name that's unique within its DAG.  The name is used to identify its output.  Nodes that depend on a given node (either directly or indirectly) can access the node's output using its name.",
         "type": "string"
-      },
-      "OmicronPhysicalDiskConfig": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
-          },
-          "identity": {
-            "$ref": "#/components/schemas/DiskIdentity"
-          },
-          "pool_id": {
-            "$ref": "#/components/schemas/TypedUuidForZpoolKind"
-          }
-        },
-        "required": [
-          "id",
-          "identity",
-          "pool_id"
-        ]
       },
       "OmicronZoneDataset": {
         "description": "Describes a persistent ZFS dataset associated with an Omicron zone",
