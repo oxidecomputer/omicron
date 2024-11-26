@@ -36,8 +36,7 @@ use omicron_common::backoff::{
 };
 use omicron_common::disk::{
     CompressionAlgorithm, DatasetConfig, DatasetKind, DatasetName,
-    DatasetsConfig, DiskVariant, OmicronPhysicalDiskConfig,
-    SharedDatasetConfig,
+    DatasetsConfig, DiskVariant, SharedDatasetConfig,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_common::policy::{
@@ -515,15 +514,14 @@ impl Plan {
                 .filter(|disk| matches!(disk.variant, DiskVariant::U2))
                 .map(|disk| BlueprintPhysicalDiskConfig {
                     disposition: BlueprintPhysicalDiskDisposition::InService,
-                    config: OmicronPhysicalDiskConfig {
-                        identity: disk.identity.clone(),
-                        id: PhysicalDiskUuid::new_v4(),
-                        pool_id: ZpoolUuid::new_v4(),
-                    },
+                    identity: disk.identity.clone(),
+                    id: PhysicalDiskUuid::new_v4(),
+                    pool_id: ZpoolUuid::new_v4(),
                 })
                 .collect();
             sled_info.request.disks = BlueprintPhysicalDisksConfig {
-                generation: Generation::new(),
+                // Any non-empty config must start at generation 2
+                generation: Generation::new().next(),
                 disks,
             };
             sled_info.u2_zpools = sled_info
@@ -531,7 +529,7 @@ impl Plan {
                 .disks
                 .disks
                 .iter()
-                .map(|disk| ZpoolName::new_external(disk.config.pool_id))
+                .map(|disk| ZpoolName::new_external(disk.pool_id))
                 .collect();
 
             // Add all non-discretionary datasets, self-provisioned on the U.2, to the blueprint.

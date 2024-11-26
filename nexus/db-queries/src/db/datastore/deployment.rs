@@ -900,7 +900,7 @@ impl DataStore {
 
         // Sort all disks to match what blueprint builders do.
         for (_, disks_config) in blueprint_disks.iter_mut() {
-            disks_config.disks.sort_unstable_by_key(|d| d.config.id);
+            disks_config.disks.sort_unstable_by_key(|d| d.id);
         }
 
         // Load our `ClickhouseClusterConfig` if it exists

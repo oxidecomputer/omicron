@@ -553,7 +553,9 @@ pub async fn run_standalone_server(
                     .map(|config| BlueprintPhysicalDiskConfig {
                         disposition:
                             BlueprintPhysicalDiskDisposition::InService,
-                        config,
+                        identity: config.identity,
+                        id: config.id,
+                        pool_id: config.pool_id,
                     })
                     .collect(),
             },

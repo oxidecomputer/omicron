@@ -51,7 +51,6 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
-use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -890,11 +889,9 @@ impl<'a> BlueprintBuilder<'a> {
             database_disk_ids.insert(disk_id);
             sled_storage.ensure_disk(BlueprintPhysicalDiskConfig {
                 disposition: BlueprintPhysicalDiskDisposition::InService,
-                config: OmicronPhysicalDiskConfig {
-                    identity: disk.disk_identity.clone(),
-                    id: disk_id,
-                    pool_id: *zpool,
-                },
+                identity: disk.disk_identity.clone(),
+                id: disk_id,
+                pool_id: *zpool,
             });
         }
 
@@ -1685,7 +1682,7 @@ impl<'a> BlueprintBuilder<'a> {
             .current_sled_disks(&sled_id)
             .ok_or(Error::NoAvailableZpool { sled_id, kind: zone_kind })?
             .values()
-            .map(|disk_config| disk_config.config.pool_id)
+            .map(|disk_config| disk_config.pool_id)
             .collect::<BTreeSet<_>>();
 
         let all_in_service_zpools =
@@ -2041,7 +2038,7 @@ pub mod test {
         // All commissioned disks should have debug and zone root datasets.
         for (sled_id, disk_config) in &blueprint.blueprint_disks {
             for disk in &disk_config.disks {
-                let zpool = ZpoolName::new_external(disk.config.pool_id);
+                let zpool = ZpoolName::new_external(disk.pool_id);
                 let datasets = datasets_for_sled(&blueprint, *sled_id);
 
                 let dataset =
@@ -2108,7 +2105,7 @@ pub mod test {
                 .expect("no disks for sled")
                 .disks
                 .iter()
-                .map(|disk| disk.config.pool_id)
+                .map(|disk| disk.pool_id)
                 .collect::<BTreeSet<_>>();
 
             for dataset in datasets.datasets.values().filter(|dataset| {

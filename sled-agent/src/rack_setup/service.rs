@@ -1004,10 +1004,10 @@ impl ServiceInner {
             .flat_map(|(sled_id, config)| {
                 config.disks.disks.iter().map(|config| {
                     NexusTypes::PhysicalDiskPutRequest {
-                        id: config.config.id,
-                        vendor: config.config.identity.vendor.clone(),
-                        serial: config.config.identity.serial.clone(),
-                        model: config.config.identity.model.clone(),
+                        id: config.id,
+                        vendor: config.identity.vendor.clone(),
+                        serial: config.identity.serial.clone(),
+                        model: config.identity.model.clone(),
                         variant: NexusTypes::PhysicalDiskKind::U2,
                         sled_id: sled_id.into_untyped_uuid(),
                     }
@@ -1020,8 +1020,8 @@ impl ServiceInner {
             .flat_map(|(sled_id, config)| {
                 config.disks.disks.iter().map(|config| {
                     NexusTypes::ZpoolPutRequest {
-                        id: config.config.pool_id.into_untyped_uuid(),
-                        physical_disk_id: config.config.id,
+                        id: config.pool_id.into_untyped_uuid(),
+                        physical_disk_id: config.id,
                         sled_id: sled_id.into_untyped_uuid(),
                     }
                 })

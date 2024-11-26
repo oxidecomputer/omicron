@@ -436,11 +436,8 @@ impl BpDiffPhysicalDisks {
             let before_generation = before_disks.generation();
             if let Some(after_disks) = after.remove(&sled_id) {
                 let after_generation = Some(after_disks.generation);
-                let a: BTreeSet<DiskIdentity> = after_disks
-                    .disks
-                    .into_iter()
-                    .map(|d| d.config.identity)
-                    .collect();
+                let a: BTreeSet<DiskIdentity> =
+                    after_disks.disks.into_iter().map(|d| d.identity).collect();
                 let b = before_disks.disks();
                 let added: BTreeSet<_> = a.difference(&b).cloned().collect();
                 let removed: BTreeSet<_> = b.difference(&a).cloned().collect();
@@ -491,11 +488,8 @@ impl BpDiffPhysicalDisks {
         // Any sleds remaining in `after` have just been added, since we remove
         // sleds from `after`, that were also in `before`, in the above loop.
         for (sled_id, after_disks) in after {
-            let added: BTreeSet<DiskIdentity> = after_disks
-                .disks
-                .into_iter()
-                .map(|d| d.config.identity)
-                .collect();
+            let added: BTreeSet<DiskIdentity> =
+                after_disks.disks.into_iter().map(|d| d.identity).collect();
             if !added.is_empty() {
                 diffs.added.insert(
                     sled_id,

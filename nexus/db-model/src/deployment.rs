@@ -44,7 +44,7 @@ use nexus_types::deployment::{
     OmicronZoneExternalSnatIp,
 };
 use omicron_common::api::internal::shared::NetworkInterface;
-use omicron_common::disk::{DiskIdentity, OmicronPhysicalDiskConfig};
+use omicron_common::disk::DiskIdentity;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::{
     DatasetKind, ExternalIpKind, ExternalIpUuid, GenericUuid, OmicronZoneKind,
@@ -244,11 +244,11 @@ impl BpOmicronPhysicalDisk {
         Self {
             blueprint_id,
             sled_id,
-            vendor: disk_config.config.identity.vendor.clone(),
-            serial: disk_config.config.identity.serial.clone(),
-            model: disk_config.config.identity.model.clone(),
-            id: disk_config.config.id.into(),
-            pool_id: disk_config.config.pool_id.into_untyped_uuid(),
+            vendor: disk_config.identity.vendor.clone(),
+            serial: disk_config.identity.serial.clone(),
+            model: disk_config.identity.model.clone(),
+            id: disk_config.id.into(),
+            pool_id: disk_config.pool_id.into_untyped_uuid(),
             disposition: to_db_bp_physical_disk_disposition(
                 disk_config.disposition,
             ),
@@ -260,15 +260,13 @@ impl From<BpOmicronPhysicalDisk> for BlueprintPhysicalDiskConfig {
     fn from(disk: BpOmicronPhysicalDisk) -> Self {
         Self {
             disposition: disk.disposition.into(),
-            config: OmicronPhysicalDiskConfig {
-                identity: DiskIdentity {
-                    vendor: disk.vendor,
-                    serial: disk.serial,
-                    model: disk.model,
-                },
-                id: disk.id.into(),
-                pool_id: ZpoolUuid::from_untyped_uuid(disk.pool_id),
+            identity: DiskIdentity {
+                vendor: disk.vendor,
+                serial: disk.serial,
+                model: disk.model,
             },
+            id: disk.id.into(),
+            pool_id: ZpoolUuid::from_untyped_uuid(disk.pool_id),
         }
     }
 }

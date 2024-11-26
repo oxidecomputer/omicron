@@ -37,7 +37,9 @@ use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -384,7 +386,7 @@ impl BpTableData for &BlueprintPhysicalDisksConfig {
 
     fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
         let sorted_disk_ids: BTreeSet<DiskIdentity> =
-            self.disks.iter().map(|d| d.config.identity.clone()).collect();
+            self.disks.iter().map(|d| d.identity.clone()).collect();
 
         sorted_disk_ids.into_iter().map(move |d| {
             BpTableRow::from_strings(state, vec![d.vendor, d.model, d.serial])
@@ -919,7 +921,9 @@ pub enum BlueprintPhysicalDiskDisposition {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct BlueprintPhysicalDiskConfig {
     pub disposition: BlueprintPhysicalDiskDisposition,
-    pub config: OmicronPhysicalDiskConfig,
+    pub identity: DiskIdentity,
+    pub id: PhysicalDiskUuid,
+    pub pool_id: ZpoolUuid,
 }
 
 /// Information about Omicron physical disks as recorded in a blueprint.
@@ -943,7 +947,11 @@ impl Default for BlueprintPhysicalDisksConfig {
 
 impl From<BlueprintPhysicalDiskConfig> for OmicronPhysicalDiskConfig {
     fn from(value: BlueprintPhysicalDiskConfig) -> Self {
-        value.config
+        OmicronPhysicalDiskConfig {
+            identity: value.identity,
+            id: value.id,
+            pool_id: value.pool_id,
+        }
     }
 }
 
@@ -1400,7 +1408,7 @@ impl BlueprintOrCollectionDisksConfig {
         match self {
             BlueprintOrCollectionDisksConfig::Collection(c) => c.disks.clone(),
             BlueprintOrCollectionDisksConfig::Blueprint(c) => {
-                c.disks.iter().map(|d| d.config.identity.clone()).collect()
+                c.disks.iter().map(|d| d.identity.clone()).collect()
             }
         }
     }

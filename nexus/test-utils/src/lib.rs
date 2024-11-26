@@ -836,19 +836,15 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                             disks.push(BlueprintPhysicalDiskConfig {
                                 disposition:
                                     BlueprintPhysicalDiskDisposition::InService,
-                                config: OmicronPhysicalDiskConfig {
-                                    identity:
-                                        omicron_common::disk::DiskIdentity {
-                                            vendor: "nexus-tests".to_string(),
-                                            model: "nexus-test-model"
-                                                .to_string(),
-                                            serial: format!(
-                                                "nexus-test-disk-{disk_index}"
-                                            ),
-                                        },
-                                    id: PhysicalDiskUuid::new_v4(),
-                                    pool_id: zpool.id(),
+                                identity: omicron_common::disk::DiskIdentity {
+                                    vendor: "nexus-tests".to_string(),
+                                    model: "nexus-test-model".to_string(),
+                                    serial: format!(
+                                        "nexus-test-disk-{disk_index}"
+                                    ),
                                 },
+                                id: PhysicalDiskUuid::new_v4(),
+                                pool_id: zpool.id(),
                             });
                             disk_index += 1;
                             let id = DatasetUuid::new_v4();
@@ -879,19 +875,15 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                             disks.push(BlueprintPhysicalDiskConfig {
                                 disposition:
                                     BlueprintPhysicalDiskDisposition::InService,
-                                config: OmicronPhysicalDiskConfig {
-                                    identity:
-                                        omicron_common::disk::DiskIdentity {
-                                            vendor: "nexus-tests".to_string(),
-                                            model: "nexus-test-model"
-                                                .to_string(),
-                                            serial: format!(
-                                                "nexus-test-disk-{disk_index}"
-                                            ),
-                                        },
-                                    id: PhysicalDiskUuid::new_v4(),
-                                    pool_id: ZpoolUuid::new_v4(),
+                                identity: omicron_common::disk::DiskIdentity {
+                                    vendor: "nexus-tests".to_string(),
+                                    model: "nexus-test-model".to_string(),
+                                    serial: format!(
+                                        "nexus-test-disk-{disk_index}"
+                                    ),
                                 },
+                                id: PhysicalDiskUuid::new_v4(),
+                                pool_id: ZpoolUuid::new_v4(),
                             });
                             disk_index += 1;
                         }

@@ -161,7 +161,6 @@ mod test {
     use omicron_common::disk::DiskManagementError;
     use omicron_common::disk::DiskManagementStatus;
     use omicron_common::disk::DisksManagementResult;
-    use omicron_common::disk::OmicronPhysicalDiskConfig;
     use omicron_common::disk::OmicronPhysicalDisksConfig;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
@@ -252,15 +251,13 @@ mod test {
                 generation: Generation::new().next(),
                 disks: vec![BlueprintPhysicalDiskConfig {
                     disposition: BlueprintPhysicalDiskDisposition::InService,
-                    config: OmicronPhysicalDiskConfig {
-                        identity: DiskIdentity {
-                            vendor: "test-vendor".to_string(),
-                            serial: "test-serial".to_string(),
-                            model: "test-model".to_string(),
-                        },
-                        id: PhysicalDiskUuid::new_v4(),
-                        pool_id: ZpoolUuid::new_v4(),
+                    identity: DiskIdentity {
+                        vendor: "test-vendor".to_string(),
+                        serial: "test-serial".to_string(),
+                        model: "test-model".to_string(),
                     },
+                    id: PhysicalDiskUuid::new_v4(),
+                    pool_id: ZpoolUuid::new_v4(),
                 }],
             }
         }
