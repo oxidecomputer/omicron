@@ -702,6 +702,8 @@ mod test {
                     disks,
                     zpools: vec![],
                     datasets: vec![],
+                    omicron_physical_disks_generation:
+                        omicron_common::api::external::Generation::new(),
                 },
             )
             .unwrap();

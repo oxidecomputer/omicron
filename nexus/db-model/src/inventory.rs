@@ -809,6 +809,7 @@ pub struct InvSledAgent {
     pub usable_hardware_threads: SqlU32,
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,
+    pub omicron_physical_disks_generation: Generation,
 }
 
 impl InvSledAgent {
@@ -852,6 +853,9 @@ impl InvSledAgent {
                     sled_agent.usable_physical_ram,
                 ),
                 reservoir_size: ByteCount::from(sled_agent.reservoir_size),
+                omicron_physical_disks_generation: Generation::from(
+                    sled_agent.omicron_physical_disks_generation,
+                ),
             })
         }
     }
