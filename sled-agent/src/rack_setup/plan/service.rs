@@ -46,8 +46,8 @@ use omicron_common::policy::{
     SINGLE_NODE_CLICKHOUSE_REDUNDANCY,
 };
 use omicron_uuid_kinds::{
-    DatasetUuid, ExternalIpUuid, GenericUuid, OmicronZoneUuid, SledUuid,
-    ZpoolUuid,
+    DatasetUuid, ExternalIpUuid, GenericUuid, OmicronZoneUuid,
+    PhysicalDiskUuid, SledUuid, ZpoolUuid,
 };
 use rand::prelude::SliceRandom;
 use schemars::JsonSchema;
@@ -514,7 +514,7 @@ impl Plan {
                 .filter(|disk| matches!(disk.variant, DiskVariant::U2))
                 .map(|disk| OmicronPhysicalDiskConfig {
                     identity: disk.identity.clone(),
-                    id: Uuid::new_v4(),
+                    id: PhysicalDiskUuid::new_v4(),
                     pool_id: ZpoolUuid::new_v4(),
                 })
                 .collect();

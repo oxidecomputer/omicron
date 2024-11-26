@@ -7,13 +7,13 @@
 use anyhow::bail;
 use camino::{Utf8Path, Utf8PathBuf};
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::str::FromStr;
-use uuid::Uuid;
 
 use crate::{
     api::external::{ByteCount, Generation},
@@ -37,7 +37,7 @@ pub use crate::api::internal::shared::DatasetKind;
 )]
 pub struct OmicronPhysicalDiskConfig {
     pub identity: DiskIdentity,
-    pub id: Uuid,
+    pub id: PhysicalDiskUuid,
     pub pool_id: ZpoolUuid,
 }
 

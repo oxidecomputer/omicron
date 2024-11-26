@@ -980,8 +980,7 @@
       ],
       "properties": {
         "id": {
-          "type": "string",
-          "format": "uuid"
+          "$ref": "#/definitions/TypedUuidForPhysicalDiskKind"
         },
         "identity": {
           "$ref": "#/definitions/DiskIdentity"
@@ -1174,6 +1173,10 @@
       "format": "uuid"
     },
     "TypedUuidForOmicronZoneKind": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "TypedUuidForPhysicalDiskKind": {
       "type": "string",
       "format": "uuid"
     },

@@ -998,7 +998,7 @@ authz_resource! {
 authz_resource! {
     name = "PhysicalDisk",
     parent = "Fleet",
-    primary_key = Uuid,
+    primary_key = { uuid_kind = PhysicalDiskKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }

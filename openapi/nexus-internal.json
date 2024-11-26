@@ -4453,8 +4453,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
           },
           "identity": {
             "$ref": "#/components/schemas/DiskIdentity"
@@ -4597,8 +4596,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
           },
           "model": {
             "type": "string"
@@ -5810,6 +5808,10 @@
         "type": "string",
         "format": "uuid"
       },
+      "TypedUuidForPhysicalDiskKind": {
+        "type": "string",
+        "format": "uuid"
+      },
       "TypedUuidForSledKind": {
         "type": "string",
         "format": "uuid"
@@ -6034,8 +6036,7 @@
             "format": "uuid"
           },
           "physical_disk_id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
           },
           "sled_id": {
             "type": "string",

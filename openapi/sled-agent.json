@@ -4470,8 +4470,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
           },
           "identity": {
             "$ref": "#/components/schemas/DiskIdentity"
@@ -5826,6 +5825,10 @@
         "format": "uuid"
       },
       "TypedUuidForOmicronZoneKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForPhysicalDiskKind": {
         "type": "string",
         "format": "uuid"
       },

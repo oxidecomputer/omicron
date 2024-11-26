@@ -363,6 +363,7 @@ mod test {
     use omicron_common::api::internal::shared::DatasetKind as ApiDatasetKind;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::DatasetUuid;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
 
@@ -396,7 +397,7 @@ mod test {
         let zpool = Zpool::new(
             *zpool_id.as_untyped_uuid(),
             *sled_id.as_untyped_uuid(),
-            Uuid::new_v4(),
+            PhysicalDiskUuid::new_v4(),
         );
         datastore
             .zpool_insert(opctx, zpool)
