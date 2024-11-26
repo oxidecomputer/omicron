@@ -6925,6 +6925,7 @@ dependencies = [
  "hubtools",
  "hyper",
  "hyper-rustls 0.26.0",
+ "hyper-staticfile",
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -6997,6 +6998,7 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "serde_with",
+ "sha2",
  "similar-asserts",
  "sled-agent-client",
  "sled-agent-types",
@@ -7021,6 +7023,7 @@ dependencies = [
  "update-common",
  "update-engine",
  "uuid",
+ "zip 2.1.3",
 ]
 
 [[package]]
