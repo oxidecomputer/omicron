@@ -47,7 +47,8 @@ use omicron_common::disk::DiskIdentity;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::{
     DatasetKind, ExternalIpKind, ExternalIpUuid, GenericUuid, OmicronZoneKind,
-    OmicronZoneUuid, SledKind, SledUuid, ZpoolKind, ZpoolUuid,
+    OmicronZoneUuid, PhysicalDiskKind, SledKind, SledUuid, ZpoolKind,
+    ZpoolUuid,
 };
 use std::net::{IpAddr, SocketAddrV6};
 use uuid::Uuid;
@@ -179,7 +180,7 @@ pub struct BpOmicronPhysicalDisk {
     pub serial: String,
     pub model: String,
 
-    pub id: Uuid,
+    pub id: DbTypedUuid<PhysicalDiskKind>,
     pub pool_id: Uuid,
 }
 
@@ -195,7 +196,7 @@ impl BpOmicronPhysicalDisk {
             vendor: disk_config.identity.vendor.clone(),
             serial: disk_config.identity.serial.clone(),
             model: disk_config.identity.model.clone(),
-            id: disk_config.id,
+            id: disk_config.id.into(),
             pool_id: disk_config.pool_id.into_untyped_uuid(),
         }
     }
@@ -209,7 +210,7 @@ impl From<BpOmicronPhysicalDisk> for BlueprintPhysicalDiskConfig {
                 serial: disk.serial,
                 model: disk.model,
             },
-            id: disk.id,
+            id: disk.id.into(),
             pool_id: ZpoolUuid::from_untyped_uuid(disk.pool_id),
         }
     }

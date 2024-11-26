@@ -1244,7 +1244,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
 
         let physical_disk_request =
             nexus_types::internal_api::params::PhysicalDiskPutRequest {
-                id: *physical_disk_id.as_untyped_uuid(),
+                id: physical_disk_id,
                 vendor: disk_identity.vendor.clone(),
                 serial: disk_identity.serial.clone(),
                 model: disk_identity.model.clone(),
@@ -1256,7 +1256,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         let zpool_request =
             nexus_types::internal_api::params::ZpoolPutRequest {
                 id: zpool.id.into_untyped_uuid(),
-                physical_disk_id: *physical_disk_id.as_untyped_uuid(),
+                physical_disk_id,
                 sled_id: sled_id.into_untyped_uuid(),
             };
 

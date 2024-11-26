@@ -888,7 +888,7 @@ impl<'a> BlueprintBuilder<'a> {
             database_disk_ids.insert(disk_id);
             sled_storage.ensure_disk(BlueprintPhysicalDiskConfig {
                 identity: disk.disk_identity.clone(),
-                id: disk_id.into_untyped_uuid(),
+                id: disk_id,
                 pool_id: *zpool,
             });
         }

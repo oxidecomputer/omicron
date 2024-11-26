@@ -248,7 +248,7 @@ mod test {
                         serial: "test-serial".to_string(),
                         model: "test-model".to_string(),
                     },
-                    id: Uuid::new_v4(),
+                    id: PhysicalDiskUuid::new_v4(),
                     pool_id: ZpoolUuid::new_v4(),
                 }],
             }
@@ -407,9 +407,9 @@ mod test {
         i: usize,
         sled_id: SledUuid,
     ) -> PhysicalDiskUuid {
-        let id = PhysicalDiskUuid::from_untyped_uuid(Uuid::new_v4());
+        let id = PhysicalDiskUuid::new_v4();
         let physical_disk = PhysicalDisk::new(
-            id.into_untyped_uuid(),
+            id,
             "v".into(),
             format!("s-{i})"),
             "m".into(),
@@ -432,11 +432,7 @@ mod test {
         let zpool = datastore
             .zpool_insert(
                 opctx,
-                Zpool::new(
-                    Uuid::new_v4(),
-                    sled_id.into_untyped_uuid(),
-                    id.into_untyped_uuid(),
-                ),
+                Zpool::new(Uuid::new_v4(), sled_id.into_untyped_uuid(), id),
             )
             .await
             .unwrap();
@@ -559,7 +555,7 @@ mod test {
         datastore
             .physical_disk_update_policy(
                 &opctx,
-                disk_to_decommission.into_untyped_uuid(),
+                disk_to_decommission,
                 PhysicalDiskPolicy::Expunged,
             )
             .await
@@ -577,10 +573,10 @@ mod test {
             .into_iter()
             .map(|disk| (disk.id(), disk))
             .collect::<BTreeMap<_, _>>();
-        let d = &all_disks[&disk_to_decommission.into_untyped_uuid()];
+        let d = &all_disks[&disk_to_decommission];
         assert_eq!(d.disk_state, PhysicalDiskState::Active);
         assert_eq!(d.disk_policy, PhysicalDiskPolicy::Expunged);
-        let d = &all_disks[&other_disk.into_untyped_uuid()];
+        let d = &all_disks[&other_disk];
         assert_eq!(d.disk_state, PhysicalDiskState::Active);
         assert_eq!(d.disk_policy, PhysicalDiskPolicy::InService);
 
@@ -607,10 +603,10 @@ mod test {
             .into_iter()
             .map(|disk| (disk.id(), disk))
             .collect::<BTreeMap<_, _>>();
-        let d = &all_disks[&disk_to_decommission.into_untyped_uuid()];
+        let d = &all_disks[&disk_to_decommission];
         assert_eq!(d.disk_state, PhysicalDiskState::Decommissioned);
         assert_eq!(d.disk_policy, PhysicalDiskPolicy::Expunged);
-        let d = &all_disks[&other_disk.into_untyped_uuid()];
+        let d = &all_disks[&other_disk];
         assert_eq!(d.disk_state, PhysicalDiskState::Active);
         assert_eq!(d.disk_policy, PhysicalDiskPolicy::InService);
 
