@@ -18,6 +18,68 @@
     }
   },
   "definitions": {
+    "BlueprintPhysicalDiskConfig": {
+      "description": "Information about an Omicron physical disk as recorded in a bluerprint.",
+      "type": "object",
+      "required": [
+        "disposition",
+        "id",
+        "identity",
+        "pool_id"
+      ],
+      "properties": {
+        "disposition": {
+          "$ref": "#/definitions/BlueprintPhysicalDiskDisposition"
+        },
+        "id": {
+          "$ref": "#/definitions/TypedUuidForPhysicalDiskKind"
+        },
+        "identity": {
+          "$ref": "#/definitions/DiskIdentity"
+        },
+        "pool_id": {
+          "$ref": "#/definitions/TypedUuidForZpoolKind"
+        }
+      }
+    },
+    "BlueprintPhysicalDiskDisposition": {
+      "description": "The desired state of an Omicron-managed physical disk in a blueprint.",
+      "oneOf": [
+        {
+          "description": "The physical disk is in-service.",
+          "type": "string",
+          "enum": [
+            "in_service"
+          ]
+        },
+        {
+          "description": "The physical disk is permanently gone.",
+          "type": "string",
+          "enum": [
+            "expunged"
+          ]
+        }
+      ]
+    },
+    "BlueprintPhysicalDisksConfig": {
+      "description": "Information about Omicron physical disks as recorded in a blueprint.\n\nPart of [`Blueprint`].",
+      "type": "object",
+      "required": [
+        "disks",
+        "generation"
+      ],
+      "properties": {
+        "disks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/BlueprintPhysicalDiskConfig"
+          }
+        },
+        "generation": {
+          "$ref": "#/definitions/Generation"
+        }
+      }
+    },
     "BlueprintZoneConfig": {
       "description": "Describes one Omicron-managed zone in a blueprint.\n\nPart of [`BlueprintZonesConfig`].",
       "type": "object",
@@ -971,49 +1033,6 @@
         }
       ]
     },
-    "OmicronPhysicalDiskConfig": {
-      "type": "object",
-      "required": [
-        "id",
-        "identity",
-        "pool_id"
-      ],
-      "properties": {
-        "id": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "identity": {
-          "$ref": "#/definitions/DiskIdentity"
-        },
-        "pool_id": {
-          "$ref": "#/definitions/TypedUuidForZpoolKind"
-        }
-      }
-    },
-    "OmicronPhysicalDisksConfig": {
-      "type": "object",
-      "required": [
-        "disks",
-        "generation"
-      ],
-      "properties": {
-        "disks": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/OmicronPhysicalDiskConfig"
-          }
-        },
-        "generation": {
-          "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.",
-          "allOf": [
-            {
-              "$ref": "#/definitions/Generation"
-            }
-          ]
-        }
-      }
-    },
     "OmicronZoneDataset": {
       "description": "Describes a persistent ZFS dataset associated with an Omicron zone",
       "type": "object",
@@ -1095,7 +1114,7 @@
           "description": "Control plane disks configured for this sled",
           "allOf": [
             {
-              "$ref": "#/definitions/OmicronPhysicalDisksConfig"
+              "$ref": "#/definitions/BlueprintPhysicalDisksConfig"
             }
           ]
         },
@@ -1174,6 +1193,10 @@
       "format": "uuid"
     },
     "TypedUuidForOmicronZoneKind": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "TypedUuidForPhysicalDiskKind": {
       "type": "string",
       "format": "uuid"
     },

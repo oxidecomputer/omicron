@@ -41,6 +41,8 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintDatasetsConfig;
+use nexus_types::deployment::BlueprintPhysicalDiskConfig;
+use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -68,7 +70,6 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::disk::CompressionAlgorithm;
-use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
@@ -76,6 +77,7 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oximeter_collector::Oximeter;
@@ -830,7 +832,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     let mut datasets = BTreeMap::new();
                     for zone in zones {
                         if let Some(zpool) = &zone.filesystem_pool {
-                            disks.push(OmicronPhysicalDiskConfig {
+                            disks.push(BlueprintPhysicalDiskConfig {
+                                disposition:
+                                    BlueprintPhysicalDiskDisposition::InService,
                                 identity: omicron_common::disk::DiskIdentity {
                                     vendor: "nexus-tests".to_string(),
                                     model: "nexus-test-model".to_string(),
@@ -838,7 +842,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                                         "nexus-test-disk-{disk_index}"
                                     ),
                                 },
-                                id: Uuid::new_v4(),
+                                id: PhysicalDiskUuid::new_v4(),
                                 pool_id: zpool.id(),
                             });
                             disk_index += 1;
@@ -867,7 +871,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     // Populate extra fake disks, giving each sled 10 total.
                     if disks.len() < 10 {
                         for _ in disks.len()..10 {
-                            disks.push(OmicronPhysicalDiskConfig {
+                            disks.push(BlueprintPhysicalDiskConfig {
+                                disposition:
+                                    BlueprintPhysicalDiskDisposition::InService,
                                 identity: omicron_common::disk::DiskIdentity {
                                     vendor: "nexus-tests".to_string(),
                                     model: "nexus-test-model".to_string(),
@@ -875,7 +881,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                                         "nexus-test-disk-{disk_index}"
                                     ),
                                 },
-                                id: Uuid::new_v4(),
+                                id: PhysicalDiskUuid::new_v4(),
                                 pool_id: ZpoolUuid::new_v4(),
                             });
                             disk_index += 1;

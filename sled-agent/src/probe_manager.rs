@@ -321,7 +321,6 @@ impl ProbeManagerInner {
                 priority: VpcFirewallRulePriority(100),
             }],
             dhcp_config: DhcpCfg::default(),
-            is_service: false,
         })?;
 
         let installed_zone = ZoneBuilderFactory::default()

@@ -478,6 +478,7 @@ mod test {
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use std::collections::HashMap;
     use std::collections::HashSet;
@@ -746,9 +747,9 @@ mod test {
         sled_id: SledUuid,
         kind: PhysicalDiskKind,
         serial: String,
-    ) -> Uuid {
+    ) -> PhysicalDiskUuid {
         let physical_disk = PhysicalDisk::new(
-            Uuid::new_v4(),
+            PhysicalDiskUuid::new_v4(),
             TEST_VENDOR.into(),
             serial,
             TEST_MODEL.into(),
@@ -767,7 +768,7 @@ mod test {
         datastore: &DataStore,
         opctx: &OpContext,
         sled_id: SledUuid,
-        physical_disk_id: Uuid,
+        physical_disk_id: PhysicalDiskUuid,
     ) -> Uuid {
         let zpool_id = create_test_zpool_not_in_inventory(
             datastore,
@@ -789,7 +790,7 @@ mod test {
         datastore: &DataStore,
         opctx: &OpContext,
         sled_id: SledUuid,
-        physical_disk_id: Uuid,
+        physical_disk_id: PhysicalDiskUuid,
     ) -> Uuid {
         let zpool_id = Uuid::new_v4();
         let zpool =
@@ -933,7 +934,7 @@ mod test {
 
             struct PhysicalDisk {
                 sled_id: SledUuid,
-                disk_id: Uuid,
+                disk_id: PhysicalDiskUuid,
             }
 
             // create 9 disks on each sled

@@ -5,8 +5,11 @@
 use super::{Dataset, Generation};
 use crate::collection::DatastoreCollectionConfig;
 use crate::schema::{dataset, zpool};
+use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
+use omicron_uuid_kinds::PhysicalDiskKind;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use uuid::Uuid;
 
 /// Database representation of a Pool.
@@ -25,17 +28,21 @@ pub struct Zpool {
     pub sled_id: Uuid,
 
     // The physical disk to which this Zpool is attached.
-    pub physical_disk_id: Uuid,
+    pub physical_disk_id: DbTypedUuid<PhysicalDiskKind>,
 }
 
 impl Zpool {
-    pub fn new(id: Uuid, sled_id: Uuid, physical_disk_id: Uuid) -> Self {
+    pub fn new(
+        id: Uuid,
+        sled_id: Uuid,
+        physical_disk_id: PhysicalDiskUuid,
+    ) -> Self {
         Self {
             identity: ZpoolIdentity::new(id),
             time_deleted: None,
             rcgen: Generation::new(),
             sled_id,
-            physical_disk_id,
+            physical_disk_id: physical_disk_id.into(),
         }
     }
 }

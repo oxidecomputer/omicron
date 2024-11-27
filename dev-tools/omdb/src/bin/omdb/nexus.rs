@@ -2852,7 +2852,7 @@ async fn cmd_nexus_sled_expunge_disk_with_datastore(
     // First, we need to look up the disk so we can lookup identity information.
     let (_authz_physical_disk, physical_disk) =
         LookupPath::new(opctx, &datastore)
-            .physical_disk(args.physical_disk_id.into_untyped_uuid())
+            .physical_disk(args.physical_disk_id)
             .fetch()
             .await
             .with_context(|| {

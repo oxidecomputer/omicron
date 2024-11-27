@@ -3942,6 +3942,9 @@
               "$ref": "#/components/schemas/InventoryDisk"
             }
           },
+          "omicron_physical_disks_generation": {
+            "$ref": "#/components/schemas/Generation"
+          },
           "omicron_zones": {
             "$ref": "#/components/schemas/OmicronZonesConfig"
           },
@@ -3976,6 +3979,7 @@
           "baseboard",
           "datasets",
           "disks",
+          "omicron_physical_disks_generation",
           "omicron_zones",
           "reservoir_size",
           "sled_agent_address",
@@ -4466,8 +4470,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
           },
           "identity": {
             "$ref": "#/components/schemas/DiskIdentity"
@@ -5822,6 +5825,10 @@
         "format": "uuid"
       },
       "TypedUuidForOmicronZoneKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForPhysicalDiskKind": {
         "type": "string",
         "format": "uuid"
       },

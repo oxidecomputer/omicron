@@ -1260,7 +1260,7 @@ impl Storage {
                 };
 
                 nexus_client::types::PhysicalDiskPutRequest {
-                    id: *id.as_untyped_uuid(),
+                    id: *id,
                     vendor: disk.identity.vendor.clone(),
                     serial: disk.identity.serial.clone(),
                     model: disk.identity.model.clone(),
@@ -1277,7 +1277,7 @@ impl Storage {
             .map(|pool| nexus_client::types::ZpoolPutRequest {
                 id: pool.id.into_untyped_uuid(),
                 sled_id: self.sled_id,
-                physical_disk_id: *pool.physical_disk_id.as_untyped_uuid(),
+                physical_disk_id: pool.physical_disk_id,
             })
             .collect()
     }

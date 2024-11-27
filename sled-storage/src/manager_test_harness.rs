@@ -12,13 +12,13 @@ use key_manager::StorageKeyRequester;
 use omicron_common::disk::{
     OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig,
 };
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use slog::{info, Logger};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
-use uuid::Uuid;
 
 /// A [`key-manager::SecretRetriever`] that only returns hardcoded IKM for
 /// epoch 0
@@ -361,7 +361,7 @@ impl StorageManagerTestHarness {
 
                 OmicronPhysicalDiskConfig {
                     identity: identity.clone(),
-                    id: Uuid::new_v4(),
+                    id: PhysicalDiskUuid::new_v4(),
                     pool_id: ZpoolUuid::new_v4(),
                 }
             })

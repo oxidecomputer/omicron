@@ -22,6 +22,7 @@ use nexus_types::identity::Asset;
 use omicron_common::api::external::DataPageParams;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -126,7 +127,7 @@ impl BackgroundTask for PhysicalDiskAdoption {
 
             for inv_disk in uninitialized {
                 let disk = PhysicalDisk::new(
-                    Uuid::new_v4(),
+                    PhysicalDiskUuid::new_v4(),
                     inv_disk.vendor,
                     inv_disk.serial,
                     inv_disk.model,
