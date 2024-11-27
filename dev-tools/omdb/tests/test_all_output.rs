@@ -10,6 +10,7 @@
 use dropshot::Method;
 use expectorate::assert_contents;
 use http::StatusCode;
+use nexus_test_utils::wait_for_producer;
 use nexus_test_utils::{OXIMETER_UUID, PRODUCER_UUID};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::Blueprint;
@@ -23,6 +24,7 @@ use std::fmt::Write;
 use std::net::IpAddr;
 use std::path::Path;
 use subprocess::Exec;
+use uuid::Uuid;
 
 /// name of the "omdb" executable
 const CMD_OMDB: &str = env!("CARGO_BIN_EXE_omdb");
@@ -274,6 +276,11 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     let mut ox_output = String::new();
     let ox = ox_url.clone();
 
+    wait_for_producer(
+        &cptestctx.oximeter,
+        PRODUCER_UUID.parse::<Uuid>().unwrap(),
+    )
+    .await;
     do_run_no_redactions(
         &mut ox_output,
         move |exec| exec.env("OMDB_OXIMETER_URL", &ox),
@@ -423,6 +430,11 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     // Case 2: is covered by the success tests above.
     let ox_args1 = &["oximeter", "--oximeter-url", &ox_url, "list-producers"];
     let mut ox_output1 = String::new();
+    wait_for_producer(
+        &cptestctx.oximeter,
+        PRODUCER_UUID.parse::<Uuid>().unwrap(),
+    )
+    .await;
     do_run_no_redactions(
         &mut ox_output1,
         move |exec| exec,
