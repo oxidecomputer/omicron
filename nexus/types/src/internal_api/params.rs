@@ -21,6 +21,7 @@ use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -73,7 +74,7 @@ pub struct SwitchPutResponse {}
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct PhysicalDiskPutRequest {
-    pub id: Uuid,
+    pub id: PhysicalDiskUuid,
 
     pub vendor: String,
     pub serial: String,
@@ -89,7 +90,7 @@ pub struct PhysicalDiskPutRequest {
 pub struct ZpoolPutRequest {
     pub id: Uuid,
     pub sled_id: Uuid,
-    pub physical_disk_id: Uuid,
+    pub physical_disk_id: PhysicalDiskUuid,
 }
 
 /// Describes a dataset within a pool.

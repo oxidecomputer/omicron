@@ -25,6 +25,7 @@ use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::SledRole;
 use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::Generation;
 pub use omicron_common::api::internal::shared::NetworkInterface;
 pub use omicron_common::api::internal::shared::NetworkInterfaceKind;
 pub use omicron_common::api::internal::shared::SourceNatConfig;
@@ -520,4 +521,13 @@ pub struct SledAgent {
     pub disks: Vec<PhysicalDisk>,
     pub zpools: Vec<Zpool>,
     pub datasets: Vec<Dataset>,
+    /// As part of reconfigurator planning we need to know the control plane
+    /// disks configuration that the sled-agent has seen last. Specifically,
+    /// this allows the planner to know if a disk expungement has been seen by
+    /// the sled-agent, so that the planner can decommission the expunged disk.
+    ///
+    /// This field corresponds to the `generation` field in
+    /// `OmicronPhysicalDisksConfig` that is stored in the blueprint and sent to
+    /// the sled-agent via the executor over the internal API.
+    pub omicron_physical_disks_generation: Generation,
 }

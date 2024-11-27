@@ -103,6 +103,7 @@ pub struct Inventory {
     pub disks: Vec<InventoryDisk>,
     pub zpools: Vec<InventoryZpool>,
     pub datasets: Vec<InventoryDataset>,
+    pub omicron_physical_disks_generation: Generation,
 }
 
 /// Describes the role of the sled within the rack.
