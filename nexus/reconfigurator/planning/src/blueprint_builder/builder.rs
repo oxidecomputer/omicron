@@ -18,6 +18,7 @@ use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
+use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
@@ -887,8 +888,9 @@ impl<'a> BlueprintBuilder<'a> {
         for (disk_id, (zpool, disk)) in database_disks {
             database_disk_ids.insert(disk_id);
             sled_storage.ensure_disk(BlueprintPhysicalDiskConfig {
+                disposition: BlueprintPhysicalDiskDisposition::InService,
                 identity: disk.disk_identity.clone(),
-                id: disk_id.into_untyped_uuid(),
+                id: disk_id,
                 pool_id: *zpool,
             });
         }

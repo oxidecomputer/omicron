@@ -58,8 +58,7 @@
       ],
       "properties": {
         "id": {
-          "type": "string",
-          "format": "uuid"
+          "$ref": "#/definitions/TypedUuidForPhysicalDiskKind"
         },
         "identity": {
           "$ref": "#/definitions/DiskIdentity"
@@ -68,6 +67,10 @@
           "$ref": "#/definitions/TypedUuidForZpoolKind"
         }
       }
+    },
+    "TypedUuidForPhysicalDiskKind": {
+      "type": "string",
+      "format": "uuid"
     },
     "TypedUuidForZpoolKind": {
       "type": "string",

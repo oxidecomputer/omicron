@@ -6,18 +6,22 @@ use anyhow::Result;
 use camino::Utf8PathBuf;
 use clickhouse_admin_types::{
     ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
-    KeeperId, Lgif, RaftConfig, OXIMETER_CLUSTER,
+    KeeperId, Lgif, RaftConfig, SystemTimeSeries, SystemTimeSeriesSettings,
+    OXIMETER_CLUSTER,
 };
 use dropshot::HttpError;
 use illumos_utils::{output_to_exec_error, ExecutionError};
-use slog::Logger;
+use slog::{debug, Logger};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
 use std::fmt::Display;
 use std::io;
 use std::net::SocketAddrV6;
+use std::time::Duration;
 use tokio::process::Command;
+
+const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, thiserror::Error, SlogInlineError)]
 pub enum ClickhouseCliError {
@@ -38,6 +42,8 @@ pub enum ClickhouseCliError {
         #[source]
         err: anyhow::Error,
     },
+    #[error("clickhouse server unavailable: {0}")]
+    ServerUnavailable(String),
 }
 
 impl From<ClickhouseCliError> for HttpError {
@@ -45,6 +51,7 @@ impl From<ClickhouseCliError> for HttpError {
         match err {
             ClickhouseCliError::Run { .. }
             | ClickhouseCliError::Parse { .. }
+            | ClickhouseCliError::ServerUnavailable { .. }
             | ClickhouseCliError::ExecutionError(_) => {
                 let message = InlineErrorChain::new(&err).to_string();
                 HttpError {
@@ -161,6 +168,25 @@ impl ClickhouseCli {
         .await
     }
 
+    pub async fn system_timeseries_avg(
+        &self,
+        settings: SystemTimeSeriesSettings,
+    ) -> Result<Vec<SystemTimeSeries>, ClickhouseCliError> {
+        let log = self.log.clone().unwrap();
+        let query = settings.query_avg();
+
+        debug!(&log, "Querying system database"; "query" => &query);
+
+        self.client_non_interactive(
+            ClickhouseClientType::Server,
+            &query,
+            "Retrieve time series from the system database",
+            SystemTimeSeries::parse,
+            log,
+        )
+        .await
+    }
+
     async fn client_non_interactive<F, T>(
         &self,
         client: ClickhouseClientType,
@@ -182,19 +208,33 @@ impl ClickhouseCli {
             .arg("--query")
             .arg(query);
 
-        let output = command.output().await.map_err(|err| {
-            let err_args: Vec<&OsStr> = command.as_std().get_args().collect();
-            let err_args_parsed: Vec<String> = err_args
-                .iter()
-                .map(|&os_str| os_str.to_string_lossy().into_owned())
-                .collect();
-            let err_args_str = err_args_parsed.join(" ");
-            ClickhouseCliError::Run {
-                description: subcommand_description,
-                subcommand: err_args_str,
-                err,
+        let now = tokio::time::Instant::now();
+        let result =
+            tokio::time::timeout(DEFAULT_COMMAND_TIMEOUT, command.output())
+                .await;
+
+        let elapsed = now.elapsed();
+        let output = match result {
+            Ok(result) => result.map_err(|err| {
+                let err_args: Vec<&OsStr> =
+                    command.as_std().get_args().collect();
+                let err_args_parsed: Vec<String> = err_args
+                    .iter()
+                    .map(|&os_str| os_str.to_string_lossy().into_owned())
+                    .collect();
+                let err_args_str = err_args_parsed.join(" ");
+                ClickhouseCliError::Run {
+                    description: subcommand_description,
+                    subcommand: err_args_str,
+                    err,
+                }
+            })?,
+            Err(e) => {
+                return Err(ClickhouseCliError::ServerUnavailable(format!(
+                    "command timed out after {elapsed:?}: {e}"
+                )))
             }
-        })?;
+        };
 
         if !output.status.success() {
             return Err(output_to_exec_error(command.as_std(), &output).into());

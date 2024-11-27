@@ -113,7 +113,7 @@ async fn test_physical_disk_create_list_delete(
     let datastore = nexus.datastore();
     let sled_id = Uuid::from_str(&SLED_AGENT_UUID).unwrap();
     let physical_disk = DbPhysicalDisk::new(
-        Uuid::new_v4(),
+        PhysicalDiskUuid::new_v4(),
         "v".into(),
         "s".into(),
         "m".into(),

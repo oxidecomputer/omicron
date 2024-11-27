@@ -573,5 +573,6 @@ pub fn sled_agent(
         disks,
         zpools,
         datasets,
+        omicron_physical_disks_generation: Generation::new(),
     }
 }

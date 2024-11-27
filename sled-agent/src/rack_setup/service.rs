@@ -103,8 +103,7 @@ use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::disk::{
-    DatasetKind, DatasetsConfig, OmicronPhysicalDiskConfig,
-    OmicronPhysicalDisksConfig,
+    DatasetKind, DatasetsConfig, OmicronPhysicalDisksConfig,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
@@ -329,19 +328,7 @@ impl ServiceInner {
                 // Ensure all the physical disks are initialized
                 self.initialize_disks_on_sled(
                     *sled_address,
-                    OmicronPhysicalDisksConfig {
-                        generation: config.disks.generation,
-                        disks: config
-                            .disks
-                            .disks
-                            .iter()
-                            .map(|disk| OmicronPhysicalDiskConfig {
-                                identity: disk.identity.clone(),
-                                id: disk.id,
-                                pool_id: disk.pool_id,
-                            })
-                            .collect(),
-                    },
+                    config.disks.clone().into(),
                 )
                 .await?;
 
@@ -1805,6 +1792,7 @@ mod test {
                     .collect(),
                 zpools: vec![],
                 datasets: vec![],
+                omicron_physical_disks_generation: Generation::new(),
             },
             true,
         )

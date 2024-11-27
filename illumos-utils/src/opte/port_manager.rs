@@ -105,7 +105,6 @@ pub struct PortCreateParams<'a> {
     pub floating_ips: &'a [IpAddr],
     pub firewall_rules: &'a [ResolvedVpcFirewallRule],
     pub dhcp_config: DhcpCfg,
-    pub is_service: bool,
 }
 
 /// The port manager controls all OPTE ports on a single host.
@@ -146,8 +145,12 @@ impl PortManager {
             floating_ips,
             firewall_rules,
             dhcp_config,
-            is_service,
         } = params;
+
+        let is_service =
+            matches!(nic.kind, NetworkInterfaceKind::Service { .. });
+        let is_instance =
+            matches!(nic.kind, NetworkInterfaceKind::Instance { .. });
 
         let mac = *nic.mac;
         let vni = Vni::new(nic.vni).unwrap();
@@ -315,6 +318,26 @@ impl PortManager {
                 nic.id,
                 nic.kind,
             );
+
+            // Ports for Probes/Services cannot have EIP<->IGW mappings filled
+            // in dynamically today, so to keep use of their EIPs working we
+            // leave them untagged at both the `nat` and `router` layer.
+            if is_instance {
+                // This is effectively re-asserting the external IP config in order to
+                // set the EIP<->IGW mapping. While this should be part of `vpc_cfg`,
+                // this currently needs to happen here to prevent a case where an old
+                // mapping is not yet removed (and so no 'change' happens to trigger
+                // `Instance::refresh_external_ips_inner`), and to prevent updates
+                // racing with nexus before an instance/port are reachable from their
+                // respective managers.
+                self.external_ips_ensure_port(
+                    &port,
+                    nic.id,
+                    source_nat,
+                    ephemeral_ip,
+                    floating_ips,
+                )?;
+            }
             (port, ticket)
         };
 
@@ -370,13 +393,7 @@ impl PortManager {
                     dest: super::net_to_cidr(route.dest),
                     target: super::router_target_opte(
                         &route.target,
-                        // This option doesn't make any difference here:
-                        // We don't yet know any associated InetGw IDs for
-                        // the IPs attached to this interface.
-                        // We might have this knowledge at create-time in
-                        // future, but assume for now that the control plane
-                        // will backfill this.
-                        false,
+                        is_instance,
                     ),
                 };
 
@@ -590,7 +607,7 @@ impl PortManager {
         changed
     }
 
-    /// Ensure external IPs for an OPTE port are up to date.
+    /// Lookup an OPTE port, and ensure its external IP config is up to date.
     #[cfg_attr(not(target_os = "illumos"), allow(unused_variables))]
     pub fn external_ips_ensure(
         &self,
@@ -600,14 +617,33 @@ impl PortManager {
         ephemeral_ip: Option<IpAddr>,
         floating_ips: &[IpAddr],
     ) -> Result<(), Error> {
-        let egw_lock = self.inner.eip_gateways.lock().unwrap();
-        let inet_gw_map = egw_lock.get(&nic_id).cloned();
-        drop(egw_lock);
-
         let ports = self.inner.ports.lock().unwrap();
         let port = ports.get(&(nic_id, nic_kind)).ok_or_else(|| {
             Error::ExternalIpUpdateMissingPort(nic_id, nic_kind)
         })?;
+
+        self.external_ips_ensure_port(
+            port,
+            nic_id,
+            source_nat,
+            ephemeral_ip,
+            floating_ips,
+        )
+    }
+
+    /// Ensure external IPs for an OPTE port are up to date.
+    #[cfg_attr(not(target_os = "illumos"), allow(unused_variables))]
+    pub fn external_ips_ensure_port(
+        &self,
+        port: &Port,
+        nic_id: Uuid,
+        source_nat: Option<SourceNatConfig>,
+        ephemeral_ip: Option<IpAddr>,
+        floating_ips: &[IpAddr],
+    ) -> Result<(), Error> {
+        let egw_lock = self.inner.eip_gateways.lock().unwrap();
+        let inet_gw_map = egw_lock.get(&nic_id).cloned();
+        drop(egw_lock);
 
         // XXX: duplicates parts of macro logic in `create_port`.
         macro_rules! ext_ip_cfg {
