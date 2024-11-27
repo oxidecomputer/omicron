@@ -1563,6 +1563,33 @@ async fn test_delete_volume_region_snapshot_replacement_state_requested_2(
     test_harness.assert_no_crucible_resources_leaked().await;
 }
 
+/// Assert that a region snapshot replacement request in state "Requested" can
+/// have everything be deleted, and the request will still transition to
+/// Complete
+#[nexus_test]
+async fn test_delete_volume_region_snapshot_replacement_state_requested_3(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let test_harness =
+        region_snapshot_replacement::DeletedVolumeTest::new(cptestctx).await;
+
+    // The request leaves the above `new` function in state Requested:
+    // - delete the snapshot
+    // - delete the snapshot's source disk
+    // - delete the disk created from the snapshot
+    // - finally, call finish_test
+
+    test_harness.delete_the_snapshot().await;
+    test_harness.delete_the_disk().await;
+    test_harness.delete_the_disk_from_snapshot().await;
+
+    test_harness.finish_test().await;
+
+    // Assert there are no more Crucible resources
+
+    test_harness.assert_no_crucible_resources_leaked().await;
+}
+
 /// Assert that a region snapshot replacement request in state "ReplacementDone"
 /// can have its snapshot deleted, and the request will still transition to
 /// Complete

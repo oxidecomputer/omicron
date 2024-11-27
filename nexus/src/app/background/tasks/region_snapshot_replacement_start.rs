@@ -186,6 +186,66 @@ impl RegionSnapshotReplacementDetector {
         for request in requests {
             let request_id = request.id;
 
+            // If the region snapshot is gone, then there are no more references
+            // in any volume, and the whole region snapshot replacement can be
+            // fast-tracked to Complete.
+
+            let maybe_region_snapshot = match self
+                .datastore
+                .region_snapshot_get(
+                    request.old_dataset_id.into(),
+                    request.old_region_id,
+                    request.old_snapshot_id,
+                )
+                .await
+            {
+                Ok(maybe_region_snapshot) => maybe_region_snapshot,
+
+                Err(e) => {
+                    let s = format!("query for region snapshot failed: {e}");
+
+                    error!(
+                        &log,
+                        "{s}";
+                        "request.snapshot_id" => %request.old_snapshot_id,
+                        "request.region_id" => %request.old_region_id,
+                        "request.dataset_id" => %request.old_dataset_id,
+                    );
+                    status.errors.push(s);
+                    return;
+                }
+            };
+
+            if maybe_region_snapshot.is_none() {
+                match self
+                    .datastore
+                    .set_region_snapshot_replacement_complete_from_requested(
+                        &opctx, request.id,
+                    )
+                    .await
+                {
+                    Ok(()) => {
+                        let s = format!(
+                            "region snapshot replacement {request_id} \
+                                completed ok"
+                        );
+                        info!(&log, "{s}");
+                        status.start_invoked_ok.push(s);
+                    }
+
+                    Err(e) => {
+                        let s = format!(
+                            "query to set region snapshot request state \
+                                to complete failed: {e}"
+                        );
+
+                        error!(&log, "{s}"; "request.id" => %request_id);
+                        status.errors.push(s);
+                        continue;
+                    }
+                }
+            }
+
             let result = self
                 .send_start_request(
                     authn::saga::Serialized::for_opctx(opctx),

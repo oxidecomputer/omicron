@@ -746,6 +746,83 @@ impl DataStore {
             })
     }
 
+    /// Transition a RegionSnapshotReplacement record from Requested to Complete
+    /// - this is required when the region snapshot is hard-deleted, which means
+    /// that all volume references are gone and no replacement is required. Also
+    /// removes the `volume_repair` record that is taking a "lock" on the
+    /// Volume.
+    pub async fn set_region_snapshot_replacement_complete_from_requested(
+        &self,
+        opctx: &OpContext,
+        region_snapshot_replacement_id: Uuid,
+    ) -> Result<(), Error> {
+        type TxnError = TransactionError<Error>;
+
+        self.pool_connection_authorized(opctx)
+            .await?
+            .transaction_async(|conn| async move {
+                use db::schema::volume_repair::dsl as volume_repair_dsl;
+
+                diesel::delete(
+                    volume_repair_dsl::volume_repair.filter(
+                        volume_repair_dsl::repair_id
+                            .eq(region_snapshot_replacement_id),
+                    ),
+                )
+                .execute_async(&conn)
+                .await?;
+
+                use db::schema::region_snapshot_replacement::dsl;
+
+                let result = diesel::update(dsl::region_snapshot_replacement)
+                    .filter(dsl::id.eq(region_snapshot_replacement_id))
+                    .filter(
+                        dsl::replacement_state
+                            .eq(RegionSnapshotReplacementState::Requested),
+                    )
+                    .filter(dsl::operating_saga_id.is_null())
+                    .filter(dsl::new_region_volume_id.is_null())
+                    .set((dsl::replacement_state
+                        .eq(RegionSnapshotReplacementState::Complete),))
+                    .check_if_exists::<RegionSnapshotReplacement>(
+                        region_snapshot_replacement_id,
+                    )
+                    .execute_and_check(&conn)
+                    .await?;
+
+                match result.status {
+                    UpdateStatus::Updated => Ok(()),
+                    UpdateStatus::NotUpdatedButExists => {
+                        let record = result.found;
+
+                        if record.replacement_state
+                            == RegionSnapshotReplacementState::Complete
+                        {
+                            Ok(())
+                        } else {
+                            Err(TxnError::CustomError(Error::conflict(
+                                format!(
+                                "region snapshot replacement {} set to {:?} \
+                                (operating saga id {:?})",
+                                region_snapshot_replacement_id,
+                                record.replacement_state,
+                                record.operating_saga_id,
+                            ),
+                            )))
+                        }
+                    }
+                }
+            })
+            .await
+            .map_err(|e| match e {
+                TxnError::CustomError(error) => error,
+
+                TxnError::Database(error) => {
+                    public_error_from_diesel(error, ErrorHandler::Server)
+                }
+            })
+    }
+
     pub async fn create_region_snapshot_replacement_step(
         &self,
         opctx: &OpContext,
