@@ -65,7 +65,7 @@
 //! order to simplify state management we decided to eliminate plan persistence
 //! and force RSS to run to completion through nexus handoff or be restarted
 //! after a clean slate upon failure.
-//! See https://github.com/oxidecomputer/omicron/issues/7174 for details.
+//! See <https://github.com/oxidecomputer/omicron/issues/7174> for details.
 
 use super::plan::service::SledConfig;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
