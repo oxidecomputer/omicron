@@ -485,6 +485,7 @@ mod test {
     use omicron_common::api::internal::shared::DatasetKind::Debug as DebugDatasetKind;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::DatasetUuid;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use rand::Rng;
 
@@ -573,7 +574,7 @@ mod test {
                 let zpool = Zpool::new(
                     *pool.pool.as_untyped_uuid(),
                     *self.sled.as_untyped_uuid(),
-                    Uuid::new_v4(),
+                    PhysicalDiskUuid::new_v4(),
                 );
                 datastore
                     .zpool_insert(opctx, zpool)
