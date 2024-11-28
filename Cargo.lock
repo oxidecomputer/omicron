@@ -6984,6 +6984,7 @@ dependencies = [
  "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=8f8fbb74662b4e19b643c500d55d2d384a6cee5e)",
  "qorb",
  "rand",
+ "range-requests",
  "rcgen",
  "ref-cast",
  "regex",
