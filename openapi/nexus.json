@@ -366,8 +366,8 @@
         "summary": "Create a new support bundle",
         "operationId": "support_bundle_create",
         "responses": {
-          "200": {
-            "description": "successful operation",
+          "201": {
+            "description": "successful creation",
             "content": {
               "application/json": {
                 "schema": {
@@ -396,10 +396,11 @@
           {
             "in": "path",
             "name": "support_bundle",
-            "description": "Name or ID of the support bundle",
+            "description": "ID of the support bundle",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/NameOrId"
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -433,23 +434,17 @@
           {
             "in": "path",
             "name": "support_bundle",
-            "description": "Name or ID of the support bundle",
+            "description": "ID of the support bundle",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/NameOrId"
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
         "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SupportBundleInfo"
-                }
-              }
-            }
+          "204": {
+            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -471,13 +466,63 @@
           {
             "in": "path",
             "name": "support_bundle",
-            "description": "Name or ID of the support bundle",
+            "description": "ID of the support bundle",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/NameOrId"
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupportBundleGetQueryParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Download the metadata of a single support bundle",
+        "operationId": "support_bundle_head",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "support_bundle",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupportBundleGetQueryParams"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "default": {
             "description": "",
@@ -20199,6 +20244,18 @@
           "items"
         ]
       },
+      "SupportBundleGetQueryParams": {
+        "description": "Query parameters for reading the support bundle",
+        "type": "object",
+        "properties": {
+          "query_type": {
+            "$ref": "#/components/schemas/SupportBundleQueryType"
+          }
+        },
+        "required": [
+          "query_type"
+        ]
+      },
       "SupportBundleInfo": {
         "type": "object",
         "properties": {
@@ -20246,6 +20303,60 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "SupportBundleQueryType": {
+        "description": "Describes the type of access to the support bundle",
+        "oneOf": [
+          {
+            "description": "Access the whole support bundle",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "whole"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Access the names of all files within the support bundle",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "index"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Access a specific file within the support bundle",
+            "type": "object",
+            "properties": {
+              "file_path": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "path"
+                ]
+              }
+            },
+            "required": [
+              "file_path",
+              "type"
+            ]
+          }
         ]
       },
       "SupportBundleState": {
