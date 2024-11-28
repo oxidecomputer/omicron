@@ -84,19 +84,18 @@ impl Display for ClickhouseClientType {
 pub struct ClickhouseCli {
     /// Path to where the clickhouse binary is located
     pub binary_path: Utf8PathBuf,
-    /// Address on where the clickhouse keeper is listening on
+    /// Address at which the clickhouse keeper/server is listening
     pub listen_address: SocketAddrV6,
-    pub log: Option<Logger>,
+    pub log: Logger,
 }
 
 impl ClickhouseCli {
-    pub fn new(binary_path: Utf8PathBuf, listen_address: SocketAddrV6) -> Self {
-        Self { binary_path, listen_address, log: None }
-    }
-
-    pub fn with_log(mut self, log: Logger) -> Self {
-        self.log = Some(log);
-        self
+    pub fn new(
+        binary_path: Utf8PathBuf,
+        listen_address: SocketAddrV6,
+        log: Logger,
+    ) -> Self {
+        Self { binary_path, listen_address, log }
     }
 
     pub async fn lgif(&self) -> Result<Lgif, ClickhouseCliError> {
@@ -105,7 +104,7 @@ impl ClickhouseCli {
             "lgif",
             "Retrieve logically grouped information file",
             Lgif::parse,
-            self.log.clone().unwrap(),
+            self.log.clone(),
         )
         .await
     }
@@ -116,7 +115,7 @@ impl ClickhouseCli {
             "get /keeper/config",
             "Retrieve raft configuration information",
             RaftConfig::parse,
-            self.log.clone().unwrap(),
+            self.log.clone(),
         )
         .await
     }
@@ -127,7 +126,7 @@ impl ClickhouseCli {
             "conf",
             "Retrieve keeper node configuration information",
             KeeperConf::parse,
-            self.log.clone().unwrap(),
+            self.log.clone(),
         )
         .await
     }
@@ -163,7 +162,7 @@ impl ClickhouseCli {
             "Retrieve information about distributed ddl queries (ON CLUSTER clause) 
             that were executed on a cluster",
             DistributedDdlQueue::parse,
-            self.log.clone().unwrap(),
+            self.log.clone(),
         )
         .await
     }
@@ -172,7 +171,7 @@ impl ClickhouseCli {
         &self,
         settings: SystemTimeSeriesSettings,
     ) -> Result<Vec<SystemTimeSeries>, ClickhouseCliError> {
-        let log = self.log.clone().unwrap();
+        let log = self.log.clone();
         let query = settings.query_avg();
 
         debug!(&log, "Querying system database"; "query" => &query);

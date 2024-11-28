@@ -7,7 +7,7 @@
 use anyhow::anyhow;
 use camino::Utf8PathBuf;
 use clap::Parser;
-use omicron_clickhouse_admin::{ClickhouseCli, Config};
+use omicron_clickhouse_admin::Config;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use std::net::{SocketAddr, SocketAddrV6};
@@ -53,11 +53,9 @@ async fn main_impl() -> Result<(), CmdError> {
             let mut config = Config::from_file(&config)
                 .map_err(|err| CmdError::Failure(anyhow!(err)))?;
             config.dropshot.bind_address = SocketAddr::V6(http_address);
-            let clickhouse_cli =
-                ClickhouseCli::new(binary_path, listen_address);
-
             let server = omicron_clickhouse_admin::start_single_admin_server(
-                clickhouse_cli,
+                binary_path,
+                listen_address,
                 config,
             )
             .await
