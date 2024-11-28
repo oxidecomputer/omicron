@@ -2793,6 +2793,19 @@ pub trait NexusExternalApi {
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SupportBundlePath>,
+        body: TypedBody<SupportBundleGetQueryParams>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Download the metadata of a single support bundle
+    #[endpoint {
+        method = HEAD,
+        path = "/experimental/v1/system/support-bundles/{support_bundle}/download",
+        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+    }]
+    async fn support_bundle_head(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+        body: TypedBody<SupportBundleGetQueryParams>,
     ) -> Result<Response<Body>, HttpError>;
 
     /// Create a new support bundle
@@ -2803,7 +2816,7 @@ pub trait NexusExternalApi {
     }]
     async fn support_bundle_create(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError>;
+    ) -> Result<HttpResponseCreated<shared::SupportBundleInfo>, HttpError>;
 
     /// Delete an existing support bundle
     ///
@@ -2817,7 +2830,7 @@ pub trait NexusExternalApi {
     async fn support_bundle_delete(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SupportBundlePath>,
-    ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError>;
+    ) -> Result<HttpResponseDeleted, HttpError>;
 
     // Probes (experimental)
 
