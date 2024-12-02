@@ -7,6 +7,7 @@ edition = "2021"
 fs-err.workspace = true
 futures.workspace = true
 libc.workspace = true
+omicron-workspace-hack.workspace = true
 slog.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }

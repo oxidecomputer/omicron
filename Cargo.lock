@@ -10741,6 +10741,7 @@ dependencies = [
  "fs-err",
  "futures",
  "libc",
+ "omicron-workspace-hack",
  "slog",
  "thiserror",
  "tokio",
