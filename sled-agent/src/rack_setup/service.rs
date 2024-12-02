@@ -1237,7 +1237,7 @@ impl ServiceInner {
 
         // Check if a previous RSS plan has completed successfully.
         //
-        // If se see the completion marker in the `completed_ledger` then the
+        // If we see the completion marker in the `completed_ledger` then the
         // system should be up-and-running. If we see the started marker in
         // the `started_ledger`, then RSS did not complete and the rack should
         // be clean-slated before RSS is run again.
