@@ -32,6 +32,7 @@ use slog::o;
 use slog::trace;
 use slog::warn;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::net::SocketAddrV6;
@@ -126,7 +127,7 @@ async fn perform_collection(
                         warn!(
                             log,
                             "failed to collect results from producer";
-                            "error" => ?e,
+                            InlineErrorChain::new(&e),
                         );
                         Err(self_stats::FailureReason::Deserialization)
                     }
@@ -144,7 +145,7 @@ async fn perform_collection(
             error!(
                 log,
                 "failed to send collection request to producer";
-                "error" => ?e
+                InlineErrorChain::new(&e),
             );
             Err(self_stats::FailureReason::Unreachable)
         }
@@ -238,7 +239,7 @@ async fn inner_collection_loop(
                                 log,
                                 "failed to receive on producer update \
                                 watch channel, exiting";
-                                "error" => ?e,
+                                InlineErrorChain::new(&e),
                             );
                             return;
                         }
@@ -548,7 +549,7 @@ async fn results_printer(
                             error!(
                                 log,
                                 "received error from a producer";
-                                "err" => ?e,
+                                InlineErrorChain::new(&e),
                             );
                         }
                     }
@@ -1028,7 +1029,7 @@ impl OximeterAgent {
                 self.log,
                 "failed to shut down collection task";
                 "producer_id" => %id,
-                "error" => ?e,
+                InlineErrorChain::new(&e),
             ),
         }
         Ok(())
@@ -1132,7 +1133,7 @@ async fn refresh_producer_list_once(
                     agent.log,
                     "error fetching next assigned producer, \
                     abandoning this refresh attempt";
-                    "err" => ?e,
+                    InlineErrorChain::new(&e),
                 );
                 return;
             }
@@ -1144,7 +1145,8 @@ async fn refresh_producer_list_once(
                             agent.log,
                             "failed to convert producer description \
                             from Nexus, skipping producer";
-                            "err" => e
+                            // No `InlineErrorChain` here: `e` is a string
+                            "error" => e,
                         );
                         continue;
                     }
@@ -1181,7 +1183,8 @@ async fn claim_nexus_with_backoff(
             log,
             "failed to lookup Nexus IP, will retry";
             "delay" => ?delay,
-            "error" => ?error,
+            // No `InlineErrorChain` here: `error` is a string
+            "error" => error,
         );
     };
     let do_lookup = || async {
