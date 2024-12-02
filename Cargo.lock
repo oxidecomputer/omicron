@@ -10739,6 +10739,7 @@ name = "sled-diagnostics"
 version = "0.1.0"
 dependencies = [
  "futures",
+ "omicron-workspace-hack",
  "thiserror",
  "tokio",
 ]
