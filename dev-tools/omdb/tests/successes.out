@@ -381,7 +381,7 @@ task: "service_zone_nat_tracker"
 
 
 task: "support_bundle_collector"
-    ensure new support bundles are automatically marked in-service
+    Manage support bundle collection and cleanup
 
 
 task: "switch_port_config_manager"
