@@ -4,13 +4,17 @@
 
 //! Support for editing the blueprint details of a single sled.
 
+use crate::blueprint_builder::SledEditCounts;
 use crate::planner::PlannerRng;
 use illumos_utils::zpool::ZpoolName;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::BlueprintDatasetConfig;
+use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
+use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::external_api::views::SledState;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -19,9 +23,12 @@ mod datasets;
 mod disks;
 mod zones;
 
-pub use self::datasets::EditDatasetsError;
-pub use self::disks::EditDisksError;
-pub use self::zones::EditZonesError;
+pub use self::datasets::DatasetsEditError;
+pub use self::datasets::MultipleDatasetsOfKind;
+pub use self::disks::DisksEditError;
+pub use self::disks::DuplicateDiskId;
+pub use self::zones::DuplicateZoneId;
+pub use self::zones::ZonesEditError;
 
 use self::datasets::DatasetsEditor;
 use self::datasets::PartialDatasetConfig;
@@ -29,13 +36,23 @@ use self::disks::DisksEditor;
 use self::zones::ZonesEditor;
 
 #[derive(Debug, thiserror::Error)]
-pub enum EditSledError {
+pub enum SledInputError {
+    #[error(transparent)]
+    DuplicateZoneId(#[from] DuplicateZoneId),
+    #[error(transparent)]
+    DuplicateDiskId(#[from] DuplicateDiskId),
+    #[error(transparent)]
+    MultipleDatasetsOfKind(#[from] MultipleDatasetsOfKind),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SledEditError {
     #[error("failed to edit disks")]
-    EditDisks(#[from] EditDisksError),
+    EditDisks(#[from] DisksEditError),
     #[error("failed to edit datasets")]
-    EditDatasetsError(#[from] EditDatasetsError),
+    EditDatasetsError(#[from] DatasetsEditError),
     #[error("failed to edit zones")]
-    EditZones(#[from] EditZonesError),
+    EditZones(#[from] ZonesEditError),
     #[error(
         "invalid configuration for zone {zone_id}: \
          filesystem root zpool ({fs_zpool}) and durable dataset zpool \
@@ -54,26 +71,72 @@ pub enum EditSledError {
 }
 
 #[derive(Debug)]
-pub(crate) struct SledEditor<'a> {
+pub(crate) struct SledEditor {
     state: SledState,
     zones: ZonesEditor,
     disks: DisksEditor,
     datasets: DatasetsEditor,
-    rng: &'a mut PlannerRng,
 }
 
-impl SledEditor<'_> {
-    pub fn ensure_disk(&mut self, disk: BlueprintPhysicalDiskConfig) {
+#[derive(Debug)]
+pub(crate) struct EditedSled {
+    pub state: SledState,
+    pub zones: BlueprintZonesConfig,
+    pub disks: BlueprintPhysicalDisksConfig,
+    pub datasets: BlueprintDatasetsConfig,
+    pub edit_counts: SledEditCounts,
+}
+
+impl SledEditor {
+    pub fn new(
+        state: SledState,
+        zones: BlueprintZonesConfig,
+        disks: BlueprintPhysicalDisksConfig,
+        datasets: BlueprintDatasetsConfig,
+    ) -> Result<Self, SledInputError> {
+        Ok(Self {
+            state,
+            zones: zones.try_into()?,
+            disks: disks.try_into()?,
+            datasets: datasets.try_into()?,
+        })
+    }
+
+    pub fn finalize(self) -> EditedSled {
+        let (disks, disks_counts) = self.disks.finalize();
+        let (datasets, datasets_counts) = self.datasets.finalize();
+        let (zones, zones_counts) = self.zones.finalize();
+        EditedSled {
+            state: self.state,
+            zones,
+            disks,
+            datasets,
+            edit_counts: SledEditCounts {
+                disks: disks_counts,
+                datasets: datasets_counts,
+                zones: zones_counts,
+            },
+        }
+    }
+
+    pub fn ensure_disk(
+        &mut self,
+        disk: BlueprintPhysicalDiskConfig,
+        rng: &mut PlannerRng,
+    ) {
         let zpool = ZpoolName::new_external(disk.pool_id);
 
         self.disks.ensure(disk);
 
         // Every disk also gets a Debug and Transient Zone Root dataset; ensure
         // both of those exist as well.
-        let debug =
-            self.dataset_config(PartialDatasetConfig::for_debug(zpool.clone()));
+        let debug = self.dataset_config(
+            PartialDatasetConfig::for_debug(zpool.clone()),
+            rng,
+        );
         let zone_root = self.dataset_config(
             PartialDatasetConfig::for_transient_zone_root(zpool),
+            rng,
         );
 
         self.datasets.ensure(debug);
@@ -83,7 +146,7 @@ impl SledEditor<'_> {
     pub fn expunge_disk(
         &mut self,
         disk_id: &PhysicalDiskUuid,
-    ) -> Result<(), EditSledError> {
+    ) -> Result<(), SledEditError> {
         let zpool_id = self.disks.expunge(disk_id)?;
 
         // When we expunge a disk, we must also expunge any datasets on it, and
@@ -105,22 +168,25 @@ impl SledEditor<'_> {
     fn dataset_config(
         &mut self,
         config: PartialDatasetConfig,
+        rng: &mut PlannerRng,
     ) -> BlueprintDatasetConfig {
         let id = self
             .datasets
             .get_id(&config.zpool().id(), config.kind())
-            .unwrap_or_else(|| self.rng.next_dataset());
+            .unwrap_or_else(|| rng.next_dataset());
         config.build(id)
     }
 
     pub fn add_zone(
         &mut self,
         zone: BlueprintZoneConfig,
-    ) -> Result<(), EditSledError> {
+        rng: &mut PlannerRng,
+    ) -> Result<(), SledEditError> {
         let filesystem_dataset = zone.filesystem_dataset().map(|dataset| {
-            self.dataset_config(PartialDatasetConfig::for_transient_zone(
-                dataset,
-            ))
+            self.dataset_config(
+                PartialDatasetConfig::for_transient_zone(dataset),
+                rng,
+            )
         });
         let durable_dataset = zone.zone_type.durable_dataset().map(|dataset| {
             let address = match &zone.zone_type {
@@ -129,18 +195,21 @@ impl SledEditor<'_> {
                 ) => Some(*address),
                 _ => None,
             };
-            self.dataset_config(PartialDatasetConfig::for_durable_zone(
-                dataset.dataset.pool_name.clone(),
-                dataset.kind,
-                address,
-            ))
+            self.dataset_config(
+                PartialDatasetConfig::for_durable_zone(
+                    dataset.dataset.pool_name.clone(),
+                    dataset.kind,
+                    address,
+                ),
+                rng,
+            )
         });
 
         // Ensure that if this zone has both kinds of datasets, they reside on
         // the same zpool.
         if let (Some(fs), Some(dur)) = (&filesystem_dataset, &durable_dataset) {
             if fs.pool != dur.pool {
-                return Err(EditSledError::ZoneInvalidZpoolCombination {
+                return Err(SledEditError::ZoneInvalidZpoolCombination {
                     zone_id: zone.id,
                     fs_zpool: fs.pool.clone(),
                     dur_zpool: dur.pool.clone(),
@@ -154,7 +223,7 @@ impl SledEditor<'_> {
             filesystem_dataset.as_ref().or(durable_dataset.as_ref())
         {
             if !self.disks.contains_zpool(&dataset.pool.id()) {
-                return Err(EditSledError::ZoneOnNonexistentZpool {
+                return Err(SledEditError::ZoneOnNonexistentZpool {
                     zone_id: zone.id,
                     zpool: dataset.pool.clone(),
                 });
@@ -176,7 +245,7 @@ impl SledEditor<'_> {
     pub fn expunge_zone(
         &mut self,
         zone_id: &OmicronZoneUuid,
-    ) -> Result<(), EditSledError> {
+    ) -> Result<(), SledEditError> {
         let config = self.zones.expunge(zone_id)?;
 
         // When expunging a zone, we also expunge its datasets.
@@ -192,7 +261,7 @@ impl SledEditor<'_> {
             {
                 match self.datasets.expunge(&dataset_id) {
                     Ok(()) => (),
-                    Err(EditDatasetsError::ExpungeNonexistentDataset {
+                    Err(DatasetsEditError::ExpungeNonexistentDataset {
                         ..
                     }) => unreachable!("we just looked up the dataset ID"),
                 }
@@ -206,7 +275,7 @@ impl SledEditor<'_> {
             {
                 match self.datasets.expunge(&dataset_id) {
                     Ok(()) => (),
-                    Err(EditDatasetsError::ExpungeNonexistentDataset {
+                    Err(DatasetsEditError::ExpungeNonexistentDataset {
                         ..
                     }) => unreachable!("we just looked up the dataset ID"),
                 }

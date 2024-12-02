@@ -13,9 +13,20 @@ use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 
 #[derive(Debug, thiserror::Error)]
-pub enum EditDisksError {
+pub enum DisksEditError {
     #[error("tried to expunge nonexistent disk {id}")]
     ExpungeNonexistentDisk { id: PhysicalDiskUuid },
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "invalid blueprint input: duplicate disk ID {id} \
+     (zpools: {zpool1:?}, {zpool2:?})"
+)]
+pub struct DuplicateDiskId {
+    pub id: PhysicalDiskUuid,
+    pub zpool1: ZpoolUuid,
+    pub zpool2: ZpoolUuid,
 }
 
 #[derive(Debug)]
@@ -26,6 +37,21 @@ pub(super) struct DisksEditor {
 }
 
 impl DisksEditor {
+    pub fn finalize(self) -> (BlueprintPhysicalDisksConfig, EditCounts) {
+        let mut generation = self.generation;
+        if self.counts.has_nonzero_counts() {
+            generation = generation.next();
+        }
+
+        (
+            BlueprintPhysicalDisksConfig {
+                generation,
+                disks: self.disks.into_values().collect(),
+            },
+            self.counts,
+        )
+    }
+
     pub fn contains_zpool(&self, zpool_id: &ZpoolUuid) -> bool {
         self.disks.values().any(|disk| disk.pool_id == *zpool_id)
     }
@@ -48,9 +74,9 @@ impl DisksEditor {
     pub fn expunge(
         &mut self,
         disk_id: &PhysicalDiskUuid,
-    ) -> Result<ZpoolUuid, EditDisksError> {
+    ) -> Result<ZpoolUuid, DisksEditError> {
         let config = self.disks.get_mut(disk_id).ok_or_else(|| {
-            EditDisksError::ExpungeNonexistentDisk { id: *disk_id }
+            DisksEditError::ExpungeNonexistentDisk { id: *disk_id }
         })?;
 
         match config.disposition {
@@ -67,30 +93,31 @@ impl DisksEditor {
     }
 }
 
-impl From<DisksEditor> for BlueprintPhysicalDisksConfig {
-    fn from(editor: DisksEditor) -> Self {
-        let mut generation = editor.generation;
-        if editor.counts.has_nonzero_counts() {
-            generation = generation.next();
-        }
+impl TryFrom<BlueprintPhysicalDisksConfig> for DisksEditor {
+    type Error = DuplicateDiskId;
 
-        BlueprintPhysicalDisksConfig {
-            generation,
-            disks: editor.disks.into_values().collect(),
+    fn try_from(
+        config: BlueprintPhysicalDisksConfig,
+    ) -> Result<Self, Self::Error> {
+        let mut disks = BTreeMap::new();
+        for disk in config.disks {
+            match disks.entry(disk.id) {
+                Entry::Vacant(slot) => {
+                    slot.insert(disk);
+                }
+                Entry::Occupied(prev) => {
+                    return Err(DuplicateDiskId {
+                        id: disk.id,
+                        zpool1: disk.pool_id,
+                        zpool2: prev.get().pool_id,
+                    });
+                }
+            }
         }
-    }
-}
-
-impl From<BlueprintPhysicalDisksConfig> for DisksEditor {
-    fn from(config: BlueprintPhysicalDisksConfig) -> Self {
-        Self {
+        Ok(Self {
             generation: config.generation,
-            disks: config
-                .disks
-                .into_iter()
-                .map(|disk| (disk.id, disk))
-                .collect(),
+            disks,
             counts: EditCounts::zeroes(),
-        }
+        })
     }
 }

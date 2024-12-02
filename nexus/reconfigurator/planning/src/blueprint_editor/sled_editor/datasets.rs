@@ -4,7 +4,6 @@
 
 use crate::blueprint_builder::EditCounts;
 use illumos_utils::zpool::ZpoolName;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintDatasetsConfig;
@@ -14,7 +13,6 @@ use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
 use omicron_common::disk::GzipLevel;
 use omicron_uuid_kinds::DatasetUuid;
-use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
@@ -33,7 +31,7 @@ pub struct MultipleDatasetsOfKind {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum EditDatasetsError {
+pub enum DatasetsEditError {
     #[error("tried to expunge nonexistent dataset: {id}")]
     ExpungeNonexistentDataset { id: DatasetUuid },
 }
@@ -132,6 +130,14 @@ pub(super) struct DatasetsEditor {
 }
 
 impl DatasetsEditor {
+    pub fn finalize(self) -> (BlueprintDatasetsConfig, EditCounts) {
+        let mut config = self.config;
+        if self.counts.has_nonzero_counts() {
+            config.generation = config.generation.next();
+        }
+        (config, self.counts)
+    }
+
     /// If there is a dataset of the given `kind` on the given `zpool`, return
     /// its ID.
     pub fn get_id(
@@ -147,7 +153,7 @@ impl DatasetsEditor {
     pub fn expunge(
         &mut self,
         id: &DatasetUuid,
-    ) -> Result<(), EditDatasetsError> {
+    ) -> Result<(), DatasetsEditError> {
         Self::expunge_by_id(&mut self.config, id, &mut self.counts)
     }
 
@@ -155,9 +161,9 @@ impl DatasetsEditor {
         config: &mut BlueprintDatasetsConfig,
         id: &DatasetUuid,
         counts: &mut EditCounts,
-    ) -> Result<(), EditDatasetsError> {
+    ) -> Result<(), DatasetsEditError> {
         let dataset = config.datasets.get_mut(id).ok_or_else(|| {
-            EditDatasetsError::ExpungeNonexistentDataset { id: *id }
+            DatasetsEditError::ExpungeNonexistentDataset { id: *id }
         })?;
         match dataset.disposition {
             BlueprintDatasetDisposition::InService => {
@@ -225,17 +231,5 @@ impl TryFrom<BlueprintDatasetsConfig> for DatasetsEditor {
             }
         }
         Ok(Self { config, by_zpool_and_kind, counts: EditCounts::zeroes() })
-    }
-}
-
-impl From<DatasetsEditor> for BlueprintDatasetsConfig {
-    fn from(editor: DatasetsEditor) -> Self {
-        let mut config = editor.config;
-
-        if editor.counts.has_nonzero_counts() {
-            config.generation = config.generation.next();
-        }
-
-        config
     }
 }
