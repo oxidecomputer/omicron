@@ -6,7 +6,6 @@
 
 use super::sled_agent::SledAgent;
 use crate::sled_agent::Error as SledAgentError;
-use crate::support_bundle::queries::SupportBundleCommandHttpOutput;
 use crate::zone_bundle::BundleError;
 use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
@@ -53,6 +52,7 @@ use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     StorageLimit, ZoneBundleId, ZoneBundleMetadata,
 };
+use sled_diagnostics::SledDiagnosticsCommandHttpOutput;
 use std::collections::BTreeMap;
 
 type SledApiDescription = ApiDescription<SledAgent>;
