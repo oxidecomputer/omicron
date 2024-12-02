@@ -24,8 +24,8 @@
 //! us pick up and restart at certain given points we instead only record two
 //! marker files. These marker files indicate one of two things:
 //!
-//!   * RSS has run already but failed to complete. We must clean-slate the
-//!     rack if we try to run RSS again and see this file.
+//!   * RSS has started. We must clean-slate the rack if we try to start RSS and
+//!     see this file, as it indicates the original RSS attempt failed.
 //!   * RSS has completed and handed off to nexus. The system is up and running
 //!     and any clean-slate would reset the rack to factory default state losing
 //!     any existing data.
@@ -1237,7 +1237,10 @@ impl ServiceInner {
 
         // Check if a previous RSS plan has completed successfully.
         //
-        // If it has, the system should be up-and-running.
+        // If se see the completion marker in the `completed_ledger` then the
+        // system should be up-and-running. If we see the started marker in
+        // the `started_ledger`, then RSS did not complete and the rack should
+        // be clean-slated before RSS is run again.
         if completed_ledger.is_some() {
             info!(self.log, "RSS configuration has already been applied",);
             return Err(SetupServiceError::RackAlreadyInitialized);
