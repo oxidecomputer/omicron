@@ -1,0 +1,12 @@
+[package]
+name = "sled-diagnostics"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fs-err.workspace = true
+futures.workspace = true
+libc.workspace = true
+slog.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["full"] }
