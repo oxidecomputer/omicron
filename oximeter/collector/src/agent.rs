@@ -20,7 +20,9 @@ use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
 use oximeter::types::ProducerResults;
 use oximeter::types::ProducerResultsItem;
+use oximeter_api::FailedCollection;
 use oximeter_api::ProducerDetails;
+use oximeter_api::SuccessfulCollection;
 use oximeter_db::Client;
 use oximeter_db::DbWrite;
 use qorb::claim::Handle;
@@ -40,6 +42,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
+use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot;
@@ -103,19 +106,28 @@ enum CollectionMessage {
     },
 }
 
+/// Return type for `perform_collection`.
+struct SingleCollectionResult {
+    /// The result of the collection.
+    result: Result<ProducerResults, self_stats::FailureReason>,
+    /// The duration the collection took.
+    duration: Duration,
+}
+
 /// Run a single collection from the producer.
 async fn perform_collection(
     log: Logger,
     client: reqwest::Client,
     producer: ProducerEndpoint,
-) -> Result<ProducerResults, self_stats::FailureReason> {
+) -> SingleCollectionResult {
+    let start = Instant::now();
     debug!(log, "collecting from producer");
     let res = client
         .get(format!("http://{}/{}", producer.address, producer.id))
         .send()
         .await;
     trace!(log, "sent collection request to producer");
-    match res {
+    let result = match res {
         Ok(res) => {
             if res.status().is_success() {
                 match res.json::<ProducerResults>().await {
@@ -153,7 +165,8 @@ async fn perform_collection(
             );
             Err(self_stats::FailureReason::Unreachable)
         }
-    }
+    };
+    SingleCollectionResult { result, duration: start.elapsed() }
 }
 
 // The type of one collection task run to completion.
@@ -162,15 +175,54 @@ async fn perform_collection(
 // can bump the self-stat counter accordingly.
 type CollectionResult = Result<ProducerResults, self_stats::FailureReason>;
 
-// The type of one response message sent from the collection task.
-type CollectionResponse = (Option<CollectionToken>, CollectionResult);
+/// Information about when we start a collection.
+struct CollectionStartTimes {
+    /// UTC timestamp at which the request was started.
+    started_at: DateTime<Utc>,
+    /// Instant right before we queued the response for processing.
+    queued_at: Instant,
+}
+
+impl CollectionStartTimes {
+    fn new() -> Self {
+        Self { started_at: Utc::now(), queued_at: Instant::now() }
+    }
+}
+
+/// Details about a forced collection.
+struct ForcedCollectionRequest {
+    /// The collection token we signal when the collection is completed.
+    token: CollectionToken,
+    /// Start time for this collection.
+    start: CollectionStartTimes,
+}
+
+impl ForcedCollectionRequest {
+    fn new(token: CollectionToken) -> Self {
+        Self { token, start: CollectionStartTimes::new() }
+    }
+}
+
+/// Details about a completed collection.
+struct CollectionResponse {
+    /// Token for a forced collection request.
+    token: Option<CollectionToken>,
+    /// The actual result of the collection.
+    result: CollectionResult,
+    /// Time when the collection started.
+    started_at: DateTime<Utc>,
+    /// Time the request spent queued.
+    time_queued: Duration,
+    /// Time we spent processing the request.
+    time_collecting: Duration,
+}
 
 /// Task that actually performs collections from the producer.
 async fn inner_collection_loop(
     log: Logger,
     mut producer_info_rx: watch::Receiver<ProducerEndpoint>,
-    mut forced_collection_rx: mpsc::Receiver<CollectionToken>,
-    mut timer_collection_rx: mpsc::Receiver<()>,
+    mut forced_collection_rx: mpsc::Receiver<ForcedCollectionRequest>,
+    mut timer_collection_rx: mpsc::Receiver<CollectionStartTimes>,
     result_tx: mpsc::Sender<CollectionResponse>,
 ) {
     let client = reqwest::Client::builder()
@@ -182,29 +234,30 @@ async fn inner_collection_loop(
     loop {
         // Wait for notification that we have a collection to perform, from
         // either the forced- or timer-collection queue.
-        trace!(log, "top of inner collection loop, waiting for next request",);
-        let maybe_token = tokio::select! {
+        trace!(log, "top of inner collection loop, waiting for next request");
+        let (maybe_token, start_time) = tokio::select! {
             maybe_request = forced_collection_rx.recv() => {
-                let Some(request) = maybe_request else {
+                let Some(ForcedCollectionRequest { token, start }) = maybe_request else {
                     debug!(
                         log,
                         "forced collection request queue closed, exiting"
                     );
                     return;
                 };
-                Some(request)
+                (Some(token), start)
             }
             maybe_request = timer_collection_rx.recv() => {
-                if maybe_request.is_none() {
+                let Some(start) = maybe_request else {
                     debug!(
                         log,
                         "timer collection request queue closed, exiting"
                     );
                     return;
                 };
-                None
+                (None, start)
             }
         };
+        let time_queued = start_time.queued_at.elapsed();
 
         // Make a future to represent the actual collection.
         let mut collection_fut = Box::pin(perform_collection(
@@ -216,7 +269,7 @@ async fn inner_collection_loop(
         // Wait for that collection to complete or fail, or for an update to the
         // producer's information. In the latter case, recreate the future for
         // the collection itself with the new producer information.
-        let collection_result = 'collection: loop {
+        let SingleCollectionResult { result, duration } = 'collection: loop {
             tokio::select! {
                 biased;
 
@@ -262,8 +315,16 @@ async fn inner_collection_loop(
         };
 
         // Now that the collection has completed, send on the results, along
-        // with any collection token we may have gotten with the request.
-        match result_tx.send((maybe_token, collection_result)).await {
+        // with the timing information and any collection token we may have
+        // gotten with the request.
+        let response = CollectionResponse {
+            token: maybe_token,
+            result,
+            started_at: start_time.started_at,
+            time_queued,
+            time_collecting: duration,
+        };
+        match result_tx.send(response).await {
             Ok(_) => trace!(log, "forwarded results to main collection loop"),
             Err(_) => {
                 error!(
@@ -350,25 +411,24 @@ async fn collection_loop(
                             log,
                             "collection task received explicit request to collect"
                         );
-                        details.start_collection();
-                        match forced_collection_tx.try_send(token) {
+                        let request = ForcedCollectionRequest::new(token);
+                        match forced_collection_tx.try_send(request) {
                             Ok(_) => trace!(
                                 log, "forwarded explicit request to collection task"
                             ),
                             Err(e) => {
-                                details.on_failure("force collect send failure");
                                 match e {
-                                    TrySendError::Closed(tok) => {
+                                    TrySendError::Closed(ForcedCollectionRequest { token, .. }) => {
                                         debug!(
                                             log,
                                             "collection task forced collection \
                                             queue is closed. Attempting to \
                                             notify caller and exiting.",
                                         );
-                                        let _ = tok.send(Err(ForcedCollectionError::Closed));
+                                        let _ = token.send(Err(ForcedCollectionError::Closed));
                                         return;
                                     }
-                                    TrySendError::Full(tok) => {
+                                    TrySendError::Full(ForcedCollectionRequest { token, start }) => {
                                         error!(
                                             log,
                                             "collection task forced collection \
@@ -378,7 +438,7 @@ async fn collection_loop(
                                             calling `force_collection()` many \
                                             times"
                                         );
-                                        if tok
+                                        if token
                                             .send(Err(ForcedCollectionError::QueueFull))
                                             .is_err()
                                         {
@@ -389,6 +449,13 @@ async fn collection_loop(
                                                 closed"
                                             );
                                         }
+                                        let failure = FailedCollection {
+                                            started_at: start.started_at,
+                                            time_queued: Duration::ZERO,
+                                            time_collecting: Duration::ZERO,
+                                            reason: String::from("forced collection queue full"),
+                                        };
+                                        details.on_failure(failure);
                                     }
                                 }
                             }
@@ -471,7 +538,7 @@ async fn collection_loop(
                 }
             }
             maybe_result = result_rx.recv() => {
-                let Some((maybe_token, result)) = maybe_result else {
+                let Some(response) = maybe_result else {
                     error!(
                         log,
                         "channel for receiving results from collection task \
@@ -479,6 +546,13 @@ async fn collection_loop(
                     );
                     return;
                 };
+                let CollectionResponse {
+                    token,
+                    result,
+                    started_at,
+                    time_queued,
+                    time_collecting
+                } = response;
                 match result {
                     Ok(results) => {
                         stats.collections.datum.increment();
@@ -489,8 +563,14 @@ async fn collection_loop(
                                 _ => 0,
                             })
                             .sum();
-                        details.on_success(n_samples);
-                        if outbox.send((maybe_token, results)).await.is_err() {
+                        let success = SuccessfulCollection {
+                            started_at,
+                            time_queued,
+                            time_collecting,
+                            n_samples
+                        };
+                        details.on_success(success);
+                        if outbox.send((token, results)).await.is_err() {
                             error!(
                                 log,
                                 "failed to send results to outbox, channel is \
@@ -500,7 +580,13 @@ async fn collection_loop(
                         }
                     }
                     Err(reason) => {
-                        details.on_failure(reason.to_string());
+                        let failure = FailedCollection {
+                            started_at,
+                            time_queued,
+                            time_collecting,
+                            reason: reason.to_string(),
+                        };
+                        details.on_failure(failure);
                         stats.failures_for_reason(reason).datum.increment();
                     }
                 }
@@ -513,8 +599,7 @@ async fn collection_loop(
                 outbox.send((None, stats.sample())).await.unwrap();
             }
             _ = collection_timer.tick() => {
-                details.start_collection();
-                match timer_collection_tx.try_send(()) {
+                match timer_collection_tx.try_send(CollectionStartTimes::new()) {
                     Ok(_) => {
                         debug!(
                             log,
@@ -530,8 +615,14 @@ async fn collection_loop(
                         );
                         return;
                     }
-                    Err(TrySendError::Full(_)) => {
-                        details.on_failure("collections in progress");
+                    Err(TrySendError::Full(start)) => {
+                        let failure = FailedCollection {
+                            started_at: start.started_at,
+                            time_queued: Duration::ZERO,
+                            time_collecting: Duration::ZERO,
+                            reason: String::from("collections in progress"),
+                        };
+                        details.on_failure(failure);
                         error!(
                             log,
                             "timer-based collection request queue is \
@@ -1687,15 +1778,12 @@ mod tests {
                 || details.n_collections == count - 1
         );
         assert_eq!(details.n_failures, 0);
-        let started = details
-            .last_collection_started
-            .expect("Should have recorded time the collection started");
-        let completed = details
-            .last_successful_collection
-            .expect("Should have recorded the time completed");
-        println!("started @ {started}, completed @ {completed}");
-        assert!(completed >= started);
-        assert!(details.last_failed_collection.is_none());
+        let success =
+            details.last_success.expect("Should have a successful collection");
+        assert!(success.time_queued > Duration::ZERO);
+        assert!(success.time_collecting > Duration::ZERO);
+        assert!(success.n_samples == 0);
+        assert!(details.last_failure.is_none());
         logctx.cleanup_successful();
     }
 

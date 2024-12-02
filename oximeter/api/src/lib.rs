@@ -76,6 +76,48 @@ pub struct CollectorInfo {
     pub last_refresh: Option<DateTime<Utc>>,
 }
 
+/// Details about a previous successful collection.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct SuccessfulCollection {
+    /// The time at which we started a collection.
+    ///
+    /// Note that this is the time we queued a request to collect for processing
+    /// by a background task. The `time_queued` can be added to this time to
+    /// figure out when processing began, and `time_collecting` can be added to
+    /// that to figure out how long the actual collection process took.
+    pub started_at: DateTime<Utc>,
+
+    /// The time this request spent queued before being processed.
+    pub time_queued: Duration,
+
+    /// The time it took for the actual collection.
+    pub time_collecting: Duration,
+
+    /// The number of samples collected.
+    pub n_samples: u64,
+}
+
+/// Details about a previous failed collection.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct FailedCollection {
+    /// The time at which we started a collection.
+    ///
+    /// Note that this is the time we queued a request to collect for processing
+    /// by a background task. The `time_queued` can be added to this time to
+    /// figure out when processing began, and `time_collecting` can be added to
+    /// that to figure out how long the actual collection process took.
+    pub started_at: DateTime<Utc>,
+
+    /// The time this request spent queued before being processed.
+    pub time_queued: Duration,
+
+    /// The time it took for the actual collection.
+    pub time_collecting: Duration,
+
+    /// The reason the collection failed.
+    pub reason: String,
+}
+
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct ProducerDetails {
     /// The producer's ID.
@@ -93,33 +135,15 @@ pub struct ProducerDetails {
     /// The last time the producer's information was updated.
     pub updated: DateTime<Utc>,
 
-    /// The last time we started to collect from this producer.
-    ///
-    /// This is None if we've never attempted to collect from the producer.
-    pub last_collection_started: Option<DateTime<Utc>>,
-
-    /// The last time we successfully completed a collection from this producer.
+    /// Details about the last successful collection.
     ///
     /// This is None if we've never successfully collected from the producer.
-    /// Note that this can be before `last_collection_started`, when we're in
-    /// the middle of a collection or the last collection has failed.
-    pub last_successful_collection: Option<DateTime<Utc>>,
+    pub last_success: Option<SuccessfulCollection>,
 
-    /// The number of samples collected in the last successful collection.
-    pub n_samples_in_last_collection: Option<u64>,
-
-    /// The duration of the last successful collection.
-    pub last_collection_duration: Option<Duration>,
-
-    /// The last time we failed to collect from this producer.
+    /// Details about the last failed collection.
     ///
-    /// This is None if we've never failed to collect from the producer. Note
-    /// that this can be before `last_collection_started`, when we're in the
-    /// middle of a collection or the last collection was successful.
-    pub last_failed_collection: Option<DateTime<Utc>>,
-
-    /// A string describing why the last collection failed.
-    pub last_failure_reason: Option<String>,
+    /// This is None if we've never failed to collect from the producer.
+    pub last_failure: Option<FailedCollection>,
 
     /// The total number of successful collections we've made.
     pub n_collections: u64,
@@ -137,12 +161,8 @@ impl ProducerDetails {
             address: info.address,
             registered: now,
             updated: now,
-            last_collection_started: None,
-            last_successful_collection: None,
-            n_samples_in_last_collection: None,
-            last_collection_duration: None,
-            last_failed_collection: None,
-            last_failure_reason: None,
+            last_success: None,
+            last_failure: None,
             n_collections: 0,
             n_failures: 0,
         }
@@ -160,35 +180,15 @@ impl ProducerDetails {
         self.interval = new.interval;
     }
 
-    /// Update when we start a collection
-    pub fn start_collection(&mut self) {
-        self.last_collection_started = Some(Utc::now());
-    }
-
     /// Update when we successfully complete a collection.
-    ///
-    /// # Panics
-    ///
-    /// This panics if no collection was started.
-    pub fn on_success(&mut self, n_samples: u64) {
-        let start = self.last_collection_started.expect("Should have started");
-        let now = Utc::now();
-        self.last_successful_collection = Some(now);
-        self.n_samples_in_last_collection = Some(n_samples);
-        self.last_collection_duration =
-            Some((now - start).to_std().unwrap_or(Duration::ZERO));
+    pub fn on_success(&mut self, success: SuccessfulCollection) {
+        self.last_success = Some(success);
         self.n_collections += 1;
     }
 
     /// Update when we fail to complete a collection.
-    ///
-    /// # Panics
-    ///
-    /// This panics if no collection was started.
-    pub fn on_failure(&mut self, reason: impl Into<String>) {
-        assert!(self.last_collection_started.is_some());
-        self.last_failed_collection = Some(Utc::now());
-        self.last_failure_reason = Some(reason.into());
+    pub fn on_failure(&mut self, failure: FailedCollection) {
+        self.last_failure = Some(failure);
         self.n_failures += 1;
     }
 }

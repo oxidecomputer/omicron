@@ -7,15 +7,15 @@
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::Omdb;
 use anyhow::Context;
-use chrono::DateTime;
 use chrono::SecondsFormat;
-use chrono::Utc;
 use clap::Args;
 use clap::Subcommand;
 use futures::TryStreamExt;
 use internal_dns_types::names::ServiceName;
+use oximeter_client::types::FailedCollection;
 use oximeter_client::types::ProducerDetails;
 use oximeter_client::types::ProducerEndpoint;
+use oximeter_client::types::SuccessfulCollection;
 use oximeter_client::Client;
 use slog::Logger;
 use std::net::SocketAddr;
@@ -159,14 +159,10 @@ fn duration_to_humantime(d: &oximeter_client::types::Duration) -> String {
     humantime::format_duration(interval).to_string()
 }
 
-fn optional_datetime_to_string(maybe_d: &Option<DateTime<Utc>>) -> String {
-    maybe_d
-        .map(|d| d.to_rfc3339_opts(SecondsFormat::Millis, true))
-        .unwrap_or_else(|| String::from("Never"))
-}
+const WIDTH: usize = 12;
 
 fn print_producer_details(details: ProducerDetails) {
-    const WIDTH: usize = 16;
+    println!();
     println!("{:>WIDTH$}: {}", "ID", details.id);
     println!("{:>WIDTH$}: {}", "Address", details.address);
     println!(
@@ -184,61 +180,104 @@ fn print_producer_details(details: ProducerDetails) {
         "Interval",
         duration_to_humantime(&details.interval)
     );
-    println!(
-        "{:>WIDTH$}: {}",
-        "Last collection",
-        optional_datetime_to_string(&details.last_collection_started)
-    );
-    println!(
-        "{:>WIDTH$}: {} ({}, {} samples)",
-        "Last success",
-        optional_datetime_to_string(&details.last_successful_collection),
-        details
-            .last_collection_duration
-            .as_ref()
-            .map(|d| format!("{:?}", Duration::new(d.secs, d.nanos)))
-            .unwrap_or_else(|| String::from("0s")),
-        details
-            .n_samples_in_last_collection
-            .map(|n| n.to_string())
-            .unwrap_or_else(|| String::from("No")),
-    );
-    println!(
-        "{:>WIDTH$}: {}{}",
-        "Last failure",
-        optional_datetime_to_string(&details.last_failed_collection),
-        match details.last_failure_reason {
-            Some(reason) => format!(" ({reason})"),
-            None => String::new(),
-        },
-    );
     println!("{:>WIDTH$}: {}", "Successes", details.n_collections);
     println!("{:>WIDTH$}: {}", "Failures", details.n_failures);
+    println!();
+    print_last_success(details.last_success.as_ref());
+    println!();
+    print_last_failure(details.last_failure.as_ref());
+}
+
+fn print_last_success(maybe_success: Option<&SuccessfulCollection>) {
+    print!("{:>WIDTH$}: ", "Last success");
+    match maybe_success {
+        None => println!("None"),
+        Some(success) => {
+            println!();
+            println!(
+                "{:>WIDTH$}: {}",
+                "Started at",
+                success.started_at.to_rfc3339_opts(SecondsFormat::Millis, true)
+            );
+            println!(
+                "{:>WIDTH$}: {:?}",
+                "Queued for",
+                Duration::new(
+                    success.time_queued.secs,
+                    success.time_queued.nanos
+                )
+            );
+            println!(
+                "{:>WIDTH$}: {:?}",
+                "Duration",
+                Duration::new(
+                    success.time_collecting.secs,
+                    success.time_collecting.nanos
+                )
+            );
+            println!("{:>WIDTH$}: {}", "Samples", success.n_samples);
+        }
+    }
+}
+
+fn print_last_failure(maybe_failure: Option<&FailedCollection>) {
+    print!("{:>WIDTH$}: ", "Last failure");
+    match maybe_failure {
+        None => println!("None"),
+        Some(failure) => {
+            println!();
+            println!(
+                "{:>WIDTH$}: {}",
+                "Started at",
+                failure.started_at.to_rfc3339_opts(SecondsFormat::Millis, true)
+            );
+            println!(
+                "{:>WIDTH$}: {:?}",
+                "Queued for",
+                Duration::new(
+                    failure.time_queued.secs,
+                    failure.time_queued.nanos
+                )
+            );
+            println!(
+                "{:>WIDTH$}: {:?}",
+                "Duration",
+                Duration::new(
+                    failure.time_collecting.secs,
+                    failure.time_collecting.nanos
+                )
+            );
+            println!("{:>WIDTH$}: {}", "Reason", failure.reason);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::print_producer_details;
     use chrono::Utc;
+    use oximeter_client::types::FailedCollection;
     use oximeter_client::types::ProducerDetails;
+    use oximeter_client::types::SuccessfulCollection;
     use std::time::Duration;
     use uuid::Uuid;
 
     #[test]
-    fn test_print_producer_details() {
+    fn test_print_producer_details_success_only() {
         let now = Utc::now();
         let details = ProducerDetails {
             id: Uuid::new_v4(),
             address: "[::1]:12345".parse().unwrap(),
             interval: Duration::from_secs(10).into(),
-            last_collection_duration: Some(Duration::from_millis(10).into()),
-            last_collection_started: Some(now),
-            last_failed_collection: None,
-            last_failure_reason: None,
-            last_successful_collection: Some(now + Duration::from_millis(10)),
+            last_success: Some(SuccessfulCollection {
+                n_samples: 100,
+                started_at: now,
+                time_collecting: Duration::from_millis(100).into(),
+                time_queued: Duration::from_millis(10).into(),
+            }),
+            last_failure: None,
             n_collections: 1,
             n_failures: 0,
-            n_samples_in_last_collection: Some(100),
             registered: now,
             updated: now,
         };
@@ -252,14 +291,20 @@ mod tests {
             id: Uuid::new_v4(),
             interval: Duration::from_secs(10).into(),
             address: "[::1]:12345".parse().unwrap(),
-            last_collection_duration: None,
-            last_collection_started: Some(now),
-            last_failed_collection: Some(now + Duration::from_millis(10)),
-            last_failure_reason: Some("unreachable".to_string()),
-            last_successful_collection: None,
-            n_collections: 0,
+            last_success: Some(SuccessfulCollection {
+                n_samples: 100,
+                started_at: now,
+                time_collecting: Duration::from_millis(100).into(),
+                time_queued: Duration::from_millis(10).into(),
+            }),
+            last_failure: Some(FailedCollection {
+                started_at: now,
+                time_collecting: Duration::from_millis(100).into(),
+                time_queued: Duration::from_millis(10).into(),
+                reason: String::from("unreachable"),
+            }),
+            n_collections: 1,
             n_failures: 1,
-            n_samples_in_last_collection: None,
             registered: now,
             updated: now,
         };

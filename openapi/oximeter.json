@@ -204,6 +204,43 @@
           "request_id"
         ]
       },
+      "FailedCollection": {
+        "description": "Details about a previous failed collection.",
+        "type": "object",
+        "properties": {
+          "reason": {
+            "description": "The reason the collection failed.",
+            "type": "string"
+          },
+          "started_at": {
+            "description": "The time at which we started a collection.\n\nNote that this is the time we queued a request to collect for processing by a background task. The `time_queued` can be added to this time to figure out when processing began, and `time_collecting` can be added to that to figure out how long the actual collection process took.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_collecting": {
+            "description": "The time it took for the actual collection.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "time_queued": {
+            "description": "The time this request spent queued before being processed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          }
+        },
+        "required": [
+          "reason",
+          "started_at",
+          "time_collecting",
+          "time_queued"
+        ]
+      },
       "ProducerDetails": {
         "type": "object",
         "properties": {
@@ -224,37 +261,23 @@
               }
             ]
           },
-          "last_collection_duration": {
+          "last_failure": {
             "nullable": true,
-            "description": "The duration of the last successful collection.",
+            "description": "Details about the last failed collection.\n\nThis is None if we've never failed to collect from the producer.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Duration"
+                "$ref": "#/components/schemas/FailedCollection"
               }
             ]
           },
-          "last_collection_started": {
+          "last_success": {
             "nullable": true,
-            "description": "The last time we started to collect from this producer.\n\nThis is None if we've never attempted to collect from the producer.",
-            "type": "string",
-            "format": "date-time"
-          },
-          "last_failed_collection": {
-            "nullable": true,
-            "description": "The last time we failed to collect from this producer.\n\nThis is None if we've never failed to collect from the producer. Note that this can be before `last_collection_started`, when we're in the middle of a collection or the last collection was successful.",
-            "type": "string",
-            "format": "date-time"
-          },
-          "last_failure_reason": {
-            "nullable": true,
-            "description": "A string describing why the last collection failed.",
-            "type": "string"
-          },
-          "last_successful_collection": {
-            "nullable": true,
-            "description": "The last time we successfully completed a collection from this producer.\n\nThis is None if we've never successfully collected from the producer. Note that this can be before `last_collection_started`, when we're in the middle of a collection or the last collection has failed.",
-            "type": "string",
-            "format": "date-time"
+            "description": "Details about the last successful collection.\n\nThis is None if we've never successfully collected from the producer.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SuccessfulCollection"
+              }
+            ]
           },
           "n_collections": {
             "description": "The total number of successful collections we've made.",
@@ -264,13 +287,6 @@
           },
           "n_failures": {
             "description": "The total number of failed collections.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "n_samples_in_last_collection": {
-            "nullable": true,
-            "description": "The number of samples collected in the last successful collection.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
@@ -385,6 +401,45 @@
               "management_gateway"
             ]
           }
+        ]
+      },
+      "SuccessfulCollection": {
+        "description": "Details about a previous successful collection.",
+        "type": "object",
+        "properties": {
+          "n_samples": {
+            "description": "The number of samples collected.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "started_at": {
+            "description": "The time at which we started a collection.\n\nNote that this is the time we queued a request to collect for processing by a background task. The `time_queued` can be added to this time to figure out when processing began, and `time_collecting` can be added to that to figure out how long the actual collection process took.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_collecting": {
+            "description": "The time it took for the actual collection.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "time_queued": {
+            "description": "The time this request spent queued before being processed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          }
+        },
+        "required": [
+          "n_samples",
+          "started_at",
+          "time_collecting",
+          "time_queued"
         ]
       }
     },
