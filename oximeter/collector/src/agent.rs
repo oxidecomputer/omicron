@@ -760,8 +760,10 @@ impl OximeterAgent {
     ) {
         let mut task = self.refresh_task.lock().unwrap();
         if task.is_none() {
-            let refresh_task =
-                tokio::spawn(refresh_producer_list(self.clone(), nexus_pool));
+            let refresh_task = tokio::spawn(refresh_producer_list_task(
+                self.clone(),
+                nexus_pool,
+            ));
             *task = Some(refresh_task);
         }
     }
@@ -1074,7 +1076,7 @@ impl OximeterAgent {
 }
 
 // A task which periodically updates our list of producers from Nexus.
-async fn refresh_producer_list(
+async fn refresh_producer_list_task(
     agent: OximeterAgent,
     nexus_pool: Pool<NexusClient>,
 ) {
@@ -1089,77 +1091,85 @@ async fn refresh_producer_list(
     loop {
         interval.tick().await;
         info!(agent.log, "refreshing list of producers from Nexus");
+        refresh_producer_list_once(&agent, &nexus_pool).await;
+    }
+}
 
-        let client = claim_nexus_with_backoff(&agent.log, &nexus_pool).await;
-        let mut stream = client.cpapi_assigned_producers_list_stream(
-            &agent.id,
-            // This is a _total_ limit, not a page size, so `None` means "get
-            // all entries".
-            None,
-            Some(IdSortMode::IdAscending),
-        );
-        let mut expected_producers = BTreeMap::new();
-        loop {
-            match stream.try_next().await {
-                Err(e) => {
-                    // TODO-robustness: Some errors here may not be "fatal", in
-                    // the sense that we can continue to process the list we
-                    // receive from Nexus. It's not clear which ones though,
-                    // since most of these are either impossible (pre-hook
-                    // errors) or indicate we've made a serious programming
-                    // error or updated to incompatible versions of Nexus /
-                    // Oximeter. One that we might be able to handle is a
-                    // communication error, say failing to fetch the last page
-                    // when we've already fetched the first few. But for now,
-                    // we'll simply keep the list we have and try again on the
-                    // next refresh.
-                    //
-                    // For now, let's just avoid doing anything at all here, on
-                    // the theory that if we hit this, we should just continue
-                    // collecting from the last known-good set of producers.
-                    error!(
-                        agent.log,
-                        "error fetching next assigned producer, \
-                        abandoning this refresh attempt";
-                        "err" => ?e,
-                    );
-                    return;
-                }
-                Ok(Some(p)) => {
-                    let endpoint = match ProducerEndpoint::try_from(p) {
-                        Ok(ep) => ep,
-                        Err(e) => {
-                            error!(
-                                agent.log,
-                                "failed to convert producer description \
-                                from Nexus, skipping producer";
-                                "err" => e
-                            );
-                            continue;
-                        }
-                    };
-                    let old = expected_producers.insert(endpoint.id, endpoint);
-                    if let Some(ProducerEndpoint { id, .. }) = old {
+// Run a single "producer refresh from Nexus" operation (which may require
+// multiple requests to Nexus to fetch multiple pages of producers).
+async fn refresh_producer_list_once(
+    agent: &OximeterAgent,
+    nexus_pool: &Pool<NexusClient>,
+) {
+    let client = claim_nexus_with_backoff(&agent.log, &nexus_pool).await;
+    let mut stream = client.cpapi_assigned_producers_list_stream(
+        &agent.id,
+        // This is a _total_ limit, not a page size, so `None` means "get
+        // all entries".
+        None,
+        Some(IdSortMode::IdAscending),
+    );
+    let mut expected_producers = BTreeMap::new();
+    loop {
+        match stream.try_next().await {
+            Err(e) => {
+                // TODO-robustness: Some errors here may not be "fatal", in
+                // the sense that we can continue to process the list we
+                // receive from Nexus. It's not clear which ones though,
+                // since most of these are either impossible (pre-hook
+                // errors) or indicate we've made a serious programming
+                // error or updated to incompatible versions of Nexus /
+                // Oximeter. One that we might be able to handle is a
+                // communication error, say failing to fetch the last page
+                // when we've already fetched the first few. But for now,
+                // we'll simply keep the list we have and try again on the
+                // next refresh.
+                //
+                // For now, let's just avoid doing anything at all here, on
+                // the theory that if we hit this, we should just continue
+                // collecting from the last known-good set of producers.
+                error!(
+                    agent.log,
+                    "error fetching next assigned producer, \
+                    abandoning this refresh attempt";
+                    "err" => ?e,
+                );
+                return;
+            }
+            Ok(Some(p)) => {
+                let endpoint = match ProducerEndpoint::try_from(p) {
+                    Ok(ep) => ep,
+                    Err(e) => {
                         error!(
                             agent.log,
-                            "Nexus appears to have sent duplicate producer info";
-                            "producer_id" => %id,
+                            "failed to convert producer description \
+                            from Nexus, skipping producer";
+                            "err" => e
                         );
+                        continue;
                     }
+                };
+                let old = expected_producers.insert(endpoint.id, endpoint);
+                if let Some(ProducerEndpoint { id, .. }) = old {
+                    error!(
+                        agent.log,
+                        "Nexus appears to have sent duplicate producer info";
+                        "producer_id" => %id,
+                    );
                 }
-                Ok(None) => break,
             }
+            Ok(None) => break,
         }
-        let n_current_tasks = expected_producers.len();
-        let n_pruned_tasks = agent.ensure_producers(expected_producers).await;
-        *agent.last_refresh_time.lock().unwrap() = Some(Utc::now());
-        info!(
-            agent.log,
-            "refreshed list of producers from Nexus";
-            "n_pruned_tasks" => n_pruned_tasks,
-            "n_current_tasks" => n_current_tasks,
-        );
     }
+    let n_current_tasks = expected_producers.len();
+    let n_pruned_tasks = agent.ensure_producers(expected_producers).await;
+    *agent.last_refresh_time.lock().unwrap() = Some(Utc::now());
+    info!(
+        agent.log,
+        "refreshed list of producers from Nexus";
+        "n_pruned_tasks" => n_pruned_tasks,
+        "n_current_tasks" => n_current_tasks,
+    );
 }
 
 async fn claim_nexus_with_backoff(
