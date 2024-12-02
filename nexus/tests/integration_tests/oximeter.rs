@@ -4,8 +4,8 @@
 
 //! Integration tests for oximeter collectors and producers.
 
-use crate::integration_tests::metrics::wait_for_producer;
 use nexus_test_interface::NexusServer;
+use nexus_test_utils::wait_for_producer;
 use nexus_test_utils_macros::nexus_test;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oximeter_db::DbWrite;
