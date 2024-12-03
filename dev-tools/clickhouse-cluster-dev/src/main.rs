@@ -22,7 +22,7 @@ use std::time::Duration;
 async fn main() -> Result<()> {
     let request_timeout = Duration::from_secs(15);
     let (logctx, path) = default_clickhouse_log_ctx_and_path();
-    
+
     if path.exists() {
         slog::info!(logctx.log, "Removing previous temporary test directory");
         std::fs::remove_dir_all(&path)?;
