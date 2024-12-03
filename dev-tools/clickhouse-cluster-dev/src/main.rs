@@ -24,6 +24,10 @@ async fn main() -> Result<()> {
     let (logctx, path) = default_clickhouse_log_ctx_and_path();
 
     if path.exists() {
+        let deployment =
+            default_clickhouse_cluster_test_deployment(path.clone());
+        slog::info!(logctx.log, "Stopping test clickhouse nodes");
+        deployment.teardown()?;
         slog::info!(logctx.log, "Removing previous temporary test directory");
         std::fs::remove_dir_all(&path)?;
     }
