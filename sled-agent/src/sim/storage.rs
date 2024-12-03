@@ -1029,7 +1029,7 @@ impl Storage {
             if stored_config.generation > config.generation {
                 return Err(HttpError::for_client_error(
                     None,
-                    http::StatusCode::BAD_REQUEST,
+                    dropshot::ClientErrorStatusCode::BAD_REQUEST,
                     "Generation number too old".to_string(),
                 ));
             } else if stored_config.generation == config.generation
@@ -1037,7 +1037,7 @@ impl Storage {
             {
                 return Err(HttpError::for_client_error(
                     None,
-                    http::StatusCode::BAD_REQUEST,
+                    dropshot::ClientErrorStatusCode::BAD_REQUEST,
                     "Generation number unchanged but data is different"
                         .to_string(),
                 ));

@@ -101,6 +101,7 @@ impl From<SledAgentInstanceError> for omicron_common::api::external::Error {
 
 impl From<SledAgentInstanceError> for dropshot::HttpError {
     fn from(value: SledAgentInstanceError) -> Self {
+        use dropshot::ErrorStatusCode;
         use dropshot::HttpError;
         use progenitor_client::Error as ClientError;
         // See RFD 486 §6.3:
@@ -118,9 +119,9 @@ impl From<SledAgentInstanceError> for dropshot::HttpError {
                 // See https://github.com/oxidecomputer/dropshot/issues/693
                 let mut error = HttpError::for_internal_error(e.to_string());
                 error.status_code = if e.is_timeout() {
-                    http::StatusCode::GATEWAY_TIMEOUT
+                    ErrorStatusCode::GATEWAY_TIMEOUT
                 } else {
-                    http::StatusCode::BAD_GATEWAY
+                    ErrorStatusCode::BAD_GATEWAY
                 };
                 error
             }
