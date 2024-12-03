@@ -718,7 +718,7 @@ dependencies = [
  "bitflags 2.6.0",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "log",
@@ -2601,7 +2601,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.13.0"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=eliza/custom-error-httpresponse-result#c86d36881310d5c005972fdb83f77e0e4853278d"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=eliza/custom-error-httpresponse-result#f0e6a46acbcb21774cc50ba24ee2faa0b9e060a3"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2665,7 +2665,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.13.0"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=eliza/custom-error-httpresponse-result#c86d36881310d5c005972fdb83f77e0e4853278d"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=eliza/custom-error-httpresponse-result#f0e6a46acbcb21774cc50ba24ee2faa0b9e060a3"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -5101,7 +5101,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
