@@ -6,11 +6,11 @@ use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::{authn, authz, db};
+use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
 use steno::Node;
-use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) enum ImageParam {
@@ -20,11 +20,11 @@ pub(crate) enum ImageParam {
 }
 
 impl ImageParam {
-    fn volume_id(&self) -> Uuid {
+    fn volume_id(&self) -> VolumeUuid {
         match self {
-            ImageParam::Project { image, .. } => image.volume_id,
+            ImageParam::Project { image, .. } => image.volume_id(),
 
-            ImageParam::Silo { image, .. } => image.volume_id,
+            ImageParam::Silo { image, .. } => image.volume_id(),
         }
     }
 }

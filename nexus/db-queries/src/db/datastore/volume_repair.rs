@@ -10,29 +10,31 @@ use crate::db::datastore::OpContext;
 use crate::db::datastore::RunnableQuery;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::model::VolumeRepair;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::VolumeUuid;
 use uuid::Uuid;
 
 impl DataStore {
     pub(super) fn volume_repair_insert_query(
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
         repair_id: Uuid,
     ) -> impl RunnableQuery<VolumeRepair> {
         use db::schema::volume_repair::dsl;
 
         diesel::insert_into(dsl::volume_repair)
-            .values(VolumeRepair { volume_id, repair_id })
+            .values(VolumeRepair { volume_id: volume_id.into(), repair_id })
     }
 
     pub async fn volume_repair_lock(
         &self,
         opctx: &OpContext,
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
         repair_id: Uuid,
     ) -> Result<(), Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -55,14 +57,14 @@ impl DataStore {
     }
 
     pub(super) fn volume_repair_delete_query(
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
         repair_id: Uuid,
     ) -> impl RunnableQuery<VolumeRepair> {
         use db::schema::volume_repair::dsl;
 
         diesel::delete(
             dsl::volume_repair
-                .filter(dsl::volume_id.eq(volume_id))
+                .filter(dsl::volume_id.eq(to_db_typed_uuid(volume_id)))
                 .filter(dsl::repair_id.eq(repair_id)),
         )
     }
@@ -70,7 +72,7 @@ impl DataStore {
     pub async fn volume_repair_unlock(
         &self,
         opctx: &OpContext,
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
         repair_id: Uuid,
     ) -> Result<(), Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -83,14 +85,14 @@ impl DataStore {
 
     pub async fn volume_repair_get(
         conn: &async_bb8_diesel::Connection<db::DbConnection>,
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
         repair_id: Uuid,
     ) -> Result<VolumeRepair, DieselError> {
         use db::schema::volume_repair::dsl;
 
         dsl::volume_repair
             .filter(dsl::repair_id.eq(repair_id))
-            .filter(dsl::volume_id.eq(volume_id))
+            .filter(dsl::volume_id.eq(to_db_typed_uuid(volume_id)))
             .first_async::<VolumeRepair>(conn)
             .await
     }
@@ -102,6 +104,7 @@ mod test {
 
     use crate::db::pub_test_utils::TestDatabase;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::VolumeUuid;
 
     #[tokio::test]
     async fn volume_lock_conflict_error_returned() {
@@ -111,7 +114,7 @@ mod test {
 
         let lock_1 = Uuid::new_v4();
         let lock_2 = Uuid::new_v4();
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
 
         datastore.volume_repair_lock(&opctx, volume_id, lock_1).await.unwrap();
 

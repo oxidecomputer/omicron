@@ -19,15 +19,15 @@ use omicron_uuid_kinds::DownstairsKind;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsKind;
 use omicron_uuid_kinds::UpstairsRepairKind;
+use omicron_uuid_kinds::VolumeUuid;
 use std::sync::Arc;
-use uuid::Uuid;
 
 impl super::Nexus {
     /// Start a saga to remove a read only parent from a volume.
     pub(crate) async fn volume_remove_read_only_parent(
         self: &Arc<Self>,
         opctx: &OpContext,
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
     ) -> DeleteResult {
         let saga_params = sagas::volume_remove_rop::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),

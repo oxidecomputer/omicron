@@ -54,7 +54,7 @@ impl NexusSaga for SagaSnapshotDelete {
 
         let volume_delete_params = sagas::volume_delete::Params {
             serialized_authn: params.serialized_authn.clone(),
-            volume_id: params.snapshot.volume_id,
+            volume_id: params.snapshot.volume_id(),
         };
         builder.append(Node::constant(
             DELETE_VOLUME_PARAMS,
@@ -68,7 +68,7 @@ impl NexusSaga for SagaSnapshotDelete {
 
         let volume_delete_params = sagas::volume_delete::Params {
             serialized_authn: params.serialized_authn.clone(),
-            volume_id: params.snapshot.destination_volume_id,
+            volume_id: params.snapshot.destination_volume_id(),
         };
         builder.append(Node::constant(
             DELETE_VOLUME_DESTINATION_PARAMS,

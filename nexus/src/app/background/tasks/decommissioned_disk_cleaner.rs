@@ -187,7 +187,7 @@ mod tests {
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_uuid_kinds::{
-        DatasetUuid, PhysicalDiskUuid, RegionUuid, SledUuid,
+        DatasetUuid, PhysicalDiskUuid, RegionUuid, SledUuid, VolumeUuid,
     };
     use std::str::FromStr;
     use uuid::Uuid;
@@ -249,7 +249,7 @@ mod tests {
         // There isn't a great API to insert regions (we normally allocate!)
         // so insert the record manually here.
         let region = {
-            let volume_id = Uuid::new_v4();
+            let volume_id = VolumeUuid::new_v4();
             Region::new(
                 dataset.id(),
                 volume_id,

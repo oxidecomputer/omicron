@@ -10,6 +10,8 @@ use db_macros::Asset;
 use omicron_common::api::external;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::VolumeKind;
+use omicron_uuid_kinds::VolumeUuid;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -34,7 +36,7 @@ pub struct Region {
     identity: RegionIdentity,
 
     dataset_id: DbTypedUuid<DatasetKind>,
-    volume_id: Uuid,
+    volume_id: DbTypedUuid<VolumeKind>,
 
     block_size: ByteCount,
 
@@ -58,7 +60,7 @@ pub struct Region {
 impl Region {
     pub fn new(
         dataset_id: DatasetUuid,
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
         block_size: ByteCount,
         blocks_per_extent: u64,
         extent_count: u64,
@@ -68,7 +70,7 @@ impl Region {
         Self {
             identity: RegionIdentity::new(Uuid::new_v4()),
             dataset_id: dataset_id.into(),
-            volume_id,
+            volume_id: volume_id.into(),
             block_size,
             blocks_per_extent: blocks_per_extent as i64,
             extent_count: extent_count as i64,
@@ -81,8 +83,8 @@ impl Region {
     pub fn id(&self) -> Uuid {
         self.identity.id
     }
-    pub fn volume_id(&self) -> Uuid {
-        self.volume_id
+    pub fn volume_id(&self) -> VolumeUuid {
+        self.volume_id.into()
     }
     pub fn dataset_id(&self) -> DatasetUuid {
         self.dataset_id.into()

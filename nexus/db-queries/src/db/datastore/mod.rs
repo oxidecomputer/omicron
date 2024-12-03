@@ -477,6 +477,7 @@ mod test {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
+    use omicron_uuid_kinds::VolumeUuid;
     use std::collections::HashMap;
     use std::collections::HashSet;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
@@ -1021,7 +1022,7 @@ mod test {
                 &format!("disk{}", alloc_seed),
                 ByteCount::from_mebibytes_u32(1),
             );
-            let volume_id = Uuid::new_v4();
+            let volume_id = VolumeUuid::new_v4();
 
             let expected_region_count = REGION_REDUNDANCY_THRESHOLD;
             let dataset_and_regions = datastore
@@ -1115,7 +1116,7 @@ mod test {
                 &format!("disk{}", alloc_seed),
                 ByteCount::from_mebibytes_u32(1),
             );
-            let volume_id = Uuid::new_v4();
+            let volume_id = VolumeUuid::new_v4();
 
             let expected_region_count = REGION_REDUNDANCY_THRESHOLD;
             let dataset_and_regions = datastore
@@ -1203,7 +1204,7 @@ mod test {
                 &format!("disk{}", alloc_seed),
                 ByteCount::from_mebibytes_u32(1),
             );
-            let volume_id = Uuid::new_v4();
+            let volume_id = VolumeUuid::new_v4();
 
             let err = datastore
                 .disk_region_allocate(
@@ -1249,7 +1250,7 @@ mod test {
             "disk",
             ByteCount::from_mebibytes_u32(500),
         );
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
         let mut dataset_and_regions1 = datastore
             .disk_region_allocate(
                 &opctx,
@@ -1358,7 +1359,7 @@ mod test {
             "disk1",
             ByteCount::from_mebibytes_u32(500),
         );
-        let volume1_id = Uuid::new_v4();
+        let volume1_id = VolumeUuid::new_v4();
         let err = datastore
             .disk_region_allocate(
                 &opctx,
@@ -1458,7 +1459,7 @@ mod test {
             "disk1",
             ByteCount::from_mebibytes_u32(500),
         );
-        let volume1_id = Uuid::new_v4();
+        let volume1_id = VolumeUuid::new_v4();
         let err = datastore
             .disk_region_allocate(
                 &opctx,
@@ -1547,7 +1548,7 @@ mod test {
             (Policy::InService, State::Active, AllocationShould::Succeed),
         ];
 
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
         let params = create_test_disk_create_params(
             "disk",
             ByteCount::from_mebibytes_u32(500),
@@ -1617,7 +1618,7 @@ mod test {
         let disk_size = test_zpool_size();
         let alloc_size = ByteCount::try_from(disk_size.to_bytes() * 2).unwrap();
         let params = create_test_disk_create_params("disk1", alloc_size);
-        let volume1_id = Uuid::new_v4();
+        let volume1_id = VolumeUuid::new_v4();
 
         assert!(datastore
             .disk_region_allocate(
@@ -1644,10 +1645,11 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let datastore = db.datastore();
         let conn = datastore.pool_connection_for_tests().await.unwrap();
-        let explanation = DataStore::get_allocated_regions_query(Uuid::nil())
-            .explain_async(&conn)
-            .await
-            .unwrap();
+        let explanation =
+            DataStore::get_allocated_regions_query(VolumeUuid::nil())
+                .explain_async(&conn)
+                .await
+                .unwrap();
         assert!(
             !explanation.contains("FULL SCAN"),
             "Found an unexpected FULL SCAN: {}",

@@ -12,6 +12,7 @@ use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::model::Generation;
 use crate::db::model::Name;
 use crate::db::model::Project;
@@ -36,6 +37,7 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::VolumeUuid;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
@@ -309,13 +311,13 @@ impl DataStore {
     pub async fn find_snapshot_by_destination_volume_id(
         &self,
         opctx: &OpContext,
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
     ) -> LookupResult<Option<Snapshot>> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
         use db::schema::snapshot::dsl;
         dsl::snapshot
-            .filter(dsl::destination_volume_id.eq(volume_id))
+            .filter(dsl::destination_volume_id.eq(to_db_typed_uuid(volume_id)))
             .select(Snapshot::as_select())
             .first_async(&*conn)
             .await
