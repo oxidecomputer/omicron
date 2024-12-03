@@ -12,6 +12,7 @@
 //! nexus/db-model, but nexus/reconfigurator/planning does not currently know
 //! about nexus/db-model and it's convenient to separate these concerns.)
 
+use crate::external_api::views::PhysicalDiskState;
 use crate::external_api::views::SledState;
 use crate::internal_api::params::DnsConfigParams;
 use crate::inventory::Collection;
@@ -921,6 +922,7 @@ pub enum BlueprintPhysicalDiskDisposition {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct BlueprintPhysicalDiskConfig {
     pub disposition: BlueprintPhysicalDiskDisposition,
+    pub state: PhysicalDiskState,
     pub identity: DiskIdentity,
     pub id: PhysicalDiskUuid,
     pub pool_id: ZpoolUuid,
@@ -955,6 +957,7 @@ impl From<BlueprintPhysicalDiskConfig> for OmicronPhysicalDiskConfig {
     }
 }
 
+// TODO: Only convert a disk if the disposition is not expunged
 impl From<BlueprintPhysicalDisksConfig> for OmicronPhysicalDisksConfig {
     fn from(value: BlueprintPhysicalDisksConfig) -> Self {
         OmicronPhysicalDisksConfig {

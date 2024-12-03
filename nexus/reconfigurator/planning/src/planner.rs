@@ -106,7 +106,7 @@ impl<'a> Planner<'a> {
     }
 
     fn do_plan_decommission(&mut self) -> Result<(), Error> {
-        self.do_plan_decommission_disks()?;
+        //self.do_plan_decommission_disks()?;
         self.do_plan_decommission_sleds()
     }
 
@@ -1845,7 +1845,9 @@ mod test {
         assert_eq!(diff.zones.removed.len(), 0);
         assert_eq!(diff.zones.modified.len(), 1);
         assert_eq!(diff.physical_disks.added.len(), 0);
-        assert_eq!(diff.physical_disks.removed.len(), 1);
+        // NOTE: Expunging a disk doesn't immediately delete it. It must first
+        // be decommissioned and then it will be removed.
+        assert_eq!(diff.physical_disks.removed.len(), 0);
         assert_eq!(diff.datasets.added.len(), 0);
         // NOTE: Expunging a disk doesn't immediately delete datasets; see the
         // "decommissioned_disk_cleaner" background task for more context.
