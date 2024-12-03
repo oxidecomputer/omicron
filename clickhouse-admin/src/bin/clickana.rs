@@ -105,7 +105,8 @@ impl App {
     }
 
     fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
-        let tick_rate = Duration::from_millis(250);
+      // TODO: Actually fix this
+        let tick_rate = Duration::from_secs(250);
         let mut last_tick = Instant::now();
         loop {
             terminal.draw(|frame| self.draw(frame))?;
@@ -346,6 +347,8 @@ fn get_api_data() -> Result<Vec<Timeseries>> {
   let log = log();
   let client = ClickhouseServerClient::new(&admin_url, log.clone());
   let result = rt.block_on( async {
+    // TODO: Do something with the logs! It's messing up my chart :(
+    // I think I need to call drawe after this
   let timeseries = client
       .system_timeseries_avg(types::SystemTable::AsynchronousMetricLog, "DiskUsed_default", Some(120), Some(3600), Some(types::TimestampFormat::UnixEpoch) )
       .await
