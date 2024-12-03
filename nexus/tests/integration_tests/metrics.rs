@@ -301,6 +301,8 @@ pub async fn timeseries_query_until_success(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
     query: impl ToString,
 ) -> Vec<oxql_types::Table> {
+    const POLL_INTERVAL: Duration = Duration::from_secs(1);
+    const POLL_MAX: Duration = Duration::from_secs(30);
     let query_ = query.to_string();
     wait_for_condition(
         || async {
@@ -309,13 +311,15 @@ pub async fn timeseries_query_until_success(
                 None => Err(CondCheckError::<()>::NotYet),
             }
         },
-        &Duration::from_secs(1),
-        &Duration::from_secs(30),
+        &POLL_INTERVAL,
+        &POLL_MAX,
     )
     .await
     .unwrap_or_else(|_| {
         panic!(
-            "Timeseries named in query are not available, query: '{}'",
+            "Timeseries named in query are not available \
+            after {:?}, query: '{}'",
+            POLL_MAX,
             query.to_string(),
         )
     })
@@ -374,7 +378,7 @@ pub async fn timeseries_query(
             .unwrap_or_else(|e| {
                 panic!(
                     "could not parse timeseries query response: {e:?}\n\
-                query: {query}\nresponse: {rsp:#?}"
+                    query: {query}\nresponse: {rsp:#?}"
                 );
             })
             .tables,
