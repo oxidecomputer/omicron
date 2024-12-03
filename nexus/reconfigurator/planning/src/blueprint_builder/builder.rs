@@ -685,6 +685,29 @@ impl<'a> BlueprintBuilder<'a> {
         self.operations.push(operation);
     }
 
+    /// Expunges all disks requiring expungement from a sled.
+    pub(crate) fn expunge_disks_for_sled(
+        &mut self,
+        sled_id: SledUuid,
+    ) -> Result<Vec<ZpoolName>, Error> {
+        let sled_resources = self.sled_resources(sled_id)?;
+        let mut sled_storage = self.storage.sled_storage_editor(
+            sled_id,
+            sled_resources,
+            &mut self.rng,
+        )?;
+
+        // Find all expunged by policy, but not decommissioned disks as we observed
+        // them in the database, during the planning phase. Then set their disposition to expunged
+        // and return their
+        let zpool_names = sled_resources
+            .all_disks(DiskFilter::Expunged)
+            .filter_map(|(_, disk)| sled_storage.expunge_disk(&disk.disk_id))
+            .collect();
+
+        Ok(zpool_names)
+    }
+
     /// Expunges all zones requiring expungement from a sled.
     ///
     /// Returns a list of zone IDs expunged (excluding zones that were already

@@ -106,6 +106,19 @@ impl SledStorageEditor<'_> {
         Some(ZpoolName::new_external(disk.pool_id))
     }
 
+    /// Set the disposition of a disk to `Expunged` and return its zpool.
+    pub fn expunge_disk(
+        &mut self,
+        disk_id: &PhysicalDiskUuid,
+    ) -> Option<ZpoolName> {
+        let Some(disk) = self.disks.expunge_disk(disk_id) else {
+            return None;
+        };
+        self.datasets
+            .expunge_datasets_if(|dataset| dataset.pool.id() == disk.pool_id);
+        Some(ZpoolName::new_external(disk.pool_id))
+    }
+
     pub fn ensure_zone_datasets(&mut self, zone: &BlueprintZoneConfig) {
         // TODO check that zpools are on valid disks?
 

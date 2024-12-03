@@ -106,6 +106,15 @@ impl<'a> Planner<'a> {
     }
 
     fn do_plan_decommission(&mut self) -> Result<(), Error> {
+        self.do_plan_decommission_disks()?;
+        self.do_plan_decommission_sleds()
+    }
+
+    fn do_plan_decommission_disks(&mut self) -> Result<(), Error> {
+        todo!()
+    }
+
+    fn do_plan_decommission_sleds(&mut self) -> Result<(), Error> {
         // Check for any sleds that are currently commissioned but can be
         // decommissioned. Our gates for decommissioning are:
         //
@@ -178,8 +187,11 @@ impl<'a> Planner<'a> {
         {
             commissioned_sled_ids.insert(sled_id);
 
-            // Perform the expungement, for any zones that might need it.
+            // Perform the expungement for any zones that might need it.
             self.blueprint.expunge_zones_for_sled(sled_id, sled_details)?;
+
+            // Perform the expungment for any disks that might need it.
+            self.blueprint.expunge_disks_for_sled(sled_id)?;
         }
 
         // Check for any decommissioned sleds (i.e., sleds for which our
@@ -723,6 +735,8 @@ fn sled_needs_all_zones_expunged(
         SledPolicy::Expunged => Some(ZoneExpungeReason::SledExpunged),
     }
 }
+
+pub(crate) fn disk_needs_expungement() {}
 
 pub(crate) fn zone_needs_expungement(
     sled_details: &SledDetails,

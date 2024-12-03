@@ -292,7 +292,7 @@ impl DataStore {
         let conn = &*self.pool_connection_authorized(&opctx).await?;
         diesel::update(dsl::physical_disk)
             .filter(dsl::time_deleted.is_null())
-            .physical_disk_filter(DiskFilter::ExpungedButActive)
+            .physical_disk_filter(DiskFilter::Expunged)
             .set(dsl::disk_state.eq(PhysicalDiskState::Decommissioned))
             .execute_async(conn)
             .await

@@ -6,6 +6,7 @@
 
 use super::EditCounts;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
+use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -150,6 +151,16 @@ impl<'a> SledDisksEditor<'a> {
             self.counts.removed += 1;
         }
         old
+    }
+
+    pub fn expunge_disk(
+        &mut self,
+        disk_id: &PhysicalDiskUuid,
+    ) -> Option<BlueprintPhysicalDiskConfig> {
+        let config = self.config.disks.get_mut(disk_id)?;
+        config.disposition = BlueprintPhysicalDiskDisposition::Expunged;
+        self.counts.expunged += 1;
+        Some(config.clone())
     }
 
     pub fn finalize(self) -> EditCounts {
