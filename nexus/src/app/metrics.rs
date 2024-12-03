@@ -189,7 +189,8 @@ impl super::Nexus {
             .await
             .map(|result| result.tables)
             .map_err(|e| match e {
-                oximeter_db::Error::DatabaseUnavailable(_) => {
+                oximeter_db::Error::DatabaseUnavailable(_)
+                | oximeter_db::Error::Connection(_) => {
                     Error::ServiceUnavailable {
                         internal_message: e.to_string(),
                     }
