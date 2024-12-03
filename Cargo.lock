@@ -7840,6 +7840,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-dtrace",
+ "slog-error-chain",
  "slog-term",
  "strum",
  "subprocess",
@@ -10738,6 +10739,7 @@ dependencies = [
 name = "sled-diagnostics"
 version = "0.1.0"
 dependencies = [
+ "cfg-if",
  "fs-err",
  "futures",
  "libc",

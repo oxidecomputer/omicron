@@ -16,6 +16,7 @@ use nexus_test_utils::resource_helpers::{
     create_default_ip_pool, create_disk, create_instance, create_project,
     objects_list_page_authz, DiskTest,
 };
+use nexus_test_utils::wait_for_producer;
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::views::OxqlQueryResult;
@@ -789,41 +790,4 @@ async fn test_mgs_metrics(
     // Because the `ControlPlaneTestContext` isn't managing the MGS we made for
     // this test, we are responsible for removing its logs.
     mgs.logctx.cleanup_successful();
-}
-
-/// Wait until a producer is registered with Oximeter.
-///
-/// This blocks until the producer is registered, for up to 60s. It panics if
-/// the retry loop hits a permanent error.
-pub async fn wait_for_producer<G: GenericUuid>(
-    oximeter: &oximeter_collector::Oximeter,
-    producer_id: G,
-) {
-    wait_for_producer_impl(oximeter, producer_id.into_untyped_uuid()).await;
-}
-
-// This function is outlined from wait_for_producer to avoid unnecessary
-// monomorphization.
-async fn wait_for_producer_impl(
-    oximeter: &oximeter_collector::Oximeter,
-    producer_id: Uuid,
-) {
-    wait_for_condition(
-        || async {
-            if oximeter
-                .list_producers(None, usize::MAX)
-                .await
-                .iter()
-                .any(|p| p.id == producer_id)
-            {
-                Ok(())
-            } else {
-                Err(CondCheckError::<()>::NotYet)
-            }
-        },
-        &Duration::from_secs(1),
-        &Duration::from_secs(60),
-    )
-    .await
-    .expect("Failed to find producer within time limit");
 }

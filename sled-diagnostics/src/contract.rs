@@ -1,6 +1,7 @@
 use fs_err as fs;
 use libc::{c_char, c_int, c_void, pid_t};
 use slog::{warn, Logger};
+use thiserror::Error;
 
 use std::{
     collections::BTreeSet,
@@ -24,6 +25,7 @@ extern "C" {
         stathdlp: *mut ct_stathdl_t,
     ) -> c_int;
     fn ct_status_free(stathdlp: ct_stathdl_t);
+    fn ct_status_get_id(stathdlp: ct_stathdl_t) -> i32;
     fn ct_pr_status_get_members(
         stathdlp: ct_stathdl_t,
         pidpp: *mut *mut pid_t,
@@ -33,6 +35,24 @@ extern "C" {
         stathdlp: ct_stathdl_t,
         fmri: *mut *mut c_char,
     ) -> c_int;
+}
+
+#[derive(Error, Debug)]
+pub enum ContractError {
+    #[error(transparent)]
+    FileIo(#[from] std::io::Error),
+    #[error(
+        "Failed to call ct_pr_status_get_svc_fmri for contract {ctid}: {error}"
+    )]
+    Fmri { ctid: i32, error: std::io::Error },
+    #[error(
+        "Failed to call ct_pr_status_get_members for contract {ctid}: {error}"
+    )]
+    Members { ctid: i32, error: std::io::Error },
+    #[error("ct_status_read returned successfully but handed back a null ptr for {0}")]
+    Null(std::path::PathBuf),
+    #[error("Failed to call ct_status_read on {path}: {error}")]
+    StatusRead { path: std::path::PathBuf, error: std::io::Error },
 }
 
 pub struct ContractStatus {
@@ -57,24 +77,25 @@ macro_rules! libcall_io {
     }
 
 impl ContractStatus {
-    fn new(contract_status: &Path) -> Result<Self, std::io::Error> {
+    fn new(contract_status: &Path) -> Result<Self, ContractError> {
         let file = fs::File::open(contract_status)?;
         let mut handle: ct_stathdl_t = std::ptr::null_mut();
-        libcall_io!(ct_status_read(file.as_raw_fd(), CTD_ALL, &mut handle,))?;
+        libcall_io!(ct_status_read(file.as_raw_fd(), CTD_ALL, &mut handle,))
+            .map_err(|error| ContractError::StatusRead {
+                path: contract_status.to_path_buf(),
+                error,
+            })?;
 
         // We don't ever expect the system to hand back a null ptr when
         // returning success but let's be extra cautious anyways.
         if handle.is_null() {
-            return Err(std::io::Error::other(
-                "ct_status_read() returned a null \
-                ptr even though it completed successfully",
-            ));
+            return Err(ContractError::Null(contract_status.to_path_buf()));
         }
 
         Ok(Self { handle })
     }
 
-    fn get_members(&self) -> Result<&[i32], std::io::Error> {
+    fn get_members(&self) -> Result<&[i32], ContractError> {
         let mut numpids = 0;
         let mut pids: *mut pid_t = std::ptr::null_mut();
 
@@ -83,7 +104,11 @@ impl ContractStatus {
                 self.handle,
                 &mut pids,
                 &mut numpids,
-            ))?;
+            ))
+            .map_err(|error| {
+                let ctid = unsafe { ct_status_get_id(self.handle) };
+                ContractError::Members { ctid, error }
+            })?;
 
             unsafe {
                 if pids.is_null() {
@@ -97,11 +122,16 @@ impl ContractStatus {
         Ok(pids)
     }
 
-    fn get_fmri(&self) -> Result<Option<CString>, std::io::Error> {
+    fn get_fmri(&self) -> Result<Option<CString>, ContractError> {
         // The lifetime of this string is tied to the lifetime of the status
         // handle itself and will be cleaned up when the handle is freed.
         let mut ptr: *mut c_char = std::ptr::null_mut();
-        libcall_io!(ct_pr_status_get_svc_fmri(self.handle, &mut ptr))?;
+        libcall_io!(ct_pr_status_get_svc_fmri(self.handle, &mut ptr)).map_err(
+            |error| {
+                let ctid = unsafe { ct_status_get_id(self.handle) };
+                ContractError::Fmri { ctid, error }
+            },
+        )?;
 
         if ptr.is_null() {
             return Ok(None);
@@ -112,7 +142,7 @@ impl ContractStatus {
     }
 }
 
-pub fn find_oxide_pids(log: &Logger) -> Result<BTreeSet<i32>, std::io::Error> {
+pub fn find_oxide_pids(log: &Logger) -> Result<BTreeSet<i32>, ContractError> {
     let mut pids = BTreeSet::new();
     let ents = fs::read_dir(CT_ALL)?;
     for ct in ents {

@@ -9,6 +9,12 @@ use std::{process::Command, time::Duration};
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
 
+#[cfg(target_os = "illumos")]
+use crate::contract::ContractError;
+
+#[cfg(not(target_os = "illumos"))]
+use crate::contract_stub::ContractError;
+
 const DLADM: &str = "/usr/sbin/dladm";
 const IPADM: &str = "/usr/sbin/ipadm";
 const PFEXEC: &str = "/usr/bin/pfexec";
@@ -24,9 +30,8 @@ pub trait SledDiagnosticsCommandHttpOutput {
 
 #[derive(Error, Debug)]
 pub enum SledDiagnosticsCmdError {
-    #[cfg(target_os = "illumos")]
     #[error("libcontract error: {0}")]
-    Contract(std::io::Error),
+    Contract(#[from] ContractError),
     #[error("Failed to duplicate pipe for command [{command}]: {error}")]
     Dup { command: String, error: std::io::Error },
     #[error("Failed to proccess output for command [{command}]: {error}")]
