@@ -63,7 +63,6 @@ async fn test_schemas_disjoint() -> anyhow::Result<()> {
     deployment.deploy().context("failed to deploy")?;
 
     let client1 = Client::new_with_request_timeout(
-        deployment.http_addr(1.into()),
         deployment.native_addr(1.into()),
         log,
         request_timeout,
@@ -159,13 +158,11 @@ async fn test_cluster() -> anyhow::Result<()> {
     deployment.deploy().context("failed to deploy")?;
 
     let client1 = Client::new_with_request_timeout(
-        deployment.http_addr(1.into()),
         deployment.native_addr(1.into()),
         log,
         request_timeout,
     );
     let client2 = Client::new_with_request_timeout(
-        deployment.http_addr(2.into()),
         deployment.native_addr(2.into()),
         log,
         request_timeout,
@@ -231,7 +228,6 @@ async fn test_cluster() -> anyhow::Result<()> {
     // Add a 3rd clickhouse server and wait for it to come up
     deployment.add_server().expect("failed to launch a 3rd clickhouse server");
     let client3 = Client::new_with_request_timeout(
-        deployment.http_addr(3.into()),
         deployment.native_addr(3.into()),
         log,
         request_timeout,
@@ -333,7 +329,6 @@ async fn test_cluster() -> anyhow::Result<()> {
     // few hundred milliseconds. To shorten the length of our test, we create a
     // new client with a shorter timeout.
     let client1_short_timeout = Client::new_with_request_timeout(
-        deployment.http_addr(1.into()),
         deployment.native_addr(1.into()),
         log,
         Duration::from_secs(2),
@@ -455,6 +450,7 @@ async fn wait_for_num_points(
     Ok(())
 }
 
+// TODO: Use the function in the other package
 /// Try to ping the server until it responds.
 async fn wait_for_ping(log: &Logger, client: &Client) -> anyhow::Result<()> {
     poll::wait_for_condition(
@@ -468,10 +464,8 @@ async fn wait_for_ping(log: &Logger, client: &Client) -> anyhow::Result<()> {
         &Duration::from_secs(30),
     )
     .await
-    .with_context(|| {
-        format!("failed to ping clickhouse server: {}", client.url())
-    })?;
-    info!(log, "Clickhouse server ready: {}", client.url());
+    .context("failed to ping ClickHouse server")?;
+    info!(log, "ClickHouse server ready");
     Ok(())
 }
 
@@ -492,12 +486,7 @@ async fn wait_for_insert(
         &Duration::from_secs(60),
     )
     .await
-    .with_context(|| {
-        format!(
-            "failed to insert samples at clickhouse server: {}",
-            client.url()
-        )
-    })?;
-    info!(log, "inserted samples at clickhouse server: {}", client.url());
+    .context("failed to insert samples into ClickHouse server")?;
+    info!(log, "inserted samples into clickhouse server");
     Ok(())
 }

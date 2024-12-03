@@ -682,6 +682,7 @@ impl Sled {
                     })
                     .collect(),
                 datasets: vec![],
+                omicron_physical_disks_generation: Generation::new(),
             }
         };
 
@@ -820,6 +821,7 @@ impl Sled {
             disks: vec![],
             zpools: vec![],
             datasets: vec![],
+            omicron_physical_disks_generation: Generation::new(),
         };
 
         Sled {

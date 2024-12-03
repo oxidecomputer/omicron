@@ -18,16 +18,12 @@
 
 // Copyright 2024 Oxide Computer Company
 
-use super::query_summary::QuerySummary;
+use crate::client::Client;
+use crate::sql::QueryResult;
 pub use crate::sql::RestrictedQuery;
+use crate::sql::Table;
 use crate::Error;
-use crate::{
-    client::Client,
-    sql::{QueryResult, Table},
-};
-pub use indexmap::IndexMap;
 use slog::debug;
-pub use std::time::Instant;
 
 impl Client {
     /// Transform a SQL query against a timeseries, but do not execute it.
@@ -44,57 +40,27 @@ impl Client {
         &self,
         query: impl AsRef<str>,
     ) -> Result<QueryResult, Error> {
-        use crate::client::handle_db_response;
-
         let original_query = query.as_ref().trim_end_matches(';');
-        let ox_sql = self.transform_query(original_query).await?;
-        let rewritten = format!("{ox_sql} FORMAT JSONEachRow");
+        let rewritten = self.transform_query(original_query).await?;
         debug!(
             self.log,
             "rewrote restricted query";
             "original_sql" => &original_query,
             "rewritten_sql" => &rewritten,
         );
-        let client = crate::client::ClientVariant::new(&self.source).await?;
-
-        let request = client
-            .reqwest()
-            .post(client.url())
-            .query(&[
-                ("output_format_json_quote_64bit_integers", "0"),
-                ("database", crate::DATABASE_NAME),
-            ])
-            .body(rewritten.clone());
-        let query_start = Instant::now();
-        let response = handle_db_response(
-            request
-                .send()
-                .await
-                .map_err(|err| Error::DatabaseUnavailable(err.to_string()))?,
-        )
-        .await?;
-        let summary = QuerySummary::from_headers(
-            query_start.elapsed(),
-            response.headers(),
-        )?;
-        let text = response.text().await.unwrap();
-        let mut table = Table::default();
-        for line in text.lines() {
-            let row =
-                serde_json::from_str::<IndexMap<String, serde_json::Value>>(
-                    line.trim(),
-                )
-                .unwrap();
-            if table.column_names.is_empty() {
-                table.column_names.extend(row.keys().cloned())
-            } else {
-                assert!(table
-                    .column_names
-                    .iter()
-                    .zip(row.keys())
-                    .all(|(k1, k2)| k1 == k2));
-            }
-            table.rows.push(row.into_values().collect());
+        let result = self.execute_with_block(&rewritten).await?;
+        let summary = result.query_summary();
+        let Some(block) = result.data.as_ref() else {
+            return Err(Error::Database(String::from(
+                "Got an empty data block",
+            )));
+        };
+        let mut table = Table {
+            column_names: block.columns.keys().cloned().collect(),
+            rows: vec![],
+        };
+        for row in block.json_rows().into_iter() {
+            table.rows.push(row.into_iter().map(|(_k, v)| v).collect());
         }
         Ok(QueryResult {
             original_query: original_query.to_string(),

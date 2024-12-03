@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "20241204.0"
+    "version": "20241204.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -13266,7 +13266,7 @@
         "type": "object",
         "properties": {
           "private_key": {
-            "description": "request signing private key (base64 encoded der file)",
+            "description": "request signing RSA private key in PKCS#1 format (base64 encoded der file)",
             "type": "string"
           },
           "public_cert": {
@@ -16540,8 +16540,28 @@
                 "$ref": "#/components/schemas/NameOrId"
               }
             ]
+          },
+          "memory": {
+            "description": "The amount of memory to assign to this instance.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "ncpus": {
+            "description": "The number of CPUs to assign to this instance.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceCpuCount"
+              }
+            ]
           }
-        }
+        },
+        "required": [
+          "memory",
+          "ncpus"
+        ]
       },
       "InternetGateway": {
         "description": "An internet gateway provides a path between VPC networks and external networks.",
@@ -17215,7 +17235,8 @@
             "type": "boolean"
           },
           "fec": {
-            "description": "The forward error correction mode of the link.",
+            "nullable": true,
+            "description": "The requested forward-error correction method.  If this is not specified, the standard FEC for the underlying media will be applied if it can be determined.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/LinkFec"
@@ -17256,7 +17277,6 @@
         },
         "required": [
           "autoneg",
-          "fec",
           "lldp",
           "mtu",
           "speed"
@@ -20459,7 +20479,8 @@
             "type": "boolean"
           },
           "fec": {
-            "description": "The forward error correction mode of the link.",
+            "nullable": true,
+            "description": "The requested forward-error correction method.  If this is not specified, the standard FEC for the underlying media will be applied if it can be determined.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/LinkFec"
@@ -20504,7 +20525,6 @@
         },
         "required": [
           "autoneg",
-          "fec",
           "link_name",
           "mtu",
           "port_settings_id",

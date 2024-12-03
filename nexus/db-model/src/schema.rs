@@ -141,7 +141,7 @@ table! {
         port_settings_id -> Uuid,
         link_name -> Text,
         mtu -> Int4,
-        fec -> crate::SwitchLinkFecEnum,
+        fec -> Nullable<crate::SwitchLinkFecEnum>,
         speed -> crate::SwitchLinkSpeedEnum,
         autoneg -> Bool,
         lldp_link_config_id -> Nullable<Uuid>,
@@ -1486,6 +1486,7 @@ table! {
         usable_hardware_threads -> Int8,
         usable_physical_ram -> Int8,
         reservoir_size -> Int8,
+        omicron_physical_disks_generation -> Int8,
     }
 }
 
@@ -1664,6 +1665,8 @@ table! {
 
         id -> Uuid,
         pool_id -> Uuid,
+
+        disposition -> crate::DbBpPhysicalDiskDispositionEnum,
     }
 }
 

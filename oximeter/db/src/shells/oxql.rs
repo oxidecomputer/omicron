@@ -32,13 +32,12 @@ pub struct ShellOptions {
 /// Run/execute the OxQL shell.
 pub async fn shell(
     address: IpAddr,
-    http_port: u16,
-    native_port: u16,
+    port: u16,
     log: Logger,
     opts: ShellOptions,
 ) -> anyhow::Result<()> {
     // Create the client.
-    let client = make_client(address, http_port, native_port, &log).await?;
+    let client = make_client(address, port, &log).await?;
 
     // A workaround to ensure the client has all available timeseries when the
     // shell starts.

@@ -28,9 +28,11 @@ qorb.workspace = true
 rand.workspace = true
 reqwest = { workspace = true, features = [ "json" ] }
 schemars.workspace = true
+semver.workspace = true
 serde.workspace = true
 slog.workspace = true
 slog-async.workspace = true
+slog-error-chain.workspace = true
 slog-dtrace.workspace = true
 slog-term.workspace = true
 strum.workspace = true

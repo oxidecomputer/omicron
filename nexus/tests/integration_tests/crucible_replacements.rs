@@ -100,7 +100,7 @@ async fn test_region_replacement_does_not_create_freed_region(
     datastore
         .physical_disk_update_policy(
             &opctx,
-            db_zpool.physical_disk_id,
+            db_zpool.physical_disk_id.into(),
             PhysicalDiskPolicy::Expunged,
         )
         .await

@@ -19,11 +19,15 @@ use crate::params::OmicronZoneTypeExt;
 use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::StorageMonitorHandle;
-use crate::support_bundle::{SupportBundleCmdError, SupportBundleCmdOutput};
+use crate::support_bundle::queries::{
+    dladm_info, ipadm_info, zoneadm_info, SupportBundleCmdError,
+    SupportBundleCmdOutput,
+};
+use crate::support_bundle::storage::SupportBundleManager;
 use crate::updates::{ConfigUpdates, UpdateManager};
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
+use crate::zone_bundle;
 use crate::zone_bundle::BundleError;
-use crate::{support_bundle, zone_bundle};
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use derive_more::From;
@@ -159,6 +163,9 @@ pub enum Error {
 
     #[error("Failed to deserialize early network config: {0}")]
     EarlyNetworkDeserialize(serde_json::Error),
+
+    #[error("Support bundle error: {0}")]
+    SupportBundle(String),
 
     #[error("Zone bundle error: {0}")]
     ZoneBundle(#[from] BundleError),
@@ -382,7 +389,7 @@ impl SledAgentInner {
 #[derive(Clone)]
 pub struct SledAgent {
     inner: Arc<SledAgentInner>,
-    log: Logger,
+    pub(crate) log: Logger,
     sprockets: SprocketsConfig,
 }
 
@@ -690,6 +697,11 @@ impl SledAgent {
         )
         .await
         .unwrap(); // we retry forever, so this can't fail
+    }
+
+    /// Accesses the [SupportBundleManager] API.
+    pub(crate) fn as_support_bundle_storage(&self) -> SupportBundleManager<'_> {
+        SupportBundleManager::new(&self.log, self.storage())
     }
 
     pub(crate) fn switch_zone_underlay_info(
@@ -1349,19 +1361,26 @@ impl SledAgent {
             disks,
             zpools,
             datasets,
+            omicron_physical_disks_generation: *all_disks.generation(),
         })
     }
 
     pub(crate) async fn support_zoneadm_info(
         &self,
     ) -> Result<SupportBundleCmdOutput, SupportBundleCmdError> {
-        support_bundle::zoneadm_info().await
+        zoneadm_info().await
     }
 
     pub(crate) async fn support_ipadm_info(
         &self,
     ) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
-        support_bundle::ipadm_info().await
+        ipadm_info().await
+    }
+
+    pub(crate) async fn support_dladm_info(
+        &self,
+    ) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
+        dladm_info().await
     }
 }
 

@@ -2,7 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{ByteCount, DatasetKind, Generation, Region, SqlU16};
+use super::DatasetKind;
+use super::{ByteCount, Generation, Region, SqlU16};
 use crate::collection::DatastoreCollectionConfig;
 use crate::ipv6;
 use crate::schema::{dataset, region};
@@ -11,7 +12,6 @@ use db_macros::Asset;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::DatasetKind as ApiDatasetKind;
-use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
@@ -34,6 +34,7 @@ use uuid::Uuid;
     PartialEq,
 )]
 #[diesel(table_name = dataset)]
+#[asset(uuid_kind = DatasetKind)]
 pub struct Dataset {
     #[diesel(embed)]
     identity: DatasetIdentity,
@@ -62,7 +63,7 @@ pub struct Dataset {
 
 impl Dataset {
     pub fn new(
-        id: Uuid,
+        id: omicron_uuid_kinds::DatasetUuid,
         pool_id: Uuid,
         addr: Option<SocketAddrV6>,
         api_kind: ApiDatasetKind,
@@ -119,7 +120,7 @@ impl From<BlueprintDatasetConfig> for Dataset {
         };
         let addr = bp.address;
         Self {
-            identity: DatasetIdentity::new(bp.id.into_untyped_uuid()),
+            identity: DatasetIdentity::new(bp.id),
             time_deleted: None,
             rcgen: Generation::new(),
             pool_id: bp.pool.id().into_untyped_uuid(),
@@ -148,7 +149,7 @@ impl TryFrom<Dataset> for omicron_common::disk::DatasetConfig {
         };
 
         Ok(Self {
-            id: DatasetUuid::from_untyped_uuid(dataset.identity.id),
+            id: dataset.identity.id.into(),
             name: omicron_common::disk::DatasetName::new(
                 omicron_common::zpool_name::ZpoolName::new_external(
                     ZpoolUuid::from_untyped_uuid(dataset.pool_id),

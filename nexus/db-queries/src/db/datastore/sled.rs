@@ -39,6 +39,8 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use std::fmt;
 use strum::IntoEnumIterator;
 use thiserror::Error;
@@ -100,17 +102,29 @@ impl DataStore {
     }
 
     /// Confirms that a sled exists and is in-service.
+    pub async fn check_sled_in_service(
+        &self,
+        opctx: &OpContext,
+        sled_id: SledUuid,
+    ) -> Result<(), Error> {
+        let conn = &*self.pool_connection_authorized(&opctx).await?;
+        Self::check_sled_in_service_on_connection(conn, sled_id)
+            .await
+            .map_err(From::from)
+    }
+
+    /// Confirms that a sled exists and is in-service.
     ///
     /// This function may be called from a transaction context.
     pub async fn check_sled_in_service_on_connection(
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        sled_id: Uuid,
+        sled_id: SledUuid,
     ) -> Result<(), TransactionError<Error>> {
         use db::schema::sled::dsl;
         let sled_exists_and_in_service = diesel::select(diesel::dsl::exists(
             dsl::sled
                 .filter(dsl::time_deleted.is_null())
-                .filter(dsl::id.eq(sled_id))
+                .filter(dsl::id.eq(sled_id.into_untyped_uuid()))
                 .sled_filter(SledFilter::InService),
         ))
         .get_result_async::<bool>(conn)
@@ -831,6 +845,7 @@ pub(in crate::db::datastore) mod test {
         sled_set_policy, sled_set_state, Expected, IneligibleSleds,
     };
     use crate::db::lookup::LookupPath;
+    use crate::db::model::to_db_typed_uuid;
     use crate::db::model::ByteCount;
     use crate::db::model::SqlU32;
     use crate::db::pub_test_utils::TestDatabase;
@@ -845,6 +860,7 @@ pub(in crate::db::datastore) mod test {
     use omicron_common::api::external;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use predicates::{prelude::*, BoxPredicate};
     use std::net::{Ipv6Addr, SocketAddrV6};
@@ -1142,11 +1158,11 @@ pub(in crate::db::datastore) mod test {
 
     async fn lookup_physical_disk(
         datastore: &DataStore,
-        id: Uuid,
+        id: PhysicalDiskUuid,
     ) -> PhysicalDisk {
         use db::schema::physical_disk::dsl;
         dsl::physical_disk
-            .filter(dsl::id.eq(id))
+            .filter(dsl::id.eq(to_db_typed_uuid(id)))
             .filter(dsl::time_deleted.is_null())
             .select(PhysicalDisk::as_select())
             .get_result_async(
@@ -1177,7 +1193,7 @@ pub(in crate::db::datastore) mod test {
         // Crucible regions, but it creates enough of a control plane object to
         // be associated with the Sled by UUID)
         let disk1 = PhysicalDisk::new(
-            Uuid::new_v4(),
+            PhysicalDiskUuid::new_v4(),
             "vendor1".to_string(),
             "serial1".to_string(),
             "model1".to_string(),
@@ -1185,7 +1201,7 @@ pub(in crate::db::datastore) mod test {
             sled_id.into_untyped_uuid(),
         );
         let disk2 = PhysicalDisk::new(
-            Uuid::new_v4(),
+            PhysicalDiskUuid::new_v4(),
             "vendor2".to_string(),
             "serial2".to_string(),
             "model2".to_string(),

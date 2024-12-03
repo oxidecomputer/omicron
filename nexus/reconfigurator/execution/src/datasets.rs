@@ -141,7 +141,7 @@ pub(crate) async fn ensure_dataset_records_exist(
         .await
         .context("failed to list all datasets")?
         .into_iter()
-        .map(|dataset| (DatasetUuid::from_untyped_uuid(dataset.id()), dataset))
+        .map(|dataset| (dataset.id(), dataset))
         .collect::<BTreeMap<DatasetUuid, _>>();
 
     let mut num_inserted = 0;
@@ -263,8 +263,8 @@ mod tests {
     use omicron_common::disk::CompressionAlgorithm;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::ZpoolUuid;
-    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -393,7 +393,7 @@ mod tests {
             let zpool = Zpool::new(
                 new_zpool_id.into_untyped_uuid(),
                 sled_id.into_untyped_uuid(),
-                Uuid::new_v4(), // physical_disk_id
+                PhysicalDiskUuid::new_v4(),
             );
             datastore
                 .zpool_insert(opctx, zpool)
@@ -551,9 +551,7 @@ mod tests {
         let first_dataset = &mut all_datasets[0];
         let observed_dataset = observed_datasets
             .into_iter()
-            .find(|dataset| {
-                dataset.id() == first_dataset.id.into_untyped_uuid()
-            })
+            .find(|dataset| dataset.id() == first_dataset.id)
             .expect("Couldn't find dataset we tried to update?");
         let observed_dataset: DatasetConfig =
             observed_dataset.try_into().unwrap();
@@ -674,10 +672,10 @@ mod tests {
             datastore.dataset_list_all_batched(opctx, None).await.unwrap();
         assert!(observed_datasets
             .iter()
-            .any(|d| d.id() == crucible_dataset_id.into_untyped_uuid()));
+            .any(|d| d.id() == crucible_dataset_id));
         assert!(!observed_datasets
             .iter()
-            .any(|d| d.id() == non_crucible_dataset_id.into_untyped_uuid()));
+            .any(|d| d.id() == non_crucible_dataset_id));
     }
 
     #[nexus_test]
@@ -766,8 +764,6 @@ mod tests {
         // "blueprint".
         let observed_datasets =
             datastore.dataset_list_all_batched(opctx, None).await.unwrap();
-        assert!(observed_datasets
-            .iter()
-            .any(|d| d.id() == dataset_id.into_untyped_uuid()));
+        assert!(observed_datasets.iter().any(|d| d.id() == dataset_id));
     }
 }

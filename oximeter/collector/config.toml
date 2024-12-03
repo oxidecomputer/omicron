@@ -3,7 +3,7 @@
 nexus_address = "[::1]:12221"
 
 [db]
-address = "[::1]:8123"
+address = "[::1]:9000"
 batch_size = 1000
 batch_interval = 5 # In seconds
 

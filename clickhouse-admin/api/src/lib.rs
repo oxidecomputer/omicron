@@ -4,11 +4,13 @@
 
 use clickhouse_admin_types::{
     ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
-    KeeperConfig, KeeperConfigurableSettings, Lgif, RaftConfig, ReplicaConfig,
-    ServerConfigurableSettings,
+    KeeperConfig, KeeperConfigurableSettings, Lgif, MetricInfoPath, RaftConfig,
+    ReplicaConfig, ServerConfigurableSettings, SystemTimeSeries,
+    TimeSeriesSettingsQuery,
 };
 use dropshot::{
-    HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
+    HttpError, HttpResponseCreated, HttpResponseOk,
+    HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
 };
 
 /// API interface for our clickhouse-admin-keeper server
@@ -115,4 +117,54 @@ pub trait ClickhouseAdminServerApi {
     async fn distributed_ddl_queue(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<DistributedDdlQueue>>, HttpError>;
+
+    /// Retrieve time series from the system database.
+    ///
+    /// The value of each data point is the average of all stored data points
+    /// within the interval.
+    /// These are internal ClickHouse metrics.
+    #[endpoint {
+        method = GET,
+        path = "/timeseries/{table}/{metric}/avg"
+    }]
+    async fn system_timeseries_avg(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<MetricInfoPath>,
+        query_params: Query<TimeSeriesSettingsQuery>,
+    ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError>;
+}
+
+/// API interface for our clickhouse-admin-single server
+///
+/// The single-node server is distinct from the both the multi-node servers
+/// and its keepers. The sole purpose of this API is to serialize database
+/// initialization requests from reconfigurator execution. Multi-node clusters
+/// must provide a similar interface via [`ClickhouseAdminServerApi`].
+#[dropshot::api_description]
+pub trait ClickhouseAdminSingleApi {
+    type Context;
+
+    /// Idempotently initialize a single-node ClickHouse database.
+    #[endpoint {
+        method = PUT,
+        path = "/init"
+    }]
+    async fn init_db(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Retrieve time series from the system database.
+    ///
+    /// The value of each data point is the average of all stored data points
+    /// within the interval.
+    /// These are internal ClickHouse metrics.
+    #[endpoint {
+        method = GET,
+        path = "/timeseries/{table}/{metric}/avg"
+    }]
+    async fn system_timeseries_avg(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<MetricInfoPath>,
+        query_params: Query<TimeSeriesSettingsQuery>,
+    ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError>;
 }

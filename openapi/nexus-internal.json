@@ -1918,7 +1918,7 @@
             "description": "A map of sled id -> disks in use on each sled.",
             "type": "object",
             "additionalProperties": {
-              "$ref": "#/components/schemas/OmicronPhysicalDisksConfig"
+              "$ref": "#/components/schemas/BlueprintPhysicalDisksConfig"
             }
           },
           "blueprint_zones": {
@@ -2185,6 +2185,68 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "BlueprintPhysicalDiskConfig": {
+        "description": "Information about an Omicron physical disk as recorded in a bluerprint.",
+        "type": "object",
+        "properties": {
+          "disposition": {
+            "$ref": "#/components/schemas/BlueprintPhysicalDiskDisposition"
+          },
+          "id": {
+            "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
+          },
+          "identity": {
+            "$ref": "#/components/schemas/DiskIdentity"
+          },
+          "pool_id": {
+            "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+          }
+        },
+        "required": [
+          "disposition",
+          "id",
+          "identity",
+          "pool_id"
+        ]
+      },
+      "BlueprintPhysicalDiskDisposition": {
+        "description": "The desired state of an Omicron-managed physical disk in a blueprint.",
+        "oneOf": [
+          {
+            "description": "The physical disk is in-service.",
+            "type": "string",
+            "enum": [
+              "in_service"
+            ]
+          },
+          {
+            "description": "The physical disk is permanently gone.",
+            "type": "string",
+            "enum": [
+              "expunged"
+            ]
+          }
+        ]
+      },
+      "BlueprintPhysicalDisksConfig": {
+        "description": "Information about Omicron physical disks as recorded in a blueprint.\n\nPart of [`Blueprint`].",
+        "type": "object",
+        "properties": {
+          "disks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlueprintPhysicalDiskConfig"
+            }
+          },
+          "generation": {
+            "$ref": "#/components/schemas/Generation"
+          }
+        },
+        "required": [
+          "disks",
+          "generation"
         ]
       },
       "BlueprintTarget": {
@@ -3102,8 +3164,7 @@
         "type": "object",
         "properties": {
           "dataset_id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/TypedUuidForDatasetKind"
           },
           "request": {
             "$ref": "#/components/schemas/DatasetPutRequest"
@@ -4450,49 +4511,6 @@
         "description": "Unique name for a saga [`Node`]\n\nEach node requires a string name that's unique within its DAG.  The name is used to identify its output.  Nodes that depend on a given node (either directly or indirectly) can access the node's output using its name.",
         "type": "string"
       },
-      "OmicronPhysicalDiskConfig": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "identity": {
-            "$ref": "#/components/schemas/DiskIdentity"
-          },
-          "pool_id": {
-            "$ref": "#/components/schemas/TypedUuidForZpoolKind"
-          }
-        },
-        "required": [
-          "id",
-          "identity",
-          "pool_id"
-        ]
-      },
-      "OmicronPhysicalDisksConfig": {
-        "type": "object",
-        "properties": {
-          "disks": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
-            }
-          },
-          "generation": {
-            "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          }
-        },
-        "required": [
-          "disks",
-          "generation"
-        ]
-      },
       "OmicronZoneDataset": {
         "description": "Describes a persistent ZFS dataset associated with an Omicron zone",
         "type": "object",
@@ -4598,8 +4616,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
           },
           "model": {
             "type": "string"
@@ -4687,6 +4704,7 @@
             ]
           },
           "uplink_port_fec": {
+            "nullable": true,
             "description": "Port forward error correction type.",
             "allOf": [
               {
@@ -4709,7 +4727,6 @@
           "port",
           "routes",
           "switch",
-          "uplink_port_fec",
           "uplink_port_speed"
         ]
       },
@@ -5811,6 +5828,10 @@
         "type": "string",
         "format": "uuid"
       },
+      "TypedUuidForPhysicalDiskKind": {
+        "type": "string",
+        "format": "uuid"
+      },
       "TypedUuidForSledKind": {
         "type": "string",
         "format": "uuid"
@@ -6035,8 +6056,7 @@
             "format": "uuid"
           },
           "physical_disk_id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
           },
           "sled_id": {
             "type": "string",

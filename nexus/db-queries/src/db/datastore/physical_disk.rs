@@ -12,6 +12,7 @@ use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::model::ApplySledFilterExt;
 use crate::db::model::InvPhysicalDisk;
 use crate::db::model::PhysicalDisk;
@@ -38,6 +39,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SledUuid;
 use uuid::Uuid;
 
 impl DataStore {
@@ -66,7 +68,7 @@ impl DataStore {
                     // expunged.
                     Self::check_sled_in_service_on_connection(
                         &conn,
-                        disk.sled_id,
+                        SledUuid::from_untyped_uuid(disk.sled_id),
                     )
                     .await
                     .map_err(|txn_error| txn_error.into_diesel(&err))?;
@@ -147,40 +149,40 @@ impl DataStore {
     pub async fn physical_disk_update_policy(
         &self,
         opctx: &OpContext,
-        id: Uuid,
+        id: PhysicalDiskUuid,
         policy: PhysicalDiskPolicy,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use db::schema::physical_disk::dsl;
 
-        diesel::update(dsl::physical_disk.filter(dsl::id.eq(id)))
-            .filter(dsl::time_deleted.is_null())
-            .set(dsl::disk_policy.eq(policy))
-            .execute_async(&*self.pool_connection_authorized(&opctx).await?)
-            .await
-            .map_err(|err| {
-                public_error_from_diesel(err, ErrorHandler::Server)
-            })?;
+        diesel::update(
+            dsl::physical_disk.filter(dsl::id.eq(to_db_typed_uuid(id))),
+        )
+        .filter(dsl::time_deleted.is_null())
+        .set(dsl::disk_policy.eq(policy))
+        .execute_async(&*self.pool_connection_authorized(&opctx).await?)
+        .await
+        .map_err(|err| public_error_from_diesel(err, ErrorHandler::Server))?;
         Ok(())
     }
 
     pub async fn physical_disk_update_state(
         &self,
         opctx: &OpContext,
-        id: Uuid,
+        id: PhysicalDiskUuid,
         state: PhysicalDiskState,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use db::schema::physical_disk::dsl;
 
-        diesel::update(dsl::physical_disk.filter(dsl::id.eq(id)))
-            .filter(dsl::time_deleted.is_null())
-            .set(dsl::disk_state.eq(state))
-            .execute_async(&*self.pool_connection_authorized(&opctx).await?)
-            .await
-            .map_err(|err| {
-                public_error_from_diesel(err, ErrorHandler::Server)
-            })?;
+        diesel::update(
+            dsl::physical_disk.filter(dsl::id.eq(to_db_typed_uuid(id))),
+        )
+        .filter(dsl::time_deleted.is_null())
+        .set(dsl::disk_state.eq(state))
+        .execute_async(&*self.pool_connection_authorized(&opctx).await?)
+        .await
+        .map_err(|err| public_error_from_diesel(err, ErrorHandler::Server))?;
         Ok(())
     }
 
@@ -308,7 +310,7 @@ impl DataStore {
         let now = Utc::now();
         use db::schema::physical_disk::dsl;
         diesel::update(dsl::physical_disk)
-            .filter(dsl::id.eq(id.into_untyped_uuid()))
+            .filter(dsl::id.eq(to_db_typed_uuid(id)))
             .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(now))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
@@ -336,7 +338,6 @@ mod test {
     use omicron_common::api::external::ByteCount;
     use omicron_common::disk::{DiskIdentity, DiskVariant};
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::SledUuid;
     use std::net::{Ipv6Addr, SocketAddrV6};
     use std::num::NonZeroU32;
 
@@ -379,7 +380,7 @@ mod test {
 
         // Insert a disk
         let disk = PhysicalDisk::new(
-            Uuid::new_v4(),
+            PhysicalDiskUuid::new_v4(),
             String::from("Oxide"),
             String::from("123"),
             String::from("FakeDisk"),
@@ -420,7 +421,7 @@ mod test {
 
         // Insert a disk
         let disk = PhysicalDisk::new(
-            Uuid::new_v4(),
+            PhysicalDiskUuid::new_v4(),
             String::from("Oxide"),
             String::from("123"),
             String::from("FakeDisk"),
@@ -434,7 +435,7 @@ mod test {
 
         // Insert a second disk
         let disk = PhysicalDisk::new(
-            Uuid::new_v4(),
+            PhysicalDiskUuid::new_v4(),
             String::from("Noxide"),
             String::from("456"),
             String::from("UnrealDisk"),
@@ -468,7 +469,7 @@ mod test {
         // Insert a disk
         let disk_id = PhysicalDiskUuid::new_v4();
         let disk = PhysicalDisk::new(
-            disk_id.into_untyped_uuid(),
+            disk_id,
             String::from("Oxide"),
             String::from("123"),
             String::from("FakeDisk"),
@@ -526,7 +527,7 @@ mod test {
         // Insert a disk
         let disk_id = PhysicalDiskUuid::new_v4();
         let disk = PhysicalDisk::new(
-            disk_id.into_untyped_uuid(),
+            disk_id,
             String::from("Oxide"),
             String::from("123"),
             String::from("FakeDisk"),
@@ -568,7 +569,7 @@ mod test {
         // Attach the disk to the second sled
         let disk_id = PhysicalDiskUuid::new_v4();
         let disk = PhysicalDisk::new(
-            disk_id.into_untyped_uuid(),
+            disk_id,
             String::from("Oxide"),
             String::from("123"),
             String::from("FakeDisk"),
@@ -615,7 +616,7 @@ mod test {
         // Insert a disk
         let disk_id = PhysicalDiskUuid::new_v4();
         let disk = PhysicalDisk::new(
-            disk_id.into_untyped_uuid(),
+            disk_id,
             String::from("Oxide"),
             String::from("123"),
             String::from("FakeDisk"),
@@ -646,7 +647,7 @@ mod test {
 
         // "Report the disk" from the second sled
         let disk = PhysicalDisk::new(
-            Uuid::new_v4(),
+            PhysicalDiskUuid::new_v4(),
             String::from("Oxide"),
             String::from("123"),
             String::from("FakeDisk"),
@@ -702,6 +703,8 @@ mod test {
                     disks,
                     zpools: vec![],
                     datasets: vec![],
+                    omicron_physical_disks_generation:
+                        omicron_common::api::external::Generation::new(),
                 },
             )
             .unwrap();
@@ -759,7 +762,7 @@ mod test {
         inv_disk: &InventoryDisk,
     ) -> (PhysicalDisk, Zpool) {
         let disk = PhysicalDisk::new(
-            Uuid::new_v4(),
+            PhysicalDiskUuid::new_v4(),
             inv_disk.identity.vendor.clone(),
             inv_disk.identity.serial.clone(),
             inv_disk.identity.model.clone(),
@@ -972,7 +975,7 @@ mod test {
         // Set a disk to "deleted".
         let now = Utc::now();
         diesel::update(dsl::physical_disk)
-            .filter(dsl::id.eq(disk_003.id()))
+            .filter(dsl::id.eq(to_db_typed_uuid(disk_003.id())))
             .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(now))
             .execute_async(
@@ -983,7 +986,7 @@ mod test {
 
         // Set another disk to "expunged"
         diesel::update(dsl::physical_disk)
-            .filter(dsl::id.eq(disk_102.id()))
+            .filter(dsl::id.eq(to_db_typed_uuid(disk_102.id())))
             .filter(dsl::time_deleted.is_null())
             .set(dsl::disk_policy.eq(PhysicalDiskPolicy::Expunged))
             .execute_async(

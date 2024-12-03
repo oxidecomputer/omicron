@@ -103,13 +103,10 @@ use anyhow::anyhow;
 use nexus_db_model::Generation;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_db_queries::db::lookup::LookupPath;
-use omicron_common::retry_until_known_result;
+use omicron_common::api::external::Error;
+use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
 use omicron_common::{
     api::external, progenitor_operation_retry::ProgenitorOperationRetry,
-};
-use omicron_common::{
-    api::external::Error,
-    progenitor_operation_retry::ProgenitorOperationRetryError,
 };
 use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid};
 use rand::{rngs::StdRng, RngCore, SeedableRng};
@@ -851,6 +848,7 @@ async fn ssc_send_snapshot_request_to_sled_agent(
             "instance no longer has an active VMM!",
         )));
     };
+    let sled_id = SledUuid::from_untyped_uuid(sled_id);
 
     info!(log, "asking for disk snapshot from Propolis via sled agent";
           "disk_id" => %params.disk_id,
@@ -860,11 +858,11 @@ async fn ssc_send_snapshot_request_to_sled_agent(
 
     let sled_agent_client = osagactx
         .nexus()
-        .sled_client(&SledUuid::from_untyped_uuid(sled_id))
+        .sled_client(&sled_id)
         .await
         .map_err(ActionError::action_failed)?;
 
-    retry_until_known_result(log, || async {
+    let snapshot_operation = || async {
         sled_agent_client
             .vmm_issue_disk_snapshot_request(
                 &PropolisUuid::from_untyped_uuid(propolis_id),
@@ -872,10 +870,23 @@ async fn ssc_send_snapshot_request_to_sled_agent(
                 &VmmIssueDiskSnapshotRequestBody { snapshot_id },
             )
             .await
-    })
-    .await
-    .map_err(|e| e.to_string())
-    .map_err(ActionError::action_failed)?;
+    };
+    let gone_check = || async {
+        osagactx.datastore().check_sled_in_service(&opctx, sled_id).await?;
+        // `check_sled_in_service` returns an error if the sled is no longer in
+        // service; if it succeeds, the sled is not gone.
+        Ok(false)
+    };
+
+    ProgenitorOperationRetry::new(snapshot_operation, gone_check)
+        .run(log)
+        .await
+        .map_err(|e| {
+            ActionError::action_failed(format!(
+                "failed to issue VMM disk snapshot request: {}",
+                InlineErrorChain::new(&e)
+            ))
+        })?;
 
     Ok(())
 }
@@ -1456,7 +1467,7 @@ async fn ssc_start_running_snapshot(
         osagactx
             .datastore()
             .region_snapshot_create(db::model::RegionSnapshot {
-                dataset_id: dataset.id(),
+                dataset_id: dataset.id().into(),
                 region_id: region.id(),
                 snapshot_id,
                 snapshot_addr,

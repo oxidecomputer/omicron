@@ -52,6 +52,7 @@ use internal_dns_types::names::ServiceName;
 use ipnetwork::IpNetwork;
 use itertools::Itertools;
 use nexus_config::PostgresConfigWithUrl;
+use nexus_db_model::to_db_typed_uuid;
 use nexus_db_model::Dataset;
 use nexus_db_model::Disk;
 use nexus_db_model::DnsGroup;
@@ -126,8 +127,10 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::MacAddr;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_client::types::VolumeConstructionRequest;
@@ -772,7 +775,7 @@ struct RegionSnapshotReplacementInfoArgs {
 #[derive(Debug, Args)]
 struct RegionSnapshotReplacementRequestArgs {
     /// The dataset id for a given region snapshot
-    dataset_id: Uuid,
+    dataset_id: DatasetUuid,
 
     /// The region id for a given region snapshot
     region_id: Uuid,
@@ -1634,7 +1637,7 @@ async fn cmd_db_disk_physical(
         .context("loading zpool from pysical disk id")?;
 
     let mut sled_ids = HashSet::new();
-    let mut dataset_ids = HashSet::new();
+    let mut dataset_ids: HashSet<DatasetUuid> = HashSet::new();
 
     if zpools.is_empty() {
         println!("Found no zpools on physical disk UUID {}", args.uuid);
@@ -1692,7 +1695,7 @@ async fn cmd_db_disk_physical(
     for did in dataset_ids.clone().into_iter() {
         use db::schema::region::dsl as region_dsl;
         let regions = region_dsl::region
-            .filter(region_dsl::dataset_id.eq(did))
+            .filter(region_dsl::dataset_id.eq(to_db_typed_uuid(did)))
             .select(Region::as_select())
             .load_async(&*conn)
             .await
@@ -1774,6 +1777,9 @@ async fn cmd_db_disk_physical(
     println!("{}", table);
 
     // Collect the region_snapshots associated with the dataset IDs
+    let dataset_ids: Vec<_> =
+        dataset_ids.into_iter().map(|did| to_db_typed_uuid(did)).collect();
+
     let limit = fetch_opts.fetch_limit;
     use db::schema::region_snapshot::dsl as region_snapshot_dsl;
     let region_snapshots = region_snapshot_dsl::region_snapshot
@@ -1852,7 +1858,7 @@ async fn cmd_db_disk_physical(
 #[derive(Tabled)]
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
 struct PhysicalDiskRow {
-    id: Uuid,
+    id: PhysicalDiskUuid,
     serial: String,
     vendor: String,
     model: String,
@@ -2328,7 +2334,7 @@ async fn cmd_db_region_list(
         #[derive(Tabled)]
         struct RegionRow {
             id: Uuid,
-            dataset_id: Uuid,
+            dataset_id: DatasetUuid,
             volume_id: Uuid,
             block_size: i64,
             blocks_per_extent: u64,
@@ -2563,7 +2569,7 @@ async fn cmd_db_region_find_deleted(
 
     #[derive(Tabled)]
     struct Row {
-        dataset_id: Uuid,
+        dataset_id: DatasetUuid,
         region_id: Uuid,
         volume_id: String,
     }
@@ -4418,7 +4424,7 @@ async fn cmd_db_validate_volume_references(
 
     #[derive(Tabled)]
     struct Row {
-        dataset_id: Uuid,
+        dataset_id: DatasetUuid,
         region_id: Uuid,
         snapshot_id: Uuid,
         error: String,
@@ -4480,7 +4486,7 @@ async fn cmd_db_validate_volume_references(
 
         if matching_volumes != region_snapshot.volume_references as usize {
             rows.push(Row {
-                dataset_id: region_snapshot.dataset_id,
+                dataset_id: region_snapshot.dataset_id.into(),
                 region_id: region_snapshot.region_id,
                 snapshot_id: region_snapshot.snapshot_id,
                 error: format!(
@@ -4498,7 +4504,7 @@ async fn cmd_db_validate_volume_references(
 
             if matching_volumes == 0 && !region_snapshot.deleting {
                 rows.push(Row {
-                    dataset_id: region_snapshot.dataset_id,
+                    dataset_id: region_snapshot.dataset_id.into(),
                     region_id: region_snapshot.region_id,
                     snapshot_id: region_snapshot.snapshot_id,
                     error: String::from(
@@ -4556,7 +4562,7 @@ async fn cmd_db_validate_region_snapshots(
 
     #[derive(Tabled)]
     struct Row {
-        dataset_id: Uuid,
+        dataset_id: DatasetUuid,
         region_id: Uuid,
         snapshot_id: Uuid,
         dataset_addr: std::net::SocketAddrV6,
@@ -4640,7 +4646,7 @@ async fn cmd_db_validate_region_snapshots(
                                 // This is ok - Nexus currently soft-deletes its
                                 // resource records.
                                 rows.push(Row {
-                                    dataset_id: region_snapshot.dataset_id,
+                                    dataset_id: region_snapshot.dataset_id.into(),
                                     region_id: region_snapshot.region_id,
                                     snapshot_id: region_snapshot.snapshot_id,
                                     dataset_addr,
@@ -4655,7 +4661,7 @@ async fn cmd_db_validate_region_snapshots(
                                 // higher level Snapshot was not deleted!
 
                                 rows.push(Row {
-                                    dataset_id: region_snapshot.dataset_id,
+                                    dataset_id: region_snapshot.dataset_id.into(),
                                     region_id: region_snapshot.region_id,
                                     snapshot_id: region_snapshot.snapshot_id,
                                     dataset_addr,
@@ -4684,7 +4690,7 @@ async fn cmd_db_validate_region_snapshots(
                             // the Agent, so it's a bug.
 
                             rows.push(Row {
-                                dataset_id: region_snapshot.dataset_id,
+                                dataset_id: region_snapshot.dataset_id.into(),
                                 region_id: region_snapshot.region_id,
                                 snapshot_id: region_snapshot.snapshot_id,
                                 dataset_addr,

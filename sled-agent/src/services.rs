@@ -1239,7 +1239,6 @@ impl ServiceManager {
                 floating_ips,
                 firewall_rules: &[],
                 dhcp_config: DhcpCfg::default(),
-                is_service: true,
             })
             .map_err(|err| Error::ServicePortCreation {
                 service: zone_kind,
@@ -1612,10 +1611,11 @@ impl ServiceManager {
                             CLICKHOUSE_BINARY,
                         );
                 let clickhouse_admin_service =
-                    ServiceBuilder::new("oxide/clickhouse-admin").add_instance(
-                        ServiceInstanceBuilder::new("default")
-                            .add_property_group(clickhouse_admin_config),
-                    );
+                    ServiceBuilder::new("oxide/clickhouse-admin-single")
+                        .add_instance(
+                            ServiceInstanceBuilder::new("default")
+                                .add_property_group(clickhouse_admin_config),
+                        );
 
                 let profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)

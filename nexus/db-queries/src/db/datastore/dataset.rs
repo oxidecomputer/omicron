@@ -15,6 +15,7 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::retryable;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::model::Dataset;
 use crate::db::model::PhysicalDisk;
 use crate::db::model::PhysicalDiskPolicy;
@@ -42,11 +43,14 @@ use omicron_uuid_kinds::GenericUuid;
 use uuid::Uuid;
 
 impl DataStore {
-    pub async fn dataset_get(&self, dataset_id: Uuid) -> LookupResult<Dataset> {
+    pub async fn dataset_get(
+        &self,
+        dataset_id: DatasetUuid,
+    ) -> LookupResult<Dataset> {
         use db::schema::dataset::dsl;
 
         dsl::dataset
-            .filter(dsl::id.eq(dataset_id))
+            .filter(dsl::id.eq(to_db_typed_uuid(dataset_id)))
             .select(Dataset::as_select())
             .first_async::<Dataset>(
                 &*self.pool_connection_unauthorized().await?,
@@ -230,8 +234,10 @@ impl DataStore {
             let batch = self
                 .dataset_list(opctx, filter_kind, &p.current_pagparams())
                 .await?;
-            paginator =
-                p.found_batch(&batch, &|d: &nexus_db_model::Dataset| d.id());
+            paginator = p
+                .found_batch(&batch, &|d: &nexus_db_model::Dataset| {
+                    d.id().into_untyped_uuid()
+                });
             all_datasets.extend(batch);
         }
 
@@ -282,10 +288,9 @@ impl DataStore {
         use db::schema::dataset::dsl as dataset_dsl;
         let now = Utc::now();
 
-        let id = *id.as_untyped_uuid();
         diesel::update(dataset_dsl::dataset)
             .filter(dataset_dsl::time_deleted.is_null())
-            .filter(dataset_dsl::id.eq(id))
+            .filter(dataset_dsl::id.eq(to_db_typed_uuid(id)))
             .set(dataset_dsl::time_deleted.eq(now))
             .execute_async(conn)
             .await
@@ -297,7 +302,7 @@ impl DataStore {
 
     pub async fn dataset_physical_disk_in_service(
         &self,
-        dataset_id: Uuid,
+        dataset_id: DatasetUuid,
     ) -> LookupResult<bool> {
         let conn = self.pool_connection_unauthorized().await?;
 
@@ -305,7 +310,7 @@ impl DataStore {
             use db::schema::dataset::dsl;
 
             dsl::dataset
-                .filter(dsl::id.eq(dataset_id))
+                .filter(dsl::id.eq(to_db_typed_uuid(dataset_id)))
                 .select(Dataset::as_select())
                 .first_async::<Dataset>(&*conn)
                 .await
@@ -357,6 +362,8 @@ mod test {
     use nexus_types::deployment::BlueprintTarget;
     use omicron_common::api::internal::shared::DatasetKind as ApiDatasetKind;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::DatasetUuid;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
 
@@ -390,7 +397,7 @@ mod test {
         let zpool = Zpool::new(
             *zpool_id.as_untyped_uuid(),
             *sled_id.as_untyped_uuid(),
-            Uuid::new_v4(),
+            PhysicalDiskUuid::new_v4(),
         );
         datastore
             .zpool_insert(opctx, zpool)
@@ -418,7 +425,7 @@ mod test {
         // Inserting a new dataset should succeed.
         let dataset1 = datastore
             .dataset_insert_if_not_exists(Dataset::new(
-                Uuid::new_v4(),
+                DatasetUuid::new_v4(),
                 *zpool_id.as_untyped_uuid(),
                 Some("[::1]:0".parse().unwrap()),
                 ApiDatasetKind::Crucible,
@@ -467,7 +474,7 @@ mod test {
         // We can can also upsert a different dataset...
         let dataset2 = datastore
             .dataset_upsert(Dataset::new(
-                Uuid::new_v4(),
+                DatasetUuid::new_v4(),
                 *zpool_id.as_untyped_uuid(),
                 Some("[::1]:0".parse().unwrap()),
                 ApiDatasetKind::Cockroach,
@@ -540,7 +547,7 @@ mod test {
 
     fn new_dataset_on(zpool_id: ZpoolUuid) -> Dataset {
         Dataset::new(
-            Uuid::new_v4(),
+            DatasetUuid::new_v4(),
             *zpool_id.as_untyped_uuid(),
             Some("[::1]:0".parse().unwrap()),
             ApiDatasetKind::Cockroach,
@@ -605,7 +612,7 @@ mod test {
             .dataset_delete_if_blueprint_is_current_target(
                 &opctx,
                 old_blueprint_id,
-                DatasetUuid::from_untyped_uuid(dataset.id()),
+                dataset.id(),
             )
             .await
             .expect_err(
@@ -617,7 +624,7 @@ mod test {
             .dataset_delete_if_blueprint_is_current_target(
                 &opctx,
                 current_blueprint_id,
-                DatasetUuid::from_untyped_uuid(dataset.id()),
+                dataset.id(),
             )
             .await
             .expect("Should be able to delete while blueprint is active");

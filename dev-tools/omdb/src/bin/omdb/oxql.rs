@@ -31,15 +31,6 @@ pub struct OxqlArgs {
     )]
     clickhouse_url: Option<String>,
 
-    /// URL of the ClickHouse server to connect to for the native protcol.
-    #[arg(
-        long,
-        env = "OMDB_CLICKHOUSE_NATIVE_URL",
-        global = true,
-        help_heading = CONNECTION_OPTIONS_HEADING,
-    )]
-    clickhouse_native_url: Option<String>,
-
     /// Print summaries of each SQL query run against the database.
     #[clap(long = "summaries")]
     print_summaries: bool,
@@ -56,7 +47,6 @@ impl OxqlArgs {
         omdb: &Omdb,
         log: &Logger,
     ) -> anyhow::Result<()> {
-        let http_addr = self.resolve_http_addr(omdb, log).await?;
         let native_addr = self.resolve_native_addr(omdb, log).await?;
 
         let opts = ShellOptions {
@@ -65,8 +55,7 @@ impl OxqlArgs {
         };
 
         oxql::shell(
-            http_addr.ip(),
-            http_addr.port(),
+            native_addr.ip(),
             native_addr.port(),
             log.new(slog::o!("component" => "clickhouse-client")),
             opts,
@@ -83,23 +72,8 @@ impl OxqlArgs {
         self.resolve_addr(
             omdb,
             log,
-            self.clickhouse_native_url.as_deref(),
-            ServiceName::ClickhouseNative,
-        )
-        .await
-    }
-
-    /// Resolve the ClickHouse HTTP URL to a socket address.
-    async fn resolve_http_addr(
-        &self,
-        omdb: &Omdb,
-        log: &Logger,
-    ) -> anyhow::Result<SocketAddr> {
-        self.resolve_addr(
-            omdb,
-            log,
             self.clickhouse_url.as_deref(),
-            ServiceName::Clickhouse,
+            ServiceName::ClickhouseNative,
         )
         .await
     }
