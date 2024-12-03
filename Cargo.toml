@@ -886,3 +886,8 @@ path = "workspace-hack"
 [patch."https://github.com/oxidecomputer/omicron"]
 omicron-uuid-kinds = { path = "uuid-kinds" }
 omicron-common = { path = "common" }
+
+# /!\ REMOVE BEFORE FLIGHT: Temporary patch to test dropshot breaking changes
+[patch.crates-io.dropshot]
+git = 'https://github.com/oxidecomputer/dropshot'
+branch = 'eliza/custom-error-httpresponse-result'

@@ -133,7 +133,7 @@ impl Server {
             // The maximum request size is set to 4 GB -- artifacts can be large
             // and there's currently no way to set a larger request size for
             // some endpoints.
-            request_body_max_bytes: 4 << 30,
+            default_request_body_max_bytes: 4 << 30,
             default_handler_task_mode: HandlerTaskMode::Detached,
             log_headers: vec![],
         };

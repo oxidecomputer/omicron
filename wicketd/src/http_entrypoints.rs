@@ -220,7 +220,8 @@ impl WicketdApi for WicketdApiImpl {
                         let message =
                             format!("Failed to send rack setup request: {err}");
                         HttpError {
-                            status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                            status_code:
+                                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
                             error_code: None,
                             external_message: message.clone(),
                             internal_message: message,
@@ -274,7 +275,8 @@ impl WicketdApi for WicketdApiImpl {
                         let message =
                             format!("Failed to send rack setup request: {err}");
                         HttpError {
-                            status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                            status_code:
+                                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
                             error_code: None,
                             external_message: message.clone(),
                             internal_message: message,
@@ -320,7 +322,8 @@ impl WicketdApi for WicketdApiImpl {
                         let message =
                             format!("Failed to send rack reset request: {err}");
                         HttpError {
-                            status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                            status_code:
+                                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
                             error_code: None,
                             external_message: message.clone(),
                             internal_message: message,
@@ -484,7 +487,7 @@ impl WicketdApi for WicketdApiImpl {
                     "Rack inventory not yet available (is MGS alive?)"
                         .to_owned();
                 return Err(HttpError {
-                    status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                    status_code: dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
                     error_code: None,
                     external_message: message.clone(),
                     internal_message: message,
@@ -779,7 +782,7 @@ impl WicketdApi for WicketdApiImpl {
             Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
             Err(err) => Err(HttpError::for_client_error(
                 None,
-                StatusCode::TOO_MANY_REQUESTS,
+                dropshot::ClientErrorStatusCode::TOO_MANY_REQUESTS,
                 err.to_string(),
             )),
         }
@@ -864,7 +867,12 @@ fn http_error_from_client_error(
 ) -> HttpError {
     // Most errors have a status code; the only one that definitely doesn't is
     // `Error::InvalidRequest`, for which we'll use `BAD_REQUEST`.
-    let status_code = err.status().unwrap_or(StatusCode::BAD_REQUEST);
+    let status_code = err
+        .status()
+        .map(|status| {
+            status.try_into().expect("status code must be a client error")
+        })
+        .unwrap_or(dropshot::ErrorStatusCode::BAD_REQUEST);
 
     let message = format!("request to MGS failed: {err}");
 

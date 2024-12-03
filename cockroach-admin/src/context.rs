@@ -53,7 +53,7 @@ impl ServerContext {
                     {err:#}",
                 );
                 Err(HttpError {
-                    status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                    status_code: dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
                     error_code: None,
                     external_message: message.clone(),
                     internal_message: message,

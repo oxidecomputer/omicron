@@ -44,6 +44,26 @@
           }
         ],
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "",
             "content": {
@@ -51,12 +71,6 @@
                 "schema": {}
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -67,6 +81,26 @@
         "description": "This is a list of discrete background activities that Nexus carries out. This is exposed for support and debugging.",
         "operationId": "bgtask_list",
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "successful operation",
             "content": {
@@ -80,12 +114,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -106,14 +134,28 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
-          },
           "4XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "5XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "resource updated"
           }
         }
       }
@@ -134,6 +176,26 @@
           }
         ],
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "successful operation",
             "content": {
@@ -143,12 +205,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -158,6 +214,26 @@
         "summary": "Get the current clickhouse policy",
         "operationId": "clickhouse_policy_get",
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "successful operation",
             "content": {
@@ -167,12 +243,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -190,14 +260,28 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
-          },
           "4XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "5XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "resource updated"
           }
         }
       }
@@ -236,14 +320,28 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
-          },
           "4XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "5XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "resource updated"
           }
         }
       }
@@ -282,14 +380,28 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
-          },
           "4XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "5XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "resource updated"
           }
         }
       }
@@ -327,14 +439,28 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
-          },
           "4XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "5XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "resource updated"
           }
         }
       }
@@ -364,14 +490,28 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
-          },
           "4XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "5XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "resource updated"
           }
         }
       }
@@ -401,14 +541,28 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
-          },
           "4XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "5XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "resource updated"
           }
         }
       }
@@ -419,6 +573,26 @@
         "description": "This saga is used for demo and testing.  The saga just waits until you complete using the `saga_demo_complete` API.",
         "operationId": "saga_demo_create",
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "successful operation",
             "content": {
@@ -428,12 +602,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -454,14 +622,28 @@
           }
         ],
         "responses": {
-          "204": {
-            "description": "resource updated"
-          },
           "4XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "5XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "resource updated"
           }
         }
       }
@@ -500,6 +682,26 @@
           }
         ],
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "successful operation",
             "content": {
@@ -509,12 +711,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": {
@@ -539,6 +735,26 @@
           }
         ],
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "successful operation",
             "content": {
@@ -548,12 +764,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -573,14 +783,28 @@
           }
         ],
         "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
           "4XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "5XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "successful deletion"
           }
         }
       }
@@ -601,14 +825,28 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
-          },
           "4XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "5XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "resource updated"
           }
         }
       }
@@ -619,6 +857,26 @@
         "description": "that's changed since the last one was generated",
         "operationId": "blueprint_regenerate",
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "successful operation",
             "content": {
@@ -628,12 +886,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -643,6 +895,26 @@
         "summary": "Fetches the current target blueprint, if any",
         "operationId": "blueprint_target_view",
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "successful operation",
             "content": {
@@ -652,12 +924,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -675,6 +941,26 @@
           "required": true
         },
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "successful operation",
             "content": {
@@ -684,12 +970,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -709,6 +989,26 @@
           "required": true
         },
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "successful operation",
             "content": {
@@ -718,12 +1018,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -745,14 +1039,28 @@
           }
         ],
         "responses": {
-          "204": {
-            "description": "resource updated"
-          },
           "4XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "5XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "resource updated"
           }
         }
       }
@@ -783,14 +1091,28 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
-          },
           "4XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "5XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "resource updated"
           }
         }
       }
@@ -820,6 +1142,26 @@
           "required": true
         },
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "successful operation",
             "content": {
@@ -829,12 +1171,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -854,14 +1190,28 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
-          },
           "4XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "5XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "resource updated"
           }
         }
       }
@@ -910,6 +1260,26 @@
           }
         ],
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "successful operation",
             "content": {
@@ -919,12 +1289,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": {
@@ -947,6 +1311,26 @@
           "required": true
         },
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "201": {
             "description": "successful creation",
             "content": {
@@ -956,12 +1340,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -994,6 +1372,26 @@
           }
         ],
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "successful operation",
             "content": {
@@ -1007,12 +1405,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1033,14 +1425,28 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
-          },
           "4XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "5XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "resource updated"
           }
         }
       }
@@ -1088,6 +1494,26 @@
           }
         ],
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "successful operation",
             "content": {
@@ -1101,12 +1527,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": {
@@ -1141,14 +1561,28 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
-          },
           "4XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "5XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "resource updated"
           }
         }
       }
@@ -1187,6 +1621,26 @@
           }
         ],
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "successful operation",
             "content": {
@@ -1196,12 +1650,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         },
         "x-dropshot-pagination": {
@@ -1225,6 +1673,26 @@
           }
         ],
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "successful operation",
             "content": {
@@ -1234,12 +1702,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1259,6 +1721,26 @@
           }
         ],
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "successful operation",
             "content": {
@@ -1268,12 +1750,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -1301,14 +1777,28 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
-          },
           "4XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "5XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "resource updated"
           }
         }
       }
@@ -1329,14 +1819,28 @@
           }
         ],
         "responses": {
-          "204": {
-            "description": "resource updated"
-          },
           "4XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "5XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "resource updated"
           }
         }
       }
@@ -1356,6 +1860,26 @@
           "required": true
         },
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "201": {
             "description": "successful creation",
             "content": {
@@ -1365,12 +1889,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1391,6 +1909,26 @@
           "required": true
         },
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "successful operation",
             "content": {
@@ -1400,12 +1938,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1415,6 +1947,26 @@
         "summary": "List uninitialized sleds",
         "operationId": "sled_list_uninitialized",
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "successful operation",
             "content": {
@@ -1424,12 +1976,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1459,6 +2005,26 @@
           "required": true
         },
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "successful operation",
             "content": {
@@ -1468,12 +2034,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1503,14 +2063,28 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
-          },
           "4XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "5XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "resource updated"
           }
         }
       }
@@ -1532,14 +2106,28 @@
           }
         ],
         "responses": {
-          "204": {
-            "description": "resource updated"
-          },
           "4XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "5XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "resource updated"
           }
         }
       }
@@ -6096,18 +6684,6 @@
       "TypedUuidForPropolisKind": {
         "type": "string",
         "format": "uuid"
-      }
-    },
-    "responses": {
-      "Error": {
-        "description": "Error",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/Error"
-            }
-          }
-        }
       }
     }
   }

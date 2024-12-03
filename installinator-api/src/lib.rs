@@ -14,7 +14,7 @@ use dropshot::{
     HttpResponseHeaders, HttpResponseOk, HttpResponseUpdatedNoContent, Path,
     RequestContext, TypedBody,
 };
-use hyper::{header, StatusCode};
+use hyper::header;
 use installinator_common::EventReport;
 use omicron_common::update::ArtifactHashId;
 use schemars::JsonSchema;
@@ -99,7 +99,7 @@ impl EventReportStatus {
             EventReportStatus::UnrecognizedUpdateId => {
                 Err(HttpError::for_client_error(
                     None,
-                    StatusCode::UNPROCESSABLE_ENTITY,
+                    dropshot::ClientErrorStatusCode::UNPROCESSABLE_ENTITY,
                     format!(
                         "update ID {update_id} unrecognized by this server"
                     ),
@@ -108,7 +108,7 @@ impl EventReportStatus {
             EventReportStatus::ReceiverClosed => {
                 Err(HttpError::for_client_error(
                     None,
-                    StatusCode::GONE,
+                    dropshot::ClientErrorStatusCode::GONE,
                     format!("update ID {update_id}: receiver closed"),
                 ))
             }
@@ -129,7 +129,7 @@ pub fn default_config(bind_address: std::net::SocketAddr) -> ConfigDropshot {
         // TODO: replace with an endpoint-specific option once
         // https://github.com/oxidecomputer/dropshot/pull/618 lands and is
         // available in omicron.
-        request_body_max_bytes: 4 * 1024 * 1024,
+        default_request_body_max_bytes: 4 * 1024 * 1024,
         default_handler_task_mode: HandlerTaskMode::Detached,
         log_headers: vec![],
     }

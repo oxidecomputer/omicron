@@ -2601,8 +2601,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50976b6bac0894e689bb8ce0e2e5892dfeedb0876408bc806f0582d81824a3b5"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=eliza/custom-error-httpresponse-result#c86d36881310d5c005972fdb83f77e0e4853278d"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2666,8 +2665,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8371ca3d0ecdd13df8a00acb66312633fc66a5e412076ccbc414238536f8290"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=eliza/custom-error-httpresponse-result#c86d36881310d5c005972fdb83f77e0e4853278d"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -10374,9 +10372,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.132"
+version = "1.0.133"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d726bfaff4b320266d395898905d0eba0345aae23b54aee3a737e260fd46db03"
+checksum = "c7fceb2473b9166b2294ef05efcb65a3db80803f0b03ef86a5fc88a2b85ee377"
 dependencies = [
  "itoa",
  "memchr",
@@ -11006,7 +11004,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.87",

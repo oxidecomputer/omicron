@@ -15,6 +15,26 @@
         "summary": "Return the baseboard identity of this sled.",
         "operationId": "baseboard_get",
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "successful operation",
             "content": {
@@ -24,12 +44,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -40,6 +54,26 @@
         "description": "This API is intended to allow early boot services (such as Wicket) to query the underlying component versions installed on a sled.",
         "operationId": "components_get",
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "successful operation",
             "content": {
@@ -53,12 +87,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -68,6 +96,26 @@
         "summary": "Get the current status of rack initialization or reset.",
         "operationId": "rack_initialization_status",
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "successful operation",
             "content": {
@@ -77,12 +125,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -100,6 +142,26 @@
           "required": true
         },
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "successful operation",
             "content": {
@@ -109,12 +171,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -122,6 +178,26 @@
         "summary": "Reset the rack to an unconfigured state.",
         "operationId": "rack_reset",
         "responses": {
+          "4XX": {
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "200": {
             "description": "successful operation",
             "content": {
@@ -131,12 +207,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -146,14 +216,28 @@
         "summary": "Reset this particular sled to an unconfigured state.",
         "operationId": "sled_reset",
         "responses": {
-          "204": {
-            "description": "resource updated"
-          },
           "4XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "5XX": {
-            "$ref": "#/components/responses/Error"
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "resource updated"
           }
         }
       }
@@ -1615,18 +1699,6 @@
         "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
         "minLength": 1,
         "maxLength": 63
-      }
-    },
-    "responses": {
-      "Error": {
-        "description": "Error",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/Error"
-            }
-          }
-        }
       }
     }
   }

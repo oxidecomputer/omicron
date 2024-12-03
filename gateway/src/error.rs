@@ -114,7 +114,7 @@ impl From<SpCommsError> for HttpError {
                     )),
                 ..
             } => http_err_with_message(
-                http::StatusCode::SERVICE_UNAVAILABLE,
+                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
                 "UpdateSlotBusy",
                 InlineErrorChain::new(&error).to_string(),
             ),
@@ -125,29 +125,29 @@ impl From<SpCommsError> for HttpError {
                     )),
                 ..
             } => http_err_with_message(
-                http::StatusCode::SERVICE_UNAVAILABLE,
+                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
                 "UpdateInProgress",
                 InlineErrorChain::new(&error).to_string(),
             ),
             SpCommsError::SpAddressUnknown(_) => http_err_with_message(
-                http::StatusCode::SERVICE_UNAVAILABLE,
+                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
                 "SpAddressUnknown",
                 InlineErrorChain::new(&error).to_string(),
             ),
             SpCommsError::Timeout { .. } => http_err_with_message(
-                http::StatusCode::SERVICE_UNAVAILABLE,
+                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
                 "Timeout ",
                 InlineErrorChain::new(&error).to_string(),
             ),
             SpCommsError::SpCommunicationFailed { .. } => {
                 http_err_with_message(
-                    http::StatusCode::SERVICE_UNAVAILABLE,
+                    dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
                     "SpCommunicationFailed",
                     InlineErrorChain::new(&error).to_string(),
                 )
             }
             SpCommsError::UpdateFailed { .. } => http_err_with_message(
-                http::StatusCode::SERVICE_UNAVAILABLE,
+                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
                 "UpdateFailed",
                 InlineErrorChain::new(&error).to_string(),
             ),
@@ -163,12 +163,12 @@ impl From<SpLookupError> for HttpError {
                 InlineErrorChain::new(&error).to_string(),
             ),
             SpLookupError::DiscoveryNotYetComplete => http_err_with_message(
-                http::StatusCode::SERVICE_UNAVAILABLE,
+                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
                 "DiscoveryNotYetComplete",
                 InlineErrorChain::new(&error).to_string(),
             ),
             SpLookupError::DiscoveryFailed { .. } => http_err_with_message(
-                http::StatusCode::SERVICE_UNAVAILABLE,
+                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
                 "DiscoveryFailed ",
                 InlineErrorChain::new(&error).to_string(),
             ),
@@ -181,7 +181,7 @@ impl From<SpLookupError> for HttpError {
 // status code, we want to give our caller some information about what is going
 // wrong (e.g., we timed out waiting for an SP).
 pub(crate) fn http_err_with_message(
-    status_code: http::StatusCode,
+    status_code: dropshot::ErrorStatusCode,
     error_code: &str,
     message: String,
 ) -> HttpError {
