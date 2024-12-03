@@ -301,20 +301,24 @@ async fn test_system_timeseries_schema_list(
         .expect("Failed to find HTTP request latency histogram schema");
 }
 
-pub async fn timeseries_query(
+pub async fn timeseries_query_until_success(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
     query: impl ToString,
 ) -> Vec<oxql_types::Table> {
-    execute_timeseries_query(cptestctx, "/v1/system/timeseries/query", query)
-        .await
+    timeseries_query_until_success_(
+        cptestctx,
+        "/v1/system/timeseries/query",
+        query,
+    )
+    .await
 }
 
-pub async fn project_timeseries_query(
+pub async fn project_timeseries_query_until_success(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
     project: &str,
     query: impl ToString,
 ) -> Vec<oxql_types::Table> {
-    execute_timeseries_query(
+    timeseries_query_until_success_(
         cptestctx,
         &format!("/v1/timeseries/query?project={}", project),
         query,
@@ -322,11 +326,46 @@ pub async fn project_timeseries_query(
     .await
 }
 
-async fn execute_timeseries_query(
+/// Run an OxQL query until it succeeds or panics.
+async fn timeseries_query_until_success_(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
     endpoint: &str,
     query: impl ToString,
 ) -> Vec<oxql_types::Table> {
+    const POLL_INTERVAL: Duration = Duration::from_secs(1);
+    const POLL_MAX: Duration = Duration::from_secs(30);
+    let query_ = query.to_string();
+    wait_for_condition(
+        || async {
+            match execute_timeseries_query(cptestctx, endpoint, &query_).await {
+                Some(r) => Ok(r),
+                None => Err(CondCheckError::<()>::NotYet),
+            }
+        },
+        &POLL_INTERVAL,
+        &POLL_MAX,
+    )
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "Timeseries named in query are not available \
+            after {:?}, query: '{}'",
+            POLL_MAX,
+            query.to_string(),
+        )
+    })
+}
+
+/// Run an OxQL query.
+///
+/// This returns `None` if the query resulted in client error and the body
+/// indicates that a timeseries named in the query could not be found. In all
+/// other cases, it either succeeds or panics.
+pub async fn execute_timeseries_query(
+    cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
+    endpoint: &str,
+    query: impl ToString,
+) -> Option<Vec<oxql_types::Table>> {
     // first, make sure the latest timeseries have been collected.
     cptestctx
         .oximeter
@@ -353,14 +392,29 @@ async fn execute_timeseries_query(
     .unwrap_or_else(|e| {
         panic!("timeseries query failed: {e:?}\nquery: {query}")
     });
-    rsp.parsed_body::<OxqlQueryResult>()
-        .unwrap_or_else(|e| {
-            panic!(
-                "could not parse timeseries query response: {e:?}\n\
-            query: {query}\nresponse: {rsp:#?}"
-            );
-        })
-        .tables
+
+    // Check for a timeseries-not-found error specifically.
+    if rsp.status.is_client_error() {
+        let text = std::str::from_utf8(&rsp.body)
+            .expect("Timeseries query response body should be UTF-8");
+        if text.contains("Schema for timeseries") && text.contains("not found")
+        {
+            return None;
+        }
+    }
+
+    // Try to parse the query as usual, which will fail on other kinds of
+    // errors.
+    Some(
+        rsp.parsed_body::<OxqlQueryResult>()
+            .unwrap_or_else(|e| {
+                panic!(
+                    "could not parse timeseries query response: {e:?}\n\
+                    query: {query}\nresponse: {rsp:#?}"
+                );
+            })
+            .tables,
+    )
 }
 
 #[nexus_test]
@@ -467,7 +521,7 @@ async fn test_instance_watcher_metrics(
     // activate the instance watcher background task.
     activate_instance_watcher().await;
 
-    let metrics = timeseries_query(&cptestctx, OXQL_QUERY).await;
+    let metrics = timeseries_query_until_success(&cptestctx, OXQL_QUERY).await;
     let checks = metrics
         .iter()
         .find(|t| t.name() == "virtual_machine:check")
@@ -483,7 +537,7 @@ async fn test_instance_watcher_metrics(
     // activate the instance watcher background task.
     activate_instance_watcher().await;
 
-    let metrics = timeseries_query(&cptestctx, OXQL_QUERY).await;
+    let metrics = timeseries_query_until_success(&cptestctx, OXQL_QUERY).await;
     let checks = metrics
         .iter()
         .find(|t| t.name() == "virtual_machine:check")
@@ -500,7 +554,7 @@ async fn test_instance_watcher_metrics(
     // activate the instance watcher background task.
     activate_instance_watcher().await;
 
-    let metrics = timeseries_query(&cptestctx, OXQL_QUERY).await;
+    let metrics = timeseries_query_until_success(&cptestctx, OXQL_QUERY).await;
     let checks = metrics
         .iter()
         .find(|t| t.name() == "virtual_machine:check")
@@ -525,7 +579,7 @@ async fn test_instance_watcher_metrics(
     // activate the instance watcher background task.
     activate_instance_watcher().await;
 
-    let metrics = timeseries_query(&cptestctx, OXQL_QUERY).await;
+    let metrics = timeseries_query_until_success(&cptestctx, OXQL_QUERY).await;
     let checks = metrics
         .iter()
         .find(|t| t.name() == "virtual_machine:check")
@@ -554,7 +608,7 @@ async fn test_instance_watcher_metrics(
     // activate the instance watcher background task.
     activate_instance_watcher().await;
 
-    let metrics = timeseries_query(&cptestctx, OXQL_QUERY).await;
+    let metrics = timeseries_query_until_success(&cptestctx, OXQL_QUERY).await;
     let checks = metrics
         .iter()
         .find(|t| t.name() == "virtual_machine:check")
@@ -599,29 +653,40 @@ async fn test_project_timeseries_query(
     // Query with no project specified
     let q1 = "get virtual_machine:check";
 
-    let result = project_timeseries_query(&cptestctx, "project1", q1).await;
-    assert_eq!(result.len(), 1);
-    assert!(result[0].timeseries().len() > 0);
-
-    // also works with project ID
     let result =
-        project_timeseries_query(&cptestctx, &p1.identity.id.to_string(), q1)
+        project_timeseries_query_until_success(&cptestctx, "project1", q1)
             .await;
     assert_eq!(result.len(), 1);
     assert!(result[0].timeseries().len() > 0);
 
-    let result = project_timeseries_query(&cptestctx, "project2", q1).await;
+    // also works with project ID
+    let result = project_timeseries_query_until_success(
+        &cptestctx,
+        &p1.identity.id.to_string(),
+        q1,
+    )
+    .await;
+    assert_eq!(result.len(), 1);
+    assert!(result[0].timeseries().len() > 0);
+
+    let result =
+        project_timeseries_query_until_success(&cptestctx, "project2", q1)
+            .await;
     assert_eq!(result.len(), 1);
     assert!(result[0].timeseries().len() > 0);
 
     // with project specified
     let q2 = &format!("{} | filter project_id == \"{}\"", q1, p1.identity.id);
 
-    let result = project_timeseries_query(&cptestctx, "project1", q2).await;
+    let result =
+        project_timeseries_query_until_success(&cptestctx, "project1", q2)
+            .await;
     assert_eq!(result.len(), 1);
     assert!(result[0].timeseries().len() > 0);
 
-    let result = project_timeseries_query(&cptestctx, "project2", q2).await;
+    let result =
+        project_timeseries_query_until_success(&cptestctx, "project2", q2)
+            .await;
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].timeseries().len(), 0);
 
@@ -629,12 +694,16 @@ async fn test_project_timeseries_query(
     let q3 = &format!("{} | filter instance_id == \"{}\"", q1, i1.identity.id);
 
     // project containing instance gives me something
-    let result = project_timeseries_query(&cptestctx, "project1", q3).await;
+    let result =
+        project_timeseries_query_until_success(&cptestctx, "project1", q3)
+            .await;
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].timeseries().len(), 1);
 
     // should be empty or error
-    let result = project_timeseries_query(&cptestctx, "project2", q3).await;
+    let result =
+        project_timeseries_query_until_success(&cptestctx, "project2", q3)
+            .await;
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].timeseries().len(), 0);
 
@@ -868,7 +937,7 @@ async fn test_mgs_metrics(
                 .try_force_collect()
                 .await
                 .expect("Could not force oximeter collection");
-            let table = timeseries_query(&cptestctx, &query)
+            let table = timeseries_query_until_success(&cptestctx, &query)
                 .await
                 .into_iter()
                 .find(|t| t.name() == name)
