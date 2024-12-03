@@ -222,16 +222,6 @@ pub struct SledEditCounts {
     pub zones: EditCounts,
 }
 
-impl SledEditCounts {
-    fn accum(self, other: Self) -> Self {
-        Self {
-            disks: self.disks.accum(other.disks),
-            datasets: self.datasets.accum(other.datasets),
-            zones: self.zones.accum(other.zones),
-        }
-    }
-}
-
 impl From<StorageEditCounts> for SledEditCounts {
     fn from(value: StorageEditCounts) -> Self {
         let StorageEditCounts { disks, datasets } = value;
@@ -884,8 +874,11 @@ impl<'a> BlueprintBuilder<'a> {
     /// This operation must perform the following:
     /// - Ensure that any disks / zpools that exist in the database
     ///   are propagated into the blueprint.
-    /// - Ensure that any disks that are expunged from the database are
-    ///   removed from the blueprint.
+    ///
+    /// Not covered by this method:
+    ///
+    /// - Expunging any disks that are expunged from the database. This is done
+    // in `expunge_disks_for_sled`.
     pub fn sled_ensure_disks(
         &mut self,
         sled_id: SledUuid,
@@ -897,19 +890,16 @@ impl<'a> BlueprintBuilder<'a> {
             resources,
             &mut self.rng,
         )?;
-        let blueprint_disk_ids = sled_storage.disk_ids().collect::<Vec<_>>();
 
         // These are the in-service disks as we observed them in the database,
         // during the planning phase
         let database_disks = resources
             .all_disks(DiskFilter::InService)
             .map(|(zpool, disk)| (disk.disk_id, (zpool, disk)));
-        let mut database_disk_ids = BTreeSet::new();
 
         // Ensure any disk present in the database is also present in the
         // blueprint
         for (disk_id, (zpool, disk)) in database_disks {
-            database_disk_ids.insert(disk_id);
             sled_storage.ensure_disk(BlueprintPhysicalDiskConfig {
                 disposition: BlueprintPhysicalDiskDisposition::InService,
                 identity: disk.disk_identity.clone(),
@@ -917,33 +907,7 @@ impl<'a> BlueprintBuilder<'a> {
                 pool_id: *zpool,
             });
         }
-
-        // Remove any disks that appear in the blueprint, but not the database
-        let mut zones_to_expunge = BTreeSet::new();
-        for disk_id in blueprint_disk_ids {
-            if !database_disk_ids.contains(&disk_id) {
-                if let Some(expunged_zpool) = sled_storage.remove_disk(&disk_id)
-                {
-                    zones_to_expunge.extend(
-                        self.zones
-                            .zones_using_zpool(
-                                sled_id,
-                                BlueprintZoneFilter::ShouldBeRunning,
-                                &expunged_zpool,
-                            )
-                            .map(|zone| zone.id),
-                    );
-                }
-            }
-        }
-        let mut edit_counts: SledEditCounts = sled_storage.finalize().into();
-
-        // Expunging a zpool necessarily requires also expunging any zones that
-        // depended on it.
-        for zone_id in zones_to_expunge {
-            edit_counts =
-                edit_counts.accum(self.sled_expunge_zone(sled_id, zone_id)?);
-        }
+        let edit_counts: SledEditCounts = sled_storage.finalize().into();
 
         Ok(edit_counts)
     }
@@ -1877,27 +1841,6 @@ impl<'a> BlueprintZonesBuilder<'a> {
         } else {
             Box::new(std::iter::empty())
         }
-    }
-
-    /// Builds a set of all zones whose filesystem or durable dataset reside on
-    /// the given `zpool`.
-    pub fn zones_using_zpool<'b>(
-        &'b self,
-        sled_id: SledUuid,
-        filter: BlueprintZoneFilter,
-        zpool: &'b ZpoolName,
-    ) -> impl Iterator<Item = &'b BlueprintZoneConfig> + 'b {
-        self.current_sled_zones(sled_id, filter).filter_map(
-            move |(config, _state)| {
-                if Some(zpool) == config.filesystem_pool.as_ref()
-                    || Some(zpool) == config.zone_type.durable_zpool()
-                {
-                    Some(config)
-                } else {
-                    None
-                }
-            },
-        )
     }
 
     /// Produces an owned map of zones for the sleds recorded in this blueprint

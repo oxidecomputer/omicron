@@ -82,10 +82,6 @@ pub(super) struct SledStorageEditor<'a> {
 }
 
 impl SledStorageEditor<'_> {
-    pub fn disk_ids(&self) -> impl Iterator<Item = PhysicalDiskUuid> + '_ {
-        self.disks.disk_ids()
-    }
-
     pub fn ensure_disk(&mut self, disk: BlueprintPhysicalDiskConfig) {
         let zpool = ZpoolName::new_external(disk.pool_id);
 
@@ -94,16 +90,8 @@ impl SledStorageEditor<'_> {
         self.datasets.ensure_zone_root_dataset(zpool);
     }
 
-    pub fn remove_disk(
-        &mut self,
-        disk_id: &PhysicalDiskUuid,
-    ) -> Option<ZpoolName> {
-        let Some(disk) = self.disks.remove_disk(disk_id) else {
-            return None;
-        };
-        self.datasets
-            .expunge_datasets_if(|dataset| dataset.pool.id() == disk.pool_id);
-        Some(ZpoolName::new_external(disk.pool_id))
+    pub fn remove_decommissioned_disk(&mut self, disk_id: &PhysicalDiskUuid) {
+        self.disks.remove_disk(disk_id);
     }
 
     /// Set the disposition of a disk to `Expunged` and return its zpool.

@@ -122,10 +122,6 @@ impl<'a> SledDisksEditor<'a> {
         }
     }
 
-    pub fn disk_ids(&self) -> impl Iterator<Item = PhysicalDiskUuid> + '_ {
-        self.config.disks.keys().copied()
-    }
-
     pub fn ensure_disk(&mut self, disk: BlueprintPhysicalDiskConfig) {
         let disk_id = disk.id;
         match self.config.disks.entry(disk_id) {

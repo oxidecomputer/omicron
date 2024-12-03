@@ -187,11 +187,14 @@ impl<'a> Planner<'a> {
         {
             commissioned_sled_ids.insert(sled_id);
 
-            // Perform the expungement for any zones that might need it.
-            self.blueprint.expunge_zones_for_sled(sled_id, sled_details)?;
-
             // Perform the expungment for any disks that might need it.
             self.blueprint.expunge_disks_for_sled(sled_id)?;
+
+            // Perform the expungement for any zones that might need it.
+            //
+            // This must come after disk expungement, as it finds expunged zones
+            // based on expunged disks.
+            self.blueprint.expunge_zones_for_sled(sled_id, sled_details)?;
         }
 
         // Check for any decommissioned sleds (i.e., sleds for which our
@@ -735,8 +738,6 @@ fn sled_needs_all_zones_expunged(
         SledPolicy::Expunged => Some(ZoneExpungeReason::SledExpunged),
     }
 }
-
-pub(crate) fn disk_needs_expungement() {}
 
 pub(crate) fn zone_needs_expungement(
     sled_details: &SledDetails,
