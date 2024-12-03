@@ -1196,11 +1196,26 @@ pub enum Timestamp {
     Unix(String),
 }
 
+// TODO: This doesn't seem to be working
+//impl FromStr for Timestamp {
+//    type Err = Error;
+//
+//    fn from_str(s: &str) -> Result<Self, Self::Err> {
+//        if let Ok(utc) = s.parse() {
+//            Ok(Timestamp::Utc(utc))
+//        } else if let Some(_) = DateTime::from_timestamp(s.parse::<i64>().expect(&format!("{s} is not a valid timestamp")), 0) {
+//            Ok(Timestamp::Unix(s.to_string()))
+//        } else {
+//            bail!("{s} is not a valid timestamp")
+//        }
+//    }
+//}
+
 /// Retrieved time series from the internal `system` database.
 #[derive(Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct SystemTimeSeries {
-    pub time: Timestamp,
+    pub time: String,
     pub value: f64,
     // TODO: Would be really nice to have an enum with possible units (s, ms, bytes)
     // Not sure if I can even add this, the system tables don't mention units at all.
