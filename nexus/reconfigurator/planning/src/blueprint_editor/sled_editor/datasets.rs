@@ -8,6 +8,8 @@ use illumos_utils::zpool::ZpoolName;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintDatasetsConfig;
+use nexus_types::deployment::SledResources;
+use nexus_types::deployment::ZpoolFilter;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::CompressionAlgorithm;
@@ -36,6 +38,73 @@ pub struct MultipleDatasetsOfKind {
 pub enum DatasetsEditError {
     #[error("tried to expunge nonexistent dataset: {id}")]
     ExpungeNonexistentDataset { id: DatasetUuid },
+}
+
+/// TODO(https://github.com/oxidecomputer/omicron/issues/6645): In between
+/// the addition of datasets to blueprints and knowing all deployed system
+/// have _generated_ a blueprint that populates datasets, we are in a sticky
+/// situation where a dataset might have already existed in CRDB with an ID,
+/// but the blueprint system doesn't know about it. We accept a map of all
+/// existing dataset IDs, and then when determining the ID of a dataset,
+/// we'll try these in order:
+///
+/// 1. Is the dataset in our blueprint already? If so, use its ID.
+/// 2. Is the dataset in `preexisting_database_ids`? If so, use that ID.
+/// 3. Generate a new random ID.
+#[derive(Debug)]
+pub(crate) struct PreexistingDatasetIds(
+    BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, DatasetUuid>>,
+);
+
+impl PreexistingDatasetIds {
+    pub fn build(
+        resources: &SledResources,
+    ) -> Result<Self, MultipleDatasetsOfKind> {
+        let iter = resources.all_datasets(ZpoolFilter::InService).flat_map(
+            |(&zpool_id, configs)| {
+                configs.iter().map(move |config| {
+                    (zpool_id, config.name.dataset().clone(), config.id)
+                })
+            },
+        );
+
+        let mut kind_id_map: BTreeMap<
+            ZpoolUuid,
+            BTreeMap<DatasetKind, DatasetUuid>,
+        > = BTreeMap::new();
+
+        for (zpool_id, kind, dataset_id) in iter {
+            let dataset_ids_by_kind = kind_id_map.entry(zpool_id).or_default();
+            match dataset_ids_by_kind.entry(kind) {
+                Entry::Vacant(slot) => {
+                    slot.insert(dataset_id);
+                }
+                Entry::Occupied(prev) => {
+                    return Err(MultipleDatasetsOfKind {
+                        zpool_id,
+                        kind: prev.key().clone(),
+                        id1: *prev.get(),
+                        id2: dataset_id,
+                    });
+                }
+            }
+        }
+        Ok(Self(kind_id_map))
+    }
+
+    pub fn empty() -> Self {
+        Self(BTreeMap::new())
+    }
+}
+
+impl PreexistingDatasetIds {
+    fn get(
+        &self,
+        zpool_id: &ZpoolUuid,
+        kind: &DatasetKind,
+    ) -> Option<DatasetUuid> {
+        self.0.get(zpool_id).and_then(|by_kind| by_kind.get(kind).copied())
+    }
 }
 
 #[derive(Debug)]
@@ -133,14 +202,46 @@ impl PartialDatasetConfig {
 
 #[derive(Debug)]
 pub(super) struct DatasetsEditor {
+    preexisting_dataset_ids: PreexistingDatasetIds,
     config: BlueprintDatasetsConfig,
     by_zpool_and_kind: BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, DatasetUuid>>,
     counts: EditCounts,
 }
 
 impl DatasetsEditor {
-    pub fn empty() -> Self {
+    pub fn new(
+        config: BlueprintDatasetsConfig,
+        preexisting_dataset_ids: PreexistingDatasetIds,
+    ) -> Result<Self, MultipleDatasetsOfKind> {
+        let mut by_zpool_and_kind = BTreeMap::new();
+        for dataset in config.datasets.values() {
+            let by_kind: &mut BTreeMap<_, _> =
+                by_zpool_and_kind.entry(dataset.pool.id()).or_default();
+            match by_kind.entry(dataset.kind.clone()) {
+                Entry::Vacant(slot) => {
+                    slot.insert(dataset.id);
+                }
+                Entry::Occupied(prev) => {
+                    return Err(MultipleDatasetsOfKind {
+                        zpool_id: dataset.pool.id(),
+                        kind: dataset.kind.clone(),
+                        id1: *prev.get(),
+                        id2: dataset.id,
+                    });
+                }
+            }
+        }
+        Ok(Self {
+            preexisting_dataset_ids,
+            config,
+            by_zpool_and_kind,
+            counts: EditCounts::zeroes(),
+        })
+    }
+
+    pub fn empty(preexisting_dataset_ids: PreexistingDatasetIds) -> Self {
         Self {
+            preexisting_dataset_ids,
             config: BlueprintDatasetsConfig {
                 generation: Generation::new(),
                 datasets: BTreeMap::new(),
@@ -169,9 +270,19 @@ impl DatasetsEditor {
         zpool: &ZpoolUuid,
         kind: &DatasetKind,
     ) -> Option<DatasetUuid> {
-        let by_kind = self.by_zpool_and_kind.get(zpool)?;
-        let id = by_kind.get(kind).copied()?;
-        Some(id)
+        if let Some(blueprint_id) = self
+            .by_zpool_and_kind
+            .get(zpool)
+            .and_then(|by_kind| by_kind.get(kind).copied())
+        {
+            return Some(blueprint_id);
+        };
+        if let Some(preexisting_database_id) =
+            self.preexisting_dataset_ids.get(zpool, kind)
+        {
+            return Some(preexisting_database_id);
+        };
+        None
     }
 
     pub fn expunge(
@@ -229,31 +340,5 @@ impl DatasetsEditor {
                 }
             }
         }
-    }
-}
-
-impl TryFrom<BlueprintDatasetsConfig> for DatasetsEditor {
-    type Error = MultipleDatasetsOfKind;
-
-    fn try_from(config: BlueprintDatasetsConfig) -> Result<Self, Self::Error> {
-        let mut by_zpool_and_kind = BTreeMap::new();
-        for dataset in config.datasets.values() {
-            let by_kind: &mut BTreeMap<_, _> =
-                by_zpool_and_kind.entry(dataset.pool.id()).or_default();
-            match by_kind.entry(dataset.kind.clone()) {
-                Entry::Vacant(slot) => {
-                    slot.insert(dataset.id);
-                }
-                Entry::Occupied(prev) => {
-                    return Err(MultipleDatasetsOfKind {
-                        zpool_id: dataset.pool.id(),
-                        kind: dataset.kind.clone(),
-                        id1: *prev.get(),
-                        id2: dataset.id,
-                    });
-                }
-            }
-        }
-        Ok(Self { config, by_zpool_and_kind, counts: EditCounts::zeroes() })
     }
 }

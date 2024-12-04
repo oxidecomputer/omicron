@@ -25,6 +25,8 @@ mod datasets;
 mod disks;
 mod zones;
 
+pub(crate) use self::datasets::PreexistingDatasetIds;
+
 pub use self::datasets::DatasetsEditError;
 pub use self::datasets::MultipleDatasetsOfKind;
 pub use self::disks::DisksEditError;
@@ -95,21 +97,25 @@ impl SledEditor {
         zones: BlueprintZonesConfig,
         disks: BlueprintPhysicalDisksConfig,
         datasets: BlueprintDatasetsConfig,
+        preexisting_dataset_ids: PreexistingDatasetIds,
     ) -> Result<Self, SledInputError> {
         Ok(Self {
             state,
             zones: zones.try_into()?,
             disks: disks.try_into()?,
-            datasets: datasets.try_into()?,
+            datasets: DatasetsEditor::new(datasets, preexisting_dataset_ids)?,
         })
     }
 
-    pub fn new_empty(state: SledState) -> Self {
+    pub fn new_empty(
+        state: SledState,
+        preexisting_dataset_ids: PreexistingDatasetIds,
+    ) -> Self {
         Self {
             state,
             zones: ZonesEditor::empty(),
             disks: DisksEditor::empty(),
-            datasets: DatasetsEditor::empty(),
+            datasets: DatasetsEditor::empty(preexisting_dataset_ids),
         }
     }
 

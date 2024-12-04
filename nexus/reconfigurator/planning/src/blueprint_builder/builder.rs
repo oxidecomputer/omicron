@@ -5,6 +5,7 @@
 //! Low-level facility for generating Blueprints
 
 use crate::blueprint_editor::EditedSled;
+use crate::blueprint_editor::PreexistingDatasetIds;
 use crate::blueprint_editor::SledEditError;
 use crate::blueprint_editor::SledEditor;
 use crate::ip_allocator::IpAllocator;
@@ -38,6 +39,7 @@ use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::SledLookupErrorKind;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::ZpoolName;
@@ -469,6 +471,30 @@ impl<'a> BlueprintBuilder<'a> {
             "parent_id" => parent_blueprint.id.to_string(),
         ));
 
+        // Helper to build a `PreexistingDatasetIds` for a given sled. This will
+        // go away with https://github.com/oxidecomputer/omicron/issues/6645.
+        let build_preexisting_dataset_ids = |sled_id| -> anyhow::Result<
+            PreexistingDatasetIds,
+        > {
+            match input.sled_lookup(SledFilter::All, sled_id) {
+                Ok(details) => PreexistingDatasetIds::build(&details.resources)
+                    .with_context(|| {
+                        format!(
+                            "failed building map of preexisting \
+                             dataset IDs for sled {sled_id}"
+                        )
+                    }),
+                Err(err) => match err.kind() {
+                    SledLookupErrorKind::Missing => {
+                        Ok(PreexistingDatasetIds::empty())
+                    }
+                    SledLookupErrorKind::Filtered { .. } => unreachable!(
+                        "SledFilter::All should not filter anything out"
+                    ),
+                },
+            }
+        };
+
         // Squish the disparate maps in our parent blueprint into one map of
         // `SledEditor`s.
         let mut sled_editors = BTreeMap::new();
@@ -508,13 +534,16 @@ impl<'a> BlueprintBuilder<'a> {
                     generation: Generation::new(),
                     datasets: BTreeMap::new(),
                 });
-            let editor =
-                SledEditor::new(state, zones.clone(), disks, datasets.clone())
-                    .with_context(|| {
-                        format!(
-                            "failed to construct SledEditor for sled {sled_id}"
-                        )
-                    })?;
+            let editor = SledEditor::new(
+                state,
+                zones.clone(),
+                disks,
+                datasets.clone(),
+                build_preexisting_dataset_ids(*sled_id)?,
+            )
+            .with_context(|| {
+                format!("failed to construct SledEditor for sled {sled_id}")
+            })?;
             sled_editors.insert(*sled_id, editor);
         }
 
@@ -522,7 +551,10 @@ impl<'a> BlueprintBuilder<'a> {
         // that weren't in the parent blueprint. (These are newly-added sleds.)
         for sled_id in input.all_sled_ids(SledFilter::Commissioned) {
             if let Entry::Vacant(slot) = sled_editors.entry(sled_id) {
-                slot.insert(SledEditor::new_empty(SledState::Active));
+                slot.insert(SledEditor::new_empty(
+                    SledState::Active,
+                    build_preexisting_dataset_ids(sled_id)?,
+                ));
             }
         }
 
