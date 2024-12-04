@@ -4,8 +4,11 @@
 
 use std::time::{Duration, Instant};
 
+use anyhow::{anyhow, bail, Context, Result};
+use camino::{Utf8Path, Utf8PathBuf};
+use chrono::DateTime;
 use clickhouse_admin_server_client::{types, Client as ClickhouseServerClient};
-use anyhow::{anyhow,Result};
+use omicron_common::FileKv;
 use ratatui::{
     crossterm::event::{self, Event, KeyCode},
     layout::{Constraint, Layout, Rect},
@@ -15,7 +18,6 @@ use ratatui::{
     widgets::{Axis, Block, Chart, Dataset, GraphType, LegendPosition},
     DefaultTerminal, Frame,
 };
-use chrono::DateTime;
 use serde::Deserialize;
 use slog::{info, o, Drain};
 use slog_async::Async;
@@ -53,60 +55,16 @@ fn main() -> Result<()> {
     app_result
 }
 
-struct App {
-    signal1: SinSignal,
-    data1: Vec<(f64, f64)>,
-    signal2: SinSignal,
-    data2: Vec<(f64, f64)>,
-    window: [f64; 2],
-}
-
-#[derive(Clone)]
-struct SinSignal {
-    x: f64,
-    interval: f64,
-    period: f64,
-    scale: f64,
-}
-
-impl SinSignal {
-    const fn new(interval: f64, period: f64, scale: f64) -> Self {
-        Self {
-            x: 0.0,
-            interval,
-            period,
-            scale,
-        }
-    }
-}
-
-impl Iterator for SinSignal {
-    type Item = (f64, f64);
-    fn next(&mut self) -> Option<Self::Item> {
-        let point = (self.x, (self.x * 1.0 / self.period).sin() * self.scale);
-        self.x += self.interval;
-        Some(point)
-    }
-}
+struct App {}
 
 impl App {
     fn new() -> Self {
-        let mut signal1 = SinSignal::new(0.2, 3.0, 18.0);
-        let mut signal2 = SinSignal::new(0.1, 2.0, 10.0);
-        let data1 = signal1.by_ref().take(200).collect::<Vec<(f64, f64)>>();
-        let data2 = signal2.by_ref().take(200).collect::<Vec<(f64, f64)>>();
-        Self {
-            signal1,
-            data1,
-            signal2,
-            data2,
-            window: [0.0, 20.0],
-        }
+       Self {}
     }
 
-    fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
-      // TODO: Actually fix this
-        let tick_rate = Duration::from_secs(250);
+    fn run(self, mut terminal: DefaultTerminal) -> Result<()> {
+        // Refresh after one minute
+        let tick_rate = Duration::from_secs(60);
         let mut last_tick = Instant::now();
         loop {
             terminal.draw(|frame| self.draw(frame))?;
@@ -120,85 +78,27 @@ impl App {
                 }
             }
             if last_tick.elapsed() >= tick_rate {
-                self.on_tick();
                 last_tick = Instant::now();
             }
         }
     }
 
-    fn on_tick(&mut self) {
-        self.data1.drain(0..5);
-        self.data1.extend(self.signal1.by_ref().take(5));
-
-        self.data2.drain(0..10);
-        self.data2.extend(self.signal2.by_ref().take(10));
-
-        self.window[0] += 1.0;
-        self.window[1] += 1.0;
-    }
-
     fn draw(&self, frame: &mut Frame) {
-       // let [_top, bottom] = Layout::vertical([Constraint::Fill(1); 2]).areas(frame.area());
-       // let [animated_chart, bar_chart] =
-       //     Layout::horizontal([Constraint::Fill(1), Constraint::Length(29)]).areas(top);
-        let [all] = Layout::vertical([Constraint::Fill(1); 1]).areas(frame.area());
+        // let [_top, bottom] = Layout::vertical([Constraint::Fill(1); 2]).areas(frame.area());
+        // let [animated_chart, bar_chart] =
+        //     Layout::horizontal([Constraint::Fill(1), Constraint::Length(29)]).areas(top);
+        let [all] =
+            Layout::vertical([Constraint::Fill(1); 1]).areas(frame.area());
         // let [line_chart, scatter] = Layout::horizontal([Constraint::Fill(1); 2]).areas(all);
 
-        let [line_chart] = Layout::horizontal([Constraint::Fill(1); 1]).areas(all);
+        let [line_chart] =
+            Layout::horizontal([Constraint::Fill(1); 1]).areas(all);
 
-       // self.render_animated_chart(frame, animated_chart);
-       // render_barchart(frame, bar_chart);
         render_line_chart(frame, line_chart);
-       // render_scatter(frame, scatter);
-    }
-
-    fn _render_animated_chart(&self, frame: &mut Frame, area: Rect) {
-        let x_labels = vec![
-            Span::styled(
-                format!("{}", self.window[0]),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(format!("{}", (self.window[0] + self.window[1]) / 2.0)),
-            Span::styled(
-                format!("{}", self.window[1]),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-        ];
-        let datasets = vec![
-            Dataset::default()
-                .name("data2")
-                .marker(symbols::Marker::Dot)
-                .style(Style::default().fg(Color::Cyan))
-                .data(&self.data1),
-            Dataset::default()
-                .name("data3")
-                .marker(symbols::Marker::Braille)
-                .style(Style::default().fg(Color::Yellow))
-                .data(&self.data2),
-        ];
-
-        let chart = Chart::new(datasets)
-            .block(Block::bordered())
-            .x_axis(
-                Axis::default()
-                    .title("X Axis")
-                    .style(Style::default().fg(Color::Gray))
-                    .labels(x_labels)
-                    .bounds(self.window),
-            )
-            .y_axis(
-                Axis::default()
-                    .title("Y Axis")
-                    .style(Style::default().fg(Color::Gray))
-                    .labels(["-20".bold(), "0".into(), "20".bold()])
-                    .bounds([-20.0, 20.0]),
-            );
-
-        frame.render_widget(chart, area);
     }
 }
 
-fn get_data() -> Result<Vec<Timeseries>, serde_json::Error> {
+fn test_data() -> Result<Vec<Timeseries>, serde_json::Error> {
     let data = r#"
 [
   {
@@ -331,81 +231,117 @@ fn get_data() -> Result<Vec<Timeseries>, serde_json::Error> {
     serde_json::from_str(data)
 }
 
-// TODO: Build better logger
-fn log() -> slog::Logger {
-  let decorator = PlainDecorator::new(TestStdoutWriter);
-  let drain = FullFormat::new(decorator).build().fuse();
-  let drain = slog_async::Async::new(drain).build().fuse();
-  slog::Logger::root(drain, o!())
+fn log_path() -> Result<Utf8PathBuf> {
+    // TODO: Add a log path via env vars?
+    // Maybe just find the temp directory
+    match std::env::var("CLICKANA_LOG_PATH") {
+        Ok(path) => Ok(path.into()),
+        Err(std::env::VarError::NotPresent) => Ok("/tmp/clickana.log".into()),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            bail!("CLICKANA_LOG_PATH is not valid unicode");
+        }
+    }
+}
+
+fn setup_log(path: &Utf8Path) -> anyhow::Result<slog::Logger> {
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(path)
+        .with_context(|| format!("error opening log file {path}"))?;
+
+    let decorator = slog_term::PlainDecorator::new(file);
+    let drain = slog_term::FullFormat::new(decorator).build().fuse();
+
+    let drain = slog_async::Async::new(drain).build().fuse();
+
+    Ok(slog::Logger::root(drain, slog::o!(FileKv)))
 }
 
 fn get_api_data() -> Result<Vec<Timeseries>> {
-  // TODO: Clean this up
-  let rt = Runtime::new().unwrap();
+    // TODO: Clean this up
+    let rt = Runtime::new().unwrap();
 
-  let admin_url = format!("http://[::1]:8888");
-  let log = log();
-  let client = ClickhouseServerClient::new(&admin_url, log.clone());
-  let result = rt.block_on( async {
-    // TODO: Do something with the logs! It's messing up my chart :(
-    // I think I need to call drawe after this
-  let timeseries = client
-      .system_timeseries_avg(types::SystemTable::AsynchronousMetricLog, "DiskUsed_default", Some(120), Some(3600), Some(types::TimestampFormat::UnixEpoch) )
-      .await
-      .map(|t| t.into_inner()).unwrap();
-      //.map_err(|e| {
-      //    anyhow!(
-      //        concat!(
-      //        "failed to send config for clickhouse server ",
-      //        "with id {} to clickhouse-admin-server; admin_url = {}",
-      //        "error = {}"
-      //    ),
-      //        config.settings.id,
-      //        admin_url,
-      //        e
-      //    )
-      //});
+    let admin_url = format!("http://[::1]:8888");
+    let log = setup_log(&log_path()?)?;
+    let client = ClickhouseServerClient::new(&admin_url, log.clone());
+    let result = rt.block_on(async {
+        // TODO: Do something with the logs! It's messing up my chart :(
+        // I think I need to call drawe after this
+        let timeseries = client
+            .system_timeseries_avg(
+                types::SystemTable::AsynchronousMetricLog,
+                "DiskUsed_default",
+                Some(120),
+                Some(3600),
+                Some(types::TimestampFormat::UnixEpoch),
+            )
+            .await
+            .map(|t| t.into_inner()) //;
+            .map_err(|e| {
+                anyhow!(
+                    concat!(
+              "failed to retrieve timeseries from clickhouse server; ",
+              "admin_url = {} error = {}",
+          ),
+                    admin_url,
+                    e
+                )
+            });
 
-   timeseries
-  });
-  // TODO: actually format time properly
-  let timeseries: Vec<Timeseries> = result.into_iter().map(|s| Timeseries{time: format!("{:?}", s.time), value: s.value} ).collect();
+        timeseries
+    })?;
+    let timeseries: Vec<Timeseries> = result
+        .into_iter()
+        .map(|s| Timeseries { time: s.time, value: s.value })
+        .collect();
 
-  Ok(timeseries)
-
+    Ok(timeseries)
 }
 
 fn render_line_chart(frame: &mut Frame, area: Rect) {
     //let raw_data = get_data().unwrap();
     let raw_data = get_api_data().unwrap();
     // TODO: Also retreive time and value separately for the human readable labels?
-    let times: Vec<i64> = raw_data.iter()
-    .map(|ts| (ts.time.trim_matches('"').parse::<i64>().expect(&format!("WHAT? time:{} struct:{:?}", ts.time, ts))))
-    .collect();
+    let times: Vec<i64> = raw_data
+        .iter()
+        .map(|ts| {
+            ts.time
+                .trim_matches('"')
+                .parse::<i64>()
+                .expect(&format!("WHAT? time:{} struct:{:?}", ts.time, ts))
+        })
+        .collect();
 
-    let values: Vec<f64> = raw_data.iter()
-    .map(|ts| (ts.value))
-    .collect();
+    let values: Vec<f64> = raw_data.iter().map(|ts| ts.value).collect();
 
-    let data: Vec<(f64, f64)> = raw_data.iter()
-    .map(|ts| (ts.time.trim_matches('"').parse::<f64>().unwrap(), ts.value))
-    .collect();
+    let data: Vec<(f64, f64)> = raw_data
+        .iter()
+        .map(|ts| (ts.time.trim_matches('"').parse::<f64>().unwrap(), ts.value))
+        .collect();
 
-    let min_value = values.iter().min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap().floor();
-    let max_value = values.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap().ceil();
+    let min_value =
+        values.iter().min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap().floor();
+    let max_value =
+        values.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap().ceil();
 
     let min_time = times.iter().min().unwrap();
     let max_time = times.iter().max().unwrap();
-    // Are these timestamps correct? is the i64 conversion working?
-    let min_time_utc = DateTime::from_timestamp(*min_time, 0).expect("invalid timestamp").time();
-    let max_time_utc = DateTime::from_timestamp(*max_time, 0).expect("invalid timestamp").time();
-    let avg_time_utc = DateTime::from_timestamp((*min_time + *max_time)/2, 0).expect("invalid timestamp").time();
 
-    let min_value_gib =  min_value as u64 / GIBIBYTE;
+    let min_time_utc = DateTime::from_timestamp(*min_time, 0)
+        .expect("invalid timestamp")
+        .time();
+    let max_time_utc = DateTime::from_timestamp(*max_time, 0)
+        .expect("invalid timestamp")
+        .time();
+    let avg_time_utc = DateTime::from_timestamp((*min_time + *max_time) / 2, 0)
+        .expect("invalid timestamp")
+        .time();
+
+    let min_value_gib = min_value as u64 / GIBIBYTE;
     let max_value_gib = max_value as u64 / GIBIBYTE;
     let avg_value_gib = (min_value_gib + max_value_gib) / 2;
-
-     // let data = [(1., 1.), (4., 4.), (4.5, 1.0)];
 
     let datasets = vec![Dataset::default()
         .name("DiskUsage per minute".italic())
@@ -415,23 +351,41 @@ fn render_line_chart(frame: &mut Frame, area: Rect) {
         .data(&data)];
 
     let chart = Chart::new(datasets)
-        .block(Block::bordered().title(Line::from(format!("Disk max {}", max_value)).cyan().bold().centered()))
+        .block(
+            Block::bordered().title(
+                Line::from(format!("Disk max {}", max_value))
+                    .cyan()
+                    .bold()
+                    .centered(),
+            ),
+        )
         .x_axis(
             Axis::default()
-             //   .title("Time")
+                //   .title("Time")
                 .style(Style::default().gray())
                 .bounds([*min_time as f64, *max_time as f64])
-                .labels([format!("{}", min_time_utc).bold(), format!("{}", avg_time_utc).bold(), format!("{}", max_time_utc).bold()]),
+                .labels([
+                    format!("{}", min_time_utc).bold(),
+                    format!("{}", avg_time_utc).bold(),
+                    format!("{}", max_time_utc).bold(),
+                ]),
         )
         .y_axis(
             Axis::default()
-              //  .title("Bytes")
+                //  .title("Bytes")
                 .style(Style::default().gray())
                 .bounds([min_value, max_value])
-                .labels([format!("{} GiB", min_value_gib).bold(), format!("{} GiB", avg_value_gib).bold(), format!("{} GiB", max_value_gib).bold()]),
+                .labels([
+                    format!("{} GiB", min_value_gib).bold(),
+                    format!("{} GiB", avg_value_gib).bold(),
+                    format!("{} GiB", max_value_gib).bold(),
+                ]),
         )
         .legend_position(Some(LegendPosition::TopLeft))
-        .hidden_legend_constraints((Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)));
+        .hidden_legend_constraints((
+            Constraint::Ratio(1, 2),
+            Constraint::Ratio(1, 2),
+        ));
 
     frame.render_widget(chart, area);
 }
