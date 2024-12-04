@@ -1667,7 +1667,7 @@ table! {
         pool_id -> Uuid,
 
         disposition -> crate::DbBpPhysicalDiskDispositionEnum,
-        state -> crate::PhysicalDiskState,
+        state -> crate::PhysicalDiskStateEnum,
     }
 }
 
