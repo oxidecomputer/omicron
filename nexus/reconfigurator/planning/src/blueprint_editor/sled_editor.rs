@@ -13,8 +13,10 @@ use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
+use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
+use nexus_types::deployment::DiskFilter;
 use nexus_types::external_api::views::SledState;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -102,6 +104,15 @@ impl SledEditor {
         })
     }
 
+    pub fn new_empty(state: SledState) -> Self {
+        Self {
+            state,
+            zones: ZonesEditor::empty(),
+            disks: DisksEditor::empty(),
+            datasets: DatasetsEditor::empty(),
+        }
+    }
+
     pub fn finalize(self) -> EditedSled {
         let (disks, disks_counts) = self.disks.finalize();
         let (datasets, datasets_counts) = self.datasets.finalize();
@@ -117,6 +128,28 @@ impl SledEditor {
                 zones: zones_counts,
             },
         }
+    }
+
+    pub fn edit_counts(&self) -> SledEditCounts {
+        SledEditCounts {
+            disks: self.disks.edit_counts(),
+            datasets: self.datasets.edit_counts(),
+            zones: self.zones.edit_counts(),
+        }
+    }
+
+    pub fn disks(
+        &self,
+        filter: DiskFilter,
+    ) -> impl Iterator<Item = &BlueprintPhysicalDiskConfig> {
+        self.disks.disks(filter)
+    }
+
+    pub fn zones(
+        &self,
+        filter: BlueprintZoneFilter,
+    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
+        self.zones.zones(filter)
     }
 
     pub fn ensure_disk(
@@ -182,62 +215,12 @@ impl SledEditor {
         zone: BlueprintZoneConfig,
         rng: &mut PlannerRng,
     ) -> Result<(), SledEditError> {
-        let filesystem_dataset = zone.filesystem_dataset().map(|dataset| {
-            self.dataset_config(
-                PartialDatasetConfig::for_transient_zone(dataset),
-                rng,
-            )
-        });
-        let durable_dataset = zone.zone_type.durable_dataset().map(|dataset| {
-            let address = match &zone.zone_type {
-                BlueprintZoneType::Crucible(
-                    blueprint_zone_type::Crucible { address, .. },
-                ) => Some(*address),
-                _ => None,
-            };
-            self.dataset_config(
-                PartialDatasetConfig::for_durable_zone(
-                    dataset.dataset.pool_name.clone(),
-                    dataset.kind,
-                    address,
-                ),
-                rng,
-            )
-        });
+        // Ensure we can construct the configs for the datasets for this zone.
+        let datasets = ZoneDatasetConfigs::new(self, &zone, rng)?;
 
-        // Ensure that if this zone has both kinds of datasets, they reside on
-        // the same zpool.
-        if let (Some(fs), Some(dur)) = (&filesystem_dataset, &durable_dataset) {
-            if fs.pool != dur.pool {
-                return Err(SledEditError::ZoneInvalidZpoolCombination {
-                    zone_id: zone.id,
-                    fs_zpool: fs.pool.clone(),
-                    dur_zpool: dur.pool.clone(),
-                });
-            }
-        }
-
-        // Ensure that if we have a zpool, we have a matching disk (i.e., a zone
-        // can't be added if it has a dataset on a zpool that we don't have)
-        if let Some(dataset) =
-            filesystem_dataset.as_ref().or(durable_dataset.as_ref())
-        {
-            if !self.disks.contains_zpool(&dataset.pool.id()) {
-                return Err(SledEditError::ZoneOnNonexistentZpool {
-                    zone_id: zone.id,
-                    zpool: dataset.pool.clone(),
-                });
-            }
-        }
-
-        // All checks complete: Add the zone and its datasets.
+        // Actually add the zone and its datasets.
         self.zones.add_zone(zone)?;
-        if let Some(dataset) = filesystem_dataset {
-            self.datasets.ensure(dataset);
-        }
-        if let Some(dataset) = durable_dataset {
-            self.datasets.ensure(dataset);
-        }
+        datasets.ensure(&mut self.datasets);
 
         Ok(())
     }
@@ -283,5 +266,95 @@ impl SledEditor {
         }
 
         Ok(())
+    }
+
+    /// Backwards compatibility / test helper: If we're given a blueprint that
+    /// has zones but wasn't created via `SledEditor`, it might not have
+    /// datasets for all its zones. This method backfills them.
+    pub fn ensure_datasets_for_running_zones(
+        &mut self,
+        rng: &mut PlannerRng,
+    ) -> Result<(), SledEditError> {
+        for zone in self.zones(BlueprintZoneFilter::ShouldBeRunning) {
+            let datasets = ZoneDatasetConfigs::new(self, zone, rng)?;
+            datasets.ensure(&mut self.datasets);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct ZoneDatasetConfigs {
+    filesystem: Option<BlueprintDatasetConfig>,
+    durable: Option<BlueprintDatasetConfig>,
+}
+
+impl ZoneDatasetConfigs {
+    fn new(
+        editor: &mut SledEditor,
+        zone: &BlueprintZoneConfig,
+        rng: &mut PlannerRng,
+    ) -> Result<Self, SledEditError> {
+        let filesystem_dataset = zone.filesystem_dataset().map(|dataset| {
+            editor.dataset_config(
+                PartialDatasetConfig::for_transient_zone(dataset),
+                rng,
+            )
+        });
+        let durable_dataset = zone.zone_type.durable_dataset().map(|dataset| {
+            let address = match &zone.zone_type {
+                BlueprintZoneType::Crucible(
+                    blueprint_zone_type::Crucible { address, .. },
+                ) => Some(*address),
+                _ => None,
+            };
+            editor.dataset_config(
+                PartialDatasetConfig::for_durable_zone(
+                    dataset.dataset.pool_name.clone(),
+                    dataset.kind,
+                    address,
+                ),
+                rng,
+            )
+        });
+
+        // Ensure that if this zone has both kinds of datasets, they reside on
+        // the same zpool.
+        if let (Some(fs), Some(dur)) = (&filesystem_dataset, &durable_dataset) {
+            if fs.pool != dur.pool {
+                return Err(SledEditError::ZoneInvalidZpoolCombination {
+                    zone_id: zone.id,
+                    fs_zpool: fs.pool.clone(),
+                    dur_zpool: dur.pool.clone(),
+                });
+            }
+        }
+
+        // Ensure that if we have a zpool, we have a matching disk (i.e., a zone
+        // can't be added if it has a dataset on a zpool that we don't have)
+        if let Some(dataset) =
+            filesystem_dataset.as_ref().or(durable_dataset.as_ref())
+        {
+            if !editor.disks.contains_zpool(&dataset.pool.id()) {
+                return Err(SledEditError::ZoneOnNonexistentZpool {
+                    zone_id: zone.id,
+                    zpool: dataset.pool.clone(),
+                });
+            }
+        }
+
+        Ok(Self {
+            filesystem: filesystem_dataset,
+            durable: durable_dataset,
+        })
+    }
+
+    fn ensure(self, datasets: &mut DatasetsEditor) {
+        if let Some(dataset) = self.filesystem {
+            datasets.ensure(dataset);
+        }
+        if let Some(dataset) = self.durable {
+            datasets.ensure(dataset);
+        }
     }
 }

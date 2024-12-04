@@ -9,6 +9,7 @@ use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZonesConfig;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -43,6 +44,14 @@ pub(super) struct ZonesEditor {
 }
 
 impl ZonesEditor {
+    pub fn empty() -> Self {
+        Self {
+            generation: Generation::new(),
+            zones: IndexMap::new(),
+            counts: EditCounts::zeroes(),
+        }
+    }
+
     pub fn finalize(self) -> (BlueprintZonesConfig, EditCounts) {
         let mut generation = self.generation;
         if self.counts.has_nonzero_counts() {
@@ -55,6 +64,19 @@ impl ZonesEditor {
             },
             self.counts,
         )
+    }
+
+    pub fn edit_counts(&self) -> EditCounts {
+        self.counts
+    }
+
+    pub fn zones(
+        &self,
+        filter: BlueprintZoneFilter,
+    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
+        self.zones
+            .values()
+            .filter(move |config| config.disposition.matches(filter))
     }
 
     pub fn add_zone(

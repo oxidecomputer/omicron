@@ -8,6 +8,7 @@ use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::Generation;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
@@ -130,12 +131,27 @@ pub(super) struct DatasetsEditor {
 }
 
 impl DatasetsEditor {
+    pub fn empty() -> Self {
+        Self {
+            config: BlueprintDatasetsConfig {
+                generation: Generation::new(),
+                datasets: BTreeMap::new(),
+            },
+            by_zpool_and_kind: BTreeMap::new(),
+            counts: EditCounts::zeroes(),
+        }
+    }
+
     pub fn finalize(self) -> (BlueprintDatasetsConfig, EditCounts) {
         let mut config = self.config;
         if self.counts.has_nonzero_counts() {
             config.generation = config.generation.next();
         }
         (config, self.counts)
+    }
+
+    pub fn edit_counts(&self) -> EditCounts {
+        self.counts
     }
 
     /// If there is a dataset of the given `kind` on the given `zpool`, return

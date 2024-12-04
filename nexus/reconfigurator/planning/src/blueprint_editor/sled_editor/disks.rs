@@ -6,6 +6,7 @@ use crate::blueprint_builder::EditCounts;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
+use nexus_types::deployment::DiskFilter;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -37,6 +38,14 @@ pub(super) struct DisksEditor {
 }
 
 impl DisksEditor {
+    pub fn empty() -> Self {
+        Self {
+            generation: Generation::new(),
+            disks: BTreeMap::new(),
+            counts: EditCounts::zeroes(),
+        }
+    }
+
     pub fn finalize(self) -> (BlueprintPhysicalDisksConfig, EditCounts) {
         let mut generation = self.generation;
         if self.counts.has_nonzero_counts() {
@@ -50,6 +59,19 @@ impl DisksEditor {
             },
             self.counts,
         )
+    }
+
+    pub fn edit_counts(&self) -> EditCounts {
+        self.counts
+    }
+
+    pub fn disks(
+        &self,
+        filter: DiskFilter,
+    ) -> impl Iterator<Item = &BlueprintPhysicalDiskConfig> {
+        self.disks
+            .values()
+            .filter(move |config| config.disposition.matches(filter))
     }
 
     pub fn contains_zpool(&self, zpool_id: &ZpoolUuid) -> bool {
