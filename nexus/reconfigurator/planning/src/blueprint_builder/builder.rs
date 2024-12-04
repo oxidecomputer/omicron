@@ -14,7 +14,6 @@ use crate::planner::ZoneExpungeReason;
 use anyhow::anyhow;
 use anyhow::Context as _;
 use clickhouse_admin_types::OXIMETER_CLUSTER;
-use datasets_editor::BlueprintDatasetsEditError;
 use ipnet::IpAdd;
 use nexus_inventory::now_db_precision;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
@@ -78,7 +77,6 @@ use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
-use storage_editor::BlueprintStorageEditor;
 use thiserror::Error;
 
 use super::clickhouse::ClickhouseAllocator;
@@ -87,12 +85,6 @@ use super::external_networking::BuilderExternalNetworking;
 use super::external_networking::ExternalNetworkingChoice;
 use super::external_networking::ExternalSnatNetworkingChoice;
 use super::internal_dns::DnsSubnetAllocator;
-//use super::zones::BuilderZoneState;
-//use super::zones::BuilderZonesConfig;
-
-mod datasets_editor;
-mod disks_editor;
-mod storage_editor;
 
 /// Errors encountered while assembling blueprints
 #[derive(Debug, Error)]
@@ -131,8 +123,6 @@ pub enum Error {
     TooManyDnsServers,
     #[error("planner produced too many {kind:?} zones")]
     TooManyZones { kind: ZoneKind },
-    #[error(transparent)]
-    BlueprintDatasetsEditError(#[from] BlueprintDatasetsEditError),
     #[error("error editing sled {sled_id}")]
     SledEditError {
         sled_id: SledUuid,
@@ -684,15 +674,6 @@ impl<'a> BlueprintBuilder<'a> {
         // have entries for in-service sleds.
         blueprint_datasets
             .retain(|sled_id, _| in_service_sleds.contains(sled_id));
-        /*
-        let blueprint_zones = self
-            .zones
-            .into_zones_map(self.input.all_sled_ids(SledFilter::Commissioned));
-        let (blueprint_disks, blueprint_datasets) =
-            self.storage.into_blueprint_maps(
-                self.input.all_sled_ids(SledFilter::InService),
-            );
-            */
 
         // If we have the clickhouse cluster setup enabled via policy and we
         // don't yet have a `ClickhouseClusterConfiguration`, then we must create
@@ -1041,8 +1022,6 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn sled_ensure_zone_datasets(
         &mut self,
         sled_id: SledUuid,
-        // TODO-john remove
-        _resources: &SledResources,
     ) -> Result<EnsureMultiple, Error> {
         let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!(
@@ -1745,15 +1724,6 @@ impl<'a> BlueprintBuilder<'a> {
         allocator.alloc().ok_or(Error::OutOfAddresses { sled_id })
     }
 
-    #[cfg(test)]
-    pub(crate) fn sled_select_zpool_for_tests(
-        &self,
-        sled_id: SledUuid,
-        zone_kind: ZoneKind,
-    ) -> Result<ZpoolName, Error> {
-        self.sled_select_zpool(sled_id, zone_kind)
-    }
-
     /// Selects a zpool for this zone type.
     ///
     /// This zpool may be used for either durable storage or transient
@@ -1852,159 +1822,6 @@ impl<'a> BlueprintBuilder<'a> {
         self.external_networking()?.add_external_dns_ip(addr)
     }
 }
-
-/*
-/// Helper for working with sets of zones on each sled
-///
-/// Tracking the set of zones is slightly non-trivial because we need to bump
-/// the per-sled generation number iff the zones are changed.  So we need to
-/// keep track of whether we've changed the zones relative to the parent
-/// blueprint.  We do this by keeping a copy of any [`BlueprintZonesConfig`]
-/// that we've changed and a _reference_ to the parent blueprint's zones.  This
-/// struct makes it easy for callers iterate over the right set of zones.
-pub(super) struct BlueprintZonesBuilder<'a> {
-    changed_zones: BTreeMap<SledUuid, BuilderZonesConfig>,
-    parent_zones: &'a BTreeMap<SledUuid, BlueprintZonesConfig>,
-}
-
-impl<'a> BlueprintZonesBuilder<'a> {
-    pub fn new(parent_blueprint: &'a Blueprint) -> BlueprintZonesBuilder {
-        BlueprintZonesBuilder {
-            changed_zones: BTreeMap::new(),
-            parent_zones: &parent_blueprint.blueprint_zones,
-        }
-    }
-
-    /// Returns a mutable reference to a sled's Omicron zones *because* we're
-    /// going to change them.
-    ///
-    /// This updates internal data structures, and it is recommended that it be
-    /// called only when the caller actually wishes to make changes to zones.
-    /// But making no changes after calling this does not result in a changed
-    /// blueprint. (In particular, the generation number is only updated if
-    /// the state of any zones was updated.)
-    pub fn change_sled_zones(
-        &mut self,
-        sled_id: SledUuid,
-    ) -> &mut BuilderZonesConfig {
-        self.changed_zones.entry(sled_id).or_insert_with(|| {
-            if let Some(old_sled_zones) = self.parent_zones.get(&sled_id) {
-                BuilderZonesConfig::from_parent(old_sled_zones)
-            } else {
-                BuilderZonesConfig::new()
-            }
-        })
-    }
-
-    /// Iterates over the list of sled IDs for which we have zones.
-    ///
-    /// This may include decommissioned sleds.
-    pub fn sled_ids_with_zones(&self) -> impl Iterator<Item = SledUuid> {
-        let mut sled_ids =
-            self.changed_zones.keys().copied().collect::<BTreeSet<_>>();
-        for &sled_id in self.parent_zones.keys() {
-            sled_ids.insert(sled_id);
-        }
-        sled_ids.into_iter()
-    }
-
-    /// Iterates over the list of `current_sled_zones` for all sled IDs for
-    /// which we have zones.
-    ///
-    /// This may include decommissioned sleds.
-    pub fn current_zones(
-        &self,
-        filter: BlueprintZoneFilter,
-    ) -> impl Iterator<Item = (SledUuid, Vec<&BlueprintZoneConfig>)> {
-        let sled_ids = self.sled_ids_with_zones();
-        sled_ids.map(move |sled_id| {
-            let zones = self
-                .current_sled_zones(sled_id, filter)
-                .map(|(zone_config, _)| zone_config)
-                .collect();
-            (sled_id, zones)
-        })
-    }
-
-    /// Iterates over the list of Omicron zones currently configured for this
-    /// sled in the blueprint that's being built, along with each zone's state
-    /// in the builder.
-    pub fn current_sled_zones(
-        &self,
-        sled_id: SledUuid,
-        filter: BlueprintZoneFilter,
-    ) -> Box<dyn Iterator<Item = (&BlueprintZoneConfig, BuilderZoneState)> + '_>
-    {
-        if let Some(sled_zones) = self.changed_zones.get(&sled_id) {
-            Box::new(
-                sled_zones.iter_zones(filter).map(|z| (z.zone(), z.state())),
-            )
-        } else if let Some(parent_zones) = self.parent_zones.get(&sled_id) {
-            Box::new(parent_zones.zones.iter().filter_map(move |z| {
-                if z.disposition.matches(filter) {
-                    Some((z, BuilderZoneState::Unchanged))
-                } else {
-                    None
-                }
-            }))
-        } else {
-            Box::new(std::iter::empty())
-        }
-    }
-
-    /// Builds a set of all zones whose filesystem or durable dataset reside on
-    /// the given `zpool`.
-    pub fn zones_using_zpool<'b>(
-        &'b self,
-        sled_id: SledUuid,
-        filter: BlueprintZoneFilter,
-        zpool: &'b ZpoolName,
-    ) -> impl Iterator<Item = &'b BlueprintZoneConfig> + 'b {
-        self.current_sled_zones(sled_id, filter).filter_map(
-            move |(config, _state)| {
-                if Some(zpool) == config.filesystem_pool.as_ref()
-                    || Some(zpool) == config.zone_type.durable_zpool()
-                {
-                    Some(config)
-                } else {
-                    None
-                }
-            },
-        )
-    }
-
-    /// Produces an owned map of zones for the sleds recorded in this blueprint
-    /// plus any newly-added sleds
-    pub fn into_zones_map(
-        self,
-        added_sled_ids: impl Iterator<Item = SledUuid>,
-    ) -> BTreeMap<SledUuid, BlueprintZonesConfig> {
-        // Start with self.changed_zones, which contains entries for any
-        // sled whose zones config is changing in this blueprint.
-        let mut zones = self
-            .changed_zones
-            .into_iter()
-            .map(|(sled_id, zones)| (sled_id, zones.build()))
-            .collect::<BTreeMap<_, _>>();
-
-        // Carry forward any zones from our parent blueprint. This may include
-        // zones for decommissioned sleds.
-        for (sled_id, parent_zones) in self.parent_zones {
-            zones.entry(*sled_id).or_insert_with(|| parent_zones.clone());
-        }
-
-        // Finally, insert any newly-added sleds.
-        for sled_id in added_sled_ids {
-            zones.entry(sled_id).or_insert_with(|| BlueprintZonesConfig {
-                generation: Generation::new(),
-                zones: vec![],
-            });
-        }
-
-        zones
-    }
-}
-*/
 
 #[cfg(test)]
 pub mod test {
@@ -2175,10 +1992,8 @@ pub mod test {
             }
             let datasets = datasets_for_sled(&blueprint, sled_id);
 
-            let zpool = zone_config.filesystem_pool.as_ref().unwrap();
-            let kind = DatasetKind::TransientZone {
-                name: storage_editor::zone_name(&zone_config),
-            };
+            let (zpool, kind) =
+                zone_config.filesystem_dataset().unwrap().into_parts();
             let dataset = find_dataset(&datasets, &zpool, kind);
             assert_eq!(
                 dataset.disposition,
@@ -2357,9 +2172,7 @@ pub mod test {
         for pool_id in new_sled_resources.zpools.keys() {
             builder.sled_ensure_zone_crucible(new_sled_id, *pool_id).unwrap();
         }
-        builder
-            .sled_ensure_zone_datasets(new_sled_id, new_sled_resources)
-            .unwrap();
+        builder.sled_ensure_zone_datasets(new_sled_id).unwrap();
 
         let blueprint3 = builder.build();
         verify_blueprint(&blueprint3);
@@ -2675,11 +2488,8 @@ pub mod test {
         // Before we make any modifications, there should be no work to do.
         //
         // If we haven't changed inputs, the output should be the same!
-        for (sled_id, resources) in
-            input.all_sled_resources(SledFilter::Commissioned)
-        {
-            let r =
-                builder.sled_ensure_zone_datasets(sled_id, resources).unwrap();
+        for sled_id in input.all_sled_ids(SledFilter::Commissioned) {
+            let r = builder.sled_ensure_zone_datasets(sled_id).unwrap();
             assert_eq!(r, EnsureMultiple::NotNeeded);
         }
 
@@ -2689,8 +2499,6 @@ pub mod test {
             .all_sled_ids(SledFilter::Commissioned)
             .next()
             .expect("at least one sled present");
-        let sled_details =
-            input.sled_lookup(SledFilter::Commissioned, sled_id).unwrap();
         let editor =
             builder.sled_editors.get_mut(&sled_id).expect("found sled");
         let crucible_zone_id = editor
@@ -2716,9 +2524,7 @@ pub mod test {
             EditCounts { added: 0, updated: 0, expunged: 2, removed: 0 }
         );
         // Once the datasets are expunged, no further changes will be proposed.
-        let r = builder
-            .sled_ensure_zone_datasets(sled_id, &sled_details.resources)
-            .unwrap();
+        let r = builder.sled_ensure_zone_datasets(sled_id).unwrap();
         assert_eq!(r, EnsureMultiple::NotNeeded);
 
         let blueprint = builder.build();
@@ -2735,9 +2541,7 @@ pub mod test {
 
         // While the datasets still exist in the input (effectively, the db) we
         // cannot remove them.
-        let r = builder
-            .sled_ensure_zone_datasets(sled_id, &sled_details.resources)
-            .unwrap();
+        let r = builder.sled_ensure_zone_datasets(sled_id).unwrap();
         assert_eq!(r, EnsureMultiple::NotNeeded);
 
         let blueprint = builder.build();
@@ -2789,11 +2593,7 @@ pub mod test {
 
         // Now, we should see the datasets "removed" from the blueprint, since
         // we no longer need to keep around records of their expungement.
-        let sled_details =
-            input.sled_lookup(SledFilter::Commissioned, sled_id).unwrap();
-        let r = builder
-            .sled_ensure_zone_datasets(sled_id, &sled_details.resources)
-            .unwrap();
+        let r = builder.sled_ensure_zone_datasets(sled_id).unwrap();
 
         // TODO(https://github.com/oxidecomputer/omicron/issues/6646):
         // Because of the workaround for #6646, we don't actually remove
@@ -3036,9 +2836,7 @@ pub mod test {
                 .sled_add_zone_cockroachdb(target_sled_id)
                 .expect("added CRDB zone");
         }
-        builder
-            .sled_ensure_zone_datasets(target_sled_id, sled_resources)
-            .unwrap();
+        builder.sled_ensure_zone_datasets(target_sled_id).unwrap();
 
         let blueprint = builder.build();
         verify_blueprint(&blueprint);

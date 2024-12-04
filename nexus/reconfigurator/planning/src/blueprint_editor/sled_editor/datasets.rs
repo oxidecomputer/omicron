@@ -100,14 +100,6 @@ impl PartialDatasetConfig {
         }
     }
 
-    pub fn zpool(&self) -> &ZpoolName {
-        self.name.pool()
-    }
-
-    pub fn kind(&self) -> &DatasetKind {
-        self.name.dataset()
-    }
-
     // Helper to generate a full `BlueprintDatasetConfig` from a partial config;
     // we either look up the ID (if we're updating an existing dataset) or
     // generate a new one via `rng`.

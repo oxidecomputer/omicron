@@ -362,17 +362,13 @@ impl<'a> Planner<'a> {
     }
 
     fn do_plan_datasets(&mut self) -> Result<(), Error> {
-        for (sled_id, sled_resources) in
-            self.input.all_sled_resources(SledFilter::InService)
-        {
+        for sled_id in self.input.all_sled_ids(SledFilter::InService) {
             if let EnsureMultiple::Changed {
                 added,
                 updated,
                 expunged,
                 removed,
-            } = self
-                .blueprint
-                .sled_ensure_zone_datasets(sled_id, &sled_resources)?
+            } = self.blueprint.sled_ensure_zone_datasets(sled_id)?
             {
                 info!(
                     &self.log,

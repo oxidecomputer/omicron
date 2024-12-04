@@ -6,7 +6,6 @@ use crate::blueprint_builder::EditCounts;
 use indexmap::map::Entry;
 use indexmap::IndexMap;
 use nexus_sled_agent_shared::inventory::ZoneKind;
-use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
