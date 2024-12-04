@@ -40,7 +40,7 @@ pub enum DatasetsEditError {
     ExpungeNonexistentDataset { id: DatasetUuid },
 }
 
-/// TODO(https://github.com/oxidecomputer/omicron/issues/6645): In between
+/// TODO(<https://github.com/oxidecomputer/omicron/issues/6645>): In between
 /// the addition of datasets to blueprints and knowing all deployed system
 /// have _generated_ a blueprint that populates datasets, we are in a sticky
 /// situation where a dataset might have already existed in CRDB with an ID,
