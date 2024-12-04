@@ -6,9 +6,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
-use chrono::DateTime;
-use clickhouse_admin_server_client::{types, Client as ClickhouseServerClient};
+use chrono::{DateTime, NaiveTime};
 use clickhouse_admin_server_client::types::SystemTimeSeries;
+use clickhouse_admin_server_client::{types, Client as ClickhouseServerClient};
 use omicron_common::FileKv;
 use ratatui::{
     crossterm::event::{self, Event, KeyCode},
@@ -31,7 +31,7 @@ pub struct Clickana {}
 
 impl Clickana {
     pub fn new() -> Self {
-       Self {}
+        Self {}
     }
 
     pub fn run(self, mut terminal: DefaultTerminal) -> Result<()> {
@@ -39,7 +39,8 @@ impl Clickana {
         let tick_rate = Duration::from_secs(60);
         let mut last_tick = Instant::now();
         loop {
-            terminal.draw(|frame| self.draw(frame))?;
+            let raw_data = get_api_data()?;
+            terminal.draw(|frame| self.draw(frame, raw_data))?;
 
             let timeout = tick_rate.saturating_sub(last_tick.elapsed());
             if event::poll(timeout)? {
@@ -55,7 +56,7 @@ impl Clickana {
         }
     }
 
-    fn draw(&self, frame: &mut Frame) {
+    fn draw(&self, frame: &mut Frame, raw_data: Vec<SystemTimeSeries>) {
         // let [_top, bottom] = Layout::vertical([Constraint::Fill(1); 2]).areas(frame.area());
         // let [animated_chart, bar_chart] =
         //     Layout::horizontal([Constraint::Fill(1), Constraint::Length(29)]).areas(top);
@@ -66,7 +67,7 @@ impl Clickana {
         let [line_chart] =
             Layout::horizontal([Constraint::Fill(1); 1]).areas(all);
 
-        render_line_chart(frame, line_chart);
+        render_line_chart(frame, line_chart, raw_data);
     }
 }
 
@@ -134,9 +135,97 @@ fn get_api_data() -> Result<Vec<SystemTimeSeries>> {
     Ok(result)
 }
 
-fn render_line_chart(frame: &mut Frame, area: Rect) {
-    let raw_data = get_api_data().unwrap();
-    // TODO: Also retreive time and value separately for the human readable labels?
+#[derive(Debug)]
+struct DashboardData {
+    //timeseries: Vec<SystemTimeSeries>,
+    data_points: Vec<(f64, f64)>,
+    avg_time_utc: NaiveTime,
+    start_time_utc: NaiveTime,
+    end_time_utc: NaiveTime,
+    avg_value_gib: u64,
+    min_value_gib: u64,
+    max_value_gib: u64,
+    // Ratatui requires the bounds of each axis to be f64
+    start_time_unix: f64,
+    end_time_unix: f64,
+    min_value_bytes: f64,
+    max_value_bytes: f64,
+}
+
+impl DashboardData {
+    fn new(raw_data: Vec<SystemTimeSeries>) -> Result<Self> {
+        let times: Vec<i64> = raw_data
+            .iter()
+            .map(|ts| {
+                // TODO: Do a match here?
+                 ts.time
+                    .trim_matches('"')
+                    .parse::<i64>().unwrap()
+            })
+            .collect();
+
+        let values: Vec<f64> = raw_data.iter().map(|ts| ts.value).collect();
+
+        let data_points: Vec<(f64, f64)> = raw_data
+            .iter()
+            .map(|ts| {
+                (ts.time.trim_matches('"').parse::<f64>().unwrap(), ts.value)
+            })
+            .collect();
+
+        let min_value_bytes = values
+            .iter()
+            .min_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap()
+            .floor();
+        let max_value_bytes = values
+            .iter()
+            .max_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap()
+            .ceil();
+
+        let start_time = times.iter().min().unwrap();
+        let end_time = times.iter().max().unwrap();
+
+        let start_time_utc = DateTime::from_timestamp(*start_time, 0)
+            .expect("invalid timestamp")
+            .time();
+        let end_time_utc = DateTime::from_timestamp(*end_time, 0)
+            .expect("invalid timestamp")
+            .time();
+        let avg_time_utc =
+            DateTime::from_timestamp((*start_time + *end_time) / 2, 0)
+                .expect("invalid timestamp")
+                .time();
+
+        let min_value_gib = min_value_bytes as u64 / GIBIBYTE;
+        let max_value_gib = max_value_bytes as u64 / GIBIBYTE;
+        let avg_value_gib = (min_value_gib + max_value_gib) / 2;
+
+        let start_time_unix = *start_time as f64;
+        let end_time_unix = *end_time as f64;
+
+        Ok(Self {
+            data_points,
+            avg_time_utc,
+            start_time_utc,
+            end_time_utc,
+            avg_value_gib,
+            min_value_gib,
+            max_value_gib,
+            start_time_unix,
+            end_time_unix,
+            min_value_bytes,
+            max_value_bytes,
+        })
+    }
+}
+
+fn render_line_chart(
+    frame: &mut Frame,
+    area: Rect,
+    raw_data: Vec<SystemTimeSeries>,
+) {
     let times: Vec<i64> = raw_data
         .iter()
         .map(|ts| {
@@ -224,7 +313,7 @@ fn render_line_chart(frame: &mut Frame, area: Rect) {
 }
 
 fn test_data() -> Result<Vec<SystemTimeSeries>, serde_json::Error> {
-  let data = r#"
+    let data = r#"
 [
 {
   "time": "1732223400",
@@ -353,5 +442,5 @@ fn test_data() -> Result<Vec<SystemTimeSeries>, serde_json::Error> {
 ]
 "#;
 
-  serde_json::from_str(data)
+    serde_json::from_str(data)
 }
