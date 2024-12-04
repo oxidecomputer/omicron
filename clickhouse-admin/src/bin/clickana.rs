@@ -8,6 +8,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::DateTime;
 use clickhouse_admin_server_client::{types, Client as ClickhouseServerClient};
+use clickhouse_admin_server_client::types::SystemTimeSeries;
 use omicron_common::FileKv;
 use ratatui::{
     crossterm::event::{self, Event, KeyCode},
@@ -26,38 +27,16 @@ use tokio::runtime::Runtime;
 
 const GIBIBYTE: u64 = 1073741824;
 
-#[derive(Deserialize, Debug)]
-struct Timeseries {
-    time: String,
-    value: f64,
-}
-
-//#[derive(Debug)]
-//pub struct Clickana {}
-//
-//impl Clickana {
-//    pub fn new() -> Self {
-//        Self {}
-//    }
-//
-//    pub fn view_dashboards(&self) -> Result<()> {
-//        let terminal = ratatui::init();
-//        let app_result = App::new().run(terminal);
-//        ratatui::restore();
-//        app_result
-//    }
-//}
-
 fn main() -> Result<()> {
     let terminal = ratatui::init();
-    let app_result = App::new().run(terminal);
+    let app_result = Clickana::new().run(terminal);
     ratatui::restore();
     app_result
 }
 
-struct App {}
+struct Clickana {}
 
-impl App {
+impl Clickana {
     fn new() -> Self {
        Self {}
     }
@@ -98,139 +77,6 @@ impl App {
     }
 }
 
-fn test_data() -> Result<Vec<Timeseries>, serde_json::Error> {
-    let data = r#"
-[
-  {
-    "time": "1732223400",
-    "value": 479551511587.3104
-  },
-  {
-    "time": "1732223520",
-    "value": 479555459822.93335
-  },
-  {
-    "time": "1732223640",
-    "value": 479560290201.6
-  },
-  {
-    "time": "1732223760",
-    "value": 469566801510.4
-  },
-  {
-    "time": "1732223880",
-    "value": 479587460778.6667
-  },
-  {
-    "time": "1732224000",
-    "value": 479618897442.13336
-  },
-  {
-    "time": "1732224120",
-    "value": 479649160567.4667
-  },
-  {
-    "time": "1732224240",
-    "value": 479677700300.8
-  },
-  {
-    "time": "1732224360",
-    "value": 479700512324.26666
-  },
-  {
-    "time": "1732224480",
-    "value": 479707099818.6667
-  },
-  {
-    "time": "1732224600",
-    "value": 479884974080.0
-  },
-  {
-    "time": "1732224720",
-    "value": 479975529779.2
-  },
-  {
-    "time": "1732224840",
-    "value": 479975824896.0
-  },
-  {
-    "time": "1732224960",
-    "value": 479976462062.93335
-  },
-  {
-    "time": "1732225080",
-    "value": 479986014242.13336
-  },
-  {
-    "time": "1732225200",
-    "value": 480041533235.2
-  },
-  {
-    "time": "1732225320",
-    "value": 480072114790.4
-  },
-  {
-    "time": "1732225440",
-    "value": 480097851050.6667
-  },
-  {
-    "time": "1732225560",
-    "value": 480138863854.93335
-  },
-  {
-    "time": "1732225680",
-    "value": 480178496648.5333
-  },
-  {
-    "time": "1732225800",
-    "value": 480196185941.3333
-  },
-  {
-    "time": "1732225920",
-    "value": 480208033792.0
-  },
-  {
-    "time": "1732226040",
-    "value": 480215815953.06665
-  },
-  {
-    "time": "1732226160",
-    "value": 480228655308.8
-  },
-  {
-    "time": "1732226280",
-    "value": 480237302749.86664
-  },
-  {
-    "time": "1732226400",
-    "value": 480251067016.5333
-  },
-  {
-    "time": "1732226520",
-    "value": 480239292381.86664
-  },
-  {
-    "time": "1732226640",
-    "value": 480886515029.3333
-  },
-  {
-    "time": "1732226760",
-    "value": 480663042423.4667
-  },
-  {
-    "time": "1732226880",
-    "value": 480213984085.3333
-  },
-  {
-    "time": "1732227000",
-    "value": 480265637816.1404
-  }
-]
-"#;
-
-    serde_json::from_str(data)
-}
-
 fn log_path() -> Result<Utf8PathBuf> {
     // TODO: Add a log path via env vars?
     // Maybe just find the temp directory
@@ -259,20 +105,19 @@ fn setup_log(path: &Utf8Path) -> anyhow::Result<slog::Logger> {
     Ok(slog::Logger::root(drain, slog::o!(FileKv)))
 }
 
-fn get_api_data() -> Result<Vec<Timeseries>> {
-    // TODO: Clean this up
-    let rt = Runtime::new().unwrap();
-
+fn get_api_data() -> Result<Vec<SystemTimeSeries>> {
+    let rt = Runtime::new()?;
+    // TODO: Take address from a flag
     let admin_url = format!("http://[::1]:8888");
     let log = setup_log(&log_path()?)?;
+
     let client = ClickhouseServerClient::new(&admin_url, log.clone());
     let result = rt.block_on(async {
-        // TODO: Do something with the logs! It's messing up my chart :(
-        // I think I need to call drawe after this
         let timeseries = client
             .system_timeseries_avg(
                 types::SystemTable::AsynchronousMetricLog,
                 "DiskUsed_default",
+                // TODO: Take interval and time_range from flag
                 Some(120),
                 Some(3600),
                 Some(types::TimestampFormat::UnixEpoch),
@@ -292,16 +137,11 @@ fn get_api_data() -> Result<Vec<Timeseries>> {
 
         timeseries
     })?;
-    let timeseries: Vec<Timeseries> = result
-        .into_iter()
-        .map(|s| Timeseries { time: s.time, value: s.value })
-        .collect();
 
-    Ok(timeseries)
+    Ok(result)
 }
 
 fn render_line_chart(frame: &mut Frame, area: Rect) {
-    //let raw_data = get_data().unwrap();
     let raw_data = get_api_data().unwrap();
     // TODO: Also retreive time and value separately for the human readable labels?
     let times: Vec<i64> = raw_data
@@ -388,4 +228,137 @@ fn render_line_chart(frame: &mut Frame, area: Rect) {
         ));
 
     frame.render_widget(chart, area);
+}
+
+fn test_data() -> Result<Vec<SystemTimeSeries>, serde_json::Error> {
+  let data = r#"
+[
+{
+  "time": "1732223400",
+  "value": 479551511587.3104
+},
+{
+  "time": "1732223520",
+  "value": 479555459822.93335
+},
+{
+  "time": "1732223640",
+  "value": 479560290201.6
+},
+{
+  "time": "1732223760",
+  "value": 469566801510.4
+},
+{
+  "time": "1732223880",
+  "value": 479587460778.6667
+},
+{
+  "time": "1732224000",
+  "value": 479618897442.13336
+},
+{
+  "time": "1732224120",
+  "value": 479649160567.4667
+},
+{
+  "time": "1732224240",
+  "value": 479677700300.8
+},
+{
+  "time": "1732224360",
+  "value": 479700512324.26666
+},
+{
+  "time": "1732224480",
+  "value": 479707099818.6667
+},
+{
+  "time": "1732224600",
+  "value": 479884974080.0
+},
+{
+  "time": "1732224720",
+  "value": 479975529779.2
+},
+{
+  "time": "1732224840",
+  "value": 479975824896.0
+},
+{
+  "time": "1732224960",
+  "value": 479976462062.93335
+},
+{
+  "time": "1732225080",
+  "value": 479986014242.13336
+},
+{
+  "time": "1732225200",
+  "value": 480041533235.2
+},
+{
+  "time": "1732225320",
+  "value": 480072114790.4
+},
+{
+  "time": "1732225440",
+  "value": 480097851050.6667
+},
+{
+  "time": "1732225560",
+  "value": 480138863854.93335
+},
+{
+  "time": "1732225680",
+  "value": 480178496648.5333
+},
+{
+  "time": "1732225800",
+  "value": 480196185941.3333
+},
+{
+  "time": "1732225920",
+  "value": 480208033792.0
+},
+{
+  "time": "1732226040",
+  "value": 480215815953.06665
+},
+{
+  "time": "1732226160",
+  "value": 480228655308.8
+},
+{
+  "time": "1732226280",
+  "value": 480237302749.86664
+},
+{
+  "time": "1732226400",
+  "value": 480251067016.5333
+},
+{
+  "time": "1732226520",
+  "value": 480239292381.86664
+},
+{
+  "time": "1732226640",
+  "value": 480886515029.3333
+},
+{
+  "time": "1732226760",
+  "value": 480663042423.4667
+},
+{
+  "time": "1732226880",
+  "value": 480213984085.3333
+},
+{
+  "time": "1732227000",
+  "value": 480265637816.1404
+}
+]
+"#;
+
+  serde_json::from_str(data)
 }
