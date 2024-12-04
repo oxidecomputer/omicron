@@ -13,6 +13,7 @@ use crate::planner::rng::PlannerRng;
 use crate::planner::zone_needs_expungement;
 use crate::planner::ZoneExpungeReason;
 use anyhow::anyhow;
+use anyhow::bail;
 use anyhow::Context as _;
 use clickhouse_admin_types::OXIMETER_CLUSTER;
 use ipnet::IpAdd;
@@ -500,17 +501,29 @@ impl<'a> BlueprintBuilder<'a> {
         let mut sled_editors = BTreeMap::new();
         for (sled_id, zones) in &parent_blueprint.blueprint_zones {
             // Prefer the sled state from our parent blueprint for sleds
-            // that were in it. If we have zones but no state for a sled, we
-            // assume it was removed by an earlier version of the planner (which
-            // pruned decommissioned sleds from `sled_state`).
-            //
-            // TODO-john Check that all zones are expunged in the "assuming
-            // decommissioned" case?
-            let state = parent_blueprint
-                .sled_state
-                .get(sled_id)
-                .copied()
-                .unwrap_or(SledState::Decommissioned);
+            // that were in it.
+            let state = match parent_blueprint.sled_state.get(sled_id).copied()
+            {
+                Some(state) => state,
+                None => {
+                    // If we have zones but no state for a sled, we assume
+                    // it was removed by an earlier version of the planner
+                    // (which pruned decommissioned sleds from
+                    // `sled_state`). Check that all of its zones are
+                    // expunged, which is a prerequisite for
+                    // decommissioning. If any zones aren't, then we don't
+                    // know what to do: the state is missing but we can't
+                    // assume "decommissioned", so fail.
+                    if zones.are_all_zones_expunged() {
+                        SledState::Decommissioned
+                    } else {
+                        bail!(
+                            "sled {sled_id} is missing in parent blueprint \
+                             sled_state map, but has non-expunged zones"
+                        );
+                    }
+                }
+            };
 
             // If we don't have disks/datasets entries, we'll start with an
             // empty config and rely on `sled_ensure_{disks,datasets}` calls to
@@ -2346,7 +2359,7 @@ pub mod test {
         // Generate a new blueprint. This sled should still be included: even
         // though the desired state is decommissioned, the current state is
         // still active, so we should carry it forward.
-        let blueprint2 = BlueprintBuilder::new_based_on(
+        let mut blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
             &input,
@@ -2364,11 +2377,21 @@ pub mod test {
         );
 
         // Change the input to mark the sled decommissioned. (Normally realizing
-        // blueprint2 would make this change.)
+        // blueprint2 would make this change.) We must also mark all its zones
+        // expunged to avoid tripping over an invalid state check in
+        // `new_based_on()`.
         let mut builder = input.into_builder();
         builder.sleds_mut().get_mut(&decommision_sled_id).unwrap().state =
             SledState::Decommissioned;
         let input = builder.build();
+        for z in &mut blueprint2
+            .blueprint_zones
+            .get_mut(&decommision_sled_id)
+            .unwrap()
+            .zones
+        {
+            z.disposition = BlueprintZoneDisposition::Expunged;
+        }
 
         // Generate a new blueprint. This desired sled state should no longer be
         // present: it has reached the terminal decommissioned state, so there's
