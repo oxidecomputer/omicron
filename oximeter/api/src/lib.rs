@@ -10,6 +10,7 @@ use dropshot::{
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::{net::SocketAddr, time::Duration};
 use uuid::Uuid;
 
 #[dropshot::api_description]
@@ -25,6 +26,16 @@ pub trait OximeterApi {
         request_context: RequestContext<Self::Context>,
         query: Query<PaginationParams<EmptyScanParams, ProducerPage>>,
     ) -> Result<HttpResponseOk<ResultsPage<ProducerEndpoint>>, HttpError>;
+
+    /// Get details about a producer by ID.
+    #[endpoint {
+        method = GET,
+        path = "/producers/{producer_id}",
+    }]
+    async fn producer_details(
+        request_context: RequestContext<Self::Context>,
+        path: dropshot::Path<ProducerIdPathParams>,
+    ) -> Result<HttpResponseOk<ProducerDetails>, HttpError>;
 
     /// Delete a producer by ID.
     #[endpoint {
@@ -63,4 +74,121 @@ pub struct CollectorInfo {
     pub id: Uuid,
     /// Last time we refreshed our producer list with Nexus.
     pub last_refresh: Option<DateTime<Utc>>,
+}
+
+/// Details about a previous successful collection.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct SuccessfulCollection {
+    /// The time at which we started a collection.
+    ///
+    /// Note that this is the time we queued a request to collect for processing
+    /// by a background task. The `time_queued` can be added to this time to
+    /// figure out when processing began, and `time_collecting` can be added to
+    /// that to figure out how long the actual collection process took.
+    pub started_at: DateTime<Utc>,
+
+    /// The time this request spent queued before being processed.
+    pub time_queued: Duration,
+
+    /// The time it took for the actual collection.
+    pub time_collecting: Duration,
+
+    /// The number of samples collected.
+    pub n_samples: u64,
+}
+
+/// Details about a previous failed collection.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct FailedCollection {
+    /// The time at which we started a collection.
+    ///
+    /// Note that this is the time we queued a request to collect for processing
+    /// by a background task. The `time_queued` can be added to this time to
+    /// figure out when processing began, and `time_collecting` can be added to
+    /// that to figure out how long the actual collection process took.
+    pub started_at: DateTime<Utc>,
+
+    /// The time this request spent queued before being processed.
+    pub time_queued: Duration,
+
+    /// The time it took for the actual collection.
+    pub time_collecting: Duration,
+
+    /// The reason the collection failed.
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct ProducerDetails {
+    /// The producer's ID.
+    pub id: Uuid,
+
+    /// The current collection interval.
+    pub interval: Duration,
+
+    /// The current collection address.
+    pub address: SocketAddr,
+
+    /// The time the producer was first registered with us.
+    pub registered: DateTime<Utc>,
+
+    /// The last time the producer's information was updated.
+    pub updated: DateTime<Utc>,
+
+    /// Details about the last successful collection.
+    ///
+    /// This is None if we've never successfully collected from the producer.
+    pub last_success: Option<SuccessfulCollection>,
+
+    /// Details about the last failed collection.
+    ///
+    /// This is None if we've never failed to collect from the producer.
+    pub last_failure: Option<FailedCollection>,
+
+    /// The total number of successful collections we've made.
+    pub n_collections: u64,
+
+    /// The total number of failed collections.
+    pub n_failures: u64,
+}
+
+impl ProducerDetails {
+    pub fn new(info: &ProducerEndpoint) -> Self {
+        let now = Utc::now();
+        Self {
+            id: info.id,
+            interval: info.interval,
+            address: info.address,
+            registered: now,
+            updated: now,
+            last_success: None,
+            last_failure: None,
+            n_collections: 0,
+            n_failures: 0,
+        }
+    }
+
+    /// Update with new producer information.
+    ///
+    /// # Panics
+    ///
+    /// This panics if the new information refers to a different ID.
+    pub fn update(&mut self, new: &ProducerEndpoint) {
+        assert_eq!(self.id, new.id);
+        self.updated = Utc::now();
+        self.address = new.address;
+        self.interval = new.interval;
+    }
+
+    /// Update when we successfully complete a collection.
+    pub fn on_success(&mut self, success: SuccessfulCollection) {
+        self.last_success = Some(success);
+        self.n_collections += 1;
+    }
+
+    /// Update when we fail to complete a collection.
+    pub fn on_failure(&mut self, failure: FailedCollection) {
+        self.last_failure = Some(failure);
+        self.n_failures += 1;
+    }
 }
