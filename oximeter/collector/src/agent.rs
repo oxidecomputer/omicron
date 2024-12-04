@@ -989,17 +989,16 @@ impl OximeterAgent {
             return Err(Error::NoSuchProducer { id });
         };
         let (reply_tx, rx) = oneshot::channel();
-        task.inbox
-            .send(CollectionMessage::Details { reply_tx })
-            .await
-            .map_err(|_| {
+        task.inbox.try_send(CollectionMessage::Details { reply_tx }).map_err(
+            |_| {
                 Error::CollectionError(
                     id,
                     String::from(
                         "Failed to send detail request to collection task",
                     ),
                 )
-            })?;
+            },
+        )?;
         drop(tasks);
         rx.await.map_err(|_| {
             Error::CollectionError(

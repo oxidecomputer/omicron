@@ -106,11 +106,22 @@ impl CollectionTaskStats {
     /// This panics if `new_info` refers to a different ID.
     pub fn update(&mut self, new_info: &ProducerEndpoint) {
         assert_eq!(self.collections.producer_id, new_info.id);
-        self.collections.producer_ip = new_info.address.ip();
-        self.collections.producer_port = new_info.address.port();
+
+        // Only reset the counters if the new information is actually different.
+        let new_ip = new_info.address.ip();
+        let new_port = new_info.address.port();
+        if self.collections.producer_ip == new_ip
+            && self.collections.producer_port == new_port
+        {
+            return;
+        }
+        self.collections.producer_ip = new_ip;
+        self.collections.producer_port = new_port;
+        self.collections.datum = Cumulative::new(0);
         for each in self.failed_collections.values_mut() {
-            each.producer_ip = new_info.address.ip();
-            each.producer_port = new_info.address.port();
+            each.producer_ip = new_ip;
+            each.producer_port = new_port;
+            each.datum = Cumulative::new(0);
         }
     }
 
@@ -150,18 +161,64 @@ impl CollectionTaskStats {
 
 #[cfg(test)]
 mod tests {
+    use super::CollectionTaskStats;
     use super::FailureReason;
+    use super::OximeterCollector;
     use super::StatusCode;
+    use omicron_common::api::internal::nexus::ProducerEndpoint;
+    use omicron_common::api::internal::nexus::ProducerKind;
+    use std::time::Duration;
+    use uuid::Uuid;
 
     #[test]
     fn test_failure_reason_serialization() {
         let data = &[
-            (FailureReason::Deserialization, "deserialization"),
-            (FailureReason::Unreachable, "unreachable"),
+            (FailureReason::Deserialization, FailureReason::DESERIALIZATION),
+            (FailureReason::Unreachable, FailureReason::UNREACHABLE),
+            (
+                FailureReason::CollectionsInProgress,
+                FailureReason::COLLECTIONS_IN_PROGRESS,
+            ),
             (FailureReason::Other(StatusCode::INTERNAL_SERVER_ERROR), "500"),
         ];
         for (variant, as_str) in data.iter() {
             assert_eq!(variant.to_string(), *as_str);
         }
+    }
+
+    #[test]
+    fn only_reset_counters_if_info_is_different() {
+        let info = ProducerEndpoint {
+            id: Uuid::new_v4(),
+            kind: ProducerKind::Service,
+            address: "[::1]:12345".parse().unwrap(),
+            interval: Duration::from_secs(1),
+        };
+        let collector = OximeterCollector {
+            collector_id: Uuid::new_v4(),
+            collector_ip: "::1".parse().unwrap(),
+            collector_port: 12345,
+        };
+        let mut stats = CollectionTaskStats::new(collector, &info);
+        stats.collections.datum.increment();
+
+        stats.update(&info);
+        assert_eq!(
+            stats.collections.datum.value(),
+            1,
+            "Should not have reset the counter when updating \
+            with the same producer endpoint information"
+        );
+        let info = ProducerEndpoint {
+            address: "[::1]:11111".parse().unwrap(),
+            ..info
+        };
+        stats.update(&info);
+        assert_eq!(
+            stats.collections.datum.value(),
+            0,
+            "Should have reset the counter when updating \
+            with different producer endpoint information"
+        );
     }
 }
