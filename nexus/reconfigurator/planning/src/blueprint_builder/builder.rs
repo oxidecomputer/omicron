@@ -352,9 +352,6 @@ pub struct BlueprintBuilder<'a> {
     // These fields will become part of the final blueprint.  See the
     // corresponding fields in `Blueprint`.
     sled_editors: BTreeMap<SledUuid, SledEditor>,
-    //pub(super) zones: BlueprintZonesBuilder<'a>,
-    //storage: BlueprintStorageEditor,
-    sled_state: BTreeMap<SledUuid, SledState>,
     cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
 
     creator: String,
@@ -465,26 +462,19 @@ impl<'a> BlueprintBuilder<'a> {
             "parent_id" => parent_blueprint.id.to_string(),
         ));
 
-        // Prefer the sled state from our parent blueprint for sleds
-        // that were in it; there may be new sleds in `input`, in which
-        // case we'll use their current state as our starting point.
-        let mut sled_state = parent_blueprint.sled_state.clone();
-        let mut commissioned_sled_ids = BTreeSet::new();
-        for (sled_id, details) in input.all_sleds(SledFilter::Commissioned) {
-            commissioned_sled_ids.insert(sled_id);
-            sled_state.entry(sled_id).or_insert(details.state);
-        }
-
         // Squish the disparate maps in our parent blueprint into one map of
         // `SledEditor`s.
         let mut sled_editors = BTreeMap::new();
         for (sled_id, zones) in &parent_blueprint.blueprint_zones {
-            // If we have zones but no state for a sled, we assume it was
-            // removed by an earlier version of the planner (which pruned
-            // decommissioned sleds from `sled_state`).
+            // Prefer the sled state from our parent blueprint for sleds
+            // that were in it. If we have zones but no state for a sled, we
+            // assume it was removed by an earlier version of the planner (which
+            // pruned decommissioned sleds from `sled_state`).
             //
-            // TODO-john Check that all zones are expunged?
-            let state = sled_state
+            // TODO-john Check that all zones are expunged in the "assuming
+            // decommissioned" case?
+            let state = parent_blueprint
+                .sled_state
                 .get(sled_id)
                 .copied()
                 .unwrap_or(SledState::Decommissioned);
@@ -529,21 +519,6 @@ impl<'a> BlueprintBuilder<'a> {
             }
         }
 
-        // Make a garbage collection pass through `sled_state`. We want to keep
-        // any sleds which either:
-        //
-        // 1. do not have a desired state of `Decommissioned`
-        // 2. do have a desired state of `Decommissioned` and are still included
-        //    in our input's list of commissioned sleds
-        //
-        // Sleds that don't fall into either of these cases have reached the
-        // actual `Decommissioned` state, which means we no longer need to carry
-        // forward that desired state.
-        sled_state.retain(|sled_id, state| {
-            *state != SledState::Decommissioned
-                || commissioned_sled_ids.contains(sled_id)
-        });
-
         Ok(BlueprintBuilder {
             log,
             parent_blueprint,
@@ -553,7 +528,6 @@ impl<'a> BlueprintBuilder<'a> {
             external_networking: OnceCell::new(),
             internal_dns_subnets: OnceCell::new(),
             sled_editors,
-            sled_state,
             cockroachdb_setting_preserve_downgrade: parent_blueprint
                 .cockroachdb_setting_preserve_downgrade,
             creator: creator.to_owned(),
@@ -641,25 +615,40 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn build(mut self) -> Blueprint {
         // Collect the Omicron zones config for all sleds, including sleds that
         // are no longer in service and need expungement work.
+        let mut sled_state = BTreeMap::new();
         let mut blueprint_zones = BTreeMap::new();
         let mut blueprint_disks = BTreeMap::new();
         let mut blueprint_datasets = BTreeMap::new();
         for (sled_id, editor) in self.sled_editors {
             // TODO-john use all fields
-            let EditedSled { zones, disks, datasets, .. } = editor.finalize();
+            let EditedSled { zones, disks, datasets, state, .. } =
+                editor.finalize();
+            sled_state.insert(sled_id, state);
             blueprint_disks.insert(sled_id, disks);
             blueprint_datasets.insert(sled_id, datasets);
             blueprint_zones.insert(sled_id, zones);
         }
+        // Preserving backwards compatibility, for now: prune sled_state of any
+        // fully decommissioned sleds, which we determine by the state being
+        // `Decommissioned` _and_ the sled is no longer in our PlanningInput's
+        // list of commissioned sleds.
+        let commissioned_sled_ids = self
+            .input
+            .all_sled_ids(SledFilter::Commissioned)
+            .collect::<BTreeSet<_>>();
+        sled_state.retain(|sled_id, state| {
+            *state != SledState::Decommissioned
+                || commissioned_sled_ids.contains(sled_id)
+        });
         // Preserving backwards compatibility, for now: disks should only
         // have entries for in-service sleds, and expunged disks should be
         // removed entirely.
-        let in_service_sleds = self
+        let in_service_sled_ids = self
             .input
             .all_sled_ids(SledFilter::InService)
             .collect::<BTreeSet<_>>();
         blueprint_disks.retain(|sled_id, disks_config| {
-            if !in_service_sleds.contains(sled_id) {
+            if !in_service_sled_ids.contains(sled_id) {
                 return false;
             }
 
@@ -673,7 +662,7 @@ impl<'a> BlueprintBuilder<'a> {
         // Preserving backwards compatibility, for now: datasets should only
         // have entries for in-service sleds.
         blueprint_datasets
-            .retain(|sled_id, _| in_service_sleds.contains(sled_id));
+            .retain(|sled_id, _| in_service_sled_ids.contains(sled_id));
 
         // If we have the clickhouse cluster setup enabled via policy and we
         // don't yet have a `ClickhouseClusterConfiguration`, then we must create
@@ -732,7 +721,7 @@ impl<'a> BlueprintBuilder<'a> {
             blueprint_zones,
             blueprint_disks,
             blueprint_datasets,
-            sled_state: self.sled_state,
+            sled_state,
             parent_blueprint_id: Some(self.parent_blueprint.id),
             internal_dns_version: self.input.internal_dns_version(),
             external_dns_version: self.input.external_dns_version(),
@@ -760,8 +749,14 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
         desired_state: SledState,
-    ) {
-        self.sled_state.insert(sled_id, desired_state);
+    ) -> Result<(), Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to set sled state for unknown sled {sled_id}"
+            ))
+        })?;
+        editor.set_state(desired_state);
+        Ok(())
     }
 
     /// Within tests, set an RNG for deterministic results.
