@@ -36,6 +36,7 @@ use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::ZpoolName;
+use nexus_types::external_api::views::PhysicalDiskState;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
 use omicron_common::address::get_sled_address;
@@ -61,6 +62,7 @@ use slog::debug;
 use slog::error;
 use slog::info;
 use slog::o;
+use slog::warn;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -152,9 +154,11 @@ pub enum EnsureMultiple {
         updated: usize,
         /// An item was expunged in the blueprint
         expunged: usize,
+        /// An item was decommissioned in the blueprint
+        decommissioned: usize,
         /// An item was removed from the blueprint.
         ///
-        /// This usually happens after the work of expungment has completed.
+        /// This happens after decommissioning has completed.
         removed: usize,
     },
 
@@ -164,11 +168,17 @@ pub enum EnsureMultiple {
 
 impl From<EditCounts> for EnsureMultiple {
     fn from(value: EditCounts) -> Self {
-        let EditCounts { added, updated, expunged, removed } = value;
-        if added == 0 && updated == 0 && expunged == 0 && removed == 0 {
+        let EditCounts { added, updated, expunged, decommissioned, removed } =
+            value;
+        if added == 0
+            && updated == 0
+            && expunged == 0
+            && decommissioned == 0
+            && removed == 0
+        {
             Self::NotNeeded
         } else {
-            Self::Changed { added, updated, expunged, removed }
+            Self::Changed { added, updated, expunged, decommissioned, removed }
         }
     }
 }
@@ -182,9 +192,12 @@ pub struct EditCounts {
     pub updated: usize,
     /// An item was expunged in the blueprint
     pub expunged: usize,
+    /// An item was decommissioned in the blueprint
+    pub decommissioned: usize,
+
     /// An item was removed from the blueprint.
     ///
-    /// This usually happens after the work of expungment has completed.
+    /// This happens after decommissioning has completed.
     pub removed: usize,
 }
 
@@ -202,6 +215,7 @@ impl EditCounts {
             added: self.added + other.added,
             updated: self.updated + other.updated,
             expunged: self.expunged + other.expunged,
+            decommissioned: self.decommissioned + other.decommissioned,
             removed: self.removed + other.removed,
         }
     }
@@ -687,15 +701,47 @@ impl<'a> BlueprintBuilder<'a> {
             &mut self.rng,
         )?;
 
-        // Find all expunged by policy, but not decommissioned disks as we observed
-        // them in the database, during the planning phase. Then set their disposition to expunged
-        // and return their
+        // Find all expunged by policy, but not decommissioned disks as we
+        // observed them in the database, during the planning phase. Then set
+        // their disposition to expunged and return their zpool names.
         let zpool_names = sled_resources
             .all_disks(DiskFilter::Expunged)
             .filter_map(|(_, disk)| sled_storage.expunge_disk(&disk.disk_id))
             .collect();
 
         Ok(zpool_names)
+    }
+
+    // This is only called during decommissioning. However, in some corner
+    // cases we  want to expunge and decommission a disk at the same time. It's
+    // easiest to just have one idempotent method that does both.
+    pub(crate) fn expunge_and_decommission_all_disks_for_sled(
+        &mut self,
+        sled_id: SledUuid,
+    ) {
+        let sled_resources = match self.sled_resources(sled_id) {
+            Ok(sled_resources) => sled_resources,
+            Err(e) => {
+                warn!(self.log, "expunging and decommissioning sled: {e}");
+                return;
+            }
+        };
+        let mut sled_storage = match self.storage.sled_storage_editor(
+            sled_id,
+            sled_resources,
+            &mut self.rng,
+        ) {
+            Ok(sled_storage) => sled_storage,
+            Err(e) => {
+                warn!(self.log, "expunging and decommissioning sled: {e}");
+                return;
+            }
+        };
+
+        for (_, disk) in sled_resources.all_disks(DiskFilter::All) {
+            sled_storage.expunge_disk(&disk.disk_id);
+            sled_storage.decommission_disk(&disk.disk_id);
+        }
     }
 
     /// Expunges all zones requiring expungement from a sled.
@@ -902,6 +948,7 @@ impl<'a> BlueprintBuilder<'a> {
         for (disk_id, (zpool, disk)) in database_disks {
             sled_storage.ensure_disk(BlueprintPhysicalDiskConfig {
                 disposition: BlueprintPhysicalDiskDisposition::InService,
+                state: PhysicalDiskState::Active,
                 identity: disk.disk_identity.clone(),
                 id: disk_id,
                 pool_id: *zpool,
@@ -2455,6 +2502,7 @@ pub mod test {
                         added: usize::from(SledBuilder::DEFAULT_NPOOLS),
                         updated: 0,
                         expunged: 0,
+                        decommissioned: 0,
                         removed: 0
                     }
                 );
@@ -2466,6 +2514,7 @@ pub mod test {
                         added: 2 * usize::from(SledBuilder::DEFAULT_NPOOLS),
                         updated: 0,
                         expunged: 0,
+                        decommissioned: 0,
                         removed: 0
                     }
                 );
@@ -2592,6 +2641,7 @@ pub mod test {
                 added: 0,
                 updated: 0,
                 expunged: 2,
+                decommissioned: 0,
                 removed: 0
             }
         );

@@ -106,12 +106,47 @@ impl<'a> Planner<'a> {
     }
 
     fn do_plan_decommission(&mut self) -> Result<(), Error> {
-        //self.do_plan_decommission_disks()?;
+        self.do_plan_decommission_disks()?;
         self.do_plan_decommission_sleds()
     }
 
+    /// Decommission disks based on two criteria for expunged disks:
+    ///
+    /// 1. If the sled containing the disk has already been decommissioned
+    /// 2. If the sled-agent on the sled-containing the disk has seen the
+    ///    corresponding  `OmicronPhysicalDiskConfig` as determined by comparing
+    ///    the `omicron_physical_disks_generation` from the parent blueprint and
+    ///    the generation returned in inventory.
+    ///
+    /// For criteria 1, we theoretically could decommission any currently
+    /// expunged disk, including those recently expunged in the currently
+    /// executing plan. However, we only expunged disks in the current plan for
+    /// commissioned sleds. For criteria 2 we can only operate on those expunged
+    /// disks present in the parent blueprint, as any newly expunged disks will
+    /// not have been seen by the corresponding sled-agent yet and reflected by
+    /// the generation number in the inventory.
+    ///
+    /// Due to both of the above reasons, we only decommission disks that have
+    /// been expunged in the parent blueprint. This is also simpler to do, as it
+    /// only deals with immutable state.
     fn do_plan_decommission_disks(&mut self) -> Result<(), Error> {
-        todo!()
+        // Find all decommissioned sleds, and mark all their disks expunged and
+        // decommissioned We don't actually know the state of the disks, and
+        // for backwards compatibility reasons some blueprints don't have disks
+        // in them at all. However they will be added by later plans. For this
+        // reason we just idempotently expunge and decommmision disks residing
+        // in decommissioned sleds on each run of the planner.
+        let decommissioned_sled_ids: BTreeSet<_> = self
+            .input
+            .all_sleds(SledFilter::Decommissioned)
+            .map(|(sled_id, _)| sled_id)
+            .collect();
+
+        for sled_id in decommissioned_sled_ids {
+            self.blueprint.expunge_and_decommission_all_disks_for_sled(sled_id);
+        }
+
+        Ok(())
     }
 
     fn do_plan_decommission_sleds(&mut self) -> Result<(), Error> {
@@ -252,6 +287,7 @@ impl<'a> Planner<'a> {
                 added,
                 updated,
                 expunged: _,
+                decommissioned: _,
                 removed,
             } = sled_edits.disks.into()
             {
@@ -384,6 +420,7 @@ impl<'a> Planner<'a> {
                 added,
                 updated,
                 expunged,
+                decommissioned,
                 removed,
             } = self
                 .blueprint
@@ -396,6 +433,7 @@ impl<'a> Planner<'a> {
                     "added" => added,
                     "updated" => updated,
                     "expunged" => expunged,
+                    "decomissioned" => decommissioned,
                     "removed" => removed,
                 );
                 self.blueprint.record_operation(Operation::UpdateDatasets {

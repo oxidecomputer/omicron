@@ -8,6 +8,7 @@ use super::EditCounts;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
+use nexus_types::external_api::views::PhysicalDiskState;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -157,6 +158,12 @@ impl<'a> SledDisksEditor<'a> {
         config.disposition = BlueprintPhysicalDiskDisposition::Expunged;
         self.counts.expunged += 1;
         Some(config.clone())
+    }
+
+    pub fn decommission_disk(&mut self, disk_id: &PhysicalDiskUuid) {
+        if let Some(config) = self.config.disks.get_mut(disk_id) {
+            config.state = PhysicalDiskState::Decommissioned;
+        }
     }
 
     pub fn finalize(self) -> EditCounts {

@@ -107,6 +107,13 @@ impl SledStorageEditor<'_> {
         Some(ZpoolName::new_external(disk.pool_id))
     }
 
+    /// Set the state of a disk to `Decomissioned`.
+    ///
+    /// Invariant: Only run this against disks with an an expugned disposition
+    pub fn decommission_disk(&mut self, disk_id: &PhysicalDiskUuid) {
+        self.disks.decommission_disk(disk_id);
+    }
+
     pub fn ensure_zone_datasets(&mut self, zone: &BlueprintZoneConfig) {
         // TODO check that zpools are on valid disks?
 
@@ -186,6 +193,7 @@ impl SledStorageEditor<'_> {
                 added: 0,
                 updated: 0,
                 expunged,
+                decommissioned: 0,
                 removed: 0,
             }
         }
