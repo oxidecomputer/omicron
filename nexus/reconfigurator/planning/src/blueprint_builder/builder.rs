@@ -2938,4 +2938,92 @@ pub mod test {
 
         logctx.cleanup_successful();
     }
+
+    // This test can go away with
+    // https://github.com/oxidecomputer/omicron/issues/6645; for now, it
+    // confirms we maintain the compatibility layer it needs.
+    #[test]
+    fn test_backcompat_reuse_existing_database_dataset_ids() {
+        static TEST_NAME: &str =
+            "backcompat_reuse_existing_database_dataset_ids";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Start with the standard example blueprint.
+        let (collection, input, mut parent) = example(&logctx.log, TEST_NAME);
+
+        // `parent` was not created prior to the addition of disks and datasets,
+        // so it should have datasets for all the disks and zones, and the
+        // dataset IDs should match the input.
+        let mut input_dataset_ids = BTreeMap::new();
+        let mut input_ndatasets = 0;
+        for (_, resources) in input.all_sled_resources(SledFilter::All) {
+            for (zpool_id, dataset_configs) in
+                resources.all_datasets(ZpoolFilter::All)
+            {
+                for dataset in dataset_configs {
+                    let id = dataset.id;
+                    let kind = dataset.name.dataset();
+                    let by_kind: &mut BTreeMap<_, _> =
+                        input_dataset_ids.entry(*zpool_id).or_default();
+                    let prev = by_kind.insert(kind.clone(), id);
+                    input_ndatasets += 1;
+                    assert!(prev.is_none());
+                }
+            }
+        }
+        // We should have 3 datasets per disk (debug + zone root + crucible),
+        // plus some number of datasets for discretionary zones. We'll just
+        // check that we have more than 3 per disk.
+        assert!(
+            input_ndatasets
+                > 3 * usize::from(SledBuilder::DEFAULT_NPOOLS)
+                    * ExampleSystemBuilder::DEFAULT_N_SLEDS,
+            "too few datasets: {input_ndatasets}"
+        );
+
+        // Now _remove_ the blueprint datasets entirely, to emulate a
+        // pre-dataset-addition blueprint.
+        parent.blueprint_datasets = BTreeMap::new();
+
+        // Build a new blueprint.
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &parent,
+            &input,
+            &collection,
+            TEST_NAME,
+        )
+        .expect("failed to create builder");
+
+        // Ensure disks and datasets. This should repopulate the datasets.
+        for (sled_id, resources) in input.all_sled_resources(SledFilter::All) {
+            builder
+                .sled_ensure_disks(sled_id, resources)
+                .expect("ensured disks");
+            builder
+                .sled_ensure_zone_datasets(sled_id)
+                .expect("ensured zone datasets");
+        }
+        let output = builder.build();
+
+        // Repeat the logic above on our new blueprint; it should have the same
+        // number of datasets, and they should all have identical IDs.
+        let mut output_dataset_ids = BTreeMap::new();
+        let mut output_ndatasets = 0;
+        for datasets in output.blueprint_datasets.values() {
+            for (id, dataset) in &datasets.datasets {
+                let zpool_id = dataset.pool.id();
+                let kind = dataset.kind.clone();
+                let by_kind: &mut BTreeMap<_, _> =
+                    output_dataset_ids.entry(zpool_id).or_default();
+                let prev = by_kind.insert(kind, *id);
+                output_ndatasets += 1;
+                assert!(prev.is_none());
+            }
+        }
+        assert_eq!(input_ndatasets, output_ndatasets);
+        assert_eq!(input_dataset_ids, output_dataset_ids);
+
+        logctx.cleanup_successful();
+    }
 }
