@@ -1333,6 +1333,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1462739cb27611015575c0c11df5df7601141071f07518d56fcc1be504cbec97"
 
 [[package]]
+name = "clickana"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "chrono",
+ "clap",
+ "clickhouse-admin-server-client",
+ "clickhouse-admin-types",
+ "dropshot 0.13.0",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "ratatui",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+ "slog-async",
+ "slog-dtrace",
+ "slog-error-chain",
+ "slog-term",
+ "tokio",
+ "tokio-postgres",
+]
+
+[[package]]
 name = "clickhouse-admin-api"
 version = "0.1.0"
 dependencies = [

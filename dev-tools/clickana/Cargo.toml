@@ -1,0 +1,31 @@
+[package]
+name = "clickana"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+anyhow.workspace = true
+camino.workspace = true
+chrono.workspace = true
+clap.workspace = true
+clickhouse-admin-types.workspace = true
+clickhouse-admin-server-client.workspace = true
+dropshot.workspace = true
+omicron-common.workspace = true
+ratatui.workspace = true
+schemars.workspace = true
+slog.workspace = true
+slog-async.workspace = true
+slog-dtrace.workspace = true
+slog-error-chain.workspace = true
+slog-term.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-postgres.workspace = true
+
+omicron-workspace-hack.workspace = true
+
+[lints]
+workspace = true

@@ -27,21 +27,14 @@ use tokio::runtime::Runtime;
 
 const GIBIBYTE: u64 = 1073741824;
 
-fn main() -> Result<()> {
-    let terminal = ratatui::init();
-    let app_result = Clickana::new().run(terminal);
-    ratatui::restore();
-    app_result
-}
-
-struct Clickana {}
+pub struct Clickana {}
 
 impl Clickana {
-    fn new() -> Self {
+    pub fn new() -> Self {
        Self {}
     }
 
-    fn run(self, mut terminal: DefaultTerminal) -> Result<()> {
+    pub fn run(self, mut terminal: DefaultTerminal) -> Result<()> {
         // Refresh after one minute
         let tick_rate = Duration::from_secs(60);
         let mut last_tick = Instant::now();
