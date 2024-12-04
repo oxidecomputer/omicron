@@ -7,7 +7,6 @@ use crate::planner::PlannerRng;
 use illumos_utils::zpool::ZpoolName;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
-use nexus_types::deployment::BlueprintDatasetFilter;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;

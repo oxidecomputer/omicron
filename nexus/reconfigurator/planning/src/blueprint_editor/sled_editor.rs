@@ -9,7 +9,6 @@ use crate::planner::PlannerRng;
 use illumos_utils::zpool::ZpoolName;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::BlueprintDatasetConfig;
-use nexus_types::deployment::BlueprintDatasetFilter;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;

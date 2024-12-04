@@ -225,6 +225,13 @@ pub struct SledEditCounts {
 }
 
 impl SledEditCounts {
+    fn has_nonzero_counts(&self) -> bool {
+        let Self { disks, datasets, zones } = self;
+        disks.has_nonzero_counts()
+            || datasets.has_nonzero_counts()
+            || zones.has_nonzero_counts()
+    }
+
     fn difference_since(self, other: Self) -> Self {
         Self {
             disks: self.disks.difference_since(other.disks),
@@ -613,6 +620,8 @@ impl<'a> BlueprintBuilder<'a> {
 
     /// Assemble a final [`Blueprint`] based on the contents of the builder
     pub fn build(mut self) -> Blueprint {
+        let blueprint_id = self.rng.next_blueprint();
+
         // Collect the Omicron zones config for all sleds, including sleds that
         // are no longer in service and need expungement work.
         let mut sled_state = BTreeMap::new();
@@ -620,13 +629,28 @@ impl<'a> BlueprintBuilder<'a> {
         let mut blueprint_disks = BTreeMap::new();
         let mut blueprint_datasets = BTreeMap::new();
         for (sled_id, editor) in self.sled_editors {
-            // TODO-john use all fields
-            let EditedSled { zones, disks, datasets, state, .. } =
+            let EditedSled { zones, disks, datasets, state, edit_counts } =
                 editor.finalize();
             sled_state.insert(sled_id, state);
             blueprint_disks.insert(sled_id, disks);
             blueprint_datasets.insert(sled_id, datasets);
             blueprint_zones.insert(sled_id, zones);
+            if edit_counts.has_nonzero_counts() {
+                info!(
+                    self.log, "sled modified in new blueprint";
+                    "sled_id" => %sled_id,
+                    "blueprint_id" => %blueprint_id,
+                    "disk_edits" => ?edit_counts.disks,
+                    "dataset_edits" => ?edit_counts.datasets,
+                    "zone_edits" => ?edit_counts.zones,
+                );
+            } else {
+                info!(
+                    self.log, "sled unchanged in new blueprint";
+                    "sled_id" => %sled_id,
+                    "blueprint_id" => %blueprint_id,
+                );
+            }
         }
         // Preserving backwards compatibility, for now: prune sled_state of any
         // fully decommissioned sleds, which we determine by the state being
@@ -717,7 +741,7 @@ impl<'a> BlueprintBuilder<'a> {
             }
         });
         Blueprint {
-            id: self.rng.next_blueprint(),
+            id: blueprint_id,
             blueprint_zones,
             blueprint_disks,
             blueprint_datasets,
