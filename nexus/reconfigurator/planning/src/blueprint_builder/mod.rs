@@ -8,7 +8,7 @@ mod builder;
 mod clickhouse;
 mod external_networking;
 mod internal_dns;
-mod zones;
+//mod zones;
 
 pub use builder::*;
 pub use clickhouse::{ClickhouseAllocator, ClickhouseZonesThatShouldBeRunning};

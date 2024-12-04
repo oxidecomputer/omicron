@@ -203,11 +203,7 @@ impl SledEditor {
         config: PartialDatasetConfig,
         rng: &mut PlannerRng,
     ) -> BlueprintDatasetConfig {
-        let id = self
-            .datasets
-            .get_id(&config.zpool().id(), config.kind())
-            .unwrap_or_else(|| rng.next_dataset());
-        config.build(id)
+        config.build(&mut self.datasets, rng)
     }
 
     pub fn add_zone(
@@ -216,7 +212,8 @@ impl SledEditor {
         rng: &mut PlannerRng,
     ) -> Result<(), SledEditError> {
         // Ensure we can construct the configs for the datasets for this zone.
-        let datasets = ZoneDatasetConfigs::new(self, &zone, rng)?;
+        let datasets =
+            ZoneDatasetConfigs::new(&self.disks, &self.datasets, &zone, rng)?;
 
         // Actually add the zone and its datasets.
         self.zones.add_zone(zone)?;
@@ -275,9 +272,9 @@ impl SledEditor {
         &mut self,
         rng: &mut PlannerRng,
     ) -> Result<(), SledEditError> {
-        for zone in self.zones(BlueprintZoneFilter::ShouldBeRunning) {
-            let datasets = ZoneDatasetConfigs::new(self, zone, rng)?;
-            datasets.ensure(&mut self.datasets);
+        for zone in self.zones.zones(BlueprintZoneFilter::ShouldBeRunning) {
+            ZoneDatasetConfigs::new(&self.disks, &self.datasets, zone, rng)?
+                .ensure(&mut self.datasets);
         }
         Ok(())
     }
@@ -291,15 +288,14 @@ struct ZoneDatasetConfigs {
 
 impl ZoneDatasetConfigs {
     fn new(
-        editor: &mut SledEditor,
+        disks: &DisksEditor,
+        datasets: &DatasetsEditor,
         zone: &BlueprintZoneConfig,
         rng: &mut PlannerRng,
     ) -> Result<Self, SledEditError> {
         let filesystem_dataset = zone.filesystem_dataset().map(|dataset| {
-            editor.dataset_config(
-                PartialDatasetConfig::for_transient_zone(dataset),
-                rng,
-            )
+            PartialDatasetConfig::for_transient_zone(dataset)
+                .build(datasets, rng)
         });
         let durable_dataset = zone.zone_type.durable_dataset().map(|dataset| {
             let address = match &zone.zone_type {
@@ -308,14 +304,12 @@ impl ZoneDatasetConfigs {
                 ) => Some(*address),
                 _ => None,
             };
-            editor.dataset_config(
-                PartialDatasetConfig::for_durable_zone(
-                    dataset.dataset.pool_name.clone(),
-                    dataset.kind,
-                    address,
-                ),
-                rng,
+            PartialDatasetConfig::for_durable_zone(
+                dataset.dataset.pool_name.clone(),
+                dataset.kind,
+                address,
             )
+            .build(datasets, rng)
         });
 
         // Ensure that if this zone has both kinds of datasets, they reside on
@@ -335,7 +329,7 @@ impl ZoneDatasetConfigs {
         if let Some(dataset) =
             filesystem_dataset.as_ref().or(durable_dataset.as_ref())
         {
-            if !editor.disks.contains_zpool(&dataset.pool.id()) {
+            if !disks.contains_zpool(&dataset.pool.id()) {
                 return Err(SledEditError::ZoneOnNonexistentZpool {
                     zone_id: zone.id,
                     zpool: dataset.pool.clone(),
@@ -343,10 +337,7 @@ impl ZoneDatasetConfigs {
             }
         }
 
-        Ok(Self {
-            filesystem: filesystem_dataset,
-            durable: durable_dataset,
-        })
+        Ok(Self { filesystem: filesystem_dataset, durable: durable_dataset })
     }
 
     fn ensure(self, datasets: &mut DatasetsEditor) {

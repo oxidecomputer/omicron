@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::blueprint_builder::EditCounts;
+use crate::planner::PlannerRng;
 use illumos_utils::zpool::ZpoolName;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
@@ -107,9 +108,24 @@ impl PartialDatasetConfig {
         self.name.dataset()
     }
 
-    pub fn build(self, id: DatasetUuid) -> BlueprintDatasetConfig {
+    // Helper to generate a full `BlueprintDatasetConfig` from a partial config;
+    // we either look up the ID (if we're updating an existing dataset) or
+    // generate a new one via `rng`.
+    //
+    // TODO-cleanup It seems awkward we don't know whether we're updating or
+    // adding at this point. For zones, should we store the dataset ID
+    // explicitly so we don't need to do this lookup for updates? Less sure what
+    // we'd do with extra datasets like Debug and ZoneRoot.
+    pub fn build(
+        self,
+        datasets: &DatasetsEditor,
+        rng: &mut PlannerRng,
+    ) -> BlueprintDatasetConfig {
         let Self { name, address, quota, reservation, compression } = self;
         let (pool, kind) = name.into_parts();
+        let id = datasets
+            .get_id(&pool.id(), &kind)
+            .unwrap_or_else(|| rng.next_dataset());
         BlueprintDatasetConfig {
             disposition: BlueprintDatasetDisposition::InService,
             id,
