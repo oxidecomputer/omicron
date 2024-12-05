@@ -4,8 +4,8 @@
 
 //! Low-level facility for generating Blueprints
 
+use crate::blueprint_editor::DatasetIdsBackfillFromDb;
 use crate::blueprint_editor::EditedSled;
-use crate::blueprint_editor::PreexistingDatasetIds;
 use crate::blueprint_editor::SledEditError;
 use crate::blueprint_editor::SledEditor;
 use crate::ip_allocator::IpAllocator;
@@ -474,27 +474,28 @@ impl<'a> BlueprintBuilder<'a> {
 
         // Helper to build a `PreexistingDatasetIds` for a given sled. This will
         // go away with https://github.com/oxidecomputer/omicron/issues/6645.
-        let build_preexisting_dataset_ids = |sled_id| -> anyhow::Result<
-            PreexistingDatasetIds,
-        > {
-            match input.sled_lookup(SledFilter::All, sled_id) {
-                Ok(details) => PreexistingDatasetIds::build(&details.resources)
-                    .with_context(|| {
-                        format!(
-                            "failed building map of preexisting \
+        let build_preexisting_dataset_ids =
+            |sled_id| -> anyhow::Result<DatasetIdsBackfillFromDb> {
+                match input.sled_lookup(SledFilter::All, sled_id) {
+                    Ok(details) => {
+                        DatasetIdsBackfillFromDb::build(&details.resources)
+                            .with_context(|| {
+                                format!(
+                                    "failed building map of preexisting \
                              dataset IDs for sled {sled_id}"
-                        )
-                    }),
-                Err(err) => match err.kind() {
-                    SledLookupErrorKind::Missing => {
-                        Ok(PreexistingDatasetIds::empty())
+                                )
+                            })
                     }
-                    SledLookupErrorKind::Filtered { .. } => unreachable!(
-                        "SledFilter::All should not filter anything out"
-                    ),
-                },
-            }
-        };
+                    Err(err) => match err.kind() {
+                        SledLookupErrorKind::Missing => {
+                            Ok(DatasetIdsBackfillFromDb::empty())
+                        }
+                        SledLookupErrorKind::Filtered { .. } => unreachable!(
+                            "SledFilter::All should not filter anything out"
+                        ),
+                    },
+                }
+            };
 
         // Squish the disparate maps in our parent blueprint into one map of
         // `SledEditor`s.

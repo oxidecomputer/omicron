@@ -25,7 +25,7 @@ mod datasets;
 mod disks;
 mod zones;
 
-pub(crate) use self::datasets::PreexistingDatasetIds;
+pub(crate) use self::datasets::DatasetIdsBackfillFromDb;
 
 pub use self::datasets::DatasetsEditError;
 pub use self::datasets::MultipleDatasetsOfKind;
@@ -97,7 +97,7 @@ impl SledEditor {
         zones: BlueprintZonesConfig,
         disks: BlueprintPhysicalDisksConfig,
         datasets: BlueprintDatasetsConfig,
-        preexisting_dataset_ids: PreexistingDatasetIds,
+        preexisting_dataset_ids: DatasetIdsBackfillFromDb,
     ) -> Result<Self, SledInputError> {
         Ok(Self {
             state,
@@ -109,7 +109,7 @@ impl SledEditor {
 
     pub fn new_empty(
         state: SledState,
-        preexisting_dataset_ids: PreexistingDatasetIds,
+        preexisting_dataset_ids: DatasetIdsBackfillFromDb,
     ) -> Self {
         Self {
             state,

@@ -52,11 +52,11 @@ pub enum DatasetsEditError {
 /// 2. Is the dataset in `preexisting_database_ids`? If so, use that ID.
 /// 3. Generate a new random ID.
 #[derive(Debug)]
-pub(crate) struct PreexistingDatasetIds(
+pub(crate) struct DatasetIdsBackfillFromDb(
     BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, DatasetUuid>>,
 );
 
-impl PreexistingDatasetIds {
+impl DatasetIdsBackfillFromDb {
     pub fn build(
         resources: &SledResources,
     ) -> Result<Self, MultipleDatasetsOfKind> {
@@ -97,7 +97,7 @@ impl PreexistingDatasetIds {
     }
 }
 
-impl PreexistingDatasetIds {
+impl DatasetIdsBackfillFromDb {
     fn get(
         &self,
         zpool_id: &ZpoolUuid,
@@ -202,7 +202,7 @@ impl PartialDatasetConfig {
 
 #[derive(Debug)]
 pub(super) struct DatasetsEditor {
-    preexisting_dataset_ids: PreexistingDatasetIds,
+    preexisting_dataset_ids: DatasetIdsBackfillFromDb,
     config: BlueprintDatasetsConfig,
     by_zpool_and_kind: BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, DatasetUuid>>,
     counts: EditCounts,
@@ -211,7 +211,7 @@ pub(super) struct DatasetsEditor {
 impl DatasetsEditor {
     pub fn new(
         config: BlueprintDatasetsConfig,
-        preexisting_dataset_ids: PreexistingDatasetIds,
+        preexisting_dataset_ids: DatasetIdsBackfillFromDb,
     ) -> Result<Self, MultipleDatasetsOfKind> {
         let mut by_zpool_and_kind = BTreeMap::new();
         for dataset in config.datasets.values() {
@@ -239,7 +239,7 @@ impl DatasetsEditor {
         })
     }
 
-    pub fn empty(preexisting_dataset_ids: PreexistingDatasetIds) -> Self {
+    pub fn empty(preexisting_dataset_ids: DatasetIdsBackfillFromDb) -> Self {
         Self {
             preexisting_dataset_ids,
             config: BlueprintDatasetsConfig {
