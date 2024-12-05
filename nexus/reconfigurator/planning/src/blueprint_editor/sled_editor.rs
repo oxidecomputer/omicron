@@ -308,6 +308,10 @@ impl ZoneDatasetConfigs {
                 .build(datasets, rng)
         });
         let durable_dataset = zone.zone_type.durable_dataset().map(|dataset| {
+            // `dataset` records include an optional socket address, which is
+            // only applicable for durable datasets backing crucible. This this
+            // is a little fishy and might go away with
+            // https://github.com/oxidecomputer/omicron/issues/6998.
             let address = match &zone.zone_type {
                 BlueprintZoneType::Crucible(
                     blueprint_zone_type::Crucible { address, .. },
