@@ -44,11 +44,11 @@ use omicron_uuid_kinds::{
     SupportBundleUuid, ZpoolUuid,
 };
 use oxnet::Ipv6Net;
-use propolis_client::types::{
-    Board, Chipset, ComponentV0, SerialPort, SerialPortNumber,
-};
 use propolis_client::{
-    types::{InstanceInitializationMethod, InstanceSpecV0},
+    types::{
+        Board, Chipset, ComponentV0, InstanceInitializationMethod,
+        InstanceSpecV0, SerialPort, SerialPortNumber,
+    },
     Client as PropolisClient, VolumeConstructionRequest,
 };
 use sled_agent_api::SupportBundleMetadata;
@@ -129,7 +129,7 @@ fn extract_targets_from_volume_construction_request(
 
             VolumeConstructionRequest::Region { opts, .. } => {
                 for target in &opts.target {
-                    res.push(target.clone());
+                    res.push(*target);
                 }
             }
 

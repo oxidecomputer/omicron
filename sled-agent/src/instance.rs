@@ -1001,8 +1001,6 @@ impl InstanceRunner {
                 format!("{id}:device")
             }
 
-            // The basic spec enables COM1-COM4 by default. Everything else
-            // needs to be added manually.
             let mut spec = propolis_client::types::InstanceSpecV0 {
                 board: Board {
                     chipset: Chipset::default(),

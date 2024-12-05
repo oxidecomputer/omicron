@@ -1454,7 +1454,7 @@ async fn ssc_start_running_snapshot(
         ));
 
         info!(log, "map {} to {}", region_addr, snapshot_addr);
-        map.insert(region_addr, snapshot_addr.clone());
+        map.insert(region_addr, snapshot_addr);
 
         // Once snapshot has been validated, and running snapshot has been
         // started, add an entry in the region_snapshot table to correspond to

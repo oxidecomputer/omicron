@@ -2284,9 +2284,9 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![
-                                region_snapshots[0].3.clone(),
-                                region_snapshots[1].3.clone(),
-                                region_snapshots[2].3.clone(),
+                                region_snapshots[0].3,
+                                region_snapshots[1].3,
+                                region_snapshots[2].3,
                             ],
                             lossy: false,
                             flush_timeout: None,
@@ -2405,9 +2405,9 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![
-                                region_snapshots[3].3.clone(),
-                                region_snapshots[4].3.clone(),
-                                region_snapshots[5].3.clone(),
+                                region_snapshots[3].3,
+                                region_snapshots[4].3,
+                                region_snapshots[5].3,
                             ],
                             lossy: false,
                             flush_timeout: None,
@@ -3567,7 +3567,7 @@ struct TestReadOnlyRegionReferenceUsage {
     datastore: Arc<DataStore>,
 
     region: db::model::Region,
-    region_address: SocketAddrV6,
+    region_address: SocketAddr,
 
     first_volume_id: Uuid,
     second_volume_id: Uuid,
@@ -3628,8 +3628,9 @@ impl TestReadOnlyRegionReferenceUsage {
         // so fill in a random port here.
         datastore.region_set_port(region.id(), 12345).await.unwrap();
 
-        let region_address =
-            datastore.region_addr(region.id()).await.unwrap().unwrap();
+        let region_address = SocketAddr::V6(
+            datastore.region_addr(region.id()).await.unwrap().unwrap(),
+        );
 
         let region = datastore.get_region(region.id()).await.unwrap();
 
@@ -3660,7 +3661,7 @@ impl TestReadOnlyRegionReferenceUsage {
                         gen: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
-                            target: vec![SocketAddr::V6(self.region_address)],
+                            target: vec![self.region_address],
                             lossy: false,
                             flush_timeout: None,
                             key: None,
@@ -3790,9 +3791,7 @@ impl TestReadOnlyRegionReferenceUsage {
                             gen: 1,
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
-                                target: vec![SocketAddr::V6(
-                                    self.region_address,
-                                )],
+                                target: vec![self.region_address],
                                 lossy: false,
                                 flush_timeout: None,
                                 key: None,
@@ -3825,7 +3824,7 @@ impl TestReadOnlyRegionReferenceUsage {
                         gen: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
-                            target: vec![SocketAddr::V6(self.region_address)],
+                            target: vec![self.region_address],
                             lossy: false,
                             flush_timeout: None,
                             key: None,
@@ -3860,7 +3859,7 @@ impl TestReadOnlyRegionReferenceUsage {
                             gen: 1,
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
-                                target: vec![SocketAddr::V6(self.region_address)],
+                                target: vec![self.region_address],
                                 lossy: false,
                                 flush_timeout: None,
                                 key: None,
@@ -5482,9 +5481,9 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![
-                                region_snapshots[1].3.clone(),
-                                region_snapshots[2].3.clone(),
-                                region_snapshots[3].3.clone(),
+                                region_snapshots[1].3,
+                                region_snapshots[2].3,
+                                region_snapshots[3].3,
                             ],
                             lossy: false,
                             flush_timeout: None,
@@ -5522,8 +5521,10 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
     );
     assert_eq!(region_snapshot_to_delete.region_id, region_snapshots[0].1);
     assert_eq!(region_snapshot_to_delete.snapshot_id, region_snapshots[0].2);
-    assert_eq!(region_snapshot_to_delete.snapshot_addr.parse::<SocketAddr>().unwrap(),
-               region_snapshots[0].3);
+    assert_eq!(
+        region_snapshot_to_delete.snapshot_addr.parse::<SocketAddr>().unwrap(),
+        region_snapshots[0].3
+    );
     assert_eq!(region_snapshot_to_delete.volume_references, 0);
     assert_eq!(region_snapshot_to_delete.deleting, true);
 
