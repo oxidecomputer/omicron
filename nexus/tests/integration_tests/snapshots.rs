@@ -980,9 +980,7 @@ async fn test_snapshot_unwind(cptestctx: &ControlPlaneTestContext) {
         .sled_agent
         .sled_agent
         .get_crucible_dataset(zpool.id, dataset.id)
-        .await
-        .set_creating_a_running_snapshot_should_fail()
-        .await;
+        .set_creating_a_running_snapshot_should_fail();
 
     // Issue snapshot request, expecting it to fail
     let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);

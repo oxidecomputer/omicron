@@ -405,7 +405,7 @@ pub(crate) mod test {
                 &instance_id,
             )
             .await;
-        let mut eips = sled_agent.external_ips.lock().await;
+        let mut eips = sled_agent.external_ips.lock().unwrap();
         let my_eips = eips.entry(vmm_id).or_default();
         assert!(my_eips.is_empty());
 
@@ -467,7 +467,7 @@ pub(crate) mod test {
         assert!(db_eips.iter().any(|v| v.kind == IpKind::SNat));
 
         // No IP bindings remain on sled-agent.
-        let eips = &*sled_agent.external_ips.lock().await;
+        let eips = &*sled_agent.external_ips.lock().unwrap();
         for (_nic_id, eip_set) in eips {
             assert_eq!(eip_set.len(), 2);
         }

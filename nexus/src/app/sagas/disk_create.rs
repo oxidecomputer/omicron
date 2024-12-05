@@ -1034,15 +1034,12 @@ pub(crate) mod test {
         true
     }
 
-    async fn no_regions_ensured(
-        sled_agent: &SledAgent,
-        test: &DiskTest<'_>,
-    ) -> bool {
+    fn no_regions_ensured(sled_agent: &SledAgent, test: &DiskTest<'_>) -> bool {
         for zpool in test.zpools() {
             for dataset in &zpool.datasets {
                 let crucible_dataset =
-                    sled_agent.get_crucible_dataset(zpool.id, dataset.id).await;
-                if !crucible_dataset.is_empty().await {
+                    sled_agent.get_crucible_dataset(zpool.id, dataset.id);
+                if !crucible_dataset.is_empty() {
                     return false;
                 }
             }
@@ -1073,7 +1070,7 @@ pub(crate) mod test {
                 .await
         );
         assert!(no_region_allocations_exist(datastore, &test).await);
-        assert!(no_regions_ensured(&sled_agent, &test).await);
+        assert!(no_regions_ensured(&sled_agent, &test));
 
         assert!(test.crucible_resources_deleted().await);
     }

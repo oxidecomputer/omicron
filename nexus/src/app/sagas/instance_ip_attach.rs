@@ -435,7 +435,7 @@ pub(crate) mod test {
                 &instance_id,
             )
             .await;
-        let mut eips = sled_agent.external_ips.lock().await;
+        let mut eips = sled_agent.external_ips.lock().unwrap();
         let my_eips = eips.entry(vmm_id).or_default();
         assert!(my_eips
             .iter()
@@ -497,7 +497,7 @@ pub(crate) mod test {
                 &instance_id,
             )
             .await;
-        let mut eips = sled_agent.external_ips.lock().await;
+        let mut eips = sled_agent.external_ips.lock().unwrap();
         let my_eips = eips.entry(vmm_id).or_default();
         assert!(my_eips.is_empty());
     }
