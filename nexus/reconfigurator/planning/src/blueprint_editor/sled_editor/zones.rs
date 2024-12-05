@@ -99,28 +99,35 @@ impl ZonesEditor {
         }
     }
 
+    /// Expunge a zone, returning `true` if the zone was expunged and `false` if
+    /// the zone was already expunged, along with the updated zone config.
     pub fn expunge(
         &mut self,
         zone_id: &OmicronZoneUuid,
-    ) -> Result<&BlueprintZoneConfig, ZonesEditError> {
+    ) -> Result<(bool, &BlueprintZoneConfig), ZonesEditError> {
         let config = self.zones.get_mut(zone_id).ok_or_else(|| {
             ZonesEditError::ExpungeNonexistentZone { id: *zone_id }
         })?;
 
-        Self::expunge_impl(config, &mut self.counts);
+        let did_expunge = Self::expunge_impl(config, &mut self.counts);
 
-        Ok(&*config)
+        Ok((did_expunge, &*config))
     }
 
-    fn expunge_impl(config: &mut BlueprintZoneConfig, counts: &mut EditCounts) {
+    fn expunge_impl(
+        config: &mut BlueprintZoneConfig,
+        counts: &mut EditCounts,
+    ) -> bool {
         match config.disposition {
             BlueprintZoneDisposition::InService
             | BlueprintZoneDisposition::Quiesced => {
                 config.disposition = BlueprintZoneDisposition::Expunged;
                 counts.expunged += 1;
+                true
             }
             BlueprintZoneDisposition::Expunged => {
                 // expunge is idempotent; do nothing
+                false
             }
         }
     }

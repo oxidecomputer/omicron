@@ -212,39 +212,28 @@ impl SledEditor {
         &mut self,
         zone_id: &OmicronZoneUuid,
     ) -> Result<(), SledEditError> {
-        let config = self.zones.expunge(zone_id)?;
+        let (did_expunge, config) = self.zones.expunge(zone_id)?;
 
-        // When expunging a zone, we also expunge its datasets.
+        // If we didn't actually expunge the zone in this edit, we don't
+        // move on and expunge its datasets. This is to guard against
+        // accidentally exposing a different zone's datasets (if that zone has
+        // happens to have the same dataset kind as us and is running on the
+        // same zpool as us, which is only possible if we were previously
+        // expunged).
+        //
+        // This wouldn't be necessary if `config` tracked its dataset IDs
+        // explicitly instead of only recording its zpool; once we fix that we
+        // should be able to remove this check.
+        if !did_expunge {
+            return Ok(());
+        }
+
         if let Some(dataset) = config.filesystem_dataset() {
-            match self.datasets.expunge(&dataset.pool().id(), dataset.dataset())
-            {
-                Ok(()) => (),
-                Err(DatasetsEditError::ExpungeNonexistentDataset {
-                    ..
-                }) => {
-                    // It would be strange to not find the dataset here; it
-                    // would mean we have a zone (because we found `config`)
-                    // that has a filesystem dataset, but that dataset isn't
-                    // present. It _could_ happen if the zone and its dataset
-                    // had previously been expunged, and the dataset has since
-                    // been cleaned up and removed from the blueprint entirely,
-                    // but the (expunged) zone is still around, so we ignore
-                    // this error.
-                }
-            }
+            self.datasets.expunge(&dataset.pool().id(), dataset.dataset())?;
         }
         if let Some(dataset) = config.zone_type.durable_dataset() {
-            match self
-                .datasets
-                .expunge(&dataset.dataset.pool_name.id(), &dataset.kind)
-            {
-                Ok(()) => (),
-                Err(DatasetsEditError::ExpungeNonexistentDataset {
-                    ..
-                }) => {
-                    // See note above about ignoring this error.
-                }
-            }
+            self.datasets
+                .expunge(&dataset.dataset.pool_name.id(), &dataset.kind)?;
         }
 
         Ok(())
