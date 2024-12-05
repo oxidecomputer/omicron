@@ -4216,9 +4216,9 @@ mod tests {
                             id: volume_id,
                             target: vec![
                                 // target to replace
-                                SocketAddr::V6(region_addresses[0].clone()),
-                                SocketAddr::V6(region_addresses[1].clone()),
-                                SocketAddr::V6(region_addresses[2].clone()),
+                                SocketAddr::V6(region_addresses[0]),
+                                SocketAddr::V6(region_addresses[1]),
+                                SocketAddr::V6(region_addresses[2]),
                             ],
                             lossy: false,
                             flush_timeout: None,
@@ -4336,9 +4336,9 @@ mod tests {
                     opts: CrucibleOpts {
                         id: volume_id,
                         target: vec![
-                            SocketAddr::V6(region_addresses[0].clone()), // back to what it was
-                            SocketAddr::V6(region_addresses[1].clone()),
-                            SocketAddr::V6(region_addresses[2].clone()),
+                            SocketAddr::V6(region_addresses[0]), // back to what it was
+                            SocketAddr::V6(region_addresses[1]),
+                            SocketAddr::V6(region_addresses[2]),
                         ],
                         lossy: false,
                         flush_timeout: None,
