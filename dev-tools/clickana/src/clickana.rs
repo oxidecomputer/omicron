@@ -22,12 +22,27 @@ use ratatui::{
 use slog::{o, Drain, Logger};
 use slog_async::Async;
 use slog_term::{FullFormat, PlainDecorator};
+use std::fmt::Display;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 
 const GIBIBYTE_F64: f64 = 1073741824.0;
 const GIBIBYTE_U64: u64 = 1073741824;
+
+enum MetricName {
+    // TODO: Add other metrics to gather
+    DiskUsed,
+}
+
+impl Display for MetricName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            MetricName::DiskUsed => "DiskUsed_default",
+        };
+        write!(f, "{s}")
+    }
+}
 
 pub struct Clickana {
     clickhouse_addr: SocketAddr,
@@ -58,7 +73,10 @@ impl Clickana {
         let tick_rate = Duration::from_secs(self.refresh_interval);
         let mut last_tick = Instant::now();
         loop {
-            let top_left_frame = ChartData::new(self.get_api_data()?)?;
+            let top_left_frame = ChartData::new(
+                self.get_api_data(MetricName::DiskUsed)?,
+                "Disk Usage".to_string(),
+            )?;
             let dashboard = Dashboard {
                 top_left_frame,
                 _top_right_frame: None,
@@ -91,7 +109,10 @@ impl Clickana {
         dashboard.top_left_frame.render_line_chart(frame, line_chart);
     }
 
-    fn get_api_data(&self) -> Result<Vec<SystemTimeSeries>> {
+    fn get_api_data(
+        &self,
+        metric: MetricName,
+    ) -> Result<Vec<SystemTimeSeries>> {
         let admin_url = format!("http://{}", self.clickhouse_addr);
         let log = self.new_logger()?;
         let client = ClickhouseServerClient::new(&admin_url, log.clone());
@@ -101,13 +122,13 @@ impl Clickana {
             let timeseries = client
                 .system_timeseries_avg(
                     types::SystemTable::AsynchronousMetricLog,
-                    "DiskUsed_default",
+                    &format!("{metric}"),
                     Some(self.sampling_interval),
                     Some(self.time_range),
                     Some(TimestampFormat::UnixEpoch),
                 )
                 .await
-                .map(|t| t.into_inner()) //;
+                .map(|t| t.into_inner())
                 .map_err(|e| {
                     anyhow!(
                         concat!(
@@ -154,6 +175,7 @@ struct Dashboard {
 
 #[derive(Debug)]
 struct ChartData {
+    title: String,
     data_points: Vec<(f64, f64)>,
     avg_time_utc: DateTime<Utc>,
     start_time_utc: DateTime<Utc>,
@@ -168,17 +190,21 @@ struct ChartData {
 }
 
 impl ChartData {
-    fn new(raw_data: Vec<SystemTimeSeries>) -> Result<Self> {
+    fn new(raw_data: Vec<SystemTimeSeries>, title: String) -> Result<Self> {
         // These values will be used to render the graph and ratatui
         // requires them to be f64
         let data_points: Vec<(f64, f64)> = raw_data
             .iter()
             .map(|ts| {
                 (
-                    ts.time.trim_matches('"').parse::<f64>().expect(&format!(
-                        "could not parse timestamp {} into f64",
-                        ts.time
-                    )),
+                    ts.time.trim_matches('"').parse::<f64>().unwrap_or_else(
+                        |_| {
+                            panic!(
+                                "could not parse timestamp {} into f64",
+                                ts.time
+                            )
+                        },
+                    ),
                     ts.value,
                 )
             })
@@ -227,10 +253,9 @@ impl ChartData {
         let timestamps: Vec<i64> = raw_data
             .iter()
             .map(|ts| {
-                ts.time.trim_matches('"').parse::<i64>().expect(&format!(
-                    "could not parse timestamp {} into i64",
-                    ts.time
-                ))
+                ts.time.trim_matches('"').parse::<i64>().unwrap_or_else(|_| {
+                    panic!("could not parse timestamp {} into i64", ts.time)
+                })
             })
             .collect();
 
@@ -268,6 +293,7 @@ impl ChartData {
         let end_time_unix = *end_time as f64;
 
         Ok(Self {
+            title,
             data_points,
             avg_time_utc,
             start_time_utc,
@@ -291,8 +317,9 @@ impl ChartData {
 
         let chart = Chart::new(datasets)
             .block(
-                Block::bordered()
-                    .title(Line::from("Disk Usage").cyan().bold().centered()),
+                Block::bordered().title(
+                    Line::from(self.title.clone()).cyan().bold().centered(),
+                ),
             )
             .x_axis(
                 Axis::default()
