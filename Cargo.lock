@@ -6271,6 +6271,7 @@ dependencies = [
  "gateway-client",
  "http",
  "humantime",
+ "illumos-utils",
  "internal-dns-types",
  "ipnetwork",
  "newtype-uuid",
