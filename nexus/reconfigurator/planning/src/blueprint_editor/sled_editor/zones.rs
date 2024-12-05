@@ -3,8 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::blueprint_builder::EditCounts;
-use indexmap::map::Entry;
-use indexmap::IndexMap;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -13,6 +11,8 @@ use nexus_types::deployment::BlueprintZonesConfig;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use std::collections::btree_map::Entry;
+use std::collections::BTreeMap;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ZonesEditError {
@@ -38,7 +38,7 @@ pub struct DuplicateZoneId {
 #[derive(Debug)]
 pub(super) struct ZonesEditor {
     generation: Generation,
-    zones: IndexMap<OmicronZoneUuid, BlueprintZoneConfig>,
+    zones: BTreeMap<OmicronZoneUuid, BlueprintZoneConfig>,
     counts: EditCounts,
 }
 
@@ -46,7 +46,7 @@ impl ZonesEditor {
     pub fn empty() -> Self {
         Self {
             generation: Generation::new(),
-            zones: IndexMap::new(),
+            zones: BTreeMap::new(),
             counts: EditCounts::zeroes(),
         }
     }
@@ -56,13 +56,12 @@ impl ZonesEditor {
         if self.counts.has_nonzero_counts() {
             generation = generation.next();
         }
-        (
-            BlueprintZonesConfig {
-                generation,
-                zones: self.zones.into_values().collect(),
-            },
-            self.counts,
-        )
+        let mut config = BlueprintZonesConfig {
+            generation,
+            zones: self.zones.into_values().collect(),
+        };
+        config.sort();
+        (config, self.counts)
     }
 
     pub fn edit_counts(&self) -> EditCounts {
@@ -151,7 +150,7 @@ impl TryFrom<BlueprintZonesConfig> for ZonesEditor {
     type Error = DuplicateZoneId;
 
     fn try_from(config: BlueprintZonesConfig) -> Result<Self, Self::Error> {
-        let mut zones = IndexMap::with_capacity(config.zones.len());
+        let mut zones = BTreeMap::new();
         for zone in config.zones {
             match zones.entry(zone.id) {
                 Entry::Vacant(slot) => {
