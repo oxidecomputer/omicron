@@ -20,7 +20,6 @@ slog-async.workspace = true
 slog-dtrace.workspace = true
 slog-error-chain.workspace = true
 slog-term.workspace = true
-serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 tokio-postgres.workspace = true

@@ -6,23 +6,22 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
-use chrono::{DateTime, NaiveTime, Utc};
-use clickhouse_admin_server_client::types::SystemTimeSeries;
+use chrono::{DateTime, Utc};
+use clickhouse_admin_server_client::types::{SystemTimeSeries, TimestampFormat};
 use clickhouse_admin_server_client::{types, Client as ClickhouseServerClient};
 use omicron_common::FileKv;
 use ratatui::{
     crossterm::event::{self, Event, KeyCode},
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style, Stylize},
-    symbols::{self, Marker},
-    text::{Line, Span},
+    style::{Color, Style, Stylize},
+    symbols::Marker,
+    text::Line,
     widgets::{Axis, Block, Chart, Dataset, GraphType, LegendPosition},
     DefaultTerminal, Frame,
 };
-use serde::Deserialize;
-use slog::{info, o, Drain};
+use slog::{o, Drain, Logger};
 use slog_async::Async;
-use slog_term::{FullFormat, PlainDecorator, TestStdoutWriter};
+use slog_term::{FullFormat, PlainDecorator};
 use tokio::runtime::Runtime;
 
 const GIBIBYTE: f64 = 1073741824.0;
@@ -84,7 +83,7 @@ fn log_path() -> Result<Utf8PathBuf> {
     }
 }
 
-fn new_logger(path: &Utf8Path) -> anyhow::Result<slog::Logger> {
+fn new_logger(path: &Utf8Path) -> Result<Logger> {
     let file = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
@@ -92,12 +91,12 @@ fn new_logger(path: &Utf8Path) -> anyhow::Result<slog::Logger> {
         .open(path)
         .with_context(|| format!("error opening log file {path}"))?;
 
-    let decorator = slog_term::PlainDecorator::new(file);
-    let drain = slog_term::FullFormat::new(decorator).build().fuse();
+    let decorator = PlainDecorator::new(file);
+    let drain = FullFormat::new(decorator).build().fuse();
 
-    let drain = slog_async::Async::new(drain).build().fuse();
+    let drain = Async::new(drain).build().fuse();
 
-    Ok(slog::Logger::root(drain, slog::o!(FileKv)))
+    Ok(slog::Logger::root(drain, o!(FileKv)))
 }
 
 fn get_api_data() -> Result<Vec<SystemTimeSeries>> {
@@ -115,7 +114,7 @@ fn get_api_data() -> Result<Vec<SystemTimeSeries>> {
                 // TODO: Take interval and time_range from flag
                 Some(120),
                 Some(3600),
-                Some(types::TimestampFormat::UnixEpoch),
+                Some(TimestampFormat::UnixEpoch),
             )
             .await
             .map(|t| t.into_inner()) //;
@@ -256,7 +255,7 @@ impl DashboardData {
     fn render_line_chart(&self, frame: &mut Frame, area: Rect) {
         let datasets = vec![Dataset::default()
             .name("DiskUsage per minute".italic())
-            .marker(symbols::Marker::Braille)
+            .marker(Marker::Braille)
             .style(Style::default().fg(Color::Yellow))
             .graph_type(GraphType::Line)
             .data(&self.data_points)];
@@ -300,6 +299,7 @@ impl DashboardData {
     }
 }
 
+#[allow(dead_code)]
 fn test_data() -> Result<Vec<SystemTimeSeries>, serde_json::Error> {
     let data = r#"
 [
