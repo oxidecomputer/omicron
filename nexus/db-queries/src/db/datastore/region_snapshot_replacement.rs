@@ -11,7 +11,6 @@ use crate::db;
 use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::lookup::LookupPath;
 use crate::db::model::RegionSnapshot;
 use crate::db::model::RegionSnapshotReplacement;
 use crate::db::model::RegionSnapshotReplacementState;
@@ -64,10 +63,19 @@ impl DataStore {
         opctx: &OpContext,
         request: RegionSnapshotReplacement,
     ) -> Result<(), Error> {
-        let (.., db_snapshot) = LookupPath::new(opctx, &self)
-            .snapshot_id(request.old_snapshot_id)
-            .fetch()
-            .await?;
+        // Note: if `LookupPath` is used here, it will not be able to retrieve
+        // deleted snapshots
+        let db_snapshot = match self
+            .snapshot_get(opctx, request.old_snapshot_id)
+            .await?
+        {
+            Some(db_snapshot) => db_snapshot,
+            None => {
+                return Err(Error::internal_error(
+                    "cannot perform region snapshot replacement without snapshot volume"
+                ));
+            }
+        };
 
         self.insert_region_snapshot_replacement_request_with_volume_id(
             opctx,
