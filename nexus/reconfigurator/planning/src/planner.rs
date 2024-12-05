@@ -159,8 +159,7 @@ impl<'a> Planner<'a> {
             let num_instances_assigned = 0;
 
             if all_zones_expunged && num_instances_assigned == 0 {
-                self.blueprint
-                    .set_sled_state(sled_id, SledState::Decommissioned)?;
+                self.blueprint.set_sled_decommissioned(sled_id)?;
             }
         }
 
