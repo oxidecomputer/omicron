@@ -2,10 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::time::{Duration, Instant};
-
 use anyhow::{anyhow, bail, Context, Result};
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use clickhouse_admin_server_client::types::{
     SystemTimeSeries, TimestampFormat,
@@ -24,21 +22,40 @@ use ratatui::{
 use slog::{o, Drain, Logger};
 use slog_async::Async;
 use slog_term::{FullFormat, PlainDecorator};
+use std::net::SocketAddr;
+use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 
 const GIBIBYTE_F64: f64 = 1073741824.0;
 const GIBIBYTE_U64: u64 = 1073741824;
 
-pub struct Clickana {}
+pub struct Clickana {
+    clickhouse_addr: SocketAddr,
+    log_path: Utf8PathBuf,
+    sampling_interval: u64,
+    time_range: u64,
+    refresh_interval: u64,
+}
 
 impl Clickana {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(
+        clickhouse_addr: SocketAddr,
+        log_path: Utf8PathBuf,
+        sampling_interval: u64,
+        time_range: u64,
+        refresh_interval: u64,
+    ) -> Self {
+        Self {
+            clickhouse_addr,
+            log_path,
+            sampling_interval,
+            time_range,
+            refresh_interval,
+        }
     }
 
     pub fn run(self, mut terminal: DefaultTerminal) -> Result<()> {
-        // Take refresh rate from CLI
-        let tick_rate = Duration::from_secs(60);
+        let tick_rate = Duration::from_secs(self.refresh_interval);
         let mut last_tick = Instant::now();
         loop {
             let dashboard = DashboardData::new(self.get_api_data()?)?;
@@ -74,20 +91,18 @@ impl Clickana {
     }
 
     fn get_api_data(&self) -> Result<Vec<SystemTimeSeries>> {
-        let rt = Runtime::new()?;
-        // TODO: Take address from a flag
-        let admin_url = format!("http://[::1]:8888");
-        let log = self.new_logger(&self.log_path()?)?;
-
+        let admin_url = format!("http://{}", self.clickhouse_addr);
+        let log = self.new_logger()?;
         let client = ClickhouseServerClient::new(&admin_url, log.clone());
+
+        let rt = Runtime::new()?;
         let result = rt.block_on(async {
             let timeseries = client
                 .system_timeseries_avg(
                     types::SystemTable::AsynchronousMetricLog,
                     "DiskUsed_default",
-                    // TODO: Take interval and time_range from flag
-                    Some(120),
-                    Some(3600),
+                    Some(self.sampling_interval),
+                    Some(self.time_range),
                     Some(TimestampFormat::UnixEpoch),
                 )
                 .await
@@ -109,27 +124,15 @@ impl Clickana {
         Ok(result)
     }
 
-    fn log_path(&self) -> Result<Utf8PathBuf> {
-        // TODO: Add a log path via env vars? or maybe a flag
-        // Maybe just find the temp directory
-        match std::env::var("CLICKANA_LOG_PATH") {
-            Ok(path) => Ok(path.into()),
-            Err(std::env::VarError::NotPresent) => {
-                Ok("/tmp/clickana.log".into())
-            }
-            Err(std::env::VarError::NotUnicode(_)) => {
-                bail!("CLICKANA_LOG_PATH is not valid unicode");
-            }
-        }
-    }
-
-    fn new_logger(&self, path: &Utf8Path) -> Result<Logger> {
+    fn new_logger(&self) -> Result<Logger> {
         let file = std::fs::OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(true)
-            .open(path)
-            .with_context(|| format!("error opening log file {path}"))?;
+            .open(self.log_path.clone())
+            .with_context(|| {
+                format!("error opening log file {}", self.log_path)
+            })?;
 
         let decorator = PlainDecorator::new(file);
         let drain = FullFormat::new(decorator).build().fuse();
@@ -282,7 +285,7 @@ impl DashboardData {
 
     fn render_line_chart(&self, frame: &mut Frame, area: Rect) {
         let datasets = vec![Dataset::default()
-            .name("DiskUsage per minute".italic())
+          //  .name("DiskUsage per minute".italic())
             .marker(Marker::Braille)
             .style(Style::default().fg(Color::Yellow))
             .graph_type(GraphType::Line)
@@ -292,10 +295,7 @@ impl DashboardData {
             .block(
                 Block::bordered().title(
                     // TODO: Fix this line, info is only for debugging
-                    Line::from(format!(
-                        "Disk max {} Disk min {}",
-                        self.max_value_bytes, self.min_value_bytes
-                    ))
+                    Line::from("Disk Usage")
                     .cyan()
                     .bold()
                     .centered(),
