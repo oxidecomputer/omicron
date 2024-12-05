@@ -579,3 +579,6 @@ has_role(USER_DB_INIT: AuthenticatedActor, "admin", _silo: Silo);
 
 # Allow the internal API admin permissions on all silos.
 has_role(USER_INTERNAL_API: AuthenticatedActor, "admin", _silo: Silo);
+
+# Allow the debugger API admin permissions on all silos.
+has_role(USER_OMDB: AuthenticatedActor, "admin", _silo: Silo);

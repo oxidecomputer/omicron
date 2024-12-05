@@ -876,7 +876,20 @@ impl DbArgs {
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
         let datastore = self.db_url_opts.connect(omdb, log).await?;
-        let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+        let token = omdb.check_allow_destructive();
+        let opctx = OpContext::for_background(
+            log.clone(),
+            Arc::new(nexus_db_queries::authz::Authz::new(log)),
+            match token {
+                anyhow::Result::Ok(_) => {
+                    nexus_db_queries::authn::Context::omdb_user()
+                }
+                anyhow::Result::Err(_) => {
+                    nexus_db_queries::authn::Context::omdb_read()
+                }
+            },
+            datastore.clone(),
+        );
         let res = match &self.command {
             DbCommands::Rack(RackArgs { command: RackCommands::List }) => {
                 cmd_db_rack_list(&opctx, &datastore, &self.fetch_opts).await
@@ -885,7 +898,7 @@ impl DbArgs {
                 command: DiskCommands::Info(uuid),
             }) => cmd_db_disk_info(&opctx, &datastore, uuid).await,
             DbCommands::Disks(DiskArgs { command: DiskCommands::List }) => {
-                cmd_db_disk_list(&datastore, &self.fetch_opts).await
+                cmd_db_disk_list(&opctx, &datastore, &self.fetch_opts).await
             }
             DbCommands::Disks(DiskArgs {
                 command: DiskCommands::Physical(uuid),
@@ -937,6 +950,7 @@ impl DbArgs {
                 command: RegionCommands::List(region_list_args),
             }) => {
                 cmd_db_region_list(
+                    &opctx,
                     &datastore,
                     &self.fetch_opts,
                     region_list_args,
@@ -947,6 +961,7 @@ impl DbArgs {
                 command: RegionCommands::UsedBy(region_used_by_args),
             }) => {
                 cmd_db_region_used_by(
+                    &opctx,
                     &datastore,
                     &self.fetch_opts,
                     region_used_by_args,
@@ -960,6 +975,7 @@ impl DbArgs {
                 command: RegionReplacementCommands::List(args),
             }) => {
                 cmd_db_region_replacement_list(
+                    &opctx,
                     &datastore,
                     &self.fetch_opts,
                     args,
@@ -984,9 +1000,8 @@ impl DbArgs {
             DbCommands::RegionReplacement(RegionReplacementArgs {
                 command: RegionReplacementCommands::Request(args),
             }) => {
-                let token = omdb.check_allow_destructive()?;
                 cmd_db_region_replacement_request(
-                    &opctx, &datastore, args, token,
+                    &opctx, &datastore, args, token?,
                 )
                 .await
             }
@@ -1026,6 +1041,7 @@ impl DbArgs {
                 verbose,
             }) => {
                 cmd_db_network_list_vnics(
+                    &opctx,
                     &datastore,
                     &self.fetch_opts,
                     *verbose,
@@ -1035,20 +1051,29 @@ impl DbArgs {
             DbCommands::Migrations(MigrationsArgs {
                 command: MigrationsCommands::List(args),
             }) => {
-                cmd_db_migrations_list(&datastore, &self.fetch_opts, args).await
+                cmd_db_migrations_list(
+                    &opctx,
+                    &datastore,
+                    &self.fetch_opts,
+                    args,
+                )
+                .await
             }
             DbCommands::Snapshots(SnapshotArgs {
                 command: SnapshotCommands::Info(uuid),
             }) => cmd_db_snapshot_info(&opctx, &datastore, uuid).await,
             DbCommands::Snapshots(SnapshotArgs {
                 command: SnapshotCommands::List,
-            }) => cmd_db_snapshot_list(&datastore, &self.fetch_opts).await,
+            }) => {
+                cmd_db_snapshot_list(&opctx, &datastore, &self.fetch_opts).await
+            }
             DbCommands::RegionSnapshotReplacement(
                 RegionSnapshotReplacementArgs {
                     command: RegionSnapshotReplacementCommands::List(args),
                 },
             ) => {
                 cmd_db_region_snapshot_replacement_list(
+                    &opctx,
                     &datastore,
                     &self.fetch_opts,
                     args,
@@ -1082,24 +1107,25 @@ impl DbArgs {
                     command: RegionSnapshotReplacementCommands::Request(args),
                 },
             ) => {
-                let token = omdb.check_allow_destructive()?;
                 cmd_db_region_snapshot_replacement_request(
-                    &opctx, &datastore, args, token,
+                    &opctx, &datastore, args, token?,
                 )
                 .await
             }
             DbCommands::Validate(ValidateArgs {
                 command: ValidateCommands::ValidateVolumeReferences,
-            }) => cmd_db_validate_volume_references(&datastore).await,
+            }) => cmd_db_validate_volume_references(&opctx, &datastore).await,
             DbCommands::Validate(ValidateArgs {
                 command: ValidateCommands::ValidateRegionSnapshots,
-            }) => cmd_db_validate_region_snapshots(&datastore).await,
+            }) => cmd_db_validate_region_snapshots(&opctx, &datastore).await,
             DbCommands::Volumes(VolumeArgs {
                 command: VolumeCommands::Info(uuid),
-            }) => cmd_db_volume_info(&datastore, uuid).await,
+            }) => cmd_db_volume_info(&opctx, &datastore, uuid).await,
             DbCommands::Volumes(VolumeArgs {
                 command: VolumeCommands::List,
-            }) => cmd_db_volume_list(&datastore, &self.fetch_opts).await,
+            }) => {
+                cmd_db_volume_list(&opctx, &datastore, &self.fetch_opts).await
+            }
 
             DbCommands::Vmm(VmmArgs { command: VmmCommands::Info(args) }) => {
                 cmd_db_vmm_info(&opctx, &datastore, &self.fetch_opts, &args)
@@ -1107,7 +1133,8 @@ impl DbArgs {
             }
             DbCommands::Vmm(VmmArgs { command: VmmCommands::List(args) })
             | DbCommands::Vmms(args) => {
-                cmd_db_vmm_list(&datastore, &self.fetch_opts, args).await
+                cmd_db_vmm_list(&opctx, &datastore, &self.fetch_opts, args)
+                    .await
             }
         };
         datastore.terminate().await;
@@ -1202,12 +1229,13 @@ fn first_page<'a, T>(limit: NonZeroU32) -> DataPageParams<'a, T> {
 
 /// Helper function to look up an instance with the given ID.
 async fn lookup_instance(
+    opctx: &OpContext,
     datastore: &DataStore,
     instance_id: Uuid,
 ) -> anyhow::Result<Option<Instance>> {
     use db::schema::instance::dsl;
 
-    let conn = datastore.pool_connection_for_tests().await?;
+    let conn = datastore.pool_connection_authorized(opctx).await?;
     dsl::instance
         .filter(dsl::id.eq(instance_id))
         .limit(1)
@@ -1264,12 +1292,13 @@ async fn lookup_service_info(
 
 /// Helper function to looks up a probe with the given ID.
 async fn lookup_probe(
+    opctx: &OpContext,
     datastore: &DataStore,
     probe_id: Uuid,
 ) -> anyhow::Result<Option<Probe>> {
     use db::schema::probe::dsl;
 
-    let conn = datastore.pool_connection_for_tests().await?;
+    let conn = datastore.pool_connection_authorized(opctx).await?;
     dsl::probe
         .filter(dsl::id.eq(probe_id))
         .limit(1)
@@ -1282,12 +1311,13 @@ async fn lookup_probe(
 
 /// Helper function to looks up a project with the given ID.
 async fn lookup_project(
+    opctx: &OpContext,
     datastore: &DataStore,
     project_id: Uuid,
 ) -> anyhow::Result<Option<Project>> {
     use db::schema::project::dsl;
 
-    let conn = datastore.pool_connection_for_tests().await?;
+    let conn = datastore.pool_connection_authorized(opctx).await?;
     dsl::project
         .filter(dsl::id.eq(project_id))
         .limit(1)
@@ -1322,6 +1352,7 @@ impl From<&'_ db::model::Disk> for DiskIdentity {
 
 /// Run `omdb db disk list`.
 async fn cmd_db_disk_list(
+    opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
 ) -> Result<(), anyhow::Error> {
@@ -1356,7 +1387,7 @@ async fn cmd_db_disk_list(
     let disks = query
         .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
         .select(Disk::as_select())
-        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .load_async(&*datastore.pool_connection_authorized(opctx).await?)
         .await
         .context("loading disks")?;
 
@@ -1447,7 +1478,7 @@ async fn cmd_db_disk_info(
 
     use db::schema::disk::dsl as disk_dsl;
 
-    let conn = datastore.pool_connection_for_tests().await?;
+    let conn = datastore.pool_connection_authorized(opctx).await?;
 
     let disk = disk_dsl::disk
         .filter(disk_dsl::id.eq(args.uuid))
@@ -1578,7 +1609,7 @@ async fn cmd_db_disk_info(
 
     println!("{}", table);
 
-    get_and_display_vcr(disk.volume_id, datastore).await?;
+    get_and_display_vcr(opctx, disk.volume_id, datastore).await?;
     Ok(())
 }
 
@@ -1586,6 +1617,7 @@ async fn cmd_db_disk_info(
 // If found, attempt to parse the .data field into a VolumeConstructionRequest
 // and display it if successful.
 async fn get_and_display_vcr(
+    opctx: &OpContext,
     volume_id: Uuid,
     datastore: &DataStore,
 ) -> Result<(), anyhow::Error> {
@@ -1595,7 +1627,7 @@ async fn get_and_display_vcr(
         .filter(volume_dsl::id.eq(volume_id))
         .limit(1)
         .select(Volume::as_select())
-        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .load_async(&*datastore.pool_connection_authorized(opctx).await?)
         .await
         .context("loading requested volume")?;
 
@@ -1620,7 +1652,7 @@ async fn cmd_db_disk_physical(
     fetch_opts: &DbFetchOptions,
     args: &DiskPhysicalArgs,
 ) -> Result<(), anyhow::Error> {
-    let conn = datastore.pool_connection_for_tests().await?;
+    let conn = datastore.pool_connection_authorized(opctx).await?;
 
     // We start by finding any zpools that are using the physical disk.
     use db::schema::zpool::dsl as zpool_dsl;
@@ -1958,6 +1990,7 @@ impl From<Snapshot> for SnapshotRow {
 
 /// Run `omdb db snapshot list`.
 async fn cmd_db_snapshot_list(
+    opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
 ) -> Result<(), anyhow::Error> {
@@ -1973,7 +2006,7 @@ async fn cmd_db_snapshot_list(
     let snapshots = query
         .limit(i64::from(u32::from(limit)))
         .select(Snapshot::as_select())
-        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .load_async(&*datastore.pool_connection_authorized(opctx).await?)
         .await
         .context("loading snapshots")?;
 
@@ -2012,7 +2045,7 @@ async fn cmd_db_snapshot_info(
         .filter(snapshot_dsl::id.eq(args.uuid))
         .limit(1)
         .select(Snapshot::as_select())
-        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .load_async(&*datastore.pool_connection_authorized(opctx).await?)
         .await
         .context("loading requested snapshot")?;
 
@@ -2036,7 +2069,7 @@ async fn cmd_db_snapshot_info(
 
     println!("SOURCE VOLUME VCR:");
     for vol in source_volume_ids {
-        get_and_display_vcr(vol, datastore).await?;
+        get_and_display_vcr(opctx, vol, datastore).await?;
     }
     for vol_id in dest_volume_ids {
         // Get the dataset backing this volume.
@@ -2075,7 +2108,7 @@ async fn cmd_db_snapshot_info(
         println!("DESTINATION REGION INFO:");
         println!("{}", table);
         println!("DESTINATION VOLUME VCR:");
-        get_and_display_vcr(vol_id, datastore).await?;
+        get_and_display_vcr(opctx, vol_id, datastore).await?;
     }
 
     Ok(())
@@ -2084,6 +2117,7 @@ async fn cmd_db_snapshot_info(
 // Volumes
 /// Run `omdb db volume list`.
 async fn cmd_db_volume_list(
+    opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
 ) -> Result<(), anyhow::Error> {
@@ -2107,7 +2141,7 @@ async fn cmd_db_volume_list(
     let volumes = query
         .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
         .select(Volume::as_select())
-        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .load_async(&*datastore.pool_connection_authorized(opctx).await?)
         .await
         .context("loading volumes")?;
 
@@ -2134,6 +2168,7 @@ async fn cmd_db_volume_list(
 
 /// Run `omdb db volume info <UUID>`.
 async fn cmd_db_volume_info(
+    opctx: &OpContext,
     datastore: &DataStore,
     args: &VolumeInfoArgs,
 ) -> Result<(), anyhow::Error> {
@@ -2152,7 +2187,7 @@ async fn cmd_db_volume_info(
         .filter(volume_dsl::id.eq(args.uuid))
         .limit(1)
         .select(Volume::as_select())
-        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .load_async(&*datastore.pool_connection_authorized(opctx).await?)
         .await
         .context("loading requested volume")?;
 
@@ -2307,6 +2342,7 @@ async fn cmd_db_region_missing_porst(
 
 /// List all regions
 async fn cmd_db_region_list(
+    opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     args: &RegionListArgs,
@@ -2319,7 +2355,7 @@ async fn cmd_db_region_list(
         &first_page::<dsl::id>(fetch_opts.fetch_limit),
     )
     .select(Region::as_select())
-    .load_async(&*datastore.pool_connection_for_tests().await?)
+    .load_async(&*datastore.pool_connection_authorized(opctx).await?)
     .await?;
 
     check_limit(&regions, fetch_opts.fetch_limit, || {
@@ -2367,6 +2403,7 @@ async fn cmd_db_region_list(
 
 /// Find what is using a region
 async fn cmd_db_region_used_by(
+    opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     args: &RegionUsedByArgs,
@@ -2380,7 +2417,7 @@ async fn cmd_db_region_used_by(
     )
     .filter(dsl::id.eq_any(args.region_id.clone()))
     .select(Region::as_select())
-    .load_async(&*datastore.pool_connection_for_tests().await?)
+    .load_async(&*datastore.pool_connection_authorized(opctx).await?)
     .await?;
 
     check_limit(&regions, fetch_opts.fetch_limit, || {
@@ -2392,7 +2429,7 @@ async fn cmd_db_region_used_by(
     let disks_used: Vec<Disk> = {
         let volumes = volumes.clone();
         datastore
-            .pool_connection_for_tests()
+            .pool_connection_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
                 use db::schema::disk::dsl;
@@ -2419,7 +2456,7 @@ async fn cmd_db_region_used_by(
     let snapshots_used: Vec<Snapshot> = {
         let volumes = volumes.clone();
         datastore
-            .pool_connection_for_tests()
+            .pool_connection_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
                 use db::schema::snapshot::dsl;
@@ -2450,7 +2487,7 @@ async fn cmd_db_region_used_by(
     let images_used: Vec<Image> = {
         let volumes = volumes.clone();
         datastore
-            .pool_connection_for_tests()
+            .pool_connection_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
                 use db::schema::image::dsl;
@@ -2602,6 +2639,7 @@ async fn cmd_db_region_find_deleted(
 
 /// List all region replacement requests
 async fn cmd_db_region_replacement_list(
+    opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     args: &RegionReplacementListArgs,
@@ -2610,7 +2648,7 @@ async fn cmd_db_region_replacement_list(
     let limit = fetch_opts.fetch_limit;
 
     let requests: Vec<RegionReplacement> = {
-        let conn = datastore.pool_connection_for_tests().await?;
+        let conn = datastore.pool_connection_authorized(opctx).await?;
 
         use db::schema::region_replacement::dsl;
 
@@ -2695,7 +2733,7 @@ async fn cmd_db_region_replacement_status(
     let limit = fetch_opts.fetch_limit;
 
     let requests: Vec<RegionReplacement> = {
-        let conn = datastore.pool_connection_for_tests().await?;
+        let conn = datastore.pool_connection_authorized(opctx).await?;
 
         use db::schema::region_replacement::dsl;
 
@@ -2992,7 +3030,7 @@ async fn cmd_db_sleds(
 
 /// Run `omdb db instance info`: show details about a customer VM.
 async fn cmd_db_instance_info(
-    _: &OpContext,
+    opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     args: &InstanceInfoArgs,
@@ -3011,7 +3049,7 @@ async fn cmd_db_instance_info(
         .filter(instance_dsl::id.eq(id.into_untyped_uuid()))
         .select(Instance::as_select())
         .limit(1)
-        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .load_async(&*datastore.pool_connection_authorized(opctx).await?)
         .await
         .with_context(|| format!("failed to fetch instance record for {id}"))?
         .into_iter()
@@ -3023,7 +3061,7 @@ async fn cmd_db_instance_info(
             .filter(vmm_dsl::id.eq(id))
             .select(Vmm::as_select())
             .limit(1)
-            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .load_async(&*datastore.pool_connection_authorized(opctx).await?)
             .await;
         let vmm = match fetch_result {
             Ok(rs) => rs.into_iter().next(),
@@ -3229,7 +3267,7 @@ async fn cmd_db_instance_info(
             .filter(vmm_dsl::id.eq(id))
             .select(Vmm::as_select())
             .limit(1)
-            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .load_async(&*datastore.pool_connection_authorized(opctx).await?)
             .await;
         match fetch_result {
             Ok(rs) => {
@@ -3247,7 +3285,7 @@ async fn cmd_db_instance_info(
             .filter(migration_dsl::id.eq(id))
             .select(Migration::as_select())
             .limit(1)
-            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .load_async(&*datastore.pool_connection_authorized(opctx).await?)
             .await;
         match fetch_result.map(|mut rs| rs.pop()) {
             Ok(Some(migration)) => {
@@ -3290,7 +3328,7 @@ async fn cmd_db_instance_info(
 
     let disks = query
         .select(Disk::as_select())
-        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .load_async(&*datastore.pool_connection_authorized(opctx).await?)
         .await
         .with_context(ctx)?;
 
@@ -3344,7 +3382,7 @@ async fn cmd_db_instance_info(
         let resources = resource_dsl::virtual_provisioning_resource
             .filter(resource_dsl::id.eq(id.into_untyped_uuid()))
             .select(db::model::VirtualProvisioningResource::as_select())
-            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .load_async(&*datastore.pool_connection_authorized(opctx).await?)
             .await
             .context("fetching instance virtual provisioning record")?;
         println!("\n{:=<80}", "== VIRTUAL RESOURCES PROVISIONED ");
@@ -3402,7 +3440,7 @@ async fn cmd_db_instance_info(
                 migration_dsl::time_created.gt(chrono::DateTime::UNIX_EPOCH),
             )
             .select(Migration::as_select())
-            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .load_async(&*datastore.pool_connection_authorized(opctx).await?)
             .await
             .with_context(ctx)?;
 
@@ -3443,7 +3481,7 @@ async fn cmd_db_instance_info(
             .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
             .order_by(vmm_dsl::time_created.desc())
             .select(Vmm::as_select())
-            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .load_async(&*datastore.pool_connection_authorized(opctx).await?)
             .await
             .with_context(ctx)?;
 
@@ -3538,7 +3576,7 @@ async fn cmd_db_instances(
         )
         .limit(i64::from(u32::from(limit)))
         .select((Instance::as_select(), Option::<Vmm>::as_select()))
-        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .load_async(&*datastore.pool_connection_authorized(opctx).await?)
         .await
         .context("loading instances")?
         .into_iter()
@@ -3675,7 +3713,7 @@ async fn load_zones_version(
         .filter(dsl::version.eq(nexus_db_model::Generation::from(version)))
         .limit(1)
         .select(DnsVersion::as_select())
-        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .load_async(&*datastore.pool_connection_authorized(opctx).await?)
         .await
         .context("loading requested version")?;
 
@@ -3718,7 +3756,7 @@ async fn cmd_db_dns_diff(
             .filter(dsl::version_added.eq(version.version))
             .limit(i64::from(u32::from(limit)))
             .select(DnsName::as_select())
-            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .load_async(&*datastore.pool_connection_authorized(opctx).await?)
             .await
             .context("loading added names")?;
         check_limit(&added, limit, || "loading added names");
@@ -3728,7 +3766,7 @@ async fn cmd_db_dns_diff(
             .filter(dsl::version_removed.eq(version.version))
             .limit(i64::from(u32::from(limit)))
             .select(DnsName::as_select())
-            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .load_async(&*datastore.pool_connection_authorized(opctx).await?)
             .await
             .context("loading added names")?;
         check_limit(&added, limit, || "loading removed names");
@@ -3817,7 +3855,7 @@ async fn cmd_db_eips(
     let ips: Vec<ExternalIp> = query
         .select(ExternalIp::as_select())
         .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
-        .get_results_async(&*datastore.pool_connection_for_tests().await?)
+        .get_results_async(&*datastore.pool_connection_authorized(opctx).await?)
         .await?;
 
     check_limit(&ips, fetch_opts.fetch_limit, || {
@@ -3941,7 +3979,7 @@ async fn cmd_db_eips(
                 Owner::Service { id: owner_id, kind, disposition }
             } else {
                 let instance =
-                    match lookup_instance(datastore, owner_id).await? {
+                    match lookup_instance(opctx, datastore, owner_id).await? {
                         Some(instance) => instance,
                         None => {
                             eprintln!("instance with id {owner_id} not found");
@@ -3950,7 +3988,8 @@ async fn cmd_db_eips(
                     };
 
                 let project =
-                    match lookup_project(datastore, instance.project_id).await?
+                    match lookup_project(opctx, datastore, instance.project_id)
+                        .await?
                     {
                         Some(project) => project,
                         None => {
@@ -3974,7 +4013,9 @@ async fn cmd_db_eips(
                 .filter(project_dsl::id.eq(project_id))
                 .limit(1)
                 .select(Project::as_select())
-                .load_async(&*datastore.pool_connection_for_tests().await?)
+                .load_async(
+                    &*datastore.pool_connection_authorized(opctx).await?,
+                )
                 .await
                 .context("loading requested project")?
                 .pop()
@@ -4018,6 +4059,7 @@ async fn cmd_db_eips(
 }
 
 async fn cmd_db_network_list_vnics(
+    opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     verbose: bool,
@@ -4043,7 +4085,7 @@ async fn cmd_db_network_list_vnics(
     let nics: Vec<NetworkInterface> = query
         .select(NetworkInterface::as_select())
         .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
-        .get_results_async(&*datastore.pool_connection_for_tests().await?)
+        .get_results_async(&*datastore.pool_connection_authorized(opctx).await?)
         .await?;
 
     check_limit(&nics, fetch_opts.fetch_limit, || {
@@ -4064,10 +4106,14 @@ async fn cmd_db_network_list_vnics(
     for nic in &nics {
         let (kind, parent_name) = match nic.kind {
             NetworkInterfaceKind::Instance => {
-                match lookup_instance(datastore, nic.parent_id).await? {
+                match lookup_instance(opctx, datastore, nic.parent_id).await? {
                     Some(instance) => {
-                        match lookup_project(datastore, instance.project_id)
-                            .await?
+                        match lookup_project(
+                            opctx,
+                            datastore,
+                            instance.project_id,
+                        )
+                        .await?
                         {
                             Some(project) => (
                                 "instance",
@@ -4092,9 +4138,9 @@ async fn cmd_db_network_list_vnics(
                 }
             }
             NetworkInterfaceKind::Probe => {
-                match lookup_probe(datastore, nic.parent_id).await? {
+                match lookup_probe(opctx, datastore, nic.parent_id).await? {
                     Some(probe) => {
-                        match lookup_project(datastore, probe.project_id)
+                        match lookup_project(opctx, datastore, probe.project_id)
                             .await?
                         {
                             Some(project) => (
@@ -4126,7 +4172,9 @@ async fn cmd_db_network_list_vnics(
                 .filter(dsl::id.eq(nic.subnet_id))
                 .limit(1)
                 .select(VpcSubnet::as_select())
-                .load_async(&*datastore.pool_connection_for_tests().await?)
+                .load_async(
+                    &*datastore.pool_connection_authorized(opctx).await?,
+                )
                 .await
                 .context("loading requested subnet")?
                 .pop()
@@ -4172,6 +4220,7 @@ async fn cmd_db_network_list_vnics(
 
 /// List all region snapshot replacement requests
 async fn cmd_db_region_snapshot_replacement_list(
+    opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     args: &RegionSnapshotReplacementListArgs,
@@ -4180,7 +4229,7 @@ async fn cmd_db_region_snapshot_replacement_list(
     let limit = fetch_opts.fetch_limit;
 
     let requests: Vec<RegionSnapshotReplacement> = {
-        let conn = datastore.pool_connection_for_tests().await?;
+        let conn = datastore.pool_connection_authorized(opctx).await?;
 
         use db::schema::region_snapshot_replacement::dsl;
 
@@ -4267,7 +4316,7 @@ async fn cmd_db_region_snapshot_replacement_status(
     let limit = fetch_opts.fetch_limit;
 
     let requests: Vec<RegionSnapshotReplacement> = {
-        let conn = datastore.pool_connection_for_tests().await?;
+        let conn = datastore.pool_connection_authorized(opctx).await?;
 
         use db::schema::region_snapshot_replacement::dsl;
 
@@ -4371,7 +4420,7 @@ async fn cmd_db_region_snapshot_replacement_request(
 
     let db_snapshots = {
         use db::schema::snapshot::dsl;
-        let conn = datastore.pool_connection_for_tests().await?;
+        let conn = datastore.pool_connection_authorized(opctx).await?;
         dsl::snapshot
             .filter(dsl::id.eq(args.snapshot_id))
             .limit(1)
@@ -4400,12 +4449,13 @@ async fn cmd_db_region_snapshot_replacement_request(
 
 /// Validate the `volume_references` column of the region snapshots table
 async fn cmd_db_validate_volume_references(
+    opctx: &OpContext,
     datastore: &DataStore,
 ) -> Result<(), anyhow::Error> {
     // First, get all region snapshot records
     let region_snapshots: Vec<RegionSnapshot> = {
         let region_snapshots: Vec<RegionSnapshot> = datastore
-            .pool_connection_for_tests()
+            .pool_connection_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
                 // Selecting all region snapshots requires a full table scan
@@ -4439,7 +4489,7 @@ async fn cmd_db_validate_volume_references(
             let snapshot_addr = region_snapshot.snapshot_addr.clone();
 
             let matching_volumes = datastore
-                .pool_connection_for_tests()
+                .pool_connection_authorized(opctx)
                 .await?
                 .transaction_async(|conn| async move {
                     // Selecting all volumes based on the data column requires a
@@ -4525,6 +4575,7 @@ async fn cmd_db_validate_volume_references(
 }
 
 async fn cmd_db_validate_region_snapshots(
+    opctx: &OpContext,
     datastore: &DataStore,
 ) -> Result<(), anyhow::Error> {
     let mut regions_to_snapshots_map: BTreeMap<Uuid, HashSet<Uuid>> =
@@ -4534,7 +4585,7 @@ async fn cmd_db_validate_region_snapshots(
     let datasets_and_region_snapshots: Vec<(Dataset, RegionSnapshot)> = {
         let datasets_region_snapshots: Vec<(Dataset, RegionSnapshot)> =
             datastore
-                .pool_connection_for_tests()
+                .pool_connection_authorized(opctx)
                 .await?
                 .transaction_async(|conn| async move {
                     // Selecting all datasets and region snapshots requires a full table scan
@@ -4636,7 +4687,7 @@ async fn cmd_db_validate_region_snapshots(
                                     .select(Snapshot::as_select())
                                     .first_async(
                                         &*datastore
-                                            .pool_connection_for_tests()
+                                            .pool_connection_authorized(opctx)
                                             .await?,
                                     )
                                     .await?
@@ -4713,7 +4764,7 @@ async fn cmd_db_validate_region_snapshots(
     // Second, get all regions
     let datasets_and_regions: Vec<(Dataset, Region)> = {
         let datasets_and_regions: Vec<(Dataset, Region)> = datastore
-            .pool_connection_for_tests()
+            .pool_connection_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
                 // Selecting all datasets and regions requires a full table scan
@@ -4867,7 +4918,7 @@ async fn cmd_db_inventory(
     inventory_args: &InventoryArgs,
 ) -> Result<(), anyhow::Error> {
     let limit = fetch_opts.fetch_limit;
-    let conn = datastore.pool_connection_for_tests().await?;
+    let conn = datastore.pool_connection_authorized(opctx).await?;
     match inventory_args.command {
         InventoryCommands::BaseboardIds => {
             cmd_db_inventory_baseboard_ids(&conn, limit).await
@@ -5606,6 +5657,7 @@ async fn cmd_db_reconfigurator_save(
 // Migrations
 
 async fn cmd_db_migrations_list(
+    opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     args: &MigrationsListArgs,
@@ -5653,7 +5705,7 @@ async fn cmd_db_migrations_list(
         // migrations-by-time-created index, it doesn't actually do anything.
         .filter(dsl::time_created.gt(chrono::DateTime::UNIX_EPOCH))
         .select(Migration::as_select())
-        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .load_async(&*datastore.pool_connection_authorized(opctx).await?)
         .await
         .context("listing migrations")?;
 
@@ -5796,7 +5848,7 @@ async fn cmd_db_vmm_info(
         .filter(vmm_dsl::id.eq(uuid))
         .select(Vmm::as_select())
         .limit(1)
-        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .load_async(&*datastore.pool_connection_authorized(opctx).await?)
         .await
         .with_context(|| format!("failed to fetch VMM record for {uuid}"))?
         .into_iter()
@@ -5857,7 +5909,7 @@ async fn cmd_db_vmm_info(
         .filter(resource_dsl::id.eq(uuid))
         .select(db::model::SledResource::as_select())
         .load_async::<db::model::SledResource>(
-            &*datastore.pool_connection_for_tests().await?,
+            &*datastore.pool_connection_authorized(opctx).await?,
         )
         .await
         .with_context(|| {
@@ -5897,7 +5949,7 @@ async fn cmd_db_vmm_info(
         // migrations-by-time-created index, it doesn't actually do anything.
         .filter(migration_dsl::time_created.gt(chrono::DateTime::UNIX_EPOCH))
         .select(db::model::Migration::as_select())
-        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .load_async(&*datastore.pool_connection_authorized(opctx).await?)
         .await
         .with_context(ctx)?;
 
@@ -5988,6 +6040,7 @@ fn prettyprint_vmm(
 }
 
 async fn cmd_db_vmm_list(
+    opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     &VmmListArgs { ref states, verbose }: &VmmListArgs,
@@ -6019,7 +6072,7 @@ async fn cmd_db_vmm_list(
     }
 
     let vmms = datastore
-        .pool_connection_for_tests()
+        .pool_connection_authorized(opctx)
         .await?
         .transaction_async(|conn| async move {
             // If we are including deleted VMMs, we can no longer use indices on

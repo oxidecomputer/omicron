@@ -366,6 +366,8 @@ impl DataStore {
             &authn::USER_SERVICE_BALANCER,
             &authn::USER_INTERNAL_API,
             &authn::USER_INTERNAL_READ,
+            &authn::USER_OMDB,
+            &authn::USER_OMDB_READ,
             &authn::USER_EXTERNAL_AUTHN,
             &authn::USER_SAGA_RECOVERY,
         ]
