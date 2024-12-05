@@ -910,7 +910,6 @@ mod test {
             // NOTE: The support bundle querying interface isn't supported on
             // the simulated sled agent (yet?) so we're skipping this step.
             skip_sled_info: true,
-            ..Default::default()
         };
         let report = collector
             .collect_bundle(&opctx, &request)
@@ -964,8 +963,7 @@ mod test {
             SupportBundleCollector::new(datastore.clone(), false, nexus.id());
 
         // Each time we call "collect_bundle", we collect a SINGLE bundle.
-        let request =
-            BundleRequest { skip_sled_info: true, ..Default::default() };
+        let request = BundleRequest { skip_sled_info: true };
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -1065,9 +1063,69 @@ mod test {
         );
     }
 
-    // TODO: Delete the bundle after collection?
+    #[nexus_test(server = crate::Server)]
+    async fn test_bundle_cleanup_cancel_after_collect(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
 
-    // TODO: Try to cancel a bundle mid-collection
+        // Before we can create any bundles, we need to create the
+        // space for them to be provisioned.
+        let _datasets =
+            TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
+
+        // We can allocate a support bundle and collect it
+        let bundle = datastore
+            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .await
+            .expect("Couldn't allocate a support bundle");
+        assert_eq!(bundle.state, SupportBundleState::Collecting);
+
+        let collector =
+            SupportBundleCollector::new(datastore.clone(), false, nexus.id());
+        let request = BundleRequest { skip_sled_info: true };
+        let report = collector
+            .collect_bundle(&opctx, &request)
+            .await
+            .expect("Collection should have succeeded under test")
+            .expect("Collecting the bundle should have generated a report");
+        assert_eq!(report.bundle, bundle.id.into());
+        assert!(report.listed_in_service_sleds);
+        assert!(report.activated_in_db_ok);
+
+        // Cancel the bundle after collection has completed
+        datastore
+            .support_bundle_update(
+                &opctx,
+                bundle.id.into(),
+                SupportBundleState::Destroying,
+            )
+            .await
+            .unwrap();
+
+        // When we perform cleanup, we should see that it was removed from the
+        // underlying sled.
+        let report = collector
+            .cleanup_destroyed_bundles(&opctx)
+            .await
+            .expect("Cleanup should succeed with no work to do");
+        assert_eq!(
+            report,
+            CleanupReport {
+                // Nothing was provisioned on the sled, since we hadn't started
+                // collection yet.
+                sled_bundles_deleted_ok: 1,
+                // The database state was "destroying", and now it's gone.
+                db_destroying_bundles_removed: 1,
+                ..Default::default()
+            }
+        );
+    }
 
     // TODO: Collect a bundle from...
     // ... an expunged disk?

@@ -421,7 +421,7 @@ impl<'a> SupportBundleManager<'a> {
             // The dataset for a support bundle exists.
             let support_bundle_path = dataset
                 .name
-                .mountpoint(&*self.storage.zpool_mountpoint_root())
+                .mountpoint(&self.storage.zpool_mountpoint_root())
                 .join(BUNDLE_FILE_NAME);
 
             // Identify whether or not the final "bundle" file exists.
@@ -512,7 +512,7 @@ impl<'a> SupportBundleManager<'a> {
             NestedDatasetLocation { path: support_bundle_id.to_string(), root };
         // The mounted root of the support bundle dataset
         let support_bundle_dir =
-            dataset.mountpoint(&*self.storage.zpool_mountpoint_root());
+            dataset.mountpoint(&self.storage.zpool_mountpoint_root());
         let support_bundle_path = support_bundle_dir.join(BUNDLE_FILE_NAME);
         let support_bundle_path_tmp = support_bundle_dir.join(format!(
             "bundle-{}.tmp",
@@ -631,7 +631,7 @@ impl<'a> SupportBundleManager<'a> {
             NestedDatasetLocation { path: support_bundle_id.to_string(), root };
         // The mounted root of the support bundle dataset
         let support_bundle_dir =
-            dataset.mountpoint(&*self.storage.zpool_mountpoint_root());
+            dataset.mountpoint(&self.storage.zpool_mountpoint_root());
         let path = support_bundle_dir.join(BUNDLE_FILE_NAME);
 
         let f = tokio::fs::File::open(&path).await?;

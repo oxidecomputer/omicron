@@ -1391,10 +1391,8 @@ impl StorageInner {
         zpool
             .datasets
             .iter()
-            .filter_map(|(id, dataset)| match dataset {
-                DatasetContents::Crucible(server) => {
-                    Some((*id, server.address()))
-                }
+            .map(|(id, dataset)| match dataset {
+                DatasetContents::Crucible(server) => (*id, server.address()),
             })
             .collect()
     }

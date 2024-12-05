@@ -449,15 +449,14 @@ impl SledAgentApi for SledAgentSimImpl {
 
         let range = rqctx.range();
         let query = body.into_inner().query_type;
-        Ok(sa
-            .support_bundle_get(
-                zpool_id,
-                dataset_id,
-                support_bundle_id,
-                range,
-                query,
-            )
-            .await?)
+        sa.support_bundle_get(
+            zpool_id,
+            dataset_id,
+            support_bundle_id,
+            range,
+            query,
+        )
+        .await
     }
 
     async fn support_bundle_head(
@@ -471,15 +470,14 @@ impl SledAgentApi for SledAgentSimImpl {
 
         let range = rqctx.range();
         let query = body.into_inner().query_type;
-        Ok(sa
-            .support_bundle_get(
-                zpool_id,
-                dataset_id,
-                support_bundle_id,
-                range,
-                query,
-            )
-            .await?)
+        sa.support_bundle_get(
+            zpool_id,
+            dataset_id,
+            support_bundle_id,
+            range,
+            query,
+        )
+        .await
     }
 
     async fn support_bundle_delete(

@@ -435,14 +435,16 @@ pub(crate) mod test {
                 &instance_id,
             )
             .await;
-        let mut eips = sled_agent.external_ips.lock().unwrap();
-        let my_eips = eips.entry(vmm_id).or_default();
-        assert!(my_eips
-            .iter()
-            .any(|v| matches!(v, InstanceExternalIpBody::Floating(_))));
-        assert!(my_eips
-            .iter()
-            .any(|v| matches!(v, InstanceExternalIpBody::Ephemeral(_))));
+        {
+            let mut eips = sled_agent.external_ips.lock().unwrap();
+            let my_eips = eips.entry(vmm_id).or_default();
+            assert!(my_eips
+                .iter()
+                .any(|v| matches!(v, InstanceExternalIpBody::Floating(_))));
+            assert!(my_eips
+                .iter()
+                .any(|v| matches!(v, InstanceExternalIpBody::Ephemeral(_))));
+        }
 
         // DB has records for SNAT plus the new IPs.
         let db_eips = datastore
