@@ -110,6 +110,14 @@ impl DatasetIdsBackfillFromDb {
     }
 }
 
+/// Container for most of the information needed to construct a
+/// `BlueprintDatasetConfig`.
+///
+/// Omitted from this set are the disposition (in practice, this will typically
+/// be "in service", as one constructs a `PartialDatasetConfig` to describe a
+/// dataset that should be in service) and the ID. Dataset IDs are a little
+/// tricky at the moment (see `DatasetIdsBackfillFromDb` above), so they're
+/// determined internally by `DatasetsEditor`.
 #[derive(Debug)]
 pub(crate) struct PartialDatasetConfig {
     pub name: DatasetName,
@@ -120,6 +128,10 @@ pub(crate) struct PartialDatasetConfig {
 }
 
 impl PartialDatasetConfig {
+    pub fn zpool(&self) -> &ZpoolName {
+        self.name.pool()
+    }
+
     pub fn for_debug(zpool: ZpoolName) -> Self {
         const DEBUG_QUOTA_SIZE_GB: u32 = 100;
 
@@ -169,36 +181,6 @@ impl PartialDatasetConfig {
             quota: None,
             reservation: None,
             compression: CompressionAlgorithm::Off,
-        }
-    }
-
-    // Helper to generate a full `BlueprintDatasetConfig` from a partial config;
-    // we either look up the ID (if we're updating an existing dataset) or
-    // generate a new one via `rng`.
-    //
-    // TODO-cleanup It seems awkward we don't know whether we're updating or
-    // adding at this point. For zones, should we store the dataset ID
-    // explicitly so we don't need to do this lookup for updates? Less sure what
-    // we'd do with extra datasets like Debug and ZoneRoot.
-    pub fn build(
-        self,
-        datasets: &DatasetsEditor,
-        rng: &mut PlannerRng,
-    ) -> BlueprintDatasetConfig {
-        let Self { name, address, quota, reservation, compression } = self;
-        let (pool, kind) = name.into_parts();
-        let id = datasets
-            .get_id(&pool.id(), &kind)
-            .unwrap_or_else(|| rng.next_dataset());
-        BlueprintDatasetConfig {
-            disposition: BlueprintDatasetDisposition::InService,
-            id,
-            pool,
-            kind,
-            address,
-            quota,
-            reservation,
-            compression,
         }
     }
 }
@@ -266,9 +248,13 @@ impl DatasetsEditor {
         self.counts
     }
 
-    /// If there is a dataset of the given `kind` on the given `zpool`, return
-    /// its ID.
-    pub fn get_id(
+    // If there is a dataset of the given `kind` on the given `zpool`, return
+    // its ID.
+    //
+    // This prefers IDs we already have; if we don't have one, it falls back to
+    // backfilling based on IDs recorded in the database from before blueprints
+    // tracked datasets (see `DatasetIdsBackfillFromDb` above).
+    fn get_id(
         &self,
         zpool: &ZpoolUuid,
         kind: &DatasetKind,
@@ -360,7 +346,38 @@ impl DatasetsEditor {
         }
     }
 
-    pub fn ensure(&mut self, dataset: BlueprintDatasetConfig) {
+    pub fn ensure_in_service(
+        &mut self,
+        dataset: PartialDatasetConfig,
+        rng: &mut PlannerRng,
+    ) {
+        // Convert the partial config into a full config by finding or
+        // generating its ID.
+        let dataset = {
+            let PartialDatasetConfig {
+                name,
+                address,
+                quota,
+                reservation,
+                compression,
+            } = dataset;
+            let (pool, kind) = name.into_parts();
+            let id = self
+                .get_id(&pool.id(), &kind)
+                .unwrap_or_else(|| rng.next_dataset());
+            BlueprintDatasetConfig {
+                disposition: BlueprintDatasetDisposition::InService,
+                id,
+                pool,
+                kind,
+                address,
+                quota,
+                reservation,
+                compression,
+            }
+        };
+
+        // Add or update our config with this new dataset info.
         match self.config.datasets.entry(dataset.id) {
             Entry::Vacant(slot) => {
                 self.by_zpool_and_kind

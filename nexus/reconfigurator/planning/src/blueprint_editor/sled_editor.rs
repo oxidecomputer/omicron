@@ -8,7 +8,6 @@ use crate::blueprint_builder::SledEditCounts;
 use crate::planner::PlannerRng;
 use illumos_utils::zpool::ZpoolName;
 use nexus_types::deployment::blueprint_zone_type;
-use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
@@ -173,17 +172,11 @@ impl SledEditor {
 
         // Every disk also gets a Debug and Transient Zone Root dataset; ensure
         // both of those exist as well.
-        let debug = self.dataset_config(
-            PartialDatasetConfig::for_debug(zpool.clone()),
-            rng,
-        );
-        let zone_root = self.dataset_config(
-            PartialDatasetConfig::for_transient_zone_root(zpool),
-            rng,
-        );
+        let debug = PartialDatasetConfig::for_debug(zpool.clone());
+        let zone_root = PartialDatasetConfig::for_transient_zone_root(zpool);
 
-        self.datasets.ensure(debug);
-        self.datasets.ensure(zone_root);
+        self.datasets.ensure_in_service(debug, rng);
+        self.datasets.ensure_in_service(zone_root, rng);
     }
 
     pub fn expunge_disk(
@@ -200,34 +193,17 @@ impl SledEditor {
         Ok(())
     }
 
-    // Helper to generate a full `BlueprintDatasetConfig` from a partial config;
-    // we either look up the ID (if we're updating an existing dataset) or
-    // generate a new one via our RNG.
-    //
-    // TODO-cleanup It seems awkward we don't know whether we're updating or
-    // adding at this point. For zones, should we store the dataset ID
-    // explicitly so we don't need to do this lookup for updates? Less sure what
-    // we'd do with extra datasets like Debug and ZoneRoot.
-    fn dataset_config(
-        &mut self,
-        config: PartialDatasetConfig,
-        rng: &mut PlannerRng,
-    ) -> BlueprintDatasetConfig {
-        config.build(&mut self.datasets, rng)
-    }
-
     pub fn add_zone(
         &mut self,
         zone: BlueprintZoneConfig,
         rng: &mut PlannerRng,
     ) -> Result<(), SledEditError> {
         // Ensure we can construct the configs for the datasets for this zone.
-        let datasets =
-            ZoneDatasetConfigs::new(&self.disks, &self.datasets, &zone, rng)?;
+        let datasets = ZoneDatasetConfigs::new(&self.disks, &zone)?;
 
         // Actually add the zone and its datasets.
         self.zones.add_zone(zone)?;
-        datasets.ensure(&mut self.datasets);
+        datasets.ensure_in_service(&mut self.datasets, rng);
 
         Ok(())
     }
@@ -282,8 +258,8 @@ impl SledEditor {
         rng: &mut PlannerRng,
     ) -> Result<(), SledEditError> {
         for zone in self.zones.zones(BlueprintZoneFilter::ShouldBeRunning) {
-            ZoneDatasetConfigs::new(&self.disks, &self.datasets, zone, rng)?
-                .ensure(&mut self.datasets);
+            ZoneDatasetConfigs::new(&self.disks, zone)?
+                .ensure_in_service(&mut self.datasets, rng);
         }
         Ok(())
     }
@@ -291,21 +267,18 @@ impl SledEditor {
 
 #[derive(Debug)]
 struct ZoneDatasetConfigs {
-    filesystem: Option<BlueprintDatasetConfig>,
-    durable: Option<BlueprintDatasetConfig>,
+    filesystem: Option<PartialDatasetConfig>,
+    durable: Option<PartialDatasetConfig>,
 }
 
 impl ZoneDatasetConfigs {
     fn new(
         disks: &DisksEditor,
-        datasets: &DatasetsEditor,
         zone: &BlueprintZoneConfig,
-        rng: &mut PlannerRng,
     ) -> Result<Self, SledEditError> {
-        let filesystem_dataset = zone.filesystem_dataset().map(|dataset| {
-            PartialDatasetConfig::for_transient_zone(dataset)
-                .build(datasets, rng)
-        });
+        let filesystem_dataset = zone
+            .filesystem_dataset()
+            .map(|dataset| PartialDatasetConfig::for_transient_zone(dataset));
         let durable_dataset = zone.zone_type.durable_dataset().map(|dataset| {
             // `dataset` records include an optional socket address, which is
             // only applicable for durable datasets backing crucible. This this
@@ -322,17 +295,16 @@ impl ZoneDatasetConfigs {
                 dataset.kind,
                 address,
             )
-            .build(datasets, rng)
         });
 
         // Ensure that if this zone has both kinds of datasets, they reside on
         // the same zpool.
         if let (Some(fs), Some(dur)) = (&filesystem_dataset, &durable_dataset) {
-            if fs.pool != dur.pool {
+            if fs.zpool() != dur.zpool() {
                 return Err(SledEditError::ZoneInvalidZpoolCombination {
                     zone_id: zone.id,
-                    fs_zpool: fs.pool.clone(),
-                    dur_zpool: dur.pool.clone(),
+                    fs_zpool: fs.zpool().clone(),
+                    dur_zpool: dur.zpool().clone(),
                 });
             }
         }
@@ -342,10 +314,10 @@ impl ZoneDatasetConfigs {
         if let Some(dataset) =
             filesystem_dataset.as_ref().or(durable_dataset.as_ref())
         {
-            if !disks.contains_zpool(&dataset.pool.id()) {
+            if !disks.contains_zpool(&dataset.zpool().id()) {
                 return Err(SledEditError::ZoneOnNonexistentZpool {
                     zone_id: zone.id,
-                    zpool: dataset.pool.clone(),
+                    zpool: dataset.zpool().clone(),
                 });
             }
         }
@@ -353,12 +325,16 @@ impl ZoneDatasetConfigs {
         Ok(Self { filesystem: filesystem_dataset, durable: durable_dataset })
     }
 
-    fn ensure(self, datasets: &mut DatasetsEditor) {
+    fn ensure_in_service(
+        self,
+        datasets: &mut DatasetsEditor,
+        rng: &mut PlannerRng,
+    ) {
         if let Some(dataset) = self.filesystem {
-            datasets.ensure(dataset);
+            datasets.ensure_in_service(dataset, rng);
         }
         if let Some(dataset) = self.durable {
-            datasets.ensure(dataset);
+            datasets.ensure_in_service(dataset, rng);
         }
     }
 }
