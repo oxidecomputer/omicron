@@ -1,0 +1,2 @@
+ALTER TABLE omicron.public.region
+    ADD COLUMN IF NOT EXISTS ip INET NOT NULL DEFAULT '0.0.0.0';

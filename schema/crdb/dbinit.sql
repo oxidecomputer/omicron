@@ -570,10 +570,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.dataset (
     /* FK into the Pool table */
     pool_id UUID NOT NULL,
 
-    /* Contact information for the dataset */
-    ip INET,
-    port INT4 CHECK (port BETWEEN 0 AND 65535),
-
     kind omicron.public.dataset_kind NOT NULL,
 
     /* An upper bound on the amount of space that might be in-use */
@@ -590,11 +586,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.dataset (
     CONSTRAINT size_used_column_set_for_crucible CHECK (
       (kind != 'crucible') OR
       (kind = 'crucible' AND size_used IS NOT NULL)
-    ),
-
-    CONSTRAINT ip_and_port_set_for_crucible CHECK (
-      (kind != 'crucible') OR
-      (kind = 'crucible' AND ip IS NOT NULL and port IS NOT NULL)
     ),
 
     CONSTRAINT zone_name_for_zone_kind CHECK (
@@ -619,7 +610,6 @@ CREATE INDEX IF NOT EXISTS lookup_dataset_by_zpool on omicron.public.dataset (
     id
 ) WHERE pool_id IS NOT NULL AND time_deleted IS NULL;
 
-CREATE INDEX IF NOT EXISTS lookup_dataset_by_ip on omicron.public.dataset (ip);
 
 /*
  * A region of space allocated to Crucible Downstairs, within a dataset.
@@ -641,7 +631,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.region (
     blocks_per_extent INT NOT NULL,
     extent_count INT NOT NULL,
 
-    port INT4,
+    ip INET NOT NULL,
+    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
 
     read_only BOOL NOT NULL,
 
