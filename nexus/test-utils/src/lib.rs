@@ -73,6 +73,7 @@ use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
+use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -1715,4 +1716,41 @@ pub async fn start_dns_server(
     let resolver = TokioAsyncResolver::tokio(resolver_config, resolver_opts);
 
     Ok((dns_server, http_server, resolver))
+}
+
+/// Wait until a producer is registered with Oximeter.
+///
+/// This blocks until the producer is registered, for up to 60s. It panics if
+/// the retry loop hits a permanent error.
+pub async fn wait_for_producer<G: GenericUuid>(
+    oximeter: &oximeter_collector::Oximeter,
+    producer_id: G,
+) {
+    wait_for_producer_impl(oximeter, producer_id.into_untyped_uuid()).await;
+}
+
+// This function is outlined from wait_for_producer to avoid unnecessary
+// monomorphization.
+async fn wait_for_producer_impl(
+    oximeter: &oximeter_collector::Oximeter,
+    producer_id: Uuid,
+) {
+    wait_for_condition(
+        || async {
+            if oximeter
+                .list_producers(None, usize::MAX)
+                .await
+                .iter()
+                .any(|p| p.id == producer_id)
+            {
+                Ok(())
+            } else {
+                Err(CondCheckError::<()>::NotYet)
+            }
+        },
+        &Duration::from_secs(1),
+        &Duration::from_secs(60),
+    )
+    .await
+    .expect("Failed to find producer within time limit");
 }
