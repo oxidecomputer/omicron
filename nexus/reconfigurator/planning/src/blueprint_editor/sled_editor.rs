@@ -240,34 +240,33 @@ impl SledEditor {
 
         // When expunging a zone, we also expunge its datasets.
         if let Some(dataset) = config.filesystem_dataset() {
-            // It would be strange to not find the dataset ID here; it would
-            // mean we have a zone (because we found `config`) that has a
-            // filesystem dataset, but that dataset isn't present. It _could_
-            // happen if the zone and its dataset had previously been expunged,
-            // and the dataset has since been cleaned up and removed from the
-            // blueprint entirely, but the (expunged) zone is still around.
-            if let Some(dataset_id) =
-                self.datasets.get_id(&dataset.pool().id(), dataset.dataset())
+            match self.datasets.expunge(&dataset.pool().id(), dataset.dataset())
             {
-                match self.datasets.expunge(&dataset_id) {
-                    Ok(()) => (),
-                    Err(DatasetsEditError::ExpungeNonexistentDataset {
-                        ..
-                    }) => unreachable!("we just looked up the dataset ID"),
+                Ok(()) => (),
+                Err(DatasetsEditError::ExpungeNonexistentDataset {
+                    ..
+                }) => {
+                    // It would be strange to not find the dataset here; it
+                    // would mean we have a zone (because we found `config`)
+                    // that has a filesystem dataset, but that dataset isn't
+                    // present. It _could_ happen if the zone and its dataset
+                    // had previously been expunged, and the dataset has since
+                    // been cleaned up and removed from the blueprint entirely,
+                    // but the (expunged) zone is still around, so we ignore
+                    // this error.
                 }
             }
         }
         if let Some(dataset) = config.zone_type.durable_dataset() {
-            // See note above about failing to find the dataset ID.
-            if let Some(dataset_id) = self
+            match self
                 .datasets
-                .get_id(&dataset.dataset.pool_name.id(), &dataset.kind)
+                .expunge(&dataset.dataset.pool_name.id(), &dataset.kind)
             {
-                match self.datasets.expunge(&dataset_id) {
-                    Ok(()) => (),
-                    Err(DatasetsEditError::ExpungeNonexistentDataset {
-                        ..
-                    }) => unreachable!("we just looked up the dataset ID"),
+                Ok(()) => (),
+                Err(DatasetsEditError::ExpungeNonexistentDataset {
+                    ..
+                }) => {
+                    // See note above about ignoring this error.
                 }
             }
         }

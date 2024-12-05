@@ -36,8 +36,11 @@ pub struct MultipleDatasetsOfKind {
 
 #[derive(Debug, thiserror::Error)]
 pub enum DatasetsEditError {
-    #[error("tried to expunge nonexistent dataset: {id}")]
-    ExpungeNonexistentDataset { id: DatasetUuid },
+    #[error(
+        "tried to expunge nonexistent dataset: \
+         zpool {zpool_id}, kind {kind}"
+    )]
+    ExpungeNonexistentDataset { zpool_id: ZpoolUuid, kind: DatasetKind },
 }
 
 /// TODO(<https://github.com/oxidecomputer/omicron/issues/6645>): In between
@@ -285,21 +288,10 @@ impl DatasetsEditor {
         None
     }
 
-    pub fn expunge(
-        &mut self,
-        id: &DatasetUuid,
-    ) -> Result<(), DatasetsEditError> {
-        Self::expunge_by_id(&mut self.config, id, &mut self.counts)
-    }
-
-    fn expunge_by_id(
-        config: &mut BlueprintDatasetsConfig,
-        id: &DatasetUuid,
+    fn expunge_impl(
+        dataset: &mut BlueprintDatasetConfig,
         counts: &mut EditCounts,
-    ) -> Result<(), DatasetsEditError> {
-        let dataset = config.datasets.get_mut(id).ok_or_else(|| {
-            DatasetsEditError::ExpungeNonexistentDataset { id: *id }
-        })?;
+    ) {
         match dataset.disposition {
             BlueprintDatasetDisposition::InService => {
                 dataset.disposition = BlueprintDatasetDisposition::Expunged;
@@ -309,6 +301,47 @@ impl DatasetsEditor {
                 // already expunged; nothing to do
             }
         }
+    }
+
+    /// Expunge a dataset identified by its zpool + kind combo.
+    ///
+    /// TODO-cleanup This seems fishy. We require that there is at most one
+    /// dataset of a given `DatasetKind` on a given zpool at a time, but over
+    /// time we might have had multiple. For example:
+    ///
+    /// * Blueprint A: Nexus 1 is on zpool 12
+    /// * Blueprint B: Nexus 1 is expunged
+    /// * Blueprint C: Nexus 2 is added and is placed on zpool 12
+    ///
+    /// When we go to plan Blueprint D, if Nexus 1 is still being carried
+    /// forward, it will already be expunged (which is fine). If we then try to
+    /// expunge it again, which should be idempotent, expunging its
+    /// datasets would incorrectly expunge Nexus 2's datasets (because we'd look
+    /// up "the dataset with kind Nexus on zpool 12"). We should probably take
+    /// an explicit dataset ID here, but that would require
+    /// `BlueprintZoneConfig` to track its dataset IDs explicitly instead of
+    /// only tracking their zpools.
+    pub fn expunge(
+        &mut self,
+        zpool: &ZpoolUuid,
+        kind: &DatasetKind,
+    ) -> Result<(), DatasetsEditError> {
+        let Some(id) = self
+            .by_zpool_and_kind
+            .get(zpool)
+            .and_then(|by_kind| by_kind.get(kind))
+        else {
+            return Err(DatasetsEditError::ExpungeNonexistentDataset {
+                zpool_id: *zpool,
+                kind: kind.clone(),
+            });
+        };
+        let dataset = self
+            .config
+            .datasets
+            .get_mut(id)
+            .expect("by_zpool_and_kind and config out of sync");
+        Self::expunge_impl(dataset, &mut self.counts);
         Ok(())
     }
 
@@ -318,8 +351,12 @@ impl DatasetsEditor {
         };
 
         for id in by_kind.values() {
-            Self::expunge_by_id(&mut self.config, id, &mut self.counts)
-                .expect("by_zpool_and_kind out of sync");
+            let dataset = self
+                .config
+                .datasets
+                .get_mut(id)
+                .expect("by_zpool_and_kind and config out of sync");
+            Self::expunge_impl(dataset, &mut self.counts);
         }
     }
 
