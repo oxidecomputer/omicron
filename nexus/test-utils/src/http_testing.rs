@@ -349,7 +349,15 @@ impl<'a> RequestBuilder<'a> {
         if let Some(allowed_headers) = self.allowed_headers {
             for header_name in headers.keys() {
                 ensure!(
-                    allowed_headers.contains(header_name),
+                    allowed_headers.contains(header_name)
+                        || (
+                            // Dropshot adds `allow` headers to its 405 Method
+                            // Not Allowed responses, per RFC 9110. If we expect
+                            // a 405 we should also inherently expect `allow`.
+                            self.expected_status
+                                == Some(http::StatusCode::METHOD_NOT_ALLOWED)
+                                && header_name == http::header::ALLOW
+                        ),
                     "response contained unexpected header {:?}",
                     header_name
                 );

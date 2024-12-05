@@ -192,6 +192,7 @@ impl RepositoryError {
                 error_code: error.error_code.clone(),
                 external_message: error.external_message.clone(),
                 internal_message: error.internal_message.clone(),
+                headers: None,
             },
 
             // Errors that are definitely caused by bad repository contents.

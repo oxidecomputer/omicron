@@ -70,6 +70,7 @@ impl From<UpdateError> for dropshot::HttpError {
                 )),
                 external_message: message.clone(),
                 internal_message: message,
+                headers: None,
             },
 
             UpdateError::UpdateInProgress { .. } => dropshot::HttpError {
@@ -77,6 +78,7 @@ impl From<UpdateError> for dropshot::HttpError {
                 error_code: Some(String::from(ERROR_CODE_UPDATE_IN_PROGRESS)),
                 external_message: message.clone(),
                 internal_message: message,
+                headers: None,
             },
 
             UpdateError::InternalError(_) => {

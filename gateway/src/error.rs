@@ -190,5 +190,6 @@ pub(crate) fn http_err_with_message(
         error_code: Some(error_code.to_string()),
         external_message: message.clone(),
         internal_message: message,
+        headers: None,
     }
 }

@@ -667,6 +667,7 @@ fn method_unimplemented<T>() -> Result<T, HttpError> {
             .to_string(),
         internal_message: "Method not implemented in sled-agent-sim"
             .to_string(),
+        headers: None,
     })
 }
 

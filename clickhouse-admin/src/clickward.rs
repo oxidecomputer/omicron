@@ -28,6 +28,7 @@ impl From<ClickwardError> for HttpError {
                     error_code: Some(String::from("Internal")),
                     external_message: message.clone(),
                     internal_message: message,
+                    headers: None,
                 }
             }
         }

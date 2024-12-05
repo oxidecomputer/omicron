@@ -224,6 +224,7 @@ impl WicketdApi for WicketdApiImpl {
                             error_code: None,
                             external_message: message.clone(),
                             internal_message: message,
+                            headers: None,
                         }
                     }
                     other => HttpError::for_bad_request(
@@ -279,6 +280,7 @@ impl WicketdApi for WicketdApiImpl {
                             error_code: None,
                             external_message: message.clone(),
                             internal_message: message,
+                            headers: None,
                         }
                     }
                     other => HttpError::for_bad_request(
@@ -326,6 +328,7 @@ impl WicketdApi for WicketdApiImpl {
                             error_code: None,
                             external_message: message.clone(),
                             internal_message: message,
+                            headers: None,
                         }
                     }
                     other => HttpError::for_bad_request(
@@ -490,6 +493,7 @@ impl WicketdApi for WicketdApiImpl {
                     error_code: None,
                     external_message: message.clone(),
                     internal_message: message,
+                    headers: None,
                 });
             }
         };
@@ -880,5 +884,6 @@ fn http_error_from_client_error(
         error_code: None,
         external_message: message.clone(),
         internal_message: message,
+        headers: None,
     }
 }

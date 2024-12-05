@@ -50,11 +50,11 @@ external_dns_servers = ["1.1.1.1", "9.9.9.9"]
 # available port) because the test suite will be running many servers
 # concurrently.
 bind_address = "127.0.0.1:0"
-request_body_max_bytes = 8388608
+default_request_body_max_bytes = 8388608
 
 [deployment.dropshot_internal]
 bind_address = "127.0.0.1:0"
-request_body_max_bytes = 8388608
+default_request_body_max_bytes = 8388608
 
 #
 # NOTE: for the test suite, the internal DNS address will be replaced with one

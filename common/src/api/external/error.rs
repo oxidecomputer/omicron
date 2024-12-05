@@ -435,6 +435,7 @@ impl From<Error> for HttpError {
                     "credentials missing or invalid",
                 ),
                 internal_message,
+                headers: None,
             },
 
             Error::InvalidRequest { message } => {
@@ -445,6 +446,7 @@ impl From<Error> for HttpError {
                     error_code: Some(String::from("InvalidRequest")),
                     external_message,
                     internal_message,
+                    headers: None,
                 }
             }
 
@@ -459,6 +461,7 @@ impl From<Error> for HttpError {
                         label, external_message
                     ),
                     internal_message,
+                    headers: None,
                 }
             }
 
@@ -493,6 +496,7 @@ impl From<Error> for HttpError {
                         external_message
                     ),
                     internal_message,
+                    headers: None,
                 }
             }
 
@@ -508,6 +512,7 @@ impl From<Error> for HttpError {
                     error_code: Some(String::from("Conflict")),
                     external_message,
                     internal_message,
+                    headers: None,
                 }
             }
 
@@ -519,6 +524,7 @@ impl From<Error> for HttpError {
                     error_code: Some(String::from("Not Found")),
                     external_message,
                     internal_message,
+                    headers: None,
                 }
             }
 
