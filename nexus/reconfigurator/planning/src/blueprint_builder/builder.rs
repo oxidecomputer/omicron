@@ -682,7 +682,7 @@ impl<'a> BlueprintBuilder<'a> {
             blueprint_datasets.insert(sled_id, datasets);
             blueprint_zones.insert(sled_id, zones);
             if edit_counts.has_nonzero_counts() {
-                info!(
+                debug!(
                     self.log, "sled modified in new blueprint";
                     "sled_id" => %sled_id,
                     "blueprint_id" => %blueprint_id,
@@ -691,7 +691,7 @@ impl<'a> BlueprintBuilder<'a> {
                     "zone_edits" => ?edit_counts.zones,
                 );
             } else {
-                info!(
+                debug!(
                     self.log, "sled unchanged in new blueprint";
                     "sled_id" => %sled_id,
                     "blueprint_id" => %blueprint_id,
