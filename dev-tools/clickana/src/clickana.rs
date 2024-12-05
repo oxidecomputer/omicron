@@ -7,7 +7,9 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, bail, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
-use clickhouse_admin_server_client::types::{SystemTimeSeries, TimestampFormat};
+use clickhouse_admin_server_client::types::{
+    SystemTimeSeries, TimestampFormat,
+};
 use clickhouse_admin_server_client::{types, Client as ClickhouseServerClient};
 use omicron_common::FileKv;
 use ratatui::{
@@ -24,7 +26,8 @@ use slog_async::Async;
 use slog_term::{FullFormat, PlainDecorator};
 use tokio::runtime::Runtime;
 
-const GIBIBYTE: f64 = 1073741824.0;
+const GIBIBYTE_F64: f64 = 1073741824.0;
+const GIBIBYTE_U64: u64 = 1073741824;
 
 pub struct Clickana {}
 
@@ -34,11 +37,11 @@ impl Clickana {
     }
 
     pub fn run(self, mut terminal: DefaultTerminal) -> Result<()> {
-        // Refresh after one minute
+        // Take refresh rate from CLI
         let tick_rate = Duration::from_secs(60);
         let mut last_tick = Instant::now();
         loop {
-            let dashboard = DashboardData::new(get_api_data()?)?;
+            let dashboard = DashboardData::new(self.get_api_data()?)?;
             terminal.draw(|frame| self.draw(frame, dashboard))?;
 
             let timeout = tick_rate.saturating_sub(last_tick.elapsed());
@@ -69,70 +72,42 @@ impl Clickana {
 
         dashboard.render_line_chart(frame, line_chart);
     }
-}
 
-fn log_path() -> Result<Utf8PathBuf> {
-    // TODO: Add a log path via env vars? or maybe a flag
-    // Maybe just find the temp directory
-    match std::env::var("CLICKANA_LOG_PATH") {
-        Ok(path) => Ok(path.into()),
-        Err(std::env::VarError::NotPresent) => Ok("/tmp/clickana.log".into()),
-        Err(std::env::VarError::NotUnicode(_)) => {
-            bail!("CLICKANA_LOG_PATH is not valid unicode");
-        }
-    }
-}
+    fn get_api_data(&self) -> Result<Vec<SystemTimeSeries>> {
+        let rt = Runtime::new()?;
+        // TODO: Take address from a flag
+        let admin_url = format!("http://[::1]:8888");
+        let log = new_logger(&log_path()?)?;
 
-fn new_logger(path: &Utf8Path) -> Result<Logger> {
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(path)
-        .with_context(|| format!("error opening log file {path}"))?;
-
-    let decorator = PlainDecorator::new(file);
-    let drain = FullFormat::new(decorator).build().fuse();
-
-    let drain = Async::new(drain).build().fuse();
-
-    Ok(slog::Logger::root(drain, o!(FileKv)))
-}
-
-fn get_api_data() -> Result<Vec<SystemTimeSeries>> {
-    let rt = Runtime::new()?;
-    // TODO: Take address from a flag
-    let admin_url = format!("http://[::1]:8888");
-    let log = new_logger(&log_path()?)?;
-
-    let client = ClickhouseServerClient::new(&admin_url, log.clone());
-    let result = rt.block_on(async {
-        let timeseries = client
-            .system_timeseries_avg(
-                types::SystemTable::AsynchronousMetricLog,
-                "DiskUsed_default",
-                // TODO: Take interval and time_range from flag
-                Some(120),
-                Some(3600),
-                Some(TimestampFormat::UnixEpoch),
-            )
-            .await
-            .map(|t| t.into_inner()) //;
-            .map_err(|e| {
-                anyhow!(
-                    concat!(
-              "failed to retrieve timeseries from clickhouse server; ",
-              "admin_url = {} error = {}",
-          ),
-                    admin_url,
-                    e
+        let client = ClickhouseServerClient::new(&admin_url, log.clone());
+        let result = rt.block_on(async {
+            let timeseries = client
+                .system_timeseries_avg(
+                    types::SystemTable::AsynchronousMetricLog,
+                    "DiskUsed_default",
+                    // TODO: Take interval and time_range from flag
+                    Some(120),
+                    Some(3600),
+                    Some(TimestampFormat::UnixEpoch),
                 )
-            });
+                .await
+                .map(|t| t.into_inner()) //;
+                .map_err(|e| {
+                    anyhow!(
+                        concat!(
+                "failed to retrieve timeseries from clickhouse server; ",
+                "admin_url = {} error = {}",
+            ),
+                        admin_url,
+                        e
+                    )
+                });
 
-        timeseries
-    })?;
+            timeseries
+        })?;
 
-    Ok(result)
+        Ok(result)
+    }
 }
 
 #[derive(Debug)]
@@ -148,6 +123,10 @@ struct DashboardData {
     max_value_gib: u64,
     min_value_bytes: f64,
     max_value_bytes: f64,
+    lower_label_value: u64,
+    upper_label_value: u64,
+    lower_bound_value: f64,
+    upper_bound_value: f64,
 }
 
 impl DashboardData {
@@ -183,19 +162,36 @@ impl DashboardData {
 
         // The result of these calculations will not be precise, but it doesn't matter since we just
         // want an estimate for the labels
-        let min_value_gib = (min_value_bytes / GIBIBYTE).floor() as u64;
-        let max_value_gib = (max_value_bytes / GIBIBYTE).ceil() as u64;
-        let avg_value_gib = (((min_value_bytes + max_value_bytes) / 2.0)
-            / GIBIBYTE)
-            .round() as u64;
+        let min_value_gib = (min_value_bytes.floor() as u64) / GIBIBYTE_U64;
+        let max_value_gib = (max_value_bytes.ceil() as u64) / GIBIBYTE_U64;
+        let avg_value_gib = (((min_value_bytes + max_value_bytes) / 2.0).round()
+            as u64)
+            / GIBIBYTE_U64;
+
+        // In case there is very little variance in the y axis,
+        // we will be adding some buffer to the bounds and labels
+        // so we don't end up with repeated labels or straight lines
+        // too close to the upper bounds.
+
+        let upper_bound_value = max_value_bytes + GIBIBYTE_F64;
+        let upper_label_value = max_value_gib + 1;
+        let lower_bound_value = if min_value_bytes < GIBIBYTE_F64 {
+            0.0
+        } else {
+            min_value_bytes - GIBIBYTE_F64
+        };
+        let lower_label_value =
+            if min_value_gib < 1 { 0 } else { min_value_gib - 1 };
 
         // These timestamps will be used to calculate maximum and minimum values in order
-        // to create labels and set bounds for the X axis.
+        // to create labels and set bounds for the X axis. As above, some of these conversions
+        // may lose precision, but it's OK as these values are only used to make sure the
+        // datapoints fit within the graph nicely.
         let timestamps: Vec<i64> = raw_data
             .iter()
             .map(|ts| {
                 ts.time.trim_matches('"').parse::<i64>().expect(&format!(
-                    "could not parse timestamp {} into f64",
+                    "could not parse timestamp {} into i64",
                     ts.time
                 ))
             })
@@ -245,10 +241,14 @@ impl DashboardData {
             start_time_unix,
             end_time_unix,
             avg_value_gib,
-            min_value_gib,
-            max_value_gib,
             min_value_bytes,
+            min_value_gib,
             max_value_bytes,
+            max_value_gib,
+            lower_label_value,
+            upper_label_value,
+            lower_bound_value,
+            upper_bound_value,
         })
     }
 
@@ -263,10 +263,14 @@ impl DashboardData {
         let chart = Chart::new(datasets)
             .block(
                 Block::bordered().title(
-                    Line::from(format!("Disk max {}", self.max_value_bytes))
-                        .cyan()
-                        .bold()
-                        .centered(),
+                    // TODO: Fix this line, info is only for debugging
+                    Line::from(format!(
+                        "Disk max {} Disk min {}",
+                        self.max_value_bytes, self.min_value_bytes
+                    ))
+                    .cyan()
+                    .bold()
+                    .centered(),
                 ),
             )
             .x_axis(
@@ -282,11 +286,11 @@ impl DashboardData {
             .y_axis(
                 Axis::default()
                     .style(Style::default().gray())
-                    .bounds([self.min_value_bytes, self.max_value_bytes])
+                    .bounds([self.lower_bound_value, self.upper_bound_value])
                     .labels([
-                        format!("{} GiB", self.min_value_gib).bold(),
+                        format!("{} GiB", self.lower_label_value).bold(),
                         format!("{} GiB", self.avg_value_gib).bold(),
-                        format!("{} GiB", self.max_value_gib).bold(),
+                        format!("{} GiB", self.upper_label_value).bold(),
                     ]),
             )
             .legend_position(Some(LegendPosition::TopLeft))
@@ -297,6 +301,34 @@ impl DashboardData {
 
         frame.render_widget(chart, area);
     }
+}
+
+fn log_path() -> Result<Utf8PathBuf> {
+    // TODO: Add a log path via env vars? or maybe a flag
+    // Maybe just find the temp directory
+    match std::env::var("CLICKANA_LOG_PATH") {
+        Ok(path) => Ok(path.into()),
+        Err(std::env::VarError::NotPresent) => Ok("/tmp/clickana.log".into()),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            bail!("CLICKANA_LOG_PATH is not valid unicode");
+        }
+    }
+}
+
+fn new_logger(path: &Utf8Path) -> Result<Logger> {
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(path)
+        .with_context(|| format!("error opening log file {path}"))?;
+
+    let decorator = PlainDecorator::new(file);
+    let drain = FullFormat::new(decorator).build().fuse();
+
+    let drain = Async::new(drain).build().fuse();
+
+    Ok(slog::Logger::root(drain, o!(FileKv)))
 }
 
 #[allow(dead_code)]
