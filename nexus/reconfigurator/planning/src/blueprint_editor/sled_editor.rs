@@ -7,6 +7,7 @@
 use crate::blueprint_builder::SledEditCounts;
 use crate::planner::PlannerRng;
 use illumos_utils::zpool::ZpoolName;
+use itertools::Either;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
@@ -19,6 +20,7 @@ use nexus_types::deployment::DiskFilter;
 use nexus_types::external_api::views::SledState;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use std::mem;
 
 mod datasets;
 mod disks;
@@ -50,6 +52,8 @@ pub enum SledInputError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SledEditError {
+    #[error("editing a decommissioned sled is not allowed")]
+    EditDecommissioned,
     #[error("failed to edit disks")]
     EditDisks(#[from] DisksEditError),
     #[error("failed to edit datasets")]
@@ -74,8 +78,181 @@ pub enum SledEditError {
 }
 
 #[derive(Debug)]
-pub(crate) struct SledEditor {
-    state: SledState,
+pub(crate) struct SledEditor(InnerSledEditor);
+
+#[derive(Debug)]
+enum InnerSledEditor {
+    // Internally, `SledEditor` has a variant for each variant of `SledState`,
+    // as the operations allowed in different states are substantially different
+    // (i.e., an active sled allows any edit; a decommissioned sled allows
+    // none).
+    Active(ActiveSledEditor),
+    Decommissioned(EditedSled),
+}
+
+impl SledEditor {
+    pub fn new(
+        state: SledState,
+        zones: BlueprintZonesConfig,
+        disks: BlueprintPhysicalDisksConfig,
+        datasets: BlueprintDatasetsConfig,
+        preexisting_dataset_ids: DatasetIdsBackfillFromDb,
+    ) -> Result<Self, SledInputError> {
+        match state {
+            SledState::Active => {
+                let inner = ActiveSledEditor::new(
+                    zones,
+                    disks,
+                    datasets,
+                    preexisting_dataset_ids,
+                )?;
+                Ok(Self(InnerSledEditor::Active(inner)))
+            }
+            SledState::Decommissioned => {
+                let inner = EditedSled {
+                    state,
+                    zones,
+                    disks,
+                    datasets,
+                    edit_counts: SledEditCounts::zeroes(),
+                };
+                Ok(Self(InnerSledEditor::Decommissioned(inner)))
+            }
+        }
+    }
+
+    pub fn new_empty(
+        // TODO-john remove and rename new_active()
+        _state: SledState,
+        preexisting_dataset_ids: DatasetIdsBackfillFromDb,
+    ) -> Self {
+        Self(InnerSledEditor::Active(ActiveSledEditor::new_empty(
+            preexisting_dataset_ids,
+        )))
+    }
+
+    pub fn finalize(self) -> EditedSled {
+        match self.0 {
+            InnerSledEditor::Active(editor) => editor.finalize(),
+            InnerSledEditor::Decommissioned(edited) => edited,
+        }
+    }
+
+    pub fn edit_counts(&self) -> SledEditCounts {
+        match &self.0 {
+            InnerSledEditor::Active(editor) => editor.edit_counts(),
+            InnerSledEditor::Decommissioned(edited) => edited.edit_counts,
+        }
+    }
+
+    pub fn decommission(&mut self) {
+        match &mut self.0 {
+            InnerSledEditor::Active(editor) => {
+                let mut stolen = ActiveSledEditor::new_empty(
+                    DatasetIdsBackfillFromDb::empty(),
+                );
+                mem::swap(editor, &mut stolen);
+
+                let mut finalized = stolen.finalize();
+                finalized.state = SledState::Decommissioned;
+                self.0 = InnerSledEditor::Decommissioned(finalized);
+            }
+            // If we're already decommissioned, there's nothing to do.
+            InnerSledEditor::Decommissioned(_) => (),
+        }
+    }
+
+    pub fn disks(
+        &self,
+        filter: DiskFilter,
+    ) -> impl Iterator<Item = &BlueprintPhysicalDiskConfig> {
+        match &self.0 {
+            InnerSledEditor::Active(editor) => {
+                Either::Left(editor.disks(filter))
+            }
+            InnerSledEditor::Decommissioned(edited) => Either::Right(
+                edited
+                    .disks
+                    .disks
+                    .iter()
+                    .filter(move |disk| disk.disposition.matches(filter)),
+            ),
+        }
+    }
+
+    pub fn zones(
+        &self,
+        filter: BlueprintZoneFilter,
+    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
+        match &self.0 {
+            InnerSledEditor::Active(editor) => {
+                Either::Left(editor.zones(filter))
+            }
+            InnerSledEditor::Decommissioned(edited) => Either::Right(
+                edited
+                    .zones
+                    .zones
+                    .iter()
+                    .filter(move |zone| zone.disposition.matches(filter)),
+            ),
+        }
+    }
+
+    fn as_active_mut(
+        &mut self,
+    ) -> Result<&mut ActiveSledEditor, SledEditError> {
+        match &mut self.0 {
+            InnerSledEditor::Active(editor) => Ok(editor),
+            InnerSledEditor::Decommissioned(_) => {
+                Err(SledEditError::EditDecommissioned)
+            }
+        }
+    }
+
+    pub fn ensure_disk(
+        &mut self,
+        disk: BlueprintPhysicalDiskConfig,
+        rng: &mut PlannerRng,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.ensure_disk(disk, rng);
+        Ok(())
+    }
+
+    pub fn expunge_disk(
+        &mut self,
+        disk_id: &PhysicalDiskUuid,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.expunge_disk(disk_id)
+    }
+
+    pub fn add_zone(
+        &mut self,
+        zone: BlueprintZoneConfig,
+        rng: &mut PlannerRng,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.add_zone(zone, rng)
+    }
+
+    pub fn expunge_zone(
+        &mut self,
+        zone_id: &OmicronZoneUuid,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.expunge_zone(zone_id)
+    }
+
+    /// Backwards compatibility / test helper: If we're given a blueprint that
+    /// has zones but wasn't created via `SledEditor`, it might not have
+    /// datasets for all its zones. This method backfills them.
+    pub fn ensure_datasets_for_running_zones(
+        &mut self,
+        rng: &mut PlannerRng,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.ensure_datasets_for_running_zones(rng)
+    }
+}
+
+#[derive(Debug)]
+struct ActiveSledEditor {
     zones: ZonesEditor,
     disks: DisksEditor,
     datasets: DatasetsEditor,
@@ -90,16 +267,14 @@ pub(crate) struct EditedSled {
     pub edit_counts: SledEditCounts,
 }
 
-impl SledEditor {
+impl ActiveSledEditor {
     pub fn new(
-        state: SledState,
         zones: BlueprintZonesConfig,
         disks: BlueprintPhysicalDisksConfig,
         datasets: BlueprintDatasetsConfig,
         preexisting_dataset_ids: DatasetIdsBackfillFromDb,
     ) -> Result<Self, SledInputError> {
         Ok(Self {
-            state,
             zones: zones.try_into()?,
             disks: disks.try_into()?,
             datasets: DatasetsEditor::new(datasets, preexisting_dataset_ids)?,
@@ -107,11 +282,9 @@ impl SledEditor {
     }
 
     pub fn new_empty(
-        state: SledState,
         preexisting_dataset_ids: DatasetIdsBackfillFromDb,
     ) -> Self {
         Self {
-            state,
             zones: ZonesEditor::empty(),
             disks: DisksEditor::empty(),
             datasets: DatasetsEditor::empty(preexisting_dataset_ids),
@@ -123,7 +296,7 @@ impl SledEditor {
         let (datasets, datasets_counts) = self.datasets.finalize();
         let (zones, zones_counts) = self.zones.finalize();
         EditedSled {
-            state: self.state,
+            state: SledState::Active,
             zones,
             disks,
             datasets,
@@ -141,10 +314,6 @@ impl SledEditor {
             datasets: self.datasets.edit_counts(),
             zones: self.zones.edit_counts(),
         }
-    }
-
-    pub fn set_state(&mut self, new_state: SledState) {
-        self.state = new_state;
     }
 
     pub fn disks(

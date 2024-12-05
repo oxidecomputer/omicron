@@ -228,6 +228,14 @@ pub struct SledEditCounts {
 }
 
 impl SledEditCounts {
+    pub fn zeroes() -> Self {
+        Self {
+            disks: EditCounts::zeroes(),
+            datasets: EditCounts::zeroes(),
+            zones: EditCounts::zeroes(),
+        }
+    }
+
     fn has_nonzero_counts(&self) -> bool {
         let Self { disks, datasets, zones } = self;
         disks.has_nonzero_counts()
@@ -815,17 +823,16 @@ impl<'a> BlueprintBuilder<'a> {
     }
 
     /// Set the desired state of the given sled.
-    pub fn set_sled_state(
+    pub fn set_sled_decommissioned(
         &mut self,
         sled_id: SledUuid,
-        desired_state: SledState,
     ) -> Result<(), Error> {
         let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!(
                 "tried to set sled state for unknown sled {sled_id}"
             ))
         })?;
-        editor.set_state(desired_state);
+        editor.decommission();
         Ok(())
     }
 
@@ -1046,15 +1053,18 @@ impl<'a> BlueprintBuilder<'a> {
         // blueprint
         for (disk_id, (zpool, disk)) in database_disks {
             database_disk_ids.insert(disk_id);
-            editor.ensure_disk(
-                BlueprintPhysicalDiskConfig {
-                    disposition: BlueprintPhysicalDiskDisposition::InService,
-                    identity: disk.disk_identity.clone(),
-                    id: disk_id,
-                    pool_id: *zpool,
-                },
-                &mut self.rng,
-            );
+            editor
+                .ensure_disk(
+                    BlueprintPhysicalDiskConfig {
+                        disposition:
+                            BlueprintPhysicalDiskDisposition::InService,
+                        identity: disk.disk_identity.clone(),
+                        id: disk_id,
+                        pool_id: *zpool,
+                    },
+                    &mut self.rng,
+                )
+                .map_err(|err| Error::SledEditError { sled_id, err })?;
         }
 
         // Remove any disks that appear in the blueprint, but not the database
