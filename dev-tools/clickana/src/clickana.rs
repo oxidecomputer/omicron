@@ -58,7 +58,13 @@ impl Clickana {
         let tick_rate = Duration::from_secs(self.refresh_interval);
         let mut last_tick = Instant::now();
         loop {
-            let dashboard = DashboardData::new(self.get_api_data()?)?;
+            let top_left_frame = ChartData::new(self.get_api_data()?)?;
+            let dashboard = Dashboard {
+                top_left_frame,
+                _top_right_frame: None,
+                _bottom_left_frame: None,
+                _bottom_right_frame: None,
+            };
             terminal.draw(|frame| self.draw(frame, dashboard))?;
 
             let timeout = tick_rate.saturating_sub(last_tick.elapsed());
@@ -76,18 +82,13 @@ impl Clickana {
         }
     }
 
-    fn draw(&self, frame: &mut Frame, dashboard: DashboardData) {
-        // let [_top, bottom] = Layout::vertical([Constraint::Fill(1); 2]).areas(frame.area());
-        // let [animated_chart, bar_chart] =
-        //     Layout::horizontal([Constraint::Fill(1), Constraint::Length(29)]).areas(top);
+    fn draw(&self, frame: &mut Frame, dashboard: Dashboard) {
         let [all] =
             Layout::vertical([Constraint::Fill(1); 1]).areas(frame.area());
-        // let [line_chart, scatter] = Layout::horizontal([Constraint::Fill(1); 2]).areas(all);
-
         let [line_chart] =
             Layout::horizontal([Constraint::Fill(1); 1]).areas(all);
 
-        dashboard.render_line_chart(frame, line_chart);
+        dashboard.top_left_frame.render_line_chart(frame, line_chart);
     }
 
     fn get_api_data(&self) -> Result<Vec<SystemTimeSeries>> {
@@ -136,7 +137,6 @@ impl Clickana {
 
         let decorator = PlainDecorator::new(file);
         let drain = FullFormat::new(decorator).build().fuse();
-
         let drain = Async::new(drain).build().fuse();
 
         Ok(slog::Logger::root(drain, o!(FileKv)))
@@ -144,7 +144,16 @@ impl Clickana {
 }
 
 #[derive(Debug)]
-struct DashboardData {
+struct Dashboard {
+    top_left_frame: ChartData,
+    _top_right_frame: Option<ChartData>,
+    _bottom_left_frame: Option<ChartData>,
+    _bottom_right_frame: Option<ChartData>,
+    // Add more charts
+}
+
+#[derive(Debug)]
+struct ChartData {
     data_points: Vec<(f64, f64)>,
     avg_time_utc: DateTime<Utc>,
     start_time_utc: DateTime<Utc>,
@@ -152,19 +161,13 @@ struct DashboardData {
     start_time_unix: f64,
     end_time_unix: f64,
     avg_value_gib: u64,
-    // TODO: Remove these, only used for debugging
-    min_value_gib: u64,
-    max_value_gib: u64,
-    min_value_bytes: f64,
-    max_value_bytes: f64,
-    // remove until this line
     lower_label_value: u64,
     upper_label_value: u64,
     lower_bound_value: f64,
     upper_bound_value: f64,
 }
 
-impl DashboardData {
+impl ChartData {
     fn new(raw_data: Vec<SystemTimeSeries>) -> Result<Self> {
         // These values will be used to render the graph and ratatui
         // requires them to be f64
@@ -272,10 +275,6 @@ impl DashboardData {
             start_time_unix,
             end_time_unix,
             avg_value_gib,
-            min_value_bytes: *min_value_bytes,
-            min_value_gib,
-            max_value_bytes: *max_value_bytes,
-            max_value_gib,
             lower_label_value,
             upper_label_value,
             lower_bound_value,
@@ -285,21 +284,15 @@ impl DashboardData {
 
     fn render_line_chart(&self, frame: &mut Frame, area: Rect) {
         let datasets = vec![Dataset::default()
-          //  .name("DiskUsage per minute".italic())
             .marker(Marker::Braille)
-            .style(Style::default().fg(Color::Yellow))
+            .style(Style::default().fg(Color::LightGreen))
             .graph_type(GraphType::Line)
             .data(&self.data_points)];
 
         let chart = Chart::new(datasets)
             .block(
-                Block::bordered().title(
-                    // TODO: Fix this line, info is only for debugging
-                    Line::from("Disk Usage")
-                    .cyan()
-                    .bold()
-                    .centered(),
-                ),
+                Block::bordered()
+                    .title(Line::from("Disk Usage").cyan().bold().centered()),
             )
             .x_axis(
                 Axis::default()
