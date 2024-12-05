@@ -77,7 +77,7 @@ impl Clickana {
         let rt = Runtime::new()?;
         // TODO: Take address from a flag
         let admin_url = format!("http://[::1]:8888");
-        let log = new_logger(&log_path()?)?;
+        let log = self.new_logger(&self.log_path()?)?;
 
         let client = ClickhouseServerClient::new(&admin_url, log.clone());
         let result = rt.block_on(async {
@@ -108,6 +108,36 @@ impl Clickana {
 
         Ok(result)
     }
+
+    fn log_path(&self) -> Result<Utf8PathBuf> {
+        // TODO: Add a log path via env vars? or maybe a flag
+        // Maybe just find the temp directory
+        match std::env::var("CLICKANA_LOG_PATH") {
+            Ok(path) => Ok(path.into()),
+            Err(std::env::VarError::NotPresent) => {
+                Ok("/tmp/clickana.log".into())
+            }
+            Err(std::env::VarError::NotUnicode(_)) => {
+                bail!("CLICKANA_LOG_PATH is not valid unicode");
+            }
+        }
+    }
+
+    fn new_logger(&self, path: &Utf8Path) -> Result<Logger> {
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(path)
+            .with_context(|| format!("error opening log file {path}"))?;
+
+        let decorator = PlainDecorator::new(file);
+        let drain = FullFormat::new(decorator).build().fuse();
+
+        let drain = Async::new(drain).build().fuse();
+
+        Ok(slog::Logger::root(drain, o!(FileKv)))
+    }
 }
 
 #[derive(Debug)]
@@ -119,10 +149,12 @@ struct DashboardData {
     start_time_unix: f64,
     end_time_unix: f64,
     avg_value_gib: u64,
+    // TODO: Remove these, only used for debugging
     min_value_gib: u64,
     max_value_gib: u64,
     min_value_bytes: f64,
     max_value_bytes: f64,
+    // remove until this line
     lower_label_value: u64,
     upper_label_value: u64,
     lower_bound_value: f64,
@@ -149,33 +181,32 @@ impl DashboardData {
         // These values will be used to calculate maximum and minimum values in order
         // to create labels and set bounds for the Y axis.
         let values: Vec<f64> = raw_data.iter().map(|ts| ts.value).collect();
-        let min_value_bytes = values
-            .iter()
-            .min_by(|a, b| a.partial_cmp(b).unwrap())
-            .unwrap()
-            .floor();
-        let max_value_bytes = values
-            .iter()
-            .max_by(|a, b| a.partial_cmp(b).unwrap())
-            .unwrap()
-            .ceil();
+        let Some(min_value_bytes) =
+            values.iter().min_by(|a, b| a.partial_cmp(b).unwrap())
+        else {
+            bail!("no values have been retrieved")
+        };
 
-        // The result of these calculations will not be precise, but it doesn't matter since we just
-        // want an estimate for the labels
-        let min_value_gib = (min_value_bytes.floor() as u64) / GIBIBYTE_U64;
-        let max_value_gib = (max_value_bytes.ceil() as u64) / GIBIBYTE_U64;
+        let Some(max_value_bytes) =
+            values.iter().max_by(|a, b| a.partial_cmp(b).unwrap())
+        else {
+            bail!("no values have been retrieved")
+        };
+
+        // The result of these calculations will not be precise, but it doesn't matter
+        // since we just want an estimate for the labels
+        let min_value_gib = min_value_bytes.floor() as u64 / GIBIBYTE_U64;
+        let max_value_gib = max_value_bytes.ceil() as u64 / GIBIBYTE_U64;
         let avg_value_gib = (((min_value_bytes + max_value_bytes) / 2.0).round()
             as u64)
             / GIBIBYTE_U64;
 
-        // In case there is very little variance in the y axis,
-        // we will be adding some buffer to the bounds and labels
-        // so we don't end up with repeated labels or straight lines
-        // too close to the upper bounds.
-
+        // In case there is very little variance in the y axis, we will be adding some
+        // buffer to the bounds and labels so we don't end up with repeated labels or
+        // straight lines too close to the upper bounds.
         let upper_bound_value = max_value_bytes + GIBIBYTE_F64;
         let upper_label_value = max_value_gib + 1;
-        let lower_bound_value = if min_value_bytes < GIBIBYTE_F64 {
+        let lower_bound_value = if min_value_bytes < &GIBIBYTE_F64 {
             0.0
         } else {
             min_value_bytes - GIBIBYTE_F64
@@ -204,7 +235,6 @@ impl DashboardData {
             bail!("failed to retrieve end time, timestamp list is empty")
         };
         let avg_time = (*start_time + *end_time) / 2;
-
         let Some(start_time_utc) = DateTime::from_timestamp(*start_time, 0)
         else {
             bail!(
@@ -213,7 +243,6 @@ impl DashboardData {
                 start_time
             )
         };
-
         let Some(end_time_utc) = DateTime::from_timestamp(*end_time, 0) else {
             bail!(
                 "failed to convert timestamp to UTC date and time;
@@ -221,7 +250,6 @@ impl DashboardData {
                 end_time
             )
         };
-
         let Some(avg_time_utc) = DateTime::from_timestamp(avg_time, 0) else {
             bail!(
                 "failed to convert timestamp to UTC date and time;
@@ -241,9 +269,9 @@ impl DashboardData {
             start_time_unix,
             end_time_unix,
             avg_value_gib,
-            min_value_bytes,
+            min_value_bytes: *min_value_bytes,
             min_value_gib,
-            max_value_bytes,
+            max_value_bytes: *max_value_bytes,
             max_value_gib,
             lower_label_value,
             upper_label_value,
@@ -301,34 +329,6 @@ impl DashboardData {
 
         frame.render_widget(chart, area);
     }
-}
-
-fn log_path() -> Result<Utf8PathBuf> {
-    // TODO: Add a log path via env vars? or maybe a flag
-    // Maybe just find the temp directory
-    match std::env::var("CLICKANA_LOG_PATH") {
-        Ok(path) => Ok(path.into()),
-        Err(std::env::VarError::NotPresent) => Ok("/tmp/clickana.log".into()),
-        Err(std::env::VarError::NotUnicode(_)) => {
-            bail!("CLICKANA_LOG_PATH is not valid unicode");
-        }
-    }
-}
-
-fn new_logger(path: &Utf8Path) -> Result<Logger> {
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(path)
-        .with_context(|| format!("error opening log file {path}"))?;
-
-    let decorator = PlainDecorator::new(file);
-    let drain = FullFormat::new(decorator).build().fuse();
-
-    let drain = Async::new(drain).build().fuse();
-
-    Ok(slog::Logger::root(drain, o!(FileKv)))
 }
 
 #[allow(dead_code)]
