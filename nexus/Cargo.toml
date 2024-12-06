@@ -72,6 +72,7 @@ progenitor-client.workspace = true
 propolis-client.workspace = true
 qorb.workspace = true
 rand.workspace = true
+range-requests.workspace = true
 ref-cast.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 ring.workspace = true
