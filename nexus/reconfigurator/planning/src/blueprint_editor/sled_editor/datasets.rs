@@ -7,6 +7,7 @@ use crate::planner::PlannerRng;
 use illumos_utils::zpool::ZpoolName;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
+use nexus_types::deployment::BlueprintDatasetFilter;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolFilter;
@@ -20,6 +21,7 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
 
 #[derive(Debug, thiserror::Error)]
@@ -189,7 +191,14 @@ impl PartialDatasetConfig {
 pub(super) struct DatasetsEditor {
     preexisting_dataset_ids: DatasetIdsBackfillFromDb,
     config: BlueprintDatasetsConfig,
-    by_zpool_and_kind: BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, DatasetUuid>>,
+    // Cache of _in service only_ datasets, identified by (zpool, kind).
+    in_service_by_zpool_and_kind:
+        BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, DatasetUuid>>,
+    // Cache of _expunged_ dataset IDs. This serves as a list of IDs from
+    // `preexisting_dataset_ids` to ignore, as we shouldn't reuse old IDs if
+    // they belong to expunged datasets. We should be able to remove this when
+    // we remove `preexisting_dataset_ids`.
+    expunged_datasets: BTreeSet<DatasetUuid>,
     counts: EditCounts,
 }
 
@@ -198,28 +207,39 @@ impl DatasetsEditor {
         config: BlueprintDatasetsConfig,
         preexisting_dataset_ids: DatasetIdsBackfillFromDb,
     ) -> Result<Self, MultipleDatasetsOfKind> {
-        let mut by_zpool_and_kind = BTreeMap::new();
+        let mut in_service_by_zpool_and_kind = BTreeMap::new();
+        let mut expunged_datasets = BTreeSet::new();
         for dataset in config.datasets.values() {
-            let by_kind: &mut BTreeMap<_, _> =
-                by_zpool_and_kind.entry(dataset.pool.id()).or_default();
-            match by_kind.entry(dataset.kind.clone()) {
-                Entry::Vacant(slot) => {
-                    slot.insert(dataset.id);
+            match dataset.disposition {
+                BlueprintDatasetDisposition::InService => {
+                    let by_kind: &mut BTreeMap<_, _> =
+                        in_service_by_zpool_and_kind
+                            .entry(dataset.pool.id())
+                            .or_default();
+                    match by_kind.entry(dataset.kind.clone()) {
+                        Entry::Vacant(slot) => {
+                            slot.insert(dataset.id);
+                        }
+                        Entry::Occupied(prev) => {
+                            return Err(MultipleDatasetsOfKind {
+                                zpool_id: dataset.pool.id(),
+                                kind: dataset.kind.clone(),
+                                id1: *prev.get(),
+                                id2: dataset.id,
+                            });
+                        }
+                    }
                 }
-                Entry::Occupied(prev) => {
-                    return Err(MultipleDatasetsOfKind {
-                        zpool_id: dataset.pool.id(),
-                        kind: dataset.kind.clone(),
-                        id1: *prev.get(),
-                        id2: dataset.id,
-                    });
+                BlueprintDatasetDisposition::Expunged => {
+                    expunged_datasets.insert(dataset.id);
                 }
             }
         }
         Ok(Self {
             preexisting_dataset_ids,
             config,
-            by_zpool_and_kind,
+            in_service_by_zpool_and_kind,
+            expunged_datasets,
             counts: EditCounts::zeroes(),
         })
     }
@@ -231,7 +251,8 @@ impl DatasetsEditor {
                 generation: Generation::new(),
                 datasets: BTreeMap::new(),
             },
-            by_zpool_and_kind: BTreeMap::new(),
+            in_service_by_zpool_and_kind: BTreeMap::new(),
+            expunged_datasets: BTreeSet::new(),
             counts: EditCounts::zeroes(),
         }
     }
@@ -248,101 +269,69 @@ impl DatasetsEditor {
         self.counts
     }
 
-    // If there is a dataset of the given `kind` on the given `zpool`, return
-    // its ID.
-    //
-    // This prefers IDs we already have; if we don't have one, it falls back to
-    // backfilling based on IDs recorded in the database from before blueprints
-    // tracked datasets (see `DatasetIdsBackfillFromDb` above).
-    fn get_id(
+    #[allow(dead_code)] // currently only used by tests; this will change soon
+    pub fn datasets(
         &self,
-        zpool: &ZpoolUuid,
-        kind: &DatasetKind,
-    ) -> Option<DatasetUuid> {
-        if let Some(blueprint_id) = self
-            .by_zpool_and_kind
-            .get(zpool)
-            .and_then(|by_kind| by_kind.get(kind).copied())
-        {
-            return Some(blueprint_id);
-        };
-        if let Some(preexisting_database_id) =
-            self.preexisting_dataset_ids.get(zpool, kind)
-        {
-            return Some(preexisting_database_id);
-        };
-        None
+        filter: BlueprintDatasetFilter,
+    ) -> impl Iterator<Item = &BlueprintDatasetConfig> {
+        self.config
+            .datasets
+            .values()
+            .filter(move |dataset| dataset.disposition.matches(filter))
     }
 
-    fn expunge_impl(
-        dataset: &mut BlueprintDatasetConfig,
-        counts: &mut EditCounts,
-    ) {
+    // Private method; panics if given an ID that isn't present in
+    // `self.config.datasets`. Callers must ensure the ID is valid.
+    fn expunge_by_known_valid_id(&mut self, id: DatasetUuid) {
+        let dataset = self
+            .config
+            .datasets
+            .get_mut(&id)
+            .expect("expunge_impl called with invalid ID");
         match dataset.disposition {
             BlueprintDatasetDisposition::InService => {
                 dataset.disposition = BlueprintDatasetDisposition::Expunged;
-                counts.expunged += 1;
+                self.counts.expunged += 1;
             }
             BlueprintDatasetDisposition::Expunged => {
                 // already expunged; nothing to do
             }
         }
+        self.expunged_datasets.insert(dataset.id);
     }
 
     /// Expunge a dataset identified by its zpool + kind combo.
     ///
-    /// TODO-cleanup This seems fishy. We require that there is at most one
-    /// dataset of a given `DatasetKind` on a given zpool at a time, but over
-    /// time we might have had multiple. For example:
-    ///
-    /// * Blueprint A: Nexus 1 is on zpool 12
-    /// * Blueprint B: Nexus 1 is expunged
-    /// * Blueprint C: Nexus 2 is added and is placed on zpool 12
-    ///
-    /// When we go to plan Blueprint D, if Nexus 1 is still being carried
-    /// forward, it will already be expunged (which is fine). If we then try to
-    /// expunge it again, which should be idempotent, expunging its
-    /// datasets would incorrectly expunge Nexus 2's datasets (because we'd look
-    /// up "the dataset with kind Nexus on zpool 12"). We should probably take
-    /// an explicit dataset ID here, but that would require
-    /// `BlueprintZoneConfig` to track its dataset IDs explicitly instead of
-    /// only tracking their zpools.
+    /// TODO-cleanup This is a little fishy and should be replaced with
+    /// an expunge-by-ID method instead, but that requires some rework
+    /// (https://github.com/oxidecomputer/omicron/issues/7214).
     pub fn expunge(
         &mut self,
         zpool: &ZpoolUuid,
         kind: &DatasetKind,
     ) -> Result<(), DatasetsEditError> {
         let Some(id) = self
-            .by_zpool_and_kind
-            .get(zpool)
-            .and_then(|by_kind| by_kind.get(kind))
+            .in_service_by_zpool_and_kind
+            .get_mut(zpool)
+            .and_then(|by_kind| by_kind.remove(kind))
         else {
             return Err(DatasetsEditError::ExpungeNonexistentDataset {
                 zpool_id: *zpool,
                 kind: kind.clone(),
             });
         };
-        let dataset = self
-            .config
-            .datasets
-            .get_mut(id)
-            .expect("by_zpool_and_kind and config out of sync");
-        Self::expunge_impl(dataset, &mut self.counts);
+        self.expunge_by_known_valid_id(id);
         Ok(())
     }
 
     pub fn expunge_all_on_zpool(&mut self, zpool: &ZpoolUuid) {
-        let Some(by_kind) = self.by_zpool_and_kind.get(zpool) else {
+        let Some(by_kind) = self.in_service_by_zpool_and_kind.remove(zpool)
+        else {
             return;
         };
 
-        for id in by_kind.values() {
-            let dataset = self
-                .config
-                .datasets
-                .get_mut(id)
-                .expect("by_zpool_and_kind and config out of sync");
-            Self::expunge_impl(dataset, &mut self.counts);
+        for id in by_kind.into_values() {
+            self.expunge_by_known_valid_id(id);
         }
     }
 
@@ -350,49 +339,381 @@ impl DatasetsEditor {
         &mut self,
         dataset: PartialDatasetConfig,
         rng: &mut PlannerRng,
-    ) {
+    ) -> &BlueprintDatasetConfig {
         // Convert the partial config into a full config by finding or
         // generating its ID.
-        let dataset = {
-            let PartialDatasetConfig {
-                name,
-                address,
-                quota,
-                reservation,
-                compression,
-            } = dataset;
-            let (pool, kind) = name.into_parts();
-            let id = self
-                .get_id(&pool.id(), &kind)
-                .unwrap_or_else(|| rng.next_dataset());
-            BlueprintDatasetConfig {
-                disposition: BlueprintDatasetDisposition::InService,
-                id,
-                pool,
-                kind,
-                address,
-                quota,
-                reservation,
-                compression,
+        let PartialDatasetConfig {
+            name,
+            address,
+            quota,
+            reservation,
+            compression,
+        } = dataset;
+        let (pool, kind) = name.into_parts();
+
+        let id = {
+            // If there is a dataset of the given `kind` on the given
+            // `zpool`, find its ID.
+            //
+            // This prefers IDs we already have; if we don't have one, it
+            // falls back to backfilling based on IDs recorded in the
+            // database from before blueprints tracked datasets (see
+            // `DatasetIdsBackfillFromDb` above).
+            if let Some(blueprint_id) = self
+                .in_service_by_zpool_and_kind
+                .get(&pool.id())
+                .and_then(|by_kind| by_kind.get(&kind).copied())
+            {
+                blueprint_id
+            } else if let Some(preexisting_database_id) =
+                self.preexisting_dataset_ids.get(&pool.id(), &kind)
+            {
+                // Only use old database IDs if this ID hasn't been expunged.
+                //
+                // This check won't work if there's a preexisting_database_id
+                // for an old dataset that has been both expunged _and removed_,
+                // as we have no way of knowing about completely removed
+                // datasets. However:
+                //
+                // 1. `DatasetIdsBackfillFromDb::build()` filters to only
+                //    in-service datasets, so we should never find a database ID
+                //    for a removed dataset.
+                // 2. We don't yet ever remove datasets anyway, and hopefully
+                //    `DatasetIdsBackfillFromDb` is entirely removed by then (it
+                //    should be removeable after R12, once we've guaranteed all
+                //    blueprints have datasets).
+                if !self.expunged_datasets.contains(&preexisting_database_id) {
+                    preexisting_database_id
+                } else {
+                    rng.next_dataset()
+                }
+            } else {
+                rng.next_dataset()
             }
+        };
+
+        let dataset = BlueprintDatasetConfig {
+            disposition: BlueprintDatasetDisposition::InService,
+            id,
+            pool,
+            kind,
+            address,
+            quota,
+            reservation,
+            compression,
         };
 
         // Add or update our config with this new dataset info.
         match self.config.datasets.entry(dataset.id) {
             Entry::Vacant(slot) => {
-                self.by_zpool_and_kind
+                self.in_service_by_zpool_and_kind
                     .entry(dataset.pool.id())
                     .or_default()
                     .insert(dataset.kind.clone(), dataset.id);
-                slot.insert(dataset);
                 self.counts.added += 1;
+                &*slot.insert(dataset)
             }
             Entry::Occupied(mut prev) => {
                 if *prev.get() != dataset {
-                    prev.insert(dataset);
                     self.counts.updated += 1;
+                    prev.insert(dataset);
                 }
+                &*prev.into_mut()
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_types::deployment::BlueprintDatasetFilter;
+    use omicron_uuid_kinds::GenericUuid;
+    use std::collections::BTreeSet;
+    use test_strategy::proptest;
+    use uuid::Uuid;
+
+    // Helper functions to "tag" an iterator (i.e., turn it into an iterator of
+    // tuples) for use with `build_test_config()` below.
+    fn all_in_service<I>(
+        value: I,
+    ) -> impl Iterator<Item = (BlueprintDatasetDisposition, DatasetKind)>
+    where
+        I: IntoIterator<Item = DatasetKind>,
+    {
+        value
+            .into_iter()
+            .map(|kind| (BlueprintDatasetDisposition::InService, kind))
+    }
+    fn all_expunged<I>(
+        value: I,
+    ) -> impl Iterator<Item = (BlueprintDatasetDisposition, DatasetKind)>
+    where
+        I: IntoIterator<Item = DatasetKind>,
+    {
+        value
+            .into_iter()
+            .map(|kind| (BlueprintDatasetDisposition::Expunged, kind))
+    }
+
+    fn build_test_config<I, J>(values: I) -> BlueprintDatasetsConfig
+    where
+        I: Iterator<Item = J>,
+        J: Iterator<Item = (BlueprintDatasetDisposition, DatasetKind)>,
+    {
+        let mut datasets = BTreeMap::new();
+        let mut dataset_id_index = 0;
+        for (zpool_id_index, disposition_kinds) in values.enumerate() {
+            let zpool_id = ZpoolUuid::from_untyped_uuid(Uuid::from_u128(
+                zpool_id_index as u128,
+            ));
+            for (disposition, kind) in disposition_kinds {
+                let id = {
+                    let id = DatasetUuid::from_untyped_uuid(Uuid::from_u128(
+                        dataset_id_index,
+                    ));
+                    dataset_id_index += 1;
+                    id
+                };
+                let dataset = BlueprintDatasetConfig {
+                    disposition,
+                    id,
+                    pool: ZpoolName::new_external(zpool_id),
+                    kind,
+                    address: None,
+                    quota: None,
+                    reservation: None,
+                    compression: CompressionAlgorithm::Off,
+                };
+                let prev = datasets.insert(id, dataset);
+                assert!(prev.is_none(), "no duplicate dataset IDs");
+            }
+        }
+        let mut generation = Generation::new();
+        if dataset_id_index > 0 {
+            generation = generation.next();
+        }
+        BlueprintDatasetsConfig { generation, datasets }
+    }
+
+    #[proptest]
+    fn proptest_create_editor_with_in_service_datasets(
+        // This test uses BTreeSet to maintain the invariant that there is at
+        // most one dataset of a given kind on any one zpool.
+        by_zpool: Vec<BTreeSet<DatasetKind>>,
+    ) {
+        let config =
+            build_test_config(by_zpool.into_iter().map(all_in_service));
+        _ = DatasetsEditor::new(config, DatasetIdsBackfillFromDb::empty())
+            .expect("built editor");
+    }
+
+    #[proptest]
+    fn proptest_create_editor_with_expunged_datasets(
+        // In contrast to the previous test, this test uses Vec as there may be
+        // multiple expunged datasets on a given zpool with the same kind.
+        by_zpool: Vec<Vec<DatasetKind>>,
+    ) {
+        let config = build_test_config(by_zpool.into_iter().map(all_expunged));
+        _ = DatasetsEditor::new(config, DatasetIdsBackfillFromDb::empty())
+            .expect("built editor");
+    }
+
+    #[proptest]
+    fn proptest_add_same_kind_after_expunging(
+        initial: Vec<(BTreeSet<DatasetKind>, Vec<DatasetKind>)>,
+        rng_seed: u32,
+    ) {
+        let config = build_test_config(initial.into_iter().map(
+            |(in_service, expunged)| {
+                all_in_service(in_service).chain(all_expunged(expunged))
+            },
+        ));
+        let mut editor = DatasetsEditor::new(
+            config.clone(),
+            DatasetIdsBackfillFromDb::empty(),
+        )
+        .expect("built editor");
+
+        let mut rng = PlannerRng::from_seed((
+            rng_seed,
+            "proptest_add_same_kind_after_expunging",
+        ));
+
+        // For each originally-in-service dataset:
+        //
+        // 1. Expunge that dataset
+        // 2. Add a new dataset of the same kind
+        // 3. Ensure the new dataset ID is freshly-generated
+        for dataset in config.datasets.values().filter(|dataset| {
+            dataset.disposition.matches(BlueprintDatasetFilter::InService)
+        }) {
+            editor
+                .expunge(&dataset.pool.id(), &dataset.kind)
+                .expect("expunged dataset");
+
+            let new_dataset = PartialDatasetConfig {
+                name: DatasetName::new(
+                    dataset.pool.clone(),
+                    dataset.kind.clone(),
+                ),
+                address: dataset.address,
+                quota: dataset.quota,
+                reservation: dataset.reservation,
+                compression: dataset.compression,
+            };
+            let new_dataset = editor.ensure_in_service(new_dataset, &mut rng);
+            assert_ne!(dataset.id, new_dataset.id);
+        }
+
+        // Repeat the test above, but this time assume all the dataset IDs were
+        // also present in the backfill database map. We should not reuse IDs
+        // after expunging zones.
+        let database_backfill = {
+            let mut by_zpool: BTreeMap<_, BTreeMap<_, _>> = BTreeMap::new();
+            for dataset in config.datasets.values().filter(|dataset| {
+                dataset.disposition.matches(BlueprintDatasetFilter::InService)
+            }) {
+                let prev = by_zpool
+                    .entry(dataset.pool.id())
+                    .or_default()
+                    .insert(dataset.kind.clone(), dataset.id);
+                assert!(
+                    prev.is_none(),
+                    "duplicate (pool,kind) in-service input"
+                );
+            }
+            DatasetIdsBackfillFromDb(by_zpool)
+        };
+        let mut editor = DatasetsEditor::new(config.clone(), database_backfill)
+            .expect("built editor");
+        for dataset in config.datasets.values().filter(|dataset| {
+            dataset.disposition.matches(BlueprintDatasetFilter::InService)
+        }) {
+            editor
+                .expunge(&dataset.pool.id(), &dataset.kind)
+                .expect("expunged dataset");
+
+            let new_dataset = PartialDatasetConfig {
+                name: DatasetName::new(
+                    dataset.pool.clone(),
+                    dataset.kind.clone(),
+                ),
+                address: dataset.address,
+                quota: dataset.quota,
+                reservation: dataset.reservation,
+                compression: dataset.compression,
+            };
+            let new_dataset = editor.ensure_in_service(new_dataset, &mut rng);
+            assert_ne!(dataset.id, new_dataset.id);
+        }
+    }
+
+    #[proptest]
+    fn proptest_add_same_kind_after_expunging_by_zpool(
+        initial: Vec<(BTreeSet<DatasetKind>, Vec<DatasetKind>)>,
+        rng_seed: u32,
+    ) {
+        let config = build_test_config(initial.into_iter().map(
+            |(in_service, expunged)| {
+                all_in_service(in_service).chain(all_expunged(expunged))
+            },
+        ));
+        let all_zpools = config
+            .datasets
+            .values()
+            .map(|dataset| dataset.pool.id())
+            .collect::<BTreeSet<_>>();
+        let mut editor = DatasetsEditor::new(
+            config.clone(),
+            DatasetIdsBackfillFromDb::empty(),
+        )
+        .expect("built editor");
+
+        let mut rng = PlannerRng::from_seed((
+            rng_seed,
+            "proptest_add_same_kind_after_expunging",
+        ));
+
+        // Expunge all datasets on all zpools, by zpool.
+        for zpool_id in &all_zpools {
+            editor.expunge_all_on_zpool(zpool_id);
+            // There should no longer be any in-service datasets on this zpool.
+            assert!(
+                !editor
+                    .datasets(BlueprintDatasetFilter::InService)
+                    .any(|dataset| dataset.pool.id() == *zpool_id),
+                "in-service dataset remains after expunging zpool"
+            );
+        }
+
+        // For each originally-in-service dataset:
+        //
+        // 1. Add a new dataset of the same kind
+        // 2. Ensure the new dataset ID is freshly-generated
+        for dataset in config.datasets.values().filter(|dataset| {
+            dataset.disposition.matches(BlueprintDatasetFilter::InService)
+        }) {
+            let new_dataset = PartialDatasetConfig {
+                name: DatasetName::new(
+                    dataset.pool.clone(),
+                    dataset.kind.clone(),
+                ),
+                address: dataset.address,
+                quota: dataset.quota,
+                reservation: dataset.reservation,
+                compression: dataset.compression,
+            };
+            let new_dataset = editor.ensure_in_service(new_dataset, &mut rng);
+            assert_ne!(dataset.id, new_dataset.id);
+        }
+
+        // Repeat the test above, but this time assume all the dataset IDs were
+        // also present in the backfill database map. We should not reuse IDs
+        // after expunging zones.
+        let database_backfill = {
+            let mut by_zpool: BTreeMap<_, BTreeMap<_, _>> = BTreeMap::new();
+            for dataset in config.datasets.values().filter(|dataset| {
+                dataset.disposition.matches(BlueprintDatasetFilter::InService)
+            }) {
+                let prev = by_zpool
+                    .entry(dataset.pool.id())
+                    .or_default()
+                    .insert(dataset.kind.clone(), dataset.id);
+                assert!(
+                    prev.is_none(),
+                    "duplicate (pool,kind) in-service input"
+                );
+            }
+            DatasetIdsBackfillFromDb(by_zpool)
+        };
+        let mut editor = DatasetsEditor::new(config.clone(), database_backfill)
+            .expect("built editor");
+        for zpool_id in &all_zpools {
+            editor.expunge_all_on_zpool(zpool_id);
+            // There should no longer be any in-service datasets on this zpool.
+            assert!(
+                !editor
+                    .datasets(BlueprintDatasetFilter::InService)
+                    .any(|dataset| dataset.pool.id() == *zpool_id),
+                "in-service dataset remains after expunging zpool"
+            );
+        }
+        for dataset in config.datasets.values().filter(|dataset| {
+            dataset.disposition.matches(BlueprintDatasetFilter::InService)
+        }) {
+            let new_dataset = PartialDatasetConfig {
+                name: DatasetName::new(
+                    dataset.pool.clone(),
+                    dataset.kind.clone(),
+                ),
+                address: dataset.address,
+                quota: dataset.quota,
+                reservation: dataset.reservation,
+                compression: dataset.compression,
+            };
+            let new_dataset = editor.ensure_in_service(new_dataset, &mut rng);
+            assert_ne!(dataset.id, new_dataset.id);
         }
     }
 }
