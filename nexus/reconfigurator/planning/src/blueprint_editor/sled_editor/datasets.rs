@@ -7,6 +7,7 @@ use crate::planner::PlannerRng;
 use illumos_utils::zpool::ZpoolName;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
+use nexus_types::deployment::BlueprintDatasetFilter;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolFilter;
@@ -246,6 +247,16 @@ impl DatasetsEditor {
 
     pub fn edit_counts(&self) -> EditCounts {
         self.counts
+    }
+
+    pub fn datasets(
+        &self,
+        filter: BlueprintDatasetFilter,
+    ) -> impl Iterator<Item = &BlueprintDatasetConfig> {
+        self.config
+            .datasets
+            .values()
+            .filter(move |config| config.disposition.matches(filter))
     }
 
     // If there is a dataset of the given `kind` on the given `zpool`, return
