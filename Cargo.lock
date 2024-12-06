@@ -287,7 +287,7 @@ dependencies = [
  "bb8",
  "diesel",
  "futures",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
 ]
 
@@ -534,7 +534,7 @@ dependencies = [
  "serde_with",
  "sha3",
  "static_assertions",
- "thiserror",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -687,13 +687,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85b6598a2f5d564fb7855dc6b06fd1c38cff5a72bd8b863a4d021938497b440a"
 dependencies = [
  "serde",
- "thiserror",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=6936f1a949d155da38d3148abd42caef337dea04#6936f1a949d155da38d3148abd42caef337dea04"
+source = "git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739#220a6f367c18f2452dbc4fa9086f3fe73b961739"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -703,7 +703,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=6936f1a949d155da38d3148abd42caef337dea04#6936f1a949d155da38d3148abd42caef337dea04"
+source = "git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739#220a6f367c18f2452dbc4fa9086f3fe73b961739"
 dependencies = [
  "libc",
  "strum",
@@ -895,7 +895,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-term",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "uuid",
  "vsss-rs",
@@ -1056,7 +1056,7 @@ dependencies = [
  "semver 1.0.23",
  "serde",
  "serde_json",
- "thiserror",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1449,7 +1449,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
 ]
 
@@ -1668,7 +1668,7 @@ source = "git+https://github.com/oxidecomputer/propolis?rev=fae5334bcad5e8647943
 dependencies = [
  "serde",
  "serde_derive",
- "thiserror",
+ "thiserror 1.0.69",
  "toml 0.7.8",
 ]
 
@@ -1822,7 +1822,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=2cfc7e0c8572b3bfafbfc838c4e6d658f442d239#2cfc7e0c8572b3bfafbfc838c4e6d658f442d239"
+source = "git+https://github.com/oxidecomputer/crucible?rev=5a41b826171c7d2a8412fa833377ab1df25ee8ec#5a41b826171c7d2a8412fa833377ab1df25ee8ec"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1838,7 +1838,7 @@ dependencies = [
 [[package]]
 name = "crucible-client-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=2cfc7e0c8572b3bfafbfc838c4e6d658f442d239#2cfc7e0c8572b3bfafbfc838c4e6d658f442d239"
+source = "git+https://github.com/oxidecomputer/crucible?rev=5a41b826171c7d2a8412fa833377ab1df25ee8ec#5a41b826171c7d2a8412fa833377ab1df25ee8ec"
 dependencies = [
  "base64 0.22.1",
  "crucible-workspace-hack",
@@ -1851,7 +1851,7 @@ dependencies = [
 [[package]]
 name = "crucible-common"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=2cfc7e0c8572b3bfafbfc838c4e6d658f442d239#2cfc7e0c8572b3bfafbfc838c4e6d658f442d239"
+source = "git+https://github.com/oxidecomputer/crucible?rev=5a41b826171c7d2a8412fa833377ab1df25ee8ec#5a41b826171c7d2a8412fa833377ab1df25ee8ec"
 dependencies = [
  "anyhow",
  "atty",
@@ -1869,7 +1869,7 @@ dependencies = [
  "slog-dtrace",
  "slog-term",
  "tempfile",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-rustls 0.24.1",
  "toml 0.8.19",
@@ -1881,7 +1881,7 @@ dependencies = [
 [[package]]
 name = "crucible-pantry-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=2cfc7e0c8572b3bfafbfc838c4e6d658f442d239#2cfc7e0c8572b3bfafbfc838c4e6d658f442d239"
+source = "git+https://github.com/oxidecomputer/crucible?rev=5a41b826171c7d2a8412fa833377ab1df25ee8ec#5a41b826171c7d2a8412fa833377ab1df25ee8ec"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1898,13 +1898,13 @@ dependencies = [
 [[package]]
 name = "crucible-smf"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=2cfc7e0c8572b3bfafbfc838c4e6d658f442d239#2cfc7e0c8572b3bfafbfc838c4e6d658f442d239"
+source = "git+https://github.com/oxidecomputer/crucible?rev=5a41b826171c7d2a8412fa833377ab1df25ee8ec#5a41b826171c7d2a8412fa833377ab1df25ee8ec"
 dependencies = [
  "crucible-workspace-hack",
  "libc",
  "num-derive",
  "num-traits",
- "thiserror",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -2150,7 +2150,7 @@ version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff4a5fefe330e8d7f31b16a318f9ce81000d8e35e69b93eae154d16d2278f70f"
 dependencies = [
- "thiserror",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -2272,7 +2272,7 @@ dependencies = [
  "hex",
  "ipnet",
  "rand",
- "thiserror",
+ "thiserror 1.0.69",
  "trust-dns-proto",
  "url",
 ]
@@ -2425,7 +2425,7 @@ dependencies = [
  "libdlpi-sys",
  "num_enum",
  "pretty-hex 0.2.1",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
 ]
 
@@ -2464,7 +2464,7 @@ dependencies = [
  "slog-term",
  "subprocess",
  "tempfile",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "toml 0.8.19",
  "uuid",
@@ -2514,7 +2514,7 @@ dependencies = [
  "pretty-hex 0.4.1",
  "serde",
  "serde_json",
- "thiserror",
+ "thiserror 1.0.69",
  "zerocopy 0.7.35",
 ]
 
@@ -2639,7 +2639,7 @@ dependencies = [
  "slog-bunyan",
  "slog-json",
  "slog-term",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-rustls 0.25.0",
  "toml 0.8.19",
@@ -2700,7 +2700,7 @@ checksum = "71734e3eb68cd4df338d04dffdcc024f89eb0b238150cc95b826fbfad756452b"
 dependencies = [
  "pest",
  "pest_derive",
- "thiserror",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -3429,7 +3429,7 @@ dependencies = [
  "slog-error-chain",
  "socket2",
  "string_cache",
- "thiserror",
+ "thiserror 1.0.69",
  "tlvc 0.3.1 (git+https://github.com/oxidecomputer/tlvc.git?branch=main)",
  "tokio",
  "usdt",
@@ -3828,7 +3828,7 @@ dependencies = [
  "once_cell",
  "radix_trie",
  "rand",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "tracing",
 ]
@@ -3850,7 +3850,7 @@ dependencies = [
  "ipnet",
  "once_cell",
  "rand",
- "thiserror",
+ "thiserror 1.0.69",
  "tinyvec",
  "tokio",
  "tracing",
@@ -3873,7 +3873,7 @@ dependencies = [
  "rand",
  "resolv-conf",
  "smallvec 1.13.2",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "tracing",
 ]
@@ -3891,7 +3891,7 @@ dependencies = [
  "futures-util",
  "hickory-proto",
  "serde",
- "thiserror",
+ "thiserror 1.0.69",
  "time",
  "tokio",
  "tokio-util",
@@ -4036,7 +4036,7 @@ dependencies = [
  "similar",
  "stringmetrics",
  "tabwriter",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "url",
 ]
@@ -4097,7 +4097,7 @@ dependencies = [
  "object 0.30.4",
  "path-slash",
  "rsa",
- "thiserror",
+ "thiserror 1.0.69",
  "tlvc 0.3.1 (git+https://github.com/oxidecomputer/tlvc)",
  "tlvc-text",
  "toml 0.7.8",
@@ -4446,7 +4446,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=98247c27846133a80fdb8f730f0c57e72d766561#98247c27846133a80fdb8f730f0c57e72d766561"
+source = "git+https://github.com/oxidecomputer/opte?rev=b56afeeb14e0042cbd7bda85b166ed86ee17820e#b56afeeb14e0042cbd7bda85b166ed86ee17820e"
 
 [[package]]
 name = "illumos-utils"
@@ -4481,7 +4481,7 @@ dependencies = [
  "slog",
  "slog-error-chain",
  "smf",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "toml 0.8.19",
  "uuid",
@@ -4650,7 +4650,7 @@ dependencies = [
  "slog-term",
  "smf",
  "test-strategy",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
  "tufaceous-lib",
@@ -4708,7 +4708,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "test-strategy",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "update-engine",
 ]
@@ -4764,7 +4764,7 @@ dependencies = [
  "sled",
  "slog",
  "tempfile",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
 ]
 
@@ -4800,7 +4800,7 @@ dependencies = [
  "proptest",
  "serde",
  "test-strategy",
- "thiserror",
+ "thiserror 1.0.69",
  "uuid",
 ]
 
@@ -4934,7 +4934,7 @@ dependencies = [
  "secrecy",
  "sha3",
  "slog",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "zeroize",
 ]
@@ -4942,7 +4942,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=98247c27846133a80fdb8f730f0c57e72d766561#98247c27846133a80fdb8f730f0c57e72d766561"
+source = "git+https://github.com/oxidecomputer/opte?rev=b56afeeb14e0042cbd7bda85b166ed86ee17820e#b56afeeb14e0042cbd7bda85b166ed86ee17820e"
 dependencies = [
  "quote",
  "syn 2.0.87",
@@ -4955,7 +4955,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27964e4632377753acb0898ce6f28770d50cbca1339200ae63d700cff97b5c2b"
 dependencies = [
  "libc",
- "thiserror",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -5028,7 +5028,7 @@ source = "git+https://github.com/oxidecomputer/libefi-illumos?branch=master#54c3
 dependencies = [
  "libc",
  "libefi-sys",
- "thiserror",
+ "thiserror 1.0.69",
  "uuid",
 ]
 
@@ -5065,7 +5065,7 @@ dependencies = [
  "slog-term",
  "smf",
  "tabwriter",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-tungstenite 0.21.0",
  "toml 0.7.8",
@@ -5093,7 +5093,7 @@ source = "git+https://github.com/oxidecomputer/libipcc?rev=fdffa212373a8f92473ea
 dependencies = [
  "cfg-if",
  "libc",
- "thiserror",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -5129,7 +5129,7 @@ dependencies = [
  "rand",
  "rusty-doors",
  "socket2",
- "thiserror",
+ "thiserror 1.0.69",
  "tracing",
  "winnow 0.6.20",
 ]
@@ -5151,7 +5151,7 @@ dependencies = [
  "rand",
  "rusty-doors",
  "socket2",
- "thiserror",
+ "thiserror 1.0.69",
  "tracing",
  "winnow 0.6.20",
 ]
@@ -5163,7 +5163,7 @@ source = "git+https://github.com/oxidecomputer/libnvme?rev=dd5bb221d327a1bc92879
 dependencies = [
  "libnvme-sys",
  "nvme",
- "thiserror",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -5328,7 +5328,7 @@ dependencies = [
  "serde",
  "serde-hex",
  "sha2",
- "thiserror",
+ "thiserror 1.0.69",
  "x509-cert",
  "zerocopy 0.6.6",
 ]
@@ -5685,7 +5685,7 @@ dependencies = [
  "serde_urlencoded",
  "slog",
  "strum",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "uuid",
 ]
@@ -5791,7 +5791,7 @@ dependencies = [
  "slog-error-chain",
  "steno",
  "strum",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "uuid",
 ]
@@ -5870,7 +5870,7 @@ dependencies = [
  "subprocess",
  "swrite",
  "term",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "url",
  "usdt",
@@ -5949,7 +5949,7 @@ dependencies = [
  "sled-agent-client",
  "slog",
  "strum",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "typed-rng",
  "uuid",
@@ -5987,7 +5987,7 @@ dependencies = [
  "pq-sys",
  "slog",
  "slog-error-chain",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "uuid",
 ]
@@ -6089,7 +6089,7 @@ dependencies = [
  "static_assertions",
  "strum",
  "test-strategy",
- "thiserror",
+ "thiserror 1.0.69",
  "typed-rng",
  "uuid",
 ]
@@ -6127,7 +6127,7 @@ dependencies = [
  "slog",
  "swrite",
  "sync-ptr",
- "thiserror",
+ "thiserror 1.0.69",
  "typed-rng",
  "uuid",
 ]
@@ -6174,7 +6174,7 @@ dependencies = [
  "serde_json",
  "sled-hardware-types",
  "strum",
- "thiserror",
+ "thiserror 1.0.69",
  "uuid",
 ]
 
@@ -6271,6 +6271,7 @@ dependencies = [
  "gateway-client",
  "http",
  "humantime",
+ "illumos-utils",
  "internal-dns-types",
  "ipnetwork",
  "newtype-uuid",
@@ -6294,7 +6295,7 @@ dependencies = [
  "steno",
  "strum",
  "test-strategy",
- "thiserror",
+ "thiserror 1.0.69",
  "update-engine",
  "uuid",
 ]
@@ -6593,7 +6594,7 @@ dependencies = [
  "openssl",
  "openssl-sys",
  "rcgen",
- "thiserror",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -6629,7 +6630,7 @@ dependencies = [
  "slog-error-chain",
  "slog-term",
  "subprocess",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-postgres",
  "toml 0.8.19",
@@ -6671,7 +6672,7 @@ dependencies = [
  "slog-error-chain",
  "subprocess",
  "test-strategy",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-postgres",
  "toml 0.8.19",
@@ -6719,7 +6720,7 @@ dependencies = [
  "slog-error-chain",
  "strum",
  "test-strategy",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "toml 0.8.19",
  "uuid",
@@ -6738,7 +6739,7 @@ dependencies = [
  "serde",
  "sled-hardware-types",
  "slog",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "uuid",
 ]
@@ -6819,7 +6820,7 @@ dependencies = [
  "slog-error-chain",
  "sp-sim",
  "subprocess",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite 0.23.1",
@@ -6980,7 +6981,7 @@ dependencies = [
  "pq-sys",
  "pretty_assertions",
  "progenitor-client",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=6936f1a949d155da38d3148abd42caef337dea04)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739)",
  "qorb",
  "rand",
  "rcgen",
@@ -7011,7 +7012,7 @@ dependencies = [
  "subprocess",
  "tempfile",
  "term",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-postgres",
  "tokio-util",
@@ -7119,7 +7120,7 @@ dependencies = [
  "smf",
  "strum",
  "tar",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "toml 0.8.19",
  "walkdir",
@@ -7139,7 +7140,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_with",
- "thiserror",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -7245,7 +7246,7 @@ dependencies = [
  "oximeter-producer",
  "oxnet",
  "pretty_assertions",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=6936f1a949d155da38d3148abd42caef337dea04)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739)",
  "propolis-mock-server",
  "propolis_api_types",
  "rand",
@@ -7279,7 +7280,7 @@ dependencies = [
  "subprocess",
  "tar",
  "tempfile",
- "thiserror",
+ "thiserror 1.0.69",
  "tofino",
  "tokio",
  "tokio-stream",
@@ -7326,7 +7327,7 @@ dependencies = [
  "subprocess",
  "tar",
  "tempfile",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-postgres",
  "usdt",
@@ -7506,7 +7507,7 @@ dependencies = [
  "serde_json",
  "slog",
  "tar",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "toml 0.7.8",
  "topological-sort",
@@ -7644,7 +7645,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=98247c27846133a80fdb8f730f0c57e72d766561#98247c27846133a80fdb8f730f0c57e72d766561"
+source = "git+https://github.com/oxidecomputer/opte?rev=b56afeeb14e0042cbd7bda85b166ed86ee17820e#b56afeeb14e0042cbd7bda85b166ed86ee17820e"
 dependencies = [
  "bitflags 2.6.0",
  "cfg-if",
@@ -7663,7 +7664,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=98247c27846133a80fdb8f730f0c57e72d766561#98247c27846133a80fdb8f730f0c57e72d766561"
+source = "git+https://github.com/oxidecomputer/opte?rev=b56afeeb14e0042cbd7bda85b166ed86ee17820e#b56afeeb14e0042cbd7bda85b166ed86ee17820e"
 dependencies = [
  "illumos-sys-hdrs",
  "ingot",
@@ -7676,7 +7677,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=98247c27846133a80fdb8f730f0c57e72d766561#98247c27846133a80fdb8f730f0c57e72d766561"
+source = "git+https://github.com/oxidecomputer/opte?rev=b56afeeb14e0042cbd7bda85b166ed86ee17820e#b56afeeb14e0042cbd7bda85b166ed86ee17820e"
 dependencies = [
  "libc",
  "libnet 0.1.0 (git+https://github.com/oxidecomputer/netadm-sys)",
@@ -7684,7 +7685,7 @@ dependencies = [
  "oxide-vpc",
  "postcard",
  "serde",
- "thiserror",
+ "thiserror 2.0.3",
 ]
 
 [[package]]
@@ -7698,7 +7699,7 @@ dependencies = [
  "maplit",
  "oso-derive",
  "polar-core",
- "thiserror",
+ "thiserror 1.0.69",
  "tracing",
 ]
 
@@ -7736,7 +7737,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "uuid",
 ]
@@ -7744,7 +7745,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=98247c27846133a80fdb8f730f0c57e72d766561#98247c27846133a80fdb8f730f0c57e72d766561"
+source = "git+https://github.com/oxidecomputer/opte?rev=b56afeeb14e0042cbd7bda85b166ed86ee17820e#b56afeeb14e0042cbd7bda85b166ed86ee17820e"
 dependencies = [
  "cfg-if",
  "illumos-sys-hdrs",
@@ -7839,10 +7840,11 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-dtrace",
+ "slog-error-chain",
  "slog-term",
  "strum",
  "subprocess",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "toml 0.8.19",
  "uuid",
@@ -7905,7 +7907,7 @@ dependencies = [
  "strum",
  "tabled",
  "tempfile",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-util",
  "usdt",
@@ -7932,7 +7934,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-term",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "uuid",
 ]
@@ -7968,7 +7970,7 @@ dependencies = [
  "slog",
  "slog-dtrace",
  "slog-term",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "uuid",
 ]
@@ -8043,7 +8045,7 @@ dependencies = [
  "serde",
  "serde_json",
  "strum",
- "thiserror",
+ "thiserror 1.0.69",
  "trybuild",
  "uuid",
 ]
@@ -8396,7 +8398,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "879952a81a83930934cbf1786752d6dedc3b1f29e8f8fb2ad1d0a36f377cf442"
 dependencies = [
  "memchr",
- "thiserror",
+ "thiserror 1.0.69",
  "ucd-trie",
 ]
 
@@ -8932,7 +8934,7 @@ dependencies = [
  "serde",
  "serde_json",
  "syn 2.0.87",
- "thiserror",
+ "thiserror 1.0.69",
  "typify",
  "unicode-ident",
 ]
@@ -8958,7 +8960,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=6936f1a949d155da38d3148abd42caef337dea04#6936f1a949d155da38d3148abd42caef337dea04"
+source = "git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739#220a6f367c18f2452dbc4fa9086f3fe73b961739"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -8970,7 +8972,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-tungstenite 0.21.0",
  "uuid",
@@ -8991,7 +8993,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-tungstenite 0.21.0",
  "uuid",
@@ -9000,7 +9002,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=6936f1a949d155da38d3148abd42caef337dea04#6936f1a949d155da38d3148abd42caef337dea04"
+source = "git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739#220a6f367c18f2452dbc4fa9086f3fe73b961739"
 dependencies = [
  "anyhow",
  "atty",
@@ -9021,7 +9023,7 @@ dependencies = [
  "slog-bunyan",
  "slog-dtrace",
  "slog-term",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-tungstenite 0.21.0",
  "uuid",
@@ -9035,27 +9037,27 @@ dependencies = [
  "cpuid_profile_config",
  "serde",
  "serde_derive",
- "thiserror",
+ "thiserror 1.0.69",
  "toml 0.7.8",
 ]
 
 [[package]]
 name = "propolis_api_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=6936f1a949d155da38d3148abd42caef337dea04#6936f1a949d155da38d3148abd42caef337dea04"
+source = "git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739#220a6f367c18f2452dbc4fa9086f3fe73b961739"
 dependencies = [
  "crucible-client-types",
  "propolis_types",
  "schemars",
  "serde",
- "thiserror",
+ "thiserror 1.0.69",
  "uuid",
 ]
 
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=6936f1a949d155da38d3148abd42caef337dea04#6936f1a949d155da38d3148abd42caef337dea04"
+source = "git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739#220a6f367c18f2452dbc4fa9086f3fe73b961739"
 dependencies = [
  "schemars",
  "serde",
@@ -9114,7 +9116,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite 0.24.0",
@@ -9151,7 +9153,7 @@ dependencies = [
  "rustc-hash 2.0.0",
  "rustls 0.23.14",
  "socket2",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "tracing",
 ]
@@ -9168,7 +9170,7 @@ dependencies = [
  "rustc-hash 2.0.0",
  "rustls 0.23.14",
  "slab",
- "thiserror",
+ "thiserror 1.0.69",
  "tinyvec",
  "tracing",
 ]
@@ -9294,7 +9296,7 @@ dependencies = [
  "hyper",
  "omicron-workspace-hack",
  "proptest",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-util",
 ]
@@ -9422,7 +9424,7 @@ checksum = "ba009ff324d1fc1b900bd1fdb31564febe58a8ccc8a6fdbb93b543d33b13ca43"
 dependencies = [
  "getrandom",
  "libredox",
- "thiserror",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -9440,7 +9442,7 @@ dependencies = [
  "strip-ansi-escapes",
  "strum",
  "strum_macros 0.26.4",
- "thiserror",
+ "thiserror 1.0.69",
  "unicode-segmentation",
  "unicode-width 0.1.14",
 ]
@@ -9801,7 +9803,7 @@ dependencies = [
  "ssh-encoding",
  "ssh-key",
  "subtle",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
 ]
 
@@ -9859,7 +9861,7 @@ dependencies = [
  "spki",
  "ssh-encoding",
  "ssh-key",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
  "typenum",
@@ -9921,7 +9923,7 @@ checksum = "f1adc9dfed5cc999077978cc7163b9282c5751c8d39827c4ea8c8c220ca5a440"
 dependencies = [
  "serde",
  "tempfile",
- "thiserror",
+ "thiserror 1.0.69",
  "toml 0.8.19",
  "toolchain_find",
 ]
@@ -10145,7 +10147,7 @@ dependencies = [
  "quick-xml",
  "rand",
  "serde",
- "thiserror",
+ "thiserror 1.0.69",
  "url",
  "uuid",
 ]
@@ -10718,7 +10720,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=6936f1a949d155da38d3148abd42caef337dea04)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739)",
  "rcgen",
  "schemars",
  "serde",
@@ -10728,7 +10730,7 @@ dependencies = [
  "sled-hardware-types",
  "slog",
  "strum",
- "thiserror",
+ "thiserror 1.0.69",
  "toml 0.8.19",
  "uuid",
 ]
@@ -10758,7 +10760,7 @@ dependencies = [
  "sled-hardware-types",
  "slog",
  "slog-error-chain",
- "thiserror",
+ "thiserror 1.0.69",
  "tofino",
  "tokio",
  "uuid",
@@ -10802,7 +10804,7 @@ dependencies = [
  "serde_json",
  "sled-hardware",
  "slog",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "uuid",
 ]
@@ -10959,7 +10961,7 @@ version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a491bfc47dffa70a3c267bc379e9de9f4b0a7195e474a94498189b177f8d18c"
 dependencies = [
- "thiserror",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -11039,7 +11041,7 @@ dependencies = [
  "serde",
  "slog",
  "slog-dtrace",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "toml 0.8.19",
 ]
@@ -11091,7 +11093,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-term",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-rustls 0.26.0",
  "toml 0.8.19",
@@ -11210,7 +11212,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "uuid",
 ]
@@ -11622,7 +11624,16 @@ version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52"
 dependencies = [
- "thiserror-impl",
+ "thiserror-impl 1.0.69",
+]
+
+[[package]]
+name = "thiserror"
+version = "2.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c006c85c7651b3cf2ada4584faa36773bd07bac24acfb39f3c431b36d7e667aa"
+dependencies = [
+ "thiserror-impl 2.0.3",
 ]
 
 [[package]]
@@ -11630,6 +11641,17 @@ name = "thiserror-impl"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.87",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "2.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f077553d607adc1caf65430528a576c757a71ed73944b66ebb58ef2bbd243568"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -12151,7 +12173,7 @@ dependencies = [
  "lazy_static",
  "rand",
  "smallvec 1.13.2",
- "thiserror",
+ "thiserror 1.0.69",
  "tinyvec",
  "tracing",
  "url",
@@ -12266,7 +12288,7 @@ dependencies = [
  "log",
  "rand",
  "sha1",
- "thiserror",
+ "thiserror 1.0.69",
  "url",
  "utf-8",
 ]
@@ -12285,7 +12307,7 @@ dependencies = [
  "log",
  "rand",
  "sha1",
- "thiserror",
+ "thiserror 1.0.69",
  "utf-8",
 ]
 
@@ -12303,7 +12325,7 @@ dependencies = [
  "log",
  "rand",
  "sha1",
- "thiserror",
+ "thiserror 1.0.69",
  "utf-8",
 ]
 
@@ -12368,7 +12390,7 @@ dependencies = [
  "serde",
  "serde_json",
  "syn 2.0.87",
- "thiserror",
+ "thiserror 1.0.69",
  "unicode-ident",
 ]
 
@@ -12534,7 +12556,7 @@ dependencies = [
  "rand",
  "sha2",
  "slog",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-util",
  "tough",
@@ -12637,7 +12659,7 @@ dependencies = [
  "serde",
  "serde_json",
  "syn 2.0.87",
- "thiserror",
+ "thiserror 1.0.69",
  "thread-id",
  "version_check",
 ]
@@ -13023,7 +13045,7 @@ dependencies = [
  "sha2",
  "sled-hardware-types",
  "slog",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "toml 0.8.19",
  "update-engine",
@@ -13113,7 +13135,7 @@ dependencies = [
  "slog-dtrace",
  "subprocess",
  "tar",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -13717,7 +13739,7 @@ dependencies = [
  "flate2",
  "indexmap 2.6.0",
  "memchr",
- "thiserror",
+ "thiserror 1.0.69",
  "zopfli",
 ]
 
@@ -13728,7 +13750,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3596bbc963cd9dbaa69b02e349af4d061c56c41d211ba64150a2cedb2f722707"
 dependencies = [
  "itertools 0.10.5",
- "thiserror",
+ "thiserror 1.0.69",
  "zone_cfg_derive 0.1.2",
 ]
 
@@ -13739,7 +13761,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a62a428a79ea2224ce8ab05d6d8a21bdd7b4b68a8dbc1230511677a56e72ef22"
 dependencies = [
  "itertools 0.10.5",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "zone_cfg_derive 0.3.0",
 ]

@@ -65,11 +65,18 @@ pub enum Error {
 
     #[error("Error running standalone")]
     Standalone(#[from] anyhow::Error),
+
+    #[error("No registered producer with id '{id}'")]
+    NoSuchProducer { id: Uuid },
 }
 
 impl From<Error> for HttpError {
     fn from(e: Error) -> Self {
-        HttpError::for_internal_error(e.to_string())
+        if let Error::NoSuchProducer { .. } = e {
+            HttpError::for_not_found(None, e.to_string())
+        } else {
+            HttpError::for_internal_error(e.to_string())
+        }
     }
 }
 

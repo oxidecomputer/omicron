@@ -5545,6 +5545,33 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn timeseries_query(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<params::ProjectSelector>,
+        body: TypedBody<params::TimeseriesQuery>,
+    ) -> Result<HttpResponseOk<views::OxqlQueryResult>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let project_selector = query_params.into_inner();
+            let query = body.into_inner().query;
+            let project_lookup =
+                nexus.project_lookup(&opctx, project_selector)?;
+            nexus
+                .timeseries_query_project(&opctx, &project_lookup, &query)
+                .await
+                .map(|tables| HttpResponseOk(views::OxqlQueryResult { tables }))
+                .map_err(HttpError::from)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     // Updates
 
     async fn system_update_put_repository(
