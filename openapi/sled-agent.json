@@ -4004,16 +4004,10 @@
           "src_propolis_addr": {
             "description": "The address of the Propolis server that will serve as the migration source.",
             "type": "string"
-          },
-          "src_propolis_id": {
-            "description": "The Propolis ID of the migration source.",
-            "type": "string",
-            "format": "uuid"
           }
         },
         "required": [
-          "src_propolis_addr",
-          "src_propolis_id"
+          "src_propolis_addr"
         ]
       },
       "InstanceProperties": {

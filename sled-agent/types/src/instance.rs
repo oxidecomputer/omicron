@@ -184,10 +184,6 @@ pub struct VmmUnregisterResponse {
 /// migration.
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceMigrationTargetParams {
-    /// The Propolis ID of the migration source.
-    // TODO(gjc) try to get rid of this, migration targets don't use it anymore
-    pub src_propolis_id: Uuid,
-
     /// The address of the Propolis server that will serve as the migration
     /// source.
     pub src_propolis_addr: SocketAddr,
