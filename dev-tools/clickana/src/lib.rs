@@ -75,9 +75,16 @@ impl Unit {
         Ok(upper_bound_value)
     }
 
+    // TODO: Needs better naming too
     fn upper_label_value(&self, max_value_bytes: &f64) -> Result<u64> {
-        let max_value = max_value_bytes.ceil() as u64 / self.in_bytes_u64()?;
-        Ok(max_value + 1)
+        let ceil_value = max_value_bytes.ceil() as u64;
+        let label_value = match self {
+            Unit::Count => ceil_value + 1,
+            Unit::Gibibyte | Unit::Mebibyte => {
+                (ceil_value / self.in_bytes_u64()?) + 1
+            }
+        };
+        Ok(label_value)
     }
 }
 
@@ -204,7 +211,8 @@ impl ChartData {
         // straight lines too close to the upper bounds.
         let upper_bound_value =
             metadata.unit.upper_bound_value(max_value_bytes)?;
-        let upper_label_value =  metadata.unit.upper_label_value(max_value_bytes)?;
+        let upper_label_value =
+            metadata.unit.upper_label_value(max_value_bytes)?;
         let lower_bound_value = if min_value_bytes < &GIBIBYTE_F64 {
             0.0
         } else {
