@@ -269,7 +269,6 @@ impl DatasetsEditor {
         self.counts
     }
 
-    #[allow(dead_code)] // currently only used by tests; this will change soon
     pub fn datasets(
         &self,
         filter: BlueprintDatasetFilter,

@@ -831,8 +831,9 @@ impl<'a> BlueprintBuilder<'a> {
                 "tried to set sled state for unknown sled {sled_id}"
             ))
         })?;
-        editor.decommission();
-        Ok(())
+        editor
+            .decommission()
+            .map_err(|err| Error::SledEditError { sled_id, err })
     }
 
     /// Within tests, set an RNG for deterministic results.
