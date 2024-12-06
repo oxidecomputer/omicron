@@ -872,6 +872,7 @@ pub struct ExternalIpGatewayMap {
 
 /// Describes the purpose of the dataset.
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, EnumCount)]
+#[cfg_attr(feature = "testing", derive(test_strategy::Arbitrary))]
 pub enum DatasetKind {
     // Durable datasets for zones
     Cockroach,
