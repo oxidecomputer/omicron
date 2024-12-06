@@ -60,7 +60,7 @@ bind_address = "127.0.0.1:12222"
 #
 # This should be brought back down to a more reasonable value once per-endpoint
 # request body limits are implemented.
-request_body_max_bytes = 3221225472
+default_request_body_max_bytes = 3221225472
 # To have Nexus's external HTTP endpoint use TLS, uncomment the line below.  You
 # will also need to provide an initial TLS certificate during rack
 # initialization.  If you're using this config file, you're probably running a
@@ -73,7 +73,7 @@ request_body_max_bytes = 3221225472
 # This config file uses 12223 to avoid colliding with the usual 12221 that's
 # used by `omicron-dev run-all`
 bind_address = "[::1]:12223"
-request_body_max_bytes = 1048576
+default_request_body_max_bytes = 1048576
 
 #[deployment.internal_dns]
 ## These values are overridden at the bottom of this file.

@@ -91,7 +91,7 @@ fn start_dropshot_server(
         Entry::Vacant(slot) => {
             let dropshot = ConfigDropshot {
                 bind_address: SocketAddr::V6(addr),
-                request_body_max_bytes,
+                default_request_body_max_bytes: request_body_max_bytes,
                 default_handler_task_mode: HandlerTaskMode::Detached,
                 log_headers: vec![],
             };
