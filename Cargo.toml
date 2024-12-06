@@ -346,10 +346,10 @@ cookie = "0.18"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crossterm = { version = "0.28.1", features = ["event-stream"] }
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2cfc7e0c8572b3bfafbfc838c4e6d658f442d239" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2cfc7e0c8572b3bfafbfc838c4e6d658f442d239" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "2cfc7e0c8572b3bfafbfc838c4e6d658f442d239" }
-crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "2cfc7e0c8572b3bfafbfc838c4e6d658f442d239" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "5a41b826171c7d2a8412fa833377ab1df25ee8ec" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "5a41b826171c7d2a8412fa833377ab1df25ee8ec" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "5a41b826171c7d2a8412fa833377ab1df25ee8ec" }
+crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "5a41b826171c7d2a8412fa833377ab1df25ee8ec" }
 csv = "1.3.0"
 curve25519-dalek = "4"
 datatest-stable = "0.2.9"
@@ -492,7 +492,7 @@ omicron-test-utils = { path = "test-utils" }
 omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.11.1"
 oxide-client = { path = "clients/oxide-client" }
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "98247c27846133a80fdb8f730f0c57e72d766561", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "b56afeeb14e0042cbd7bda85b166ed86ee17820e", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = { git = "https://github.com/oxidecomputer/oxnet" }
 once_cell = "1.20.2"
@@ -502,7 +502,7 @@ openapiv3 = "2.0.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "98247c27846133a80fdb8f730f0c57e72d766561" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "b56afeeb14e0042cbd7bda85b166ed86ee17820e" }
 oso = "0.27"
 owo-colors = "4.1.0"
 oximeter = { path = "oximeter/oximeter" }
@@ -539,10 +539,10 @@ prettyplease = { version = "0.2.25", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = "0.8.0"
 progenitor-client = "0.8.0"
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "6936f1a949d155da38d3148abd42caef337dea04" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "6936f1a949d155da38d3148abd42caef337dea04" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "6936f1a949d155da38d3148abd42caef337dea04" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "6936f1a949d155da38d3148abd42caef337dea04" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "220a6f367c18f2452dbc4fa9086f3fe73b961739" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "220a6f367c18f2452dbc4fa9086f3fe73b961739" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "220a6f367c18f2452dbc4fa9086f3fe73b961739" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "220a6f367c18f2452dbc4fa9086f3fe73b961739" }
 proptest = "1.5.0"
 qorb = "0.2.1"
 quote = "1.0"
