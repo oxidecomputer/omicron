@@ -6,6 +6,7 @@
 //!
 //! See crate-level documentation for details.
 
+mod allocators;
 mod sled_editor;
 
 pub(crate) use sled_editor::EditedSled;
