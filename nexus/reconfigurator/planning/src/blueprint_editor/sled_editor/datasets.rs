@@ -304,7 +304,7 @@ impl DatasetsEditor {
     ///
     /// TODO-cleanup This is a little fishy and should be replaced with
     /// an expunge-by-ID method instead, but that requires some rework
-    /// (https://github.com/oxidecomputer/omicron/issues/7214).
+    /// (<https://github.com/oxidecomputer/omicron/issues/7214>).
     pub fn expunge(
         &mut self,
         zpool: &ZpoolUuid,
