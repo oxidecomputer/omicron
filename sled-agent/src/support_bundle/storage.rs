@@ -4,6 +4,7 @@
 
 //! Management of and access to Support Bundles
 
+use async_trait::async_trait;
 use bytes::Bytes;
 use camino::Utf8Path;
 use dropshot::Body;
@@ -13,6 +14,7 @@ use futures::StreamExt;
 use omicron_common::api::external::Error as ExternalError;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
+use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::DatasetUuid;
@@ -30,12 +32,23 @@ use sled_storage::manager::NestedDatasetLocation;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
+use std::borrow::Cow;
 use std::io::Write;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 use zip::result::ZipError;
+
+// The final name of the bundle, as it is stored within the dedicated
+// datasets.
+//
+// The full path is of the form:
+//
+// /pool/ext/$(POOL_UUID)/crypt/$(DATASET_TYPE)/$(BUNDLE_UUID)/bundle.zip
+//                              |               | This is a per-bundle nested dataset
+//                              | This is a Debug dataset
+const BUNDLE_FILE_NAME: &str = "bundle.zip";
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -97,6 +110,116 @@ impl From<Error> for HttpError {
             },
             err => HttpError::for_internal_error(err_str(&err)),
         }
+    }
+}
+
+/// Abstracts the storage APIs for accessing datasets.
+///
+/// Allows support bundle storage to work on both simulated and non-simulated
+/// sled agents.
+#[async_trait]
+pub trait LocalStorage: Sync {
+    // These methods are all prefixed as "dyn_" to avoid duplicating the name
+    // with the real implementations.
+    //
+    // Dispatch is a little silly; if I use the same name as the real
+    // implementation, then a "missing function" dispatches to the trait instead
+    // and results in infinite recursion.
+
+    /// Returns all configured datasets
+    async fn dyn_datasets_config_list(&self) -> Result<DatasetsConfig, Error>;
+
+    /// Returns all nested datasets within an existing dataset
+    async fn dyn_nested_dataset_list(
+        &self,
+        name: NestedDatasetLocation,
+        options: NestedDatasetListOptions,
+    ) -> Result<Vec<NestedDatasetConfig>, Error>;
+
+    /// Ensures a nested dataset exists
+    async fn dyn_nested_dataset_ensure(
+        &self,
+        config: NestedDatasetConfig,
+    ) -> Result<(), Error>;
+
+    /// Destroys a nested dataset
+    async fn dyn_nested_dataset_destroy(
+        &self,
+        name: NestedDatasetLocation,
+    ) -> Result<(), Error>;
+
+    /// Returns the root filesystem path where datasets are mounted.
+    ///
+    /// This is typically "/" in prod, but can be a temporary directory
+    /// for tests to isolate storage that typically appears globally.
+    fn zpool_mountpoint_root(&self) -> Cow<Utf8Path>;
+}
+
+/// This implementation is effectively a pass-through to the real methods
+#[async_trait]
+impl LocalStorage for StorageHandle {
+    async fn dyn_datasets_config_list(&self) -> Result<DatasetsConfig, Error> {
+        self.datasets_config_list().await.map_err(|err| err.into())
+    }
+
+    async fn dyn_nested_dataset_list(
+        &self,
+        name: NestedDatasetLocation,
+        options: NestedDatasetListOptions,
+    ) -> Result<Vec<NestedDatasetConfig>, Error> {
+        self.nested_dataset_list(name, options).await.map_err(|err| err.into())
+    }
+
+    async fn dyn_nested_dataset_ensure(
+        &self,
+        config: NestedDatasetConfig,
+    ) -> Result<(), Error> {
+        self.nested_dataset_ensure(config).await.map_err(|err| err.into())
+    }
+
+    async fn dyn_nested_dataset_destroy(
+        &self,
+        name: NestedDatasetLocation,
+    ) -> Result<(), Error> {
+        self.nested_dataset_destroy(name).await.map_err(|err| err.into())
+    }
+
+    fn zpool_mountpoint_root(&self) -> Cow<Utf8Path> {
+        Cow::Borrowed(illumos_utils::zpool::ZPOOL_MOUNTPOINT_ROOT.into())
+    }
+}
+
+/// This implementation allows storage bundles to be stored on simulated storage
+#[async_trait]
+impl LocalStorage for crate::sim::Storage {
+    async fn dyn_datasets_config_list(&self) -> Result<DatasetsConfig, Error> {
+        self.lock().datasets_config_list().map_err(|err| err.into())
+    }
+
+    async fn dyn_nested_dataset_list(
+        &self,
+        name: NestedDatasetLocation,
+        options: NestedDatasetListOptions,
+    ) -> Result<Vec<NestedDatasetConfig>, Error> {
+        self.lock().nested_dataset_list(name, options).map_err(|err| err.into())
+    }
+
+    async fn dyn_nested_dataset_ensure(
+        &self,
+        config: NestedDatasetConfig,
+    ) -> Result<(), Error> {
+        self.lock().nested_dataset_ensure(config).map_err(|err| err.into())
+    }
+
+    async fn dyn_nested_dataset_destroy(
+        &self,
+        name: NestedDatasetLocation,
+    ) -> Result<(), Error> {
+        self.lock().nested_dataset_destroy(name).map_err(|err| err.into())
+    }
+
+    fn zpool_mountpoint_root(&self) -> Cow<Utf8Path> {
+        Cow::Owned(self.lock().root().to_path_buf())
     }
 }
 
@@ -226,7 +349,7 @@ fn stream_zip_entry(
 /// APIs to manage support bundle storage.
 pub struct SupportBundleManager<'a> {
     log: &'a Logger,
-    storage: &'a StorageHandle,
+    storage: &'a dyn LocalStorage,
 }
 
 impl<'a> SupportBundleManager<'a> {
@@ -234,7 +357,7 @@ impl<'a> SupportBundleManager<'a> {
     /// to support bundle CRUD APIs.
     pub fn new(
         log: &'a Logger,
-        storage: &'a StorageHandle,
+        storage: &'a dyn LocalStorage,
     ) -> SupportBundleManager<'a> {
         Self { log, storage }
     }
@@ -245,7 +368,7 @@ impl<'a> SupportBundleManager<'a> {
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
     ) -> Result<DatasetConfig, Error> {
-        let datasets_config = self.storage.datasets_config_list().await?;
+        let datasets_config = self.storage.dyn_datasets_config_list().await?;
         let dataset = datasets_config
             .datasets
             .get(&dataset_id)
@@ -279,7 +402,7 @@ impl<'a> SupportBundleManager<'a> {
             NestedDatasetLocation { path: String::from(""), root };
         let datasets = self
             .storage
-            .nested_dataset_list(
+            .dyn_nested_dataset_list(
                 dataset_location,
                 NestedDatasetListOptions::ChildrenOnly,
             )
@@ -298,8 +421,8 @@ impl<'a> SupportBundleManager<'a> {
             // The dataset for a support bundle exists.
             let support_bundle_path = dataset
                 .name
-                .mountpoint(illumos_utils::zpool::ZPOOL_MOUNTPOINT_ROOT.into())
-                .join("bundle");
+                .mountpoint(&self.storage.zpool_mountpoint_root())
+                .join(BUNDLE_FILE_NAME);
 
             // Identify whether or not the final "bundle" file exists.
             //
@@ -388,9 +511,9 @@ impl<'a> SupportBundleManager<'a> {
         let dataset =
             NestedDatasetLocation { path: support_bundle_id.to_string(), root };
         // The mounted root of the support bundle dataset
-        let support_bundle_dir = dataset
-            .mountpoint(illumos_utils::zpool::ZPOOL_MOUNTPOINT_ROOT.into());
-        let support_bundle_path = support_bundle_dir.join("bundle");
+        let support_bundle_dir =
+            dataset.mountpoint(&self.storage.zpool_mountpoint_root());
+        let support_bundle_path = support_bundle_dir.join(BUNDLE_FILE_NAME);
         let support_bundle_path_tmp = support_bundle_dir.join(format!(
             "bundle-{}.tmp",
             thread_rng()
@@ -403,7 +526,7 @@ impl<'a> SupportBundleManager<'a> {
         // Ensure that the dataset exists.
         info!(log, "Ensuring dataset exists for bundle");
         self.storage
-            .nested_dataset_ensure(NestedDatasetConfig {
+            .dyn_nested_dataset_ensure(NestedDatasetConfig {
                 name: dataset,
                 inner: SharedDatasetConfig {
                     compression: CompressionAlgorithm::On,
@@ -412,6 +535,7 @@ impl<'a> SupportBundleManager<'a> {
                 },
             })
             .await?;
+        info!(log, "Dataset does exist for bundle");
 
         // Exit early if the support bundle already exists
         if tokio::fs::try_exists(&support_bundle_path).await? {
@@ -435,9 +559,14 @@ impl<'a> SupportBundleManager<'a> {
 
         // Stream the file into the dataset, first as a temporary file,
         // and then renaming to the final location.
-        info!(log, "Streaming bundle to storage");
+        info!(
+            log,
+            "Streaming bundle to storage";
+            "path" => ?support_bundle_path_tmp,
+        );
         let tmp_file =
             tokio::fs::File::create(&support_bundle_path_tmp).await?;
+
         if let Err(err) = Self::write_and_finalize_bundle(
             tmp_file,
             &support_bundle_path_tmp,
@@ -481,7 +610,7 @@ impl<'a> SupportBundleManager<'a> {
         let root =
             self.get_configured_dataset(zpool_id, dataset_id).await?.name;
         self.storage
-            .nested_dataset_destroy(NestedDatasetLocation {
+            .dyn_nested_dataset_destroy(NestedDatasetLocation {
                 path: support_bundle_id.to_string(),
                 root,
             })
@@ -501,9 +630,9 @@ impl<'a> SupportBundleManager<'a> {
         let dataset =
             NestedDatasetLocation { path: support_bundle_id.to_string(), root };
         // The mounted root of the support bundle dataset
-        let support_bundle_dir = dataset
-            .mountpoint(illumos_utils::zpool::ZPOOL_MOUNTPOINT_ROOT.into());
-        let path = support_bundle_dir.join("bundle");
+        let support_bundle_dir =
+            dataset.mountpoint(&self.storage.zpool_mountpoint_root());
+        let path = support_bundle_dir.join(BUNDLE_FILE_NAME);
 
         let f = tokio::fs::File::open(&path).await?;
         Ok(f)

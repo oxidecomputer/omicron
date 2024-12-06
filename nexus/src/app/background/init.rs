@@ -535,8 +535,7 @@ impl BackgroundTasksInitializer {
         // collection.
         driver.register(TaskDefinition {
             name: "support_bundle_collector",
-            description:
-                "ensure new support bundles are automatically marked in-service",
+            description: "Manage support bundle collection and cleanup",
             period: config.support_bundle_collector.period_secs,
             task_impl: Box::new(
                 support_bundle_collector::SupportBundleCollector::new(
