@@ -911,6 +911,8 @@ impl InstanceRunner {
                     id: disk.disk_id,
                     device: NvmeDisk {
                         backend_id: SpecKey::Uuid(disk.disk_id),
+                        // Add 16 to the disk slot number to match Propolis's
+                        // previous interpretation of disk slot parameters.
                         pci_path: PciPath::new(0, disk.slot + 0x10, 0)?,
                         serial_number,
                     },
@@ -944,6 +946,8 @@ impl InstanceRunner {
                     device: VirtioNic {
                         backend_id: SpecKey::Uuid(nic.id),
                         interface_id: nic.id,
+                        // Add 8 to the NIC slot number to match Propolis's
+                        // previous interpretation of NIC slot parameters.
                         pci_path: PciPath::new(0, nic.slot + 8, 0)?,
                     },
                     backend: VirtioNetworkBackend {
