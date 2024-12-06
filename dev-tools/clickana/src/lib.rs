@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use clickhouse_admin_server_client::types::{
     SystemTable, SystemTimeSeries, TimestampFormat,
 };
-use clickhouse_admin_server_client::{types, Client as ClickhouseServerClient};
+use clickhouse_admin_server_client::Client as ClickhouseServerClient;
 use omicron_common::FileKv;
 use ratatui::{
     crossterm::event::{self, Event, KeyCode},
@@ -29,6 +29,8 @@ use tokio::runtime::Runtime;
 
 const GIBIBYTE_F64: f64 = 1073741824.0;
 const GIBIBYTE_U64: u64 = 1073741824;
+const MEBIBYTE_F64: f64 = 1048576.0;
+const MEBIBYTE_U64: u64 = 1048576;
 
 #[derive(Debug)]
 enum Unit {
@@ -45,6 +47,37 @@ impl Display for Unit {
             &Unit::Mebibyte => "MiB",
         };
         write!(f, "{s}")
+    }
+}
+
+impl Unit {
+    fn in_bytes_f64(&self) -> Result<f64> {
+        let bytes = match self {
+            Unit::Gibibyte => GIBIBYTE_F64,
+            Unit::Mebibyte => MEBIBYTE_F64,
+            Unit::Count => bail!("Count cannot be converted into bytes"),
+        };
+        Ok(bytes)
+    }
+
+    fn in_bytes_u64(&self) -> Result<u64> {
+        let bytes = match self {
+            Unit::Gibibyte => GIBIBYTE_U64,
+            Unit::Mebibyte => MEBIBYTE_U64,
+            Unit::Count => bail!("Count cannot be converted into bytes"),
+        };
+        Ok(bytes)
+    }
+
+    // TODO: Probably needs a better name
+    fn upper_bound_value(&self, max_value_bytes: &f64) -> Result<f64> {
+        let upper_bound_value = max_value_bytes + self.in_bytes_f64()?;
+        Ok(upper_bound_value)
+    }
+
+    fn upper_label_value(&self, max_value_bytes: &f64) -> Result<u64> {
+        let max_value = max_value_bytes.ceil() as u64 / self.in_bytes_u64()?;
+        Ok(max_value + 1)
     }
 }
 
@@ -157,12 +190,11 @@ impl ChartData {
         };
 
         // TODO: Based on the unit calculate the labels
-        // Extract into another function
+        // Extract into other functions
 
         // The result of these calculations will not be precise, but it doesn't matter
         // since we just want an estimate for the labels
         let min_value_gib = min_value_bytes.floor() as u64 / GIBIBYTE_U64;
-        let max_value_gib = max_value_bytes.ceil() as u64 / GIBIBYTE_U64;
         let avg_value_gib = (((min_value_bytes + max_value_bytes) / 2.0).round()
             as u64)
             / GIBIBYTE_U64;
@@ -170,8 +202,9 @@ impl ChartData {
         // In case there is very little variance in the y axis, we will be adding some
         // buffer to the bounds and labels so we don't end up with repeated labels or
         // straight lines too close to the upper bounds.
-        let upper_bound_value = max_value_bytes + GIBIBYTE_F64;
-        let upper_label_value = max_value_gib + 1;
+        let upper_bound_value =
+            metadata.unit.upper_bound_value(max_value_bytes)?;
+        let upper_label_value =  metadata.unit.upper_label_value(max_value_bytes)?;
         let lower_bound_value = if min_value_bytes < &GIBIBYTE_F64 {
             0.0
         } else {
