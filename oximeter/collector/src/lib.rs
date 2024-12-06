@@ -4,9 +4,9 @@
 
 //! Implementation of the `oximeter` metric collection server.
 
-// Copyright 2023 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
-pub use agent::ForcedCollectionError;
+pub use collection_task::ForcedCollectionError;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::HttpError;
@@ -42,7 +42,9 @@ use thiserror::Error;
 use uuid::Uuid;
 
 mod agent;
+mod collection_task;
 mod http_entrypoints;
+mod results_sink;
 mod self_stats;
 mod standalone;
 

@@ -4,8 +4,12 @@
 
 //! The oximeter agent handles collection tasks for each producer.
 
-// Copyright 2023 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
+use crate::collection_task::CollectionTaskHandle;
+use crate::collection_task::CollectionTaskOutput;
+use crate::collection_task::ForcedCollectionError;
+use crate::results_sink;
 use crate::self_stats;
 use crate::DbConfig;
 use crate::Error;
@@ -18,11 +22,7 @@ use nexus_client::types::IdSortMode;
 use nexus_client::Client as NexusClient;
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
-use oximeter::types::ProducerResults;
-use oximeter::types::ProducerResultsItem;
-use oximeter_api::FailedCollection;
 use oximeter_api::ProducerDetails;
-use oximeter_api::SuccessfulCollection;
 use oximeter_db::Client;
 use oximeter_db::DbWrite;
 use qorb::claim::Handle;
@@ -43,741 +43,10 @@ use std::ops::Bound;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
-use std::time::Instant;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::error::TrySendError;
-use tokio::sync::oneshot;
-use tokio::sync::watch;
 use tokio::sync::Mutex;
 use tokio::sync::MutexGuard;
-use tokio::task::JoinHandle;
-use tokio::time::interval;
 use uuid::Uuid;
-
-/// A token used to force a collection.
-///
-/// If the collection is successfully completed, `Ok(())` will be sent back on the
-/// contained oneshot channel. Note that that "successful" means the actual
-/// request completed, _not_ that results were successfully collected. I.e., it
-/// means "this attempt is done".
-///
-/// If the collection could not be queued because there are too many outstanding
-/// force collection attempts, an `Err(ForcedCollectionQueueFull)` is returned.
-type CollectionToken = oneshot::Sender<Result<(), ForcedCollectionError>>;
-
-/// Error returned when a forced collection fails.
-#[derive(Clone, Copy, Debug)]
-pub enum ForcedCollectionError {
-    /// The internal queue of requests is full.
-    QueueFull,
-    /// We failed to send the request because the channel was closed.
-    Closed,
-}
-
-/// Timeout on any single collection from a producer.
-const COLLECTION_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// The number of forced collections queued before we start to deny them.
-const N_QUEUED_FORCED_COLLECTIONS: usize = 1;
-
-/// The number of timer-based collections queued before we start to deny them.
-const N_QUEUED_TIMER_COLLECTIONS: usize = 1;
-
-// Messages for controlling a collection task
-#[derive(Debug)]
-enum CollectionMessage {
-    // Explicit request that the task collect data from its producer
-    //
-    // Also sends a oneshot that is signalled once the task scrapes
-    // data from the Producer, and places it in the Clickhouse server.
-    Collect(CollectionToken),
-    // Request that the task update its interval and the socket address on which it collects data
-    // from its producer.
-    Update(ProducerEndpoint),
-    // Request that the task exit
-    Shutdown,
-    // Return the current statistics from a single task.
-    #[cfg(test)]
-    Statistics {
-        reply_tx: oneshot::Sender<self_stats::CollectionTaskStats>,
-    },
-    // Request details from the collection task about its producer.
-    Details {
-        reply_tx: oneshot::Sender<ProducerDetails>,
-    },
-}
-
-/// Return type for `perform_collection`.
-struct SingleCollectionResult {
-    /// The result of the collection.
-    result: Result<ProducerResults, self_stats::FailureReason>,
-    /// The duration the collection took.
-    duration: Duration,
-}
-
-/// Run a single collection from the producer.
-async fn perform_collection(
-    log: Logger,
-    client: reqwest::Client,
-    producer: ProducerEndpoint,
-) -> SingleCollectionResult {
-    let start = Instant::now();
-    debug!(log, "collecting from producer");
-    let res = client
-        .get(format!("http://{}/{}", producer.address, producer.id))
-        .send()
-        .await;
-    trace!(log, "sent collection request to producer");
-    let result = match res {
-        Ok(res) => {
-            if res.status().is_success() {
-                match res.json::<ProducerResults>().await {
-                    Ok(results) => {
-                        debug!(
-                            log,
-                            "collected results from producer";
-                            "n_results" => results.len()
-                        );
-                        Ok(results)
-                    }
-                    Err(e) => {
-                        warn!(
-                            log,
-                            "failed to collect results from producer";
-                            InlineErrorChain::new(&e),
-                        );
-                        Err(self_stats::FailureReason::Deserialization)
-                    }
-                }
-            } else {
-                warn!(
-                    log,
-                    "failed to receive metric results from producer";
-                    "status_code" => res.status().as_u16(),
-                );
-                Err(self_stats::FailureReason::Other(res.status()))
-            }
-        }
-        Err(e) => {
-            error!(
-                log,
-                "failed to send collection request to producer";
-                InlineErrorChain::new(&e),
-            );
-            Err(self_stats::FailureReason::Unreachable)
-        }
-    };
-    SingleCollectionResult { result, duration: start.elapsed() }
-}
-
-// The type of one collection task run to completion.
-//
-// An `Err(_)` means we failed to collect, and contains the reason so that we
-// can bump the self-stat counter accordingly.
-type CollectionResult = Result<ProducerResults, self_stats::FailureReason>;
-
-/// Information about when we start a collection.
-struct CollectionStartTimes {
-    /// UTC timestamp at which the request was started.
-    started_at: DateTime<Utc>,
-    /// Instant right before we queued the response for processing.
-    queued_at: Instant,
-}
-
-impl CollectionStartTimes {
-    fn new() -> Self {
-        Self { started_at: Utc::now(), queued_at: Instant::now() }
-    }
-}
-
-/// Details about a forced collection.
-struct ForcedCollectionRequest {
-    /// The collection token we signal when the collection is completed.
-    token: CollectionToken,
-    /// Start time for this collection.
-    start: CollectionStartTimes,
-}
-
-impl ForcedCollectionRequest {
-    fn new(token: CollectionToken) -> Self {
-        Self { token, start: CollectionStartTimes::new() }
-    }
-}
-
-/// Details about a completed collection.
-struct CollectionResponse {
-    /// Token for a forced collection request.
-    token: Option<CollectionToken>,
-    /// The actual result of the collection.
-    result: CollectionResult,
-    /// Time when the collection started.
-    started_at: DateTime<Utc>,
-    /// Time the request spent queued.
-    time_queued: Duration,
-    /// Time we spent processing the request.
-    time_collecting: Duration,
-}
-
-/// Task that actually performs collections from the producer.
-async fn inner_collection_loop(
-    log: Logger,
-    mut producer_info_rx: watch::Receiver<ProducerEndpoint>,
-    mut forced_collection_rx: mpsc::Receiver<ForcedCollectionRequest>,
-    mut timer_collection_rx: mpsc::Receiver<CollectionStartTimes>,
-    result_tx: mpsc::Sender<CollectionResponse>,
-) {
-    let client = reqwest::Client::builder()
-        .timeout(COLLECTION_TIMEOUT)
-        .build()
-        // Safety: `build()` only fails if TLS couldn't be initialized or the
-        // system DNS configuration could not be loaded.
-        .unwrap();
-    loop {
-        // Wait for notification that we have a collection to perform, from
-        // either the forced- or timer-collection queue.
-        trace!(log, "top of inner collection loop, waiting for next request");
-        let (maybe_token, start_time) = tokio::select! {
-            maybe_request = forced_collection_rx.recv() => {
-                let Some(ForcedCollectionRequest { token, start }) = maybe_request else {
-                    debug!(
-                        log,
-                        "forced collection request queue closed, exiting"
-                    );
-                    return;
-                };
-                (Some(token), start)
-            }
-            maybe_request = timer_collection_rx.recv() => {
-                let Some(start) = maybe_request else {
-                    debug!(
-                        log,
-                        "timer collection request queue closed, exiting"
-                    );
-                    return;
-                };
-                (None, start)
-            }
-        };
-        let time_queued = start_time.queued_at.elapsed();
-
-        // Make a future to represent the actual collection.
-        let mut collection_fut = Box::pin(perform_collection(
-            log.clone(),
-            client.clone(),
-            *producer_info_rx.borrow_and_update(),
-        ));
-
-        // Wait for that collection to complete or fail, or for an update to the
-        // producer's information. In the latter case, recreate the future for
-        // the collection itself with the new producer information.
-        let SingleCollectionResult { result, duration } = 'collection: loop {
-            tokio::select! {
-                biased;
-
-                maybe_update = producer_info_rx.changed() => {
-                    match maybe_update {
-                        Ok(_) => {
-                            let update = *producer_info_rx.borrow_and_update();
-                            debug!(
-                                log,
-                                "received producer info update with an outstanding \
-                                collection running, cancelling it and recreating \
-                                with the new info";
-                                "new_info" => ?&update,
-                            );
-                            collection_fut = Box::pin(perform_collection(
-                                log.new(o!("address" => update.address)),
-                                client.clone(),
-                                update,
-                            ));
-                            continue 'collection;
-                        }
-                        Err(e) => {
-                            error!(
-                                log,
-                                "failed to receive on producer update \
-                                watch channel, exiting";
-                                InlineErrorChain::new(&e),
-                            );
-                            return;
-                        }
-                    }
-                }
-
-                collection_result = &mut collection_fut => {
-                    // NOTE: This break here is intentional. We cannot just call
-                    // `result_tx.send()` in this loop, because that moves out
-                    // of `maybe_token`, which isn't Copy. Break the loop, and
-                    // then send it after we know we've completed the
-                    // collection.
-                    break 'collection collection_result;
-                }
-            }
-        };
-
-        // Now that the collection has completed, send on the results, along
-        // with the timing information and any collection token we may have
-        // gotten with the request.
-        let response = CollectionResponse {
-            token: maybe_token,
-            result,
-            started_at: start_time.started_at,
-            time_queued,
-            time_collecting: duration,
-        };
-        match result_tx.send(response).await {
-            Ok(_) => trace!(log, "forwarded results to main collection loop"),
-            Err(_) => {
-                error!(
-                    log,
-                    "failed to forward results to \
-                    collection loop, channel is closed, exiting",
-                );
-                return;
-            }
-        }
-    }
-}
-
-// Background task used to collect metrics from one producer on an interval.
-//
-// This function is started by the `OximeterAgent`, when a producer is registered. The task loops
-// endlessly, and collects metrics from the assigned producer on a timeout. The assigned agent can
-// also send a `CollectionMessage`, for example to update the collection interval. This is not
-// currently used, but will likely be exposed via control plane interfaces in the future.
-async fn collection_loop(
-    log: Logger,
-    collector: self_stats::OximeterCollector,
-    producer: ProducerEndpoint,
-    mut inbox: mpsc::Receiver<CollectionMessage>,
-    outbox: mpsc::Sender<(Option<CollectionToken>, ProducerResults)>,
-) {
-    let mut collection_timer = interval(producer.interval);
-    debug!(
-        log,
-        "starting oximeter collection task";
-        "interval" => ?producer.interval,
-    );
-
-    // Set up the collection of self statistics about this collection task.
-    let mut stats = self_stats::CollectionTaskStats::new(collector, &producer);
-    let mut self_collection_timer = interval(self_stats::COLLECTION_INTERVAL);
-    self_collection_timer.tick().await;
-
-    // Keep track of more details about each collection, so we can expose this
-    // as debugging information in `oximeter`'s public API.
-    let mut details = ProducerDetails::new(&producer);
-
-    // Spawn a task to run the actual collections.
-    //
-    // This is so that we can possibly interrupt and restart collections that
-    // are in-progress when we get an update to the producer's information. In
-    // that case, the collection is likely doomed, since the producer has moved
-    // and won't be available at the address the collection started with. This
-    // lets us restart that collection with the new information.
-    let (producer_info_tx, producer_info_rx) = watch::channel(producer);
-    let (forced_collection_tx, forced_collection_rx) =
-        mpsc::channel(N_QUEUED_FORCED_COLLECTIONS);
-    let (timer_collection_tx, timer_collection_rx) =
-        mpsc::channel(N_QUEUED_TIMER_COLLECTIONS);
-    let (result_tx, mut result_rx) = mpsc::channel(1);
-    tokio::task::spawn(inner_collection_loop(
-        log.clone(),
-        producer_info_rx,
-        forced_collection_rx,
-        timer_collection_rx,
-        result_tx,
-    ));
-
-    loop {
-        tokio::select! {
-            message = inbox.recv() => {
-                match message {
-                    None => {
-                        debug!(
-                            log,
-                            "collection task inbox closed, shutting down"
-                        );
-                        return;
-                    }
-                    Some(CollectionMessage::Shutdown) => {
-                        debug!(
-                            log,
-                            "collection task received shutdown request"
-                        );
-                        return;
-                    },
-                    Some(CollectionMessage::Collect(token)) => {
-                        debug!(
-                            log,
-                            "collection task received explicit request to collect"
-                        );
-                        let request = ForcedCollectionRequest::new(token);
-                        match forced_collection_tx.try_send(request) {
-                            Ok(_) => trace!(
-                                log, "forwarded explicit request to collection task"
-                            ),
-                            Err(e) => {
-                                match e {
-                                    TrySendError::Closed(ForcedCollectionRequest { token, .. }) => {
-                                        debug!(
-                                            log,
-                                            "collection task forced collection \
-                                            queue is closed. Attempting to \
-                                            notify caller and exiting.",
-                                        );
-                                        let _ = token.send(Err(ForcedCollectionError::Closed));
-                                        return;
-                                    }
-                                    TrySendError::Full(ForcedCollectionRequest { token, start }) => {
-                                        error!(
-                                            log,
-                                            "collection task forced collection \
-                                            queue is full! This should never \
-                                            happen, and probably indicates \
-                                            a bug in your test code, such as \
-                                            calling `force_collection()` many \
-                                            times"
-                                        );
-                                        if token
-                                            .send(Err(ForcedCollectionError::QueueFull))
-                                            .is_err()
-                                        {
-                                            warn!(
-                                                log,
-                                                "failed to notify caller of \
-                                                force_collection(), oneshot is \
-                                                closed"
-                                            );
-                                        }
-                                        let failure = FailedCollection {
-                                            started_at: start.started_at,
-                                            time_queued: Duration::ZERO,
-                                            time_collecting: Duration::ZERO,
-                                            reason: String::from("forced collection queue full"),
-                                        };
-                                        details.on_failure(failure);
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    Some(CollectionMessage::Update(new_info)) => {
-                        // If the collection interval is shorter than the
-                        // interval on which we receive these update messages,
-                        // we'll never actually collect anything! Instead, only
-                        // do the update if the information has changed. This
-                        // should also be guarded against by the main agent, but
-                        // we're being cautious here.
-                        let updated_producer_info = |info: &mut ProducerEndpoint| {
-                            if new_info == *info {
-                                false
-                            } else {
-                                *info = new_info;
-                                true
-                            }
-                        };
-                        if !producer_info_tx.send_if_modified(updated_producer_info) {
-                            trace!(
-                                log,
-                                "collection task received update with \
-                                identical producer information, no \
-                                updates will be sent to the collection task"
-                            );
-                            continue;
-                        }
-
-                        // We have an actual update to the producer information.
-                        //
-                        // Rebuild our timer to reflect the possibly-new
-                        // interval. The collection task has already been
-                        // notified above.
-                        debug!(
-                            log,
-                            "collection task received request to update \
-                            its producer information";
-                            "interval" => ?new_info.interval,
-                            "address" => new_info.address,
-                        );
-                        details.update(&new_info);
-                        stats.update(&new_info);
-                        collection_timer = interval(new_info.interval);
-                        collection_timer.tick().await; // completes immediately
-                    }
-                    #[cfg(test)]
-                    Some(CollectionMessage::Statistics { reply_tx }) => {
-                        // Time should be paused when using this retrieval
-                        // mechanism. We advance time to cause a panic if this
-                        // message were to be sent with time *not* paused.
-                        tokio::time::advance(Duration::from_nanos(1)).await;
-                        // The collection timer *may* be ready to go in which
-                        // case we would do a collection right after
-                        // processesing this message, thus changing the actual
-                        // data. Instead we reset the timer to prevent
-                        // additional collections (i.e. since time is paused).
-                        collection_timer.reset();
-                        debug!(
-                            log,
-                            "received request for current task statistics"
-                        );
-                        reply_tx.send(stats.clone()).expect("failed to send statistics");
-                    }
-                    Some(CollectionMessage::Details { reply_tx }) => {
-                        match reply_tx.send(details.clone()) {
-                            Ok(_) => trace!(
-                                log,
-                                "sent producer details reply to oximeter agent",
-                            ),
-                            Err(e) => error!(
-                                log,
-                                "failed to send producer details reply to \
-                                oximeter agent";
-                                "error" => ?e,
-                            ),
-                        }
-                    }
-                }
-            }
-            maybe_result = result_rx.recv() => {
-                let Some(response) = maybe_result else {
-                    error!(
-                        log,
-                        "channel for receiving results from collection task \
-                        is closed, exiting",
-                    );
-                    return;
-                };
-                let CollectionResponse {
-                    token,
-                    result,
-                    started_at,
-                    time_queued,
-                    time_collecting
-                } = response;
-                match result {
-                    Ok(results) => {
-                        stats.collections.datum.increment();
-                        let n_samples: u64 = results
-                            .iter()
-                            .map(|each| match each {
-                                ProducerResultsItem::Ok(samples) => samples.len() as u64,
-                                _ => 0,
-                            })
-                            .sum();
-                        let success = SuccessfulCollection {
-                            started_at,
-                            time_queued,
-                            time_collecting,
-                            n_samples
-                        };
-                        details.on_success(success);
-                        if outbox.send((token, results)).await.is_err() {
-                            error!(
-                                log,
-                                "failed to send results to outbox, channel is \
-                                closed, exiting",
-                            );
-                            return;
-                        }
-                    }
-                    Err(reason) => {
-                        let failure = FailedCollection {
-                            started_at,
-                            time_queued,
-                            time_collecting,
-                            reason: reason.to_string(),
-                        };
-                        details.on_failure(failure);
-                        stats.failures_for_reason(reason).datum.increment();
-                    }
-                }
-            }
-            _ = self_collection_timer.tick() => {
-                debug!(
-                    log,
-                    "reporting oximeter self-collection statistics"
-                );
-                outbox.send((None, stats.sample())).await.unwrap();
-            }
-            _ = collection_timer.tick() => {
-                match timer_collection_tx.try_send(CollectionStartTimes::new()) {
-                    Ok(_) => {
-                        debug!(
-                            log,
-                            "sent timer-based collection request to \
-                            the collection task"
-                        );
-                    }
-                    Err(TrySendError::Closed(_)) => {
-                        error!(
-                            log,
-                            "timer-based collection request queue is \
-                            closed, exiting"
-                        );
-                        return;
-                    }
-                    Err(TrySendError::Full(start)) => {
-                        let failure = FailedCollection {
-                            started_at: start.started_at,
-                            time_queued: Duration::ZERO,
-                            time_collecting: Duration::ZERO,
-                            reason: String::from("collections in progress"),
-                        };
-                        details.on_failure(failure);
-                        error!(
-                            log,
-                            "timer-based collection request queue is \
-                            full! This may indicate that the producer \
-                            has a sampling interval that is too fast \
-                            for the amount of data it generates";
-                            "interval" => ?producer_info_tx.borrow().interval,
-                        );
-                        stats
-                            .failures_for_reason(
-                                self_stats::FailureReason::CollectionsInProgress
-                            )
-                            .datum
-                            .increment()
-                    }
-                }
-            }
-        }
-    }
-}
-
-// Struct representing a task for collecting metric data from a single producer
-#[derive(Debug)]
-struct CollectionTask {
-    // Channel used to send messages from the agent to the actual task. The task owns the other
-    // side.
-    pub inbox: mpsc::Sender<CollectionMessage>,
-    // Handle to the actual tokio task running the collection loop.
-    #[allow(dead_code)]
-    pub task: JoinHandle<()>,
-}
-
-// A task run by `oximeter` in standalone mode, which simply prints results as
-// they're received.
-async fn results_printer(
-    log: Logger,
-    mut rx: mpsc::Receiver<(Option<CollectionToken>, ProducerResults)>,
-) {
-    loop {
-        match rx.recv().await {
-            Some((_, results)) => {
-                for res in results.into_iter() {
-                    match res {
-                        ProducerResultsItem::Ok(samples) => {
-                            for sample in samples.into_iter() {
-                                info!(
-                                    log,
-                                    "";
-                                    "sample" => ?sample,
-                                );
-                            }
-                        }
-                        ProducerResultsItem::Err(e) => {
-                            error!(
-                                log,
-                                "received error from a producer";
-                                InlineErrorChain::new(&e),
-                            );
-                        }
-                    }
-                }
-            }
-            None => {
-                debug!(log, "result queue closed, exiting");
-                return;
-            }
-        }
-    }
-}
-
-// Aggregation point for all results, from all collection tasks.
-async fn results_sink(
-    log: Logger,
-    client: Client,
-    batch_size: usize,
-    batch_interval: Duration,
-    mut rx: mpsc::Receiver<(Option<CollectionToken>, ProducerResults)>,
-) {
-    let mut timer = interval(batch_interval);
-    timer.tick().await; // completes immediately
-    let mut batch = Vec::with_capacity(batch_size);
-    loop {
-        let mut collection_token = None;
-        let insert = tokio::select! {
-            _ = timer.tick() => {
-                if batch.is_empty() {
-                    trace!(log, "batch interval expired, but no samples to insert");
-                    false
-                } else {
-                    true
-                }
-            }
-            results = rx.recv() => {
-                match results {
-                    Some((token, results)) => {
-                        let flattened_results = {
-                            let mut flattened = Vec::with_capacity(results.len());
-                            for inner_batch in results.into_iter() {
-                                match inner_batch {
-                                    ProducerResultsItem::Ok(samples) => flattened.extend(samples.into_iter()),
-                                    ProducerResultsItem::Err(e) => {
-                                        debug!(
-                                            log,
-                                            "received error (not samples) from a producer: {}",
-                                            e.to_string()
-                                        );
-                                    }
-                                }
-                            }
-                            flattened
-                        };
-                        batch.extend(flattened_results);
-
-                        collection_token = token;
-                        if collection_token.is_some() {
-                            true
-                        } else {
-                            batch.len() >= batch_size
-                        }
-                    }
-                    None => {
-                        warn!(log, "result queue closed, exiting");
-                        return;
-                    }
-                }
-            }
-        };
-
-        if insert {
-            debug!(log, "inserting {} samples into database", batch.len());
-            match client.insert_samples(&batch).await {
-                Ok(()) => trace!(log, "successfully inserted samples"),
-                Err(e) => {
-                    warn!(
-                        log,
-                        "failed to insert some results into metric DB: {}",
-                        e.to_string()
-                    );
-                }
-            }
-            // TODO-correctness The `insert_samples` call above may fail. The method itself needs
-            // better handling of partially-inserted results in that case, but we may need to retry
-            // or otherwise handle an error here as well.
-            //
-            // See https://github.com/oxidecomputer/omicron/issues/740 for a
-            // disucssion.
-            batch.clear();
-        }
-
-        if let Some(token) = collection_token {
-            let _ = token.send(Ok(()));
-        }
-    }
-}
 
 /// The internal agent the oximeter server uses to collect metrics from producers.
 #[derive(Clone, Debug)]
@@ -788,10 +57,9 @@ pub struct OximeterAgent {
     // Oximeter target used by this agent to produce metrics about itself.
     collection_target: self_stats::OximeterCollector,
     // Handle to the TX-side of a channel for collecting results from the collection tasks
-    result_sender: mpsc::Sender<(Option<CollectionToken>, ProducerResults)>,
-    // The actual tokio tasks running the collection on a timer.
-    collection_tasks:
-        Arc<Mutex<BTreeMap<Uuid, (ProducerEndpoint, CollectionTask)>>>,
+    result_sender: mpsc::Sender<CollectionTaskOutput>,
+    // Handle to each Tokio task collection from a single producer.
+    collection_tasks: Arc<Mutex<BTreeMap<Uuid, CollectionTaskHandle>>>,
     // The interval on which we refresh our list of producers from Nexus
     refresh_interval: Duration,
     // Handle to the task used to periodically refresh the list of producers.
@@ -860,7 +128,7 @@ impl OximeterAgent {
 
         // Spawn the task for aggregating and inserting all metrics
         tokio::spawn(async move {
-            results_sink(
+            crate::results_sink::database_inserter(
                 insertion_log,
                 client,
                 db_config.batch_size,
@@ -945,7 +213,7 @@ impl OximeterAgent {
 
             // Spawn the task for aggregating and inserting all metrics
             tokio::spawn(async move {
-                results_sink(
+                results_sink::database_inserter(
                     insertion_log,
                     client,
                     db_config.batch_size,
@@ -955,7 +223,7 @@ impl OximeterAgent {
                 .await
             });
         } else {
-            tokio::spawn(results_printer(insertion_log, result_receiver));
+            tokio::spawn(results_sink::logger(insertion_log, result_receiver));
         }
 
         // Set up tracking of statistics about ourselves.
@@ -988,29 +256,10 @@ impl OximeterAgent {
         id: Uuid,
     ) -> Result<ProducerDetails, Error> {
         let tasks = self.collection_tasks.lock().await;
-        let Some((_info, task)) = tasks.get(&id) else {
+        let Some(task) = tasks.get(&id) else {
             return Err(Error::NoSuchProducer { id });
         };
-        let (reply_tx, rx) = oneshot::channel();
-        task.inbox.try_send(CollectionMessage::Details { reply_tx }).map_err(
-            |_| {
-                Error::CollectionError(
-                    id,
-                    String::from(
-                        "Failed to send detail request to collection task",
-                    ),
-                )
-            },
-        )?;
-        drop(tasks);
-        rx.await.map_err(|_| {
-            Error::CollectionError(
-                id,
-                String::from(
-                    "Failed to receive detail response from collection task",
-                ),
-            )
-        })
+        task.details().await
     }
 
     /// Register a new producer with this oximeter instance.
@@ -1027,10 +276,7 @@ impl OximeterAgent {
     // the map is held.
     async fn register_producer_locked(
         &self,
-        tasks: &mut MutexGuard<
-            '_,
-            BTreeMap<Uuid, (ProducerEndpoint, CollectionTask)>,
-        >,
+        tasks: &mut MutexGuard<'_, BTreeMap<Uuid, CollectionTaskHandle>>,
         info: ProducerEndpoint,
     ) {
         let id = info.id;
@@ -1042,26 +288,20 @@ impl OximeterAgent {
                     "producer_id" => id.to_string(),
                     "address" => info.address,
                 );
-
-                // Build channel to control the task and receive results.
-                let (tx, rx) = mpsc::channel(4);
-                let q = self.result_sender.clone();
-                let log = self.log.new(o!(
-                    "component" => "collection-task",
-                    "producer_id" => id.to_string(),
-                ));
-                let info_clone = info;
-                let target = self.collection_target;
-                let task = tokio::spawn(async move {
-                    collection_loop(log, target, info_clone, rx, q).await;
-                });
-                value.insert((info, CollectionTask { inbox: tx, task }));
+                let handle = CollectionTaskHandle::new(
+                    &self.log,
+                    self.collection_target,
+                    info,
+                    self.result_sender.clone(),
+                )
+                .await;
+                value.insert(handle);
             }
             Entry::Occupied(mut value) => {
                 // Only update the endpoint information if it's actually
                 // different, to avoid indefinitely delaying the collection
                 // timer from expiring.
-                if value.get().0 == info {
+                if value.get().producer == info {
                     trace!(
                         self.log,
                         "ignoring request to update existing metric \
@@ -1078,14 +318,7 @@ impl OximeterAgent {
                         "interval" => ?info.interval,
                         "address" => info.address,
                     );
-                    value.get_mut().0 = info;
-                    value
-                        .get()
-                        .1
-                        .inbox
-                        .send(CollectionMessage::Update(info))
-                        .await
-                        .unwrap();
+                    value.get_mut().update(info).await;
                 }
             }
         }
@@ -1105,10 +338,9 @@ impl OximeterAgent {
     ) -> Result<(), ForcedCollectionError> {
         let mut collection_oneshots = vec![];
         let collection_tasks = self.collection_tasks.lock().await;
-        for (_id, (_endpoint, task)) in collection_tasks.iter() {
-            let (tx, rx) = oneshot::channel();
+        for (_id, task) in collection_tasks.iter() {
             // Scrape from each producer, into oximeter...
-            task.inbox.send(CollectionMessage::Collect(tx)).await.unwrap();
+            let rx = task.collect();
             // ... and keep track of the token that indicates once the metric
             // has made it into ClickHouse.
             collection_oneshots.push(rx);
@@ -1152,7 +384,7 @@ impl OximeterAgent {
             .await
             .range((start, Bound::Unbounded))
             .take(limit)
-            .map(|(_id, (info, _t))| *info)
+            .map(|(_id, task)| task.producer)
             .collect()
     }
 
@@ -1166,13 +398,10 @@ impl OximeterAgent {
     // the map is held.
     async fn delete_producer_locked(
         &self,
-        tasks: &mut MutexGuard<
-            '_,
-            BTreeMap<Uuid, (ProducerEndpoint, CollectionTask)>,
-        >,
+        tasks: &mut MutexGuard<'_, BTreeMap<Uuid, CollectionTaskHandle>>,
         id: Uuid,
     ) -> Result<(), Error> {
-        let Some((_info, task)) = tasks.remove(&id) else {
+        let Some(task) = tasks.remove(&id) else {
             // We have no such producer, so good news, we've removed it!
             return Ok(());
         };
@@ -1181,19 +410,7 @@ impl OximeterAgent {
             "removed collection task from set";
             "producer_id" => %id,
         );
-        match task.inbox.send(CollectionMessage::Shutdown).await {
-            Ok(_) => debug!(
-                self.log,
-                "shut down collection task";
-                "producer_id" => %id,
-            ),
-            Err(e) => error!(
-                self.log,
-                "failed to shut down collection task";
-                "producer_id" => %id,
-                InlineErrorChain::new(&e),
-            ),
-        }
+        task.shutdown().await;
         Ok(())
     }
 
@@ -1367,7 +584,6 @@ async fn claim_nexus_with_backoff(
 
 #[cfg(test)]
 mod tests {
-    use super::CollectionMessage;
     use super::OximeterAgent;
     use super::ProducerEndpoint;
     use crate::self_stats::FailureReason;
@@ -1387,7 +603,6 @@ mod tests {
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
     use std::time::Duration;
-    use tokio::sync::oneshot;
     use tokio::time::Instant;
     use uuid::Uuid;
 
@@ -1518,21 +733,15 @@ mod tests {
         }
 
         // Request the statistics from the task itself.
-        let (reply_tx, rx) = oneshot::channel();
-        collector
+        let stats = collector
             .collection_tasks
             .lock()
             .await
             .values()
             .next()
             .unwrap()
-            .1
-            .inbox
-            .send(CollectionMessage::Statistics { reply_tx })
-            .await
-            .expect("failed to request statistics from task");
-        let stats = rx.await.expect("failed to receive statistics from task");
-
+            .statistics()
+            .await;
         let count = stats.collections.datum.value() as usize;
 
         assert!(count != 0);
@@ -1589,20 +798,15 @@ mod tests {
         }
 
         // Request the statistics from the task itself.
-        let (reply_tx, rx) = oneshot::channel();
-        collector
+        let stats = collector
             .collection_tasks
             .lock()
             .await
             .values()
             .next()
             .unwrap()
-            .1
-            .inbox
-            .send(CollectionMessage::Statistics { reply_tx })
-            .await
-            .expect("failed to request statistics from task");
-        let stats = rx.await.expect("failed to receive statistics from task");
+            .statistics()
+            .await;
         assert_eq!(stats.collections.datum.value(), 0);
         assert_eq!(
             stats
@@ -1668,20 +872,15 @@ mod tests {
         }
 
         // Request the statistics from the task itself.
-        let (reply_tx, rx) = oneshot::channel();
-        collector
+        let stats = collector
             .collection_tasks
             .lock()
             .await
             .values()
             .next()
             .unwrap()
-            .1
-            .inbox
-            .send(CollectionMessage::Statistics { reply_tx })
-            .await
-            .expect("failed to request statistics from task");
-        let stats = rx.await.expect("failed to receive statistics from task");
+            .statistics()
+            .await;
         let count = stats
             .failed_collections
             .get(&FailureReason::Other(
