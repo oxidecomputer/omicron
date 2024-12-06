@@ -5,6 +5,7 @@
 //! Background task for managing Support Bundles
 
 use crate::app::background::BackgroundTask;
+use camino::Utf8DirEntry;
 use camino::Utf8Path;
 use camino_tempfile::tempdir;
 use camino_tempfile::tempfile;
@@ -572,6 +573,8 @@ impl BackgroundTask for SupportBundleCollector {
     }
 }
 
+// TODO: Could maybe test this in isolation
+
 // Takes a directory "dir", and zips the contents into a single zipfile.
 fn bundle_to_zipfile(dir: &Utf8TempDir) -> anyhow::Result<std::fs::File> {
     let tempfile = tempfile()?;
@@ -582,20 +585,28 @@ fn bundle_to_zipfile(dir: &Utf8TempDir) -> anyhow::Result<std::fs::File> {
     Ok(zip.finish()?)
 }
 
-// TODO: Could maybe test this in isolation
-
 fn recursively_add_directory_to_zipfile(
     zip: &mut ZipWriter<std::fs::File>,
     root_path: &Utf8Path,
     dir_path: &Utf8Path,
 ) -> anyhow::Result<()> {
-    for entry in dir_path.read_dir_utf8()? {
-        let entry = entry?;
+    // Readdir might return entries in a non-deterministic order.
+    // Let's sort it for the zipfile, to be nice.
+    let mut entries = dir_path
+        .read_dir_utf8()?
+        .filter_map(Result::ok)
+        .collect::<Vec<Utf8DirEntry>>();
+    entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+
+    for entry in &entries {
+        // Remove the "/tmp/..." prefix from the path when we're storing it in the
+        // zipfile.
+        let dst = entry.path().strip_prefix(root_path)?;
+
         let file_type = entry.file_type()?;
         if file_type.is_file() {
             let opts = FullFileOptions::default();
             let src = entry.path();
-            let dst = entry.path().strip_prefix(root_path)?;
 
             zip.start_file_from_path(dst, opts)?;
             let buf = std::fs::read(&src)?;
@@ -603,7 +614,7 @@ fn recursively_add_directory_to_zipfile(
         }
         if file_type.is_dir() {
             let opts = FullFileOptions::default();
-            zip.add_directory_from_path(entry.path(), opts)?;
+            zip.add_directory_from_path(dst, opts)?;
             recursively_add_directory_to_zipfile(zip, root_path, entry.path())?;
         }
     }
@@ -700,6 +711,30 @@ mod test {
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    // Ensure that we can convert a temporary directory into a zipfile
+    #[test]
+    fn test_zipfile_creation() {
+        let dir = tempdir().unwrap();
+
+        std::fs::create_dir_all(dir.path().join("dir-a")).unwrap();
+        std::fs::create_dir_all(dir.path().join("dir-b")).unwrap();
+        std::fs::write(dir.path().join("dir-a").join("file-a"), "some data")
+            .unwrap();
+        std::fs::write(dir.path().join("file-b"), "more data").unwrap();
+
+        let zipfile = bundle_to_zipfile(&dir)
+            .expect("Should have been able to bundle zipfile");
+        let archive = zip::read::ZipArchive::new(zipfile).unwrap();
+
+        // We expect the order to be deterministically alphabetical
+        let mut names = archive.file_names();
+        assert_eq!(names.next(), Some("dir-a/"));
+        assert_eq!(names.next(), Some("dir-a/file-a"));
+        assert_eq!(names.next(), Some("dir-b/"));
+        assert_eq!(names.next(), Some("file-b"));
+        assert_eq!(names.next(), None);
+    }
 
     // If we have not populated any bundles needing cleanup, the cleanup
     // process should succeed with an empty cleanup report.
