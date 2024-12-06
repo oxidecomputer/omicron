@@ -556,7 +556,7 @@ impl<'a> BlueprintBuilder<'a> {
                     generation: Generation::new(),
                     datasets: BTreeMap::new(),
                 });
-            let editor = SledEditor::new(
+            let editor = SledEditor::for_existing(
                 state,
                 zones.clone(),
                 disks,
@@ -573,8 +573,7 @@ impl<'a> BlueprintBuilder<'a> {
         // that weren't in the parent blueprint. (These are newly-added sleds.)
         for sled_id in input.all_sled_ids(SledFilter::Commissioned) {
             if let Entry::Vacant(slot) = sled_editors.entry(sled_id) {
-                slot.insert(SledEditor::new_empty(
-                    SledState::Active,
+                slot.insert(SledEditor::for_new_active(
                     build_preexisting_dataset_ids(sled_id)?,
                 ));
             }
