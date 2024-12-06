@@ -91,7 +91,7 @@ enum InnerSledEditor {
 }
 
 impl SledEditor {
-    pub fn new(
+    pub fn for_existing(
         state: SledState,
         zones: BlueprintZonesConfig,
         disks: BlueprintPhysicalDisksConfig,
@@ -121,9 +121,7 @@ impl SledEditor {
         }
     }
 
-    pub fn new_empty(
-        // TODO-john remove and rename new_active()
-        _state: SledState,
+    pub fn for_new_active(
         preexisting_dataset_ids: DatasetIdsBackfillFromDb,
     ) -> Self {
         Self(InnerSledEditor::Active(ActiveSledEditor::new_empty(
