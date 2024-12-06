@@ -146,6 +146,14 @@ impl SledEditor {
     pub fn decommission(&mut self) {
         match &mut self.0 {
             InnerSledEditor::Active(editor) => {
+                // We can't take ownership of `editor` from the `&mut self`
+                // reference we have, and we need ownership to call
+                // `finalize()`. Steal the contents via `mem::swap()` with an
+                // empty editor. This isn't panic safe (i.e., if we panic
+                // between the `mem::swap()` and the reassignment to `self.0`
+                // below, we'll be left in the active state with an empty sled
+                // editor), but omicron in general is not panic safe and aborts
+                // on panic. Plus `finalize()` should never panic.
                 let mut stolen = ActiveSledEditor::new_empty(
                     DatasetIdsBackfillFromDb::empty(),
                 );
