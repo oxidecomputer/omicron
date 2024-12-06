@@ -4,8 +4,6 @@
 
 //! Tests basic instance support in the API
 
-use crate::integration_tests::metrics::wait_for_producer;
-
 use super::external_ips::floating_ip_get;
 use super::external_ips::get_floating_ip_by_id_url;
 use super::metrics::{get_latest_silo_metric, get_latest_system_metric};
@@ -39,6 +37,7 @@ use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::start_sled_agent;
+use nexus_test_utils::wait_for_producer;
 use nexus_types::external_api::params::SshKeyCreate;
 use nexus_types::external_api::shared::IpKind;
 use nexus_types::external_api::shared::IpRange;

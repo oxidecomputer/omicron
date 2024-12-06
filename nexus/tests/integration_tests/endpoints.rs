@@ -948,10 +948,14 @@ pub static DEMO_SILO_METRICS_URL: Lazy<String> = Lazy::new(|| {
     )
 });
 
-pub static TIMESERIES_LIST_URL: Lazy<String> =
+pub static TIMESERIES_QUERY_URL: Lazy<String> = Lazy::new(|| {
+    format!("/v1/timeseries/query?project={}", *DEMO_PROJECT_NAME)
+});
+
+pub static SYSTEM_TIMESERIES_LIST_URL: Lazy<String> =
     Lazy::new(|| String::from("/v1/system/timeseries/schemas"));
 
-pub static TIMESERIES_QUERY_URL: Lazy<String> =
+pub static SYSTEM_TIMESERIES_QUERY_URL: Lazy<String> =
     Lazy::new(|| String::from("/v1/system/timeseries/query"));
 
 pub static DEMO_TIMESERIES_QUERY: Lazy<params::TimeseriesQuery> =
@@ -2208,7 +2212,18 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
         },
 
         VerifyEndpoint {
-            url: &TIMESERIES_LIST_URL,
+            url: &TIMESERIES_QUERY_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_TIMESERIES_QUERY).unwrap()
+                ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &SYSTEM_TIMESERIES_LIST_URL,
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
@@ -2217,7 +2232,7 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
         },
 
         VerifyEndpoint {
-            url: &TIMESERIES_QUERY_URL,
+            url: &SYSTEM_TIMESERIES_QUERY_URL,
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
