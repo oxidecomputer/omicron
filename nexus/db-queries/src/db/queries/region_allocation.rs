@@ -126,38 +126,70 @@ pub fn allocation_query(
     FROM region WHERE (region.volume_id = ").param().sql(")),")
     .bind::<sql_types::Uuid, _>(volume_id)
 
+    // Find the current target blueprint_id. This is necessary for lookups
+    // in the `bp_omicron_dataset` table. We assume that even if the target
+    // blueprint changes, it is likely the relevant choice of datasets will not.
+    // In short, we have to operate on cached data. This is fresher than the
+    // original `dataset` table and so isn't any worse. An alternative would be
+    // to check that the blueprint_id hasn't changed at the end of the CTE, but
+    // that would introduce false conflicts the majority of the time since most
+    // blueprint changes don't necessarily affect datasets. Therefore we choose
+    // to use a cached copy of the datsets for region allocation and assume that
+    // the allocation saga can fail later on if we made a bad choice.
+    .sql("
+  target_blueprint_id AS (
+      SELECT bp_target.blueprint_id
+      FROM bp_target ORDER BY bp_target.version LIMIT 1
+  )")
+
     // Calculates the old size being used by zpools under consideration as targets for region
     // allocation.
     .sql("
   old_zpool_usage AS (
     SELECT
-      dataset.pool_id,
-      sum(dataset.size_used) AS size_used
-    FROM dataset WHERE ((dataset.size_used IS NOT NULL) AND (dataset.time_deleted IS NULL)) GROUP BY dataset.pool_id),");
+      bp_omicron_dataset.pool_id,
+      sum(bp_omicron_dataset.size_used) AS size_used
+    FROM bp_omicron_dataset 
+    WHERE ((bp_omicron_dataset.blueprint_id = target_blueprint_id) 
+      AND (bp_omicron_dataset.size_used IS NOT NULL) 
+      AND (bp_omicron_dataset.time_deleted IS NULL)) GROUP BY dataset.pool_id),");
 
     let builder = if let Some(snapshot_id) = snapshot_id {
         // Any zpool already have this volume's existing regions, or host the
         // snapshot volume's regions?
-        builder.sql("
+        builder
+            .sql(
+                "
       existing_zpools AS ((
         SELECT
-          dataset.pool_id
+          bp_omicron_dataset.pool_id
         FROM
-          dataset INNER JOIN old_regions ON (old_regions.dataset_id = dataset.id)
+          bp_omicron_dataset INNER JOIN old_regions 
+            ON (old_regions.dataset_id = bp_omicron_dataset.id)
       ) UNION (
-       select dataset.pool_id from
- dataset inner join region_snapshot on (region_snapshot.dataset_id = dataset.id)
- where region_snapshot.snapshot_id = ").param().sql(")),")
-        .bind::<sql_types::Uuid, _>(snapshot_id)
+       SELECT bp_omicron_dataset.pool_id FROM bp_omicron_dataset 
+         INNER JOIN region_snapshot 
+           ON (region_snapshot.dataset_id = bp_omicron_dataset.id)
+         WHERE 
+             ((bp_omicron_dataset.blueprint_id = target_blueprint_id) 
+         AND (region_snapshot.snapshot_id = ",
+            )
+            .param()
+            .sql(")))),")
+            .bind::<sql_types::Uuid, _>(snapshot_id)
     } else {
         // Any zpool already have this volume's existing regions?
-        builder.sql("
+        builder.sql(
+            "
       existing_zpools AS (
         SELECT
-          dataset.pool_id
+          bp_omicron_dataset.pool_id
         FROM
-          dataset INNER JOIN old_regions ON (old_regions.dataset_id = dataset.id)
-      ),")
+          bp_omicron_dataset INNER JOIN old_regions 
+          ON (old_regions.dataset_id = bp_omicron_dataset.id)
+        WHERE bp_omicron_dataset.blueprint_id = target_blueprint_id
+      ),",
+        )
     };
 
     // Identifies zpools with enough space for region allocation, that are not
@@ -216,16 +248,18 @@ pub fn allocation_query(
     // We select only one dataset from each zpool.
     builder.sql("
   candidate_datasets AS (
-    SELECT DISTINCT ON (dataset.pool_id)
-      dataset.id,
-      dataset.pool_id
-    FROM (dataset INNER JOIN candidate_zpools ON (dataset.pool_id = candidate_zpools.pool_id))
+    SELECT DISTINCT ON (bp_omicron_dataset.pool_id)
+      bp_omicron_dataset.id,
+      bp_omicron_dataset.pool_id
+    FROM (bp_omicron_dataset INNER JOIN candidate_zpools 
+    ON (bp_omicron_dataset.pool_id = candidate_zpools.pool_id))
     WHERE (
-      ((dataset.time_deleted IS NULL) AND
-      (dataset.size_used IS NOT NULL)) AND
-      (dataset.kind = 'crucible')
+      ((bp_omicron_dataset.time_deleted IS NULL) AND
+      (bp_omicron_dataset.size_used IS NOT NULL)) AND
+      (bp_omicron_dataset.kind = 'crucible') AND
+      (bp_omicron_dataset.blueprint_id = target_blueprint_id)
     )
-    ORDER BY dataset.pool_id, md5((CAST(dataset.id as BYTEA) || ").param().sql("))
+    ORDER BY bp_omicron_dataset.pool_id, md5((CAST(dataset.id as BYTEA) || ").param().sql("))
   ),")
     .bind::<sql_types::Bytea, _>(seed.clone())
 
@@ -281,9 +315,10 @@ pub fn allocation_query(
   proposed_dataset_changes AS (
     SELECT
       candidate_regions.dataset_id AS id,
-      dataset.pool_id AS pool_id,
+      bp_omicron_dataset.pool_id AS pool_id,
       ((candidate_regions.block_size * candidate_regions.blocks_per_extent) * candidate_regions.extent_count) AS size_used_delta
-    FROM (candidate_regions INNER JOIN dataset ON (dataset.id = candidate_regions.dataset_id))
+    FROM (candidate_regions INNER JOIN bp_omicron_dataset ON (bp_omicron_dataset.id = candidate_regions.dataset_id))
+    WHERE bp_omicron_dataset.blueprint_id = target_blueprint_id
   ),")
 
     // Confirms whether or not the insertion and updates should
@@ -342,18 +377,20 @@ pub fn allocation_query(
             (
               (
                SELECT
-                 dataset.pool_id
+                 bp_omicron_dataset.pool_id
                FROM
                  candidate_regions
-                   INNER JOIN dataset ON (candidate_regions.dataset_id = dataset.id)
+                   INNER JOIN bp_omicron_dataset ON (candidate_regions.dataset_id = bp_omicron_dataset.id)
+                   WHERE bp_omicron_dataset.blueprint_id = target_blueprint_id
               )
               UNION
               (
                SELECT
-                 dataset.pool_id
+                 bp_omicron_dataset.pool_id
                FROM
                  old_regions
-                   INNER JOIN dataset ON (old_regions.dataset_id = dataset.id)
+                   INNER JOIN bp_omicron_dataset ON (old_regions.dataset_id = bp_omicron_dataset.id)
+                   WHERE bp_omicron_dataset.blueprint_id = target_blueprint_id
               )
             )
            LIMIT 1
@@ -377,12 +414,15 @@ pub fn allocation_query(
     RETURNING ").sql(AllColumnsOfRegion::with_prefix("region")).sql("
   ),
   updated_datasets AS (
-    UPDATE dataset SET
-      size_used = (dataset.size_used + (SELECT proposed_dataset_changes.size_used_delta FROM proposed_dataset_changes WHERE (proposed_dataset_changes.id = dataset.id) LIMIT 1))
+    UPDATE bp_omicron_dataset SET
+      size_used = (bp_omicron_dataset.size_used + 
+        (SELECT proposed_dataset_changes.size_used_delta 
+         FROM proposed_dataset_changes 
+         WHERE (proposed_dataset_changes.id = bp_omicron_dataset.id) LIMIT 1))
     WHERE (
-      (dataset.id = ANY(SELECT proposed_dataset_changes.id FROM proposed_dataset_changes)) AND
+      (bp_omicron_dataset.id = ANY(SELECT proposed_dataset_changes.id FROM proposed_dataset_changes)) AND
       (SELECT do_insert.insert FROM do_insert LIMIT 1))
-    RETURNING ").sql(AllColumnsOfDataset::with_prefix("dataset")).sql("
+    RETURNING ").sql(AllColumnsOfDataset::with_prefix("bp_omicron_dataset")).sql("
   )
 (
   SELECT ")
@@ -390,7 +430,7 @@ pub fn allocation_query(
     .sql(", ")
     .sql(AllColumnsOfRegion::with_prefix("old_regions")).sql("
   FROM
-    (old_regions INNER JOIN dataset ON (old_regions.dataset_id = dataset.id))
+    (old_regions INNER JOIN bp_omicron_dataset ON (old_regions.dataset_id = bp_omicron_dataset.id))
 )
 UNION
 (
@@ -398,7 +438,8 @@ UNION
     .sql(AllColumnsOfDataset::with_prefix("updated_datasets"))
     .sql(", ")
     .sql(AllColumnsOfRegion::with_prefix("inserted_regions")).sql("
-  FROM (inserted_regions INNER JOIN updated_datasets ON (inserted_regions.dataset_id = updated_datasets.id))
+  FROM (inserted_regions INNER JOIN updated_datasets 
+  ON (inserted_regions.dataset_id = updated_datasets.id))
 )"
     ).query()
 }

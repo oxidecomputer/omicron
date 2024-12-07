@@ -631,7 +631,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.region (
     blocks_per_extent INT NOT NULL,
     extent_count INT NOT NULL,
 
-    ip INET NOT NULL,
     port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
 
     read_only BOOL NOT NULL,
@@ -3758,8 +3757,23 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_dataset (
     zone_name TEXT,
 
     -- Only valid if kind = crucible
+    --
+    -- This is the ip address of the crucible zone and is denormalized here
+    -- for easy lookup during crucible region allocation. There have been other
+    -- proposals about how to find this IP from a region creation operation
+    -- that has chosen a dataset already, but this is the simplest and most
+    -- efficient.
+    --
+    -- This choice implicitly couples a specific zone to a specific dataset.
+    -- We never move a crucible dataset to a different crucible zone and so the
+    -- IP address never changes. This coupling is unlikley to change for the
+    -- foreseeable future.
+    --
+    -- In the long run, it's very possible that we will change how crucible
+    -- manages IP addresses for regions and the corresponding datasets by making
+    -- them first class in the data model. For now we stick with the simple
+    -- solution that already exists.
     ip INET,
-    port INT4 CHECK (port BETWEEN 0 AND 65535),
 
     quota INT8,
     reservation INT8,

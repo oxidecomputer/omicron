@@ -43,9 +43,6 @@ pub struct Dataset {
 
     pub pool_id: Uuid,
 
-    ip: Option<ipv6::Ipv6Addr>,
-    port: Option<SqlU16>,
-
     pub kind: DatasetKind,
     pub size_used: Option<i64>,
     zone_name: Option<String>,
@@ -65,7 +62,6 @@ impl Dataset {
     pub fn new(
         id: omicron_uuid_kinds::DatasetUuid,
         pool_id: Uuid,
-        addr: Option<SocketAddrV6>,
         api_kind: ApiDatasetKind,
     ) -> Self {
         let kind = DatasetKind::from(&api_kind);
@@ -80,8 +76,6 @@ impl Dataset {
             time_deleted: None,
             rcgen: Generation::new(),
             pool_id,
-            ip: addr.map(|addr| addr.ip().into()),
-            port: addr.map(|addr| addr.port().into()),
             kind,
             size_used,
             zone_name,
