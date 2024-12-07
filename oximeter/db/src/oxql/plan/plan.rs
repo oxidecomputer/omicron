@@ -1233,7 +1233,7 @@ mod tests {
             "Should fail to plan query with an incomparable filter",
         );
         assert!(
-            err.to_string().contains("is not compatible with the field"),
+            err.to_string().contains("is not compatible with the expected type"),
             "Error message should complain that a filter cannot compare \
             a field against an incompatible type, but the error message is: {:#?}",
             err,
