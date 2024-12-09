@@ -234,7 +234,8 @@ async fn sdc_create_disk_record_undo(
 
 async fn sdc_alloc_regions(
     sagactx: NexusActionContext,
-) -> Result<Vec<(db::model::Dataset, db::model::Region)>, ActionError> {
+) -> Result<Vec<(db::model::BpOmicronDataset, db::model::Region)>, ActionError>
+{
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
