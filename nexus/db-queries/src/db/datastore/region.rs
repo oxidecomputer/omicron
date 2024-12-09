@@ -27,6 +27,7 @@ use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_config::RegionAllocationStrategy;
+use nexus_db_model::BpOmicronDataset;
 use nexus_types::external_api::params;
 use omicron_common::api::external;
 use omicron_common::api::external::DeleteResult;
@@ -188,7 +189,7 @@ impl DataStore {
         disk_source: &params::DiskSource,
         size: external::ByteCount,
         allocation_strategy: &RegionAllocationStrategy,
-    ) -> Result<Vec<(Dataset, Region)>, Error> {
+    ) -> Result<Vec<(BpOmicronDataset, Region)>, Error> {
         self.arbitrary_region_allocate(
             opctx,
             RegionAllocationFor::DiskVolume { volume_id },
@@ -274,7 +275,7 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(&opctx).await?;
 
-        let dataset_and_regions: Vec<(Dataset, Region)> =
+        let dataset_and_regions: Vec<(BpOmicronDataset, Region)> =
             query.get_results_async(&*conn).await.map_err(|e| {
                 crate::db::queries::region_allocation::from_diesel(e)
             })?;

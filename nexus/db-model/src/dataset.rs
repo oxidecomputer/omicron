@@ -3,9 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::DatasetKind;
-use super::{ByteCount, Generation, Region, SqlU16};
+use super::{ByteCount, Generation, Region};
 use crate::collection::DatastoreCollectionConfig;
-use crate::ipv6;
 use crate::schema::{dataset, region};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
@@ -112,15 +111,12 @@ impl From<BlueprintDatasetConfig> for Dataset {
             | ApiDatasetKind::Debug
             | ApiDatasetKind::Update => None,
         };
-        let addr = bp.address;
         Self {
             identity: DatasetIdentity::new(bp.id),
             time_deleted: None,
             rcgen: Generation::new(),
             pool_id: bp.pool.id().into_untyped_uuid(),
             kind,
-            ip: addr.map(|addr| addr.ip().into()),
-            port: addr.map(|addr| addr.port().into()),
             size_used,
             zone_name,
             quota: bp.quota.map(ByteCount::from),

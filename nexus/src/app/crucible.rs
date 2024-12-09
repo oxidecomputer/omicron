@@ -155,7 +155,7 @@ impl super::Nexus {
     pub async fn ensure_region_in_dataset(
         &self,
         log: &Logger,
-        dataset: &db::model::Dataset,
+        dataset: &db::model::BpOmicronDataset,
         region: &db::model::Region,
         source: Option<String>,
     ) -> Result<Region, Error> {

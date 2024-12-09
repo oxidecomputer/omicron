@@ -354,6 +354,8 @@ pub struct BpOmicronDataset {
     pub pool_id: DbTypedUuid<ZpoolKind>,
     pub kind: crate::DatasetKind,
     zone_name: Option<String>,
+
+    /// Only relevant for crucible datasets
     pub ip: Option<ipv6::Ipv6Addr>,
     pub port: Option<SqlU16>,
 

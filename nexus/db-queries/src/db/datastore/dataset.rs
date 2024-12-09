@@ -307,11 +307,11 @@ impl DataStore {
         let conn = self.pool_connection_unauthorized().await?;
 
         let dataset = {
-            use db::schema::dataset::dsl;
+            use db::schema::bp_omicron_dataset::dsl;
 
-            dsl::dataset
+            dsl::bp_omicron_dataset
                 .filter(dsl::id.eq(to_db_typed_uuid(dataset_id)))
-                .select(Dataset::as_select())
+                .select(BpOmicronDataset::as_select())
                 .first_async::<Dataset>(&*conn)
                 .await
                 .map_err(|e| {

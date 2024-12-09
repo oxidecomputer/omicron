@@ -1044,9 +1044,6 @@ table! {
 
         pool_id -> Uuid,
 
-        ip -> Nullable<Inet>,
-        port -> Nullable<Int4>,
-
         kind -> crate::DatasetKindEnum,
         size_used -> Nullable<Int8>,
         zone_name -> Nullable<Text>,
@@ -1072,7 +1069,7 @@ table! {
         blocks_per_extent -> Int8,
         extent_count -> Int8,
 
-        port -> Nullable<Int4>,
+        port -> Int4,
 
         read_only -> Bool,
 

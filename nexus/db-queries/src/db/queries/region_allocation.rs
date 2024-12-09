@@ -130,12 +130,13 @@ pub fn allocation_query(
     // in the `bp_omicron_dataset` table. We assume that even if the target
     // blueprint changes, it is likely the relevant choice of datasets will not.
     // In short, we have to operate on cached data. This is fresher than the
-    // original `dataset` table and so isn't any worse. An alternative would be
-    // to check that the blueprint_id hasn't changed at the end of the CTE, but
-    // that would introduce false conflicts the majority of the time since most
-    // blueprint changes don't necessarily affect datasets. Therefore we choose
-    // to use a cached copy of the datsets for region allocation and assume that
-    // the allocation saga can fail later on if we made a bad choice.
+    // original `dataset` table and so isn't any worse. An alternative would
+    // be to check that the blueprint_id hasn't changed at the end of the CTE,
+    // but that would introduce false conflicts the majority of the time since
+    // most blueprint changes don't necessarily affect datasets. Therefore we
+    // optimistically choose to use a cached copy of the datsets for region
+    // allocation and assume that the allocation saga can fail later on if we
+    // made a bad choice.
     .sql("
   target_blueprint_id AS (
       SELECT bp_target.blueprint_id

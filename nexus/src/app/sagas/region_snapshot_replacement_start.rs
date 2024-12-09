@@ -632,19 +632,8 @@ async fn get_replace_params(
         "ensured_dataset_and_region",
     )?;
 
-    let Some(new_dataset_address) = new_dataset.address() else {
-        return Err(ActionError::action_failed(format!(
-            "dataset {} does not have an address!",
-            new_dataset.id(),
-        )));
-    };
-
-    let new_region_address = SocketAddrV6::new(
-        *new_dataset_address.ip(),
-        ensured_region.port_number,
-        0,
-        0,
-    );
+    let new_region_address =
+        SocketAddrV6::new(ensured_region.ip, ensured_region.port_number, 0, 0);
 
     let old_volume_id = sagactx.lookup::<Uuid>("old_snapshot_volume_id")?;
 
