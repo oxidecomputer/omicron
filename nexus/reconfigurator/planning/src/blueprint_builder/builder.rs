@@ -524,23 +524,47 @@ impl<'a> BlueprintBuilder<'a> {
                     generation: Generation::new(),
                     datasets: IdMap::new(),
                 });
-            let editor = SledEditor::for_existing(
-                state,
-                zones.clone(),
-                disks,
-                datasets.clone(),
-            )
+            let editor = match state {
+                SledState::Active => {
+                    let subnet = input
+                        .sled_lookup(SledFilter::Commissioned, *sled_id)
+                        .with_context(|| {
+                            format!(
+                                "failed to find sled details for \
+                                 active sled in parent blueprint {sled_id}"
+                            )
+                        })?
+                        .resources
+                        .subnet;
+                    SledEditor::for_existing_active(
+                        subnet,
+                        zones.clone(),
+                        disks,
+                        datasets.clone(),
+                    )
+                }
+                SledState::Decommissioned => {
+                    SledEditor::for_existing_decommissioned(
+                        zones.clone(),
+                        disks,
+                        datasets.clone(),
+                    )
+                }
+            }
             .with_context(|| {
                 format!("failed to construct SledEditor for sled {sled_id}")
             })?;
+
             sled_editors.insert(*sled_id, editor);
         }
 
         // Add new, empty `SledEditor`s for any commissioned sleds in our input
         // that weren't in the parent blueprint. (These are newly-added sleds.)
-        for sled_id in input.all_sled_ids(SledFilter::Commissioned) {
+        for (sled_id, details) in input.all_sleds(SledFilter::Commissioned) {
             if let Entry::Vacant(slot) = sled_editors.entry(sled_id) {
-                slot.insert(SledEditor::for_new_active());
+                slot.insert(SledEditor::for_new_active(
+                    details.resources.subnet,
+                ));
             }
         }
 

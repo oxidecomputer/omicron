@@ -2102,6 +2102,16 @@ mod test {
                 zone.disposition = BlueprintZoneDisposition::Expunged;
             }
 
+            // Similarly, a sled can only have gotten into the `Decommissioned`
+            // state via blueprints. If the database says the sled is
+            // decommissioned but the parent blueprint says it's still active,
+            // that's an invalid state that the planner will reject.
+            *blueprint1
+                .sled_state
+                .get_mut(sled_id)
+                .expect("found state in parent blueprint") =
+                SledState::Decommissioned;
+
             *sled_id
         };
         println!("1 -> 2: decommissioned {decommissioned_sled_id}");

@@ -11,9 +11,13 @@ use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use std::collections::BTreeSet;
 
 #[derive(Debug, thiserror::Error)]
-pub enum InternalDnsError {
+pub enum InternalDnsInputError {
     #[error("can only have {INTERNAL_DNS_REDUNDANCY} internal DNS servers")]
     TooManyDnsServers,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum InternalDnsError {
     #[error("no reserved subnets available for internal DNS")]
     NoAvailableDnsSubnets,
 }
@@ -24,15 +28,15 @@ pub enum InternalDnsError {
 /// be at most `INTERNAL_DNS_REDUNDANCY` subnets (and so servers)
 /// allocated. This structure tracks which subnets are currently allocated.
 #[derive(Debug)]
-pub struct DnsSubnetAllocator {
+pub struct InternalDnsSubnetAllocator {
     in_use: BTreeSet<DnsSubnet>,
 }
 
-impl DnsSubnetAllocator {
+impl InternalDnsSubnetAllocator {
     pub fn new<'a>(
         running_omicron_zones: impl Iterator<Item = &'a BlueprintZoneConfig>,
         target_redundancy: usize,
-    ) -> Result<Self, InternalDnsError> {
+    ) -> Result<Self, InternalDnsInputError> {
         let in_use = running_omicron_zones
             .filter_map(|zone_config| match zone_config.zone_type {
                 BlueprintZoneType::InternalDns(InternalDns {
@@ -47,7 +51,7 @@ impl DnsSubnetAllocator {
         // we have another use for it in the future, or should someone else do
         // this check?
         if target_redundancy > INTERNAL_DNS_REDUNDANCY {
-            return Err(InternalDnsError::TooManyDnsServers);
+            return Err(InternalDnsInputError::TooManyDnsServers);
         }
 
         Ok(Self { in_use })
@@ -139,7 +143,7 @@ pub mod test {
         verify_blueprint(&blueprint1);
 
         // Create an allocator.
-        let mut allocator = DnsSubnetAllocator::new(
+        let mut allocator = InternalDnsSubnetAllocator::new(
             blueprint1
                 .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
                 .map(|(_sled_id, zone_config)| zone_config),
