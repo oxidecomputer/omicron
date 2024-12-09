@@ -30,7 +30,7 @@ use tokio::runtime::Runtime;
 const GIBIBYTE_F64: f64 = 1073741824.0;
 const MEBIBYTE_F64: f64 = 1048576.0;
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 enum Unit {
     Count,
     Gibibyte,
@@ -57,103 +57,6 @@ impl Unit {
             Unit::Count => bail!("Count cannot be converted into bytes"),
         };
         Ok(bytes)
-    }
-
-    // TODO: Should all of these be part of TimeseriesValues instead?
-
-    // The result of the following functions will not be precise, but it doesn't
-    // matter since we just want an estimate for the chart's labels and bounds.
-    // all we need are values that are larger than the maximum value in the
-    // timeseries or smaller than the minimum value in the timeseries.
-
-    /// Returns the sum of the maximum raw value and 1 or the equivalent of 1
-    /// MiB or GiB in bytes.
-    fn padded_max_value_raw(&self, max_value_raw: &f64) -> Result<f64> {
-        let ceil_value = max_value_raw.ceil();
-        let padded_value = match self {
-            Unit::Count => ceil_value + 1.0,
-            Unit::Gibibyte | Unit::Mebibyte => {
-                ceil_value + self.as_bytes_f64()?
-            }
-        };
-        Ok(padded_value)
-    }
-
-    /// Returns the sum of the max raw value and 1 or the equivalent of 1
-    /// Mib or Gib.
-    fn padded_max_value_parsed(&self, max_value_raw: &f64) -> Result<f64> {
-        let label_value = match self {
-            Unit::Count => max_value_raw + 1.0,
-            Unit::Gibibyte | Unit::Mebibyte => {
-                (max_value_raw / self.as_bytes_f64()?) + 1.0
-            }
-        };
-        Ok(label_value.ceil())
-    }
-
-    /// Returns the difference of the minimum raw value and 1 or the equivalent
-    /// of 1 in MiB or GiB in bytes. If the minimum is equal to or less than 1.0,
-    /// or the equivalent of 1 once converted from bytes to the expected unit
-    /// (e.g. less than or equal to 1048576 if we're using MiB) we'll use 0.0 as
-    /// the minimum value as we don't expect any of our charts
-    /// to require negative numbers for now.
-    fn padded_min_value_raw(&self, min_value_raw: &f64) -> Result<f64> {
-        let padded_value = match self {
-            Unit::Count => {
-                if *min_value_raw <= 1.0 {
-                    0.0
-                } else {
-                    min_value_raw - 1.0
-                }
-            }
-            Unit::Gibibyte | Unit::Mebibyte => {
-                let bytes = self.as_bytes_f64()?;
-                if *min_value_raw <= bytes {
-                    0.0
-                } else {
-                    min_value_raw - bytes
-                }
-            }
-        };
-        Ok(padded_value.floor())
-    }
-
-    /// Returns the difference of the minimum raw value and 1 or the equivalent
-    /// of 1 in MiB or GiB in bytes. If the minimum is less than 1, we'll use
-    /// 0 as the minimum value as we don't expect any of our charts to require
-    /// negative numbers for now.
-    fn padded_min_value_parsed(&self, min_value_raw: &f64) -> Result<f64> {
-        let padded_value = match self {
-            Unit::Count => {
-                if *min_value_raw <= 1.0 {
-                    0.0
-                } else {
-                    min_value_raw - 1.0
-                }
-            }
-            Unit::Gibibyte | Unit::Mebibyte => {
-                let value_as_unit = min_value_raw / self.as_bytes_f64()?;
-                if value_as_unit <= 1.0 {
-                    0.0
-                } else {
-                    value_as_unit - 1.0
-                }
-            }
-        };
-        Ok(padded_value.floor())
-    }
-
-    fn avg_value_parsed(
-        &self,
-        min_value_raw: &f64,
-        max_value_raw: &f64,
-    ) -> Result<f64> {
-        let avg = ((min_value_raw + max_value_raw) / 2.0).round();
-        let avg_value = match self {
-            Unit::Count => avg,
-            Unit::Gibibyte | Unit::Mebibyte => avg / self.as_bytes_f64()?,
-        };
-        Ok(avg_value)
     }
 }
 
@@ -240,6 +143,109 @@ impl TimeSeriesValues {
 
         Ok(max_value)
     }
+}
+
+// The result of the following functions will not be precise, but it doesn't
+// matter since we just want an estimate for the chart's labels and bounds.
+// all we need are values that are larger than the maximum value in the
+// timeseries or smaller than the minimum value in the timeseries.
+
+/// Returns the sum of the maximum raw value and 1 or the equivalent of 1
+/// MiB or GiB in bytes.
+fn padded_max_value_raw(unit: Unit, max_value_raw: &f64) -> Result<f64> {
+    let ceil_value = max_value_raw.ceil();
+    let padded_value = match unit {
+        Unit::Count => ceil_value + 1.0,
+        Unit::Gibibyte | Unit::Mebibyte => ceil_value + unit.as_bytes_f64()?,
+    };
+    Ok(padded_value)
+}
+
+/// Returns the sum of the max raw value and 1 or the equivalent of 1
+/// Mib or Gib.
+fn padded_max_value_as_unit(unit: Unit, max_value_raw: &f64) -> Result<f64> {
+    let label_value = match unit {
+        Unit::Count => max_value_raw + 1.0,
+        Unit::Gibibyte | Unit::Mebibyte => {
+            (max_value_raw / unit.as_bytes_f64()?) + 1.0
+        }
+    };
+    Ok(label_value.ceil())
+}
+
+/// Returns the difference of the minimum raw value and 1 or the equivalent
+/// of 1 in MiB or GiB in bytes. If the minimum is equal to or less than 1.0,
+/// or the equivalent of 1 once converted from bytes to the expected unit
+/// (e.g. less than or equal to 1048576 if we're using MiB) we'll use 0.0 as
+/// the minimum value as we don't expect any of our charts
+/// to require negative numbers for now.
+fn padded_min_value_raw(unit: Unit, min_value_raw: &f64) -> Result<f64> {
+    let padded_value = match unit {
+        Unit::Count => {
+            if *min_value_raw <= 1.0 {
+                0.0
+            } else {
+                min_value_raw - 1.0
+            }
+        }
+        Unit::Gibibyte | Unit::Mebibyte => {
+            let bytes = unit.as_bytes_f64()?;
+            if *min_value_raw <= bytes {
+                0.0
+            } else {
+                min_value_raw - bytes
+            }
+        }
+    };
+    Ok(padded_value.floor())
+}
+
+/// Returns the difference of the minimum raw value and 1 or the equivalent
+/// of 1 in MiB or GiB in bytes. If the minimum is less than 1, we'll use
+/// 0 as the minimum value as we don't expect any of our charts to require
+/// negative numbers for now.
+fn padded_min_value_as_unit(unit: Unit, min_value_raw: &f64) -> Result<f64> {
+    let padded_value = match unit {
+        Unit::Count => {
+            if *min_value_raw <= 1.0 {
+                0.0
+            } else {
+                min_value_raw - 1.0
+            }
+        }
+        Unit::Gibibyte | Unit::Mebibyte => {
+            let value_as_unit = min_value_raw / unit.as_bytes_f64()?;
+            if value_as_unit <= 1.0 {
+                0.0
+            } else {
+                value_as_unit - 1.0
+            }
+        }
+    };
+    Ok(padded_value.floor())
+}
+
+/// Returns the average value of the max and min values in the specified unit.
+fn avg_value_as_unit(
+    unit: Unit,
+    min_value_raw: &f64,
+    max_value_raw: &f64,
+) -> Result<f64> {
+    let avg = ((min_value_raw + max_value_raw) / 2.0).round();
+    let avg_value = match unit {
+        Unit::Count => avg,
+        Unit::Gibibyte | Unit::Mebibyte => avg / unit.as_bytes_f64()?,
+    };
+    Ok(avg_value)
+}
+
+#[derive(Debug)]
+struct YAxisValues {
+    lower_label_value: f64,
+    mid_label_value: f64,
+    upper_label_value: f64,
+    lower_bound_value: f64,
+    upper_bound_value: f64,
 }
 
 #[derive(Debug)]
@@ -340,16 +346,14 @@ impl ChartData {
         // In case there is very little variance in the y axis, we will be adding some
         // padding to the bounds and labels so we don't end up with repeated labels or
         // straight lines too close to the upper bounds.
-        let upper_bound_value =
-            metadata.unit.padded_max_value_raw(max_value)?;
+        let upper_bound_value = padded_max_value_raw(metadata.unit, max_value)?;
         let upper_label_value =
-            metadata.unit.padded_max_value_parsed(max_value)?;
-        let lower_bound_value =
-            metadata.unit.padded_min_value_raw(min_value)?;
+            padded_max_value_as_unit(metadata.unit, max_value)?;
+        let lower_bound_value = padded_min_value_raw(metadata.unit, min_value)?;
         let lower_label_value =
-            metadata.unit.padded_min_value_parsed(min_value)?;
+            padded_min_value_as_unit(metadata.unit, min_value)?;
         let mid_label_value =
-            metadata.unit.avg_value_parsed(min_value, max_value)?;
+            avg_value_as_unit(metadata.unit, min_value, max_value)?;
 
         // Retrieve values only to create chart bounds and labels
         let timestamps = TimeSeriesTimestamps::new(&raw_data);
