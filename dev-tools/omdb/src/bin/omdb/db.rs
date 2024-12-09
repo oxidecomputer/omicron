@@ -14,6 +14,8 @@
 
 // NOTE: emanates from Tabled macros
 #![allow(clippy::useless_vec)]
+// NOTE: allowing "transaction_async" without retry
+#![allow(clippy::disallowed_methods)]
 
 use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::helpers::const_max_len;
