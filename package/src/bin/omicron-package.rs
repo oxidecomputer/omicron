@@ -108,6 +108,7 @@ struct Args {
 #[derive(Debug, Default)]
 struct CargoPlan<'a> {
     command: &'a str,
+    packages: BTreeSet<&'a String>,
     bins: BTreeSet<&'a String>,
     features: BTreeSet<&'a String>,
     release: bool,
@@ -123,6 +124,9 @@ impl<'a> CargoPlan<'a> {
         // We rely on the rust-toolchain.toml file for toolchain information,
         // rather than specifying one within the packaging tool.
         cmd.arg(self.command);
+        for package in &self.packages {
+            cmd.arg("--package").arg(package);
+        }
         for bin in &self.bins {
             cmd.arg("--bin").arg(bin);
         }
@@ -188,6 +192,8 @@ async fn do_for_all_rust_packages(
         // If this is a Rust package...
         if let PackageSource::Local { rust: Some(rust_pkg), .. } = &pkg.source {
             let plan = if rust_pkg.release { &mut release } else { &mut debug };
+            // Add the package name to the plan
+            plan.packages.insert(name);
             // Get the package metadata
             let metadata = workspace_pkgs.get(name).with_context(|| {
                 format!("package '{name}' is not a workspace package")
