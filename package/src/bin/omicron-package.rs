@@ -124,6 +124,9 @@ impl<'a> CargoPlan<'a> {
         // We rely on the rust-toolchain.toml file for toolchain information,
         // rather than specifying one within the packaging tool.
         cmd.arg(self.command);
+        // We specify _both_ --package and --bin; --bin does not imply
+        // --package, and without any --package options Cargo unifies features
+        // across all workspace default members. See rust-lang/cargo#8157.
         for package in &self.packages {
             cmd.arg("--package").arg(package);
         }
@@ -189,7 +192,8 @@ async fn do_for_all_rust_packages(
     let mut debug = CargoPlan { command, release: false, ..Default::default() };
 
     for (name, pkg) in config.packages_to_build().0 {
-        // If this is a Rust package...
+        // If this is a Rust package, `name` (the map key) is the name of the
+        // corresponding Rust crate.
         if let PackageSource::Local { rust: Some(rust_pkg), .. } = &pkg.source {
             let plan = if rust_pkg.release { &mut release } else { &mut debug };
             // Add the package name to the plan
