@@ -199,6 +199,8 @@ impl DataStore {
 
         let group_id = authz_silo_group.id();
 
+        // Prefer to use "transaction_retry_wrapper"
+        #[allow(clippy::disallowed_methods)]
         self.pool_connection_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {

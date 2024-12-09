@@ -674,8 +674,9 @@ impl DataStore {
         let log = opctx.log.clone();
         let err = Arc::new(OnceLock::new());
 
-        // NOTE: This transaction cannot yet be made retryable, as it uses
-        // nested transactions.
+        // This method uses nested transactions, which are not supported
+        // with retryable transactions.
+        #[allow(clippy::disallowed_methods)]
         let rack = self
             .pool_connection_authorized(opctx)
             .await?
