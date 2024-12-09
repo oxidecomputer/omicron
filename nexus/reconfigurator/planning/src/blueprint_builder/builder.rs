@@ -742,8 +742,8 @@ impl<'a> BlueprintBuilder<'a> {
             .retain(|sled_id, _| in_service_sled_ids.contains(sled_id));
 
         // If we have the clickhouse cluster setup enabled via policy and we
-        // don't yet have a `ClickhouseClusterConfiguration`, then we must create
-        // one and feed it to our `ClickhouseAllocator`.
+        // don't yet have a `ClickhouseClusterConfiguration`, then we must
+        // create one and feed it to our `ClickhouseAllocator`.
         let clickhouse_allocator = if self.input.clickhouse_cluster_enabled() {
             let parent_config = self
                 .parent_blueprint
