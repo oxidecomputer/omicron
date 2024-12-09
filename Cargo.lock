@@ -1535,6 +1535,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "common"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/lldp#471a2dc103081e003e700c9825de608073a850cb"
+dependencies = [
+ "anyhow",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+ "slog-async",
+ "slog-bunyan",
+ "slog-term",
+ "thiserror",
+]
+
+[[package]]
 name = "compact_str"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5273,6 +5289,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "lldpd-client"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/lldp#471a2dc103081e003e700c9825de608073a850cb"
+dependencies = [
+ "chrono",
+ "common",
+ "progenitor",
+ "reqwest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6931,6 +6962,7 @@ dependencies = [
  "internal-dns-types",
  "ipnetwork",
  "itertools 0.13.0",
+ "lldpd-client",
  "macaddr",
  "mg-admin-client",
  "nexus-auth",
