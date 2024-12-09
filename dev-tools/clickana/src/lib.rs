@@ -312,11 +312,11 @@ impl DataPoints {
 struct ChartData {
     metadata: ChartMetadata,
     data_points: DataPoints,
-    mid_time_utc: DateTime<Utc>,
-    start_time_utc: DateTime<Utc>,
-    end_time_utc: DateTime<Utc>,
-    start_time_unix: f64,
-    end_time_unix: f64,
+    mid_time_label: DateTime<Utc>,
+    start_time_label: DateTime<Utc>,
+    end_time_label: DateTime<Utc>,
+    start_time_bound: f64,
+    end_time_bound: f64,
     lower_label_value: f64,
     mid_label_value: f64,
     upper_label_value: f64,
@@ -332,7 +332,7 @@ impl ChartData {
         // Retrieve datapoints that will be charted
         let data_points = DataPoints::new(&raw_data);
 
-        // Retrieve values only to create chart bouds and labels
+        // Retrieve values only to create chart bounds and labels
         let values = TimeSeriesValues::new(&raw_data);
         let max_value = values.max()?;
         let min_value = values.min()?;
@@ -351,16 +351,17 @@ impl ChartData {
         let mid_label_value =
             metadata.unit.avg_value_parsed(min_value, max_value)?;
 
+        // Retrieve values only to create chart bounds and labels
+        let timestamps = TimeSeriesTimestamps::new(&raw_data);
         // These timestamps will be used to calculate maximum and minimum values in order
         // to create labels and set bounds for the X axis. As above, some of these conversions
         // may lose precision, but it's OK as these values are only used to make sure the
         // datapoints fit within the graph nicely.
-        let timestamps = TimeSeriesTimestamps::new(&raw_data);
         let start_time = timestamps.min()?;
         let end_time = timestamps.max()?;
         let avg_time = timestamps.avg()?;
 
-        let Some(start_time_utc) = DateTime::from_timestamp(*start_time, 0)
+        let Some(start_time_label) = DateTime::from_timestamp(*start_time, 0)
         else {
             bail!(
                 "failed to convert timestamp to UTC date and time;
@@ -368,14 +369,15 @@ impl ChartData {
                 start_time
             )
         };
-        let Some(end_time_utc) = DateTime::from_timestamp(*end_time, 0) else {
+        let Some(end_time_label) = DateTime::from_timestamp(*end_time, 0)
+        else {
             bail!(
                 "failed to convert timestamp to UTC date and time;
         timestamp = {}",
                 end_time
             )
         };
-        let Some(mid_time_utc) = DateTime::from_timestamp(avg_time, 0) else {
+        let Some(mid_time_label) = DateTime::from_timestamp(avg_time, 0) else {
             bail!(
                 "failed to convert timestamp to UTC date and time;
         timestamp = {}",
@@ -383,17 +385,17 @@ impl ChartData {
             )
         };
 
-        let start_time_unix = *start_time as f64;
-        let end_time_unix = *end_time as f64;
+        let start_time_bound = *start_time as f64;
+        let end_time_bound = *end_time as f64;
 
         Ok(Self {
             metadata,
             data_points,
-            mid_time_utc,
-            start_time_utc,
-            end_time_utc,
-            start_time_unix,
-            end_time_unix,
+            mid_time_label,
+            start_time_label,
+            end_time_label,
+            start_time_bound,
+            end_time_bound,
             lower_label_value,
             mid_label_value,
             upper_label_value,
@@ -421,13 +423,13 @@ impl ChartData {
             .x_axis(
                 Axis::default()
                     .style(Style::default().gray())
-                    .bounds([self.start_time_unix, self.end_time_unix])
+                    .bounds([self.start_time_bound, self.end_time_bound])
                     .labels([
                         // TODO: Remove start time and print the interval at the top of the
                         // dashboard
-                        format!("{}", self.start_time_utc).bold(),
-                        format!("{}", self.mid_time_utc).bold(),
-                        format!("{}", self.end_time_utc).bold(),
+                        format!("{}", self.start_time_label).bold(),
+                        format!("{}", self.mid_time_label).bold(),
+                        format!("{}", self.end_time_label).bold(),
                     ]),
             )
             .y_axis(
