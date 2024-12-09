@@ -23,10 +23,12 @@ impl From<ClickwardError> for HttpError {
             ClickwardError::Failure { .. } => {
                 let message = InlineErrorChain::new(&err).to_string();
                 HttpError {
-                    status_code: http::StatusCode::INTERNAL_SERVER_ERROR,
+                    status_code:
+                        dropshot::ErrorStatusCode::INTERNAL_SERVER_ERROR,
                     error_code: Some(String::from("Internal")),
                     external_message: message.clone(),
                     internal_message: message,
+                    headers: None,
                 }
             }
         }

@@ -508,7 +508,7 @@ fn test_config(
         dns_server::storage::Config { storage_path, keep_old_generations: 3 };
     let config_dropshot = dropshot::ConfigDropshot {
         bind_address: "[::1]:0".to_string().parse().unwrap(),
-        request_body_max_bytes: 1024,
+        default_request_body_max_bytes: 1024,
         default_handler_task_mode: HandlerTaskMode::Detached,
         log_headers: vec![],
     };

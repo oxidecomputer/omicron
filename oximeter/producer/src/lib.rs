@@ -216,7 +216,7 @@ impl Server {
         let log = Self::build_logger(log)?;
         let dropshot = ConfigDropshot {
             bind_address: server_info.address,
-            request_body_max_bytes,
+            default_request_body_max_bytes: request_body_max_bytes,
             default_handler_task_mode: dropshot::HandlerTaskMode::Detached,
             log_headers: vec![],
         };
@@ -509,7 +509,7 @@ mod tests {
         ServerBuilder::new(api, Arc::new(AtomicU32::new(0)), log.clone())
             .config(ConfigDropshot {
                 bind_address: "[::1]:0".parse().unwrap(),
-                request_body_max_bytes: 2048,
+                default_request_body_max_bytes: 2048,
                 ..Default::default()
             })
             .start()

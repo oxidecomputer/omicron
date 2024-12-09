@@ -236,7 +236,7 @@ impl GatewayApi for GatewayImpl {
                 let key = str::from_utf8(key).unwrap();
                 String::from_utf8(bytes).map_err(|_| {
                     http_err_with_message(
-                        http::StatusCode::SERVICE_UNAVAILABLE,
+                        dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
                         "InvalidCaboose",
                         format!("non-utf8 data returned for caboose key {key}"),
                     )
