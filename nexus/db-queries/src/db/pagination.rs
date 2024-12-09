@@ -679,6 +679,7 @@ mod test {
             pagparams: &DataPageParams<'_, (i64, i64)>,
         ) -> Vec<UserAndPhoneNumber> {
             let conn = pool.claim().await.unwrap();
+            #[allow(clippy::disallowed_methods)]
             conn.transaction_async(|conn| async move {
                 // I couldn't figure out how to make this work without requiring a full
                 // table scan, and I just want the test to work so that I can get on

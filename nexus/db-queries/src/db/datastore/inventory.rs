@@ -11,7 +11,6 @@ use crate::db::error::public_error_from_diesel_lookup;
 use crate::db::error::ErrorHandler;
 use crate::db::pagination::{paginated, paginated_multicolumn, Paginator};
 use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
-use crate::db::TransactionError;
 use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -280,6 +279,11 @@ impl DataStore {
         // We'd do that if we had an interface for doing that with bound
         // parameters, etc.  See oxidecomputer/omicron#973.
         let pool = self.pool_connection_authorized(opctx).await?;
+
+        // The risk of a serialization error is possible here, but low,
+        // as most of the operations should be insertions rather than in-place
+        // modifications of existing tables.
+        #[allow(clippy::disallowed_methods)]
         pool.transaction_async(|conn| async move {
             // Insert records (and generate ids) for any baseboards that do not
             // already exist in the database.  These rows are not scoped to a
@@ -1242,6 +1246,7 @@ impl DataStore {
         // collection if we crash while deleting it.
         let conn = self.pool_connection_authorized(opctx).await?;
         let db_collection_id = to_db_typed_uuid(collection_id);
+
         let (
             ncollections,
             nsps,
@@ -1258,22 +1263,22 @@ impl DataStore {
             nzpools,
             nerrors,
             nclickhouse_keeper_membership,
-        ) = conn
-            .transaction_async(|conn| async move {
-                // Remove the record describing the collection itself.
-                let ncollections = {
-                    use db::schema::inv_collection::dsl;
-                    diesel::delete(
-                        dsl::inv_collection
-                            .filter(dsl::id.eq(db_collection_id)),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+        ) =
+            self.transaction_retry_wrapper("inventory_delete_collection")
+                .transaction(&conn, |conn| async move {
+                    // Remove the record describing the collection itself.
+                    let ncollections = {
+                        use db::schema::inv_collection::dsl;
+                        diesel::delete(
+                            dsl::inv_collection
+                                .filter(dsl::id.eq(db_collection_id)),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
 
-                // Remove rows for service processors.
-                let nsps =
-                    {
+                    // Remove rows for service processors.
+                    let nsps = {
                         use db::schema::inv_service_processor::dsl;
                         diesel::delete(dsl::inv_service_processor.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
@@ -1282,9 +1287,8 @@ impl DataStore {
                         .await?
                     };
 
-                // Remove rows for roots of trust.
-                let nrots =
-                    {
+                    // Remove rows for roots of trust.
+                    let nrots = {
                         use db::schema::inv_root_of_trust::dsl;
                         diesel::delete(dsl::inv_root_of_trust.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
@@ -1293,9 +1297,8 @@ impl DataStore {
                         .await?
                     };
 
-                // Remove rows for cabooses found.
-                let ncabooses =
-                    {
+                    // Remove rows for cabooses found.
+                    let ncabooses = {
                         use db::schema::inv_caboose::dsl;
                         diesel::delete(dsl::inv_caboose.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
@@ -1304,9 +1307,8 @@ impl DataStore {
                         .await?
                     };
 
-                // Remove rows for root of trust pages found.
-                let nrot_pages =
-                    {
+                    // Remove rows for root of trust pages found.
+                    let nrot_pages = {
                         use db::schema::inv_root_of_trust_page::dsl;
                         diesel::delete(dsl::inv_root_of_trust_page.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
@@ -1315,9 +1317,8 @@ impl DataStore {
                         .await?
                     };
 
-                // Remove rows for sled agents found.
-                let nsled_agents =
-                    {
+                    // Remove rows for sled agents found.
+                    let nsled_agents = {
                         use db::schema::inv_sled_agent::dsl;
                         diesel::delete(dsl::inv_sled_agent.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
@@ -1326,9 +1327,8 @@ impl DataStore {
                         .await?
                     };
 
-                // Remove rows for datasets
-                let ndatasets =
-                    {
+                    // Remove rows for datasets
+                    let ndatasets = {
                         use db::schema::inv_dataset::dsl;
                         diesel::delete(dsl::inv_dataset.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
@@ -1337,9 +1337,8 @@ impl DataStore {
                         .await?
                     };
 
-                // Remove rows for physical disks found.
-                let nphysical_disks =
-                    {
+                    // Remove rows for physical disks found.
+                    let nphysical_disks = {
                         use db::schema::inv_physical_disk::dsl;
                         diesel::delete(dsl::inv_physical_disk.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
@@ -1348,9 +1347,8 @@ impl DataStore {
                         .await?
                     };
 
-                // Remove rows for NVMe physical disk firmware found.
-                let nnvme_disk_firwmare =
-                    {
+                    // Remove rows for NVMe physical disk firmware found.
+                    let nnvme_disk_firwmare = {
                         use db::schema::inv_nvme_disk_firmware::dsl;
                         diesel::delete(dsl::inv_nvme_disk_firmware.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
@@ -1359,9 +1357,8 @@ impl DataStore {
                         .await?
                     };
 
-                // Remove rows associated with Omicron zones
-                let nsled_agent_zones =
-                    {
+                    // Remove rows associated with Omicron zones
+                    let nsled_agent_zones = {
                         use db::schema::inv_sled_omicron_zones::dsl;
                         diesel::delete(dsl::inv_sled_omicron_zones.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
@@ -1370,8 +1367,7 @@ impl DataStore {
                         .await?
                     };
 
-                let nzones =
-                    {
+                    let nzones = {
                         use db::schema::inv_omicron_zone::dsl;
                         diesel::delete(dsl::inv_omicron_zone.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
@@ -1380,8 +1376,7 @@ impl DataStore {
                         .await?
                     };
 
-                let nnics =
-                    {
+                    let nnics = {
                         use db::schema::inv_omicron_zone_nic::dsl;
                         diesel::delete(dsl::inv_omicron_zone_nic.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
@@ -1390,8 +1385,7 @@ impl DataStore {
                         .await?
                     };
 
-                let nzpools =
-                    {
+                    let nzpools = {
                         use db::schema::inv_zpool::dsl;
                         diesel::delete(dsl::inv_zpool.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
@@ -1400,9 +1394,8 @@ impl DataStore {
                         .await?
                     };
 
-                // Remove rows for errors encountered.
-                let nerrors =
-                    {
+                    // Remove rows for errors encountered.
+                    let nerrors = {
                         use db::schema::inv_collection_error::dsl;
                         diesel::delete(dsl::inv_collection_error.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
@@ -1411,43 +1404,40 @@ impl DataStore {
                         .await?
                     };
 
-                // Remove rows for clickhouse keeper membership
-                let nclickhouse_keeper_membership = {
-                    use db::schema::inv_clickhouse_keeper_membership::dsl;
-                    diesel::delete(
-                        dsl::inv_clickhouse_keeper_membership.filter(
-                            dsl::inv_collection_id.eq(db_collection_id),
-                        ),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                    // Remove rows for clickhouse keeper membership
+                    let nclickhouse_keeper_membership = {
+                        use db::schema::inv_clickhouse_keeper_membership::dsl;
+                        diesel::delete(
+                            dsl::inv_clickhouse_keeper_membership.filter(
+                                dsl::inv_collection_id.eq(db_collection_id),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
 
-                Ok((
-                    ncollections,
-                    nsps,
-                    nrots,
-                    ncabooses,
-                    nrot_pages,
-                    nsled_agents,
-                    ndatasets,
-                    nphysical_disks,
-                    nnvme_disk_firwmare,
-                    nsled_agent_zones,
-                    nzones,
-                    nnics,
-                    nzpools,
-                    nerrors,
-                    nclickhouse_keeper_membership,
-                ))
-            })
-            .await
-            .map_err(|error| match error {
-                TransactionError::CustomError(e) => e,
-                TransactionError::Database(e) => {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                }
-            })?;
+                    Ok((
+                        ncollections,
+                        nsps,
+                        nrots,
+                        ncabooses,
+                        nrot_pages,
+                        nsled_agents,
+                        ndatasets,
+                        nphysical_disks,
+                        nnvme_disk_firwmare,
+                        nsled_agent_zones,
+                        nzones,
+                        nnics,
+                        nzpools,
+                        nerrors,
+                        nclickhouse_keeper_membership,
+                    ))
+                })
+                .await
+                .map_err(|error| {
+                    public_error_from_diesel(error, ErrorHandler::Server)
+                })?;
 
         info!(&opctx.log, "removed inventory collection";
             "collection_id" => collection_id.to_string(),
@@ -2429,6 +2419,9 @@ impl DataStoreInventoryTest for DataStore {
                 .pool_connection_for_tests()
                 .await
                 .context("getting connection")?;
+
+            // This transaction is used by tests, and does not need to retry.
+            #[allow(clippy::disallowed_methods)]
             conn.transaction_async(|conn| async move {
                 conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
                     .await
@@ -2484,6 +2477,8 @@ mod test {
 
     impl CollectionCounts {
         async fn new(conn: &DataStoreConnection) -> anyhow::Result<Self> {
+            // This transaction is used by tests, and does not need to retry.
+            #[allow(clippy::disallowed_methods)]
             conn.transaction_async(|conn| async move {
                 conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
                     .await
@@ -2933,6 +2928,8 @@ mod test {
             .expect("failed to delete collection");
         assert!(datastore.inventory_collections().await.unwrap().is_empty());
 
+        // This transaction is used by tests, and does not need to retry.
+        #[allow(clippy::disallowed_methods)]
         conn.transaction_async(|conn| async move {
             conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await.unwrap();
             let count = schema::inv_collection::dsl::inv_collection
@@ -3055,6 +3052,8 @@ mod test {
             bail!("Tables missing from information_schema query");
         }
 
+        // This transaction is used by tests, and does not need to retry.
+        #[allow(clippy::disallowed_methods)]
         conn.transaction_async(|conn| async move {
             // We need this to call "COUNT(*)" below.
             conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)

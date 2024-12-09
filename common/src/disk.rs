@@ -103,6 +103,10 @@ impl DatasetName {
         Self { pool_name, kind }
     }
 
+    pub fn into_parts(self) -> (ZpoolName, DatasetKind) {
+        (self.pool_name, self.kind)
+    }
+
     pub fn pool(&self) -> &ZpoolName {
         &self.pool_name
     }
