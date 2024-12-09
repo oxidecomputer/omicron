@@ -97,45 +97,45 @@ impl DataStore {
 
         self.transaction_retry_wrapper(
             "insert_region_snapshot_replacement_request_with_volume_id",
-            )
-            .transaction(&conn, |conn| {
-                let request = request.clone();
-                let err = err.clone();
-                async move {
-                    use db::schema::region_snapshot_replacement::dsl;
-                    use db::schema::volume_repair::dsl as volume_repair_dsl;
+        )
+        .transaction(&conn, |conn| {
+            let request = request.clone();
+            let err = err.clone();
+            async move {
+                use db::schema::region_snapshot_replacement::dsl;
+                use db::schema::volume_repair::dsl as volume_repair_dsl;
 
-                    // An associated volume repair record isn't _strictly_
-                    // needed: snapshot volumes should never be directly
-                    // constructed, and therefore won't ever have an associated
-                    // Upstairs that receives a volume replacement request.
-                    // However it's being done in an attempt to be overly
-                    // cautious, and it validates that the volume exist:
-                    // otherwise it would be possible to create a region
-                    // snapshot replacement request for a volume that didn't
-                    // exist!
+                // An associated volume repair record isn't _strictly_
+                // needed: snapshot volumes should never be directly
+                // constructed, and therefore won't ever have an associated
+                // Upstairs that receives a volume replacement request.
+                // However it's being done in an attempt to be overly
+                // cautious, and it validates that the volume exist:
+                // otherwise it would be possible to create a region
+                // snapshot replacement request for a volume that didn't
+                // exist!
 
-                    Self::volume_repair_insert_in_txn(
-                        &conn, err, volume_id, request.id,
-                    )
+                Self::volume_repair_insert_in_txn(
+                    &conn, err, volume_id, request.id,
+                )
+                .await?;
+
+                diesel::insert_into(dsl::region_snapshot_replacement)
+                    .values(request)
+                    .execute_async(&conn)
                     .await?;
 
-                    diesel::insert_into(dsl::region_snapshot_replacement)
-                        .values(request)
-                        .execute_async(&conn)
-                        .await?;
-
-                    Ok(())
-                }
-            })
-            .await
-            .map_err(|e| {
-                if let Some(err) = err.take() {
-                    err
-                } else {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                }
-            })
+                Ok(())
+            }
+        })
+        .await
+        .map_err(|e| {
+            if let Some(err) = err.take() {
+                err
+            } else {
+                public_error_from_diesel(e, ErrorHandler::Server)
+            }
+        })
     }
 
     pub async fn get_region_snapshot_replacement_request_by_id(
