@@ -20,12 +20,15 @@ use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::external_api::views::SledState;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::SLED_PREFIX;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use std::mem;
+use std::net::Ipv6Addr;
 
 mod datasets;
 mod disks;
@@ -120,40 +123,44 @@ enum InnerSledEditor {
 }
 
 impl SledEditor {
-    pub fn for_existing(
-        state: SledState,
+    pub fn for_existing_active(
+        subnet: Ipv6Subnet<SLED_PREFIX>,
         zones: BlueprintZonesConfig,
         disks: BlueprintPhysicalDisksConfig,
         datasets: BlueprintDatasetsConfig,
         preexisting_dataset_ids: DatasetIdsBackfillFromDb,
     ) -> Result<Self, SledInputError> {
-        match state {
-            SledState::Active => {
-                let inner = ActiveSledEditor::new(
-                    zones,
-                    disks,
-                    datasets,
-                    preexisting_dataset_ids,
-                )?;
-                Ok(Self(InnerSledEditor::Active(inner)))
-            }
-            SledState::Decommissioned => {
-                let inner = EditedSled {
-                    state,
-                    zones,
-                    disks,
-                    datasets,
-                    edit_counts: SledEditCounts::zeroes(),
-                };
-                Ok(Self(InnerSledEditor::Decommissioned(inner)))
-            }
-        }
+        let inner = ActiveSledEditor::new(
+            subnet,
+            zones,
+            disks,
+            datasets,
+            preexisting_dataset_ids,
+        )?;
+        Ok(Self(InnerSledEditor::Active(inner)))
+    }
+
+    pub fn for_existing_decommissioned(
+        zones: BlueprintZonesConfig,
+        disks: BlueprintPhysicalDisksConfig,
+        datasets: BlueprintDatasetsConfig,
+    ) -> Result<Self, SledInputError> {
+        let inner = EditedSled {
+            state: SledState::Decommissioned,
+            zones,
+            disks,
+            datasets,
+            edit_counts: SledEditCounts::zeroes(),
+        };
+        Ok(Self(InnerSledEditor::Decommissioned(inner)))
     }
 
     pub fn for_new_active(
+        subnet: Ipv6Subnet<SLED_PREFIX>,
         preexisting_dataset_ids: DatasetIdsBackfillFromDb,
     ) -> Self {
         Self(InnerSledEditor::Active(ActiveSledEditor::new_empty(
+            subnet,
             preexisting_dataset_ids,
         )))
     }
@@ -192,6 +199,7 @@ impl SledEditor {
                 // editor), but omicron in general is not panic safe and aborts
                 // on panic. Plus `finalize()` should never panic.
                 let mut stolen = ActiveSledEditor::new_empty(
+                    Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                     DatasetIdsBackfillFromDb::empty(),
                 );
                 mem::swap(editor, &mut stolen);
@@ -204,6 +212,20 @@ impl SledEditor {
             InnerSledEditor::Decommissioned(_) => (),
         }
         Ok(())
+    }
+
+    /// Returns this sled's subnet if it is an active sled.
+    ///
+    /// Decommissioned sleds do not report a sled subnet. While we don't
+    /// currently reuse sled subnets after sled decommissioning, we may
+    /// eventually (<https://github.com/oxidecomputer/omicron/issues/5554>),
+    /// which would require us to ignore subnets of decommissioned sleds when
+    /// making editing decisions.
+    pub fn subnet(&self) -> Option<Ipv6Subnet<SLED_PREFIX>> {
+        match &self.0 {
+            InnerSledEditor::Active(editor) => Some(editor.subnet),
+            InnerSledEditor::Decommissioned(_) => None,
+        }
     }
 
     pub fn disks(
@@ -297,6 +319,7 @@ impl SledEditor {
 
 #[derive(Debug)]
 struct ActiveSledEditor {
+    subnet: Ipv6Subnet<SLED_PREFIX>,
     zones: ZonesEditor,
     disks: DisksEditor,
     datasets: DatasetsEditor,
@@ -313,12 +336,14 @@ pub(crate) struct EditedSled {
 
 impl ActiveSledEditor {
     pub fn new(
+        subnet: Ipv6Subnet<SLED_PREFIX>,
         zones: BlueprintZonesConfig,
         disks: BlueprintPhysicalDisksConfig,
         datasets: BlueprintDatasetsConfig,
         preexisting_dataset_ids: DatasetIdsBackfillFromDb,
     ) -> Result<Self, SledInputError> {
         Ok(Self {
+            subnet,
             zones: zones.try_into()?,
             disks: disks.try_into()?,
             datasets: DatasetsEditor::new(datasets, preexisting_dataset_ids)?,
@@ -326,9 +351,11 @@ impl ActiveSledEditor {
     }
 
     pub fn new_empty(
+        subnet: Ipv6Subnet<SLED_PREFIX>,
         preexisting_dataset_ids: DatasetIdsBackfillFromDb,
     ) -> Self {
         Self {
+            subnet,
             zones: ZonesEditor::empty(),
             disks: DisksEditor::empty(),
             datasets: DatasetsEditor::empty(preexisting_dataset_ids),
