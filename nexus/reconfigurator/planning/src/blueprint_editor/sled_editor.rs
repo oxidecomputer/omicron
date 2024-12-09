@@ -67,7 +67,7 @@ pub enum SledEditError {
         "sled is not decommissionable: \
          disk {disk_id} (zpool {zpool_id}) is in service"
     )]
-    NotDecommisionableDiskInService {
+    NonDecommissionableDiskInService {
         disk_id: PhysicalDiskUuid,
         zpool_id: ZpoolUuid,
     },
@@ -75,7 +75,7 @@ pub enum SledEditError {
         "sled is not decommissionable: \
          dataset {dataset_id} (kind {kind:?}) is in service"
     )]
-    NotDecommisionableDatasetInService {
+    NonDecommissionableDatasetInService {
         dataset_id: DatasetUuid,
         kind: DatasetKind,
     },
@@ -83,7 +83,7 @@ pub enum SledEditError {
         "sled is not decommissionable: \
          zone {zone_id} (kind {kind:?}) is not expunged"
     )]
-    NotDecommisionableZoneNotExpunged {
+    NonDecommissionableZoneNotExpunged {
         zone_id: OmicronZoneUuid,
         kind: ZoneKind,
     },
@@ -364,7 +364,7 @@ impl ActiveSledEditor {
                 BlueprintPhysicalDiskDisposition::Expunged => false,
             })
         {
-            return Err(SledEditError::NotDecommisionableDiskInService {
+            return Err(SledEditError::NonDecommissionableDiskInService {
                 disk_id: disk.id,
                 zpool_id: disk.pool_id,
             });
@@ -379,7 +379,7 @@ impl ActiveSledEditor {
                 }
             })
         {
-            return Err(SledEditError::NotDecommisionableDatasetInService {
+            return Err(SledEditError::NonDecommissionableDatasetInService {
                 dataset_id: dataset.id,
                 kind: dataset.kind.clone(),
             });
@@ -393,7 +393,7 @@ impl ActiveSledEditor {
                 BlueprintZoneDisposition::Expunged => false,
             }
         }) {
-            return Err(SledEditError::NotDecommisionableZoneNotExpunged {
+            return Err(SledEditError::NonDecommissionableZoneNotExpunged {
                 zone_id: zone.id,
                 kind: zone.zone_type.kind(),
             });
