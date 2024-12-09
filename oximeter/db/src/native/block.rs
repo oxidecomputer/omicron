@@ -32,6 +32,7 @@ use nom::sequence::tuple;
 use nom::IResult;
 use oximeter::DatumType;
 use std::fmt;
+use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::sync::LazyLock;
@@ -54,6 +55,16 @@ pub struct Block {
     pub info: BlockInfo,
     /// Mapping from column names to the column data.
     pub columns: IndexMap<String, Column>,
+}
+
+impl Default for Block {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            info: BlockInfo::default(),
+            columns: IndexMap::new(),
+        }
+    }
 }
 
 impl Block {
@@ -193,6 +204,77 @@ impl Block {
         // We cannot have more columns in the block than are "insertable" based
         // on the provided column descriptions.
         self.n_columns() <= n_insertable_columns
+    }
+
+    /// Convert the column arrays into rows of JSON.
+    ///
+    /// Types which have native JSON represenation, such as strings and numbers,
+    /// are converted directly. Those without, like dates, are stringified.
+    #[cfg(any(test, feature = "sql"))]
+    pub fn json_rows(&self) -> Vec<serde_json::Map<String, serde_json::Value>> {
+        use serde_json::Value;
+        let mut out = Vec::with_capacity(self.n_rows());
+        fn values_to_json(values: &ValueArray, i: usize) -> serde_json::Value {
+            match &values {
+                ValueArray::Bool(x) => Value::from(x[i]),
+                ValueArray::UInt8(x) => Value::from(x[i]),
+                ValueArray::UInt16(x) => Value::from(x[i]),
+                ValueArray::UInt32(x) => Value::from(x[i]),
+                ValueArray::UInt64(x) => Value::from(x[i]),
+                ValueArray::UInt128(x) => Value::from(x[i].to_string()),
+                ValueArray::Int8(x) => Value::from(x[i]),
+                ValueArray::Int16(x) => Value::from(x[i]),
+                ValueArray::Int32(x) => Value::from(x[i]),
+                ValueArray::Int64(x) => Value::from(x[i]),
+                ValueArray::Int128(x) => Value::from(x[i].to_string()),
+                ValueArray::Float32(x) => Value::from(x[i]),
+                ValueArray::Float64(x) => Value::from(x[i]),
+                ValueArray::String(x) => Value::from(x[i].clone()),
+                ValueArray::Uuid(x) => Value::from(x[i].to_string()),
+                ValueArray::Ipv4(x) => Value::from(x[i].to_string()),
+                ValueArray::Ipv6(x) => Value::from(x[i].to_string()),
+                ValueArray::Date(x) => Value::from(x[i].to_string()),
+                ValueArray::DateTime { values, .. } => {
+                    Value::from(values[i].to_string())
+                }
+                ValueArray::DateTime64 { values, .. } => {
+                    Value::from(values[i].to_string())
+                }
+                ValueArray::Nullable { is_null, values } => {
+                    if is_null[i] {
+                        Value::Null
+                    } else {
+                        values_to_json(values, i)
+                    }
+                }
+                ValueArray::Enum8 { variants, values } => {
+                    Value::from(variants.get(&values[i]).unwrap().clone())
+                }
+                ValueArray::Array { values, .. } => {
+                    let row = &values[i];
+                    let len = row.len();
+                    let mut out = Vec::with_capacity(len);
+                    for j in 0..len {
+                        let inner = values_to_json(row, j);
+                        out.push(inner);
+                    }
+                    Value::Array(out)
+                }
+            }
+        }
+
+        for i in 0..self.n_rows() {
+            let row = self
+                .columns
+                .iter()
+                .map(|(name, column)| {
+                    let value = values_to_json(&column.values, i);
+                    (name.to_string(), value)
+                })
+                .collect();
+            out.push(row);
+        }
+        out
     }
 }
 
@@ -511,7 +593,60 @@ impl ValueArray {
             }
         }
     }
+
+    /// Extract the contained values as an enum, if possible.
+    ///
+    /// If the values have a different type, an error is returned with their
+    /// actual type.
+    pub fn as_enum(&self) -> Result<(&IndexMap<i8, String>, &[i8]), DataType> {
+        match self {
+            ValueArray::Enum8 { variants, values } => {
+                Ok((variants, values.as_slice()))
+            }
+            _ => Err(self.data_type()),
+        }
+    }
+
+    /// Extract the contained values as an array, if possible.
+    ///
+    /// If the values have a different type, an error is returned with their
+    /// actual type.
+    pub fn as_array(&self) -> Result<(&DataType, &[ValueArray]), DataType> {
+        match self {
+            ValueArray::Array { inner_type, values } => {
+                Ok((inner_type, values.as_slice()))
+            }
+            _ => Err(self.data_type()),
+        }
+    }
 }
+
+macro_rules! impl_value_array_as_types {
+    ($( $name:tt, $variant:tt, $return_type:ty ),+) => {
+        impl ValueArray {
+            $(
+                /// Extract the contained values as the concrete type, if possible.
+                ///
+                /// If the values have a different type, an error is returned with
+                /// their actual type.
+                pub fn $name(&self) -> Result<&[$return_type], DataType> {
+                    match self {
+                        ValueArray::$variant(x) => Ok(x.as_slice()),
+                        _ => Err(self.data_type()),
+                    }
+                }
+            )+
+        }
+    }
+}
+
+impl_value_array_as_types!(
+    as_u8, UInt8, u8, as_u16, UInt16, u16, as_u32, UInt32, u32, as_u64, UInt64,
+    u64, as_i8, Int8, i8, as_i16, Int16, i16, as_i32, Int32, i32, as_i64,
+    Int64, i64, as_f32, Float32, f32, as_f64, Float64, f64, as_uuid, Uuid,
+    Uuid, as_ipv4, Ipv4, Ipv4Addr, as_ipv6, Ipv6, Ipv6Addr, as_string, String,
+    String
+);
 
 macro_rules! impl_value_array_from_vec {
     ($data_type:ty, $variant:tt) => {
@@ -540,6 +675,19 @@ impl_value_array_from_vec!(String, String);
 impl_value_array_from_vec!(Uuid, Uuid);
 impl_value_array_from_vec!(Ipv4Addr, Ipv4);
 impl_value_array_from_vec!(Ipv6Addr, Ipv6);
+
+impl From<Vec<IpAddr>> for ValueArray {
+    fn from(values: Vec<IpAddr>) -> Self {
+        let values = values
+            .into_iter()
+            .map(|x| match x {
+                IpAddr::V4(v4) => v4.to_ipv6_mapped(),
+                IpAddr::V6(v6) => v6,
+            })
+            .collect();
+        Self::Ipv6(values)
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Precision(u8);

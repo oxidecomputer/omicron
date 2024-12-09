@@ -2,12 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use context::ServerContext;
+use camino::Utf8PathBuf;
+use context::{ServerContext, SingleServerContext};
+use dropshot::HttpServer;
 use omicron_common::FileKv;
 use slog::{debug, error, Drain};
 use slog_dtrace::ProbeRegistration;
 use slog_error_chain::SlogInlineError;
 use std::io;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
 
 mod clickhouse_cli;
@@ -30,15 +33,14 @@ pub enum StartError {
     InitializeHttpServer(#[source] dropshot::BuildError),
 }
 
-pub type Server = dropshot::HttpServer<Arc<ServerContext>>;
-
 /// Start the dropshot server for `clickhouse-admin-server` which
 /// manages clickhouse replica servers.
 pub async fn start_server_admin_server(
     clickward: Clickward,
-    clickhouse_cli: ClickhouseCli,
+    binary_path: Utf8PathBuf,
+    listen_address: SocketAddrV6,
     server_config: Config,
-) -> Result<Server, StartError> {
+) -> Result<HttpServer<Arc<ServerContext>>, StartError> {
     let (drain, registration) = slog_dtrace::with_drain(
         server_config
             .log
@@ -57,13 +59,12 @@ pub async fn start_server_admin_server(
         }
     }
 
-    let context = ServerContext::new(
-        clickward,
-        clickhouse_cli
-            .with_log(log.new(slog::o!("component" => "ClickhouseCli"))),
-        log.new(slog::o!("component" => "ServerContext")),
+    let clickhouse_cli = ClickhouseCli::new(
+        binary_path,
+        listen_address,
+        log.new(slog::o!("component" => "ClickhouseCli")),
     );
-
+    let context = ServerContext::new(clickward, clickhouse_cli);
     dropshot::ServerBuilder::new(
         http_entrypoints::clickhouse_admin_server_api(),
         Arc::new(context),
@@ -78,9 +79,10 @@ pub async fn start_server_admin_server(
 /// manages clickhouse replica servers.
 pub async fn start_keeper_admin_server(
     clickward: Clickward,
-    clickhouse_cli: ClickhouseCli,
+    binary_path: Utf8PathBuf,
+    listen_address: SocketAddrV6,
     server_config: Config,
-) -> Result<Server, StartError> {
+) -> Result<HttpServer<Arc<ServerContext>>, StartError> {
     let (drain, registration) = slog_dtrace::with_drain(
         server_config
             .log
@@ -99,15 +101,55 @@ pub async fn start_keeper_admin_server(
         }
     }
 
-    let context = ServerContext::new(
-        clickward,
-        clickhouse_cli
-            .with_log(log.new(slog::o!("component" => "ClickhouseCli"))),
-        log.new(slog::o!("component" => "ServerContext")),
+    let clickhouse_cli = ClickhouseCli::new(
+        binary_path,
+        listen_address,
+        log.new(slog::o!("component" => "ClickhouseCli")),
     );
-
+    let context = ServerContext::new(clickward, clickhouse_cli);
     dropshot::ServerBuilder::new(
         http_entrypoints::clickhouse_admin_keeper_api(),
+        Arc::new(context),
+        log.new(slog::o!("component" => "dropshot")),
+    )
+    .config(server_config.dropshot)
+    .start()
+    .map_err(StartError::InitializeHttpServer)
+}
+
+/// Start the dropshot server for `clickhouse-admin-single` which
+/// manages a single-node ClickHouse database.
+pub async fn start_single_admin_server(
+    binary_path: Utf8PathBuf,
+    listen_address: SocketAddrV6,
+    server_config: Config,
+) -> Result<HttpServer<Arc<SingleServerContext>>, StartError> {
+    let (drain, registration) = slog_dtrace::with_drain(
+        server_config
+            .log
+            .to_logger("clickhouse-admin-single")
+            .map_err(StartError::InitializeLogger)?,
+    );
+    let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
+    match registration {
+        ProbeRegistration::Success => {
+            debug!(log, "registered DTrace probes");
+        }
+        ProbeRegistration::Failed(err) => {
+            let err = StartError::RegisterDtraceProbes(err);
+            error!(log, "failed to register DTrace probes"; &err);
+            return Err(err);
+        }
+    }
+
+    let clickhouse_cli = ClickhouseCli::new(
+        binary_path,
+        listen_address,
+        log.new(slog::o!("component" => "ClickhouseCli")),
+    );
+    let context = SingleServerContext::new(clickhouse_cli);
+    dropshot::ServerBuilder::new(
+        http_entrypoints::clickhouse_admin_single_api(),
         Arc::new(context),
         log.new(slog::o!("component" => "dropshot")),
     )

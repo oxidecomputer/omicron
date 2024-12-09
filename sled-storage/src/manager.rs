@@ -856,7 +856,6 @@ impl StorageManager {
         let ledger_paths = self.all_omicron_dataset_ledgers().await;
         let maybe_ledger =
             Ledger::<DatasetsConfig>::new(&log, ledger_paths.clone()).await;
-        let had_old_ledger = maybe_ledger.is_some();
 
         let mut ledger = match maybe_ledger {
             Some(ledger) => {
@@ -915,14 +914,12 @@ impl StorageManager {
         let result = self.datasets_ensure_internal(&log, &config).await;
 
         let ledger_data = ledger.data_mut();
-
-        // Commit the ledger to storage if either:
-        // - No ledger exists in storage, or
-        // - The ledger has changed
-        if !had_old_ledger || *ledger_data != config {
-            *ledger_data = config;
-            ledger.commit().await?;
+        if *ledger_data == config {
+            return Ok(result);
         }
+        *ledger_data = config;
+        ledger.commit().await?;
+
         Ok(result)
     }
 
@@ -955,8 +952,8 @@ impl StorageManager {
             err: None,
         };
 
-        let mountpoint_path =
-            config.name.mountpoint(ZPOOL_MOUNTPOINT_ROOT.into());
+        let mountpoint_root = &self.resources.disks().mount_config().root;
+        let mountpoint_path = config.name.mountpoint(mountpoint_root);
         let details = DatasetCreationDetails {
             zoned: config.name.dataset().zoned(),
             mountpoint: Mountpoint::Path(mountpoint_path),
@@ -1145,7 +1142,6 @@ impl StorageManager {
             ledger_paths.clone(),
         )
         .await;
-        let had_old_ledger = maybe_ledger.is_some();
 
         let mut ledger = match maybe_ledger {
             Some(ledger) => {
@@ -1185,14 +1181,11 @@ impl StorageManager {
             self.omicron_physical_disks_ensure_internal(&log, &config).await?;
 
         let ledger_data = ledger.data_mut();
-
-        // Commit the ledger to storage if either:
-        // - No ledger exists in storage, or
-        // - The ledger has changed
-        if !had_old_ledger || *ledger_data != config {
-            *ledger_data = config;
-            ledger.commit().await?;
+        if *ledger_data == config {
+            return Ok(result);
         }
+        *ledger_data = config;
+        ledger.commit().await?;
 
         Ok(result)
     }

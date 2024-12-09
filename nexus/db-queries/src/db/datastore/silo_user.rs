@@ -21,7 +21,6 @@ use crate::db::model::UserBuiltin;
 use crate::db::model::UserProvisionType;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
-use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -92,9 +91,10 @@ impl DataStore {
         // TODO-robustness We might consider the RFD 192 "rcgen" pattern as well
         // so that people can't, say, login while we do this.
         let authz_silo_user_id = authz_silo_user.id();
-        self.pool_connection_authorized(opctx)
-            .await?
-            .transaction_async(|mut conn| async move {
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.transaction_retry_wrapper("silo_user_delete")
+            .transaction(&conn, |conn| async move {
                 // Delete the user record.
                 {
                     use db::schema::silo_user::dsl;
@@ -103,7 +103,7 @@ impl DataStore {
                         .filter(dsl::time_deleted.is_null())
                         .set(dsl::time_deleted.eq(Utc::now()))
                         .check_if_exists::<SiloUser>(authz_silo_user_id)
-                        .execute_and_check(&mut conn)
+                        .execute_and_check(&conn)
                         .await?;
                 }
 
@@ -112,7 +112,7 @@ impl DataStore {
                     use db::schema::console_session::dsl;
                     diesel::delete(dsl::console_session)
                         .filter(dsl::silo_user_id.eq(authz_silo_user_id))
-                        .execute_async(&mut conn)
+                        .execute_async(&conn)
                         .await?;
                 }
 
@@ -121,7 +121,7 @@ impl DataStore {
                     use db::schema::device_access_token::dsl;
                     diesel::delete(dsl::device_access_token)
                         .filter(dsl::silo_user_id.eq(authz_silo_user_id))
-                        .execute_async(&mut conn)
+                        .execute_async(&conn)
                         .await?;
                 }
 
@@ -130,7 +130,7 @@ impl DataStore {
                     use db::schema::silo_group_membership::dsl;
                     diesel::delete(dsl::silo_group_membership)
                         .filter(dsl::silo_user_id.eq(authz_silo_user_id))
-                        .execute_async(&mut conn)
+                        .execute_async(&conn)
                         .await?;
                 }
 
@@ -141,7 +141,7 @@ impl DataStore {
                         .filter(dsl::silo_user_id.eq(authz_silo_user_id))
                         .filter(dsl::time_deleted.is_null())
                         .set(dsl::time_deleted.eq(Utc::now()))
-                        .execute_async(&mut conn)
+                        .execute_async(&conn)
                         .await?;
                 }
 

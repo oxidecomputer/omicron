@@ -2,28 +2,36 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::context::ServerContext;
+use crate::context::{ServerContext, SingleServerContext};
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::{
     ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
-    KeeperConfig, KeeperConfigurableSettings, Lgif, RaftConfig, ReplicaConfig,
-    ServerConfigurableSettings,
+    KeeperConfig, KeeperConfigurableSettings, Lgif, MetricInfoPath, RaftConfig,
+    ReplicaConfig, ServerConfigurableSettings, SystemTimeSeries,
+    SystemTimeSeriesSettings, TimeSeriesSettingsQuery,
 };
 use dropshot::{
-    HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
+    ApiDescription, HttpError, HttpResponseCreated, HttpResponseOk,
+    HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
 };
 use illumos_utils::svcadm::Svcadm;
+use oximeter_db::OXIMETER_VERSION;
+use slog::info;
 use std::sync::Arc;
 
-type ClickhouseApiDescription = dropshot::ApiDescription<Arc<ServerContext>>;
-
-pub fn clickhouse_admin_server_api() -> ClickhouseApiDescription {
+pub fn clickhouse_admin_server_api() -> ApiDescription<Arc<ServerContext>> {
     clickhouse_admin_server_api_mod::api_description::<ClickhouseAdminServerImpl>()
         .expect("registered entrypoints")
 }
 
-pub fn clickhouse_admin_keeper_api() -> ClickhouseApiDescription {
+pub fn clickhouse_admin_keeper_api() -> ApiDescription<Arc<ServerContext>> {
     clickhouse_admin_keeper_api_mod::api_description::<ClickhouseAdminKeeperImpl>()
+        .expect("registered entrypoints")
+}
+
+pub fn clickhouse_admin_single_api() -> ApiDescription<Arc<SingleServerContext>>
+{
+    clickhouse_admin_single_api_mod::api_description::<ClickhouseAdminSingleImpl>()
         .expect("registered entrypoints")
 }
 
@@ -53,6 +61,21 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
     ) -> Result<HttpResponseOk<Vec<DistributedDdlQueue>>, HttpError> {
         let ctx = rqctx.context();
         let output = ctx.clickhouse_cli().distributed_ddl_queue().await?;
+        Ok(HttpResponseOk(output))
+    }
+
+    async fn system_timeseries_avg(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<MetricInfoPath>,
+        query_params: Query<TimeSeriesSettingsQuery>,
+    ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError> {
+        let ctx = rqctx.context();
+        let retrieval_settings = query_params.into_inner();
+        let metric_info = path_params.into_inner();
+        let settings =
+            SystemTimeSeriesSettings { retrieval_settings, metric_info };
+        let output =
+            ctx.clickhouse_cli().system_timeseries_avg(settings).await?;
         Ok(HttpResponseOk(output))
     }
 }
@@ -107,6 +130,70 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
     {
         let ctx = rqctx.context();
         let output = ctx.clickhouse_cli().keeper_cluster_membership().await?;
+        Ok(HttpResponseOk(output))
+    }
+}
+
+enum ClickhouseAdminSingleImpl {}
+
+impl ClickhouseAdminSingleApi for ClickhouseAdminSingleImpl {
+    type Context = Arc<SingleServerContext>;
+
+    async fn init_db(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let log = &rqctx.log;
+        let ctx = rqctx.context();
+
+        // Database initialization is idempotent, but not concurrency-safe.
+        // Use a mutex to serialize requests.
+        let lock = ctx.initialization_lock();
+        let _guard = lock.lock().await;
+
+        // Initialize the database only if it was not previously initialized.
+        // TODO: Migrate schema to newer version without wiping data.
+        let client = ctx.oximeter_client();
+        let version = client.read_latest_version().await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "can't read ClickHouse version: {e}",
+            ))
+        })?;
+        if version == 0 {
+            info!(
+                log,
+                "initializing single-node ClickHouse to version {OXIMETER_VERSION}"
+            );
+            ctx.oximeter_client()
+                .initialize_db_with_version(false, OXIMETER_VERSION)
+                .await
+                .map_err(|e| {
+                    HttpError::for_internal_error(format!(
+                        "can't initialize single-node ClickHouse \
+                         to version {OXIMETER_VERSION}: {e}",
+                    ))
+                })?;
+        } else {
+            info!(
+                log,
+                "skipping initialization of single-node ClickHouse at version {version}"
+            );
+        }
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn system_timeseries_avg(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<MetricInfoPath>,
+        query_params: Query<TimeSeriesSettingsQuery>,
+    ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError> {
+        let ctx = rqctx.context();
+        let retrieval_settings = query_params.into_inner();
+        let metric_info = path_params.into_inner();
+        let settings =
+            SystemTimeSeriesSettings { retrieval_settings, metric_info };
+        let output =
+            ctx.clickhouse_cli().system_timeseries_avg(settings).await?;
         Ok(HttpResponseOk(output))
     }
 }

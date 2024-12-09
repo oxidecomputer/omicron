@@ -8890,6 +8890,55 @@
         }
       }
     },
+    "/v1/timeseries/query": {
+      "post": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Run project-scoped timeseries query",
+        "description": "Queries are written in OxQL. Project must be specified by name or ID in URL query parameter. The OxQL query will only return timeseries data from the specified project.",
+        "operationId": "timeseries_query",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TimeseriesQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OxqlQueryResult"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/users": {
       "get": {
         "tags": [
@@ -13217,7 +13266,7 @@
         "type": "object",
         "properties": {
           "private_key": {
-            "description": "request signing private key (base64 encoded der file)",
+            "description": "request signing RSA private key in PKCS#1 format (base64 encoded der file)",
             "type": "string"
           },
           "public_cert": {

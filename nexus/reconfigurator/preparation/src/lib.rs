@@ -48,7 +48,6 @@ use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_common::policy::OXIMETER_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use slog::error;
@@ -234,7 +233,7 @@ impl PlanningInputFromDb<'_> {
                         serial: disk.serial.clone(),
                         model: disk.model.clone(),
                     },
-                    disk_id: PhysicalDiskUuid::from_untyped_uuid(disk.id()),
+                    disk_id: disk.id(),
                     policy: disk.disk_policy.into(),
                     state: disk.disk_state.into(),
                 };

@@ -28,6 +28,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use update_engine::merge_anyhow_list;
+use update_engine::StepWarning;
 
 mod clickhouse;
 mod cockroachdb;
@@ -177,6 +178,12 @@ pub async fn realize_blueprint_with_overrides(
     );
 
     register_deploy_clickhouse_cluster_nodes_step(
+        &engine.for_component(ExecutionComponent::Clickhouse),
+        &opctx,
+        blueprint,
+    );
+
+    register_deploy_clickhouse_single_node_step(
         &engine.for_component(ExecutionComponent::Clickhouse),
         &opctx,
         blueprint,
@@ -549,6 +556,31 @@ fn register_deploy_clickhouse_cluster_nodes_step<'a>(
         .register();
 }
 
+fn register_deploy_clickhouse_single_node_step<'a>(
+    registrar: &ComponentRegistrar<'_, 'a>,
+    opctx: &'a OpContext,
+    blueprint: &'a Blueprint,
+) {
+    registrar
+        .new_step(
+            ExecutionStepId::Ensure,
+            "Deploy single-node clickhouse cluster",
+            move |_cx| async move {
+                if let Err(e) = clickhouse::deploy_single_node(
+                    &opctx,
+                    &blueprint.blueprint_zones,
+                )
+                .await
+                {
+                    StepWarning::new((), e.to_string()).into()
+                } else {
+                    StepSuccess::new(()).into()
+                }
+            },
+        )
+        .register();
+}
+
 #[derive(Debug)]
 struct ReassignSagaOutput {
     needs_saga_recovery: bool,
@@ -685,6 +717,7 @@ mod tests {
     use nexus_db_model::SledUpdate;
     use nexus_db_model::Zpool;
     use omicron_common::api::external::Error;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
     use std::collections::BTreeSet;
     use uuid::Uuid;
 
@@ -744,7 +777,7 @@ mod tests {
                 continue;
             };
 
-            let physical_disk_id = Uuid::new_v4();
+            let physical_disk_id = PhysicalDiskUuid::new_v4();
             let pool_id = dataset.dataset.pool_name.id();
 
             let disk = PhysicalDisk::new(

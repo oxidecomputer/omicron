@@ -654,6 +654,7 @@ mod test {
             .expect("failed to re-assign sagas");
 
         // Fetch all the sagas and check their states.
+        #[allow(clippy::disallowed_methods)]
         let all_sagas: Vec<_> = datastore
             .pool_connection_for_tests()
             .await

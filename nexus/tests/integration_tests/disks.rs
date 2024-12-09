@@ -4,8 +4,6 @@
 
 //! Tests basic disk support in the API
 
-use crate::integration_tests::metrics::wait_for_producer;
-
 use super::instances::instance_wait_for_state;
 use super::metrics::{get_latest_silo_metric, query_for_metrics};
 use chrono::Utc;
@@ -32,6 +30,7 @@ use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_instance_with;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
+use nexus_test_utils::wait_for_producer;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
@@ -1827,7 +1826,10 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
             .await;
     assert!(measurements.items.is_empty());
 
-    oximeter.force_collect().await;
+    oximeter
+        .try_force_collect()
+        .await
+        .expect("Could not force oximeter collection");
     assert_eq!(
         get_latest_silo_metric(
             cptestctx,
@@ -1841,7 +1843,10 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     // Create an instance, attach the disk to it.
     create_instance_with_disk(client).await;
     wait_for_producer(&cptestctx.oximeter, disk.id()).await;
-    oximeter.force_collect().await;
+    oximeter
+        .try_force_collect()
+        .await
+        .expect("Could not force oximeter collection");
 
     for metric in &ALL_METRICS {
         let measurements = query_for_metrics(client, &metric_url(metric)).await;
@@ -1878,7 +1883,10 @@ async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
     wait_for_producer(&cptestctx.oximeter, disk.id()).await;
 
     let oximeter = &cptestctx.oximeter;
-    oximeter.force_collect().await;
+    oximeter
+        .try_force_collect()
+        .await
+        .expect("Could not force oximeter collection");
     for metric in &ALL_METRICS {
         let collection_url = format!(
             "/v1/disks/{}/metrics/{}?project={}",
@@ -2505,7 +2513,7 @@ async fn test_no_halt_disk_delete_one_region_on_expunged_agent(
     datastore
         .physical_disk_update_policy(
             &opctx,
-            db_zpool.physical_disk_id,
+            db_zpool.physical_disk_id.into(),
             PhysicalDiskPolicy::Expunged,
         )
         .await

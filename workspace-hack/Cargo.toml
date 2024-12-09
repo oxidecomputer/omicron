@@ -63,7 +63,6 @@ generic-array = { version = "0.14.7", default-features = false, features = ["mor
 getrandom = { version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.15.0" }
-heck = { version = "0.4.1" }
 hex = { version = "0.4.3", features = ["serde"] }
 hickory-proto = { version = "0.24.1", features = ["text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
@@ -94,7 +93,7 @@ pkcs8 = { version = "0.10.2", default-features = false, features = ["encryption"
 postgres-types = { version = "0.2.8", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 predicates = { version = "3.1.2" }
 proc-macro2 = { version = "1.0.89" }
-qorb = { version = "0.2.0", features = ["qtop"] }
+qorb = { version = "0.2.1", features = ["qtop"] }
 quote = { version = "1.0.37" }
 rand = { version = "0.8.5", features = ["small_rng"] }
 regex = { version = "1.11.1" }
@@ -184,7 +183,6 @@ generic-array = { version = "0.14.7", default-features = false, features = ["mor
 getrandom = { version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.15.0" }
-heck = { version = "0.4.1" }
 hex = { version = "0.4.3", features = ["serde"] }
 hickory-proto = { version = "0.24.1", features = ["text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
@@ -215,7 +213,7 @@ pkcs8 = { version = "0.10.2", default-features = false, features = ["encryption"
 postgres-types = { version = "0.2.8", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 predicates = { version = "3.1.2" }
 proc-macro2 = { version = "1.0.89" }
-qorb = { version = "0.2.0", features = ["qtop"] }
+qorb = { version = "0.2.1", features = ["qtop"] }
 quote = { version = "1.0.37" }
 rand = { version = "0.8.5", features = ["small_rng"] }
 regex = { version = "1.11.1" }

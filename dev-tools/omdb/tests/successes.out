@@ -1224,8 +1224,49 @@ stdout:
 blueprint  ......<REDACTED_BLUEPRINT_ID>.......
 parent:    <none>
 
-!..........<REDACTED_UUID>...........
-WARNING: Zones exist without physical disks!
+  sled: ..........<REDACTED_UUID>........... (active)
+
+    physical disks at generation 2:
+    ---------------------------------------------------
+    vendor        model              serial            
+    ---------------------------------------------------
+    nexus-tests   nexus-test-model   nexus-test-disk-10
+    nexus-tests   nexus-test-model   nexus-test-disk-11
+    nexus-tests   nexus-test-model   nexus-test-disk-12
+    nexus-tests   nexus-test-model   nexus-test-disk-13
+    nexus-tests   nexus-test-model   nexus-test-disk-14
+    nexus-tests   nexus-test-model   nexus-test-disk-15
+    nexus-tests   nexus-test-model   nexus-test-disk-16
+    nexus-tests   nexus-test-model   nexus-test-disk-17
+    nexus-tests   nexus-test-model   nexus-test-disk-18
+    nexus-tests   nexus-test-model   nexus-test-disk-19
+
+
+    omicron zones at generation 2:
+    -----------------------------------------------
+    zone type   zone id   disposition   underlay IP
+    -----------------------------------------------
+
+
+
+  sled: ..........<REDACTED_UUID>........... (active)
+
+    physical disks at generation 2:
+    --------------------------------------------------
+    vendor        model              serial           
+    --------------------------------------------------
+    nexus-tests   nexus-test-model   nexus-test-disk-0
+    nexus-tests   nexus-test-model   nexus-test-disk-1
+    nexus-tests   nexus-test-model   nexus-test-disk-2
+    nexus-tests   nexus-test-model   nexus-test-disk-3
+    nexus-tests   nexus-test-model   nexus-test-disk-4
+    nexus-tests   nexus-test-model   nexus-test-disk-5
+    nexus-tests   nexus-test-model   nexus-test-disk-6
+    nexus-tests   nexus-test-model   nexus-test-disk-7
+    nexus-tests   nexus-test-model   nexus-test-disk-8
+    nexus-tests   nexus-test-model   nexus-test-disk-9
+
+
     omicron zones at generation 2:
     ---------------------------------------------------------------------------------------
     zone type         zone id                                disposition   underlay IP     
@@ -1236,7 +1277,6 @@ WARNING: Zones exist without physical disks!
     external_dns      ..........<REDACTED_UUID>...........   in service    ::1             
     internal_dns      ..........<REDACTED_UUID>...........   in service    ::1             
     nexus             ..........<REDACTED_UUID>...........   in service    ::ffff:127.0.0.1
-
 
 
  COCKROACHDB SETTINGS:
@@ -1262,8 +1302,49 @@ stdout:
 blueprint  ......<REDACTED_BLUEPRINT_ID>.......
 parent:    <none>
 
-!..........<REDACTED_UUID>...........
-WARNING: Zones exist without physical disks!
+  sled: ..........<REDACTED_UUID>........... (active)
+
+    physical disks at generation 2:
+    ---------------------------------------------------
+    vendor        model              serial            
+    ---------------------------------------------------
+    nexus-tests   nexus-test-model   nexus-test-disk-10
+    nexus-tests   nexus-test-model   nexus-test-disk-11
+    nexus-tests   nexus-test-model   nexus-test-disk-12
+    nexus-tests   nexus-test-model   nexus-test-disk-13
+    nexus-tests   nexus-test-model   nexus-test-disk-14
+    nexus-tests   nexus-test-model   nexus-test-disk-15
+    nexus-tests   nexus-test-model   nexus-test-disk-16
+    nexus-tests   nexus-test-model   nexus-test-disk-17
+    nexus-tests   nexus-test-model   nexus-test-disk-18
+    nexus-tests   nexus-test-model   nexus-test-disk-19
+
+
+    omicron zones at generation 2:
+    -----------------------------------------------
+    zone type   zone id   disposition   underlay IP
+    -----------------------------------------------
+
+
+
+  sled: ..........<REDACTED_UUID>........... (active)
+
+    physical disks at generation 2:
+    --------------------------------------------------
+    vendor        model              serial           
+    --------------------------------------------------
+    nexus-tests   nexus-test-model   nexus-test-disk-0
+    nexus-tests   nexus-test-model   nexus-test-disk-1
+    nexus-tests   nexus-test-model   nexus-test-disk-2
+    nexus-tests   nexus-test-model   nexus-test-disk-3
+    nexus-tests   nexus-test-model   nexus-test-disk-4
+    nexus-tests   nexus-test-model   nexus-test-disk-5
+    nexus-tests   nexus-test-model   nexus-test-disk-6
+    nexus-tests   nexus-test-model   nexus-test-disk-7
+    nexus-tests   nexus-test-model   nexus-test-disk-8
+    nexus-tests   nexus-test-model   nexus-test-disk-9
+
+
     omicron zones at generation 2:
     ---------------------------------------------------------------------------------------
     zone type         zone id                                disposition   underlay IP     
@@ -1274,7 +1355,6 @@ WARNING: Zones exist without physical disks!
     external_dns      ..........<REDACTED_UUID>...........   in service    ::1             
     internal_dns      ..........<REDACTED_UUID>...........   in service    ::1             
     nexus             ..........<REDACTED_UUID>...........   in service    ::ffff:127.0.0.1
-
 
 
  COCKROACHDB SETTINGS:
@@ -1304,7 +1384,51 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
 
   sled ..........<REDACTED_UUID>........... (active):
 
+    physical disks at generation 2:
+    ---------------------------------------------------
+    vendor        model              serial            
+    ---------------------------------------------------
+    nexus-tests   nexus-test-model   nexus-test-disk-10
+    nexus-tests   nexus-test-model   nexus-test-disk-11
+    nexus-tests   nexus-test-model   nexus-test-disk-12
+    nexus-tests   nexus-test-model   nexus-test-disk-13
+    nexus-tests   nexus-test-model   nexus-test-disk-14
+    nexus-tests   nexus-test-model   nexus-test-disk-15
+    nexus-tests   nexus-test-model   nexus-test-disk-16
+    nexus-tests   nexus-test-model   nexus-test-disk-17
+    nexus-tests   nexus-test-model   nexus-test-disk-18
+    nexus-tests   nexus-test-model   nexus-test-disk-19
+
+
   sled ..........<REDACTED_UUID>........... (active):
+
+    physical disks at generation 2:
+    --------------------------------------------------
+    vendor        model              serial           
+    --------------------------------------------------
+    nexus-tests   nexus-test-model   nexus-test-disk-0
+    nexus-tests   nexus-test-model   nexus-test-disk-1
+    nexus-tests   nexus-test-model   nexus-test-disk-2
+    nexus-tests   nexus-test-model   nexus-test-disk-3
+    nexus-tests   nexus-test-model   nexus-test-disk-4
+    nexus-tests   nexus-test-model   nexus-test-disk-5
+    nexus-tests   nexus-test-model   nexus-test-disk-6
+    nexus-tests   nexus-test-model   nexus-test-disk-7
+    nexus-tests   nexus-test-model   nexus-test-disk-8
+    nexus-tests   nexus-test-model   nexus-test-disk-9
+
+
+    datasets at generation 2:
+    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    dataset name                                                                                                   dataset uuid                           quota   reservation   compression
+    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_clickhouse_..........<REDACTED_UUID>...........        ..........<REDACTED_UUID>...........   none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_cockroachdb_..........<REDACTED_UUID>...........       ..........<REDACTED_UUID>...........   none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_crucible_pantry_..........<REDACTED_UUID>...........   ..........<REDACTED_UUID>...........   none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   none    none          off        
+
 
     omicron zones at generation 2:
     ---------------------------------------------------------------------------------------

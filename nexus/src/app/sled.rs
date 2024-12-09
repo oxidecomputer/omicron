@@ -25,6 +25,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_client::Client as SledAgentClient;
 use std::net::SocketAddrV6;
@@ -208,8 +209,10 @@ impl super::Nexus {
         opctx: &'a OpContext,
         disk_selector: &params::PhysicalDiskPath,
     ) -> Result<lookup::PhysicalDisk<'a>, Error> {
-        Ok(lookup::LookupPath::new(&opctx, &self.db_datastore)
-            .physical_disk(disk_selector.disk_id))
+        // XXX how to do typed UUID as part of dropshot path?
+        Ok(lookup::LookupPath::new(&opctx, &self.db_datastore).physical_disk(
+            PhysicalDiskUuid::from_untyped_uuid(disk_selector.disk_id),
+        ))
     }
 
     pub(crate) async fn sled_list_physical_disks(

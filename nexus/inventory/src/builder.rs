@@ -543,6 +543,8 @@ impl CollectionBuilder {
                 .into_iter()
                 .map(|d| d.into())
                 .collect(),
+            omicron_physical_disks_generation: inventory
+                .omicron_physical_disks_generation,
         };
 
         if let Some(previous) = self.sleds.get(&sled_id) {
