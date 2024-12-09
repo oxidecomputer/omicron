@@ -241,11 +241,34 @@ fn avg_value_as_unit(
 
 #[derive(Debug)]
 struct YAxisValues {
-    lower_label_value: f64,
-    mid_label_value: f64,
-    upper_label_value: f64,
-    lower_bound_value: f64,
-    upper_bound_value: f64,
+    lower_label: f64,
+    mid_label: f64,
+    upper_label: f64,
+    lower_bound: f64,
+    upper_bound: f64,
+}
+
+impl YAxisValues {
+    fn new(unit: Unit, raw_data: &Vec<SystemTimeSeries>) -> Result<Self> {
+        // Retrieve values only to create Y axis bounds and labels
+        let values = TimeSeriesValues::new(&raw_data);
+        let max_value = values.max()?;
+        let min_value = values.min()?;
+
+        // In case there is very little variance in the y axis, we will be adding some
+        // padding to the bounds and labels so we don't end up with repeated labels or
+        // straight lines too close to the upper bounds.
+        let upper_bound = padded_max_value_raw(unit, max_value)?;
+        let upper_label =
+            padded_max_value_as_unit(unit, max_value)?;
+        let lower_bound = padded_min_value_raw(unit, min_value)?;
+        let lower_label =
+            padded_min_value_as_unit(unit, min_value)?;
+        let mid_label =
+            avg_value_as_unit(unit, min_value, max_value)?;
+        
+        Ok(Self { lower_label, mid_label, upper_label, lower_bound, upper_bound })
+    }
 }
 
 #[derive(Debug)]
@@ -286,78 +309,19 @@ impl TimeSeriesTimestamps {
 }
 
 #[derive(Debug)]
-struct DataPoints {
-    data: Vec<(f64, f64)>,
-}
-
-impl DataPoints {
-    fn new(timeseries: &Vec<SystemTimeSeries>) -> Self {
-        // These values will be used to render the graph and ratatui
-        // requires them to be f64
-        let data: Vec<(f64, f64)> = timeseries
-            .iter()
-            .map(|ts| {
-                (
-                    ts.time.trim_matches('"').parse::<f64>().unwrap_or_else(
-                        |_| {
-                            panic!(
-                                "could not parse timestamp {} into f64",
-                                ts.time
-                            )
-                        },
-                    ),
-                    ts.value,
-                )
-            })
-            .collect();
-        Self { data }
-    }
-}
-
-#[derive(Debug)]
-struct ChartData {
-    metadata: ChartMetadata,
-    data_points: DataPoints,
+struct XAxisTimestamps {
     mid_time_label: DateTime<Utc>,
     start_time_label: DateTime<Utc>,
     end_time_label: DateTime<Utc>,
     start_time_bound: f64,
     end_time_bound: f64,
-    lower_label_value: f64,
-    mid_label_value: f64,
-    upper_label_value: f64,
-    lower_bound_value: f64,
-    upper_bound_value: f64,
 }
 
-impl ChartData {
-    fn new(
-        raw_data: Vec<SystemTimeSeries>,
-        metadata: ChartMetadata,
-    ) -> Result<Self> {
-        // Retrieve datapoints that will be charted
-        let data_points = DataPoints::new(&raw_data);
-
-        // Retrieve values only to create chart bounds and labels
-        let values = TimeSeriesValues::new(&raw_data);
-        let max_value = values.max()?;
-        let min_value = values.min()?;
-
-        // In case there is very little variance in the y axis, we will be adding some
-        // padding to the bounds and labels so we don't end up with repeated labels or
-        // straight lines too close to the upper bounds.
-        let upper_bound_value = padded_max_value_raw(metadata.unit, max_value)?;
-        let upper_label_value =
-            padded_max_value_as_unit(metadata.unit, max_value)?;
-        let lower_bound_value = padded_min_value_raw(metadata.unit, min_value)?;
-        let lower_label_value =
-            padded_min_value_as_unit(metadata.unit, min_value)?;
-        let mid_label_value =
-            avg_value_as_unit(metadata.unit, min_value, max_value)?;
-
-        // Retrieve values only to create chart bounds and labels
+impl XAxisTimestamps {
+    fn new(raw_data: &Vec<SystemTimeSeries>) -> Result<Self> {
+        // Retrieve timestamps only to create chart bounds and labels
         let timestamps = TimeSeriesTimestamps::new(&raw_data);
-        // These timestamps will be used to calculate maximum and minimum values in order
+        // These timestamps will be used to calculate start and end timestamps in order
         // to create labels and set bounds for the X axis. As above, some of these conversions
         // may lose precision, but it's OK as these values are only used to make sure the
         // datapoints fit within the graph nicely.
@@ -392,19 +356,66 @@ impl ChartData {
         let start_time_bound = *start_time as f64;
         let end_time_bound = *end_time as f64;
 
+        Ok(Self { mid_time_label, start_time_label, end_time_label, start_time_bound, end_time_bound })
+    }
+}
+
+#[derive(Debug)]
+struct DataPoints {
+    data: Vec<(f64, f64)>,
+}
+
+impl DataPoints {
+    fn new(timeseries: &Vec<SystemTimeSeries>) -> Self {
+        // These values will be used to render the graph and ratatui
+        // requires them to be f64
+        let data: Vec<(f64, f64)> = timeseries
+            .iter()
+            .map(|ts| {
+                (
+                    ts.time.trim_matches('"').parse::<f64>().unwrap_or_else(
+                        |_| {
+                            panic!(
+                                "could not parse timestamp {} into f64",
+                                ts.time
+                            )
+                        },
+                    ),
+                    ts.value,
+                )
+            })
+            .collect();
+        Self { data }
+    }
+}
+
+#[derive(Debug)]
+struct ChartData {
+    metadata: ChartMetadata,
+    data_points: DataPoints,
+    x_axis_timestamps: XAxisTimestamps,
+    y_axis_values: YAxisValues,
+}
+
+impl ChartData {
+    fn new(
+        raw_data: Vec<SystemTimeSeries>,
+        metadata: ChartMetadata,
+    ) -> Result<Self> {
+        // Retrieve datapoints that will be charted
+        let data_points = DataPoints::new(&raw_data);
+
+        // Retrieve X axis bounds and labels
+        let x_axis_timestamps = XAxisTimestamps::new(&raw_data)?;
+
+        // Retrieve X axis bounds and labels
+        let y_axis_values = YAxisValues::new(metadata.unit, &raw_data)?;
+
         Ok(Self {
             metadata,
             data_points,
-            mid_time_label,
-            start_time_label,
-            end_time_label,
-            start_time_bound,
-            end_time_bound,
-            lower_label_value,
-            mid_label_value,
-            upper_label_value,
-            lower_bound_value,
-            upper_bound_value,
+            x_axis_timestamps,
+            y_axis_values,
         })
     }
 
@@ -427,34 +438,34 @@ impl ChartData {
             .x_axis(
                 Axis::default()
                     .style(Style::default().gray())
-                    .bounds([self.start_time_bound, self.end_time_bound])
+                    .bounds([self.x_axis_timestamps.start_time_bound, self.x_axis_timestamps.end_time_bound])
                     .labels([
                         // TODO: Remove start time and print the interval at the top of the
                         // dashboard
-                        format!("{}", self.start_time_label).bold(),
-                        format!("{}", self.mid_time_label).bold(),
-                        format!("{}", self.end_time_label).bold(),
+                        format!("{}", self.x_axis_timestamps.start_time_label).bold(),
+                        format!("{}", self.x_axis_timestamps.mid_time_label).bold(),
+                        format!("{}", self.x_axis_timestamps.end_time_label).bold(),
                     ]),
             )
             .y_axis(
                 Axis::default()
                     .style(Style::default().gray())
-                    .bounds([self.lower_bound_value, self.upper_bound_value])
+                    .bounds([self.y_axis_values.lower_bound, self.y_axis_values.upper_bound])
                     .labels([
                         format!(
                             "{} {}",
-                            self.lower_label_value, self.metadata.unit
+                            self.y_axis_values.lower_label, self.metadata.unit
                         )
                         .bold(),
                         // TODO: Only show fractional number if not .0 ?
                         format!(
                             "{:.1} {}",
-                            self.mid_label_value, self.metadata.unit
+                            self.y_axis_values.mid_label, self.metadata.unit
                         )
                         .bold(),
                         format!(
                             "{} {}",
-                            self.upper_label_value, self.metadata.unit
+                            self.y_axis_values.upper_label, self.metadata.unit
                         )
                         .bold(),
                     ]),
