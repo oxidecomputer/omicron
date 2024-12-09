@@ -589,6 +589,10 @@ impl CollectionTask {
     }
 
     /// Run the main loop of this collection task.
+    ///
+    /// NOTE: This returns a `TaskAction`, but the value isn't used. It returns
+    /// that value to simplify control-flow internally, which uses `?` to
+    /// propagate the `TaskAction::Break` variant when we need to exit.
     async fn run(mut self) -> TaskAction {
         loop {
             tokio::select! {
