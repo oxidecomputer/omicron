@@ -429,8 +429,10 @@ mod tests {
     use super::*;
     use nexus_types::deployment::BlueprintDatasetFilter;
     use omicron_uuid_kinds::GenericUuid;
+    use proptest::prelude::*;
     use std::collections::BTreeSet;
     use test_strategy::proptest;
+    use test_strategy::Arbitrary;
     use uuid::Uuid;
 
     // Helper functions to "tag" an iterator (i.e., turn it into an iterator of
@@ -496,39 +498,98 @@ mod tests {
         BlueprintDatasetsConfig { generation, datasets }
     }
 
+    #[derive(Debug, Arbitrary)]
+    struct DatasetKindSet {
+        #[strategy(prop::collection::btree_set(any::<DatasetKind>(), 0..16))]
+        kinds: BTreeSet<DatasetKind>,
+    }
+
+    #[derive(Debug, Arbitrary)]
+    struct ZpoolsWithInServiceDatasets {
+        #[strategy(prop::collection::vec(any::<DatasetKindSet>(), 0..10))]
+        by_zpool: Vec<DatasetKindSet>,
+    }
+
+    impl ZpoolsWithInServiceDatasets {
+        fn into_config(self) -> BlueprintDatasetsConfig {
+            build_test_config(
+                self.by_zpool
+                    .into_iter()
+                    .map(|kinds| all_in_service(kinds.kinds)),
+            )
+        }
+    }
+
+    #[derive(Debug, Arbitrary)]
+    struct DatasetKindVec {
+        #[strategy(prop::collection::vec(any::<DatasetKind>(), 0..32))]
+        kinds: Vec<DatasetKind>,
+    }
+
+    #[derive(Debug, Arbitrary)]
+    struct ZpoolsWithExpungedDatasets {
+        #[strategy(prop::collection::vec(any::<DatasetKindVec>(), 0..10))]
+        by_zpool: Vec<DatasetKindVec>,
+    }
+
+    impl ZpoolsWithExpungedDatasets {
+        fn into_config(self) -> BlueprintDatasetsConfig {
+            build_test_config(
+                self.by_zpool
+                    .into_iter()
+                    .map(|kinds| all_expunged(kinds.kinds)),
+            )
+        }
+    }
+
+    // Proptest helper to construct zpools with both in-service datasets (the
+    // first element of the tuple: a set of kinds) and expunged datasets (the
+    // second element of the tuple: a vec of kinds).
+    #[derive(Debug, Arbitrary)]
+    struct ZpoolsWithMixedDatasets {
+        #[strategy(prop::collection::vec(any::<(DatasetKindSet, DatasetKindVec)>(), 0..10))]
+        by_zpool: Vec<(DatasetKindSet, DatasetKindVec)>,
+    }
+
+    impl ZpoolsWithMixedDatasets {
+        fn into_config(self) -> BlueprintDatasetsConfig {
+            build_test_config(self.by_zpool.into_iter().map(
+                |(in_service, expunged)| {
+                    all_in_service(in_service.kinds)
+                        .chain(all_expunged(expunged.kinds))
+                },
+            ))
+        }
+    }
+
     #[proptest]
     fn proptest_create_editor_with_in_service_datasets(
-        // This test uses BTreeSet to maintain the invariant that there is at
-        // most one dataset of a given kind on any one zpool.
-        by_zpool: Vec<BTreeSet<DatasetKind>>,
+        by_zpool: ZpoolsWithInServiceDatasets,
     ) {
-        let config =
-            build_test_config(by_zpool.into_iter().map(all_in_service));
-        _ = DatasetsEditor::new(config, DatasetIdsBackfillFromDb::empty())
-            .expect("built editor");
+        _ = DatasetsEditor::new(
+            by_zpool.into_config(),
+            DatasetIdsBackfillFromDb::empty(),
+        )
+        .expect("built editor");
     }
 
     #[proptest]
     fn proptest_create_editor_with_expunged_datasets(
-        // In contrast to the previous test, this test uses Vec as there may be
-        // multiple expunged datasets on a given zpool with the same kind.
-        by_zpool: Vec<Vec<DatasetKind>>,
+        by_zpool: ZpoolsWithExpungedDatasets,
     ) {
-        let config = build_test_config(by_zpool.into_iter().map(all_expunged));
-        _ = DatasetsEditor::new(config, DatasetIdsBackfillFromDb::empty())
-            .expect("built editor");
+        _ = DatasetsEditor::new(
+            by_zpool.into_config(),
+            DatasetIdsBackfillFromDb::empty(),
+        )
+        .expect("built editor");
     }
 
     #[proptest]
     fn proptest_add_same_kind_after_expunging(
-        initial: Vec<(BTreeSet<DatasetKind>, Vec<DatasetKind>)>,
+        initial: ZpoolsWithMixedDatasets,
         rng_seed: u32,
     ) {
-        let config = build_test_config(initial.into_iter().map(
-            |(in_service, expunged)| {
-                all_in_service(in_service).chain(all_expunged(expunged))
-            },
-        ));
+        let config = initial.into_config();
         let mut editor = DatasetsEditor::new(
             config.clone(),
             DatasetIdsBackfillFromDb::empty(),
@@ -611,14 +672,10 @@ mod tests {
 
     #[proptest]
     fn proptest_add_same_kind_after_expunging_by_zpool(
-        initial: Vec<(BTreeSet<DatasetKind>, Vec<DatasetKind>)>,
+        initial: ZpoolsWithMixedDatasets,
         rng_seed: u32,
     ) {
-        let config = build_test_config(initial.into_iter().map(
-            |(in_service, expunged)| {
-                all_in_service(in_service).chain(all_expunged(expunged))
-            },
-        ));
+        let config = initial.into_config();
         let all_zpools = config
             .datasets
             .values()
