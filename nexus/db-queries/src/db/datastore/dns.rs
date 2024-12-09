@@ -19,6 +19,7 @@ use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
 use crate::db::pool::DbConnection;
 use crate::db::TransactionError;
+use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
@@ -363,40 +364,49 @@ impl DataStore {
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::DNS_CONFIG).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        conn.transaction_async(|c| async move {
-            let zones = self
-                .dns_zones_list_all_on_connection(opctx, &c, update.dns_group)
-                .await?;
-            // This looks like a time-of-check-to-time-of-use race, but this
-            // approach works because we're inside a transaction and the
-            // isolation level is SERIALIZABLE.
-            let version = self
-                .dns_group_latest_version_conn(opctx, &c, update.dns_group)
-                .await?;
-            if version.version != old_version {
-                return Err(TransactionError::CustomError(Error::conflict(
-                    format!(
-                        "expected current DNS version to be {}, found {}",
-                        *old_version, *version.version,
-                    ),
-                )));
-            }
 
-            self.dns_write_version_internal(
-                &c,
-                update,
-                zones,
-                Generation(old_version.next()),
-            )
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper("dns_update_from_version")
+            .transaction(&conn, |c| {
+                let err = err.clone();
+                let update = update.clone();
+                async move {
+                    let zones = self
+                        .dns_zones_list_all_on_connection(opctx, &c, update.dns_group)
+                        .await
+                        .map_err(|txn_error| txn_error.into_diesel(&err))?;
+                    // This looks like a time-of-check-to-time-of-use race, but this
+                    // approach works because we're inside a transaction and the
+                    // isolation level is SERIALIZABLE.
+                    let version = self
+                        .dns_group_latest_version_conn(opctx, &c, update.dns_group)
+                        .await
+                        .map_err(|txn_error| txn_error.into_diesel(&err))?;
+                    if version.version != old_version {
+                        return Err(err.bail(TransactionError::CustomError(Error::conflict(
+                            format!(
+                                "expected current DNS version to be {}, found {}",
+                                *old_version, *version.version,
+                            ),
+                        ))));
+                    }
+
+                    self.dns_write_version_internal(
+                        &c,
+                        update,
+                        zones,
+                        Generation(old_version.next()),
+                    )
+                    .await
+                    .map_err(|txn_error| txn_error.into_diesel(&err))
+                }
+            })
             .await
-        })
-        .await
-        .map_err(|e| match e {
-            TransactionError::CustomError(e) => e,
-            TransactionError::Database(e) => {
-                public_error_from_diesel(e, ErrorHandler::Server)
-            }
-        })
+            .map_err(|e| match err.take() {
+                Some(err) => err.into(),
+                None => public_error_from_diesel(e, ErrorHandler::Server),
+            })
     }
 
     /// Update the configuration of a DNS zone as specified in `update`
@@ -441,6 +451,9 @@ impl DataStore {
             .dns_zones_list_all_on_connection(opctx, conn, update.dns_group)
             .await?;
 
+        // This method is used in nested transactions, which are not supported
+        // with retryable transactions.
+        #[allow(clippy::disallowed_methods)]
         conn.transaction_async(|c| async move {
             let version = self
                 .dns_group_latest_version_conn(opctx, conn, update.dns_group)
@@ -1724,6 +1737,8 @@ mod test {
 
             let cds = datastore.clone();
             let copctx = opctx.child(std::collections::BTreeMap::new());
+
+            #[allow(clippy::disallowed_methods)]
             let mut fut = conn1
                 .transaction_async(|c1| async move {
                     cds.dns_update_incremental(&copctx, &c1, update1)

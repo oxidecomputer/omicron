@@ -67,10 +67,11 @@ impl DataStore {
 
         use db::schema::silo::dsl;
         use db::schema::silo_quotas::dsl as quotas_dsl;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
         let count = self
-            .pool_connection_authorized(opctx)
-            .await?
-            .transaction_async(|conn| async move {
+            .transaction_retry_wrapper("load_builtin_silos")
+            .transaction(&conn, |conn| async move {
                 diesel::insert_into(quotas_dsl::silo_quotas)
                     .values(SiloQuotas::arbitrarily_high_default(
                         DEFAULT_SILO.id(),
@@ -78,19 +79,17 @@ impl DataStore {
                     .on_conflict(quotas_dsl::silo_id)
                     .do_nothing()
                     .execute_async(&conn)
-                    .await
-                    .map_err(TransactionError::CustomError)
-                    .unwrap();
-                diesel::insert_into(dsl::silo)
+                    .await?;
+                let count = diesel::insert_into(dsl::silo)
                     .values([&*DEFAULT_SILO, &*INTERNAL_SILO])
                     .on_conflict(dsl::id)
                     .do_nothing()
                     .execute_async(&conn)
-                    .await
-                    .map_err(TransactionError::CustomError)
+                    .await?;
+                Ok(count)
             })
             .await
-            .unwrap();
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         info!(opctx.log, "created {} built-in silos", count);
 
@@ -226,6 +225,9 @@ impl DataStore {
                 None
             };
 
+        // This method uses nested transactions, which are not supported
+        // with retryable transactions.
+        #[allow(clippy::disallowed_methods)]
         let silo = conn
             .transaction_async(|conn| async move {
                 let silo = silo_create_query
@@ -424,6 +426,10 @@ impl DataStore {
         let now = Utc::now();
 
         type TxnError = TransactionError<Error>;
+
+        // This method uses nested transactions, which are not supported
+        // with retryable transactions.
+        #[allow(clippy::disallowed_methods)]
         conn.transaction_async(|conn| async move {
             let updated_rows = diesel::update(silo::dsl::silo)
                 .filter(silo::dsl::time_deleted.is_null())
