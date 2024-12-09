@@ -68,16 +68,59 @@ impl Unit {
         };
         Ok(bytes)
     }
+    
+    // TODO: Should all of these be f64?
 
-    // TODO: Probably needs a better name
-    fn upper_bound_value(&self, max_value_bytes: &f64) -> Result<f64> {
-        let upper_bound_value = max_value_bytes + self.in_bytes_f64()?;
-        Ok(upper_bound_value)
+    // The result of the following functions will not be precise, but it doesn't
+    // matter since we just want an estimate for the chart's labels and bounds.
+    // all we need are values that are larger than the maximum value in the
+    // timeseries or smaller than the minimum value in the timeseries.
+
+    /// Returns the sum of the maximum raw value and 1 or the equivalent of 1
+    /// MiB or GiB in bytes.
+    fn padded_max_value_raw(&self, max_value_raw: &f64) -> Result<f64> {
+        let ceil_value = max_value_raw.ceil();
+        let padded_value = match self {
+            Unit::Count => ceil_value + 1.0,
+            Unit::Gibibyte | Unit::Mebibyte => {
+                ceil_value + self.in_bytes_f64()?
+            }
+        };
+        Ok(padded_value)
     }
 
-    // TODO: Needs better naming too
-    fn upper_label_value(&self, max_value_bytes: &f64) -> Result<u64> {
-        let ceil_value = max_value_bytes.ceil() as u64;
+    /// Returns the difference of the minimum raw value and 1 or the equivalent
+    /// of 1 in MiB or GiB in bytes. If the minimum is equal to or less than 1.0,
+    /// or the equivalent of 1 once converted from bytes to the expected unit
+    /// (e.g. less than or equal to 1048576 if we're using MiB) we'll use 0.0 as
+    /// the minimum value as we don't expect any of our charts
+    /// to require negative numbers for now.
+    fn padded_min_value_raw(&self, min_value_raw: &f64) -> Result<f64> {
+        let floor_value = min_value_raw.floor();
+        let padded_value = match self {
+            Unit::Count => {
+                if floor_value <= 1.0 {
+                    0.0
+                } else {
+                    floor_value - 1.0
+                }
+            }
+            Unit::Gibibyte | Unit::Mebibyte => {
+                let bytes = self.in_bytes_f64()?;
+                if floor_value <= bytes {
+                    0.0
+                } else {
+                    floor_value - bytes
+                }
+            }
+        };
+        Ok(padded_value)
+    }
+
+    /// Returns the sum of the max raw value and 1 or the equivalent of 1
+    /// Mib or Gib.
+    fn padded_max_value_unit(&self, max_value_raw: &f64) -> Result<u64> {
+        let ceil_value = max_value_raw.ceil() as u64;
         let label_value = match self {
             Unit::Count => ceil_value + 1,
             Unit::Gibibyte | Unit::Mebibyte => {
@@ -85,6 +128,45 @@ impl Unit {
             }
         };
         Ok(label_value)
+    }
+
+    /// Returns the difference of the minimum raw value and 1 or the equivalent
+    /// of 1 in MiB or GiB in bytes. If the minimum is less than 1, we'll use
+    /// 0 as the minimum value as we don't expect any of our charts to require
+    /// negative numbers for now.
+    fn padded_min_value_unit(&self, min_value_raw: &f64) -> Result<u64> {
+        let floor_value = min_value_raw.floor() as u64;
+        let padded_value = match self {
+            Unit::Count => {
+                if floor_value <= 1 {
+                    0
+                } else {
+                    floor_value - 1
+                }
+            }
+            Unit::Gibibyte | Unit::Mebibyte => {
+                let value_as_unit = floor_value as u64 / self.in_bytes_u64()?;
+                if value_as_unit <= 1 {
+                    0
+                } else {
+                    value_as_unit - 1
+                }
+            }
+        };
+        Ok(padded_value)
+    }
+
+    fn avg_value_unit(
+        &self,
+        min_value_raw: &f64,
+        max_value_raw: &f64,
+    ) -> Result<u64> {
+        let avg = ((min_value_raw + max_value_raw) / 2.0).round() as u64;
+        let avg_value = match self {
+            Unit::Count => avg,
+            Unit::Gibibyte | Unit::Mebibyte => avg / self.in_bytes_u64()?,
+        };
+        Ok(avg_value)
     }
 }
 
@@ -196,30 +278,20 @@ impl ChartData {
             bail!("no values have been retrieved")
         };
 
-        // TODO: Based on the unit calculate the labels
-        // Extract into other functions
-
-        // The result of these calculations will not be precise, but it doesn't matter
-        // since we just want an estimate for the labels
-        let min_value_gib = min_value_bytes.floor() as u64 / GIBIBYTE_U64;
-        let avg_value_gib = (((min_value_bytes + max_value_bytes) / 2.0).round()
-            as u64)
-            / GIBIBYTE_U64;
+        let avg_value_gib =
+            metadata.unit.avg_value_unit(min_value_bytes, max_value_bytes)?;
 
         // In case there is very little variance in the y axis, we will be adding some
-        // buffer to the bounds and labels so we don't end up with repeated labels or
+        // padding to the bounds and labels so we don't end up with repeated labels or
         // straight lines too close to the upper bounds.
         let upper_bound_value =
-            metadata.unit.upper_bound_value(max_value_bytes)?;
+            metadata.unit.padded_max_value_raw(max_value_bytes)?;
         let upper_label_value =
-            metadata.unit.upper_label_value(max_value_bytes)?;
-        let lower_bound_value = if min_value_bytes < &GIBIBYTE_F64 {
-            0.0
-        } else {
-            min_value_bytes - GIBIBYTE_F64
-        };
+            metadata.unit.padded_max_value_unit(max_value_bytes)?;
+        let lower_bound_value =
+            metadata.unit.padded_min_value_raw(min_value_bytes)?;
         let lower_label_value =
-            if min_value_gib < 1 { 0 } else { min_value_gib - 1 };
+            metadata.unit.padded_min_value_unit(min_value_bytes)?;
 
         // These timestamps will be used to calculate maximum and minimum values in order
         // to create labels and set bounds for the X axis. As above, some of these conversions
