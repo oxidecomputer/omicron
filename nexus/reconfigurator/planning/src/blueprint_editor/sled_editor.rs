@@ -11,11 +11,9 @@ use itertools::Either;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::BlueprintDatasetConfig;
-use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintDatasetFilter;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
-use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -357,6 +355,13 @@ impl ActiveSledEditor {
     }
 
     fn validate_decommisionable(&self) -> Result<(), SledEditError> {
+        // TODO-john The disks and datasets checks below don't pass what the
+        // planner does currently to decommission sleds: if a sled is expunged,
+        // we'll omit its disks and datasets from the outgoing blueprint
+        // entirely without setting them all to the `Expunged` disposition.
+        // Fixing this will conflict with ongoing disk work, so for now these
+        // checks are commented out.
+        /*
         // Check that all disks are expunged...
         if let Some(disk) =
             self.disks(DiskFilter::All).find(|disk| match disk.disposition {
@@ -384,6 +389,7 @@ impl ActiveSledEditor {
                 kind: dataset.kind.clone(),
             });
         }
+        */
 
         // ... and all zones are expunged.
         if let Some(zone) = self.zones(BlueprintZoneFilter::All).find(|zone| {
@@ -417,6 +423,7 @@ impl ActiveSledEditor {
         self.disks.disks(filter)
     }
 
+    #[allow(dead_code)] // currently only used by tests; this will change soon
     pub fn datasets(
         &self,
         filter: BlueprintDatasetFilter,
