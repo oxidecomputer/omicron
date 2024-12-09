@@ -212,9 +212,70 @@ impl ChartMetadata {
 }
 
 #[derive(Debug)]
+struct TimeSeriesValues {
+    values: Vec<f64>,
+}
+
+impl TimeSeriesValues {
+    fn new(raw_data: &Vec<SystemTimeSeries>) -> Self {
+        let values: Vec<f64> = raw_data.iter().map(|ts| ts.value).collect();
+        Self { values }
+    }
+
+    fn min(&self) -> Result<&f64> {
+        let Some(min_value) =
+            self.values.iter().min_by(|a, b| a.partial_cmp(b).unwrap())
+        else {
+            bail!("no values have been retrieved")
+        };
+
+        Ok(min_value)
+    }
+
+    fn max(&self) -> Result<&f64> {
+        let Some(max_value) =
+            self.values.iter().max_by(|a, b| a.partial_cmp(b).unwrap())
+        else {
+            bail!("no values have been retrieved")
+        };
+
+        Ok(max_value)
+    }
+}
+
+#[derive(Debug)]
+struct DataPoints {
+    data: Vec<(f64, f64)>,
+}
+
+impl DataPoints {
+    fn new(timeseries: &Vec<SystemTimeSeries>) -> Self {
+        // These values will be used to render the graph and ratatui
+        // requires them to be f64
+        let data: Vec<(f64, f64)> = timeseries
+            .iter()
+            .map(|ts| {
+                (
+                    ts.time.trim_matches('"').parse::<f64>().unwrap_or_else(
+                        |_| {
+                            panic!(
+                                "could not parse timestamp {} into f64",
+                                ts.time
+                            )
+                        },
+                    ),
+                    ts.value,
+                )
+            })
+            .collect();
+        Self { data }
+    }
+}
+
+#[derive(Debug)]
 struct ChartData {
     metadata: ChartMetadata,
-    data_points: Vec<(f64, f64)>,
+    data_points: DataPoints,
     mid_time_utc: DateTime<Utc>,
     start_time_utc: DateTime<Utc>,
     end_time_utc: DateTime<Utc>,
@@ -232,53 +293,27 @@ impl ChartData {
         raw_data: Vec<SystemTimeSeries>,
         metadata: ChartMetadata,
     ) -> Result<Self> {
-        // These values will be used to render the graph and ratatui
-        // requires them to be f64
-        let data_points: Vec<(f64, f64)> = raw_data
-            .iter()
-            .map(|ts| {
-                (
-                    ts.time.trim_matches('"').parse::<f64>().unwrap_or_else(
-                        |_| {
-                            panic!(
-                                "could not parse timestamp {} into f64",
-                                ts.time
-                            )
-                        },
-                    ),
-                    ts.value,
-                )
-            })
-            .collect();
+        // Retrieve datapoints that will be charted
+        let data_points = DataPoints::new(&raw_data);
 
-        // These values will be used to calculate maximum and minimum values in order
-        // to create labels and set bounds for the Y axis.
-        let values: Vec<f64> = raw_data.iter().map(|ts| ts.value).collect();
-        let Some(min_value_bytes) =
-            values.iter().min_by(|a, b| a.partial_cmp(b).unwrap())
-        else {
-            bail!("no values have been retrieved")
-        };
-
-        let Some(max_value_bytes) =
-            values.iter().max_by(|a, b| a.partial_cmp(b).unwrap())
-        else {
-            bail!("no values have been retrieved")
-        };
+        // Retrieve values only to create chart bouds and labels
+        let values = TimeSeriesValues::new(&raw_data);
+        let max_value = values.max()?;
+        let min_value = values.min()?;
 
         // In case there is very little variance in the y axis, we will be adding some
         // padding to the bounds and labels so we don't end up with repeated labels or
         // straight lines too close to the upper bounds.
         let upper_bound_value =
-            metadata.unit.padded_max_value_raw(max_value_bytes)?;
+            metadata.unit.padded_max_value_raw(max_value)?;
         let upper_label_value =
-            metadata.unit.padded_max_value_unit(max_value_bytes)?;
+            metadata.unit.padded_max_value_unit(max_value)?;
         let lower_bound_value =
-            metadata.unit.padded_min_value_raw(min_value_bytes)?;
+            metadata.unit.padded_min_value_raw(min_value)?;
         let lower_label_value =
-            metadata.unit.padded_min_value_unit(min_value_bytes)?;
+            metadata.unit.padded_min_value_unit(min_value)?;
         let mid_label_value =
-            metadata.unit.avg_value_unit(min_value_bytes, max_value_bytes)?;
+            metadata.unit.avg_value_unit(min_value, max_value)?;
 
         // These timestamps will be used to calculate maximum and minimum values in order
         // to create labels and set bounds for the X axis. As above, some of these conversions
@@ -347,7 +382,7 @@ impl ChartData {
             .marker(Marker::Braille)
             .style(Style::default().fg(Color::LightGreen))
             .graph_type(GraphType::Line)
-            .data(&self.data_points)];
+            .data(&self.data_points.data)];
 
         let chart = Chart::new(datasets)
             .block(
@@ -363,6 +398,8 @@ impl ChartData {
                     .style(Style::default().gray())
                     .bounds([self.start_time_unix, self.end_time_unix])
                     .labels([
+                        // TODO: Remove start time and print the interval at the top of the
+                        // dashboard
                         format!("{}", self.start_time_utc).bold(),
                         format!("{}", self.mid_time_utc).bold(),
                         format!("{}", self.end_time_utc).bold(),
@@ -378,6 +415,7 @@ impl ChartData {
                             self.lower_label_value, self.metadata.unit
                         )
                         .bold(),
+                        // TODO: Only show fractional number if not .0 ?
                         format!(
                             "{:.1} {}",
                             self.mid_label_value, self.metadata.unit
