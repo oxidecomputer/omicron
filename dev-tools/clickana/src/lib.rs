@@ -28,9 +28,7 @@ use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 
 const GIBIBYTE_F64: f64 = 1073741824.0;
-const GIBIBYTE_U64: u64 = 1073741824;
 const MEBIBYTE_F64: f64 = 1048576.0;
-const MEBIBYTE_U64: u64 = 1048576;
 
 #[derive(Debug)]
 enum Unit {
@@ -51,19 +49,12 @@ impl Display for Unit {
 }
 
 impl Unit {
-    fn in_bytes_f64(&self) -> Result<f64> {
+
+    /// Returns the value of the unit represented in bytes.
+    fn as_bytes_f64(&self) -> Result<f64> {
         let bytes = match self {
             Unit::Gibibyte => GIBIBYTE_F64,
             Unit::Mebibyte => MEBIBYTE_F64,
-            Unit::Count => bail!("Count cannot be converted into bytes"),
-        };
-        Ok(bytes)
-    }
-
-    fn in_bytes_u64(&self) -> Result<u64> {
-        let bytes = match self {
-            Unit::Gibibyte => GIBIBYTE_U64,
-            Unit::Mebibyte => MEBIBYTE_U64,
             Unit::Count => bail!("Count cannot be converted into bytes"),
         };
         Ok(bytes)
@@ -83,10 +74,22 @@ impl Unit {
         let padded_value = match self {
             Unit::Count => ceil_value + 1.0,
             Unit::Gibibyte | Unit::Mebibyte => {
-                ceil_value + self.in_bytes_f64()?
+                ceil_value + self.as_bytes_f64()?
             }
         };
         Ok(padded_value)
+    }
+
+    /// Returns the sum of the max raw value and 1 or the equivalent of 1
+    /// Mib or Gib.
+    fn padded_max_value_unit(&self, max_value_raw: &f64) -> Result<f64> {
+        let label_value = match self {
+            Unit::Count => max_value_raw + 1.0,
+            Unit::Gibibyte | Unit::Mebibyte => {
+                (max_value_raw / self.as_bytes_f64()?) + 1.0
+            }
+        };
+        Ok(label_value.ceil())
     }
 
     /// Returns the difference of the minimum raw value and 1 or the equivalent
@@ -96,75 +99,60 @@ impl Unit {
     /// the minimum value as we don't expect any of our charts
     /// to require negative numbers for now.
     fn padded_min_value_raw(&self, min_value_raw: &f64) -> Result<f64> {
-        let floor_value = min_value_raw.floor();
         let padded_value = match self {
             Unit::Count => {
-                if floor_value <= 1.0 {
+                if *min_value_raw <= 1.0 {
                     0.0
                 } else {
-                    floor_value - 1.0
+                    min_value_raw - 1.0
                 }
             }
             Unit::Gibibyte | Unit::Mebibyte => {
-                let bytes = self.in_bytes_f64()?;
-                if floor_value <= bytes {
+                let bytes = self.as_bytes_f64()?;
+                if *min_value_raw <= bytes {
                     0.0
                 } else {
-                    floor_value - bytes
+                    min_value_raw - bytes
                 }
             }
         };
-        Ok(padded_value)
-    }
-
-    /// Returns the sum of the max raw value and 1 or the equivalent of 1
-    /// Mib or Gib.
-    fn padded_max_value_unit(&self, max_value_raw: &f64) -> Result<u64> {
-        let ceil_value = max_value_raw.ceil() as u64;
-        let label_value = match self {
-            Unit::Count => ceil_value + 1,
-            Unit::Gibibyte | Unit::Mebibyte => {
-                (ceil_value / self.in_bytes_u64()?) + 1
-            }
-        };
-        Ok(label_value)
+        Ok(padded_value.floor())
     }
 
     /// Returns the difference of the minimum raw value and 1 or the equivalent
     /// of 1 in MiB or GiB in bytes. If the minimum is less than 1, we'll use
     /// 0 as the minimum value as we don't expect any of our charts to require
     /// negative numbers for now.
-    fn padded_min_value_unit(&self, min_value_raw: &f64) -> Result<u64> {
-        let floor_value = min_value_raw.floor() as u64;
+    fn padded_min_value_unit(&self, min_value_raw: &f64) -> Result<f64> {
         let padded_value = match self {
             Unit::Count => {
-                if floor_value <= 1 {
-                    0
+                if *min_value_raw <= 1.0 {
+                    0.0
                 } else {
-                    floor_value - 1
+                    min_value_raw - 1.0
                 }
             }
             Unit::Gibibyte | Unit::Mebibyte => {
-                let value_as_unit = floor_value as u64 / self.in_bytes_u64()?;
-                if value_as_unit <= 1 {
-                    0
+                let value_as_unit = min_value_raw / self.as_bytes_f64()?;
+                if value_as_unit <= 1.0 {
+                    0.0
                 } else {
-                    value_as_unit - 1
+                    value_as_unit - 1.0
                 }
             }
         };
-        Ok(padded_value)
+        Ok(padded_value.floor())
     }
 
     fn avg_value_unit(
         &self,
         min_value_raw: &f64,
         max_value_raw: &f64,
-    ) -> Result<u64> {
-        let avg = ((min_value_raw + max_value_raw) / 2.0).round() as u64;
+    ) -> Result<f64> {
+        let avg = ((min_value_raw + max_value_raw) / 2.0).round();
         let avg_value = match self {
             Unit::Count => avg,
-            Unit::Gibibyte | Unit::Mebibyte => avg / self.in_bytes_u64()?,
+            Unit::Gibibyte | Unit::Mebibyte => avg / self.as_bytes_f64()?,
         };
         Ok(avg_value)
     }
@@ -227,14 +215,14 @@ impl ChartMetadata {
 struct ChartData {
     metadata: ChartMetadata,
     data_points: Vec<(f64, f64)>,
-    avg_time_utc: DateTime<Utc>,
+    mid_time_utc: DateTime<Utc>,
     start_time_utc: DateTime<Utc>,
     end_time_utc: DateTime<Utc>,
     start_time_unix: f64,
     end_time_unix: f64,
-    avg_value_gib: u64,
-    lower_label_value: u64,
-    upper_label_value: u64,
+    lower_label_value: f64,
+    mid_label_value: f64,
+    upper_label_value: f64,
     lower_bound_value: f64,
     upper_bound_value: f64,
 }
@@ -278,9 +266,6 @@ impl ChartData {
             bail!("no values have been retrieved")
         };
 
-        let avg_value_gib =
-            metadata.unit.avg_value_unit(min_value_bytes, max_value_bytes)?;
-
         // In case there is very little variance in the y axis, we will be adding some
         // padding to the bounds and labels so we don't end up with repeated labels or
         // straight lines too close to the upper bounds.
@@ -292,6 +277,8 @@ impl ChartData {
             metadata.unit.padded_min_value_raw(min_value_bytes)?;
         let lower_label_value =
             metadata.unit.padded_min_value_unit(min_value_bytes)?;
+        let mid_label_value =
+            metadata.unit.avg_value_unit(min_value_bytes, max_value_bytes)?;
 
         // These timestamps will be used to calculate maximum and minimum values in order
         // to create labels and set bounds for the X axis. As above, some of these conversions
@@ -328,7 +315,7 @@ impl ChartData {
                 end_time
             )
         };
-        let Some(avg_time_utc) = DateTime::from_timestamp(avg_time, 0) else {
+        let Some(mid_time_utc) = DateTime::from_timestamp(avg_time, 0) else {
             bail!(
                 "failed to convert timestamp to UTC date and time;
         timestamp = {}",
@@ -342,13 +329,13 @@ impl ChartData {
         Ok(Self {
             metadata,
             data_points,
-            avg_time_utc,
+            mid_time_utc,
             start_time_utc,
             end_time_utc,
             start_time_unix,
             end_time_unix,
-            avg_value_gib,
             lower_label_value,
+            mid_label_value,
             upper_label_value,
             lower_bound_value,
             upper_bound_value,
@@ -377,7 +364,7 @@ impl ChartData {
                     .bounds([self.start_time_unix, self.end_time_unix])
                     .labels([
                         format!("{}", self.start_time_utc).bold(),
-                        format!("{}", self.avg_time_utc).bold(),
+                        format!("{}", self.mid_time_utc).bold(),
                         format!("{}", self.end_time_utc).bold(),
                     ]),
             )
@@ -392,8 +379,8 @@ impl ChartData {
                         )
                         .bold(),
                         format!(
-                            "{} {}",
-                            self.avg_value_gib, self.metadata.unit
+                            "{:.1} {}",
+                            self.mid_label_value, self.metadata.unit
                         )
                         .bold(),
                         format!(
