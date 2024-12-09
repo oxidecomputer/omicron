@@ -58,6 +58,7 @@ impl DataStore {
         self.transaction_retry_wrapper("insert_region_replacement_request")
             .transaction(&conn, |conn| {
                 let request = request.clone();
+                let err = err.clone();
                 async move {
                     use db::schema::region_replacement::dsl;
 

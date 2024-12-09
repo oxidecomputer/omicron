@@ -652,7 +652,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     datastore
         .physical_disk_update_policy(
             &opctx,
-            db_zpool.physical_disk_id,
+            db_zpool.physical_disk_id.into(),
             PhysicalDiskPolicy::Expunged,
         )
         .await

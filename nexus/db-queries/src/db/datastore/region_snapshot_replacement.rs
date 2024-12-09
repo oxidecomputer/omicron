@@ -103,7 +103,6 @@ impl DataStore {
             let err = err.clone();
             async move {
                 use db::schema::region_snapshot_replacement::dsl;
-                use db::schema::volume_repair::dsl as volume_repair_dsl;
 
                 // An associated volume repair record isn't _strictly_
                 // needed: snapshot volumes should never be directly
@@ -689,11 +688,15 @@ impl DataStore {
         region_snapshot_replacement_id: Uuid,
         operating_saga_id: Uuid,
     ) -> Result<(), Error> {
-        type TxnError = TransactionError<Error>;
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
 
-        self.pool_connection_authorized(opctx)
-            .await?
-            .transaction_async(|conn| async move {
+        self.transaction_retry_wrapper(
+            "set_region_snapshot_replacement_complete",
+        )
+        .transaction(&conn, |conn| {
+            let err = err.clone();
+            async move {
                 use db::schema::volume_repair::dsl as volume_repair_dsl;
 
                 diesel::delete(
@@ -735,27 +738,23 @@ impl DataStore {
                         {
                             Ok(())
                         } else {
-                            Err(TxnError::CustomError(Error::conflict(
-                                format!(
+                            Err(err.bail(Error::conflict(format!(
                                 "region snapshot replacement {} set to {:?} \
-                                (operating saga id {:?})",
+                                    (operating saga id {:?})",
                                 region_snapshot_replacement_id,
                                 record.replacement_state,
                                 record.operating_saga_id,
-                            ),
-                            )))
+                            ))))
                         }
                     }
                 }
-            })
-            .await
-            .map_err(|e| match e {
-                TxnError::CustomError(error) => error,
-
-                TxnError::Database(error) => {
-                    public_error_from_diesel(error, ErrorHandler::Server)
-                }
-            })
+            }
+        })
+        .await
+        .map_err(|e| match err.take() {
+            Some(error) => error,
+            None => public_error_from_diesel(e, ErrorHandler::Server),
+        })
     }
 
     /// Transition a RegionSnapshotReplacement record from Requested to Complete
@@ -797,8 +796,8 @@ impl DataStore {
                         )
                         .filter(dsl::operating_saga_id.is_null())
                         .filter(dsl::new_region_volume_id.is_null())
-                        .set((dsl::replacement_state
-                            .eq(RegionSnapshotReplacementState::Complete)))
+                        .set(dsl::replacement_state
+                            .eq(RegionSnapshotReplacementState::Complete))
                         .check_if_exists::<RegionSnapshotReplacement>(
                             region_snapshot_replacement_id,
                         )
@@ -1292,11 +1291,16 @@ impl DataStore {
         opctx: &OpContext,
         region_snapshot_replacement_step: RegionSnapshotReplacementStep,
     ) -> Result<(), Error> {
-        type TxnError = TransactionError<Error>;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
 
-        self.pool_connection_authorized(opctx)
-            .await?
-            .transaction_async(|conn| async move {
+        self.transaction_retry_wrapper(
+            "set_region_snapshot_replacement_complete",
+        )
+        .transaction(&conn, |conn| {
+            let err = err.clone();
+
+            async move {
                 use db::schema::volume_repair::dsl as volume_repair_dsl;
 
                 diesel::delete(
@@ -1339,27 +1343,23 @@ impl DataStore {
                         {
                             Ok(())
                         } else {
-                            Err(TxnError::CustomError(Error::conflict(
-                                format!(
-                                    "region snapshot replacement step {} set \
+                            Err(err.bail(Error::conflict(format!(
+                                "region snapshot replacement step {} set \
                                     to {:?} (operating saga id {:?})",
-                                    region_snapshot_replacement_step.id,
-                                    record.replacement_state,
-                                    record.operating_saga_id,
-                                ),
-                            )))
+                                region_snapshot_replacement_step.id,
+                                record.replacement_state,
+                                record.operating_saga_id,
+                            ))))
                         }
                     }
                 }
-            })
-            .await
-            .map_err(|e| match e {
-                TxnError::CustomError(error) => error,
-
-                TxnError::Database(error) => {
-                    public_error_from_diesel(error, ErrorHandler::Server)
-                }
-            })
+            }
+        })
+        .await
+        .map_err(|e| match err.take() {
+            Some(error) => error,
+            None => public_error_from_diesel(e, ErrorHandler::Server),
+        })
     }
 }
 
