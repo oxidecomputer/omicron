@@ -4,4 +4,5 @@
 
 //! Blueprint planner resource allocation
 
+mod external_networking;
 mod underlay_ip;
