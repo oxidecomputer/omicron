@@ -49,7 +49,6 @@ impl Display for Unit {
 }
 
 impl Unit {
-
     /// Returns the value of the unit represented in bytes.
     fn as_bytes_f64(&self) -> Result<f64> {
         let bytes = match self {
@@ -59,8 +58,8 @@ impl Unit {
         };
         Ok(bytes)
     }
-    
-    // TODO: Should all of these be f64?
+
+    // TODO: Should all of these be part of TimeseriesValues instead?
 
     // The result of the following functions will not be precise, but it doesn't
     // matter since we just want an estimate for the chart's labels and bounds.
@@ -82,7 +81,7 @@ impl Unit {
 
     /// Returns the sum of the max raw value and 1 or the equivalent of 1
     /// Mib or Gib.
-    fn padded_max_value_unit(&self, max_value_raw: &f64) -> Result<f64> {
+    fn padded_max_value_parsed(&self, max_value_raw: &f64) -> Result<f64> {
         let label_value = match self {
             Unit::Count => max_value_raw + 1.0,
             Unit::Gibibyte | Unit::Mebibyte => {
@@ -123,7 +122,7 @@ impl Unit {
     /// of 1 in MiB or GiB in bytes. If the minimum is less than 1, we'll use
     /// 0 as the minimum value as we don't expect any of our charts to require
     /// negative numbers for now.
-    fn padded_min_value_unit(&self, min_value_raw: &f64) -> Result<f64> {
+    fn padded_min_value_parsed(&self, min_value_raw: &f64) -> Result<f64> {
         let padded_value = match self {
             Unit::Count => {
                 if *min_value_raw <= 1.0 {
@@ -144,7 +143,7 @@ impl Unit {
         Ok(padded_value.floor())
     }
 
-    fn avg_value_unit(
+    fn avg_value_parsed(
         &self,
         min_value_raw: &f64,
         max_value_raw: &f64,
@@ -244,6 +243,43 @@ impl TimeSeriesValues {
 }
 
 #[derive(Debug)]
+struct TimeSeriesTimestamps {
+    timestamps: Vec<i64>,
+}
+
+impl TimeSeriesTimestamps {
+    fn new(raw_data: &Vec<SystemTimeSeries>) -> Self {
+        let timestamps: Vec<i64> = raw_data
+            .iter()
+            .map(|ts| {
+                ts.time.trim_matches('"').parse::<i64>().unwrap_or_else(|_| {
+                    panic!("could not parse timestamp {} into i64", ts.time)
+                })
+            })
+            .collect();
+        Self { timestamps }
+    }
+
+    fn min(&self) -> Result<&i64> {
+        let Some(start_time) = self.timestamps.iter().min() else {
+            bail!("failed to retrieve start time, timestamp list is empty")
+        };
+        Ok(start_time)
+    }
+
+    fn max(&self) -> Result<&i64> {
+        let Some(end_time) = self.timestamps.iter().max() else {
+            bail!("failed to retrieve end time, timestamp list is empty")
+        };
+        Ok(end_time)
+    }
+
+    fn avg(&self) -> Result<i64> {
+        Ok((self.min()? + self.max()?) / 2)
+    }
+}
+
+#[derive(Debug)]
 struct DataPoints {
     data: Vec<(f64, f64)>,
 }
@@ -307,34 +343,23 @@ impl ChartData {
         let upper_bound_value =
             metadata.unit.padded_max_value_raw(max_value)?;
         let upper_label_value =
-            metadata.unit.padded_max_value_unit(max_value)?;
+            metadata.unit.padded_max_value_parsed(max_value)?;
         let lower_bound_value =
             metadata.unit.padded_min_value_raw(min_value)?;
         let lower_label_value =
-            metadata.unit.padded_min_value_unit(min_value)?;
+            metadata.unit.padded_min_value_parsed(min_value)?;
         let mid_label_value =
-            metadata.unit.avg_value_unit(min_value, max_value)?;
+            metadata.unit.avg_value_parsed(min_value, max_value)?;
 
         // These timestamps will be used to calculate maximum and minimum values in order
         // to create labels and set bounds for the X axis. As above, some of these conversions
         // may lose precision, but it's OK as these values are only used to make sure the
         // datapoints fit within the graph nicely.
-        let timestamps: Vec<i64> = raw_data
-            .iter()
-            .map(|ts| {
-                ts.time.trim_matches('"').parse::<i64>().unwrap_or_else(|_| {
-                    panic!("could not parse timestamp {} into i64", ts.time)
-                })
-            })
-            .collect();
+        let timestamps = TimeSeriesTimestamps::new(&raw_data);
+        let start_time = timestamps.min()?;
+        let end_time = timestamps.max()?;
+        let avg_time = timestamps.avg()?;
 
-        let Some(start_time) = timestamps.iter().min() else {
-            bail!("failed to retrieve start time, timestamp list is empty")
-        };
-        let Some(end_time) = timestamps.iter().max() else {
-            bail!("failed to retrieve end time, timestamp list is empty")
-        };
-        let avg_time = (*start_time + *end_time) / 2;
         let Some(start_time_utc) = DateTime::from_timestamp(*start_time, 0)
         else {
             bail!(
