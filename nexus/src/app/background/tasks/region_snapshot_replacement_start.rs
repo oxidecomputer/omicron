@@ -139,17 +139,33 @@ impl RegionSnapshotReplacementDetector {
                     }
 
                     Err(e) => {
-                        let s =
-                            format!("error creating replacement request: {e}");
+                        match e {
+                            Error::Conflict { message }
+                                if message.external_message()
+                                    == "volume repair lock" =>
+                            {
+                                // This is not a fatal error! If there are
+                                // competing region replacement and region
+                                // snapshot replacements, then they are both
+                                // attempting to lock volumes.
+                            }
 
-                        error!(
-                            &log,
-                            "{s}";
-                            "snapshot_id" => %region_snapshot.snapshot_id,
-                            "region_id" => %region_snapshot.region_id,
-                            "dataset_id" => %region_snapshot.dataset_id,
-                        );
-                        status.errors.push(s);
+                            _ => {
+                                let s = format!(
+                                    "error creating replacement request: {e}"
+                                );
+
+                                error!(
+                                    &log,
+                                    "{s}";
+                                    "snapshot_id" => %region_snapshot.snapshot_id,
+                                    "region_id" => %region_snapshot.region_id,
+                                    "dataset_id" => %region_snapshot.dataset_id,
+                                );
+
+                                status.errors.push(s);
+                            }
+                        }
                     }
                 }
             }

@@ -23,6 +23,7 @@ use nexus_db_model::RegionReplacement;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::RegionReplacementStatus;
+use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TypedUuid;
 use serde_json::json;
@@ -42,7 +43,7 @@ impl RegionReplacementDetector {
         &self,
         serialized_authn: authn::saga::Serialized,
         request: RegionReplacement,
-    ) -> Result<(), omicron_common::api::external::Error> {
+    ) -> Result<(), Error> {
         let params = sagas::region_replacement_start::Params {
             serialized_authn,
             request,
@@ -134,15 +135,31 @@ impl BackgroundTask for RegionReplacementDetector {
                         }
 
                         Err(e) => {
-                            let s = format!(
-                                "error adding region replacement request for \
-                                 region {} volume id {}: {e}",
-                                region.id(),
-                                region.volume_id(),
-                            );
-                            error!(&log, "{s}");
+                            match e {
+                                Error::Conflict { message }
+                                    if message.external_message()
+                                        == "volume repair lock" =>
+                                {
+                                    // This is not a fatal error! If there are
+                                    // competing region replacement and region
+                                    // snapshot replacements, then they are both
+                                    // attempting to lock volumes.
+                                }
 
-                            status.errors.push(s);
+                                _ => {
+                                    let s = format!(
+                                        "error adding region replacement \
+                                        request for region {} volume id {}: \
+                                        {e}",
+                                        region.id(),
+                                        region.volume_id(),
+                                    );
+                                    error!(&log, "{s}");
+
+                                    status.errors.push(s);
+                                }
+                            }
+
                             continue;
                         }
                     }

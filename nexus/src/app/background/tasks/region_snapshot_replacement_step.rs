@@ -36,6 +36,7 @@ use nexus_db_queries::db::datastore::region_snapshot_replacement::*;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
+use omicron_common::api::external::Error;
 use serde_json::json;
 use std::sync::Arc;
 
@@ -53,7 +54,7 @@ impl RegionSnapshotReplacementFindAffected {
         &self,
         opctx: &OpContext,
         request: RegionSnapshotReplacementStep,
-    ) -> Result<(), omicron_common::api::external::Error> {
+    ) -> Result<(), Error> {
         let params = sagas::region_snapshot_replacement_step::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             request,
@@ -70,7 +71,7 @@ impl RegionSnapshotReplacementFindAffected {
         &self,
         opctx: &OpContext,
         request: RegionSnapshotReplacementStep,
-    ) -> Result<(), omicron_common::api::external::Error> {
+    ) -> Result<(), Error> {
         let Some(old_snapshot_volume_id) = request.old_snapshot_volume_id
         else {
             // This state is illegal!
@@ -79,9 +80,7 @@ impl RegionSnapshotReplacementFindAffected {
                 request.id,
             );
 
-            return Err(omicron_common::api::external::Error::internal_error(
-                &s,
-            ));
+            return Err(Error::internal_error(&s));
         };
 
         let params =
@@ -364,13 +363,28 @@ impl RegionSnapshotReplacementFindAffected {
 
                     Err(e) => {
                         let s = format!("error creating step request: {e}");
-                        error!(
+                        warn!(
                             log,
                             "{s}";
                             "request id" => ?request.id,
                             "volume id" => ?volume.id(),
                         );
-                        status.errors.push(s);
+
+                        match e {
+                            Error::Conflict { message }
+                                if message.external_message()
+                                    == "volume repair lock" =>
+                            {
+                                // This is not a fatal error! If there are
+                                // competing region replacement and region
+                                // snapshot replacements, then they are both
+                                // attempting to lock volumes.
+                            }
+
+                            _ => {
+                                status.errors.push(s);
+                            }
+                        }
                     }
                 }
             }
