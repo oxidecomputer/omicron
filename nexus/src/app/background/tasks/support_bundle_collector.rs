@@ -695,7 +695,6 @@ mod test {
     use nexus_db_model::Dataset;
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
-    use nexus_db_model::PhysicalDiskPolicy;
     use nexus_db_model::Zpool;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
@@ -827,7 +826,6 @@ mod test {
     }
 
     struct TestDataset {
-        disk_id: PhysicalDiskUuid,
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
     }
@@ -865,14 +863,14 @@ mod test {
                     disk_id,
                     1 << 40,
                 );
-                disks.push(Self { disk_id, zpool_id, dataset_id })
+                disks.push(Self { zpool_id, dataset_id })
             }
 
             // Create a configuration for the sled agent consisting of all these
             // debug datasets.
             let datasets = disks
                 .iter()
-                .map(|TestDataset { zpool_id, dataset_id, .. }| {
+                .map(|TestDataset { zpool_id, dataset_id }| {
                     (
                         *dataset_id,
                         DatasetConfig {
@@ -897,21 +895,6 @@ mod test {
             assert!(!res.has_error());
 
             disks
-        }
-
-        async fn expunge_disk(
-            &self,
-            datastore: &Arc<DataStore>,
-            opctx: &OpContext,
-        ) {
-            datastore
-                .physical_disk_update_policy(
-                    &opctx,
-                    self.disk_id,
-                    PhysicalDiskPolicy::Expunged,
-                )
-                .await
-                .unwrap();
         }
     }
 
@@ -1162,9 +1145,135 @@ mod test {
         );
     }
 
-    // TODO: Collect a bundle from...
-    // ... an expunged disk?
-    // ... an expunged sled?
+    #[nexus_test(server = crate::Server)]
+    async fn test_bundle_cleanup_failed_bundle_before_collection(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
 
-    // TODO: Verify nested dataset storage is cleared?
+        // Before we can create any bundles, we need to create the
+        // space for them to be provisioned.
+        let _datasets =
+            TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
+
+        // We can allocate a support bundle, though we'll fail it before it gets
+        // collected.
+        let bundle = datastore
+            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .await
+            .expect("Couldn't allocate a support bundle");
+        assert_eq!(bundle.state, SupportBundleState::Collecting);
+
+        // Mark the bundle as "failing" - this should be triggered
+        // automatically by the blueprint executor if the corresponding
+        // storage has been expunged.
+        datastore
+            .support_bundle_update(
+                &opctx,
+                bundle.id.into(),
+                SupportBundleState::Failing,
+            )
+            .await
+            .unwrap();
+
+        let collector =
+            SupportBundleCollector::new(datastore.clone(), false, nexus.id());
+
+        let report = collector
+            .cleanup_destroyed_bundles(&opctx)
+            .await
+            .expect("Cleanup should delete failing bundle");
+        assert_eq!(
+            report,
+            CleanupReport {
+                // Nothing was provisioned on the sled, since we hadn't started
+                // collection yet.
+                sled_bundles_deleted_not_found: 1,
+                // The database state was "failing", and now it's updated.
+                //
+                // Note that it isn't immediately deleted, so the end-user
+                // should have a chance to observe the new state.
+                db_failing_bundles_updated: 1,
+                ..Default::default()
+            }
+        );
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_bundle_cleanup_failed_bundle_after_collection(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        // Before we can create any bundles, we need to create the
+        // space for them to be provisioned.
+        let _datasets =
+            TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
+
+        // We can allocate a support bundle and collect it
+        let bundle = datastore
+            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .await
+            .expect("Couldn't allocate a support bundle");
+        assert_eq!(bundle.state, SupportBundleState::Collecting);
+
+        let collector =
+            SupportBundleCollector::new(datastore.clone(), false, nexus.id());
+        let request = BundleRequest { skip_sled_info: true };
+        let report = collector
+            .collect_bundle(&opctx, &request)
+            .await
+            .expect("Collection should have succeeded under test")
+            .expect("Collecting the bundle should have generated a report");
+        assert_eq!(report.bundle, bundle.id.into());
+
+        // Mark the bundle as "failing" - this should be triggered
+        // automatically by the blueprint executor if the corresponding
+        // storage has been expunged.
+        datastore
+            .support_bundle_update(
+                &opctx,
+                bundle.id.into(),
+                SupportBundleState::Failing,
+            )
+            .await
+            .unwrap();
+
+        // We can cleanup this bundle, even though it has already been
+        // collected.
+        let report = collector
+            .cleanup_destroyed_bundles(&opctx)
+            .await
+            .expect("Cleanup should delete failing bundle");
+        assert_eq!(
+            report,
+            CleanupReport {
+                // The bundle was provisioned on the sled, so we should have
+                // successfully removed it when we later talk to the sled.
+                //
+                // This won't always be the case for removal - if the entire
+                // underlying sled was expunged, we won't get an affirmative
+                // HTTP response from it. But in our simulated environment,
+                // we have simply marked the bundle "failed" and kept the
+                // simulated server running.
+                sled_bundles_deleted_ok: 1,
+                // The database state was "failing", and now it's updated.
+                //
+                // Note that it isn't immediately deleted, so the end-user
+                // should have a chance to observe the new state.
+                db_failing_bundles_updated: 1,
+                ..Default::default()
+            }
+        );
+    }
 }
