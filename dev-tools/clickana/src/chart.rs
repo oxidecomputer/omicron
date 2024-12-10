@@ -300,10 +300,10 @@ impl TimeSeriesTimestamps {
 }
 
 #[derive(Debug)]
-struct XAxisTimestamps {
+pub struct XAxisTimestamps {
     mid_time_label: DateTime<Utc>,
-    start_time_label: DateTime<Utc>,
-    end_time_label: DateTime<Utc>,
+    pub start_time_label: DateTime<Utc>,
+    pub end_time_label: DateTime<Utc>,
     start_time_bound: f64,
     end_time_bound: f64,
 }
@@ -390,7 +390,7 @@ impl DataPoints {
 pub struct ChartData {
     metadata: ChartMetadata,
     data_points: DataPoints,
-    x_axis_timestamps: XAxisTimestamps,
+    pub x_axis_timestamps: XAxisTimestamps,
     y_axis_values: YAxisValues,
 }
 

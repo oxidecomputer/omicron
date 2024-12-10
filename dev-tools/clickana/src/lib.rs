@@ -4,6 +4,7 @@
 
 use anyhow::{anyhow, Context, Result};
 use camino::Utf8PathBuf;
+use chrono::{DateTime, Utc};
 use clickhouse_admin_server_client::types::{
     SystemTimeSeries, TimestampFormat,
 };
@@ -28,6 +29,8 @@ mod chart;
 
 #[derive(Debug)]
 struct Dashboard {
+    start_time: DateTime<Utc>,
+    end_time: DateTime<Utc>,
     top_left_frame: ChartData,
     top_right_frame: ChartData,
     bottom_left_frame: ChartData,
@@ -61,6 +64,10 @@ impl Clickana {
     }
 
     pub fn run(self, mut terminal: DefaultTerminal) -> Result<()> {
+        let admin_url = format!("http://{}", self.clickhouse_addr);
+        let log = self.new_logger()?;
+        let client = ClickhouseServerClient::new(&admin_url, log.clone());
+
         let tick_rate = Duration::from_secs(self.refresh_interval);
         let mut last_tick = Instant::now();
         loop {
@@ -69,7 +76,7 @@ impl Clickana {
                 "Disk Usage".to_string(),
             );
             let top_left_frame = ChartData::new(
-                self.get_api_data(top_left_frame_metadata.metric)?,
+                self.get_api_data(&client, top_left_frame_metadata.metric)?,
                 top_left_frame_metadata,
             )?;
 
@@ -78,7 +85,7 @@ impl Clickana {
                 "Memory Allocated by the Server".to_string(),
             );
             let top_right_frame = ChartData::new(
-                self.get_api_data(top_right_frame_metadata.metric)?,
+                self.get_api_data(&client, top_right_frame_metadata.metric)?,
                 top_right_frame_metadata,
             )?;
 
@@ -87,7 +94,7 @@ impl Clickana {
                 "Queries Started per Second".to_string(),
             );
             let bottom_left_frame = ChartData::new(
-                self.get_api_data(bottom_left_frame_metadata.metric)?,
+                self.get_api_data(&client, bottom_left_frame_metadata.metric)?,
                 bottom_left_frame_metadata,
             )?;
 
@@ -96,11 +103,17 @@ impl Clickana {
                 "Queries Running".to_string(),
             );
             let bottom_right_frame = ChartData::new(
-                self.get_api_data(bottom_right_frame_metadata.metric)?,
+                self.get_api_data(&client, bottom_right_frame_metadata.metric)?,
                 bottom_right_frame_metadata,
             )?;
 
+            // We only need to retrieve from one chart as they will all be the same
+            let start_time = top_left_frame.x_axis_timestamps.start_time_label;
+            let end_time = top_left_frame.x_axis_timestamps.end_time_label;
+
             let dashboard = Dashboard {
+                start_time,
+                end_time,
                 top_left_frame,
                 top_right_frame,
                 bottom_left_frame,
@@ -137,7 +150,7 @@ impl Clickana {
         let [bottom_left_frame, bottom_right_frame] =
             Layout::horizontal([Constraint::Fill(1); 2]).areas(bottom);
 
-        self.render_title_bar(frame, title);
+        self.render_title_bar(frame, title, &dashboard);
 
         dashboard.top_left_frame.render_line_chart(frame, top_left_frame);
         dashboard.top_right_frame.render_line_chart(frame, top_right_frame);
@@ -147,7 +160,12 @@ impl Clickana {
             .render_line_chart(frame, bottom_right_frame);
     }
 
-    fn render_title_bar(&self, frame: &mut Frame, area: Rect) {
+    fn render_title_bar(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        dashboard: &Dashboard,
+    ) {
         let style = Style::new().fg(Color::Green).bold();
         let title = vec![
             Span::styled("Clickana", style).into_centered_line(),
@@ -156,8 +174,14 @@ impl Clickana {
                 style,
             )
             .into_left_aligned_line(),
-            Span::styled(format!("Time Range: {}s", self.time_range), style)
-                .into_left_aligned_line(),
+            Span::styled(
+                format!(
+                    "Time Range: {} - {} ({}s)",
+                    dashboard.start_time, dashboard.end_time, self.time_range
+                ),
+                style,
+            )
+            .into_left_aligned_line(),
             Span::styled(
                 format!("Refresh Interval {}s", self.refresh_interval),
                 style,
@@ -171,12 +195,9 @@ impl Clickana {
 
     fn get_api_data(
         &self,
+        client: &ClickhouseServerClient,
         metric: MetricName,
     ) -> Result<Vec<SystemTimeSeries>> {
-        let admin_url = format!("http://{}", self.clickhouse_addr);
-        let log = self.new_logger()?;
-        let client = ClickhouseServerClient::new(&admin_url, log.clone());
-
         let rt = Runtime::new()?;
         let result = rt.block_on(async {
             let timeseries = client
@@ -193,9 +214,8 @@ impl Clickana {
                     anyhow!(
                         concat!(
                 "failed to retrieve timeseries from clickhouse server; ",
-                "admin_url = {} error = {}",
+                "error = {}",
             ),
-                        admin_url,
                         e
                     )
                 });
