@@ -616,7 +616,7 @@
         "type": "object",
         "properties": {
           "time": {
-            "$ref": "#/components/schemas/Timestamp"
+            "type": "string"
           },
           "value": {
             "type": "number",
@@ -626,17 +626,6 @@
         "required": [
           "time",
           "value"
-        ]
-      },
-      "Timestamp": {
-        "anyOf": [
-          {
-            "type": "string",
-            "format": "date-time"
-          },
-          {
-            "type": "string"
-          }
         ]
       },
       "SystemTable": {
