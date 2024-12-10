@@ -65,6 +65,7 @@ use crate::app::{authn, db};
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::DatasetUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::CrucibleOpts;
@@ -90,6 +91,9 @@ declare_saga_actions! {
     SET_SAGA_ID -> "unused_1" {
         + rsrss_set_saga_id
         - rsrss_set_saga_id_undo
+    }
+    GET_CLONE_SOURCE -> "clone_source" {
+        + rsrss_get_clone_source
     }
     GET_ALLOC_REGION_PARAMS -> "alloc_region_params" {
         + rsrss_get_alloc_region_params
@@ -194,6 +198,7 @@ impl NexusSaga for SagaRegionSnapshotReplacementStart {
         ));
 
         builder.append(set_saga_id_action());
+        builder.append(get_clone_source_action());
         builder.append(get_alloc_region_params_action());
         builder.append(alloc_new_region_action());
         builder.append(find_new_region_action());
@@ -263,6 +268,145 @@ async fn rsrss_set_saga_id_undo(
         .await?;
 
     Ok(())
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+enum CloneSource {
+    RegionSnapshot { dataset_id: DatasetUuid, region_id: Uuid },
+    Region { region_id: Uuid },
+}
+
+async fn rsrss_get_clone_source(
+    sagactx: NexusActionContext,
+) -> Result<CloneSource, ActionError> {
+    let params = sagactx.saga_params::<Params>()?;
+    let osagactx = sagactx.user_data();
+    let log = osagactx.log();
+
+    // If the downstairs we're cloning from is on an expunged dataset, the clone
+    // will never succeed. Find either a region snapshot or a read-only region
+    // that is associated with the request snapshot that has not been expunged.
+    //
+    // Importantly, determine the clone source before new region alloc step in
+    // this saga, otherwise the query that searches for read-only region
+    // candidates will match the newly allocated region (that is not created
+    // yet!).
+
+    let request_dataset_on_in_service_physical_disk = osagactx
+        .datastore()
+        .dataset_physical_disk_in_service(params.request.old_dataset_id.into())
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let clone_source = if request_dataset_on_in_service_physical_disk {
+        // If the request region snapshot's dataset has not been expunged,
+        // it can be used
+        CloneSource::RegionSnapshot {
+            dataset_id: params.request.old_dataset_id.into(),
+            region_id: params.request.old_region_id,
+        }
+    } else {
+        info!(
+            log,
+            "request region snapshot dataset expunged, finding another";
+            "snapshot_id" => %params.request.old_snapshot_id,
+            "dataset_id" => %params.request.old_dataset_id,
+        );
+
+        // Select another region snapshot that's part of this snapshot - they
+        // will all have identical contents.
+
+        let opctx = crate::context::op_context_for_saga_action(
+            &sagactx,
+            &params.serialized_authn,
+        );
+
+        let mut non_expunged_region_snapshots = osagactx
+            .datastore()
+            .find_non_expunged_region_snapshots(
+                &opctx,
+                params.request.old_snapshot_id,
+            )
+            .await
+            .map_err(ActionError::action_failed)?;
+
+        match non_expunged_region_snapshots.pop() {
+            Some(candidate) => {
+                info!(
+                    log,
+                    "found another non-expunged region snapshot";
+                    "snapshot_id" => %params.request.old_snapshot_id,
+                    "dataset_id" => %candidate.dataset_id,
+                    "region_id" => %candidate.region_id,
+                );
+
+                CloneSource::RegionSnapshot {
+                    dataset_id: candidate.dataset_id.into(),
+                    region_id: candidate.region_id,
+                }
+            }
+
+            None => {
+                // If a candidate region snapshot was not found, look for the
+                // snapshot's read-only regions.
+
+                info!(
+                    log,
+                    "no region snapshot clone source candidates";
+                    "snapshot_id" => %params.request.old_snapshot_id,
+                );
+
+                // Look up the existing snapshot
+                let maybe_db_snapshot = osagactx
+                    .datastore()
+                    .snapshot_get(&opctx, params.request.old_snapshot_id)
+                    .await
+                    .map_err(ActionError::action_failed)?;
+
+                let Some(db_snapshot) = maybe_db_snapshot else {
+                    return Err(ActionError::action_failed(
+                        Error::internal_error(&format!(
+                            "snapshot {} was hard deleted!",
+                            params.request.old_snapshot_id
+                        )),
+                    ));
+                };
+
+                let mut non_expunged_read_only_regions = osagactx
+                    .datastore()
+                    .find_non_expunged_regions(&opctx, db_snapshot.volume_id)
+                    .await
+                    .map_err(ActionError::action_failed)?;
+
+                match non_expunged_read_only_regions.pop() {
+                    Some(candidate) => {
+                        info!(
+                            log,
+                            "found region clone source candidate";
+                            "snapshot_id" => %params.request.old_snapshot_id,
+                            "dataset_id" => %candidate.dataset_id(),
+                            "region_id" => %candidate.id(),
+                        );
+
+                        CloneSource::Region { region_id: candidate.id() }
+                    }
+
+                    None => {
+                        // If all targets of a Volume::Region are on expunged
+                        // datasets, then the user's data is gone, and this code
+                        // will fail to select a clone source.
+
+                        return Err(ActionError::action_failed(format!(
+                            "no clone source candidate for {}!",
+                            params.request.old_snapshot_id,
+                        )));
+                    }
+                }
+            }
+        }
+    };
+
+    Ok(clone_source)
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -445,45 +589,66 @@ async fn rsrss_new_region_ensure(
             "new_dataset_and_region",
         )?;
 
-    let region_snapshot = osagactx
-        .datastore()
-        .region_snapshot_get(
-            params.request.old_dataset_id.into(),
-            params.request.old_region_id,
-            params.request.old_snapshot_id,
-        )
-        .await
-        .map_err(ActionError::action_failed)?;
+    let clone_source = sagactx.lookup::<CloneSource>("clone_source")?;
 
-    let Some(region_snapshot) = region_snapshot else {
-        return Err(ActionError::action_failed(format!(
-            "region snapshot {} {} {} deleted!",
-            params.request.old_dataset_id,
-            params.request.old_region_id,
-            params.request.old_snapshot_id,
-        )));
+    let mut source_repair_addr: SocketAddrV6 = match clone_source {
+        CloneSource::RegionSnapshot { dataset_id, region_id } => {
+            let region_snapshot = osagactx
+                .datastore()
+                .region_snapshot_get(
+                    dataset_id,
+                    region_id,
+                    params.request.old_snapshot_id,
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+
+            let Some(region_snapshot) = region_snapshot else {
+                return Err(ActionError::action_failed(format!(
+                    "region snapshot {} {} {} deleted!",
+                    dataset_id, region_id, params.request.old_snapshot_id,
+                )));
+            };
+
+            match region_snapshot.snapshot_addr.parse() {
+                Ok(addr) => addr,
+
+                Err(e) => {
+                    return Err(ActionError::action_failed(format!(
+                        "error parsing region_snapshot.snapshot_addr: {e}"
+                    )));
+                }
+            }
+        }
+
+        CloneSource::Region { region_id } => {
+            let maybe_addr = osagactx
+                .datastore()
+                .region_addr(region_id)
+                .await
+                .map_err(ActionError::action_failed)?;
+
+            match maybe_addr {
+                Some(addr) => addr,
+
+                None => {
+                    return Err(ActionError::action_failed(format!(
+                        "region clone source {region_id} has no port!"
+                    )));
+                }
+            }
+        }
     };
-
-    let (new_dataset, new_region) = new_dataset_and_region;
 
     // Currently, the repair port is set using a fixed offset above the
     // downstairs port. Once this goes away, Nexus will require a way to query
     // for the repair port!
 
-    let mut source_repair_addr: SocketAddrV6 =
-        match region_snapshot.snapshot_addr.parse() {
-            Ok(addr) => addr,
-
-            Err(e) => {
-                return Err(ActionError::action_failed(format!(
-                    "error parsing region_snapshot.snapshot_addr: {e}"
-                )));
-            }
-        };
-
     source_repair_addr.set_port(
         source_repair_addr.port() + crucible_common::REPAIR_PORT_OFFSET,
     );
+
+    let (new_dataset, new_region) = new_dataset_and_region;
 
     let ensured_region = osagactx
         .nexus()
