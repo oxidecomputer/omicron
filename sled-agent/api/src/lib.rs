@@ -702,23 +702,8 @@ pub struct SupportBundleGetHeaders {
     range: String,
 }
 
-/// Query parameters for reading the support bundle
-#[derive(Deserialize, Serialize, JsonSchema)]
-pub struct SupportBundleGetQueryParams {
-    pub query_type: SupportBundleQueryType,
-}
-
-/// Describes the type of access to the support bundle
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum SupportBundleQueryType {
-    /// Access the whole support bundle
-    Whole,
-    /// Access the names of all files within the support bundle
-    Index,
-    /// Access a specific file within the support bundle
-    Path { file_path: String },
-}
+pub use omicron_common::api::external::SupportBundleGetQueryParams;
+pub use omicron_common::api::external::SupportBundleQueryType;
 
 #[derive(Deserialize, Debug, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
