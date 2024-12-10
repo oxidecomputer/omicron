@@ -165,10 +165,10 @@ impl SledEditor {
         &mut self,
         disk: BlueprintPhysicalDiskConfig,
         rng: &mut PlannerRng,
-    ) {
+    ) -> Result<(), SledEditError> {
         let zpool = ZpoolName::new_external(disk.pool_id);
 
-        self.disks.ensure(disk);
+        self.disks.ensure(disk)?;
 
         // Every disk also gets a Debug and Transient Zone Root dataset; ensure
         // both of those exist as well.
@@ -177,6 +177,8 @@ impl SledEditor {
 
         self.datasets.ensure_in_service(debug, rng);
         self.datasets.ensure_in_service(zone_root, rng);
+
+        Ok(())
     }
 
     pub fn expunge_disk(
@@ -190,6 +192,14 @@ impl SledEditor {
         self.datasets.expunge_all_on_zpool(&zpool_id);
         self.zones.expunge_all_on_zpool(&zpool_id);
 
+        Ok(())
+    }
+
+    pub fn decommission_disk(
+        &mut self,
+        disk_id: &PhysicalDiskUuid,
+    ) -> Result<(), SledEditError> {
+        self.disks.decommission(disk_id)?;
         Ok(())
     }
 

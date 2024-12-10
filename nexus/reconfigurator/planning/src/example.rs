@@ -419,12 +419,12 @@ impl ExampleSystemBuilder {
                 );
         }
 
-        for (i, (sled_id, sled_resources)) in
-            base_input.all_sled_resources(SledFilter::Commissioned).enumerate()
+        for (i, (sled_id, sled_details)) in
+            base_input.all_sleds(SledFilter::Commissioned).enumerate()
         {
             if self.create_disks_in_blueprint {
                 let _ =
-                    builder.sled_ensure_disks(sled_id, sled_resources).unwrap();
+                    builder.sled_ensure_disks(sled_id, sled_details).unwrap();
             }
             if self.create_zones {
                 let _ = builder.sled_ensure_zone_ntp(sled_id).unwrap();
@@ -447,7 +447,7 @@ impl ExampleSystemBuilder {
                 }
             }
             if self.create_zones {
-                for pool_name in sled_resources.zpools.keys() {
+                for pool_name in sled_details.resources.zpools.keys() {
                     let _ = builder
                         .sled_ensure_zone_crucible(sled_id, *pool_name)
                         .unwrap();

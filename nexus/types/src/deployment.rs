@@ -12,6 +12,7 @@
 //! nexus/db-model, but nexus/reconfigurator/planning does not currently know
 //! about nexus/db-model and it's convenient to separate these concerns.)
 
+use crate::external_api::views::PhysicalDiskState;
 use crate::external_api::views::SledState;
 use crate::internal_api::params::DnsConfigParams;
 use crate::inventory::Collection;
@@ -935,14 +936,12 @@ impl BlueprintPhysicalDiskDisposition {
             Self::InService => match filter {
                 DiskFilter::All => true,
                 DiskFilter::InService => true,
-                // TODO remove this variant?
-                DiskFilter::ExpungedButActive => false,
+                DiskFilter::ExpungedButNotDecommissioned => false,
             },
             Self::Expunged => match filter {
                 DiskFilter::All => true,
                 DiskFilter::InService => false,
-                // TODO remove this variant?
-                DiskFilter::ExpungedButActive => true,
+                DiskFilter::ExpungedButNotDecommissioned => true,
             },
         }
     }
@@ -952,6 +951,7 @@ impl BlueprintPhysicalDiskDisposition {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct BlueprintPhysicalDiskConfig {
     pub disposition: BlueprintPhysicalDiskDisposition,
+    pub state: PhysicalDiskState,
     pub identity: DiskIdentity,
     pub id: PhysicalDiskUuid,
     pub pool_id: ZpoolUuid,

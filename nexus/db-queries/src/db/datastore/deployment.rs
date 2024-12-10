@@ -2341,7 +2341,6 @@ mod tests {
                         &planning_input
                             .sled_lookup(SledFilter::Commissioned, new_sled_id)
                             .unwrap()
-                            .resources,
                     )
                     .unwrap()
                     .disks
@@ -2350,6 +2349,7 @@ mod tests {
                 added: 4,
                 updated: 0,
                 expunged: 0,
+                decommissioned: 0,
                 removed: 0
             }
         );

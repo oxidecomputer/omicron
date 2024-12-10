@@ -3737,6 +3737,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_physical_disk  (
     pool_id UUID NOT NULL,
 
     disposition omicron.public.bp_physical_disk_disposition NOT NULL,
+    state omicron.public.physical_disk_state NOT NULL,
 
     PRIMARY KEY (blueprint_id, id)
 );
