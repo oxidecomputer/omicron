@@ -891,6 +891,9 @@ impl<'a> BlueprintBuilder<'a> {
 
             // TODO-john we lost the check for "are we expunging a zone we
             // modified in this planner iteration" - do we need that?
+            //
+            // TODO-ajs: Expungement always comes first, so we don't need the check
+            // mentioned above
             let is_expunged = match zone_config.disposition {
                 BlueprintZoneDisposition::InService
                 | BlueprintZoneDisposition::Quiesced => false,

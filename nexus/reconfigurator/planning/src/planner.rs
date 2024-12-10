@@ -38,6 +38,7 @@ use self::omicron_zone_placement::OmicronZonePlacement;
 use self::omicron_zone_placement::OmicronZonePlacementSledState;
 pub use self::rng::PlannerRng;
 
+mod expunge;
 mod omicron_zone_placement;
 pub(crate) mod rng;
 
@@ -182,6 +183,10 @@ impl<'a> Planner<'a> {
             self.blueprint.expunge_zones_for_sled(sled_id, sled_details)?;
         }
 
+        // TODO: This whole check should become unnecessary. We should uphold
+        // the invariant during decommissioning that we only decommission
+        // expunged sleds.
+        //
         // Check for any decommissioned sleds (i.e., sleds for which our
         // blueprint has zones, but are not in the input sled list). Any zones
         // for decommissioned sleds must have already be expunged for
