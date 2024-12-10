@@ -213,18 +213,9 @@ fn padded_min_value_as_unit(unit: Unit, min_value_raw: &f64) -> Result<f64> {
     Ok(padded_value.floor())
 }
 
-/// Returns the average value of the max and min values in the specified unit.
-fn avg_value_as_unit(
-    unit: Unit,
-    min_value_raw: &f64,
-    max_value_raw: &f64,
-) -> Result<f64> {
-    let avg = (min_value_raw + max_value_raw) / 2.0;
-    let avg_value = match unit {
-        Unit::Count => avg,
-        Unit::Gibibyte | Unit::Mebibyte => avg / unit.as_bytes_f64()?,
-    };
-    Ok(avg_value)
+/// Returns the average value of the max and min values.
+fn avg(min_value_label: &f64, max_value_label: &f64) -> f64 {
+    (min_value_label + max_value_label) / 2.0
 }
 
 #[derive(Debug)]
@@ -250,7 +241,7 @@ impl YAxisValues {
         let upper_label = padded_max_value_as_unit(unit, max_value)?;
         let lower_bound = padded_min_value_raw(unit, min_value)?;
         let lower_label = padded_min_value_as_unit(unit, min_value)?;
-        let mid_label = avg_value_as_unit(unit, &lower_bound, &upper_bound)?;
+        let mid_label = avg( &lower_label, &upper_label);
 
         Ok(Self {
             lower_label,
@@ -294,8 +285,8 @@ impl TimeSeriesTimestamps {
         Ok(end_time)
     }
 
-    fn avg(&self) -> Result<i64> {
-        Ok((self.min()? + self.max()?) / 2)
+    fn avg(&self, start_time: &i64, end_time: &i64) -> i64 {
+        (start_time + end_time) / 2
     }
 }
 
@@ -318,7 +309,7 @@ impl XAxisTimestamps {
         // datapoints fit within the graph nicely.
         let start_time = timestamps.min()?;
         let end_time = timestamps.max()?;
-        let avg_time = timestamps.avg()?;
+        let avg_time = timestamps.avg(start_time, end_time);
 
         let Some(start_time_label) = DateTime::from_timestamp(*start_time, 0)
         else {
@@ -427,10 +418,10 @@ impl ChartData {
         let mid_value = self.y_axis_values.mid_label;
         let fractional_of_mid_value = mid_value - mid_value.floor();
         let mid_value_formatted = format!("{:.1}", mid_value);
-        let y_axis_mid_label = if mid_value_formatted == "0.0".to_string() {
+        let y_axis_mid_label = if mid_value_formatted == *"0.0" {
             "".to_string()
         } else if fractional_of_mid_value == 0.0 {
-            format!("{}", mid_value_formatted.split('.').next().unwrap())
+            mid_value_formatted.split('.').next().unwrap().to_string()
         } else {
             mid_value_formatted
         };
