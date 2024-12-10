@@ -331,7 +331,7 @@ impl DataStore {
                             .filter(dsl::id.eq_any(bundles_to_delete))
                             // This check should be redundant (we already
                             // partitioned above based on this state) but out of
-                            // an abundance of catuion we don't auto-delete a
+                            // an abundance of caution we don't auto-delete a
                             // bundle in any other state.
                             .filter(dsl::state.eq(SupportBundleState::Destroying))
                             .execute_async(conn)
@@ -364,7 +364,7 @@ impl DataStore {
                             }
                         }).collect::<Vec<_>>();
 
-                    // Mark these support bundles as failing, and assign then
+                    // Mark these support bundles as failing, and assign them
                     // to a nexus that should still exist.
                     //
                     // This should lead to their storage being freed, if it
