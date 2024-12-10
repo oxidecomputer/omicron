@@ -2528,9 +2528,7 @@ async fn test_disk_create_saga_unwinds_correctly(
         .sled_agent
         .sled_agent
         .get_crucible_dataset(zpool.id, dataset.id)
-        .await
-        .set_region_creation_error(true)
-        .await;
+        .set_region_creation_error(true);
 
     let disk_size = ByteCount::from_gibibytes_u32(2);
     let base_disk = params::DiskCreate {
@@ -2598,9 +2596,7 @@ async fn test_snapshot_create_saga_unwinds_correctly(
         .sled_agent
         .sled_agent
         .get_crucible_dataset(zpool.id, dataset.id)
-        .await
-        .set_region_creation_error(true)
-        .await;
+        .set_region_creation_error(true);
 
     // Create a snapshot
     let snapshot_create = params::SnapshotCreate {
@@ -4225,11 +4221,9 @@ async fn test_read_only_region_reference_counting(
                 TypedUuid::from_untyped_uuid(db_read_only_dataset.pool_id),
                 db_read_only_dataset.id(),
             )
-            .await
             .get(crucible_agent_client::types::RegionId(
                 read_only_region.id().to_string()
             ))
-            .await
             .unwrap()
             .state,
         crucible_agent_client::types::State::Created
@@ -4297,11 +4291,9 @@ async fn test_read_only_region_reference_counting(
                 TypedUuid::from_untyped_uuid(db_read_only_dataset.pool_id),
                 db_read_only_dataset.id(),
             )
-            .await
             .get(crucible_agent_client::types::RegionId(
                 read_only_region.id().to_string()
             ))
-            .await
             .unwrap()
             .state,
         crucible_agent_client::types::State::Destroyed

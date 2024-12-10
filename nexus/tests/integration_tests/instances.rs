@@ -646,7 +646,7 @@ async fn test_instance_start_creates_networking_state(
 
     sled_agents.push(&cptestctx.sled_agent.sled_agent);
     for agent in &sled_agents {
-        agent.v2p_mappings.lock().await.clear();
+        agent.v2p_mappings.lock().unwrap().clear();
     }
 
     // Start the instance and make sure that it gets to Running.
@@ -6244,7 +6244,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     // Validate that every sled no longer has the V2P mapping for this instance
     for sled_agent in &sled_agents {
         let condition = || async {
-            let v2p_mappings = sled_agent.v2p_mappings.lock().await;
+            let v2p_mappings = sled_agent.v2p_mappings.lock().unwrap();
             if v2p_mappings.is_empty() {
                 Ok(())
             } else {
@@ -6501,7 +6501,7 @@ async fn assert_sled_v2p_mappings(
     vni: Vni,
 ) {
     let condition = || async {
-        let v2p_mappings = sled_agent.v2p_mappings.lock().await;
+        let v2p_mappings = sled_agent.v2p_mappings.lock().unwrap();
         let mapping = v2p_mappings.iter().find(|mapping| {
             mapping.virtual_ip == nic.ip
                 && mapping.virtual_mac == nic.mac
@@ -6573,7 +6573,7 @@ pub async fn assert_sled_vpc_routes(
             kind: RouterKind::Custom(db_subnet.ipv4_block.0.into()),
         };
 
-        let vpc_routes = sled_agent.vpc_routes.lock().await;
+        let vpc_routes = sled_agent.vpc_routes.lock().unwrap();
         let sys_routes_found = vpc_routes
             .iter()
             .any(|(id, set)| *id == sys_key && set.routes == system_routes);
