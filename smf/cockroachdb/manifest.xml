@@ -19,7 +19,7 @@
   <exec_method type='method' name='start'
     exec='/opt/oxide/lib/svc/manifest/cockroachdb.sh'
     timeout_seconds='0'>
-    <method_context>
+    <method_context working_directory="/">
       <method_environment>
         <envvar name="GOTRACEBACK" value="crash" />
       </method_environment>
