@@ -4,9 +4,7 @@
 
 use anyhow::{bail, Result};
 use chrono::{DateTime, Utc};
-use clickhouse_admin_server_client::types::{
-    SystemTable, SystemTimeSeries,
-};
+use clickhouse_admin_server_client::types::{SystemTable, SystemTimeSeries};
 use ratatui::{
     layout::{Constraint, Rect},
     style::{Color, Style, Stylize},
@@ -249,15 +247,18 @@ impl YAxisValues {
         // padding to the bounds and labels so we don't end up with repeated labels or
         // straight lines too close to the upper bounds.
         let upper_bound = padded_max_value_raw(unit, max_value)?;
-        let upper_label =
-            padded_max_value_as_unit(unit, max_value)?;
+        let upper_label = padded_max_value_as_unit(unit, max_value)?;
         let lower_bound = padded_min_value_raw(unit, min_value)?;
-        let lower_label =
-            padded_min_value_as_unit(unit, min_value)?;
-        let mid_label =
-            avg_value_as_unit(unit, min_value, max_value)?;
-        
-        Ok(Self { lower_label, mid_label, upper_label, lower_bound, upper_bound })
+        let lower_label = padded_min_value_as_unit(unit, min_value)?;
+        let mid_label = avg_value_as_unit(unit, min_value, max_value)?;
+
+        Ok(Self {
+            lower_label,
+            mid_label,
+            upper_label,
+            lower_bound,
+            upper_bound,
+        })
     }
 }
 
@@ -346,7 +347,13 @@ impl XAxisTimestamps {
         let start_time_bound = *start_time as f64;
         let end_time_bound = *end_time as f64;
 
-        Ok(Self { mid_time_label, start_time_label, end_time_label, start_time_bound, end_time_bound })
+        Ok(Self {
+            mid_time_label,
+            start_time_label,
+            end_time_label,
+            start_time_bound,
+            end_time_bound,
+        })
     }
 }
 
@@ -401,12 +408,7 @@ impl ChartData {
         // Retrieve X axis bounds and labels
         let y_axis_values = YAxisValues::new(metadata.unit, &raw_data)?;
 
-        Ok(Self {
-            metadata,
-            data_points,
-            x_axis_timestamps,
-            y_axis_values,
-        })
+        Ok(Self { metadata, data_points, x_axis_timestamps, y_axis_values })
     }
 
     pub fn render_line_chart(&self, frame: &mut Frame, area: Rect) {
@@ -428,19 +430,28 @@ impl ChartData {
             .x_axis(
                 Axis::default()
                     .style(Style::default().gray())
-                    .bounds([self.x_axis_timestamps.start_time_bound, self.x_axis_timestamps.end_time_bound])
+                    .bounds([
+                        self.x_axis_timestamps.start_time_bound,
+                        self.x_axis_timestamps.end_time_bound,
+                    ])
                     .labels([
                         // TODO: Remove start time and print the interval at the top of the
                         // dashboard
-                        format!("{}", self.x_axis_timestamps.start_time_label).bold(),
-                        format!("{}", self.x_axis_timestamps.mid_time_label).bold(),
-                        format!("{}", self.x_axis_timestamps.end_time_label).bold(),
+                        format!("{}", self.x_axis_timestamps.start_time_label)
+                            .bold(),
+                        format!("{}", self.x_axis_timestamps.mid_time_label)
+                            .bold(),
+                        format!("{}", self.x_axis_timestamps.end_time_label)
+                            .bold(),
                     ]),
             )
             .y_axis(
                 Axis::default()
                     .style(Style::default().gray())
-                    .bounds([self.y_axis_values.lower_bound, self.y_axis_values.upper_bound])
+                    .bounds([
+                        self.y_axis_values.lower_bound,
+                        self.y_axis_values.upper_bound,
+                    ])
                     .labels([
                         format!(
                             "{} {}",

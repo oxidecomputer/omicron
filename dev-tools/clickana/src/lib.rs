@@ -21,7 +21,7 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 
-use crate::chart::{ChartMetadata, MetricName, ChartData};
+use crate::chart::{ChartData, ChartMetadata, MetricName};
 
 mod chart;
 
@@ -62,11 +62,39 @@ impl Clickana {
                 self.get_api_data(top_left_frame_metadata.metric)?,
                 top_left_frame_metadata,
             )?;
+
+            let top_right_frame_metadata = ChartMetadata::new(
+                MetricName::MemoryTracking,
+                "Memory Allocated by the Server".to_string(),
+            );
+            let top_right_frame = ChartData::new(
+                self.get_api_data(top_right_frame_metadata.metric)?,
+                top_right_frame_metadata,
+            )?;
+
+            let bottom_left_frame_metadata = ChartMetadata::new(
+                MetricName::QueryCount,
+                "Queries Started per Second".to_string(),
+            );
+            let bottom_left_frame = ChartData::new(
+                self.get_api_data(bottom_left_frame_metadata.metric)?,
+                bottom_left_frame_metadata,
+            )?;
+
+            let bottom_right_frame_metadata = ChartMetadata::new(
+                MetricName::RunningQueries,
+                "Queries Running".to_string(),
+            );
+            let bottom_right_frame = ChartData::new(
+                self.get_api_data(bottom_right_frame_metadata.metric)?,
+                bottom_right_frame_metadata,
+            )?;
+
             let dashboard = Dashboard {
                 top_left_frame,
-                _top_right_frame: None,
-                _bottom_left_frame: None,
-                _bottom_right_frame: None,
+                top_right_frame,
+                bottom_left_frame,
+                bottom_right_frame,
             };
             terminal.draw(|frame| self.draw(frame, dashboard))?;
 
@@ -86,12 +114,19 @@ impl Clickana {
     }
 
     fn draw(&self, frame: &mut Frame, dashboard: Dashboard) {
-        let [all] =
-            Layout::vertical([Constraint::Fill(1); 1]).areas(frame.area());
-        let [line_chart] =
-            Layout::horizontal([Constraint::Fill(1); 1]).areas(all);
+        let [top, bottom] =
+            Layout::vertical([Constraint::Fill(1); 2]).areas(frame.area());
+        let [top_left_frame, top_right_frame] =
+            Layout::horizontal([Constraint::Fill(1); 2]).areas(top);
+        let [bottom_left_frame, bottom_right_frame] =
+            Layout::horizontal([Constraint::Fill(1); 2]).areas(bottom);
 
-        dashboard.top_left_frame.render_line_chart(frame, line_chart);
+        dashboard.top_left_frame.render_line_chart(frame, top_left_frame);
+        dashboard.top_right_frame.render_line_chart(frame, top_right_frame);
+        dashboard.bottom_left_frame.render_line_chart(frame, bottom_left_frame);
+        dashboard
+            .bottom_right_frame
+            .render_line_chart(frame, bottom_right_frame);
     }
 
     fn get_api_data(
@@ -152,9 +187,9 @@ impl Clickana {
 #[derive(Debug)]
 struct Dashboard {
     top_left_frame: ChartData,
-    _top_right_frame: Option<ChartData>,
-    _bottom_left_frame: Option<ChartData>,
-    _bottom_right_frame: Option<ChartData>,
+    top_right_frame: ChartData,
+    bottom_left_frame: ChartData,
+    bottom_right_frame: ChartData,
     // Add more charts
 }
 
