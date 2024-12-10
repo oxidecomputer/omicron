@@ -573,8 +573,6 @@ impl BackgroundTask for SupportBundleCollector {
     }
 }
 
-// TODO: Could maybe test this in isolation
-
 // Takes a directory "dir", and zips the contents into a single zipfile.
 fn bundle_to_zipfile(dir: &Utf8TempDir) -> anyhow::Result<std::fs::File> {
     let tempfile = tempfile()?;
