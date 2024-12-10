@@ -1346,7 +1346,7 @@ pub mod test {
         assert!(disk_is_detached(datastore).await);
         assert!(no_instances_or_disks_on_sled(&sled_agent).await);
 
-        let v2p_mappings = &*sled_agent.v2p_mappings.lock().await;
+        let v2p_mappings = &*sled_agent.v2p_mappings.lock().unwrap();
         assert!(v2p_mappings.is_empty());
     }
 

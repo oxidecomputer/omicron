@@ -1282,26 +1282,24 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         // Tell the simulated sled agent to create the disk and zpool containing
         // these datasets.
 
-        sled_agent
-            .create_external_physical_disk(
-                physical_disk_id,
-                disk_identity.clone(),
-            )
-            .await;
-        sled_agent
-            .create_zpool(zpool.id, physical_disk_id, zpool.size.to_bytes())
-            .await;
+        sled_agent.create_external_physical_disk(
+            physical_disk_id,
+            disk_identity.clone(),
+        );
+        sled_agent.create_zpool(
+            zpool.id,
+            physical_disk_id,
+            zpool.size.to_bytes(),
+        );
 
         for dataset in &zpool.datasets {
             // Sled Agent side: Create the Dataset, make sure regions can be
             // created immediately if Nexus requests anything.
             let address =
-                sled_agent.create_crucible_dataset(zpool.id, dataset.id).await;
+                sled_agent.create_crucible_dataset(zpool.id, dataset.id);
             let crucible =
-                sled_agent.get_crucible_dataset(zpool.id, dataset.id).await;
-            crucible
-                .set_create_callback(Box::new(|_| RegionState::Created))
-                .await;
+                sled_agent.get_crucible_dataset(zpool.id, dataset.id);
+            crucible.set_create_callback(Box::new(|_| RegionState::Created));
 
             // Nexus side: Notify Nexus of the physical disk/zpool/dataset
             // combination that exists.
@@ -1381,23 +1379,19 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 for dataset in &zpool.datasets {
                     let crucible = self
                         .get_sled(*sled_id)
-                        .get_crucible_dataset(zpool.id, dataset.id)
-                        .await;
+                        .get_crucible_dataset(zpool.id, dataset.id);
                     let called = std::sync::atomic::AtomicBool::new(false);
-                    crucible
-                        .set_create_callback(Box::new(move |_| {
-                            if !called.load(std::sync::atomic::Ordering::SeqCst)
-                            {
-                                called.store(
-                                    true,
-                                    std::sync::atomic::Ordering::SeqCst,
-                                );
-                                RegionState::Requested
-                            } else {
-                                RegionState::Created
-                            }
-                        }))
-                        .await;
+                    crucible.set_create_callback(Box::new(move |_| {
+                        if !called.load(std::sync::atomic::Ordering::SeqCst) {
+                            called.store(
+                                true,
+                                std::sync::atomic::Ordering::SeqCst,
+                            );
+                            RegionState::Requested
+                        } else {
+                            RegionState::Created
+                        }
+                    }));
                 }
             }
         }
@@ -1409,11 +1403,9 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 for dataset in &zpool.datasets {
                     let crucible = self
                         .get_sled(*sled_id)
-                        .get_crucible_dataset(zpool.id, dataset.id)
-                        .await;
+                        .get_crucible_dataset(zpool.id, dataset.id);
                     crucible
-                        .set_create_callback(Box::new(|_| RegionState::Failed))
-                        .await;
+                        .set_create_callback(Box::new(|_| RegionState::Failed));
                 }
             }
         }
@@ -1430,9 +1422,8 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 for dataset in &zpool.datasets {
                     let crucible = self
                         .get_sled(*sled_id)
-                        .get_crucible_dataset(zpool.id, dataset.id)
-                        .await;
-                    if !crucible.is_empty().await {
+                        .get_crucible_dataset(zpool.id, dataset.id);
+                    if !crucible.is_empty() {
                         return false;
                     }
                 }

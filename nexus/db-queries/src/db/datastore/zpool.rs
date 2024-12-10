@@ -31,9 +31,11 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use uuid::Uuid;
 
@@ -269,5 +271,25 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(())
+    }
+
+    pub async fn zpool_get_sled(
+        &self,
+        opctx: &OpContext,
+        id: ZpoolUuid,
+    ) -> LookupResult<SledUuid> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        use db::schema::zpool::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let id = dsl::zpool
+            .filter(dsl::id.eq(id.into_untyped_uuid()))
+            .filter(dsl::time_deleted.is_null())
+            .select(dsl::sled_id)
+            .first_async::<Uuid>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(SledUuid::from_untyped_uuid(id))
     }
 }
