@@ -565,7 +565,7 @@ ring = "0.17.8"
 rpassword = "7.3.1"
 rstest = "0.23.0"
 rustfmt-wrapper = "0.2"
-rustls = "0.22.2"
+rustls = "0.23.0"
 rustls-pemfile = "2.2.0"
 rustyline = "14.0.0"
 samael = { version = "0.0.17", features = ["xmlsec"] }
