@@ -9,11 +9,12 @@ use clickhouse_admin_server_client::types::{
 };
 use clickhouse_admin_server_client::Client as ClickhouseServerClient;
 use omicron_common::FileKv;
-use ratatui::{
-    crossterm::event::{self, Event, KeyCode},
-    layout::{Constraint, Layout},
-    DefaultTerminal, Frame,
-};
+use ratatui::crossterm::event::{self, Event, KeyCode};
+use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::{Color, Style, Stylize};
+use ratatui::text::Span;
+use ratatui::widgets::Paragraph;
+use ratatui::{DefaultTerminal, Frame};
 use slog::{o, Drain, Logger};
 use slog_async::Async;
 use slog_term::{FullFormat, PlainDecorator};
@@ -24,6 +25,15 @@ use tokio::runtime::Runtime;
 use crate::chart::{ChartData, ChartMetadata, MetricName};
 
 mod chart;
+
+#[derive(Debug)]
+struct Dashboard {
+    top_left_frame: ChartData,
+    top_right_frame: ChartData,
+    bottom_left_frame: ChartData,
+    bottom_right_frame: ChartData,
+    // TODO: Add more charts?
+}
 
 pub struct Clickana {
     clickhouse_addr: SocketAddr,
@@ -114,12 +124,20 @@ impl Clickana {
     }
 
     fn draw(&self, frame: &mut Frame, dashboard: Dashboard) {
-        let [top, bottom] =
-            Layout::vertical([Constraint::Fill(1); 2]).areas(frame.area());
+        let [heading, top, bottom] = Layout::vertical([
+            Constraint::Length(4),
+            Constraint::Fill(1),
+            Constraint::Fill(1),
+        ])
+        .areas(frame.area());
+        let [title] =
+            Layout::horizontal([Constraint::Fill(1); 1]).areas(heading);
         let [top_left_frame, top_right_frame] =
             Layout::horizontal([Constraint::Fill(1); 2]).areas(top);
         let [bottom_left_frame, bottom_right_frame] =
             Layout::horizontal([Constraint::Fill(1); 2]).areas(bottom);
+
+        self.render_title_bar(frame, title);
 
         dashboard.top_left_frame.render_line_chart(frame, top_left_frame);
         dashboard.top_right_frame.render_line_chart(frame, top_right_frame);
@@ -127,6 +145,28 @@ impl Clickana {
         dashboard
             .bottom_right_frame
             .render_line_chart(frame, bottom_right_frame);
+    }
+
+    fn render_title_bar(&self, frame: &mut Frame, area: Rect) {
+        let style = Style::new().fg(Color::Green).bold();
+        let title = vec![
+            Span::styled("Clickana", style).into_centered_line(),
+            Span::styled(
+                format!("Sampling Interval: {}s", self.sampling_interval),
+                style,
+            )
+            .into_left_aligned_line(),
+            Span::styled(format!("Time Range: {}s", self.time_range), style)
+                .into_left_aligned_line(),
+            Span::styled(
+                format!("Refresh Interval {}s", self.refresh_interval),
+                style,
+            )
+            .into_left_aligned_line(),
+        ];
+        let p = Paragraph::new(title);
+
+        frame.render_widget(p, area);
     }
 
     fn get_api_data(
@@ -182,15 +222,6 @@ impl Clickana {
 
         Ok(slog::Logger::root(drain, o!(FileKv)))
     }
-}
-
-#[derive(Debug)]
-struct Dashboard {
-    top_left_frame: ChartData,
-    top_right_frame: ChartData,
-    bottom_left_frame: ChartData,
-    bottom_right_frame: ChartData,
-    // Add more charts
 }
 
 #[allow(dead_code)]
