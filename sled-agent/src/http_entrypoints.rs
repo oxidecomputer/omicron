@@ -6,7 +6,6 @@
 
 use super::sled_agent::SledAgent;
 use crate::sled_agent::Error as SledAgentError;
-use crate::support_bundle::queries::SupportBundleCommandHttpOutput;
 use crate::zone_bundle::BundleError;
 use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
@@ -53,6 +52,7 @@ use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     StorageLimit, ZoneBundleId, ZoneBundleMetadata,
 };
+use sled_diagnostics::SledDiagnosticsCommandHttpOutput;
 use std::collections::BTreeMap;
 
 type SledApiDescription = ApiDescription<SledAgent>;
@@ -893,6 +893,38 @@ impl SledAgentApi for SledAgentImpl {
         let sa = request_context.context();
         let output = sa
             .support_dladm_info()
+            .await
+            .into_iter()
+            .map(|cmd| cmd.get_output())
+            .collect::<Vec<_>>()
+            .as_slice()
+            .join("\n\n");
+
+        Ok(HttpResponseOk(FreeformBody(output.into())))
+    }
+
+    async fn support_pargs_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+        let sa = request_context.context();
+        let output = sa
+            .support_pargs_info()
+            .await
+            .into_iter()
+            .map(|cmd| cmd.get_output())
+            .collect::<Vec<_>>()
+            .as_slice()
+            .join("\n\n");
+
+        Ok(HttpResponseOk(FreeformBody(output.into())))
+    }
+
+    async fn support_pstack_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+        let sa = request_context.context();
+        let output = sa
+            .support_pstack_info()
             .await
             .into_iter()
             .map(|cmd| cmd.get_output())

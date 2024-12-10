@@ -1,18 +1,37 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Wrapper for command execution with timeout.
+
 use std::{process::Command, time::Duration};
 
-use futures::{stream::FuturesUnordered, StreamExt};
-use illumos_utils::{dladm::DLADM, zone::IPADM, PFEXEC, ZONEADM};
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
 
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
+#[cfg(target_os = "illumos")]
+use crate::contract::ContractError;
 
-pub trait SupportBundleCommandHttpOutput {
+#[cfg(not(target_os = "illumos"))]
+use crate::contract_stub::ContractError;
+
+const DLADM: &str = "/usr/sbin/dladm";
+const IPADM: &str = "/usr/sbin/ipadm";
+const PFEXEC: &str = "/usr/bin/pfexec";
+const PSTACK: &str = "/usr/bin/pstack";
+const PARGS: &str = "/usr/bin/pargs";
+const ZONEADM: &str = "/usr/sbin/zoneadm";
+
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
+
+pub trait SledDiagnosticsCommandHttpOutput {
     fn get_output(self) -> String;
 }
 
 #[derive(Error, Debug)]
-pub enum SupportBundleCmdError {
+pub enum SledDiagnosticsCmdError {
+    #[error("libcontract error: {0}")]
+    Contract(#[from] ContractError),
     #[error("Failed to duplicate pipe for command [{command}]: {error}")]
     Dup { command: String, error: std::io::Error },
     #[error("Failed to proccess output for command [{command}]: {error}")]
@@ -32,13 +51,13 @@ pub enum SupportBundleCmdError {
 }
 
 #[derive(Debug)]
-pub struct SupportBundleCmdOutput {
+pub struct SledDiagnosticsCmdOutput {
     pub command: String,
     pub stdio: String,
     pub exit_status: String,
 }
 
-impl std::fmt::Display for SupportBundleCmdOutput {
+impl std::fmt::Display for SledDiagnosticsCmdOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Command executed [{}]:", self.command)?;
         writeln!(f, "    ==== stdio ====\n{}", self.stdio)?;
@@ -46,8 +65,8 @@ impl std::fmt::Display for SupportBundleCmdOutput {
     }
 }
 
-impl SupportBundleCommandHttpOutput
-    for Result<SupportBundleCmdOutput, SupportBundleCmdError>
+impl SledDiagnosticsCommandHttpOutput
+    for Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>
 {
     fn get_output(self) -> String {
         match self {
@@ -76,16 +95,19 @@ fn command_to_string(command: &Command) -> String {
 /// and stderr as they occur.
 async fn execute(
     cmd: Command,
-) -> Result<SupportBundleCmdOutput, SupportBundleCmdError> {
+) -> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
     let cmd_string = command_to_string(&cmd);
     let (sender, mut rx) = tokio::net::unix::pipe::pipe().map_err(|e| {
-        SupportBundleCmdError::Pipe { command: cmd_string.clone(), error: e }
+        SledDiagnosticsCmdError::Pipe { command: cmd_string.clone(), error: e }
     })?;
     let pipe = sender.into_nonblocking_fd().map_err(|e| {
-        SupportBundleCmdError::OwnedFd { command: cmd_string.clone(), error: e }
+        SledDiagnosticsCmdError::OwnedFd {
+            command: cmd_string.clone(),
+            error: e,
+        }
     })?;
     let pipe_dup = pipe.try_clone().map_err(|e| {
-        SupportBundleCmdError::Dup { command: cmd_string.clone(), error: e }
+        SledDiagnosticsCmdError::Dup { command: cmd_string.clone(), error: e }
     })?;
 
     // TODO MTZ: We may eventually want to reuse some of the process contract
@@ -95,9 +117,8 @@ async fn execute(
     cmd.stdout(pipe);
     cmd.stderr(pipe_dup);
 
-    let mut child = cmd.spawn().map_err(|e| SupportBundleCmdError::Spawn {
-        command: cmd_string.clone(),
-        error: e,
+    let mut child = cmd.spawn().map_err(|e| {
+        SledDiagnosticsCmdError::Spawn { command: cmd_string.clone(), error: e }
     })?;
     // NB: This drop call is load-bearing and prevents a deadlock. The command
     // struct holds onto the write half of the pipe preventing the read side
@@ -107,130 +128,103 @@ async fn execute(
 
     let mut stdio = String::new();
     rx.read_to_string(&mut stdio).await.map_err(|e| {
-        SupportBundleCmdError::Output { command: cmd_string.clone(), error: e }
+        SledDiagnosticsCmdError::Output {
+            command: cmd_string.clone(),
+            error: e,
+        }
     })?;
 
     let exit_status =
         child.wait().await.map(|es| format!("{es}")).map_err(|e| {
-            SupportBundleCmdError::Wait {
+            SledDiagnosticsCmdError::Wait {
                 command: cmd_string.clone(),
                 error: e,
             }
         })?;
 
-    Ok(SupportBundleCmdOutput { command: cmd_string, stdio, exit_status })
+    Ok(SledDiagnosticsCmdOutput { command: cmd_string, stdio, exit_status })
 }
 
 /// Spawn a command that's allowed to execute within a given time limit.
-async fn execute_command_with_timeout(
+pub async fn execute_command_with_timeout(
     command: Command,
     duration: Duration,
-) -> Result<SupportBundleCmdOutput, SupportBundleCmdError> {
+) -> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
     let cmd_string = command_to_string(&command);
     let tokio_command = execute(command);
     match tokio::time::timeout(duration, tokio_command).await {
         Ok(res) => res,
-        Err(_elapsed) => Err(SupportBundleCmdError::Timeout {
+        Err(_elapsed) => Err(SledDiagnosticsCmdError::Timeout {
             command: cmd_string,
             duration,
         }),
     }
 }
 
-fn zoneadm_list() -> Command {
+pub fn zoneadm_list() -> Command {
     let mut cmd = std::process::Command::new(PFEXEC);
     cmd.env_clear().arg(ZONEADM).arg("list").arg("-cip");
     cmd
 }
 
-fn ipadm_show_interface() -> Command {
+pub fn ipadm_show_interface() -> Command {
     let mut cmd = std::process::Command::new(PFEXEC);
     cmd.env_clear().arg(IPADM).arg("show-if");
     cmd
 }
 
-fn ipadm_show_addr() -> Command {
+pub fn ipadm_show_addr() -> Command {
     let mut cmd = std::process::Command::new(PFEXEC);
     cmd.env_clear().arg(IPADM).arg("show-addr");
     cmd
 }
 
-fn ipadm_show_prop() -> Command {
+pub fn ipadm_show_prop() -> Command {
     let mut cmd = std::process::Command::new(PFEXEC);
     cmd.env_clear().arg(IPADM).arg("show-prop");
     cmd
 }
 
-fn dladm_show_phys() -> Command {
+pub fn dladm_show_phys() -> Command {
     let mut cmd = std::process::Command::new(PFEXEC);
     cmd.env_clear().arg(DLADM).args(["show-phys", "-m"]);
     cmd
 }
 
-fn dladm_show_ether() -> Command {
+pub fn dladm_show_ether() -> Command {
     let mut cmd = std::process::Command::new(PFEXEC);
     cmd.env_clear().arg(DLADM).arg("show-ether");
     cmd
 }
 
-fn dladm_show_link() -> Command {
+pub fn dladm_show_link() -> Command {
     let mut cmd = std::process::Command::new(PFEXEC);
     cmd.env_clear().arg(DLADM).arg("show-link");
     cmd
 }
 
-fn dladm_show_vnic() -> Command {
+pub fn dladm_show_vnic() -> Command {
     let mut cmd = std::process::Command::new(PFEXEC);
     cmd.env_clear().arg(DLADM).arg("show-vnic");
     cmd
 }
 
-fn dladm_show_linkprop() -> Command {
+pub fn dladm_show_linkprop() -> Command {
     let mut cmd = std::process::Command::new(PFEXEC);
     cmd.env_clear().arg(DLADM).arg("show-linkprop");
     cmd
 }
 
-/*
- * Public API
- */
-
-/// List all zones on a sled.
-pub async fn zoneadm_info(
-) -> Result<SupportBundleCmdOutput, SupportBundleCmdError> {
-    execute_command_with_timeout(zoneadm_list(), DEFAULT_TIMEOUT).await
+pub fn pargs_process(pid: i32) -> Command {
+    let mut cmd = std::process::Command::new(PFEXEC);
+    cmd.env_clear().arg(PARGS).arg("-ae").arg(pid.to_string());
+    cmd
 }
 
-/// Retrieve various `ipadm` command output for the system.
-pub async fn ipadm_info(
-) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
-    [ipadm_show_interface(), ipadm_show_addr(), ipadm_show_prop()]
-        .into_iter()
-        .map(|c| async move {
-            execute_command_with_timeout(c, DEFAULT_TIMEOUT).await
-        })
-        .collect::<FuturesUnordered<_>>()
-        .collect::<Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>>>()
-        .await
-}
-
-/// Retrieve various `dladm` command output for the system.
-pub async fn dladm_info(
-) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
-    [
-        dladm_show_phys(),
-        dladm_show_ether(),
-        dladm_show_link(),
-        dladm_show_vnic(),
-        dladm_show_linkprop(),
-    ]
-        .into_iter()
-        .map(|c| async move {
-            execute_command_with_timeout(c, DEFAULT_TIMEOUT).await
-        })
-        .collect::<FuturesUnordered<_>>()
-        .collect::<Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>>>()
-        .await
+pub fn pstack_process(pid: i32) -> Command {
+    let mut cmd = std::process::Command::new(PFEXEC);
+    cmd.env_clear().arg(PSTACK).arg(pid.to_string());
+    cmd
 }
 
 #[cfg(test)]
@@ -246,7 +240,7 @@ mod test {
         match execute_command_with_timeout(command, Duration::from_millis(500))
             .await
         {
-            Err(SupportBundleCmdError::Timeout { .. }) => (),
+            Err(SledDiagnosticsCmdError::Timeout { .. }) => (),
             _ => panic!("command should have timed out"),
         }
     }
@@ -267,7 +261,7 @@ mod test {
     #[tokio::test]
     async fn test_command_stderr_is_correct() {
         let mut command = Command::new("bash");
-        command.env_clear().args(&["-c", "echo oxide computer > /dev/stderr"]);
+        command.env_clear().args(["-c", "echo oxide computer > /dev/stderr"]);
 
         let res = execute_command_with_timeout(command, Duration::from_secs(5))
             .await
@@ -279,7 +273,7 @@ mod test {
     #[tokio::test]
     async fn test_command_stdout_stderr_are_interleaved() {
         let mut command = Command::new("bash");
-        command.env_clear().args(&[
+        command.env_clear().args([
             "-c",
             "echo one > /dev/stdout \
             && echo two > /dev/stderr \
