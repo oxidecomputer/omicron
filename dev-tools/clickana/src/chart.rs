@@ -195,7 +195,7 @@ fn padded_min_value_raw(unit: Unit, min_value_raw: &f64) -> Result<f64> {
 fn padded_min_value_as_unit(unit: Unit, min_value_raw: &f64) -> Result<f64> {
     let padded_value = match unit {
         Unit::Count => {
-            if *min_value_raw <= 1.0 {
+            if *min_value_raw < 1.0 {
                 0.0
             } else {
                 min_value_raw - 1.0
@@ -203,7 +203,7 @@ fn padded_min_value_as_unit(unit: Unit, min_value_raw: &f64) -> Result<f64> {
         }
         Unit::Gibibyte | Unit::Mebibyte => {
             let value_as_unit = min_value_raw / unit.as_bytes_f64()?;
-            if value_as_unit <= 1.0 {
+            if value_as_unit < 1.0 {
                 0.0
             } else {
                 value_as_unit - 1.0
@@ -219,7 +219,7 @@ fn avg_value_as_unit(
     min_value_raw: &f64,
     max_value_raw: &f64,
 ) -> Result<f64> {
-    let avg = ((min_value_raw + max_value_raw) / 2.0).round();
+    let avg = (min_value_raw + max_value_raw) / 2.0;
     let avg_value = match unit {
         Unit::Count => avg,
         Unit::Gibibyte | Unit::Mebibyte => avg / unit.as_bytes_f64()?,
@@ -250,7 +250,7 @@ impl YAxisValues {
         let upper_label = padded_max_value_as_unit(unit, max_value)?;
         let lower_bound = padded_min_value_raw(unit, min_value)?;
         let lower_label = padded_min_value_as_unit(unit, min_value)?;
-        let mid_label = avg_value_as_unit(unit, min_value, max_value)?;
+        let mid_label = avg_value_as_unit(unit, &lower_bound, &upper_bound)?;
 
         Ok(Self {
             lower_label,
@@ -418,6 +418,23 @@ impl ChartData {
             .graph_type(GraphType::Line)
             .data(&self.data_points.data)];
 
+        // TODO: Put this somewhere else?
+        //
+        // To nicely display the mid value label for the Y axis, we do the following:
+        // - It is not displayed it if it is a 0.0.
+        // - If it does not have a fractional number we display it as an integer.
+        // - Else, we display the number as is up to the first fractional number.
+        let mid_value = self.y_axis_values.mid_label;
+        let fractional_of_mid_value = mid_value - mid_value.floor();
+        let mid_value_formatted = format!("{:.1}", mid_value);
+        let y_axis_mid_label = if mid_value_formatted == "0.0".to_string() {
+            "".to_string()
+        } else if fractional_of_mid_value == 0.0 {
+            format!("{}", mid_value_formatted.split('.').next().unwrap())
+        } else {
+            mid_value_formatted
+        };
+
         let chart = Chart::new(datasets)
             .block(
                 Block::bordered().title(
@@ -435,14 +452,21 @@ impl ChartData {
                         self.x_axis_timestamps.end_time_bound,
                     ])
                     .labels([
-                        // TODO: Remove start time and print the interval at the top of the
-                        // dashboard
-                        format!("{}", self.x_axis_timestamps.start_time_label)
-                            .bold(),
-                        format!("{}", self.x_axis_timestamps.mid_time_label)
-                            .bold(),
-                        format!("{}", self.x_axis_timestamps.end_time_label)
-                            .bold(),
+                        format!(
+                            "{}",
+                            self.x_axis_timestamps.start_time_label.time()
+                        )
+                        .bold(),
+                        format!(
+                            "{}",
+                            self.x_axis_timestamps.mid_time_label.time()
+                        )
+                        .bold(),
+                        format!(
+                            "{}",
+                            self.x_axis_timestamps.end_time_label.time()
+                        )
+                        .bold(),
                     ]),
             )
             .y_axis(
@@ -459,11 +483,8 @@ impl ChartData {
                         )
                         .bold(),
                         // TODO: Only show fractional number if not .0 ?
-                        format!(
-                            "{:.1} {}",
-                            self.y_axis_values.mid_label, self.metadata.unit
-                        )
-                        .bold(),
+                        format!("{} {}", y_axis_mid_label, self.metadata.unit)
+                            .bold(),
                         format!(
                             "{} {}",
                             self.y_axis_values.upper_label, self.metadata.unit

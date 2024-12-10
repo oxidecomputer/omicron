@@ -139,6 +139,9 @@ impl Clickana {
     fn draw(&self, frame: &mut Frame, dashboard: Dashboard) {
         let [heading, top, bottom] = Layout::vertical([
             Constraint::Length(4),
+            // TODO: If we make the dashboard with too many charts
+            // we may want to reconsider setting sizes instead of filling
+            // the space
             Constraint::Fill(1),
             Constraint::Fill(1),
         ])
