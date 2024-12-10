@@ -391,18 +391,17 @@ mod test {
         let region_id = Uuid::new_v4();
         let snapshot_id = Uuid::new_v4();
 
-         let region_snapshot = RegionSnapshot::new(
+        let region_snapshot = RegionSnapshot::new(
             dataset_id,
             region_id,
             snapshot_id,
             "[::]:12345".to_string(),
-         );
- 
-         datastore.region_snapshot_create(region_snapshot).await.unwrap();
-
-        let request = RegionSnapshotReplacement::new(
-            dataset_id, region_id, snapshot_id
         );
+
+        datastore.region_snapshot_create(region_snapshot).await.unwrap();
+
+        let request =
+            RegionSnapshotReplacement::new(dataset_id, region_id, snapshot_id);
 
         let request_id = request.id;
 
