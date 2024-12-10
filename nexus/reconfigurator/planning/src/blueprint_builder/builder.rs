@@ -44,6 +44,7 @@ use nexus_types::deployment::SledLookupErrorKind;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::ZpoolName;
+use nexus_types::external_api::views::PhysicalDiskState;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
 use omicron_common::address::get_sled_address;
@@ -1049,6 +1050,7 @@ impl<'a> BlueprintBuilder<'a> {
             editor.ensure_disk(
                 BlueprintPhysicalDiskConfig {
                     disposition: BlueprintPhysicalDiskDisposition::InService,
+                    state: PhysicalDiskState::Active,
                     identity: disk.disk_identity.clone(),
                     id: disk_id,
                     pool_id: *zpool,

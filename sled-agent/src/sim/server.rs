@@ -32,6 +32,7 @@ use nexus_types::deployment::{
 use nexus_types::deployment::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
 };
+use nexus_types::external_api::views::PhysicalDiskState;
 use nexus_types::inventory::NetworkInterfaceKind;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
@@ -553,6 +554,7 @@ pub async fn run_standalone_server(
                     .map(|config| BlueprintPhysicalDiskConfig {
                         disposition:
                             BlueprintPhysicalDiskDisposition::InService,
+                        state: PhysicalDiskState::Active,
                         identity: config.identity,
                         id: config.id,
                         pool_id: config.pool_id,
