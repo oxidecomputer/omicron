@@ -2302,9 +2302,9 @@ dependencies = [
 
 [[package]]
 name = "diesel"
-version = "2.2.4"
+version = "2.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "158fe8e2e68695bd615d7e4f3227c0727b151330d3e253b525086c348d055d5e"
+checksum = "ccf1bedf64cdb9643204a36dd15b19a6ce8e7aa7f7b105868e9f1fad5ffa7d12"
 dependencies = [
  "bitflags 2.6.0",
  "byteorder",
@@ -2321,9 +2321,9 @@ dependencies = [
 
 [[package]]
 name = "diesel-dtrace"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5318329cce80f28564e585bb5ba4007bdf16865efa13d797a4f0fd4b1fed40f1"
+checksum = "4e5130181059723aae1cfdb678d3698052a225aaadb18000f77fec4200047acc"
 dependencies = [
  "diesel",
  "serde",
