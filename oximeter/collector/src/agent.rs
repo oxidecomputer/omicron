@@ -970,7 +970,22 @@ mod tests {
         // We don't manipulate time manually here, since this is pretty short
         // and we want to assert things about the actual timing in the test
         // below.
-        while collection_count.load(Ordering::SeqCst) < 1 {
+        let is_ready = || async {
+            // We need to check if the server has had a collection request, and
+            // also if we've processed it on our task side. If we don't wait for
+            // the second bit, updating our collection details in the task races
+            // with the rest of this test that checks those details.
+            if collection_count.load(Ordering::SeqCst) < 1 {
+                return false;
+            }
+            collector
+                .producer_details(id)
+                .await
+                .expect("Should be able to get producer details")
+                .n_collections
+                > 0
+        };
+        while !is_ready().await {
             tokio::time::sleep(TICK_INTERVAL).await;
         }
 
@@ -980,6 +995,7 @@ mod tests {
             .producer_details(id)
             .await
             .expect("Should be able to get producer details");
+        println!("{details:#?}");
         assert_eq!(details.id, id);
         assert!(details.registered > before);
         assert!(details.updated > before);
