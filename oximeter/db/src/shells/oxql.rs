@@ -83,6 +83,47 @@ pub async fn shell(
                             } else {
                                 print_oxql_operation_help(stmt);
                             }
+                        } else if let Some(stmt) = cmd.strip_prefix("plan") {
+                            match client
+                                .plan_oxql_query(
+                                    stmt.trim().trim_end_matches(';'),
+                                )
+                                .await
+                            {
+                                Ok(plan) => {
+                                    println!(
+                                        "{}\n{}\n",
+                                        "OxQL query plan".underlined(),
+                                        plan.query,
+                                    );
+                                    let (original, optimized_plan) =
+                                        plan.to_plan_tree();
+                                    println!("{}", "Original".underlined());
+                                    println!("{}", original);
+                                    println!("{}", "Optimized".underlined());
+                                    println!("{}", optimized_plan);
+                                    let output = plan.output();
+                                    println!(
+                                        "{} ({} table{})",
+                                        "Output".underlined(),
+                                        output.n_tables(),
+                                        if output.n_tables() == 1 {
+                                            ""
+                                        } else {
+                                            "s"
+                                        },
+                                    );
+                                    println!("{}", output);
+                                    println!(
+                                        "Planning time: {:?}",
+                                        plan.duration
+                                    );
+                                }
+                                Err(e) => {
+                                    eprintln!("{}", "Error".underlined().red());
+                                    eprintln!("{e}");
+                                }
+                            }
                         } else {
                             match client
                                 .oxql_query(cmd.trim().trim_end_matches(';'))
@@ -151,7 +192,7 @@ Get instances of a timeseries by name"#;
             println!("{HELP}");
         }
         "filter" => {
-            const HELP: &str = r#"filter <expr>");
+            const HELP: &str = r#"filter <expr>";
 
 Filter timeseries based on their attributes.
 <expr> can be a logical combination of filtering
@@ -190,6 +231,18 @@ account the timestamps, and does not align the outputs
 directly."#;
             println!("{HELP}");
         }
+        "align" => {
+            const HELP: &str = r#"align <alignment_method>
+
+Align the timepoints in each timeseries, so that they
+occur on exactly regular intervals. Nearby timepoints
+may be combined with the specified alignment method.
+Alignment is required to combine multiple timeseries
+together, either by joining them across tables, or grouping
+them within tables.
+"#;
+            println!("{HELP}");
+        }
         _ => eprintln!("unrecognized OxQL operation: '{op}'"),
     }
 }
@@ -202,6 +255,7 @@ fn print_basic_commands() {
     println!("  \\l                 - List timeseries");
     println!("  \\d <timeseries>    - Describe a timeseries");
     println!("  \\ql [<operation>]  - Get OxQL help about an operation");
+    println!("  plan <query>       - Emit the query plan for an OxQL query");
     println!();
     println!("Or try entering an OxQL `get` query");
 }
@@ -219,12 +273,13 @@ operator, "|".
 All queries start with a `get` operation, which selects a
 timeseries from the database, by name. For example:
 
-`get physical_data_link:bytes_received`
+`get sled_data_link:bytes_received`
 
 The supported timeseries operations are:
 
 - get: Select a timeseries by name
 - filter: Filter timeseries by field or sample values
+- align: Temporally align timeseries, combining nearby points.
 - group_by: Group timeseries by fields, applying a reducer.
 - join: Join two or more timeseries together
 

@@ -43,6 +43,7 @@ slog-async.workspace = true
 slog-dtrace.workspace = true
 slog-term.workspace = true
 strum.workspace = true
+termtree.workspace = true
 thiserror.workspace = true
 tokio-util.workspace = true
 usdt.workspace = true

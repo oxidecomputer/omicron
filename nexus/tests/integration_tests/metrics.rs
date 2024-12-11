@@ -450,7 +450,8 @@ async fn test_instance_watcher_metrics(
     const STATE_STARTING: &str = "starting";
     const STATE_RUNNING: &str = "running";
     const STATE_STOPPING: &str = "stopping";
-    const OXQL_QUERY: &str = "get virtual_machine:check";
+    const OXQL_QUERY: &str = "get virtual_machine:check | \
+                              filter timestamp > @2000-01-01";
 
     let client = &cptestctx.external_client;
     let internal_client = &cptestctx.internal_client;
@@ -707,7 +708,13 @@ async fn test_project_timeseries_query(
     // fields are. This is helpful generally, but here it would be better if
     // we could say something more like "you can't query this timeseries from
     // this endpoint"
-    assert_eq!(result.message, "The filter expression contains identifiers that are not valid for its input timeseries. Invalid identifiers: [\"project_id\", \"silo_id\"], timeseries fields: {\"datum\", \"metric_name\", \"target_name\", \"timestamp\"}");
+    const EXPECTED_ERROR_MESSAGE: &str = "\
+        The filter expression refers to \
+        identifiers that are not valid for its input \
+        table \"integration_target:integration_metric\". \
+        Invalid identifiers: [\"silo_id\", \"project_id\"], \
+        valid identifiers: [\"datum\", \"metric_name\", \"target_name\", \"timestamp\"]";
+    assert!(result.message.ends_with(EXPECTED_ERROR_MESSAGE));
 
     // nonexistent project
     let url = "/v1/timeseries/query?project=nonexistent";
@@ -872,7 +879,8 @@ async fn test_mgs_metrics(
             return;
         }
 
-        let query = format!("get {metric_name}");
+        let query =
+            format!("get {metric_name} | filter timestamp > @2000-01-01");
 
         // MGS polls SP sensor data once every second. It's possible that, when
         // we triggered Oximeter to collect samples from MGS, it may not have
