@@ -2582,20 +2582,11 @@ mod test {
         let expunged_sled_id = pantry_sleds[0];
 
         let mut input_builder = input.into_builder();
-        let expunged_sled = input_builder
+        input_builder
             .sleds_mut()
             .get_mut(&expunged_sled_id)
-            .expect("can't find sled");
-
-        expunged_sled.policy = SledPolicy::Expunged;
-
-        // When expunging a sled via Nexus, all its disks are also immediately
-        // expunged; we must also do that or we'd be providing an invalid input
-        // state which would cause planning to fail.
-        for (disk, _) in expunged_sled.resources.zpools.values_mut() {
-            disk.policy = PhysicalDiskPolicy::Expunged;
-        }
-
+            .expect("can't find sled")
+            .policy = SledPolicy::Expunged;
         let input = input_builder.build();
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
