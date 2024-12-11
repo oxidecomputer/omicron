@@ -33,6 +33,7 @@ pub struct SledUnderlayIpOutOfRange {
 // general enough to use here, though this one could potentially be used there.
 #[derive(Debug)]
 pub(crate) struct SledUnderlayIpAllocator {
+    minimum: Ipv6Addr,
     last: Ipv6Addr,
     maximum: Ipv6Addr,
 }
@@ -68,22 +69,48 @@ impl SledUnderlayIpAllocator {
         assert!(sled_subnet.net().contains(minimum));
         assert!(sled_subnet.net().contains(maximum));
 
-        let mut last = minimum;
-        for (zone_kind, reserved_ip) in in_use_zone_ips {
-            if reserved_ip < minimum || reserved_ip > maximum {
-                return Err(SledUnderlayIpOutOfRange {
-                    zone_kind,
-                    ip: reserved_ip,
-                    low: minimum,
-                    high: maximum,
-                });
-            }
-            last = Ipv6Addr::max(last, reserved_ip);
+        let mut slf = Self { minimum, last: minimum, maximum };
+        for (zone_kind, ip) in in_use_zone_ips {
+            slf.mark_as_allocated(zone_kind, ip)?;
         }
-        assert!(minimum <= last);
-        assert!(last <= maximum);
+        assert!(slf.minimum <= slf.last);
+        assert!(slf.last <= slf.maximum);
 
-        Ok(Self { last, maximum })
+        Ok(slf)
+    }
+
+    /// Mark an address as used.
+    ///
+    /// Marking an address that has already been handed out by this allocator
+    /// (or could have been handed out by this allocator) is allowed and does
+    /// nothing.
+    ///
+    /// # Errors
+    ///
+    /// Fails if `ip` is outside the subnet of this sled.
+    pub fn mark_as_allocated(
+        &mut self,
+        zone_kind: ZoneKind,
+        ip: Ipv6Addr,
+    ) -> Result<(), SledUnderlayIpOutOfRange> {
+        // We intentionally ignore any internal DNS underlay IPs; they live
+        // outside the sled subnet and are allocated separately.
+        if zone_kind == ZoneKind::InternalDns {
+            return Ok(());
+        }
+
+        if ip < self.minimum || ip > self.maximum {
+            return Err(SledUnderlayIpOutOfRange {
+                zone_kind,
+                ip,
+                low: self.minimum,
+                high: self.maximum,
+            });
+        }
+
+        self.last = Ipv6Addr::max(self.last, ip);
+
+        Ok(())
     }
 
     /// Allocate an unused address from this allocator's range
