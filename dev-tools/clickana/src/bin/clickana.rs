@@ -39,8 +39,8 @@ struct Cli {
     )]
     log_path: Utf8PathBuf,
 
-    /// Address where a clickhouse server is listening on
-    #[arg(long, short)]
+    /// Address where a clickhouse admin server is listening on
+    #[arg(long, short = 'a')]
     clickhouse_addr: SocketAddr,
 
     /// The interval to collect monitoring data in seconds
