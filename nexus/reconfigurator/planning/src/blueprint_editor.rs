@@ -13,8 +13,15 @@ pub use allocators::BlueprintResourceAllocatorInputError;
 pub use allocators::ExternalNetworkingError;
 pub use allocators::InternalDnsError;
 pub use allocators::InternalDnsInputError;
-pub use allocators::SledUnderlayIpError;
+pub use sled_editor::DatasetsEditError;
+pub use sled_editor::DisksEditError;
+pub use sled_editor::DuplicateDiskId;
+pub use sled_editor::DuplicateZoneId;
+pub use sled_editor::MultipleDatasetsOfKind;
 pub use sled_editor::SledEditError;
+pub use sled_editor::SledInputError;
+pub use sled_editor::SledUnderlayIpOutOfRange;
+pub use sled_editor::ZonesEditError;
 
 pub(crate) use allocators::BlueprintResourceAllocator;
 pub(crate) use sled_editor::EditedSled;

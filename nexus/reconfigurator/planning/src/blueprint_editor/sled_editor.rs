@@ -27,17 +27,21 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use std::iter;
 use std::mem;
 use std::net::Ipv6Addr;
+use underlay_ip_allocator::SledUnderlayIpAllocator;
 
 mod datasets;
 mod disks;
+mod underlay_ip_allocator;
 mod zones;
 
 pub use self::datasets::DatasetsEditError;
 pub use self::datasets::MultipleDatasetsOfKind;
 pub use self::disks::DisksEditError;
 pub use self::disks::DuplicateDiskId;
+pub use self::underlay_ip_allocator::SledUnderlayIpOutOfRange;
 pub use self::zones::DuplicateZoneId;
 pub use self::zones::ZonesEditError;
 
@@ -54,6 +58,8 @@ pub enum SledInputError {
     DuplicateDiskId(#[from] DuplicateDiskId),
     #[error(transparent)]
     MultipleDatasetsOfKind(#[from] MultipleDatasetsOfKind),
+    #[error(transparent)]
+    UnderlayIp(#[from] SledUnderlayIpOutOfRange),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -198,20 +204,6 @@ impl SledEditor {
         Ok(())
     }
 
-    /// Returns this sled's subnet if it is an active sled.
-    ///
-    /// Decommissioned sleds do not report a sled subnet. While we don't
-    /// currently reuse sled subnets after sled decommissioning, we may
-    /// eventually (<https://github.com/oxidecomputer/omicron/issues/5554>),
-    /// which would require us to ignore subnets of decommissioned sleds when
-    /// making editing decisions.
-    pub fn subnet(&self) -> Option<Ipv6Subnet<SLED_PREFIX>> {
-        match &self.0 {
-            InnerSledEditor::Active(editor) => Some(editor.subnet),
-            InnerSledEditor::Decommissioned(_) => None,
-        }
-    }
-
     pub fn disks(
         &self,
         filter: DiskFilter,
@@ -303,7 +295,7 @@ impl SledEditor {
 
 #[derive(Debug)]
 struct ActiveSledEditor {
-    subnet: Ipv6Subnet<SLED_PREFIX>,
+    underlay_ip_allocator: SledUnderlayIpAllocator,
     zones: ZonesEditor,
     disks: DisksEditor,
     datasets: DatasetsEditor,
@@ -325,8 +317,27 @@ impl ActiveSledEditor {
         disks: BlueprintPhysicalDisksConfig,
         datasets: BlueprintDatasetsConfig,
     ) -> Result<Self, SledInputError> {
+        // We never reuse underlay IPs within a sled, regardless of zone
+        // dispositions. If a zone has been fully removed from the blueprint
+        // some time after expungement, we may reuse its IP; reconfigurator must
+        // know that's safe prior to pruning the expunged zone.
+        let zone_ips = zones.zones(BlueprintZoneFilter::All).filter_map(|z| {
+            // Internal DNS zone's IPs are (intentionally!) outside the sled
+            // subnet, and must be allocated across the rack as a whole. We'll
+            // ignore any internal DNS zones when constructing our underlay IP
+            // allocator (as `SledUnderlayIpAllocator` will fail if we tell it a
+            // zone is using an IP outside of the sled subnet).
+            if z.zone_type.is_internal_dns() {
+                None
+            } else {
+                Some((z.zone_type.kind(), z.underlay_ip()))
+            }
+        });
+
         Ok(Self {
-            subnet,
+            underlay_ip_allocator: SledUnderlayIpAllocator::new(
+                subnet, zone_ips,
+            )?,
             zones: zones.into(),
             disks: disks.try_into()?,
             datasets: DatasetsEditor::new(datasets)?,
@@ -334,8 +345,20 @@ impl ActiveSledEditor {
     }
 
     pub fn new_empty(subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
+        // Creating the underlay IP allocator can only fail if we have a zone
+        // with an IP outside the sled subnet, but we don't have any zones at
+        // all, so this can't fail. Match explicitly to guard against this error
+        // turning into an enum and getting new variants we'd need to check.
+        let underlay_ip_allocator =
+            match SledUnderlayIpAllocator::new(subnet, iter::empty()) {
+                Ok(allocator) => allocator,
+                Err(SledUnderlayIpOutOfRange { .. }) => {
+                    unreachable!("iter::empty() returns no IPs")
+                }
+            };
+
         Self {
-            subnet,
+            underlay_ip_allocator,
             zones: ZonesEditor::empty(),
             disks: DisksEditor::empty(),
             datasets: DatasetsEditor::empty(),
