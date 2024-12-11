@@ -113,6 +113,8 @@ pub enum SledEditError {
     ZoneOnNonexistentZpool { zone_id: OmicronZoneUuid, zpool: ZpoolName },
     #[error("ran out of underlay IP addresses")]
     OutOfUnderlayIps,
+    #[error("cannot add zone with invalid underlay IP")]
+    AddZoneBadUnderlayIp(#[source] SledUnderlayIpOutOfRange),
 }
 
 #[derive(Debug)]
@@ -331,18 +333,9 @@ impl ActiveSledEditor {
         // dispositions. If a zone has been fully removed from the blueprint
         // some time after expungement, we may reuse its IP; reconfigurator must
         // know that's safe prior to pruning the expunged zone.
-        let zone_ips = zones.zones(BlueprintZoneFilter::All).filter_map(|z| {
-            // Internal DNS zone's IPs are (intentionally!) outside the sled
-            // subnet, and must be allocated across the rack as a whole. We'll
-            // ignore any internal DNS zones when constructing our underlay IP
-            // allocator (as `SledUnderlayIpAllocator` will fail if we tell it a
-            // zone is using an IP outside of the sled subnet).
-            if z.zone_type.is_internal_dns() {
-                None
-            } else {
-                Some((z.zone_type.kind(), z.underlay_ip()))
-            }
-        });
+        let zone_ips = zones
+            .zones(BlueprintZoneFilter::All)
+            .map(|z| (z.zone_type.kind(), z.underlay_ip()));
 
         Ok(Self {
             underlay_ip_allocator: SledUnderlayIpAllocator::new(
@@ -475,6 +468,13 @@ impl ActiveSledEditor {
     ) -> Result<(), SledEditError> {
         // Ensure we can construct the configs for the datasets for this zone.
         let datasets = ZoneDatasetConfigs::new(&self.disks, &zone)?;
+
+        // Ensure this zone's IP is within our subnet and that future IP
+        // allocations take it into account. (Unless `zone` is an internal DNS
+        // zone, in which case validation is higher-level planner's job.)
+        self.underlay_ip_allocator
+            .mark_as_allocated(zone.zone_type.kind(), zone.underlay_ip())
+            .map_err(SledEditError::AddZoneBadUnderlayIp)?;
 
         // Actually add the zone and its datasets.
         self.zones.add_zone(zone)?;
