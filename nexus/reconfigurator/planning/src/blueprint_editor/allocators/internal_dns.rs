@@ -114,6 +114,7 @@ pub mod test {
     use crate::blueprint_builder::test::verify_blueprint;
     use crate::example::ExampleSystemBuilder;
     use nexus_types::deployment::BlueprintZoneFilter;
+    use omicron_common::disk::DatasetKind;
     use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
     use omicron_test_utils::dev::test_setup_log;
 
@@ -139,6 +140,24 @@ pub mod test {
         }
         let npruned = blueprint1.blueprint_zones.len() - 1;
         assert!(npruned > 0);
+
+        // Also prune out the zones' datasets, or we're left with an invalid
+        // blueprint.
+        for (_, dataset_config) in
+            blueprint1.blueprint_datasets.iter_mut().skip(1)
+        {
+            dataset_config.datasets.retain(|dataset| {
+                // This is gross; once zone configs know explicit dataset IDs,
+                // we should retain by ID instead.
+                match &dataset.kind {
+                    DatasetKind::InternalDns => false,
+                    DatasetKind::TransientZone { name } => {
+                        !name.starts_with("oxz_internal_dns")
+                    }
+                    _ => true,
+                }
+            });
+        }
 
         verify_blueprint(&blueprint1);
 

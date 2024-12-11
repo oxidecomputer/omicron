@@ -325,6 +325,8 @@ impl ActiveSledEditor {
         disks: BlueprintPhysicalDisksConfig,
         datasets: BlueprintDatasetsConfig,
     ) -> Result<Self, SledInputError> {
+        let zones = ZonesEditor::from(zones);
+
         // We never reuse underlay IPs within a sled, regardless of zone
         // dispositions. If a zone has been fully removed from the blueprint
         // some time after expungement, we may reuse its IP; reconfigurator must
@@ -346,7 +348,7 @@ impl ActiveSledEditor {
             underlay_ip_allocator: SledUnderlayIpAllocator::new(
                 subnet, zone_ips,
             )?,
-            zones: zones.into(),
+            zones,
             disks: disks.try_into()?,
             datasets: DatasetsEditor::new(datasets)?,
         })
