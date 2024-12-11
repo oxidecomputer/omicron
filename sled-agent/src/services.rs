@@ -2359,7 +2359,7 @@ impl ServiceManager {
                             bind_address: SocketAddr::new(*opte_ip, nexus_port),
                             // This has to be large enough to support:
                             // - bulk writes to disks
-                            request_body_max_bytes: 8192 * 1024,
+                            default_request_body_max_bytes: 8192 * 1024,
                             default_handler_task_mode:
                                 HandlerTaskMode::Detached,
                             log_headers: vec![],
@@ -2371,7 +2371,7 @@ impl ServiceManager {
                         // other things, the initial list of TLS
                         // certificates provided by the customer during
                         // rack setup.
-                        request_body_max_bytes: 10 * 1024 * 1024,
+                        default_request_body_max_bytes: 10 * 1024 * 1024,
                         default_handler_task_mode: HandlerTaskMode::Detached,
                         log_headers: vec![],
                     },
