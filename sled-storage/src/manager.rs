@@ -891,6 +891,19 @@ impl StorageManager {
                             generation: config.generation,
                         });
                     }
+
+                    // The ledger already was written, and the datasets were
+                    // ensured for this generation. Exit early.
+                    return Ok(DatasetsManagementResult {
+                        status: config
+                            .datasets
+                            .into_values()
+                            .map(|dataset| DatasetManagementStatus {
+                                dataset_name: dataset.name,
+                                err: None,
+                            })
+                            .collect(),
+                    });
                 } else {
                     info!(
                         log,
@@ -933,15 +946,17 @@ impl StorageManager {
         log: &Logger,
         config: &DatasetsConfig,
     ) -> DatasetsManagementResult {
-        let mut status = vec![];
-        for dataset in config.datasets.values() {
-            status.push(self.dataset_ensure_internal(log, dataset).await);
-        }
+        // Ensure each dataset concurrently
+        let futures = config.datasets.values().map(|dataset| async {
+            self.dataset_ensure_internal(log, dataset).await
+        });
+
+        let status = futures::future::join_all(futures).await;
         DatasetsManagementResult { status }
     }
 
     async fn dataset_ensure_internal(
-        &mut self,
+        &self,
         log: &Logger,
         config: &DatasetConfig,
     ) -> DatasetManagementStatus {
@@ -1294,7 +1309,7 @@ impl StorageManager {
     // Invokes [Self::ensure_dataset] and also ensures the dataset has an
     // expected UUID as a ZFS property.
     async fn ensure_dataset_with_id(
-        &mut self,
+        &self,
         zpool: &ZpoolName,
         id: DatasetUuid,
         config: &SharedDatasetConfig,
@@ -1323,7 +1338,7 @@ impl StorageManager {
     //
     // Confirms that the zpool exists and is managed by this sled.
     async fn ensure_dataset(
-        &mut self,
+        &self,
         zpool: &ZpoolName,
         config: &SharedDatasetConfig,
         details: &DatasetCreationDetails,
@@ -1428,7 +1443,8 @@ impl StorageManager {
 
 /// All tests only use synthetic disks, but are expected to be run on illumos
 /// systems.
-#[cfg(all(test, target_os = "illumos"))]
+// #[cfg(all(test, target_os = "illumos"))]
+#[cfg(test)]
 mod tests {
     use crate::disk::RawSyntheticDisk;
     use crate::manager_test_harness::StorageManagerTestHarness;
@@ -1991,6 +2007,121 @@ mod tests {
         let status =
             harness.handle().datasets_ensure(config.clone()).await.unwrap();
         assert!(!status.has_error());
+
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn ensure_many_datasets() {
+        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
+        let logctx = test_setup_log("ensure_many_datasets");
+        let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
+
+        // Test setup: Add U.2s and an M.2, adopt them into the "control plane"
+        // for usage.
+        harness.handle().key_manager_ready().await;
+        let raw_disks = harness
+            .add_vdevs(&[
+                "u2_0.vdev",
+                "u2_1.vdev",
+                "u2_2.vdev",
+                "u2_3.vdev",
+                "u2_4.vdev",
+                "u2_5.vdev",
+                "u2_6.vdev",
+                "u2_7.vdev",
+                "u2_8.vdev",
+                "u2_9.vdev",
+                "m2_helping.vdev",
+            ])
+            .await;
+        let config = harness.make_config(1, &raw_disks);
+
+        println!("Ensuring physical disks...");
+        let result = harness
+            .handle()
+            .omicron_physical_disks_ensure(config.clone())
+            .await
+            .expect("Ensuring disks should work after key manager is ready");
+        assert!(!result.has_error(), "{:?}", result);
+        println!("OK");
+
+        println!("Ensuring physical disks again...");
+        let result = harness
+            .handle()
+            .omicron_physical_disks_ensure(config.clone())
+            .await
+            .expect("Ensuring disks should work after key manager is ready");
+        assert!(!result.has_error(), "{:?}", result);
+        println!("OK");
+
+        // Create datasets on the newly formatted U.2s
+        let mut datasets = BTreeMap::new();
+        for i in 0..10 {
+            let zpool_name = ZpoolName::new_external(config.disks[i].pool_id);
+
+            let id = DatasetUuid::new_v4();
+            let name =
+                DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
+            datasets.insert(
+                id,
+                DatasetConfig {
+                    id,
+                    name,
+                    inner: SharedDatasetConfig::default(),
+                },
+            );
+
+            let id = DatasetUuid::new_v4();
+            let name = DatasetName::new(zpool_name.clone(), DatasetKind::Debug);
+            datasets.insert(
+                id,
+                DatasetConfig {
+                    id,
+                    name,
+                    inner: SharedDatasetConfig::default(),
+                },
+            );
+
+            let id = DatasetUuid::new_v4();
+            let name = DatasetName::new(
+                zpool_name.clone(),
+                DatasetKind::TransientZoneRoot,
+            );
+            datasets.insert(
+                id,
+                DatasetConfig {
+                    id,
+                    name,
+                    inner: SharedDatasetConfig::default(),
+                },
+            );
+        }
+        // "Generation = 1" is reserved as "no requests seen yet", so we jump
+        // past it.
+        let generation = Generation::new().next();
+        let config = DatasetsConfig { generation, datasets };
+
+        println!("Ensuring datasets... ");
+        let status =
+            harness.handle().datasets_ensure(config.clone()).await.unwrap();
+        assert!(!status.has_error());
+        println!("OK");
+
+        // List datasets, expect to see what we just created
+        println!("List... ");
+        let observed_config =
+            harness.handle().datasets_config_list().await.unwrap();
+        assert_eq!(config, observed_config);
+        println!("OK");
+
+        // Calling "datasets_ensure" with the same input should succeed.
+        println!("Ensuring datasets again... ");
+        let status =
+            harness.handle().datasets_ensure(config.clone()).await.unwrap();
+        assert!(!status.has_error());
+        println!("OK");
 
         harness.cleanup().await;
         logctx.cleanup_successful();
