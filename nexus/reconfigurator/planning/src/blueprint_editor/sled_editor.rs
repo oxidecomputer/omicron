@@ -195,6 +195,14 @@ impl SledEditor {
         Ok(())
     }
 
+    pub fn decommission_disk(
+        &mut self,
+        disk_id: &PhysicalDiskUuid,
+    ) -> Result<(), SledEditError> {
+        self.disks.decommission(disk_id)?;
+        Ok(())
+    }
+
     pub fn add_zone(
         &mut self,
         zone: BlueprintZoneConfig,

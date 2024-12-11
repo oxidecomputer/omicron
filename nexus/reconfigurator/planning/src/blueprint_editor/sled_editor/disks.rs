@@ -7,6 +7,7 @@ use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::DiskFilter;
+use nexus_types::external_api::views::PhysicalDiskState;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -19,8 +20,12 @@ use super::SledEditError;
 pub enum DisksEditError {
     #[error("tried to expunge nonexistent disk {id}")]
     ExpungeNonexistentDisk { id: PhysicalDiskUuid },
-    #[error("tried to mark an expunged disk as in service{id}")]
+    #[error("tried to decommission nonexistent disk {id}")]
+    DecommissionNonexistentDisk { id: PhysicalDiskUuid },
+    #[error("tried to mark an expunged disk as in service {id}")]
     AddExpungedDisk { id: PhysicalDiskUuid },
+    #[error("tried to decommission an in service disk {id}")]
+    DecommissionInServiceDisk { id: PhysicalDiskUuid },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -131,6 +136,32 @@ impl DisksEditor {
         }
 
         Ok(config.pool_id)
+    }
+
+    pub fn decommission(
+        &mut self,
+        disk_id: &PhysicalDiskUuid,
+    ) -> Result<(), DisksEditError> {
+        let config = self.disks.get_mut(disk_id).ok_or_else(|| {
+            DisksEditError::DecommissionNonexistentDisk { id: *disk_id }
+        })?;
+
+        match config.state {
+            PhysicalDiskState::Active => {
+                if config.disposition
+                    != BlueprintPhysicalDiskDisposition::Expunged
+                {
+                    return Err(DisksEditError::DecommissionInServiceDisk {
+                        id: *disk_id,
+                    });
+                }
+                config.state = PhysicalDiskState::Decommissioned;
+                self.counts.decommissioned += 1;
+            }
+            PhysicalDiskState::Decommissioned => {}
+        }
+
+        Ok(())
     }
 }
 

@@ -45,6 +45,7 @@ use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::external_api::views::PhysicalDiskState;
+use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
 use omicron_common::address::get_sled_address;
@@ -198,7 +199,7 @@ pub struct EditCounts {
     /// An item was expunged in the blueprint
     pub expunged: usize,
     /// An item was decommissioned in the blueprint
-    decommissioned: usize,
+    pub decommissioned: usize,
     /// An item was removed from the blueprint.
     ///
     /// This happens after expungement or decommissioning has completed
@@ -1100,18 +1101,35 @@ impl<'a> BlueprintBuilder<'a> {
 
     /// Set the state of the disk to `Decommissioned` for any expunged disks if:
     ///
-    /// The sled-agent where the disk resides has seen the request to expunge
-    /// the disk as reflected in inventory
+    /// (1) the sled where the disk resides has been expunged.
     ///
     ///   or
     ///
-    /// the sled where the disk resides has been expunged.
+    /// (2) the sled-agent where the disk resides has seen the
+    /// request to expunge the disk as reflected in inventory. We use
+    /// `BlueprintPhysicalDisksConfig::generation` from the parent blueprint and
+    /// `SledAgent::omicron_physical_disks_generation` from inventory to see how
+    /// up to date the inventory is with respect to the parent_blueprint.
+    ///
+    ///
+    /// Caveats:
+    ///
+    ///   When the disk resides on an expunged sled, we can immediately
+    ///   decommission it, even if it has had its disposition set to expunged in
+    ///   *this* planner pass.
+    ///
+    ///   However, if the sled is still in service, we must wait for any
+    ///   disks expunged in this planner pass to be seen by the sled-agent and
+    ///   reflected in inventory before we can decommission them. Since any
+    ///   modifications made in this planner pass have not yet been sent to the
+    ///   sled-agents, we only check for expunged sleds in the parent_blueprint.
+    ///
     ///
     /// Called by the planner in the `do_plan_decommission()` stage of planning
     pub fn sled_decommision_disks(
         &mut self,
         sled_id: SledUuid,
-        sled_resources: &SledResources,
+        sled_details: &SledDetails,
     ) -> Result<SledEditCounts, Error> {
         let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!(
@@ -1121,23 +1139,69 @@ impl<'a> BlueprintBuilder<'a> {
 
         let initial_counts = editor.edit_counts();
 
-        // These are the disks in the database as observed at the start of the
-        // planning phase that have their policy set to expunged, but have not
-        // yet been decommissioned.
-        for (_, disk) in
-            sled_resources.all_disks(DiskFilter::ExpungedButNotDecommissioned)
-        {
-            // Decommissioning happens after expungment in the planner orde
-            // Therefore at this point, any disks that are expunged but not yet
-            // decommissioned will have had their disposition set to expunged in
-            // the disk editor.
+        // This sled is expunged. Decommission all expunged disks. Note that
+        // because the decommision step comes after the expunge step, all disks
+        // should be marked expunged in the editor currently and can therefore
+        // be set to decommissioned.
+        //
+        // We shouldn't have added a disk during this planner pass, because
+        // an expunged sled is one that has been removed from the rack either
+        // physically or via trust-quorum.
+        if sled_details.policy == SledPolicy::Expunged {
+            for (_, disk) in sled_details
+                .resources
+                .all_disks(DiskFilter::ExpungedButNotDecommissioned)
+            {
+                editor
+                    .expunge_disk(&disk.disk_id)
+                    .map_err(|err| Error::SledEditError { sled_id, err })?;
+            }
+        } else {
+            // The sled is not expunged. We have to see if the inventory
+            // reflects the parent blueprint disk generation. If it does
+            // then we mark any expunged disks decommissioned.
+            let seen_generation = self
+                .collection
+                .sled_agents
+                .get(&sled_id)
+                .map(|sa| sa.omicron_physical_disks_generation);
+            let parent_bp_generation = self
+                .parent_blueprint
+                .blueprint_disks
+                .get(&sled_id)
+                .map(|config| config.generation);
 
-            // Is this sled expunged  or has its sled-agent seen the disk
-            // expungement yet?
-
-            editor
-                .expunge_disk(&disk.disk_id)
-                .map_err(|err| Error::SledEditError { sled_id, err })?;
+            // We can only check if the current generation has been seen.
+            // If a new generation has been seen then this blueprint is already
+            // out of date. If an old generation has been seen, the parent_blueprint
+            // has not been reflected in inventory.
+            //
+            // This means that many frequent expungements or additions will
+            // delay decommissioning, but we are limited by the total number of
+            // disks per sled that this will reasonably happen to in multiple
+            // passes.
+            if seen_generation.is_some()
+                && seen_generation == parent_bp_generation
+            {
+                // Do we have any expunged disks in the parent blueprint?
+                //
+                // SAFETY: We check that we have a parent blueprint in the
+                // condition immediately above.
+                let config = self
+                    .parent_blueprint
+                    .blueprint_disks
+                    .get(&sled_id)
+                    .unwrap();
+                for disk in &config.disks {
+                    if disk.disposition
+                        == BlueprintPhysicalDiskDisposition::Expunged
+                    {
+                        editor.expunge_disk(&disk.id).map_err(|err| {
+                            Error::SledEditError { sled_id, err }
+                        })?;
+                    }
+                }
+            }
         }
 
         let final_counts = editor.edit_counts();
