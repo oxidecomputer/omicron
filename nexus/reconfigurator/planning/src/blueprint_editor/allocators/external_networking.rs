@@ -400,19 +400,19 @@ impl ExternalNetworkingAllocator {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(super) struct ExternalNetworkingChoice {
-    pub(super) external_ip: IpAddr,
-    pub(super) nic_ip: IpAddr,
-    pub(super) nic_subnet: IpNet,
-    pub(super) nic_mac: MacAddr,
+pub(crate) struct ExternalNetworkingChoice {
+    pub(crate) external_ip: IpAddr,
+    pub(crate) nic_ip: IpAddr,
+    pub(crate) nic_subnet: IpNet,
+    pub(crate) nic_mac: MacAddr,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(super) struct ExternalSnatNetworkingChoice {
-    pub(super) snat_cfg: SourceNatConfig,
-    pub(super) nic_ip: IpAddr,
-    pub(super) nic_subnet: IpNet,
-    pub(super) nic_mac: MacAddr,
+pub(crate) struct ExternalSnatNetworkingChoice {
+    pub(crate) snat_cfg: SourceNatConfig,
+    pub(crate) nic_ip: IpAddr,
+    pub(crate) nic_subnet: IpNet,
+    pub(crate) nic_mac: MacAddr,
 }
 
 /// Combines a base iterator with an `in_use` set, filtering out any elements

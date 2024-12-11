@@ -24,6 +24,8 @@ pub use sled_editor::SledUnderlayIpOutOfRange;
 pub use sled_editor::ZonesEditError;
 
 pub(crate) use allocators::BlueprintResourceAllocator;
+pub(crate) use allocators::ExternalNetworkingChoice;
+pub(crate) use allocators::ExternalSnatNetworkingChoice;
 pub(crate) use sled_editor::DatasetIdsBackfillFromDb;
 pub(crate) use sled_editor::EditedSled;
 pub(crate) use sled_editor::SledEditor;
