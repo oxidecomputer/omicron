@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use ipnet::IpAdd;
+use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::address::get_sled_address;
 use omicron_common::address::get_switch_zone_address;
 use omicron_common::address::Ipv6Subnet;
@@ -12,9 +13,12 @@ use omicron_common::address::SLED_RESERVED_ADDRESSES;
 use std::net::Ipv6Addr;
 
 #[derive(Debug, thiserror::Error)]
-#[error("reserved IP {reserved} not in sled underlay range ({low}..={high})")]
-pub struct SledUnderlayIpError {
-    pub reserved: Ipv6Addr,
+#[error(
+    "{zone_kind:?} zone IP {ip} not in sled underlay range ({low}..={high})"
+)]
+pub struct SledUnderlayIpOutOfRange {
+    pub zone_kind: ZoneKind,
+    pub ip: Ipv6Addr,
     pub low: Ipv6Addr,
     pub high: Ipv6Addr,
 }
@@ -40,10 +44,10 @@ impl SledUnderlayIpAllocator {
     /// Fails if any of the specified IPs are not part of the sled subnet.
     pub fn new<I>(
         sled_subnet: Ipv6Subnet<SLED_PREFIX>,
-        reserved_ips: I,
-    ) -> Result<Self, SledUnderlayIpError>
+        in_use_zone_ips: I,
+    ) -> Result<Self, SledUnderlayIpOutOfRange>
     where
-        I: Iterator<Item = Ipv6Addr>,
+        I: Iterator<Item = (ZoneKind, Ipv6Addr)>,
     {
         let sled_subnet_addr = sled_subnet.net().prefix();
         let minimum = sled_subnet_addr
@@ -65,10 +69,11 @@ impl SledUnderlayIpAllocator {
         assert!(sled_subnet.net().contains(maximum));
 
         let mut last = minimum;
-        for reserved_ip in reserved_ips {
+        for (zone_kind, reserved_ip) in in_use_zone_ips {
             if reserved_ip < minimum || reserved_ip > maximum {
-                return Err(SledUnderlayIpError {
-                    reserved: reserved_ip,
+                return Err(SledUnderlayIpOutOfRange {
+                    zone_kind,
+                    ip: reserved_ip,
                     low: minimum,
                     high: maximum,
                 });
@@ -101,16 +106,20 @@ impl SledUnderlayIpAllocator {
 
 #[cfg(test)]
 mod test {
+    use std::collections::BTreeSet;
+
     use super::*;
 
     #[test]
     fn test_basic() {
         let sled_subnet = Ipv6Subnet::new("fd00::d0".parse().unwrap());
-        let reserved: Vec<Ipv6Addr> = vec![
-            "fd00::50".parse().unwrap(),
-            "fd00::d3".parse().unwrap(),
-            "fd00::d7".parse().unwrap(),
+        let reserved: Vec<(ZoneKind, Ipv6Addr)> = vec![
+            (ZoneKind::Nexus, "fd00::50".parse().unwrap()),
+            (ZoneKind::Nexus, "fd00::d3".parse().unwrap()),
+            (ZoneKind::Nexus, "fd00::d7".parse().unwrap()),
         ];
+        let reserved_ips =
+            reserved.iter().map(|(_, ip)| *ip).collect::<BTreeSet<_>>();
 
         let mut allocator =
             SledUnderlayIpAllocator::new(sled_subnet, reserved.iter().copied())
@@ -120,7 +129,7 @@ mod test {
         for _ in 0..16 {
             let addr = allocator.alloc().expect("allocated IP");
             println!("allocated: {addr}");
-            assert!(!reserved.contains(&addr));
+            assert!(!reserved_ips.contains(&addr));
             assert!(!allocated.contains(&addr));
             allocated.push(addr);
         }
@@ -155,30 +164,30 @@ mod test {
     #[test]
     fn test_reject_out_of_range_reserved_ips() {
         let sled_subnet = Ipv6Subnet::new("fd00::d0".parse().unwrap());
-        let reserved_low: Vec<Ipv6Addr> = vec![
+        let reserved_low: Vec<(ZoneKind, Ipv6Addr)> = vec![
             // ok
-            "fd00::d3".parse().unwrap(),
+            (ZoneKind::Nexus, "fd00::d3".parse().unwrap()),
             // too low; first 32 addrs are reserved
-            "fd00::1f".parse().unwrap(),
+            (ZoneKind::Nexus, "fd00::1f".parse().unwrap()),
         ];
         let err = SledUnderlayIpAllocator::new(
             sled_subnet,
             reserved_low.iter().copied(),
         )
         .expect_err("failed to create allocator");
-        assert_eq!(err.reserved, reserved_low[1]);
+        assert_eq!(err.ip, reserved_low[1].1);
 
-        let reserved_high: Vec<Ipv6Addr> = vec![
+        let reserved_high: Vec<(ZoneKind, Ipv6Addr)> = vec![
             // ok
-            "fd00::d3".parse().unwrap(),
+            (ZoneKind::Nexus, "fd00::d3".parse().unwrap()),
             // too high; above sled /64
-            "fd00:0000:0000:0001::1ff".parse().unwrap(),
+            (ZoneKind::Nexus, "fd00:0000:0000:0001::1ff".parse().unwrap()),
         ];
         let err = SledUnderlayIpAllocator::new(
             sled_subnet,
             reserved_high.iter().copied(),
         )
         .expect_err("failed to create allocator");
-        assert_eq!(err.reserved, reserved_high[1]);
+        assert_eq!(err.ip, reserved_high[1].1);
     }
 }
