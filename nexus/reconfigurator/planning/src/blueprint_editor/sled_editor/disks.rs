@@ -14,8 +14,6 @@ use omicron_uuid_kinds::ZpoolUuid;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 
-use super::SledEditError;
-
 #[derive(Debug, thiserror::Error)]
 pub enum DisksEditError {
     #[error("tried to expunge nonexistent disk {id}")]

@@ -123,6 +123,9 @@ impl<'a> Planner<'a> {
         for (sled_id, sled_details) in
             self.input.all_sleds(SledFilter::Commissioned)
         {
+            // Decommission any disks that need it
+            self.blueprint.sled_decommision_disks(sled_id, sled_details)?;
+
             // Check 1: look for sleds that are expunged.
             match (sled_details.policy, sled_details.state) {
                 // If the sled is still in service, don't decommission it.
@@ -178,6 +181,10 @@ impl<'a> Planner<'a> {
         {
             commissioned_sled_ids.insert(sled_id);
 
+            // Expunge any disks that need it
+            self.blueprint
+                .sled_expunge_disks(sled_id, &sled_details.resources)?;
+
             // Perform the expungement, for any zones that might need it.
             self.blueprint.expunge_zones_for_sled(sled_id, sled_details)?;
         }
@@ -232,7 +239,7 @@ impl<'a> Planner<'a> {
             // First, we need to ensure that sleds are using their expected
             // disks. This is necessary before we can allocate any zones.
             let sled_edits =
-                self.blueprint.sled_ensure_disks(sled_id, &sled_resources)?;
+                self.blueprint.sled_add_disks(sled_id, &sled_resources)?;
             if let EnsureMultiple::Changed {
                 added,
                 updated,
