@@ -89,7 +89,7 @@ impl MetricName {
 
 #[derive(Debug)]
 pub struct ChartMetadata {
-    pub metric: MetricName,
+    pub _metric: MetricName,
     pub title: String,
     pub unit: Unit,
 }
@@ -97,7 +97,7 @@ pub struct ChartMetadata {
 impl ChartMetadata {
     pub fn new(metric: MetricName, title: String) -> Self {
         let unit = metric.unit();
-        Self { metric, title, unit }
+        Self { _metric: metric, title, unit }
     }
 }
 

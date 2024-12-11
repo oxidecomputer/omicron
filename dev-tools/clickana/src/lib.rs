@@ -71,49 +71,48 @@ impl Clickana {
         let tick_rate = Duration::from_secs(self.refresh_interval);
         let mut last_tick = Instant::now();
         loop {
-            
+            // TODO: Eventually we'll want to not have a set amount of charts and make the
+            // dashboard a bit more dynamic. Perhaps taking a toml configuration file or
+            // something like that. We can then create a vector of "ChartData"s for Dashboard
+            // to take and create the layout dynamically.
             let s = self.clone();
             let c = client.clone();
-            let top_left_frame = tokio::spawn(async move {
-                let top_left_frame_metadata = ChartMetadata::new(
+            let top_left_frame = tokio::spawn({
+                s.populate_chart_data(
+                    c,
                     MetricName::DiskUsage,
                     "Disk Usage".to_string(),
-                );
-                let data = s.get_api_data(&c, top_left_frame_metadata.metric).await?;
-                ChartData::new(data, top_left_frame_metadata)
+                )
             });
 
             let s = self.clone();
             let c = client.clone();
-            let top_right_frame = tokio::spawn(async move {
-                let top_right_frame_metadata = ChartMetadata::new(
+            let top_right_frame = tokio::spawn({
+                s.populate_chart_data(
+                    c,
                     MetricName::MemoryTracking,
                     "Memory Allocated by the Server".to_string(),
-                );
-                let data = s.get_api_data(&c, top_right_frame_metadata.metric).await?;
-                ChartData::new(data, top_right_frame_metadata)
+                )
             });
-        
+
             let s = self.clone();
             let c = client.clone();
-            let bottom_left_frame = tokio::spawn(async move {
-                let bottom_left_frame_metadata = ChartMetadata::new(
+            let bottom_left_frame = tokio::spawn({
+                s.populate_chart_data(
+                    c,
                     MetricName::QueryCount,
                     "Queries Started per Second".to_string(),
-                );
-                let data = s.get_api_data(&c, bottom_left_frame_metadata.metric).await?;
-                ChartData::new(data, bottom_left_frame_metadata)
+                )
             });
-        
+
             let s = self.clone();
             let c = client.clone();
-            let bottom_right_frame = tokio::spawn(async move {
-                let bottom_right_frame_metadata = ChartMetadata::new(
+            let bottom_right_frame = tokio::spawn({
+                s.populate_chart_data(
+                    c,
                     MetricName::RunningQueries,
                     "Queries Running".to_string(),
-                );
-                let data = s.get_api_data(&c, bottom_right_frame_metadata.metric).await?;
-                ChartData::new(data, bottom_right_frame_metadata)
+                )
             });
 
             let top_left_frame = top_left_frame.await??;
@@ -150,6 +149,17 @@ impl Clickana {
                 last_tick = Instant::now();
             }
         }
+    }
+
+    async fn populate_chart_data(
+        self,
+        client: ClickhouseServerClient,
+        metric_name: MetricName,
+        title: String,
+    ) -> Result<ChartData> {
+        let metadata = ChartMetadata::new(metric_name, title);
+        let data = self.get_api_data(&client, metric_name).await?;
+        Ok(ChartData::new(data, metadata)?)
     }
 
     fn draw(&self, frame: &mut Frame, dashboard: Dashboard) {
