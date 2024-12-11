@@ -6,6 +6,7 @@
 
 use crate::{execute, PFEXEC};
 use anyhow::anyhow;
+use anyhow::bail;
 use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
 use omicron_common::api::external::ByteCount;
@@ -253,7 +254,9 @@ impl DatasetProperties {
 
         let mut datasets: BTreeMap<&str, BTreeMap<&str, _>> = BTreeMap::new();
         for name_prop_val_source in name_prop_val_source_list {
-            let mut iter = name_prop_val_source.split_whitespace();
+            // "-H" indicates that these columns are tab-separated;
+            // each column may internally have whitespace.
+            let mut iter = name_prop_val_source.split('\t');
 
             let (name, prop, val, source) = (
                 iter.next().context("Missing 'name'")?,
@@ -261,6 +264,9 @@ impl DatasetProperties {
                 iter.next().context("Missing 'value'")?,
                 iter.next().context("Missing 'source'")?,
             );
+            if let Some(extra) = iter.next() {
+                bail!("Unexpected column data: '{extra}'");
+            }
 
             let props = datasets.entry(name).or_default();
             props.insert(prop, (val, source));
@@ -269,26 +275,23 @@ impl DatasetProperties {
         datasets
             .into_iter()
             .map(|(dataset_name, props)| {
-                // Dataset UUIDs are properties that are optionally attached to
-                // datasets. However, some datasets are nested - to avoid them
-                // from propagating, we explicitly ignore this value if it is
-                // inherited.
-                //
-                // This can be the case for the "zone" filesystem root, which
-                // can propagate this property to a child zone without it set.
-                let id = match props.get("oxide:uuid") {
-                    Some((prop, source)) => {
-                        if *source == "inherited" {
-                            None
-                        } else {
-                            Some(
-                                prop.parse::<DatasetUuid>()
-                                    .context("Failed to parse UUID")?,
-                            )
-                        }
-                    }
-                    None => None,
-                };
+                let id = props
+                    .get("oxide:uuid")
+                    .filter(|(prop, source)| {
+                        // Dataset UUIDs are properties that are optionally attached to
+                        // datasets. However, some datasets are nested - to avoid them
+                        // from propagating, we explicitly ignore this value if it is
+                        // inherited.
+                        //
+                        // This can be the case for the "zone" filesystem root, which
+                        // can propagate this property to a child zone without it set.
+                        !source.starts_with("inherited") && *prop != "-"
+                    })
+                    .map(|(prop, _source)| {
+                        prop.parse::<DatasetUuid>()
+                            .context("Failed to parse UUID")
+                    })
+                    .transpose()?;
                 let name = dataset_name.to_string();
                 let avail = props
                     .get("available")
@@ -304,40 +307,33 @@ impl DatasetProperties {
                     .parse::<u64>()
                     .context("Failed to parse 'used'")?
                     .try_into()?;
-                let quota = match props.get("quota") {
-                    // If a quota has not been set explicitly, it has a default
-                    // source and a value of "zero". Rather than parsing the value
-                    // as zero, it should be ignored.
-                    Some((prop, source)) => {
-                        if *source == "default" {
-                            None
-                        } else {
-                            Some(
-                                prop.parse::<u64>()
-                                    .context("Failed to parse 'quota'")?
-                                    .try_into()?,
-                            )
-                        }
-                    }
-                    None => None,
-                };
-                let reservation = match props.get("reservation") {
-                    // If a reservation has not been set explicitly, it has a default
-                    // source and a value of "zero". Rather than parsing the value
-                    // as zero, it should be ignored.
-                    Some((prop, source)) => {
-                        if *source == "default" {
-                            None
-                        } else {
-                            Some(
-                                prop.parse::<u64>()
-                                    .context("Failed to parse 'reservation'")?
-                                    .try_into()?,
-                            )
-                        }
-                    }
-                    None => None,
-                };
+                let quota = props
+                    .get("quota")
+                    .filter(|(_prop, source)| {
+                        // If a quota has not been set explicitly, it has a default
+                        // source and a value of "zero". Rather than parsing the value
+                        // as zero, it should be ignored.
+                        *source != "default"
+                    })
+                    .map(|(prop, _source)| {
+                        prop.parse::<u64>().context("Failed to parse 'quota'")
+                    })
+                    .transpose()?
+                    .and_then(|v| ByteCount::try_from(v).ok());
+                let reservation = props
+                    .get("reservation")
+                    .filter(|(_prop, source)| {
+                        // If a reservation has not been set explicitly, it has a default
+                        // source and a value of "zero". Rather than parsing the value
+                        // as zero, it should be ignored.
+                        *source != "default"
+                    })
+                    .map(|(prop, _source)| {
+                        prop.parse::<u64>()
+                            .context("Failed to parse 'reservation'")
+                    })
+                    .transpose()?
+                    .and_then(|v| ByteCount::try_from(v).ok());
                 let compression = props
                     .get("compression")
                     .map(|(prop, _source)| prop.to_string())
@@ -403,6 +399,7 @@ impl Zfs {
     }
 
     /// Get information about datasets within a list of zpools / datasets.
+    /// Returns properties for all input datasets and their direct children.
     ///
     /// This function is similar to [Zfs::list_datasets], but provides a more
     /// substantial results about the datasets found.
@@ -416,7 +413,7 @@ impl Zfs {
             "get",
             "-d",
             "1",
-            "-rHpo",
+            "-Hpo",
             "name,property,value,source",
         ]);
 
@@ -925,10 +922,10 @@ mod test {
 
     #[test]
     fn parse_dataset_props() {
-        let input = "dataset_name available 1234 -\n\
-             dataset_name used 5678 -\n\
-             dataset_name name I_AM_IGNORED -\n\
-             dataset_name compression off inherited from parent";
+        let input = "dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tused\t5678\t-\n\
+             dataset_name\tname\tI_AM_IGNORED\t-\n\
+             dataset_name\tcompression\toff\tinherited from parent";
         let props = DatasetProperties::parse_many(&input)
             .expect("Should have parsed data");
         assert_eq!(props.len(), 1);
@@ -943,14 +940,28 @@ mod test {
     }
 
     #[test]
+    fn parse_dataset_too_many_columns() {
+        let input = "dataset_name\tavailable\t1234\t-\tEXTRA\n\
+             dataset_name\tused\t5678\t-\n\
+             dataset_name\tname\tI_AM_IGNORED\t-\n\
+             dataset_name\tcompression\toff\tinherited from parent";
+        let err = DatasetProperties::parse_many(&input)
+            .expect_err("Should have parsed data");
+        assert!(
+            err.to_string().contains("Unexpected column data: 'EXTRA'"),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn parse_dataset_props_with_optionals() {
         let input =
-            "dataset_name oxide:uuid d4e1e554-7b98-4413-809e-4a42561c3d0c local\n\
-             dataset_name available 1234 -\n\
-             dataset_name used 5678 - \n\
-             dataset_name quota 111 -\n\
-             dataset_name reservation 222 -\n\
-             dataset_name compression off inherited from parent";
+            "dataset_name\toxide:uuid\td4e1e554-7b98-4413-809e-4a42561c3d0c\tlocal\n\
+             dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tused\t5678\t-\n\
+             dataset_name\tquota\t111\t-\n\
+             dataset_name\treservation\t222\t-\n\
+             dataset_name\tcompression\toff\tinherited from parent";
         let props = DatasetProperties::parse_many(&input)
             .expect("Should have parsed data");
         assert_eq!(props.len(), 1);
@@ -968,9 +979,9 @@ mod test {
 
     #[test]
     fn parse_dataset_bad_uuid() {
-        let input = "dataset_name oxide:uuid bad -\n\
-             dataset_name available 1234 -\n\
-             dataset_name used 5678 -";
+        let input = "dataset_name\toxide:uuid\tbad\t-\n\
+             dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tused\t5678\t-";
 
         let err = DatasetProperties::parse_many(&input)
             .expect_err("Should have failed to parse");
@@ -982,8 +993,8 @@ mod test {
 
     #[test]
     fn parse_dataset_bad_avail() {
-        let input = "dataset_name available BADAVAIL -\n\
-             dataset_name used 5678 -";
+        let input = "dataset_name\tavailable\tBADAVAIL\t-\n\
+             dataset_name\tused\t5678\t-";
         let err = DatasetProperties::parse_many(&input)
             .expect_err("Should have failed to parse");
         assert!(
@@ -994,8 +1005,8 @@ mod test {
 
     #[test]
     fn parse_dataset_bad_usage() {
-        let input = "dataset_name available 1234 -\n\
-             dataset_name used BADUSAGE -";
+        let input = "dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tused\tBADUSAGE\t-";
         let err = DatasetProperties::parse_many(&input)
             .expect_err("Should have failed to parse");
         assert!(
@@ -1006,9 +1017,9 @@ mod test {
 
     #[test]
     fn parse_dataset_bad_quota() {
-        let input = "dataset_name available 1234 -\n\
-             dataset_name used 5678 -\n\
-             dataset_name quota BADQUOTA -";
+        let input = "dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tused\t5678\t-\n\
+             dataset_name\tquota\tBADQUOTA\t-";
         let err = DatasetProperties::parse_many(&input)
             .expect_err("Should have failed to parse");
         assert!(
@@ -1019,10 +1030,10 @@ mod test {
 
     #[test]
     fn parse_dataset_bad_reservation() {
-        let input = "dataset_name available 1234 -\n\
-             dataset_name used 5678 -\n\
-             dataset_name quota 111 -\n\
-             dataset_name reservation BADRES -";
+        let input = "dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tused\t5678\t-\n\
+             dataset_name\tquota\t111\t-\n\
+             dataset_name\treservation\tBADRES\t-";
         let err = DatasetProperties::parse_many(&input)
             .expect_err("Should have failed to parse");
         assert!(
@@ -1041,24 +1052,24 @@ mod test {
         };
 
         expect_missing(
-            "dataset_name used 5678 -\n\
-             dataset_name quota 111 -\n\
-             dataset_name reservation 222 -\n\
-             dataset_name compression off inherited",
+            "dataset_name\tused\t5678\t-\n\
+             dataset_name\tquota\t111\t-\n\
+             dataset_name\treservation\t222\t-\n\
+             dataset_name\tcompression\toff\tinherited",
             "'available'",
         );
         expect_missing(
-            "dataset_name available 1234 -\n\
-             dataset_name quota 111 -\n\
-             dataset_name reservation 222 -\n\
-             dataset_name compression off inherited",
+            "dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tquota\t111\t-\n\
+             dataset_name\treservation\t222\t-\n\
+             dataset_name\tcompression\toff\tinherited",
             "'used'",
         );
         expect_missing(
-            "dataset_name available 1234 -\n\
-             dataset_name used 5678 -\n\
-             dataset_name quota 111 -\n\
-             dataset_name reservation 222 -",
+            "dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tused\t5678\t-\n\
+             dataset_name\tquota\t111\t-\n\
+             dataset_name\treservation\t222\t-",
             "'compression'",
         );
     }
@@ -1066,10 +1077,22 @@ mod test {
     #[test]
     fn parse_dataset_uuid_ignored_if_inherited() {
         let input =
-            "dataset_name oxide:uuid b8698ede-60c2-4e16-b792-d28c165cfd12 inherited from parent\n\
-             dataset_name available 1234 -\n\
-             dataset_name used 5678 -\n\
-             dataset_name compression off -";
+            "dataset_name\toxide:uuid\tb8698ede-60c2-4e16-b792-d28c165cfd12\tinherited from parent\n\
+             dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tused\t5678\t-\n\
+             dataset_name\tcompression\toff\t-";
+        let props = DatasetProperties::parse_many(&input)
+            .expect("Should have parsed data");
+        assert_eq!(props.len(), 1);
+        assert_eq!(props[0].id, None);
+    }
+
+    #[test]
+    fn parse_dataset_uuid_ignored_if_dash() {
+        let input = "dataset_name\toxide:uuid\t-\t-\n\
+             dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tused\t5678\t-\n\
+             dataset_name\tcompression\toff\t-";
         let props = DatasetProperties::parse_many(&input)
             .expect("Should have parsed data");
         assert_eq!(props.len(), 1);
@@ -1078,10 +1101,10 @@ mod test {
 
     #[test]
     fn parse_quota_ignored_if_default() {
-        let input = "dataset_name quota 0 default\n\
-             dataset_name available 1234 -\n\
-             dataset_name used 5678 -\n\
-             dataset_name compression off -";
+        let input = "dataset_name\tquota\t0\tdefault\n\
+             dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tused\t5678\t-\n\
+             dataset_name\tcompression\toff\t-";
         let props = DatasetProperties::parse_many(&input)
             .expect("Should have parsed data");
         assert_eq!(props.len(), 1);
@@ -1090,10 +1113,10 @@ mod test {
 
     #[test]
     fn parse_reservation_ignored_if_default() {
-        let input = "dataset_name reservation 0 default\n\
-             dataset_name available 1234 -\n\
-             dataset_name used 5678 -\n\
-             dataset_name compression off -";
+        let input = "dataset_name\treservation\t0\tdefault\n\
+             dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tused\t5678\t-\n\
+             dataset_name\tcompression\toff\t-";
         let props = DatasetProperties::parse_many(&input)
             .expect("Should have parsed data");
         assert_eq!(props.len(), 1);
@@ -1102,15 +1125,15 @@ mod test {
 
     #[test]
     fn parse_sorts_and_dedups() {
-        let input = "foo available 111 -\n\
-             foo used 111 -\n\
-             foo compression off -\n\
-             foo available 111 -\n\
-             foo used 111 -\n\
-             foo compression off -\n\
-             bar available 222 -\n\
-             bar used 222 -\n\
-             bar compression off -";
+        let input = "foo\tavailable\t111\t-\n\
+             foo\tused\t111\t-\n\
+             foo\tcompression\toff\t-\n\
+             foo\tavailable\t111\t-\n\
+             foo\tused\t111\t-\n\
+             foo\tcompression\toff\t-\n\
+             bar\tavailable\t222\t-\n\
+             bar\tused\t222\t-\n\
+             bar\tcompression\toff\t-";
 
         let props = DatasetProperties::parse_many(&input)
             .expect("Should have parsed data");
