@@ -9,7 +9,6 @@ use crate::blueprint_editor::BlueprintResourceAllocatorInputError;
 use crate::blueprint_editor::EditedSled;
 use crate::blueprint_editor::SledEditError;
 use crate::blueprint_editor::SledEditor;
-use crate::ip_allocator::IpAllocator;
 use crate::planner::rng::PlannerRng;
 use crate::planner::zone_needs_expungement;
 use crate::planner::ZoneExpungeReason;
@@ -17,7 +16,6 @@ use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context as _;
 use clickhouse_admin_types::OXIMETER_CLUSTER;
-use ipnet::IpAdd;
 use nexus_inventory::now_db_precision;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -47,15 +45,11 @@ use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
-use omicron_common::address::get_sled_address;
-use omicron_common::address::get_switch_zone_address;
 use omicron_common::address::ReservedRackSubnet;
 use omicron_common::address::CLICKHOUSE_HTTP_PORT;
-use omicron_common::address::CP_SERVICES_RESERVED_ADDRESSES;
 use omicron_common::address::DNS_HTTP_PORT;
 use omicron_common::address::DNS_PORT;
 use omicron_common::address::NTP_PORT;
-use omicron_common::address::SLED_RESERVED_ADDRESSES;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
@@ -374,7 +368,6 @@ pub struct BlueprintBuilder<'a> {
     // free. (This is implicit and awkward; as we rework the builder we should
     // rework this to make it more explicit.)
     allocator: OnceCell<BlueprintResourceAllocator>,
-    sled_ip_allocators: BTreeMap<SledUuid, IpAllocator>,
     external_networking: OnceCell<BuilderExternalNetworking<'a>>,
     internal_dns_subnets: OnceCell<DnsSubnetAllocator>,
 
@@ -586,7 +579,6 @@ impl<'a> BlueprintBuilder<'a> {
             collection: inventory,
             input,
             allocator: OnceCell::new(),
-            sled_ip_allocators: BTreeMap::new(),
             external_networking: OnceCell::new(),
             internal_dns_subnets: OnceCell::new(),
             sled_editors,
@@ -1787,45 +1779,14 @@ impl<'a> BlueprintBuilder<'a> {
     /// Returns a newly-allocated underlay address suitable for use by Omicron
     /// zones
     fn sled_alloc_ip(&mut self, sled_id: SledUuid) -> Result<Ipv6Addr, Error> {
-        let sled_subnet = self.sled_resources(sled_id)?.subnet;
-        let editor = self.sled_editors.get(&sled_id).ok_or_else(|| {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!(
-                "tried to allocate underlay IP for unknown sled {sled_id}"
+                "tried to allocate underlay IP on unknown sled {sled_id}"
             ))
         })?;
-        let allocator =
-            self.sled_ip_allocators.entry(sled_id).or_insert_with(|| {
-                let sled_subnet_addr = sled_subnet.net().prefix();
-                let minimum = sled_subnet_addr
-                    .saturating_add(u128::from(SLED_RESERVED_ADDRESSES));
-                let maximum = sled_subnet_addr
-                    .saturating_add(u128::from(CP_SERVICES_RESERVED_ADDRESSES));
-                assert!(sled_subnet.net().contains(minimum));
-                assert!(sled_subnet.net().contains(maximum));
-                let mut allocator = IpAllocator::new(minimum, maximum);
-
-                // We shouldn't need to explicitly reserve the sled's global
-                // zone and switch addresses because they should be out of our
-                // range, but we do so just to be sure.
-                let sled_gz_addr = *get_sled_address(sled_subnet).ip();
-                assert!(sled_subnet.net().contains(sled_gz_addr));
-                assert!(minimum > sled_gz_addr);
-                assert!(maximum > sled_gz_addr);
-                let switch_zone_addr = get_switch_zone_address(sled_subnet);
-                assert!(sled_subnet.net().contains(switch_zone_addr));
-                assert!(minimum > switch_zone_addr);
-                assert!(maximum > switch_zone_addr);
-
-                // Record each of the sled's zones' underlay IPs as
-                // allocated.
-                for z in editor.zones(BlueprintZoneFilter::All) {
-                    allocator.reserve(z.underlay_ip());
-                }
-
-                allocator
-            });
-
-        allocator.alloc().ok_or(Error::OutOfAddresses { sled_id })
+        editor
+            .alloc_underlay_ip()
+            .map_err(|err| Error::SledEditError { sled_id, err })
     }
 
     /// Selects a zpool for this zone type.

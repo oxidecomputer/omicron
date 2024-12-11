@@ -111,6 +111,8 @@ pub enum SledEditError {
          zpool ({zpool}) is not present in this sled's disks"
     )]
     ZoneOnNonexistentZpool { zone_id: OmicronZoneUuid, zpool: ZpoolName },
+    #[error("ran out of underlay IP addresses")]
+    OutOfUnderlayIps,
 }
 
 #[derive(Debug)]
@@ -202,6 +204,12 @@ impl SledEditor {
             InnerSledEditor::Decommissioned(_) => (),
         }
         Ok(())
+    }
+
+    pub fn alloc_underlay_ip(&mut self) -> Result<Ipv6Addr, SledEditError> {
+        self.as_active_mut()?
+            .alloc_underlay_ip()
+            .ok_or(SledEditError::OutOfUnderlayIps)
     }
 
     pub fn disks(
@@ -406,6 +414,10 @@ impl ActiveSledEditor {
             datasets: self.datasets.edit_counts(),
             zones: self.zones.edit_counts(),
         }
+    }
+
+    pub fn alloc_underlay_ip(&mut self) -> Option<Ipv6Addr> {
+        self.underlay_ip_allocator.alloc()
     }
 
     pub fn disks(
