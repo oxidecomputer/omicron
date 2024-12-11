@@ -1153,7 +1153,7 @@ impl<'a> BlueprintBuilder<'a> {
                 .all_disks(DiskFilter::ExpungedButNotDecommissioned)
             {
                 editor
-                    .expunge_disk(&disk.disk_id)
+                    .decommission_disk(&disk.disk_id)
                     .map_err(|err| Error::SledEditError { sled_id, err })?;
             }
         } else {
@@ -1196,7 +1196,7 @@ impl<'a> BlueprintBuilder<'a> {
                     if disk.disposition
                         == BlueprintPhysicalDiskDisposition::Expunged
                     {
-                        editor.expunge_disk(&disk.id).map_err(|err| {
+                        editor.decommission_disk(&disk.id).map_err(|err| {
                             Error::SledEditError { sled_id, err }
                         })?;
                     }
