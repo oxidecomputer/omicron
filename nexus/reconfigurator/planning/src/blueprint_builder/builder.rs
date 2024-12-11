@@ -59,7 +59,6 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
-use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -87,8 +86,6 @@ use super::clickhouse::ClickhouseAllocator;
 /// Errors encountered while assembling blueprints
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("sled {sled_id}: ran out of available addresses for sled")]
-    OutOfAddresses { sled_id: SledUuid },
     #[error(
         "sled {sled_id}: no available zpools for additional {kind:?} zones"
     )]
@@ -97,14 +94,6 @@ pub enum Error {
     NoNexusZonesInParentBlueprint,
     #[error("no Boundary NTP zones exist in parent blueprint")]
     NoBoundaryNtpZonesInParentBlueprint,
-    #[error("no external DNS IP addresses are available")]
-    NoExternalDnsIpAvailable,
-    #[error("no external service IP addresses are available")]
-    NoExternalServiceIpAvailable,
-    #[error("no system MAC addresses are available")]
-    NoSystemMacAddressAvailable,
-    #[error("exhausted available OPTE IP addresses for service {kind:?}")]
-    ExhaustedOpteIps { kind: ZoneKind },
     #[error(
         "invariant violation: found decommissioned sled with \
          {num_zones} non-expunged zones: {sled_id}"
@@ -115,12 +104,6 @@ pub enum Error {
     },
     #[error("programming error in planner")]
     Planner(#[source] anyhow::Error),
-    #[error("no reserved subnets available for DNS")]
-    NoAvailableDnsSubnets,
-    #[error("can only have {INTERNAL_DNS_REDUNDANCY} internal DNS servers")]
-    TooManyDnsServers,
-    #[error("planner produced too many {kind:?} zones")]
-    TooManyZones { kind: ZoneKind },
     #[error("error editing sled {sled_id}")]
     SledEditError {
         sled_id: SledUuid,
