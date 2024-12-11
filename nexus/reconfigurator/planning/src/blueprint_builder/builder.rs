@@ -158,9 +158,12 @@ pub enum EnsureMultiple {
         updated: usize,
         /// An item was expunged in the blueprint
         expunged: usize,
+        /// An item was decommissioned in the blueprint
+        decommissioned: usize,
         /// An item was removed from the blueprint.
         ///
-        /// This usually happens after the work of expungment has completed.
+        /// This happens after expungement or decommissioning has completed
+        /// depending upon the resource type.
         removed: usize,
     },
 
@@ -170,11 +173,17 @@ pub enum EnsureMultiple {
 
 impl From<EditCounts> for EnsureMultiple {
     fn from(value: EditCounts) -> Self {
-        let EditCounts { added, updated, expunged, removed } = value;
-        if added == 0 && updated == 0 && expunged == 0 && removed == 0 {
+        let EditCounts { added, updated, expunged, decommissioned, removed } =
+            value;
+        if added == 0
+            && updated == 0
+            && expunged == 0
+            && decommissioned == 0
+            && removed == 0
+        {
             Self::NotNeeded
         } else {
-            Self::Changed { added, updated, expunged, removed }
+            Self::Changed { added, updated, expunged, decommissioned, removed }
         }
     }
 }
@@ -188,9 +197,12 @@ pub struct EditCounts {
     pub updated: usize,
     /// An item was expunged in the blueprint
     pub expunged: usize,
+    /// An item was decommissioned in the blueprint
+    decommissioned: usize,
     /// An item was removed from the blueprint.
     ///
-    /// This usually happens after the work of expungment has completed.
+    /// This happens after expungement or decommissioning has completed
+    /// depending upon the resource type.
     pub removed: usize,
 }
 
@@ -208,6 +220,7 @@ impl EditCounts {
             added: self.added - other.added,
             updated: self.updated - other.updated,
             expunged: self.expunged - other.expunged,
+            decommissioned: self.decommissioned - other.decommissioned,
             removed: self.removed - other.removed,
         }
     }
@@ -1008,6 +1021,127 @@ impl<'a> BlueprintBuilder<'a> {
         }
 
         Ok(zones_to_expunge)
+    }
+
+    /// Set the disposition of disks to expunged if their policy is expunged
+    ///
+    /// Called by the planner in the `do_plan_expunge()` stage of planning
+    pub fn sled_expunge_disks(
+        &mut self,
+        sled_id: SledUuid,
+        sled_resources: &SledResources,
+    ) -> Result<SledEditCounts, Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to expunge disks for unknown sled {sled_id}"
+            ))
+        })?;
+
+        let initial_counts = editor.edit_counts();
+
+        // These are the disks in the database as observed at the start of the
+        // planning phase that have their policy set to expunged, but have not
+        // yet been decommissioned.
+        for (_, disk) in
+            sled_resources.all_disks(DiskFilter::ExpungedButNotDecommissioned)
+        {
+            editor
+                .expunge_disk(&disk.disk_id)
+                .map_err(|err| Error::SledEditError { sled_id, err })?;
+        }
+
+        let final_counts = editor.edit_counts();
+        Ok(final_counts.difference_since(initial_counts))
+    }
+
+    /// Add any disks to the blueprint
+    /// Called by the planner in the `do_plan_add()` stage of planning
+    pub fn sled_add_disks(
+        &mut self,
+        sled_id: SledUuid,
+        sled_resources: &SledResources,
+    ) -> Result<SledEditCounts, Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to add disks for unknown sled {sled_id}"
+            ))
+        })?;
+        let initial_counts = editor.edit_counts();
+
+        // These are the in-service disks as we observed them in the database,
+        // during the planning phase
+        let database_disks = sled_resources
+            .all_disks(DiskFilter::InService)
+            .map(|(zpool, disk)| (disk.disk_id, (zpool, disk)));
+        let mut database_disk_ids = BTreeSet::new();
+
+        // Ensure any disk present in the database is also present in the
+        // blueprint
+        for (disk_id, (zpool, disk)) in database_disks {
+            database_disk_ids.insert(disk_id);
+            editor
+                .ensure_disk(
+                    BlueprintPhysicalDiskConfig {
+                        disposition:
+                            BlueprintPhysicalDiskDisposition::InService,
+                        state: PhysicalDiskState::Active,
+                        identity: disk.disk_identity.clone(),
+                        id: disk_id,
+                        pool_id: *zpool,
+                    },
+                    &mut self.rng,
+                )
+                .map_err(|err| Error::SledEditError { sled_id, err })?;
+        }
+
+        let final_counts = editor.edit_counts();
+        Ok(final_counts.difference_since(initial_counts))
+    }
+
+    /// Set the state of the disk to `Decommissioned` for any expunged disks if:
+    ///
+    /// The sled-agent where the disk resides has seen the request to expunge
+    /// the disk as reflected in inventory
+    ///
+    ///   or
+    ///
+    /// the sled where the disk resides has been expunged.
+    ///
+    /// Called by the planner in the `do_plan_decommission()` stage of planning
+    pub fn sled_decommision_disks(
+        &mut self,
+        sled_id: SledUuid,
+        sled_resources: &SledResources,
+    ) -> Result<SledEditCounts, Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to decommission disks for unknown sled {sled_id}"
+            ))
+        })?;
+
+        let initial_counts = editor.edit_counts();
+
+        // These are the disks in the database as observed at the start of the
+        // planning phase that have their policy set to expunged, but have not
+        // yet been decommissioned.
+        for (_, disk) in
+            sled_resources.all_disks(DiskFilter::ExpungedButNotDecommissioned)
+        {
+            // Decommissioning happens after expungment in the planner orde
+            // Therefore at this point, any disks that are expunged but not yet
+            // decommissioned will have had their disposition set to expunged in
+            // the disk editor.
+
+            // Is this sled expunged  or has its sled-agent seen the disk
+            // expungement yet?
+
+            editor
+                .expunge_disk(&disk.disk_id)
+                .map_err(|err| Error::SledEditError { sled_id, err })?;
+        }
+
+        let final_counts = editor.edit_counts();
+        Ok(final_counts.difference_since(initial_counts))
     }
 
     /// Ensures that the blueprint contains disks for a sled which already

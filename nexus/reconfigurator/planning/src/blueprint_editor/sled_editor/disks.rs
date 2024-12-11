@@ -13,10 +13,14 @@ use omicron_uuid_kinds::ZpoolUuid;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 
+use super::SledEditError;
+
 #[derive(Debug, thiserror::Error)]
 pub enum DisksEditError {
     #[error("tried to expunge nonexistent disk {id}")]
     ExpungeNonexistentDisk { id: PhysicalDiskUuid },
+    #[error("tried to mark an expunged disk as in service{id}")]
+    AddExpungedDisk { id: PhysicalDiskUuid },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -78,19 +82,34 @@ impl DisksEditor {
         self.disks.values().any(|disk| disk.pool_id == *zpool_id)
     }
 
-    pub fn ensure(&mut self, disk: BlueprintPhysicalDiskConfig) {
+    pub fn ensure(
+        &mut self,
+        disk: BlueprintPhysicalDiskConfig,
+    ) -> Result<(), DisksEditError> {
         match self.disks.entry(disk.id) {
             Entry::Vacant(slot) => {
                 slot.insert(disk);
                 self.counts.added += 1;
             }
             Entry::Occupied(mut slot) => {
-                if *slot.get() != disk {
+                let existing = slot.get();
+                if *existing != disk {
+                    if existing.disposition
+                        == BlueprintPhysicalDiskDisposition::Expunged
+                        && disk.disposition
+                            == BlueprintPhysicalDiskDisposition::InService
+                    {
+                        return Err(DisksEditError::AddExpungedDisk {
+                            id: disk.id,
+                        });
+                    }
+
                     slot.insert(disk);
                     self.counts.updated += 1;
                 }
             }
         }
+        Ok(())
     }
 
     pub fn expunge(

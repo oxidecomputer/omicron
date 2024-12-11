@@ -936,14 +936,12 @@ impl BlueprintPhysicalDiskDisposition {
             Self::InService => match filter {
                 DiskFilter::All => true,
                 DiskFilter::InService => true,
-                // TODO Change the name of this variant
-                DiskFilter::ExpungedButActive => false,
+                DiskFilter::ExpungedButNotDecommissioned => false,
             },
             Self::Expunged => match filter {
                 DiskFilter::All => true,
                 DiskFilter::InService => false,
-                // TODO Change the name of this variant
-                DiskFilter::ExpungedButActive => true,
+                DiskFilter::ExpungedButNotDecommissioned => true,
             },
         }
     }
