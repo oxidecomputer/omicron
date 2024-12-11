@@ -10,7 +10,8 @@ use std::net::SocketAddr;
 
 const CLICKANA_LOG_FILE: &str = "/tmp/clickana.log";
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let args = Cli::parse();
 
     let terminal = ratatui::init();
@@ -21,7 +22,8 @@ fn main() -> Result<()> {
         args.time_range,
         args.refresh_interval,
     )
-    .run(terminal);
+    .run(terminal)
+    .await;
     ratatui::restore();
     result
 }

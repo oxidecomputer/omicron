@@ -241,7 +241,7 @@ impl YAxisValues {
         let upper_label = padded_max_value_as_unit(unit, max_value)?;
         let lower_bound = padded_min_value_raw(unit, min_value)?;
         let lower_label = padded_min_value_as_unit(unit, min_value)?;
-        let mid_label = avg( &lower_label, &upper_label);
+        let mid_label = avg(&lower_label, &upper_label);
 
         Ok(Self {
             lower_label,

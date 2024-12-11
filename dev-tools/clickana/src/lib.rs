@@ -21,7 +21,6 @@ use slog_async::Async;
 use slog_term::{FullFormat, PlainDecorator};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
-use tokio::runtime::Runtime;
 
 use crate::chart::{ChartData, ChartMetadata, MetricName};
 
@@ -38,6 +37,7 @@ struct Dashboard {
     // TODO: Add more charts?
 }
 
+#[derive(Clone, Debug)]
 pub struct Clickana {
     clickhouse_addr: SocketAddr,
     log_path: Utf8PathBuf,
@@ -63,7 +63,7 @@ impl Clickana {
         }
     }
 
-    pub fn run(self, mut terminal: DefaultTerminal) -> Result<()> {
+    pub async fn run(self, mut terminal: DefaultTerminal) -> Result<()> {
         let admin_url = format!("http://{}", self.clickhouse_addr);
         let log = self.new_logger()?;
         let client = ClickhouseServerClient::new(&admin_url, log.clone());
@@ -71,41 +71,55 @@ impl Clickana {
         let tick_rate = Duration::from_secs(self.refresh_interval);
         let mut last_tick = Instant::now();
         loop {
-            let top_left_frame_metadata = ChartMetadata::new(
-                MetricName::DiskUsage,
-                "Disk Usage".to_string(),
-            );
-            let top_left_frame = ChartData::new(
-                self.get_api_data(&client, top_left_frame_metadata.metric)?,
-                top_left_frame_metadata,
-            )?;
+            
+            let s = self.clone();
+            let c = client.clone();
+            let top_left_frame = tokio::spawn(async move {
+                let top_left_frame_metadata = ChartMetadata::new(
+                    MetricName::DiskUsage,
+                    "Disk Usage".to_string(),
+                );
+                let data = s.get_api_data(&c, top_left_frame_metadata.metric).await?;
+                ChartData::new(data, top_left_frame_metadata)
+            });
 
-            let top_right_frame_metadata = ChartMetadata::new(
-                MetricName::MemoryTracking,
-                "Memory Allocated by the Server".to_string(),
-            );
-            let top_right_frame = ChartData::new(
-                self.get_api_data(&client, top_right_frame_metadata.metric)?,
-                top_right_frame_metadata,
-            )?;
+            let s = self.clone();
+            let c = client.clone();
+            let top_right_frame = tokio::spawn(async move {
+                let top_right_frame_metadata = ChartMetadata::new(
+                    MetricName::MemoryTracking,
+                    "Memory Allocated by the Server".to_string(),
+                );
+                let data = s.get_api_data(&c, top_right_frame_metadata.metric).await?;
+                ChartData::new(data, top_right_frame_metadata)
+            });
+        
+            let s = self.clone();
+            let c = client.clone();
+            let bottom_left_frame = tokio::spawn(async move {
+                let bottom_left_frame_metadata = ChartMetadata::new(
+                    MetricName::QueryCount,
+                    "Queries Started per Second".to_string(),
+                );
+                let data = s.get_api_data(&c, bottom_left_frame_metadata.metric).await?;
+                ChartData::new(data, bottom_left_frame_metadata)
+            });
+        
+            let s = self.clone();
+            let c = client.clone();
+            let bottom_right_frame = tokio::spawn(async move {
+                let bottom_right_frame_metadata = ChartMetadata::new(
+                    MetricName::RunningQueries,
+                    "Queries Running".to_string(),
+                );
+                let data = s.get_api_data(&c, bottom_right_frame_metadata.metric).await?;
+                ChartData::new(data, bottom_right_frame_metadata)
+            });
 
-            let bottom_left_frame_metadata = ChartMetadata::new(
-                MetricName::QueryCount,
-                "Queries Started per Second".to_string(),
-            );
-            let bottom_left_frame = ChartData::new(
-                self.get_api_data(&client, bottom_left_frame_metadata.metric)?,
-                bottom_left_frame_metadata,
-            )?;
-
-            let bottom_right_frame_metadata = ChartMetadata::new(
-                MetricName::RunningQueries,
-                "Queries Running".to_string(),
-            );
-            let bottom_right_frame = ChartData::new(
-                self.get_api_data(&client, bottom_right_frame_metadata.metric)?,
-                bottom_right_frame_metadata,
-            )?;
+            let top_left_frame = top_left_frame.await??;
+            let top_right_frame = top_right_frame.await??;
+            let bottom_left_frame = bottom_left_frame.await??;
+            let bottom_right_frame = bottom_right_frame.await??;
 
             // We only need to retrieve from one chart as they will all be relatively the same.
             // On occasion the charts may have a variance of a second or so depending on when
@@ -198,37 +212,32 @@ impl Clickana {
         frame.render_widget(p, area);
     }
 
-    fn get_api_data(
+    async fn get_api_data(
         &self,
         client: &ClickhouseServerClient,
         metric: MetricName,
     ) -> Result<Vec<SystemTimeSeries>> {
-        let rt = Runtime::new()?;
-        let result = rt.block_on(async {
-            let timeseries = client
-                .system_timeseries_avg(
-                    metric.table(),
-                    &format!("{metric}"),
-                    Some(self.sampling_interval),
-                    Some(self.time_range),
-                    Some(TimestampFormat::UnixEpoch),
-                )
-                .await
-                .map(|t| t.into_inner())
-                .map_err(|e| {
-                    anyhow!(
-                        concat!(
+        let timeseries = client
+            .system_timeseries_avg(
+                metric.table(),
+                &format!("{metric}"),
+                Some(self.sampling_interval),
+                Some(self.time_range),
+                Some(TimestampFormat::UnixEpoch),
+            )
+            .await
+            .map(|t| t.into_inner())
+            .map_err(|e| {
+                anyhow!(
+                    concat!(
                 "failed to retrieve timeseries from clickhouse server; ",
                 "error = {}",
             ),
-                        e
-                    )
-                });
+                    e
+                )
+            });
 
-            timeseries
-        })?;
-
-        Ok(result)
+        timeseries
     }
 
     fn new_logger(&self) -> Result<Logger> {
