@@ -1370,16 +1370,15 @@ async fn create_volume(
 
     // Create the volume from the parts above and insert into the database.
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
+            VolumeConstructionRequest::Volume {
                 id: *volume_id.as_untyped_uuid(),
                 block_size,
                 sub_volumes,
                 read_only_parent: rop,
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 }
@@ -1529,15 +1528,14 @@ async fn test_volume_remove_read_only_parent_volume_not_volume(
     let t_vid = VolumeUuid::new_v4();
 
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::File {
+            VolumeConstructionRequest::File {
                 id: *volume_id.as_untyped_uuid(),
                 block_size: 512,
                 path: "/lol".to_string(),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
@@ -1761,15 +1759,14 @@ async fn test_volume_remove_rop_saga_volume_not_volume(
     let datastore = nexus.datastore();
 
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::File {
+            VolumeConstructionRequest::File {
                 id: *volume_id.as_untyped_uuid(),
                 block_size: 512,
                 path: "/lol".to_string(),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
@@ -1872,10 +1869,7 @@ async fn test_volume_checkout(cptestctx: &ControlPlaneTestContext) {
 
     // Take our VCR from above and insert into the database.
     datastore
-        .volume_create(nexus_db_model::Volume::new(
-            volume_id,
-            serde_json::to_string(&volume_construction_request).unwrap(),
-        ))
+        .volume_create(volume_id, volume_construction_request)
         .await
         .unwrap();
 
@@ -1927,10 +1921,7 @@ async fn test_volume_checkout_updates_nothing(
 
     // Take our VCR from above and insert into the database.
     datastore
-        .volume_create(nexus_db_model::Volume::new(
-            volume_id,
-            serde_json::to_string(&volume_construction_request).unwrap(),
-        ))
+        .volume_create(volume_id, volume_construction_request)
         .await
         .unwrap();
 
@@ -1979,10 +1970,7 @@ async fn test_volume_checkout_updates_multiple_gen(
 
     // Insert the volume into the database.
     datastore
-        .volume_create(nexus_db_model::Volume::new(
-            volume_id,
-            serde_json::to_string(&volume_construction_request).unwrap(),
-        ))
+        .volume_create(volume_id, volume_construction_request)
         .await
         .unwrap();
 
@@ -2050,10 +2038,7 @@ async fn test_volume_checkout_updates_sparse_multiple_gen(
 
     // Insert the volume into the database.
     datastore
-        .volume_create(nexus_db_model::Volume::new(
-            volume_id,
-            serde_json::to_string(&volume_construction_request).unwrap(),
-        ))
+        .volume_create(volume_id, volume_construction_request)
         .await
         .unwrap();
 
@@ -2111,10 +2096,7 @@ async fn test_volume_checkout_updates_sparse_mid_multiple_gen(
 
     // Insert the volume into the database.
     datastore
-        .volume_create(nexus_db_model::Volume::new(
-            volume_id,
-            serde_json::to_string(&volume_construction_request).unwrap(),
-        ))
+        .volume_create(volume_id, volume_construction_request)
         .await
         .unwrap();
 
@@ -2166,10 +2148,7 @@ async fn test_volume_checkout_randomize_ids_only_read_only(
 
     // Insert the volume into the database.
     datastore
-        .volume_create(nexus_db_model::Volume::new(
-            volume_id,
-            serde_json::to_string(&volume_construction_request).unwrap(),
-        ))
+        .volume_create(volume_id, volume_construction_request)
         .await
         .unwrap();
 
@@ -2270,9 +2249,9 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
 
     let volume_id = VolumeUuid::new_v4();
     let volume = datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
+            VolumeConstructionRequest::Volume {
                 id: *volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
@@ -2300,9 +2279,8 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
                         },
                     },
                 )),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
@@ -2391,9 +2369,9 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
 
     let volume_id = VolumeUuid::new_v4();
     let volume = datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
+            VolumeConstructionRequest::Volume {
                 id: *volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
@@ -2421,9 +2399,8 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
                         },
                     },
                 )),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
@@ -2712,15 +2689,14 @@ async fn test_volume_hard_delete_idempotent(
 
     let volume_id = VolumeUuid::new_v4();
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::File {
+            VolumeConstructionRequest::File {
                 id: *volume_id.as_untyped_uuid(),
                 block_size: 512,
                 path: "/lol".to_string(),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
@@ -3643,9 +3619,9 @@ impl TestReadOnlyRegionReferenceUsage {
 
     pub async fn create_first_volume(&self) {
         self.datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 self.first_volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: *self.first_volume_id.as_untyped_uuid(),
                     block_size: 512,
                     sub_volumes: vec![VolumeConstructionRequest::Region {
@@ -3667,9 +3643,8 @@ impl TestReadOnlyRegionReferenceUsage {
                         },
                     }],
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
     }
@@ -3771,9 +3746,9 @@ impl TestReadOnlyRegionReferenceUsage {
 
     pub async fn create_first_volume_region_in_rop(&self) {
         self.datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 self.first_volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: *self.first_volume_id.as_untyped_uuid(),
                     block_size: 512,
                     sub_volumes: vec![],
@@ -3797,18 +3772,17 @@ impl TestReadOnlyRegionReferenceUsage {
                             },
                         },
                     )),
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
     }
 
     pub async fn create_second_volume(&self) {
         self.datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 self.second_volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: *self.second_volume_id.as_untyped_uuid(),
                     block_size: 512,
                     sub_volumes: vec![VolumeConstructionRequest::Region {
@@ -3830,18 +3804,17 @@ impl TestReadOnlyRegionReferenceUsage {
                         },
                     }],
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
     }
 
     pub async fn create_second_volume_region_in_rop(&self) {
         self.datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 self.second_volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: *self.second_volume_id.as_untyped_uuid(),
                     block_size: 512,
                     sub_volumes: vec![],
@@ -3865,9 +3838,8 @@ impl TestReadOnlyRegionReferenceUsage {
                             },
                         },
                     )),
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
     }
@@ -4638,16 +4610,15 @@ async fn test_volume_replace_snapshot_respects_accounting(
     let volume_to_delete_id = VolumeUuid::new_v4();
 
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             volume_to_delete_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
+            VolumeConstructionRequest::Volume {
                 id: *volume_to_delete_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
                 read_only_parent: None,
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
@@ -4855,16 +4826,15 @@ async fn test_volume_remove_rop_respects_accounting(
     let volume_to_delete_id = VolumeUuid::new_v4();
 
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             volume_to_delete_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
+            VolumeConstructionRequest::Volume {
                 id: *volume_to_delete_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
                 read_only_parent: None,
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
@@ -5041,16 +5011,15 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
     let volume_to_delete_id = VolumeUuid::new_v4();
 
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             volume_to_delete_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
+            VolumeConstructionRequest::Volume {
                 id: *volume_to_delete_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
                 read_only_parent: None,
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
@@ -5428,9 +5397,9 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
 
     let first_volume_id = VolumeUuid::new_v4();
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             first_volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
+            VolumeConstructionRequest::Volume {
                 id: *first_volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
@@ -5458,17 +5427,16 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
                         },
                     },
                 )),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
     let second_volume_id = VolumeUuid::new_v4();
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             second_volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
+            VolumeConstructionRequest::Volume {
                 id: *second_volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
@@ -5496,9 +5464,8 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
                         },
                     },
                 )),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
@@ -5907,16 +5874,15 @@ async fn test_no_zombie_region_snapshots(cptestctx: &ControlPlaneTestContext) {
 
     let step_3_volume_id = VolumeUuid::new_v4();
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             step_3_volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
+            VolumeConstructionRequest::Volume {
                 id: *step_3_volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
                 read_only_parent: Some(Box::new(snapshot_vcr.clone())),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
@@ -5945,16 +5911,15 @@ async fn test_no_zombie_region_snapshots(cptestctx: &ControlPlaneTestContext) {
 
     let racing_volume_id = VolumeUuid::new_v4();
     let result = datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             racing_volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
+            VolumeConstructionRequest::Volume {
                 id: *racing_volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
                 read_only_parent: Some(Box::new(snapshot_vcr.clone())),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await;
 
     assert!(result.is_err());
@@ -6043,9 +6008,9 @@ async fn test_no_zombie_read_only_regions(cptestctx: &ControlPlaneTestContext) {
     // subvolume, not the read-only parent
 
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             step_1_volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
+            VolumeConstructionRequest::Volume {
                 id: *step_1_volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![VolumeConstructionRequest::Region {
@@ -6071,9 +6036,8 @@ async fn test_no_zombie_read_only_regions(cptestctx: &ControlPlaneTestContext) {
                     },
                 }],
                 read_only_parent: None,
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
@@ -6092,16 +6056,15 @@ async fn test_no_zombie_read_only_regions(cptestctx: &ControlPlaneTestContext) {
     let step_2_volume_id = VolumeUuid::new_v4();
 
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             step_2_volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
+            VolumeConstructionRequest::Volume {
                 id: *step_2_volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
                 read_only_parent: Some(Box::new(step_1_vcr.clone())),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
@@ -6129,16 +6092,15 @@ async fn test_no_zombie_read_only_regions(cptestctx: &ControlPlaneTestContext) {
 
     let racing_volume_id = VolumeUuid::new_v4();
     let result = datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             racing_volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
+            VolumeConstructionRequest::Volume {
                 id: *racing_volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
                 read_only_parent: Some(Box::new(step_1_vcr)),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await;
 
     assert!(result.is_err());
@@ -6229,9 +6191,9 @@ async fn test_no_zombie_read_write_regions(
     // subvolume, not the read-only parent
 
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             step_1_volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
+            VolumeConstructionRequest::Volume {
                 id: *step_1_volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![VolumeConstructionRequest::Region {
@@ -6257,9 +6219,8 @@ async fn test_no_zombie_read_write_regions(
                     },
                 }],
                 read_only_parent: None,
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
@@ -6278,16 +6239,15 @@ async fn test_no_zombie_read_write_regions(
     let step_2_volume_id = VolumeUuid::new_v4();
 
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             step_2_volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
+            VolumeConstructionRequest::Volume {
                 id: *step_2_volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
                 read_only_parent: Some(Box::new(step_1_vcr.clone())),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
@@ -6315,16 +6275,15 @@ async fn test_no_zombie_read_write_regions(
 
     let racing_volume_id = VolumeUuid::new_v4();
     let result = datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             racing_volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
+            VolumeConstructionRequest::Volume {
                 id: *racing_volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
                 read_only_parent: Some(Box::new(step_1_vcr)),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await;
 
     assert!(result.is_err());
