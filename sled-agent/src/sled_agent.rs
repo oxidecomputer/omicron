@@ -1389,7 +1389,7 @@ impl SledAgent {
     pub(crate) async fn support_pstack_info(
         &self,
     ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
-        sled_diagnostics::pargs_oxide_processes(&self.log).await
+        sled_diagnostics::pstack_oxide_processes(&self.log).await
     }
 }
 
