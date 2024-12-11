@@ -1932,6 +1932,7 @@ table! {
         new_region_id -> Nullable<Uuid>,
         replacement_state -> crate::RegionSnapshotReplacementStateEnum,
         operating_saga_id -> Nullable<Uuid>,
+        new_region_volume_id -> Nullable<Uuid>,
     }
 }
 
