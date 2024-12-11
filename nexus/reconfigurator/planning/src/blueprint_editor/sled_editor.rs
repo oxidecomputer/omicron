@@ -7,18 +7,27 @@
 use crate::blueprint_builder::SledEditCounts;
 use crate::planner::PlannerRng;
 use illumos_utils::zpool::ZpoolName;
+use itertools::Either;
+use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::blueprint_zone_type;
+use nexus_types::deployment::BlueprintDatasetConfig;
+use nexus_types::deployment::BlueprintDatasetFilter;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::external_api::views::SledState;
+use omicron_common::disk::DatasetKind;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::ZpoolUuid;
+use std::mem;
 
 mod datasets;
 mod disks;
@@ -50,6 +59,32 @@ pub enum SledInputError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SledEditError {
+    #[error("editing a decommissioned sled is not allowed")]
+    EditDecommissioned,
+    #[error(
+        "sled is not decommissionable: \
+         disk {disk_id} (zpool {zpool_id}) is in service"
+    )]
+    NonDecommissionableDiskInService {
+        disk_id: PhysicalDiskUuid,
+        zpool_id: ZpoolUuid,
+    },
+    #[error(
+        "sled is not decommissionable: \
+         dataset {dataset_id} (kind {kind:?}) is in service"
+    )]
+    NonDecommissionableDatasetInService {
+        dataset_id: DatasetUuid,
+        kind: DatasetKind,
+    },
+    #[error(
+        "sled is not decommissionable: \
+         zone {zone_id} (kind {kind:?}) is not expunged"
+    )]
+    NonDecommissionableZoneNotExpunged {
+        zone_id: OmicronZoneUuid,
+        kind: ZoneKind,
+    },
     #[error("failed to edit disks")]
     EditDisks(#[from] DisksEditError),
     #[error("failed to edit datasets")]
@@ -74,8 +109,196 @@ pub enum SledEditError {
 }
 
 #[derive(Debug)]
-pub(crate) struct SledEditor {
-    state: SledState,
+pub(crate) struct SledEditor(InnerSledEditor);
+
+#[derive(Debug)]
+enum InnerSledEditor {
+    // Internally, `SledEditor` has a variant for each variant of `SledState`,
+    // as the operations allowed in different states are substantially different
+    // (i.e., an active sled allows any edit; a decommissioned sled allows
+    // none).
+    Active(ActiveSledEditor),
+    Decommissioned(EditedSled),
+}
+
+impl SledEditor {
+    pub fn for_existing(
+        state: SledState,
+        zones: BlueprintZonesConfig,
+        disks: BlueprintPhysicalDisksConfig,
+        datasets: BlueprintDatasetsConfig,
+        preexisting_dataset_ids: DatasetIdsBackfillFromDb,
+    ) -> Result<Self, SledInputError> {
+        match state {
+            SledState::Active => {
+                let inner = ActiveSledEditor::new(
+                    zones,
+                    disks,
+                    datasets,
+                    preexisting_dataset_ids,
+                )?;
+                Ok(Self(InnerSledEditor::Active(inner)))
+            }
+            SledState::Decommissioned => {
+                let inner = EditedSled {
+                    state,
+                    zones,
+                    disks,
+                    datasets,
+                    edit_counts: SledEditCounts::zeroes(),
+                };
+                Ok(Self(InnerSledEditor::Decommissioned(inner)))
+            }
+        }
+    }
+
+    pub fn for_new_active(
+        preexisting_dataset_ids: DatasetIdsBackfillFromDb,
+    ) -> Self {
+        Self(InnerSledEditor::Active(ActiveSledEditor::new_empty(
+            preexisting_dataset_ids,
+        )))
+    }
+
+    pub fn finalize(self) -> EditedSled {
+        match self.0 {
+            InnerSledEditor::Active(editor) => editor.finalize(),
+            InnerSledEditor::Decommissioned(edited) => edited,
+        }
+    }
+
+    pub fn edit_counts(&self) -> SledEditCounts {
+        match &self.0 {
+            InnerSledEditor::Active(editor) => editor.edit_counts(),
+            InnerSledEditor::Decommissioned(edited) => edited.edit_counts,
+        }
+    }
+
+    pub fn decommission(&mut self) -> Result<(), SledEditError> {
+        match &mut self.0 {
+            InnerSledEditor::Active(editor) => {
+                // Decommissioning a sled is a one-way trip that has many
+                // preconditions. We can't check all of them here (e.g., we
+                // should kick the sled out of trust quorum before
+                // decommissioning, which is entirely outside the realm of
+                // `SledEditor`. But we can do some basic checks: all of the
+                // disks, datasets, and zones for this sled should be expunged.
+                editor.validate_decommisionable()?;
+
+                // We can't take ownership of `editor` from the `&mut self`
+                // reference we have, and we need ownership to call
+                // `finalize()`. Steal the contents via `mem::swap()` with an
+                // empty editor. This isn't panic safe (i.e., if we panic
+                // between the `mem::swap()` and the reassignment to `self.0`
+                // below, we'll be left in the active state with an empty sled
+                // editor), but omicron in general is not panic safe and aborts
+                // on panic. Plus `finalize()` should never panic.
+                let mut stolen = ActiveSledEditor::new_empty(
+                    DatasetIdsBackfillFromDb::empty(),
+                );
+                mem::swap(editor, &mut stolen);
+
+                let mut finalized = stolen.finalize();
+                finalized.state = SledState::Decommissioned;
+                self.0 = InnerSledEditor::Decommissioned(finalized);
+            }
+            // If we're already decommissioned, there's nothing to do.
+            InnerSledEditor::Decommissioned(_) => (),
+        }
+        Ok(())
+    }
+
+    pub fn disks(
+        &self,
+        filter: DiskFilter,
+    ) -> impl Iterator<Item = &BlueprintPhysicalDiskConfig> {
+        match &self.0 {
+            InnerSledEditor::Active(editor) => {
+                Either::Left(editor.disks(filter))
+            }
+            InnerSledEditor::Decommissioned(edited) => Either::Right(
+                edited
+                    .disks
+                    .disks
+                    .iter()
+                    .filter(move |disk| disk.disposition.matches(filter)),
+            ),
+        }
+    }
+
+    pub fn zones(
+        &self,
+        filter: BlueprintZoneFilter,
+    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
+        match &self.0 {
+            InnerSledEditor::Active(editor) => {
+                Either::Left(editor.zones(filter))
+            }
+            InnerSledEditor::Decommissioned(edited) => Either::Right(
+                edited
+                    .zones
+                    .zones
+                    .iter()
+                    .filter(move |zone| zone.disposition.matches(filter)),
+            ),
+        }
+    }
+
+    fn as_active_mut(
+        &mut self,
+    ) -> Result<&mut ActiveSledEditor, SledEditError> {
+        match &mut self.0 {
+            InnerSledEditor::Active(editor) => Ok(editor),
+            InnerSledEditor::Decommissioned(_) => {
+                Err(SledEditError::EditDecommissioned)
+            }
+        }
+    }
+
+    pub fn ensure_disk(
+        &mut self,
+        disk: BlueprintPhysicalDiskConfig,
+        rng: &mut PlannerRng,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.ensure_disk(disk, rng);
+        Ok(())
+    }
+
+    pub fn expunge_disk(
+        &mut self,
+        disk_id: &PhysicalDiskUuid,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.expunge_disk(disk_id)
+    }
+
+    pub fn add_zone(
+        &mut self,
+        zone: BlueprintZoneConfig,
+        rng: &mut PlannerRng,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.add_zone(zone, rng)
+    }
+
+    pub fn expunge_zone(
+        &mut self,
+        zone_id: &OmicronZoneUuid,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.expunge_zone(zone_id)
+    }
+
+    /// Backwards compatibility / test helper: If we're given a blueprint that
+    /// has zones but wasn't created via `SledEditor`, it might not have
+    /// datasets for all its zones. This method backfills them.
+    pub fn ensure_datasets_for_running_zones(
+        &mut self,
+        rng: &mut PlannerRng,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.ensure_datasets_for_running_zones(rng)
+    }
+}
+
+#[derive(Debug)]
+struct ActiveSledEditor {
     zones: ZonesEditor,
     disks: DisksEditor,
     datasets: DatasetsEditor,
@@ -90,16 +313,14 @@ pub(crate) struct EditedSled {
     pub edit_counts: SledEditCounts,
 }
 
-impl SledEditor {
+impl ActiveSledEditor {
     pub fn new(
-        state: SledState,
         zones: BlueprintZonesConfig,
         disks: BlueprintPhysicalDisksConfig,
         datasets: BlueprintDatasetsConfig,
         preexisting_dataset_ids: DatasetIdsBackfillFromDb,
     ) -> Result<Self, SledInputError> {
         Ok(Self {
-            state,
             zones: zones.try_into()?,
             disks: disks.try_into()?,
             datasets: DatasetsEditor::new(datasets, preexisting_dataset_ids)?,
@@ -107,11 +328,9 @@ impl SledEditor {
     }
 
     pub fn new_empty(
-        state: SledState,
         preexisting_dataset_ids: DatasetIdsBackfillFromDb,
     ) -> Self {
         Self {
-            state,
             zones: ZonesEditor::empty(),
             disks: DisksEditor::empty(),
             datasets: DatasetsEditor::empty(preexisting_dataset_ids),
@@ -123,7 +342,7 @@ impl SledEditor {
         let (datasets, datasets_counts) = self.datasets.finalize();
         let (zones, zones_counts) = self.zones.finalize();
         EditedSled {
-            state: self.state,
+            state: SledState::Active,
             zones,
             disks,
             datasets,
@@ -135,6 +354,60 @@ impl SledEditor {
         }
     }
 
+    fn validate_decommisionable(&self) -> Result<(), SledEditError> {
+        // TODO-john The disks and datasets checks below don't pass what the
+        // planner does currently to decommission sleds: if a sled is expunged,
+        // we'll omit its disks and datasets from the outgoing blueprint
+        // entirely without setting them all to the `Expunged` disposition.
+        // Fixing this will conflict with ongoing disk work, so for now these
+        // checks are commented out.
+        /*
+        // Check that all disks are expunged...
+        if let Some(disk) =
+            self.disks(DiskFilter::All).find(|disk| match disk.disposition {
+                BlueprintPhysicalDiskDisposition::InService => true,
+                BlueprintPhysicalDiskDisposition::Expunged => false,
+            })
+        {
+            return Err(SledEditError::NonDecommissionableDiskInService {
+                disk_id: disk.id,
+                zpool_id: disk.pool_id,
+            });
+        }
+
+        // ... and all datasets are expunged ...
+        if let Some(dataset) =
+            self.datasets(BlueprintDatasetFilter::All).find(|dataset| {
+                match dataset.disposition {
+                    BlueprintDatasetDisposition::InService => true,
+                    BlueprintDatasetDisposition::Expunged => false,
+                }
+            })
+        {
+            return Err(SledEditError::NonDecommissionableDatasetInService {
+                dataset_id: dataset.id,
+                kind: dataset.kind.clone(),
+            });
+        }
+        */
+
+        // ... and all zones are expunged.
+        if let Some(zone) = self.zones(BlueprintZoneFilter::All).find(|zone| {
+            match zone.disposition {
+                BlueprintZoneDisposition::InService
+                | BlueprintZoneDisposition::Quiesced => true,
+                BlueprintZoneDisposition::Expunged => false,
+            }
+        }) {
+            return Err(SledEditError::NonDecommissionableZoneNotExpunged {
+                zone_id: zone.id,
+                kind: zone.zone_type.kind(),
+            });
+        }
+
+        Ok(())
+    }
+
     pub fn edit_counts(&self) -> SledEditCounts {
         SledEditCounts {
             disks: self.disks.edit_counts(),
@@ -143,15 +416,19 @@ impl SledEditor {
         }
     }
 
-    pub fn set_state(&mut self, new_state: SledState) {
-        self.state = new_state;
-    }
-
     pub fn disks(
         &self,
         filter: DiskFilter,
     ) -> impl Iterator<Item = &BlueprintPhysicalDiskConfig> {
         self.disks.disks(filter)
+    }
+
+    #[allow(dead_code)] // currently only used by tests; this will change soon
+    pub fn datasets(
+        &self,
+        filter: BlueprintDatasetFilter,
+    ) -> impl Iterator<Item = &BlueprintDatasetConfig> {
+        self.datasets.datasets(filter)
     }
 
     pub fn zones(
