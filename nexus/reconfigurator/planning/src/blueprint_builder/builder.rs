@@ -4,6 +4,8 @@
 
 //! Low-level facility for generating Blueprints
 
+use crate::blueprint_editor::BlueprintResourceAllocator;
+use crate::blueprint_editor::BlueprintResourceAllocatorInputError;
 use crate::blueprint_editor::EditedSled;
 use crate::blueprint_editor::SledEditError;
 use crate::blueprint_editor::SledEditor;
@@ -131,6 +133,8 @@ pub enum Error {
         #[source]
         err: SledEditError,
     },
+    #[error("error constructing resource allocator")]
+    AllocatorInput(#[from] BlueprintResourceAllocatorInputError),
 }
 
 /// Describes the result of an idempotent "ensure" operation
@@ -362,6 +366,14 @@ pub struct BlueprintBuilder<'a> {
 
     // These fields are used to allocate resources for sleds.
     input: &'a PlanningInput,
+
+    // `allocators` contains logic for choosing new underlay IPs, external IPs,
+    // internal DNS subnets, etc. It's held in a `OnceCell` to delay its
+    // creation until it's first needed; the planner expunges zones before
+    // adding zones, so this delay allows us to reuse resources that just came
+    // free. (This is implicit and awkward; as we rework the builder we should
+    // rework this to make it more explicit.)
+    allocator: OnceCell<BlueprintResourceAllocator>,
     sled_ip_allocators: BTreeMap<SledUuid, IpAllocator>,
     external_networking: OnceCell<BuilderExternalNetworking<'a>>,
     internal_dns_subnets: OnceCell<DnsSubnetAllocator>,
@@ -573,6 +585,7 @@ impl<'a> BlueprintBuilder<'a> {
             parent_blueprint,
             collection: inventory,
             input,
+            allocator: OnceCell::new(),
             sled_ip_allocators: BTreeMap::new(),
             external_networking: OnceCell::new(),
             internal_dns_subnets: OnceCell::new(),
@@ -584,6 +597,33 @@ impl<'a> BlueprintBuilder<'a> {
             comments: Vec::new(),
             rng: PlannerRng::from_entropy(),
         })
+    }
+
+    fn allocator(&mut self) -> Result<&mut BlueprintResourceAllocator, Error> {
+        self.allocator.get_or_try_init(|| {
+            // Check the planning input: there shouldn't be any external
+            // networking resources in the database (the source of `input`)
+            // that we don't know about from the parent blueprint.
+            //
+            // TODO-cleanup Should the planner do this instead? Move this check
+            // to blippy.
+            ensure_input_networking_records_appear_in_parent_blueprint(
+                self.parent_blueprint,
+                self.input,
+            )
+            .map_err(Error::Planner)?;
+
+            let allocator = BlueprintResourceAllocator::new(
+                self.sled_editors
+                    .iter()
+                    .map(|(sled_id, editor)| (*sled_id, editor)),
+                self.input.service_ip_pool_ranges().to_vec(),
+                self.input.target_internal_dns_zone_count(),
+            )?;
+
+            Ok::<_, Error>(allocator)
+        })?;
+        Ok(self.allocator.get_mut().expect("get_or_init succeeded"))
     }
 
     // Helper method to create a `BuilderExternalNetworking` allocator at the
