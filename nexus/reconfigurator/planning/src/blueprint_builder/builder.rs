@@ -1208,64 +1208,39 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(final_counts.difference_since(initial_counts))
     }
 
-    /// Ensures that the blueprint contains disks for a sled which already
-    /// exists in the database.
-    ///
-    /// This operation must perform the following:
-    /// - Ensure that any disks / zpools that exist in the database
-    ///   are propagated into the blueprint.
-    /// - Ensure that any disks that are expunged from the database are
-    ///   removed from the blueprint.
+    // TODO: REMOVE ME
+    //
+    /// This method only exists for use in tests. It wraps
+    /// calls to `sled_disk_expunge, sled_disk_add, and sled_disk_decommission`
+    /// such that they happen in planner order.
     pub fn sled_ensure_disks(
         &mut self,
         sled_id: SledUuid,
-        resources: &SledResources,
+        sled_details: &SledDetails,
     ) -> Result<SledEditCounts, Error> {
-        // These are the disks known to our (last?) blueprint
-        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
-            Error::Planner(anyhow!(
-                "tried to ensure disks for unknown sled {sled_id}"
+        let initial_counts = {
+            let editor =
+                self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+                    Error::Planner(anyhow!(
+                "tried to ensure zone datasets for unknown sled {sled_id}"
             ))
-        })?;
-        let initial_counts = editor.edit_counts();
+                })?;
+            editor.edit_counts()
+        };
 
-        let blueprint_disk_ids = editor
-            .disks(DiskFilter::InService)
-            .map(|config| config.id)
-            .collect::<Vec<_>>();
+        self.sled_expunge_disks(sled_id, &sled_details.resources)?;
+        self.sled_add_disks(sled_id, &sled_details.resources)?;
+        self.sled_decommision_disks(sled_id, sled_details)?;
 
-        // These are the in-service disks as we observed them in the database,
-        // during the planning phase
-        let database_disks = resources
-            .all_disks(DiskFilter::InService)
-            .map(|(zpool, disk)| (disk.disk_id, (zpool, disk)));
-        let mut database_disk_ids = BTreeSet::new();
-
-        // Ensure any disk present in the database is also present in the
-        // blueprint
-        for (disk_id, (zpool, disk)) in database_disks {
-            database_disk_ids.insert(disk_id);
-            editor.ensure_disk(
-                BlueprintPhysicalDiskConfig {
-                    disposition: BlueprintPhysicalDiskDisposition::InService,
-                    state: PhysicalDiskState::Active,
-                    identity: disk.disk_identity.clone(),
-                    id: disk_id,
-                    pool_id: *zpool,
-                },
-                &mut self.rng,
-            );
-        }
-
-        // Remove any disks that appear in the blueprint, but not the database
-        for disk_id in blueprint_disk_ids {
-            if !database_disk_ids.contains(&disk_id) {
-                editor
-                    .expunge_disk(&disk_id)
-                    .map_err(|err| Error::SledEditError { sled_id, err })?;
-            }
-        }
-        let final_counts = editor.edit_counts();
+        let final_counts = {
+            let editor =
+                self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+                    Error::Planner(anyhow!(
+                "tried to ensure zone datasets for unknown sled {sled_id}"
+            ))
+                })?;
+            editor.edit_counts()
+        };
 
         Ok(final_counts.difference_since(initial_counts))
     }
@@ -2392,12 +2367,12 @@ pub mod test {
         // The example blueprint should have internal NTP zones on all the
         // existing sleds, plus Crucible zones on all pools.  So if we ensure
         // all these zones exist, we should see no change.
-        for (sled_id, sled_resources) in
-            example.input.all_sled_resources(SledFilter::Commissioned)
+        for (sled_id, sled_details) in
+            example.input.all_sleds(SledFilter::Commissioned)
         {
-            builder.sled_ensure_disks(sled_id, sled_resources).unwrap();
+            builder.sled_ensure_disks(sled_id, &sled_details).unwrap();
             builder.sled_ensure_zone_ntp(sled_id).unwrap();
-            for pool_id in sled_resources.zpools.keys() {
+            for pool_id in sled_details.resources.zpools.keys() {
                 builder.sled_ensure_zone_crucible(sled_id, *pool_id).unwrap();
             }
         }
@@ -2428,13 +2403,11 @@ pub mod test {
             "test_basic",
         )
         .expect("failed to create builder");
-        let new_sled_resources = &input
-            .sled_lookup(SledFilter::Commissioned, new_sled_id)
-            .unwrap()
-            .resources;
-        builder.sled_ensure_disks(new_sled_id, new_sled_resources).unwrap();
+        let new_sled_details =
+            &input.sled_lookup(SledFilter::Commissioned, new_sled_id).unwrap();
+        builder.sled_ensure_disks(new_sled_id, new_sled_details).unwrap();
         builder.sled_ensure_zone_ntp(new_sled_id).unwrap();
-        for pool_id in new_sled_resources.zpools.keys() {
+        for pool_id in new_sled_details.resources.zpools.keys() {
             builder.sled_ensure_zone_crucible(new_sled_id, *pool_id).unwrap();
         }
         builder.sled_ensure_zone_datasets(new_sled_id).unwrap();
@@ -2458,7 +2431,11 @@ pub mod test {
 
         // All zones' underlay addresses ought to be on the sled's subnet.
         for z in &new_sled_zones.zones {
-            assert!(new_sled_resources.subnet.net().contains(z.underlay_ip()));
+            assert!(new_sled_details
+                .resources
+                .subnet
+                .net()
+                .contains(z.underlay_ip()));
         }
 
         // Check for an NTP zone.  Its sockaddr's IP should also be on the
@@ -2476,7 +2453,8 @@ pub mod test {
                 },
             ) = &z
             {
-                assert!(new_sled_resources
+                assert!(new_sled_details
+                    .resources
                     .subnet
                     .net()
                     .contains(*address.ip()));
@@ -2503,7 +2481,11 @@ pub mod test {
                 ) = &z
                 {
                     let ip = address.ip();
-                    assert!(new_sled_resources.subnet.net().contains(*ip));
+                    assert!(new_sled_details
+                        .resources
+                        .subnet
+                        .net()
+                        .contains(*ip));
                     Some(dataset.pool_name.clone())
                 } else {
                     None
@@ -2512,7 +2494,8 @@ pub mod test {
             .collect::<BTreeSet<_>>();
         assert_eq!(
             crucible_pool_names,
-            new_sled_resources
+            new_sled_details
+                .resources
                 .zpools
                 .keys()
                 .map(|id| { ZpoolName::new_external(*id) })
@@ -2668,18 +2651,18 @@ pub mod test {
                 );
             }
 
-            for (sled_id, sled_resources) in
-                input.all_sled_resources(SledFilter::InService)
+            for (sled_id, sled_details) in
+                input.all_sleds(SledFilter::InService)
             {
-                let edits = builder
-                    .sled_ensure_disks(sled_id, &sled_resources)
-                    .unwrap();
+                let edits =
+                    builder.sled_ensure_disks(sled_id, sled_details).unwrap();
                 assert_eq!(
                     edits.disks,
                     EditCounts {
                         added: usize::from(SledBuilder::DEFAULT_NPOOLS),
                         updated: 0,
                         expunged: 0,
+                        decommissioned: 0,
                         removed: 0
                     }
                 );
@@ -2691,6 +2674,7 @@ pub mod test {
                         added: 2 * usize::from(SledBuilder::DEFAULT_NPOOLS),
                         updated: 0,
                         expunged: 0,
+                        decommissioned: 0,
                         removed: 0
                     }
                 );
@@ -2796,7 +2780,13 @@ pub mod test {
         // zone filesystem, so we expect two datasets to be expunged.
         assert_eq!(
             changed_counts.datasets,
-            EditCounts { added: 0, updated: 0, expunged: 2, removed: 0 }
+            EditCounts {
+                added: 0,
+                updated: 0,
+                expunged: 2,
+                decommissioned: 0,
+                removed: 0
+            }
         );
         // Once the datasets are expunged, no further changes will be proposed.
         let r = builder.sled_ensure_zone_datasets(sled_id).unwrap();
@@ -3220,9 +3210,9 @@ pub mod test {
         .expect("failed to create builder");
 
         // Ensure disks and datasets. This should repopulate the datasets.
-        for (sled_id, resources) in input.all_sled_resources(SledFilter::All) {
+        for (sled_id, sled_details) in input.all_sleds(SledFilter::All) {
             builder
-                .sled_ensure_disks(sled_id, resources)
+                .sled_ensure_disks(sled_id, sled_details)
                 .expect("ensured disks");
             builder
                 .sled_ensure_zone_datasets(sled_id)

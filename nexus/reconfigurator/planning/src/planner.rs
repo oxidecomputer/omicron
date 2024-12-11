@@ -237,6 +237,7 @@ impl<'a> Planner<'a> {
                 added,
                 updated,
                 expunged: _,
+                decommissioned: _,
                 removed,
             } = sled_edits.disks.into()
             {
@@ -367,6 +368,8 @@ impl<'a> Planner<'a> {
                 added,
                 updated,
                 expunged,
+                // Datasets don't get decommissioned
+                decommissioned: _,
                 removed,
             } = self.blueprint.sled_ensure_zone_datasets(sled_id)?
             {

@@ -3124,8 +3124,7 @@ mod tests {
                         sled_id,
                         &planning_input
                             .sled_lookup(SledFilter::InService, sled_id)
-                            .expect("found sled")
-                            .resources,
+                            .expect("found sled"),
                     )
                     .expect("ensured disks");
             }
