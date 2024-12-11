@@ -37,14 +37,14 @@ pub trait SledDiagnosticsCommandHttpOutput {
 #[serde(rename_all = "snake_case")]
 pub enum SledDiagnosticsQueryOutput {
     Success {
-        /// The command and it's arguments.
+        /// The command and its arguments.
         command: String,
         /// Any stdout/stderr produced by the command.
         stdio: String,
         /// The exit status of the command. This will be the exit code (if any)
         /// and exit reason such as from a signal.
         exit_status: String,
-        /// The exit code if one was present when the comman exited.
+        /// The exit code if one was present when the command exited.
         exit_code: Option<i32>,
     },
     Failure {
