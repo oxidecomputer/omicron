@@ -12,6 +12,7 @@ clap.workspace = true
 clickhouse-admin-types.workspace = true
 clickhouse-admin-server-client.workspace = true
 dropshot.workspace = true
+futures.workspace = true
 omicron-common.workspace = true
 ratatui.workspace = true
 schemars.workspace = true

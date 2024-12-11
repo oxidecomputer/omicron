@@ -19,6 +19,7 @@ use ratatui::{DefaultTerminal, Frame};
 use slog::{o, Drain, Logger};
 use slog_async::Async;
 use slog_term::{FullFormat, PlainDecorator};
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
@@ -71,57 +72,48 @@ impl Clickana {
         let tick_rate = Duration::from_secs(self.refresh_interval);
         let mut last_tick = Instant::now();
         loop {
-            // TODO: Eventually we'll want to not have a set amount of charts and make the
+            let charts = BTreeMap::from([
+                (MetricName::DiskUsage, "Disk Usage".to_string()),
+                (
+                    MetricName::MemoryTracking,
+                    "Memory Allocated by the Server".to_string(),
+                ),
+                (
+                    MetricName::QueryCount,
+                    "Queries Started per Second".to_string(),
+                ),
+                (MetricName::RunningQueries, "Queries Running".to_string()),
+            ]);
+
+            let mut tasks = Vec::new();
+
+            for (metric_name, title) in charts {
+                let s = self.clone();
+                let c = client.clone();
+
+                let task = tokio::spawn(async move {
+                    s.populate_chart_data(c, metric_name, title).await
+                });
+
+                tasks.push(task);
+            }
+
+            let mut results = futures::future::join_all(tasks)
+                .await
+                .into_iter()
+                .collect::<Result<Vec<_>, _>>()?;
+
+            // TODO: Eventually we may want to not have a set amount of charts and make the
             // dashboard a bit more dynamic. Perhaps taking a toml configuration file or
             // something like that. We can then create a vector of "ChartData"s for Dashboard
             // to take and create the layout dynamically.
-            let s = self.clone();
-            let c = client.clone();
-            let top_left_frame = tokio::spawn({
-                s.populate_chart_data(
-                    c,
-                    MetricName::DiskUsage,
-                    "Disk Usage".to_string(),
-                )
-            });
-
-            let s = self.clone();
-            let c = client.clone();
-            let top_right_frame = tokio::spawn({
-                s.populate_chart_data(
-                    c,
-                    MetricName::MemoryTracking,
-                    "Memory Allocated by the Server".to_string(),
-                )
-            });
-
-            let s = self.clone();
-            let c = client.clone();
-            let bottom_left_frame = tokio::spawn({
-                s.populate_chart_data(
-                    c,
-                    MetricName::QueryCount,
-                    "Queries Started per Second".to_string(),
-                )
-            });
-
-            let s = self.clone();
-            let c = client.clone();
-            let bottom_right_frame = tokio::spawn({
-                s.populate_chart_data(
-                    c,
-                    MetricName::RunningQueries,
-                    "Queries Running".to_string(),
-                )
-            });
-
-            let top_left_frame = top_left_frame.await??;
-            let top_right_frame = top_right_frame.await??;
-            let bottom_left_frame = bottom_left_frame.await??;
-            let bottom_right_frame = bottom_right_frame.await??;
+            let top_left_frame: ChartData = results.remove(0)?;
+            let top_right_frame: ChartData = results.remove(0)?;
+            let bottom_left_frame: ChartData = results.remove(0)?;
+            let bottom_right_frame: ChartData = results.remove(0)?;
 
             // We only need to retrieve from one chart as they will all be relatively the same.
-            // On occasion the charts may have a variance of a second or so depending on when
+            // Rarely, the charts may have a variance of a second or so depending on when
             // the API calls were made, but for the header block we don't need exact precision.
             let start_time = top_left_frame.x_axis_timestamps.start_time_label;
             let end_time = top_left_frame.x_axis_timestamps.end_time_label;
@@ -159,7 +151,7 @@ impl Clickana {
     ) -> Result<ChartData> {
         let metadata = ChartMetadata::new(metric_name, title);
         let data = self.get_api_data(&client, metric_name).await?;
-        Ok(ChartData::new(data, metadata)?)
+        ChartData::new(data, metadata)
     }
 
     fn draw(&self, frame: &mut Frame, dashboard: Dashboard) {
@@ -197,7 +189,7 @@ impl Clickana {
     ) {
         let style = Style::new().fg(Color::Green).bold();
         let title = vec![
-            Span::styled("Clickana", style).into_centered_line(),
+            Span::styled("CLICKANA", style).into_centered_line(),
             Span::styled(
                 format!("Sampling Interval: {}s", self.sampling_interval),
                 style,

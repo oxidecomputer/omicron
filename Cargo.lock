@@ -1343,6 +1343,7 @@ dependencies = [
  "clickhouse-admin-server-client",
  "clickhouse-admin-types",
  "dropshot 0.13.0",
+ "futures",
  "omicron-common",
  "omicron-workspace-hack",
  "ratatui",
