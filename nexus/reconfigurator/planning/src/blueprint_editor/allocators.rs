@@ -8,7 +8,6 @@ use super::SledEditor;
 use nexus_types::deployment::BlueprintZoneFilter;
 use omicron_common::address::IpRange;
 use omicron_uuid_kinds::SledUuid;
-use std::collections::BTreeMap;
 
 mod external_networking;
 mod internal_dns;
