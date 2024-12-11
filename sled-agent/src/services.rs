@@ -76,6 +76,7 @@ use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
 use omicron_common::address::{
     get_internal_dns_server_addresses, CLICKHOUSE_ADMIN_PORT,
+    CLICKHOUSE_TCP_PORT,
 };
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::address::{BOOTSTRAP_ARTIFACT_PORT, COCKROACH_ADMIN_PORT};
@@ -1597,13 +1598,20 @@ impl ServiceManager {
                     addr.to_string()
                 };
 
+                // The ClickHouse client connects via the TCP port
+                let ch_address = {
+                    let mut addr = *address;
+                    addr.set_port(CLICKHOUSE_TCP_PORT);
+                    addr.to_string()
+                };
+
                 let clickhouse_admin_config =
                     PropertyGroupBuilder::new("config")
                         .add_property("http_address", "astring", admin_address)
                         .add_property(
                             "ch_address",
                             "astring",
-                            address.to_string(),
+                            ch_address.to_string(),
                         )
                         .add_property(
                             "ch_binary",
@@ -1668,13 +1676,20 @@ impl ServiceManager {
                     addr.to_string()
                 };
 
+                // The ClickHouse client connects via the TCP port
+                let ch_address = {
+                    let mut addr = *address;
+                    addr.set_port(CLICKHOUSE_TCP_PORT);
+                    addr.to_string()
+                };
+
                 let clickhouse_admin_config =
                     PropertyGroupBuilder::new("config")
                         .add_property("http_address", "astring", admin_address)
                         .add_property(
                             "ch_address",
                             "astring",
-                            address.to_string(),
+                            ch_address.to_string(),
                         )
                         .add_property(
                             "ch_binary",
