@@ -29,3 +29,6 @@ pub(crate) use allocators::ExternalSnatNetworkingChoice;
 pub(crate) use sled_editor::DatasetIdsBackfillFromDb;
 pub(crate) use sled_editor::EditedSled;
 pub(crate) use sled_editor::SledEditor;
+
+#[cfg(test)]
+pub(crate) use allocators::ExternalIpAllocator;
