@@ -18,16 +18,17 @@ use crate::artifact_store::{ArtifactStore, DatasetsManager};
 
 #[derive(Clone)]
 pub(super) struct SimArtifactStorage {
-    dirs: Arc<(Utf8TempDir, Utf8TempDir)>,
+    // We simulate the two M.2s with two separate temporary directories.
+    dirs: Arc<[Utf8TempDir; 2]>,
 }
 
 impl SimArtifactStorage {
     pub(super) fn new() -> SimArtifactStorage {
         SimArtifactStorage {
-            dirs: Arc::new((
+            dirs: Arc::new([
                 camino_tempfile::tempdir().unwrap(),
                 camino_tempfile::tempdir().unwrap(),
-            )),
+            ]),
         }
     }
 }
@@ -37,8 +38,7 @@ impl DatasetsManager for SimArtifactStorage {
         &self,
     ) -> Result<impl Iterator<Item = camino::Utf8PathBuf> + '_, StorageError>
     {
-        Ok([self.dirs.0.path().to_owned(), self.dirs.1.path().to_owned()]
-            .into_iter())
+        Ok(self.dirs.iter().map(|tempdir| tempdir.path().to_owned()))
     }
 }
 
