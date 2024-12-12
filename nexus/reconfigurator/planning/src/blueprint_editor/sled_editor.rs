@@ -10,8 +10,6 @@ use illumos_utils::zpool::ZpoolName;
 use itertools::Either;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::blueprint_zone_type;
-use nexus_types::deployment::BlueprintDatasetConfig;
-use nexus_types::deployment::BlueprintDatasetFilter;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
@@ -355,42 +353,6 @@ impl ActiveSledEditor {
     }
 
     fn validate_decommisionable(&self) -> Result<(), SledEditError> {
-        // TODO-john The disks and datasets checks below don't pass what the
-        // planner does currently to decommission sleds: if a sled is expunged,
-        // we'll omit its disks and datasets from the outgoing blueprint
-        // entirely without setting them all to the `Expunged` disposition.
-        // Fixing this will conflict with ongoing disk work, so for now these
-        // checks are commented out.
-        /*
-        // Check that all disks are expunged...
-        if let Some(disk) =
-            self.disks(DiskFilter::All).find(|disk| match disk.disposition {
-                BlueprintPhysicalDiskDisposition::InService => true,
-                BlueprintPhysicalDiskDisposition::Expunged => false,
-            })
-        {
-            return Err(SledEditError::NonDecommissionableDiskInService {
-                disk_id: disk.id,
-                zpool_id: disk.pool_id,
-            });
-        }
-
-        // ... and all datasets are expunged ...
-        if let Some(dataset) =
-            self.datasets(BlueprintDatasetFilter::All).find(|dataset| {
-                match dataset.disposition {
-                    BlueprintDatasetDisposition::InService => true,
-                    BlueprintDatasetDisposition::Expunged => false,
-                }
-            })
-        {
-            return Err(SledEditError::NonDecommissionableDatasetInService {
-                dataset_id: dataset.id,
-                kind: dataset.kind.clone(),
-            });
-        }
-        */
-
         // ... and all zones are expunged.
         if let Some(zone) = self.zones(BlueprintZoneFilter::All).find(|zone| {
             match zone.disposition {
@@ -421,14 +383,6 @@ impl ActiveSledEditor {
         filter: DiskFilter,
     ) -> impl Iterator<Item = &BlueprintPhysicalDiskConfig> {
         self.disks.disks(filter)
-    }
-
-    #[allow(dead_code)] // currently only used by tests; this will change soon
-    pub fn datasets(
-        &self,
-        filter: BlueprintDatasetFilter,
-    ) -> impl Iterator<Item = &BlueprintDatasetConfig> {
-        self.datasets.datasets(filter)
     }
 
     pub fn zones(
