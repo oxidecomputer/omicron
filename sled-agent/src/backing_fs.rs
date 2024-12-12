@@ -150,6 +150,7 @@ pub(crate) fn ensure_backing_fs(
             true,  // do_format
             None,  // encryption_details,
             size_details,
+            None,
             Some(vec!["canmount=noauto".to_string()]), // options
         )?;
 
@@ -180,7 +181,7 @@ pub(crate) fn ensure_backing_fs(
 
         info!(log, "Mounting {} on {}", dataset, mountpoint);
 
-        Zfs::mount_overlay_dataset(&dataset, &mountpoint)?;
+        Zfs::mount_overlay_dataset(&dataset)?;
 
         if let Some(subdirs) = bfs.subdirs {
             for dir in subdirs {
