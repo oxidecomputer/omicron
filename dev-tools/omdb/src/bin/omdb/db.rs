@@ -250,6 +250,10 @@ pub struct DbFetchOptions {
     /// can be soft-deleted
     #[clap(long, default_value_t = false)]
     include_deleted: bool,
+
+    /// If the table supports it, only show records after a given time
+    #[arg(short, long)]
+    after: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// Subcommands that query or update the database
@@ -2882,13 +2886,20 @@ async fn cmd_db_sagas_list(
             // current index definitions.
             conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
-            db::paginated(
-                dsl::saga,
-                dsl::time_created,
-                &first_page::<dsl::time_created>(fetch_opts.fetch_limit),
-            )
-            .load_async(&conn)
-            .await
+            if let Some(after) = fetch_opts.after {
+                dsl::saga
+                    .filter(dsl::time_created.gt(after))
+                    .load_async(&conn)
+                    .await
+            } else {
+                db::paginated(
+                    dsl::saga,
+                    dsl::time_created,
+                    &first_page::<dsl::time_created>(fetch_opts.fetch_limit),
+                )
+                .load_async(&conn)
+                .await
+            }
         })
         .await?;
 
