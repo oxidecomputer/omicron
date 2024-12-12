@@ -101,9 +101,43 @@ declare_saga_actions! {
     FIND_NEW_REGION -> "new_dataset_and_region" {
         + rsrss_find_new_region
     }
+    // One of the common sharp edges of sagas is that the compensating action of
+    // a node does _not_ run if the forward action fails. Said another way, for
+    // this node:
+    //
+    // EXAMPLE -> "output" {
+    //   + forward_action
+    //   - forward_action_undo
+    // }
+    //
+    // If `forward_action` fails, `forward_action_undo` is never executed.
+    // Forward actions are therefore required to be atomic, in that they either
+    // fully apply or don't apply at all.
+    //
+    // Sagas with nodes that ensure multiple regions exist cannot be atomic
+    // because they can partially fail (for example: what if only 2 out of 3
+    // ensures succeed?). In order for the compensating action to be run, it
+    // must exist as a separate node that has a no-op forward action:
+    //
+    // EXAMPLE_UNDO -> "not_used" {
+    //   + noop
+    //   - forward_action_undo
+    // }
+    // EXAMPLE -> "output" {
+    //   + forward_action
+    // }
+    //
+    // This saga will only ever ensure that a single region exists, so you might
+    // think you could get away with a single node that combines the forward and
+    // compensating action - you'd be mistaken! The Crucible agent's region
+    // ensure is not atomic in all cases: if the region fails to create, it
+    // enters the `failed` state, but is not deleted. Nexus must clean these up.
+    NEW_REGION_ENSURE_UNDO -> "not_used" {
+        + rsrss_noop
+        - rsrss_new_region_ensure_undo
+    }
     NEW_REGION_ENSURE -> "ensured_dataset_and_region" {
         + rsrss_new_region_ensure
-        - rsrss_new_region_ensure_undo
     }
     GET_OLD_SNAPSHOT_VOLUME_ID -> "old_snapshot_volume_id" {
         + rsrss_get_old_snapshot_volume_id
@@ -380,6 +414,10 @@ async fn rsrss_find_new_region(
     Ok(dataset_and_region)
 }
 
+async fn rsrss_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
+    Ok(())
+}
+
 async fn rsrss_new_region_ensure(
     sagactx: NexusActionContext,
 ) -> Result<
@@ -390,10 +428,6 @@ async fn rsrss_new_region_ensure(
     let osagactx = sagactx.user_data();
     let log = osagactx.log();
 
-    // With a list of datasets and regions to ensure, other sagas need to have a
-    // separate no-op forward step for the undo action to ensure that the undo
-    // step occurs in the case that the ensure partially fails. Here this is not
-    // required, there's only one dataset and region.
     let new_dataset_and_region = sagactx
         .lookup::<(db::model::Dataset, db::model::Region)>(
             "new_dataset_and_region",
