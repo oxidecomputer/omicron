@@ -705,7 +705,7 @@ task: "switch_port_config_manager"
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
 
 task: "tuf_artifact_replication"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every 1h
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
@@ -1161,7 +1161,7 @@ task: "switch_port_config_manager"
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
 
 task: "tuf_artifact_replication"
-  configured period: every <REDACTED_DURATION>m
+  configured period: every 1h
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
