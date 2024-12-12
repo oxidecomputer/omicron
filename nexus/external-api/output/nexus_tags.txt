@@ -231,6 +231,16 @@ API operations found with tag "system/status"
 OPERATION ID                             METHOD   URL PATH
 ping                                     GET      /v1/ping
 
+API operations found with tag "system/webhooks"
+OPERATION ID                             METHOD   URL PATH
+webhook_create                           POST     /experimental/v1/webhooks
+webhook_delete                           DELETE   /experimental/v1/webhooks/{webhook_id}
+webhook_delivery_list                    GET      /experimental/v1/webhooks/{webhook_id}/deliveries
+webhook_delivery_resend                  POST     /experimental/v1/webhooks/{webhook_id}/deliveries/{delivery_id}/resend
+webhook_secrets_add                      POST     /experimental/v1/webhooks/{webhook_id}/secrets
+webhook_secrets_list                     GET      /experimental/v1/webhooks/{webhook_id}/secrets
+webhook_view                             GET      /experimental/v1/webhooks/{webhook_id}
+
 API operations found with tag "vpcs"
 OPERATION ID                             METHOD   URL PATH
 internet_gateway_create                  POST     /v1/internet-gateways

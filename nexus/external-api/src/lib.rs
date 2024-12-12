@@ -151,6 +151,12 @@ pub const API_VERSION: &str = "20241204.0.0";
                     url = "http://docs.oxide.computer/api/vpcs"
                 }
             },
+            "system/webhooks" = {
+                description = "Webhooks deliver notifications for audit log events and fault management alerts.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/webhooks"
+                }
+            },
             "system/probes" = {
                 description = "Probes for testing network connectivity",
                 external_docs = {
@@ -3088,6 +3094,87 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<params::DeviceAccessTokenRequest>,
     ) -> Result<Response<Body>, HttpError>;
+
+    // Webhooks (experimental)
+
+    /// Get the configuration for a webhook.
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/webhooks/{webhook_id}",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookPath>,
+    ) -> Result<HttpResponseOk<views::Webhook>, HttpError>;
+
+    /// Create a new webhook receiver.
+    #[endpoint {
+        method = POST,
+        path = "/experimental/v1/webhooks",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_create(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<params::WebhookCreate>,
+    ) -> Result<HttpResponseCreated<views::Webhook>, HttpError>;
+
+    /// Delete a webhook receiver.
+    #[endpoint {
+        method = DELETE,
+        path = "/experimental/v1/webhooks/{webhook_id}",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List the IDs of secrets for a webhook receiver.
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/webhooks/{webhook_id}/secrets",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_secrets_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookPath>,
+    ) -> Result<HttpResponseOk<views::WebhookSecrets>, HttpError>;
+
+    /// Add a secret to a webhook.
+    #[endpoint {
+        method = POST,
+        path = "/experimental/v1/webhooks/{webhook_id}/secrets",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_secrets_add(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookPath>,
+        params: TypedBody<params::WebhookSecret>,
+    ) -> Result<HttpResponseCreated<views::WebhookSecretId>, HttpError>;
+
+    /// List delivery attempts to a webhook receiver.
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/webhooks/{webhook_id}/deliveries",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_delivery_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::WebhookDelivery>>, HttpError>;
+
+    /// Request re-delivery of a webhook event.
+    #[endpoint {
+        method = POST,
+        path = "/experimental/v1/webhooks/{webhook_id}/deliveries/{delivery_id}/resend",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_delivery_resend(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookDeliveryPath>,
+    ) -> Result<HttpResponseCreated<views::WebhookDeliveryId>, HttpError>;
 }
 
 /// Perform extra validations on the OpenAPI spec.
