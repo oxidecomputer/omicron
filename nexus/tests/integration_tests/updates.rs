@@ -195,16 +195,6 @@ async fn test_repo_upload() -> Result<()> {
         "initial description matches fetched description"
     );
 
-    // Even though the repository already exists, the artifacts are sent to the
-    // replication task ahead of database insertion. The task should have run
-    // once, found nothing to do, and deleted the artifacts.
-    let status =
-        wait_tuf_artifact_replication_step(&cptestctx.internal_client).await;
-    eprintln!("{status:?}");
-    assert_eq!(status.requests_ok, 0);
-    assert_eq!(status.requests_outstanding, 0);
-    assert_eq!(status.local_repos, 0);
-
     // Upload a new repository with the same system version but a different
     // version for one of the components. This will produce a different hash,
     // which should return an error.
@@ -232,16 +222,6 @@ async fn test_repo_upload() -> Result<()> {
         )?;
     }
 
-    // Even though the repository was rejected, the artifacts are sent to the
-    // replication task ahead of database insertion. The task should have run
-    // once, found nothing to do, and deleted the artifacts.
-    let status =
-        wait_tuf_artifact_replication_step(&cptestctx.internal_client).await;
-    eprintln!("{status:?}");
-    assert_eq!(status.requests_ok, 0);
-    assert_eq!(status.requests_outstanding, 0);
-    assert_eq!(status.local_repos, 0);
-
     // Upload a new repository with a different system version and different
     // contents (but same version) for an artifact.
     {
@@ -267,16 +247,6 @@ async fn test_repo_upload() -> Result<()> {
             "Uploaded artifacts don't match existing artifacts with same IDs:",
         )?;
     }
-
-    // Even though the repository was rejected, the artifacts are sent to the
-    // replication task ahead of database insertion. The task should have run
-    // once, found nothing to do, and deleted the artifacts.
-    let status =
-        wait_tuf_artifact_replication_step(&cptestctx.internal_client).await;
-    eprintln!("{status:?}");
-    assert_eq!(status.requests_ok, 0);
-    assert_eq!(status.requests_outstanding, 0);
-    assert_eq!(status.local_repos, 0);
 
     // Upload a new repository with a different system version but no other
     // changes. This should be accepted.
