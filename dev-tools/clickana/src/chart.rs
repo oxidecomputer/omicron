@@ -135,7 +135,7 @@ impl TimeSeriesValues {
     }
 
     /// Returns the average value of the max and min values.
-    fn avg(&self, min_value_label: &f64, max_value_label: &f64) -> f64 {
+    fn avg(&self, min_value_label: f64, max_value_label: f64) -> f64 {
         (min_value_label + max_value_label) / 2.0
     }
 }
@@ -222,9 +222,9 @@ fn padded_min_value_as_unit(unit: Unit, min_value_raw: &f64) -> Result<f64> {
 
 #[derive(Debug, PartialEq)]
 struct YAxisValues {
-    lower_label: f64,
-    mid_label: f64,
-    upper_label: f64,
+    lower_label: String,
+    mid_label: String,
+    upper_label: String,
     lower_bound: f64,
     upper_bound: f64,
 }
@@ -240,10 +240,30 @@ impl YAxisValues {
         // padding to the bounds and labels so we don't end up with repeated labels or
         // straight lines too close to the upper bounds.
         let upper_bound = padded_max_value_raw(unit, max_value)?;
-        let upper_label = padded_max_value_as_unit(unit, max_value)?;
+        let upper_label_as_unit = padded_max_value_as_unit(unit, max_value)?;
         let lower_bound = padded_min_value_raw(unit, min_value)?;
-        let lower_label = padded_min_value_as_unit(unit, min_value)?;
-        let mid_label = values.avg(&lower_label, &upper_label);
+        let lower_label_as_unit = padded_min_value_as_unit(unit, min_value)?;
+        let mid_label_as_unit =
+            values.avg(lower_label_as_unit, upper_label_as_unit);
+
+        // To nicely display the mid value label for the Y axis, we do the following:
+        // - It is not displayed it if it is a 0.0.
+        // - If it does not have a fractional number we display it as an integer.
+        // - Else, we display the number as is up to the first fractional number.
+        //let mid_value = mid_label;
+        let fractional_of_mid_value =
+            mid_label_as_unit - mid_label_as_unit.floor();
+        let mid_value_formatted = format!("{:.1}", mid_label_as_unit);
+        let mid_label = if mid_value_formatted == *"0.0" {
+            "".to_string()
+        } else if fractional_of_mid_value == 0.0 {
+            mid_value_formatted.split('.').next().unwrap().to_string()
+        } else {
+            mid_value_formatted
+        };
+
+        let upper_label = upper_label_as_unit.to_string();
+        let lower_label = lower_label_as_unit.to_string();
 
         Ok(Self {
             lower_label,
@@ -412,77 +432,32 @@ impl ChartData {
             .graph_type(GraphType::Line)
             .data(&self.data_points.data)];
 
-        // TODO: Put this somewhere else?
-        //
-        // To nicely display the mid value label for the Y axis, we do the following:
-        // - It is not displayed it if it is a 0.0.
-        // - If it does not have a fractional number we display it as an integer.
-        // - Else, we display the number as is up to the first fractional number.
-        let mid_value = self.y_axis_values.mid_label;
-        let fractional_of_mid_value = mid_value - mid_value.floor();
-        let mid_value_formatted = format!("{:.1}", mid_value);
-        let y_axis_mid_label = if mid_value_formatted == *"0.0" {
-            "".to_string()
-        } else if fractional_of_mid_value == 0.0 {
-            mid_value_formatted.split('.').next().unwrap().to_string()
-        } else {
-            mid_value_formatted
-        };
-
         let chart = Chart::new(datasets)
             .block(
-                Block::bordered().title(
-                    Line::from(self.metadata.title.clone())
-                        .cyan()
-                        .bold()
-                        .centered(),
-                ),
+                Block::bordered()
+                    .title(Line::from(self.title()).cyan().bold().centered()),
             )
             .x_axis(
                 Axis::default()
                     .style(Style::default().gray())
-                    .bounds([
-                        self.x_axis_timestamps.start_time_bound,
-                        self.x_axis_timestamps.end_time_bound,
-                    ])
+                    .bounds([self.start_time_bound(), self.end_time_bound()])
                     .labels([
-                        format!(
-                            "{}",
-                            self.x_axis_timestamps.start_time_label.time()
-                        )
-                        .bold(),
-                        format!(
-                            "{}",
-                            self.x_axis_timestamps.mid_time_label.time()
-                        )
-                        .bold(),
-                        format!(
-                            "{}",
-                            self.x_axis_timestamps.end_time_label.time()
-                        )
-                        .bold(),
+                        self.start_time_label().bold(),
+                        self.mid_time_label().bold(),
+                        self.end_time_label().bold(),
                     ]),
             )
             .y_axis(
                 Axis::default()
                     .style(Style::default().gray())
                     .bounds([
-                        self.y_axis_values.lower_bound,
-                        self.y_axis_values.upper_bound,
+                        self.lower_value_bound(),
+                        self.upper_value_bound(),
                     ])
                     .labels([
-                        format!(
-                            "{} {}",
-                            self.y_axis_values.lower_label, self.metadata.unit
-                        )
-                        .bold(),
-                        format!("{} {}", y_axis_mid_label, self.metadata.unit)
-                            .bold(),
-                        format!(
-                            "{} {}",
-                            self.y_axis_values.upper_label, self.metadata.unit
-                        )
-                        .bold(),
+                        self.lower_value_label().bold(),
+                        self.mid_value_label().bold(),
+                        self.upper_value_label().bold(),
                     ]),
             )
             .legend_position(Some(LegendPosition::TopLeft))
@@ -492,6 +467,50 @@ impl ChartData {
             ));
 
         frame.render_widget(chart, area);
+    }
+
+    fn title(&self) -> String {
+        self.metadata.title.clone()
+    }
+
+    fn start_time_label(&self) -> String {
+        self.x_axis_timestamps.start_time_label.time().to_string()
+    }
+
+    fn mid_time_label(&self) -> String {
+        self.x_axis_timestamps.mid_time_label.time().to_string()
+    }
+
+    fn end_time_label(&self) -> String {
+        self.x_axis_timestamps.end_time_label.time().to_string()
+    }
+
+    fn start_time_bound(&self) -> f64 {
+        self.x_axis_timestamps.start_time_bound
+    }
+
+    fn end_time_bound(&self) -> f64 {
+        self.x_axis_timestamps.end_time_bound
+    }
+
+    fn lower_value_label(&self) -> String {
+        format!("{} {}", self.y_axis_values.lower_label, self.metadata.unit)
+    }
+
+    fn mid_value_label(&self) -> String {
+        format!("{} {}", self.y_axis_values.mid_label, self.metadata.unit)
+    }
+
+    fn upper_value_label(&self) -> String {
+        format!("{} {}", self.y_axis_values.upper_label, self.metadata.unit)
+    }
+
+    fn lower_value_bound(&self) -> f64 {
+        self.y_axis_values.lower_bound
+    }
+
+    fn upper_value_bound(&self) -> f64 {
+        self.y_axis_values.upper_bound
     }
 }
 
@@ -548,9 +567,9 @@ mod tests {
                 end_time_bound: 1732223640.0,
             },
             y_axis_values: YAxisValues {
-                lower_label: 445.0,
-                mid_label: 446.5,
-                upper_label: 448.0,
+                lower_label: "445".to_string(),
+                mid_label: "446.5".to_string(),
+                upper_label: "448".to_string(),
                 lower_bound: 478477769763.0,
                 upper_bound: 480634032026.0,
             },
