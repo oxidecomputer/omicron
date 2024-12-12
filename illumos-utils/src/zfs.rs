@@ -256,7 +256,9 @@ impl DatasetProperties {
     /// Parses dataset properties, assuming that the caller is providing the
     /// output of the following command as stdout:
     ///
-    /// zfs get -rpo name,property,value,source $ZFS_GET_PROPS $DATASETS
+    /// zfs get \
+    ///     [maybe depth arguments] \
+    ///     -Hpo name,property,value,source $ZFS_GET_PROPS $DATASETS
     fn parse_many(
         stdout: &str,
     ) -> Result<Vec<DatasetProperties>, anyhow::Error> {
@@ -392,12 +394,12 @@ pub enum WhichDatasets {
 // set". This helps callers minimize the number of calls to "zfs set" they need
 // to make.
 struct PropertySetter {
-    props: BTreeMap<&'static str, String>,
+    props: Vec<(&'static str, String)>,
 }
 
 impl PropertySetter {
     fn new() -> Self {
-        PropertySetter { props: BTreeMap::new() }
+        PropertySetter { props: Vec::new() }
     }
 
     fn add_size_details(&mut self, details: SizeDetails) -> &mut Self {
@@ -405,30 +407,29 @@ impl PropertySetter {
         let quota = quota
             .map(|q| q.to_bytes().to_string())
             .unwrap_or_else(|| String::from("none"));
-        self.props.insert("quota", quota);
+        self.props.push(("quota", quota));
 
         let reservation = reservation
             .map(|r| r.to_bytes().to_string())
             .unwrap_or_else(|| String::from("none"));
-        self.props.insert("reservation", reservation);
+        self.props.push(("reservation", reservation));
 
         let compression = compression.to_string();
-        self.props.insert("compression", compression);
+        self.props.push(("compression", compression));
 
         self
     }
 
     fn add_id(&mut self, id: DatasetUuid) -> &mut Self {
-        self.props.insert("oxide:uuid", id.to_string());
+        self.props.push(("oxide:uuid", id.to_string()));
         self
     }
 
-    fn as_vec(&self) -> Vec<(&str, &str)> {
-        self.props.iter().map(|(k, v)| (*k, v.as_str())).collect()
+    fn as_vec(&self) -> &Vec<(&str, String)> {
+        &self.props
     }
 }
 
-#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zfs {
     /// Lists all datasets within a pool or existing dataset.
     ///
@@ -452,7 +453,9 @@ impl Zfs {
     }
 
     /// Get information about datasets within a list of zpools / datasets.
-    /// Returns properties for all input datasets and their direct children.
+    /// Returns properties for all input datasets, and optionally, for
+    /// their children (depending on the value of [WhichDatasets] is provided
+    /// as input).
     ///
     /// This function is similar to [Zfs::list_datasets], but provides a more
     /// substantial results about the datasets found.
@@ -721,9 +724,9 @@ impl Zfs {
         Self::set_values(filesystem_name, &[(name, value)])
     }
 
-    fn set_values<'a>(
-        filesystem_name: &'a str,
-        name_values: &'a [(&'a str, &'a str)],
+    fn set_values<K: std::fmt::Display, V: std::fmt::Display>(
+        filesystem_name: &str,
+        name_values: &[(K, V)],
     ) -> Result<(), SetValueError> {
         if name_values.is_empty() {
             return Ok(());
@@ -828,10 +831,7 @@ impl Zfs {
             err,
         })
     }
-}
 
-// These methods don't work with mockall, so they exist in a separate impl block
-impl Zfs {
     /// Calls "zfs get" to acquire multiple values
     ///
     /// - `names`: The properties being acquired

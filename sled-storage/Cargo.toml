@@ -28,6 +28,7 @@ sled-hardware.workspace = true
 slog.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-stream.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 

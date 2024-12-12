@@ -14,6 +14,8 @@ use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
 use futures::future::FutureExt;
+use futures::Stream;
+use futures::StreamExt;
 use illumos_utils::zfs::{DatasetProperties, Mountpoint, WhichDatasets, Zfs};
 use illumos_utils::zpool::{ZpoolName, ZPOOL_MOUNTPOINT_ROOT};
 use key_manager::StorageKeyRequester;
@@ -930,7 +932,7 @@ impl StorageManager {
     // includes details about all possible errors that may occur on
     // a per-dataset granularity.
     async fn datasets_ensure_internal(
-        &mut self,
+        &self,
         log: &Logger,
         config: &DatasetsConfig,
     ) -> DatasetsManagementResult {
@@ -951,7 +953,6 @@ impl StorageManager {
         .map(|props| (props.name.clone(), props))
         .collect::<BTreeMap<String, _>>();
 
-        // Ensure each dataset concurrently
         let futures = config.datasets.values().map(|dataset| async {
             self.dataset_ensure_internal(
                 log,
@@ -961,7 +962,24 @@ impl StorageManager {
             .await
         });
 
-        let status = futures::future::join_all(futures).await;
+        // This "Box::pin" is a workaround for: https://github.com/rust-lang/rust/issues/64552
+        //
+        // Ideally, we would just use:
+        //
+        // ```
+        // let status: Vec<_> = futures::stream::iter(futures)
+        //      .buffered(...)
+        //      .collect()
+        //      .await;
+        // ```
+        const DATASET_ENSURE_CONCURRENCY_LIMIT: usize = 16;
+        let results: std::pin::Pin<Box<dyn Stream<Item = _> + Send>> = Box::pin(
+            futures::stream::iter(futures)
+                .buffered(DATASET_ENSURE_CONCURRENCY_LIMIT),
+        );
+
+        let status: Vec<DatasetManagementStatus> = results.collect().await;
+
         DatasetsManagementResult { status }
     }
 
