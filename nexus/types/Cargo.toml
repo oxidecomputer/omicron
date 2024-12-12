@@ -30,7 +30,7 @@ openssl.workspace = true
 oxql-types.workspace = true
 oxnet.workspace = true
 parse-display.workspace = true
-schemars = { workspace = true, features = ["chrono", "uuid1"] }
+schemars = { workspace = true, features = ["chrono", "uuid1", "url"] }
 serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
@@ -42,6 +42,7 @@ thiserror.workspace = true
 newtype-uuid.workspace = true
 update-engine.workspace = true
 uuid.workspace = true
+url = { workspace = true, features = ["serde"] }
 
 api_identity.workspace = true
 gateway-client.workspace = true

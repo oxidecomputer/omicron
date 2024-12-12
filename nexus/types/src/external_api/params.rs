@@ -28,6 +28,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::{net::IpAddr, str::FromStr};
+use url::Url;
 use uuid::Uuid;
 
 macro_rules! path_param {
@@ -92,6 +93,7 @@ path_param!(CertificatePath, certificate, "certificate");
 
 id_path_param!(SupportBundlePath, support_bundle, "support bundle");
 id_path_param!(GroupPath, group_id, "group");
+id_path_param!(WebhookPath, webhook_id, "webhook");
 
 // TODO: The hardware resources should be represented by its UUID or a hardware
 // ID that can be used to deterministically generate the UUID.
@@ -2299,4 +2301,25 @@ pub struct DeviceAccessTokenRequest {
     pub grant_type: String,
     pub device_code: String,
     pub client_id: Uuid,
+}
+
+// Webhooks
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookCreate {
+    pub name: String,
+    pub endpoint: Url,
+    pub secrets: Vec<String>,
+    pub events: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookSecret {
+    pub secret: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct WebhookDeliveryPath {
+    pub webhook_id: Uuid,
+    pub delivery_id: Uuid,
 }

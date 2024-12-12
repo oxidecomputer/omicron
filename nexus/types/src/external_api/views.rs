@@ -17,6 +17,7 @@ use omicron_common::api::external::{
     IdentityMetadata, InstanceState, Name, ObjectIdentity, RoleName,
     SimpleIdentityOrName,
 };
+use omicron_uuid_kinds::{EventUuid, WebhookUuid};
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -25,6 +26,7 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::net::IpAddr;
 use strum::{EnumIter, IntoEnumIterator};
+use url::Url;
 use uuid::Uuid;
 
 use super::params::PhysicalDiskKind;
@@ -1026,4 +1028,97 @@ pub struct AllowList {
 pub struct OxqlQueryResult {
     /// Tables resulting from the query, each containing timeseries.
     pub tables: Vec<oxql_types::Table>,
+}
+
+// WEBHOOKS
+
+/// The configuration for a webhook.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Webhook {
+    pub id: WebhookUuid,
+    pub name: String,
+    pub endpoint: Url,
+    pub secrets: Vec<WebhookSecretId>,
+    // XXX(eliza): should eventually be an enum?
+    pub events: Vec<String>,
+    // TODO(eliza): roles?
+}
+
+/// A list of the IDs of secrets associated with a webhook.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookSecrets {
+    pub secrets: Vec<WebhookSecretId>,
+}
+
+/// The public ID of a secret key assigned to a webhook.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookSecretId {
+    pub id: String,
+}
+
+/// A delivery attempt for a webhook event.
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookDelivery {
+    /// The UUID of this delivery attempt.
+    pub id: Uuid,
+
+    /// The UUID of the webhook receiver that this event was delivered to.
+    pub webhook_id: WebhookUuid,
+
+    /// The event class.
+    pub event: String,
+
+    /// The UUID of the event.
+    pub event_id: EventUuid,
+
+    /// The state of the delivery attempt.
+    pub state: WebhookDeliveryState,
+
+    /// The time at which the webhook delivery was attempted, or `null` if
+    /// webhook delivery has not yet been attempted (`state` is "pending").
+    pub time_sent: Option<DateTime<Utc>>,
+
+    /// Describes the response returned by the receiver endpoint.
+    ///
+    /// This is present if the webhook has been delivered successfully, or if the
+    /// endpoint returned an HTTP error (`state` is "delivered" or
+    /// "failed_http_error"). This is `null` if the webhook has not yet been
+    /// delivered, or if the endpoint was unreachable (`state` is "pending" or
+    /// "failed_unreachable").
+    pub response: Option<WebhookDeliveryResponse>,
+
+    /// The UUID of a previous delivery attempt that this is a repeat of, if
+    /// this was a resending of a previous delivery. If this is the first time
+    /// this event has been delivered, this is `null`.
+    pub resent_for: Option<Uuid>,
+}
+
+/// The state of a webhook delivery attempt.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WebhookDeliveryState {
+    /// The webhook event has not yet been delivered.
+    Pending,
+    /// The webhook event has been delivered successfully.
+    Delivered,
+    /// A webhook request was sent to the endpoint, and it
+    /// returned a HTTP error status code indicating an error.
+    FailedHttpError,
+    /// The webhook request could not be sent to the receiver endpoint.
+    FailedUnreachable,
+}
+
+/// The response received from a webhook receiver endpoint.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookDeliveryResponse {
+    /// The HTTP status code returned from the webhook endpoint.
+    pub status: u16,
+    /// The response time of the webhook endpoint, in milliseconds.
+    pub duration_ms: usize,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookDeliveryId {
+    pub delivery_id: Uuid,
 }
