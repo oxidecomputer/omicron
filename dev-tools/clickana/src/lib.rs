@@ -126,8 +126,8 @@ impl Clickana {
             // We only need to retrieve from one chart as they will all be relatively the same.
             // Rarely, the charts may have a variance of a second or so depending on when
             // the API calls were made, but for the header block we don't need exact precision.
-            let start_time = top_left_frame.x_axis_timestamps.start_time_label;
-            let end_time = top_left_frame.x_axis_timestamps.end_time_label;
+            let start_time = top_left_frame.start_date_time();
+            let end_time = top_left_frame.end_date_time();
 
             let dashboard = Dashboard {
                 start_time,

@@ -257,13 +257,13 @@ impl YAxisValues {
         let mid_label = if mid_value_formatted == *"0.0" {
             "".to_string()
         } else if fractional_of_mid_value == 0.0 {
-            mid_value_formatted.split('.').next().unwrap().to_string()
+            format!("{} {}", mid_value_formatted.split('.').next().unwrap(), unit)
         } else {
-            mid_value_formatted
+            format!("{} {}", mid_value_formatted, unit)
         };
 
-        let upper_label = upper_label_as_unit.to_string();
-        let lower_label = lower_label_as_unit.to_string();
+        let upper_label = format!("{} {}", upper_label_as_unit, unit);
+        let lower_label = format!("{} {}", lower_label_as_unit, unit);
 
         Ok(Self {
             lower_label,
@@ -473,6 +473,14 @@ impl ChartData {
         self.metadata.title.clone()
     }
 
+    pub fn start_date_time(&self) -> DateTime<Utc> {
+        self.x_axis_timestamps.start_time_label
+    }
+
+    pub fn end_date_time(&self) -> DateTime<Utc> {
+        self.x_axis_timestamps.end_time_label
+    }
+    
     fn start_time_label(&self) -> String {
         self.x_axis_timestamps.start_time_label.time().to_string()
     }
@@ -494,15 +502,15 @@ impl ChartData {
     }
 
     fn lower_value_label(&self) -> String {
-        format!("{} {}", self.y_axis_values.lower_label, self.metadata.unit)
+        self.y_axis_values.lower_label.clone()
     }
 
     fn mid_value_label(&self) -> String {
-        format!("{} {}", self.y_axis_values.mid_label, self.metadata.unit)
+        self.y_axis_values.mid_label.clone()
     }
 
     fn upper_value_label(&self) -> String {
-        format!("{} {}", self.y_axis_values.upper_label, self.metadata.unit)
+        self.y_axis_values.upper_label.clone()
     }
 
     fn lower_value_bound(&self) -> f64 {
@@ -526,7 +534,7 @@ mod tests {
     use super::{DataPoints, XAxisTimestamps};
 
     #[test]
-    fn gather_chart_data_success() {
+    fn gather_chart_data_for_disk_usage_success() {
         let metadata =
             ChartMetadata::new(MetricName::DiskUsage, "Test Chart".to_string());
         let raw_data = vec![
@@ -567,11 +575,170 @@ mod tests {
                 end_time_bound: 1732223640.0,
             },
             y_axis_values: YAxisValues {
-                lower_label: "445".to_string(),
-                mid_label: "446.5".to_string(),
-                upper_label: "448".to_string(),
+                lower_label: "445 GiB".to_string(),
+                mid_label: "446.5 GiB".to_string(),
+                upper_label: "448 GiB".to_string(),
                 lower_bound: 478477769763.0,
                 upper_bound: 480634032026.0,
+            },
+        };
+        let result = ChartData::new(raw_data, metadata).unwrap();
+        assert_eq!(result, expected_result);
+    }
+
+    #[test]
+    fn gather_chart_data_for_memory_tracking_success() {
+        let metadata =
+            ChartMetadata::new(MetricName::MemoryTracking, "Test Chart".to_string());
+        let raw_data = vec![
+            SystemTimeSeries {
+                time: "1732223400".to_string(),
+                value: 479551511587.3104,
+            },
+            SystemTimeSeries {
+                time: "1732223520".to_string(),
+                value: 479555459822.93335,
+            },
+            SystemTimeSeries {
+                time: "1732223640".to_string(),
+                value: 479560290201.6,
+            },
+        ];
+
+        let expected_result = ChartData {
+            metadata: ChartMetadata {
+                title: "Test Chart".to_string(),
+                unit: Unit::Mebibyte,
+            },
+            data_points: DataPoints {
+                data: vec![
+                    (1732223400.0, 479551511587.3104),
+                    (1732223520.0, 479555459822.93335),
+                    (1732223640.0, 479560290201.6),
+                ],
+            },
+            x_axis_timestamps: XAxisTimestamps {
+                start_time_label: DateTime::from_timestamp(1732223400, 0)
+                    .unwrap(),
+                mid_time_label: DateTime::from_timestamp(1732223520, 0)
+                    .unwrap(),
+                end_time_label: DateTime::from_timestamp(1732223640, 0)
+                    .unwrap(),
+                start_time_bound: 1732223400.0,
+                end_time_bound: 1732223640.0,
+            },
+            y_axis_values: YAxisValues {
+                lower_label: "457334 MiB".to_string(),
+                mid_label: "457340 MiB".to_string(),
+                upper_label: "457346 MiB".to_string(),
+                lower_bound: 479550463011.0,
+                upper_bound: 479561338778.0,
+            },
+        };
+        let result = ChartData::new(raw_data, metadata).unwrap();
+        assert_eq!(result, expected_result);
+    }
+
+    #[test]
+    fn gather_chart_data_for_query_count_success() {
+        let metadata =
+            ChartMetadata::new(MetricName::QueryCount, "Test Chart".to_string());
+        let raw_data = vec![
+            SystemTimeSeries {
+                time: "1732223400".to_string(),
+                value: 0.0,
+            },
+            SystemTimeSeries {
+                time: "1732223520".to_string(),
+                value: 0.004,
+            },
+            SystemTimeSeries {
+                time: "1732223640".to_string(),
+                value: 0.0,
+            },
+        ];
+
+        let expected_result = ChartData {
+            metadata: ChartMetadata {
+                title: "Test Chart".to_string(),
+                unit: Unit::Count,
+            },
+            data_points: DataPoints {
+                data: vec![
+                    (1732223400.0, 0.0),
+                    (1732223520.0, 0.004),
+                    (1732223640.0, 0.0),
+                ],
+            },
+            x_axis_timestamps: XAxisTimestamps {
+                start_time_label: DateTime::from_timestamp(1732223400, 0)
+                    .unwrap(),
+                mid_time_label: DateTime::from_timestamp(1732223520, 0)
+                    .unwrap(),
+                end_time_label: DateTime::from_timestamp(1732223640, 0)
+                    .unwrap(),
+                start_time_bound: 1732223400.0,
+                end_time_bound: 1732223640.0,
+            },
+            y_axis_values: YAxisValues {
+                lower_label: "0 ".to_string(),
+                mid_label: "1 ".to_string(),
+                upper_label: "2 ".to_string(),
+                lower_bound: 0.0,
+                upper_bound: 2.0,
+            },
+        };
+        let result = ChartData::new(raw_data, metadata).unwrap();
+        assert_eq!(result, expected_result);
+    }
+
+    #[test]
+    fn gather_chart_data_for_running_queries_success() {
+        let metadata =
+            ChartMetadata::new(MetricName::RunningQueries, "Test Chart".to_string());
+        let raw_data = vec![
+            SystemTimeSeries {
+                time: "1732223400".to_string(),
+                value: 1.554,
+            },
+            SystemTimeSeries {
+                time: "1732223520".to_string(),
+                value: 1.877,
+            },
+            SystemTimeSeries {
+                time: "1732223640".to_string(),
+                value: 1.3456,
+            },
+        ];
+
+        let expected_result = ChartData {
+            metadata: ChartMetadata {
+                title: "Test Chart".to_string(),
+                unit: Unit::Count,
+            },
+            data_points: DataPoints {
+                data: vec![
+                    (1732223400.0, 1.554),
+                    (1732223520.0, 1.877),
+                    (1732223640.0, 1.3456),
+                ],
+            },
+            x_axis_timestamps: XAxisTimestamps {
+                start_time_label: DateTime::from_timestamp(1732223400, 0)
+                    .unwrap(),
+                mid_time_label: DateTime::from_timestamp(1732223520, 0)
+                    .unwrap(),
+                end_time_label: DateTime::from_timestamp(1732223640, 0)
+                    .unwrap(),
+                start_time_bound: 1732223400.0,
+                end_time_bound: 1732223640.0,
+            },
+            y_axis_values: YAxisValues {
+                lower_label: "0 ".to_string(),
+                mid_label: "1.5 ".to_string(),
+                upper_label: "3 ".to_string(),
+                lower_bound: 0.0,
+                upper_bound: 3.0,
             },
         };
         let result = ChartData::new(raw_data, metadata).unwrap();
