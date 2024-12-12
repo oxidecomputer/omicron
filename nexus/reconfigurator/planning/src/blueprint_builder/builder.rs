@@ -732,16 +732,10 @@ impl<'a> BlueprintBuilder<'a> {
             .input
             .all_sled_ids(SledFilter::InService)
             .collect::<BTreeSet<_>>();
-        blueprint_disks.retain(|sled_id, disks_config| {
+        blueprint_disks.retain(|sled_id, _disks_config| {
             if !in_service_sled_ids.contains(sled_id) {
                 return false;
             }
-
-            disks_config.disks.retain(|config| match config.disposition {
-                BlueprintPhysicalDiskDisposition::InService => true,
-                BlueprintPhysicalDiskDisposition::Expunged => false,
-            });
-
             true
         });
         // Preserving backwards compatibility, for now: datasets should only
@@ -2189,7 +2183,7 @@ pub mod test {
             }
         }
 
-        // All disks should have debug and zone root datasets.
+        // All InService disks should have debug and zone root datasets.
         for (sled_id, disk_config) in &blueprint.blueprint_disks {
             for disk in &disk_config.disks {
                 eprintln!(
@@ -2201,19 +2195,18 @@ pub mod test {
 
                 let dataset =
                     find_dataset(&datasets, &zpool, DatasetKind::Debug);
-                assert_eq!(
-                    dataset.disposition,
-                    BlueprintDatasetDisposition::InService
-                );
-                let dataset = find_dataset(
-                    &datasets,
-                    &zpool,
-                    DatasetKind::TransientZoneRoot,
-                );
-                assert_eq!(
-                    dataset.disposition,
-                    BlueprintDatasetDisposition::InService
-                );
+                if dataset.disposition == BlueprintDatasetDisposition::InService
+                {
+                    let dataset = find_dataset(
+                        &datasets,
+                        &zpool,
+                        DatasetKind::TransientZoneRoot,
+                    );
+                    assert_eq!(
+                        dataset.disposition,
+                        BlueprintDatasetDisposition::InService
+                    );
+                }
             }
         }
 

@@ -240,6 +240,7 @@ impl<'a> Planner<'a> {
             // disks. This is necessary before we can allocate any zones.
             let sled_edits =
                 self.blueprint.sled_add_disks(sled_id, &sled_resources)?;
+
             if let EnsureMultiple::Changed {
                 added,
                 updated,
@@ -812,6 +813,7 @@ mod test {
     use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintDiff;
+    use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::BlueprintZoneType;
@@ -820,7 +822,9 @@ mod test {
     use nexus_types::deployment::CockroachDbClusterVersion;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use nexus_types::deployment::CockroachDbSettings;
+    use nexus_types::deployment::Policy;
     use nexus_types::deployment::SledDisk;
+    use nexus_types::deployment::SledFilter;
     use nexus_types::external_api::views::PhysicalDiskPolicy;
     use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::external_api::views::SledPolicy;
@@ -1760,6 +1764,159 @@ mod test {
         assert_eq!(diff.datasets.modified.len(), 1);
 
         logctx.cleanup_successful();
+    }
+
+    #[test]
+
+    fn test_disk_add_expunge_decommission() {
+        static TEST_NAME: &str = "planner_disk_add_expunge_decommission";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Create an example system with a single sled
+        let (example, blueprint1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(1).build();
+        let mut collection = example.collection;
+        let input = example.input;
+
+        // The initial collection configuration has generation 1 for disks
+        // The initial blueprint configuration has generation 2 for disks
+        let (sled_id, disks_config) =
+            blueprint1.blueprint_disks.first_key_value().unwrap();
+        assert_eq!(disks_config.generation, Generation::from_u32(2));
+        assert_eq!(
+            collection
+                .sled_agents
+                .get(&sled_id)
+                .unwrap()
+                .omicron_physical_disks_generation,
+            Generation::new()
+        );
+
+        // All disks should have an `InService` disposition and `Active` state
+        for disk in &disks_config.disks {
+            assert_eq!(
+                disk.disposition,
+                BlueprintPhysicalDiskDisposition::InService
+            );
+            assert_eq!(disk.state, PhysicalDiskState::Active);
+        }
+
+        let mut builder = input.into_builder();
+
+        // Let's expunge a disk. It's disposition should change to `Expunged`
+        // but it's state should remain active.
+        let expunged_disk_id = {
+            let expunged_disk = &mut builder
+                .sleds_mut()
+                .get_mut(&sled_id)
+                .unwrap()
+                .resources
+                .zpools
+                .iter_mut()
+                .next()
+                .unwrap()
+                .1
+                 .0;
+            expunged_disk.policy = PhysicalDiskPolicy::Expunged;
+            expunged_disk.disk_id
+        };
+
+        let input = builder.build();
+
+        let blueprint2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint1,
+            &input,
+            "test: expunge a disk",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
+        .plan()
+        .expect("failed to plan");
+
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        println!("1 -> 2 (expunge a disk):\n{}", diff.display());
+
+        let (_, disks_config) =
+            blueprint2.blueprint_disks.first_key_value().unwrap();
+
+        // The disks generation goes from 2 -> 3
+        assert_eq!(disks_config.generation, Generation::from_u32(3));
+        // One disk should have it's disposition set to `Expunged`. All disks
+        // should have their state remain `Active`.
+        let disk_iter = disks_config.disks.iter();
+        for disk in disk_iter {
+            if disk.id == expunged_disk_id {
+                assert_eq!(
+                    disk.disposition,
+                    BlueprintPhysicalDiskDisposition::Expunged
+                );
+            } else {
+                assert_eq!(
+                    disk.disposition,
+                    BlueprintPhysicalDiskDisposition::InService
+                );
+            }
+            assert_eq!(disk.state, PhysicalDiskState::Active);
+            println!("{disk:?}");
+        }
+
+        // We haven't updated the inventory, so no changes should be made
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint2,
+            &input,
+            TEST_NAME,
+        );
+
+        // Let's update the inventory to reflect that the sled-agent
+        // has learned about the expungement.
+        collection
+            .sled_agents
+            .get_mut(&sled_id)
+            .unwrap()
+            .omicron_physical_disks_generation = Generation::from_u32(3);
+
+        let blueprint3 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint2,
+            &input,
+            "test: decommission a disk",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
+        .plan()
+        .expect("failed to plan");
+
+        let diff = blueprint3.diff_since_blueprint(&blueprint2);
+        println!("2 -> 3 (decommission a disk):\n{}", diff.display());
+
+        let (_, disks_config) =
+            blueprint3.blueprint_disks.first_key_value().unwrap();
+
+        // The disks generation goes from 3 -> 4
+        assert_eq!(disks_config.generation, Generation::from_u32(4));
+        // One disk should have its disposition set to `Expunged` and it's state
+        // set to 'Decommissioned'.
+        let disk_iter = disks_config.disks.iter();
+        for disk in disk_iter {
+            if disk.id == expunged_disk_id {
+                assert_eq!(
+                    disk.disposition,
+                    BlueprintPhysicalDiskDisposition::Expunged
+                );
+                assert_eq!(disk.state, PhysicalDiskState::Decommissioned);
+            } else {
+                assert_eq!(
+                    disk.disposition,
+                    BlueprintPhysicalDiskDisposition::InService
+                );
+                assert_eq!(disk.state, PhysicalDiskState::Active);
+            }
+            println!("{disk:?}");
+        }
     }
 
     #[test]
