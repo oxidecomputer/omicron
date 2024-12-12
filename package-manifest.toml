@@ -125,6 +125,7 @@ source.paths = [
   { from = "smf/nexus/{{rack-topology}}", to = "/var/svc/manifest/site/nexus" },
   { from = "out/console-assets", to = "/var/nexus/static" },
   { from = "schema/crdb", to = "/var/nexus/schema/crdb" },
+  { from = "tools/dtrace/nexus", to = "/var/nexus/dtrace" },
 ]
 output.type = "zone"
 setup_hint = """
