@@ -725,21 +725,12 @@ impl<'a> BlueprintBuilder<'a> {
             *state != SledState::Decommissioned
                 || commissioned_sled_ids.contains(sled_id)
         });
-        // Preserving backwards compatibility, for now: disks should only
-        // have entries for in-service sleds, and expunged disks should be
-        // removed entirely.
+        // Preserving backwards compatibility, for now: datasets should only
+        // have entries for in-service sleds.
         let in_service_sled_ids = self
             .input
             .all_sled_ids(SledFilter::InService)
             .collect::<BTreeSet<_>>();
-        blueprint_disks.retain(|sled_id, _disks_config| {
-            if !in_service_sled_ids.contains(sled_id) {
-                return false;
-            }
-            true
-        });
-        // Preserving backwards compatibility, for now: datasets should only
-        // have entries for in-service sleds.
         blueprint_datasets
             .retain(|sled_id, _| in_service_sled_ids.contains(sled_id));
 

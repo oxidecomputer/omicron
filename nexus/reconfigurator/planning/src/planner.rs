@@ -822,9 +822,7 @@ mod test {
     use nexus_types::deployment::CockroachDbClusterVersion;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use nexus_types::deployment::CockroachDbSettings;
-    use nexus_types::deployment::Policy;
     use nexus_types::deployment::SledDisk;
-    use nexus_types::deployment::SledFilter;
     use nexus_types::external_api::views::PhysicalDiskPolicy;
     use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::external_api::views::SledPolicy;
@@ -1845,8 +1843,7 @@ mod test {
         assert_eq!(disks_config.generation, Generation::from_u32(3));
         // One disk should have it's disposition set to `Expunged`. All disks
         // should have their state remain `Active`.
-        let disk_iter = disks_config.disks.iter();
-        for disk in disk_iter {
+        for disk in &disks_config.disks {
             if disk.id == expunged_disk_id {
                 assert_eq!(
                     disk.disposition,
@@ -1900,8 +1897,7 @@ mod test {
         assert_eq!(disks_config.generation, Generation::from_u32(4));
         // One disk should have its disposition set to `Expunged` and it's state
         // set to 'Decommissioned'.
-        let disk_iter = disks_config.disks.iter();
-        for disk in disk_iter {
+        for disk in &disks_config.disks {
             if disk.id == expunged_disk_id {
                 assert_eq!(
                     disk.disposition,
@@ -1915,6 +1911,58 @@ mod test {
                 );
                 assert_eq!(disk.state, PhysicalDiskState::Active);
             }
+            println!("{disk:?}");
+        }
+
+        // Now let's expunge a sled via the planning input. All disks should get
+        // expunged and decommissioned in the same planning round. We also have
+        // to manually expunge all the disks via policy, which would happen in a
+        // database transaction when an operator expunges a sled.
+        //
+        // We don't rely on the sled-agents learning about expungement to
+        // decommission because by definition expunging a sled means it's
+        // already gone.
+        let mut builder = input.into_builder();
+        let sled_details = builder.sleds_mut().get_mut(&sled_id).unwrap();
+        sled_details.policy = SledPolicy::Expunged;
+        for (_, (sled_disk, _)) in sled_details.resources.zpools.iter_mut() {
+            sled_disk.policy = PhysicalDiskPolicy::Expunged;
+        }
+        let input = builder.build();
+
+        let blueprint4 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint3,
+            &input,
+            "test: expunge and decommission all disks",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp4")))
+        .plan()
+        .expect("failed to plan");
+
+        let diff = blueprint3.diff_since_blueprint(&blueprint2);
+        println!(
+            "3 -> 4 (expunge and decommission all disks):\n{}",
+            diff.display()
+        );
+
+        let (_, disks_config) =
+            blueprint4.blueprint_disks.first_key_value().unwrap();
+
+        // The disks generation goes from 3 -> 4
+        assert_eq!(disks_config.generation, Generation::from_u32(5));
+        // We should still have 10 disks
+        assert_eq!(disks_config.disks.len(), 10);
+        // One disk should have its disposition set to `Expunged` and it's state
+        // set to 'Decommissioned'.
+        for disk in &disks_config.disks {
+            assert_eq!(
+                disk.disposition,
+                BlueprintPhysicalDiskDisposition::Expunged
+            );
+            assert_eq!(disk.state, PhysicalDiskState::Decommissioned);
             println!("{disk:?}");
         }
     }
