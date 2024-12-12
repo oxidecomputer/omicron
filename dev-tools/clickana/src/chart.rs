@@ -257,7 +257,11 @@ impl YAxisValues {
         let mid_label = if mid_value_formatted == *"0.0" {
             "".to_string()
         } else if fractional_of_mid_value == 0.0 {
-            format!("{} {}", mid_value_formatted.split('.').next().unwrap(), unit)
+            format!(
+                "{} {}",
+                mid_value_formatted.split('.').next().unwrap(),
+                unit
+            )
         } else {
             format!("{} {}", mid_value_formatted, unit)
         };
@@ -480,7 +484,7 @@ impl ChartData {
     pub fn end_date_time(&self) -> DateTime<Utc> {
         self.x_axis_timestamps.end_time_label
     }
-    
+
     fn start_time_label(&self) -> String {
         self.x_axis_timestamps.start_time_label.time().to_string()
     }
@@ -588,8 +592,10 @@ mod tests {
 
     #[test]
     fn gather_chart_data_for_memory_tracking_success() {
-        let metadata =
-            ChartMetadata::new(MetricName::MemoryTracking, "Test Chart".to_string());
+        let metadata = ChartMetadata::new(
+            MetricName::MemoryTracking,
+            "Test Chart".to_string(),
+        );
         let raw_data = vec![
             SystemTimeSeries {
                 time: "1732223400".to_string(),
@@ -641,21 +647,14 @@ mod tests {
 
     #[test]
     fn gather_chart_data_for_query_count_success() {
-        let metadata =
-            ChartMetadata::new(MetricName::QueryCount, "Test Chart".to_string());
+        let metadata = ChartMetadata::new(
+            MetricName::QueryCount,
+            "Test Chart".to_string(),
+        );
         let raw_data = vec![
-            SystemTimeSeries {
-                time: "1732223400".to_string(),
-                value: 0.0,
-            },
-            SystemTimeSeries {
-                time: "1732223520".to_string(),
-                value: 0.004,
-            },
-            SystemTimeSeries {
-                time: "1732223640".to_string(),
-                value: 0.0,
-            },
+            SystemTimeSeries { time: "1732223400".to_string(), value: 0.0 },
+            SystemTimeSeries { time: "1732223520".to_string(), value: 0.004 },
+            SystemTimeSeries { time: "1732223640".to_string(), value: 0.0 },
         ];
 
         let expected_result = ChartData {
@@ -694,21 +693,14 @@ mod tests {
 
     #[test]
     fn gather_chart_data_for_running_queries_success() {
-        let metadata =
-            ChartMetadata::new(MetricName::RunningQueries, "Test Chart".to_string());
+        let metadata = ChartMetadata::new(
+            MetricName::RunningQueries,
+            "Test Chart".to_string(),
+        );
         let raw_data = vec![
-            SystemTimeSeries {
-                time: "1732223400".to_string(),
-                value: 1.554,
-            },
-            SystemTimeSeries {
-                time: "1732223520".to_string(),
-                value: 1.877,
-            },
-            SystemTimeSeries {
-                time: "1732223640".to_string(),
-                value: 1.3456,
-            },
+            SystemTimeSeries { time: "1732223400".to_string(), value: 1.554 },
+            SystemTimeSeries { time: "1732223520".to_string(), value: 1.877 },
+            SystemTimeSeries { time: "1732223640".to_string(), value: 1.3456 },
         ];
 
         let expected_result = ChartData {
