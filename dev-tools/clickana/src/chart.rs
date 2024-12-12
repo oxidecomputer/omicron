@@ -18,7 +18,7 @@ use std::fmt::Display;
 const GIBIBYTE_F64: f64 = 1073741824.0;
 const MEBIBYTE_F64: f64 = 1048576.0;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Unit {
     Count,
     Gibibyte,
@@ -69,6 +69,7 @@ impl Display for MetricName {
 }
 
 impl MetricName {
+    /// Returns the associated table to query for each metric.
     pub fn table(&self) -> SystemTable {
         match self {
             MetricName::DiskUsage => SystemTable::AsynchronousMetricLog,
@@ -78,6 +79,7 @@ impl MetricName {
         }
     }
 
+    /// Returns the unit the data values will be represented as.
     fn unit(&self) -> Unit {
         match self {
             MetricName::DiskUsage => Unit::Gibibyte,
@@ -87,9 +89,8 @@ impl MetricName {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChartMetadata {
-    pub _metric: MetricName,
     pub title: String,
     pub unit: Unit,
 }
@@ -97,12 +98,13 @@ pub struct ChartMetadata {
 impl ChartMetadata {
     pub fn new(metric: MetricName, title: String) -> Self {
         let unit = metric.unit();
-        Self { _metric: metric, title, unit }
+        Self { title, unit }
     }
 }
 
 #[derive(Debug)]
 struct TimeSeriesValues {
+    /// A collection of all the values from the timeseries
     values: Vec<f64>,
 }
 
@@ -130,6 +132,11 @@ impl TimeSeriesValues {
         };
 
         Ok(max_value)
+    }
+
+    /// Returns the average value of the max and min values.
+    fn avg(&self, min_value_label: &f64, max_value_label: &f64) -> f64 {
+        (min_value_label + max_value_label) / 2.0
     }
 }
 
@@ -213,12 +220,7 @@ fn padded_min_value_as_unit(unit: Unit, min_value_raw: &f64) -> Result<f64> {
     Ok(padded_value.floor())
 }
 
-/// Returns the average value of the max and min values.
-fn avg(min_value_label: &f64, max_value_label: &f64) -> f64 {
-    (min_value_label + max_value_label) / 2.0
-}
-
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 struct YAxisValues {
     lower_label: f64,
     mid_label: f64,
@@ -241,7 +243,7 @@ impl YAxisValues {
         let upper_label = padded_max_value_as_unit(unit, max_value)?;
         let lower_bound = padded_min_value_raw(unit, min_value)?;
         let lower_label = padded_min_value_as_unit(unit, min_value)?;
-        let mid_label = avg(&lower_label, &upper_label);
+        let mid_label = values.avg(&lower_label, &upper_label);
 
         Ok(Self {
             lower_label,
@@ -255,6 +257,7 @@ impl YAxisValues {
 
 #[derive(Debug)]
 struct TimeSeriesTimestamps {
+    /// A collection of all the timestamps from the timeseries
     timestamps: Vec<i64>,
 }
 
@@ -290,7 +293,7 @@ impl TimeSeriesTimestamps {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct XAxisTimestamps {
     mid_time_label: DateTime<Utc>,
     pub start_time_label: DateTime<Utc>,
@@ -348,7 +351,7 @@ impl XAxisTimestamps {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 struct DataPoints {
     data: Vec<(f64, f64)>,
 }
@@ -377,7 +380,7 @@ impl DataPoints {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct ChartData {
     metadata: ChartMetadata,
     data_points: DataPoints,
@@ -473,7 +476,6 @@ impl ChartData {
                             self.y_axis_values.lower_label, self.metadata.unit
                         )
                         .bold(),
-                        // TODO: Only show fractional number if not .0 ?
                         format!("{} {}", y_axis_mid_label, self.metadata.unit)
                             .bold(),
                         format!(
@@ -490,5 +492,95 @@ impl ChartData {
             ));
 
         frame.render_widget(chart, area);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        chart::{Unit, YAxisValues},
+        ChartData, ChartMetadata, MetricName,
+    };
+    use chrono::DateTime;
+    use clickhouse_admin_server_client::types::SystemTimeSeries;
+
+    use super::{DataPoints, XAxisTimestamps};
+
+    #[test]
+    fn gather_chart_data_success() {
+        let metadata =
+            ChartMetadata::new(MetricName::DiskUsage, "Test Chart".to_string());
+        let raw_data = vec![
+            SystemTimeSeries {
+                time: "1732223400".to_string(),
+                value: 479551511587.3104,
+            },
+            SystemTimeSeries {
+                time: "1732223520".to_string(),
+                value: 479555459822.93335,
+            },
+            SystemTimeSeries {
+                time: "1732223640".to_string(),
+                value: 479560290201.6,
+            },
+        ];
+
+        let expected_result = ChartData {
+            metadata: ChartMetadata {
+                title: "Test Chart".to_string(),
+                unit: Unit::Gibibyte,
+            },
+            data_points: DataPoints {
+                data: vec![
+                    (1732223400.0, 479551511587.3104),
+                    (1732223520.0, 479555459822.93335),
+                    (1732223640.0, 479560290201.6),
+                ],
+            },
+            x_axis_timestamps: XAxisTimestamps {
+                start_time_label: DateTime::from_timestamp(1732223400, 0)
+                    .unwrap(),
+                mid_time_label: DateTime::from_timestamp(1732223520, 0)
+                    .unwrap(),
+                end_time_label: DateTime::from_timestamp(1732223640, 0)
+                    .unwrap(),
+                start_time_bound: 1732223400.0,
+                end_time_bound: 1732223640.0,
+            },
+            y_axis_values: YAxisValues {
+                lower_label: 445.0,
+                mid_label: 446.5,
+                upper_label: 448.0,
+                lower_bound: 478477769763.0,
+                upper_bound: 480634032026.0,
+            },
+        };
+        let result = ChartData::new(raw_data, metadata).unwrap();
+        assert_eq!(result, expected_result);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "could not parse timestamp Some nonsense string into f64"
+    )]
+    fn gather_chart_data_failure() {
+        let metadata =
+            ChartMetadata::new(MetricName::DiskUsage, "Test Chart".to_string());
+        let raw_data = vec![
+            SystemTimeSeries {
+                time: "Some nonsense string".to_string(),
+                value: 479551511587.3104,
+            },
+            SystemTimeSeries {
+                time: "1732223520".to_string(),
+                value: 479555459822.93335,
+            },
+            SystemTimeSeries {
+                time: "1732223640".to_string(),
+                value: 479560290201.6,
+            },
+        ];
+
+        let _ = ChartData::new(raw_data, metadata);
     }
 }

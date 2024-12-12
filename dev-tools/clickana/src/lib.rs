@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use clickhouse_admin_server_client::types::{
@@ -35,7 +35,6 @@ struct Dashboard {
     top_right_frame: ChartData,
     bottom_left_frame: ChartData,
     bottom_right_frame: ChartData,
-    // TODO: Add more charts?
 }
 
 #[derive(Clone, Debug)]
@@ -72,6 +71,10 @@ impl Clickana {
         let tick_rate = Duration::from_secs(self.refresh_interval);
         let mut last_tick = Instant::now();
         loop {
+            // Charts we will be showing in the dashboard
+            //
+            // We are hardcoding these for now. In the future these will likely be taken
+            // from a TOML config file.
             let charts = BTreeMap::from([
                 (MetricName::DiskUsage, "Disk Usage".to_string()),
                 (
@@ -92,7 +95,9 @@ impl Clickana {
                 let c = client.clone();
 
                 let task = tokio::spawn(async move {
-                    s.populate_chart_data(c, metric_name, title).await
+                    let metadata = ChartMetadata::new(metric_name, title);
+                    let data = s.get_api_data(&c, metric_name).await?;
+                    ChartData::new(data, metadata)
                 });
 
                 tasks.push(task);
@@ -103,6 +108,12 @@ impl Clickana {
                 .into_iter()
                 .collect::<Result<Vec<_>, _>>()?;
 
+            if results.len() != 4 {
+                bail!(
+                    "expected information for 4 charts, received {} instead",
+                    results.len()
+                );
+            }
             // TODO: Eventually we may want to not have a set amount of charts and make the
             // dashboard a bit more dynamic. Perhaps taking a toml configuration file or
             // something like that. We can then create a vector of "ChartData"s for Dashboard
@@ -131,6 +142,7 @@ impl Clickana {
             let timeout = tick_rate.saturating_sub(last_tick.elapsed());
             if event::poll(timeout)? {
                 if let Event::Key(key) = event::read()? {
+                    // To exit the dashboard press the "q" key
                     if key.code == KeyCode::Char('q') {
                         return Ok(());
                     }
@@ -141,17 +153,6 @@ impl Clickana {
                 last_tick = Instant::now();
             }
         }
-    }
-
-    async fn populate_chart_data(
-        self,
-        client: ClickhouseServerClient,
-        metric_name: MetricName,
-        title: String,
-    ) -> Result<ChartData> {
-        let metadata = ChartMetadata::new(metric_name, title);
-        let data = self.get_api_data(&client, metric_name).await?;
-        ChartData::new(data, metadata)
     }
 
     fn draw(&self, frame: &mut Frame, dashboard: Dashboard) {
@@ -258,138 +259,4 @@ impl Clickana {
 
         Ok(slog::Logger::root(drain, o!(FileKv)))
     }
-}
-
-#[allow(dead_code)]
-fn test_data() -> Result<Vec<SystemTimeSeries>, serde_json::Error> {
-    let data = r#"
-[
-{
-  "time": "1732223400",
-  "value": 479551511587.3104
-},
-{
-  "time": "1732223520",
-  "value": 479555459822.93335
-},
-{
-  "time": "1732223640",
-  "value": 479560290201.6
-},
-{
-  "time": "1732223760",
-  "value": 469566801510.4
-},
-{
-  "time": "1732223880",
-  "value": 479587460778.6667
-},
-{
-  "time": "1732224000",
-  "value": 479618897442.13336
-},
-{
-  "time": "1732224120",
-  "value": 479649160567.4667
-},
-{
-  "time": "1732224240",
-  "value": 479677700300.8
-},
-{
-  "time": "1732224360",
-  "value": 479700512324.26666
-},
-{
-  "time": "1732224480",
-  "value": 479707099818.6667
-},
-{
-  "time": "1732224600",
-  "value": 479884974080.0
-},
-{
-  "time": "1732224720",
-  "value": 479975529779.2
-},
-{
-  "time": "1732224840",
-  "value": 479975824896.0
-},
-{
-  "time": "1732224960",
-  "value": 479976462062.93335
-},
-{
-  "time": "1732225080",
-  "value": 479986014242.13336
-},
-{
-  "time": "1732225200",
-  "value": 480041533235.2
-},
-{
-  "time": "1732225320",
-  "value": 480072114790.4
-},
-{
-  "time": "1732225440",
-  "value": 480097851050.6667
-},
-{
-  "time": "1732225560",
-  "value": 480138863854.93335
-},
-{
-  "time": "1732225680",
-  "value": 480178496648.5333
-},
-{
-  "time": "1732225800",
-  "value": 480196185941.3333
-},
-{
-  "time": "1732225920",
-  "value": 480208033792.0
-},
-{
-  "time": "1732226040",
-  "value": 480215815953.06665
-},
-{
-  "time": "1732226160",
-  "value": 480228655308.8
-},
-{
-  "time": "1732226280",
-  "value": 480237302749.86664
-},
-{
-  "time": "1732226400",
-  "value": 480251067016.5333
-},
-{
-  "time": "1732226520",
-  "value": 480239292381.86664
-},
-{
-  "time": "1732226640",
-  "value": 480886515029.3333
-},
-{
-  "time": "1732226760",
-  "value": 480663042423.4667
-},
-{
-  "time": "1732226880",
-  "value": 480213984085.3333
-},
-{
-  "time": "1732227000",
-  "value": 480265637816.1404
-}
-]
-"#;
-
-    serde_json::from_str(data)
 }
