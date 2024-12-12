@@ -244,11 +244,13 @@ impl Blueprint {
     pub fn all_omicron_datasets(
         &self,
         filter: BlueprintDatasetFilter,
-    ) -> impl Iterator<Item = &BlueprintDatasetConfig> {
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintDatasetConfig)> {
         self.blueprint_datasets
             .iter()
-            .flat_map(move |(_, datasets)| datasets.datasets.values())
-            .filter(move |d| d.disposition.matches(filter))
+            .flat_map(move |(sled_id, datasets)| {
+                datasets.datasets.values().map(|dataset| (*sled_id, dataset))
+            })
+            .filter(move |(_, d)| d.disposition.matches(filter))
     }
 
     /// Iterate over the [`BlueprintZoneConfig`] instances in the blueprint

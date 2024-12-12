@@ -6036,6 +6036,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-reconfigurator-blippy"
+version = "0.1.0"
+dependencies = [
+ "nexus-sled-agent-shared",
+ "nexus-types",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+]
+
+[[package]]
 name = "nexus-reconfigurator-execution"
 version = "0.1.0"
 dependencies = [
