@@ -938,13 +938,18 @@ impl StorageManager {
         //
         // This pre-fetching lets us avoid individually querying them later.
         let old_datasets = Zfs::get_dataset_properties(
-            config.datasets.values().map(|config| {
-                config.name.full_name()
-            }).collect::<Vec<String>>().as_slice(),
+            config
+                .datasets
+                .values()
+                .map(|config| config.name.full_name())
+                .collect::<Vec<String>>()
+                .as_slice(),
             WhichDatasets::SelfOnly,
-        ).unwrap_or_default().into_iter().map(|props| {
-            (props.name.clone(), props)
-        }).collect::<BTreeMap<String, _>>();
+        )
+        .unwrap_or_default()
+        .into_iter()
+        .map(|props| (props.name.clone(), props))
+        .collect::<BTreeMap<String, _>>();
 
         // Ensure each dataset concurrently
         let futures = config.datasets.values().map(|dataset| async {
@@ -952,7 +957,8 @@ impl StorageManager {
                 log,
                 dataset,
                 old_datasets.get(&dataset.name.full_name()),
-            ).await
+            )
+            .await
         });
 
         let status = futures::future::join_all(futures).await;
@@ -985,11 +991,14 @@ impl StorageManager {
                     // has our UUID.
                     if let Some(old_id) = old_dataset.id {
                         if old_id != config.id {
-                            status.err = Some(Error::UuidMismatch {
-                                name: config.name.full_name(),
-                                old: old_id.into_untyped_uuid(),
-                                new: config.id.into_untyped_uuid(),
-                            }.to_string());
+                            status.err = Some(
+                                Error::UuidMismatch {
+                                    name: config.name.full_name(),
+                                    old: old_id.into_untyped_uuid(),
+                                    new: config.id.into_untyped_uuid(),
+                                }
+                                .to_string(),
+                            );
                             return status;
                         }
                         if old_props == config.inner {
@@ -997,12 +1006,17 @@ impl StorageManager {
                             info!(log, "No changes necessary, returning early");
                             return status;
                         } else {
-                            info!(log, "Old properties changed {:?} vs {:?}", old_props, config.inner);
+                            info!(
+                                log,
+                                "Old properties changed {:?} vs {:?}",
+                                old_props,
+                                config.inner
+                            );
                         }
                     } else {
                         info!(log, "Old properties missing UUID");
                     }
-                },
+                }
                 Err(err) => {
                     warn!(log, "Failed to parse old properties"; "err" => ?err);
                 }
@@ -1020,9 +1034,9 @@ impl StorageManager {
         };
 
         if let Err(err) = self
-            .ensure_dataset_with_id(
+            .ensure_dataset(
                 config.name.pool(),
-                config.id,
+                Some(config.id),
                 &config.inner,
                 &details,
             )
@@ -1079,7 +1093,8 @@ impl StorageManager {
         Zfs::get_dataset_properties(
             datasets_of_interest.as_slice(),
             WhichDatasets::SelfAndChildren,
-        ).map_err(Error::Other)
+        )
+        .map_err(Error::Other)
     }
 
     // Ensures that a dataset exists, nested somewhere arbitrary within
@@ -1100,8 +1115,13 @@ impl StorageManager {
             full_name: config.name.full_name(),
         };
 
-        self.ensure_dataset(config.name.root.pool(), None, &config.inner, &details)
-            .await?;
+        self.ensure_dataset(
+            config.name.root.pool(),
+            None,
+            &config.inner,
+            &details,
+        )
+        .await?;
 
         Ok(())
     }
@@ -1134,15 +1154,18 @@ impl StorageManager {
         info!(log, "Listing nested datasets");
 
         let full_name = name.full_name();
-        let properties =
-            Zfs::get_dataset_properties(&[full_name], WhichDatasets::SelfAndChildren).map_err(|e| {
-                warn!(
-                    log,
-                    "Failed to access nested dataset";
-                    "name" => ?name
-                );
-                crate::dataset::DatasetError::Other(e)
-            })?;
+        let properties = Zfs::get_dataset_properties(
+            &[full_name],
+            WhichDatasets::SelfAndChildren,
+        )
+        .map_err(|e| {
+            warn!(
+                log,
+                "Failed to access nested dataset";
+                "name" => ?name
+            );
+            crate::dataset::DatasetError::Other(e)
+        })?;
 
         let root_path = name.root.full_name();
         Ok(properties
@@ -1365,19 +1388,6 @@ impl StorageManager {
         }
     }
 
-    // Invokes [Self::ensure_dataset] and also ensures the dataset has an
-    // expected UUID as a ZFS property.
-    async fn ensure_dataset_with_id(
-        &self,
-        zpool: &ZpoolName,
-        id: DatasetUuid,
-        config: &SharedDatasetConfig,
-        details: &DatasetCreationDetails,
-    ) -> Result<(), Error> {
-        self.ensure_dataset(zpool, Some(id), config, details).await?;
-        Ok(())
-    }
-
     // Ensures a dataset exists within a zpool.
     //
     // Confirms that the zpool exists and is managed by this sled.
@@ -1490,8 +1500,7 @@ impl StorageManager {
 
 /// All tests only use synthetic disks, but are expected to be run on illumos
 /// systems.
-// #[cfg(all(test, target_os = "illumos"))]
-#[cfg(test)]
+#[cfg(all(test, target_os = "illumos"))]
 mod tests {
     use crate::disk::RawSyntheticDisk;
     use crate::manager_test_harness::StorageManagerTestHarness;

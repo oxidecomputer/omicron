@@ -84,9 +84,7 @@ enum EnsureFilesystemErrorRaw {
 
 /// Error returned by [`Zfs::ensure_filesystem`].
 #[derive(thiserror::Error, Debug)]
-#[error(
-    "Failed to ensure filesystem '{name}': {err}"
-)]
+#[error("Failed to ensure filesystem '{name}': {err}")]
 pub struct EnsureFilesystemError {
     name: String,
     #[source]
@@ -95,9 +93,7 @@ pub struct EnsureFilesystemError {
 
 /// Error returned by [`Zfs::set_oxide_value`]
 #[derive(thiserror::Error, Debug)]
-#[error(
-    "Failed to set values '{values}' on filesystem {filesystem}: {err}"
-)]
+#[error("Failed to set values '{values}' on filesystem {filesystem}: {err}")]
 pub struct SetValueError {
     filesystem: String,
     values: String,
@@ -245,7 +241,9 @@ impl DatasetProperties {
 impl TryFrom<&DatasetProperties> for SharedDatasetConfig {
     type Error = anyhow::Error;
 
-    fn try_from(props: &DatasetProperties) -> Result<SharedDatasetConfig, Self::Error> {
+    fn try_from(
+        props: &DatasetProperties,
+    ) -> Result<SharedDatasetConfig, Self::Error> {
         Ok(SharedDatasetConfig {
             compression: props.compression.parse()?,
             quota: props.quota,
@@ -328,9 +326,7 @@ impl DatasetProperties {
                 // with a value of "none".
                 let quota = props
                     .get("quota")
-                    .filter(|(prop, _source)| {
-                        *prop != "-" && *prop != "0"
-                    })
+                    .filter(|(prop, _source)| *prop != "-" && *prop != "0")
                     .map(|(prop, _source)| {
                         prop.parse::<u64>().context("Failed to parse 'quota'")
                     })
@@ -338,9 +334,7 @@ impl DatasetProperties {
                     .and_then(|v| ByteCount::try_from(v).ok());
                 let reservation = props
                     .get("reservation")
-                    .filter(|(prop, _source)| {
-                        *prop != "-" && *prop != "0"
-                    })
+                    .filter(|(prop, _source)| *prop != "-" && *prop != "0")
                     .map(|(prop, _source)| {
                         prop.parse::<u64>()
                             .context("Failed to parse 'reservation'")
@@ -394,15 +388,16 @@ pub enum WhichDatasets {
     SelfAndChildren,
 }
 
+// A helper structure for gathering all possible key/value pairs to pass to "zfs
+// set". This helps callers minimize the number of calls to "zfs set" they need
+// to make.
 struct PropertySetter {
     props: BTreeMap<&'static str, String>,
 }
 
 impl PropertySetter {
     fn new() -> Self {
-        PropertySetter {
-            props: BTreeMap::new(),
-        }
+        PropertySetter { props: BTreeMap::new() }
     }
 
     fn add_size_details(&mut self, details: SizeDetails) -> &mut Self {
@@ -429,9 +424,7 @@ impl PropertySetter {
     }
 
     fn as_vec(&self) -> Vec<(&str, &str)> {
-        self.props.iter().map(|(k, v)| {
-            (*k, v.as_str())
-        }).collect()
+        self.props.iter().map(|(k, v)| (*k, v.as_str())).collect()
     }
 }
 
@@ -477,10 +470,7 @@ impl Zfs {
                 cmd.args(&["-d", "1"]);
             }
         }
-        cmd.args(&[
-            "-Hpo",
-            "name,property,value,source",
-        ]);
+        cmd.args(&["-Hpo", "name,property,value,source"]);
 
         // Note: this is tightly coupled with the layout of DatasetProperties
         cmd.arg(DatasetProperties::ZFS_GET_PROPS);
@@ -491,7 +481,9 @@ impl Zfs {
         // If one or more dataset doesn't exist, we can still read stdout to
         // see about the ones that do exist.
         let output = cmd.output().map_err(|err| {
-            anyhow!("Failed to get dataset properties for {datasets:?}: {err:?}")
+            anyhow!(
+                "Failed to get dataset properties for {datasets:?}: {err:?}"
+            )
         })?;
         let stdout = String::from_utf8(output.stdout)?;
 
@@ -573,13 +565,12 @@ impl Zfs {
         }
 
         if exists {
-            Self::set_values(name, props.as_vec().as_slice())
-                .map_err(|err| {
-                    EnsureFilesystemError {
-                        name: name.to_string(),
-                        err: err.err.into(),
-                    }
-                })?;
+            Self::set_values(name, props.as_vec().as_slice()).map_err(
+                |err| EnsureFilesystemError {
+                    name: name.to_string(),
+                    err: err.err.into(),
+                },
+            )?;
 
             if encryption_details.is_none() {
                 // If the dataset exists, we're done. Unencrypted datasets are
@@ -649,13 +640,12 @@ impl Zfs {
             })?;
         }
 
-        Self::set_values(name, props.as_vec().as_slice())
-            .map_err(|err| {
-                EnsureFilesystemError {
-                    name: name.to_string(),
-                    err: err.err.into(),
-                }
-            })?;
+        Self::set_values(name, props.as_vec().as_slice()).map_err(|err| {
+            EnsureFilesystemError {
+                name: name.to_string(),
+                err: err.err.into(),
+            }
+        })?;
 
         Ok(())
     }
@@ -728,10 +718,7 @@ impl Zfs {
         name: &str,
         value: &str,
     ) -> Result<(), SetValueError> {
-        Self::set_values(
-            filesystem_name,
-            &[(name, value)]
-        )
+        Self::set_values(filesystem_name, &[(name, value)])
     }
 
     fn set_values<'a>(
@@ -750,7 +737,10 @@ impl Zfs {
         cmd.arg(filesystem_name);
         execute(cmd).map_err(|err| SetValueError {
             filesystem: filesystem_name.to_string(),
-            values: name_values.iter().map(|(k,v)| format!("{k}={v}")).join(","),
+            values: name_values
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .join(","),
             err,
         })?;
         Ok(())
