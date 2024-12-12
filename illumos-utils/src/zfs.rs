@@ -9,9 +9,11 @@ use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
+use itertools::Itertools;
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DiskIdentity;
+use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -83,11 +85,10 @@ enum EnsureFilesystemErrorRaw {
 /// Error returned by [`Zfs::ensure_filesystem`].
 #[derive(thiserror::Error, Debug)]
 #[error(
-    "Failed to ensure filesystem '{name}' exists at '{mountpoint:?}': {err}"
+    "Failed to ensure filesystem '{name}': {err}"
 )]
 pub struct EnsureFilesystemError {
     name: String,
-    mountpoint: Mountpoint,
     #[source]
     err: EnsureFilesystemErrorRaw,
 }
@@ -95,12 +96,11 @@ pub struct EnsureFilesystemError {
 /// Error returned by [`Zfs::set_oxide_value`]
 #[derive(thiserror::Error, Debug)]
 #[error(
-    "Failed to set value '{name}={value}' on filesystem {filesystem}: {err}"
+    "Failed to set values '{values}' on filesystem {filesystem}: {err}"
 )]
 pub struct SetValueError {
     filesystem: String,
-    name: String,
-    value: String,
+    values: String,
     err: crate::ExecutionError,
 }
 
@@ -242,6 +242,18 @@ impl DatasetProperties {
         "oxide:uuid,name,avail,used,quota,reservation,compression";
 }
 
+impl TryFrom<&DatasetProperties> for SharedDatasetConfig {
+    type Error = anyhow::Error;
+
+    fn try_from(props: &DatasetProperties) -> Result<SharedDatasetConfig, Self::Error> {
+        Ok(SharedDatasetConfig {
+            compression: props.compression.parse()?,
+            quota: props.quota,
+            reservation: props.reservation,
+        })
+    }
+}
+
 impl DatasetProperties {
     /// Parses dataset properties, assuming that the caller is providing the
     /// output of the following command as stdout:
@@ -307,13 +319,17 @@ impl DatasetProperties {
                     .parse::<u64>()
                     .context("Failed to parse 'used'")?
                     .try_into()?;
+
+                // The values of "quota" and "reservation" can be either "-" or
+                // "0" when they are not actually set. To be cautious, we treat
+                // both of these values as "the value has not been set
+                // explicitly". As a result, setting either of these values
+                // explicitly to zero is indistinguishable from setting them
+                // with a value of "none".
                 let quota = props
                     .get("quota")
-                    .filter(|(_prop, source)| {
-                        // If a quota has not been set explicitly, it has a default
-                        // source and a value of "zero". Rather than parsing the value
-                        // as zero, it should be ignored.
-                        *source != "default"
+                    .filter(|(prop, _source)| {
+                        *prop != "-" && *prop != "0"
                     })
                     .map(|(prop, _source)| {
                         prop.parse::<u64>().context("Failed to parse 'quota'")
@@ -322,11 +338,8 @@ impl DatasetProperties {
                     .and_then(|v| ByteCount::try_from(v).ok());
                 let reservation = props
                     .get("reservation")
-                    .filter(|(_prop, source)| {
-                        // If a reservation has not been set explicitly, it has a default
-                        // source and a value of "zero". Rather than parsing the value
-                        // as zero, it should be ignored.
-                        *source != "default"
+                    .filter(|(prop, _source)| {
+                        *prop != "-" && *prop != "0"
                     })
                     .map(|(prop, _source)| {
                         prop.parse::<u64>()
@@ -375,6 +388,53 @@ impl fmt::Display for PropertySource {
     }
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum WhichDatasets {
+    SelfOnly,
+    SelfAndChildren,
+}
+
+struct PropertySetter {
+    props: BTreeMap<&'static str, String>,
+}
+
+impl PropertySetter {
+    fn new() -> Self {
+        PropertySetter {
+            props: BTreeMap::new(),
+        }
+    }
+
+    fn add_size_details(&mut self, details: SizeDetails) -> &mut Self {
+        let SizeDetails { quota, reservation, compression } = details;
+        let quota = quota
+            .map(|q| q.to_bytes().to_string())
+            .unwrap_or_else(|| String::from("none"));
+        self.props.insert("quota", quota);
+
+        let reservation = reservation
+            .map(|r| r.to_bytes().to_string())
+            .unwrap_or_else(|| String::from("none"));
+        self.props.insert("reservation", reservation);
+
+        let compression = compression.to_string();
+        self.props.insert("compression", compression);
+
+        self
+    }
+
+    fn add_id(&mut self, id: DatasetUuid) -> &mut Self {
+        self.props.insert("oxide:uuid", id.to_string());
+        self
+    }
+
+    fn as_vec(&self) -> Vec<(&str, &str)> {
+        self.props.iter().map(|(k, v)| {
+            (*k, v.as_str())
+        }).collect()
+    }
+}
+
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zfs {
     /// Lists all datasets within a pool or existing dataset.
@@ -407,12 +467,17 @@ impl Zfs {
     /// Sorts results and de-duplicates them by name.
     pub fn get_dataset_properties(
         datasets: &[String],
+        which: WhichDatasets,
     ) -> Result<Vec<DatasetProperties>, anyhow::Error> {
         let mut command = std::process::Command::new(ZFS);
-        let cmd = command.args(&[
-            "get",
-            "-d",
-            "1",
+        let cmd = command.arg("get");
+        match which {
+            WhichDatasets::SelfOnly => (),
+            WhichDatasets::SelfAndChildren => {
+                cmd.args(&["-d", "1"]);
+            }
+        }
+        cmd.args(&[
             "-Hpo",
             "name,property,value,source",
         ]);
@@ -421,8 +486,12 @@ impl Zfs {
         cmd.arg(DatasetProperties::ZFS_GET_PROPS);
         cmd.args(datasets);
 
-        let output = execute(cmd).with_context(|| {
-            format!("Failed to get dataset properties for {datasets:?}")
+        // We are intentionally ignoring the output status of this command.
+        //
+        // If one or more dataset doesn't exist, we can still read stdout to
+        // see about the ones that do exist.
+        let output = cmd.output().map_err(|err| {
+            anyhow!("Failed to get dataset properties for {datasets:?}: {err:?}")
         })?;
         let stdout = String::from_utf8(output.stdout)?;
 
@@ -490,23 +559,27 @@ impl Zfs {
         do_format: bool,
         encryption_details: Option<EncryptionDetails>,
         size_details: Option<SizeDetails>,
+        id: Option<DatasetUuid>,
         additional_options: Option<Vec<String>>,
     ) -> Result<(), EnsureFilesystemError> {
         let (exists, mounted) = Self::dataset_exists(name, &mountpoint)?;
+
+        let mut props = PropertySetter::new();
+        if let Some(size_details) = size_details {
+            props.add_size_details(size_details);
+        }
+        if let Some(id) = id {
+            props.add_id(id);
+        }
+
         if exists {
-            if let Some(SizeDetails { quota, reservation, compression }) =
-                size_details
-            {
-                // apply quota and compression mode (in case they've changed across
-                // sled-agent versions since creation)
-                Self::apply_properties(
-                    name,
-                    &mountpoint,
-                    quota,
-                    reservation,
-                    compression,
-                )?;
-            }
+            Self::set_values(name, props.as_vec().as_slice())
+                .map_err(|err| {
+                    EnsureFilesystemError {
+                        name: name.to_string(),
+                        err: err.err.into(),
+                    }
+                })?;
 
             if encryption_details.is_none() {
                 // If the dataset exists, we're done. Unencrypted datasets are
@@ -518,14 +591,13 @@ impl Zfs {
                     return Ok(());
                 }
                 // We need to load the encryption key and mount the filesystem
-                return Self::mount_encrypted_dataset(name, &mountpoint);
+                return Self::mount_encrypted_dataset(name);
             }
         }
 
         if !do_format {
             return Err(EnsureFilesystemError {
                 name: name.to_string(),
-                mountpoint,
                 err: EnsureFilesystemErrorRaw::NotFoundNotFormatted,
             });
         }
@@ -561,7 +633,6 @@ impl Zfs {
 
         execute(cmd).map_err(|err| EnsureFilesystemError {
             name: name.to_string(),
-            mountpoint: mountpoint.clone(),
             err: err.into(),
         })?;
 
@@ -574,82 +645,28 @@ impl Zfs {
             let cmd = command.args(["chown", "-R", &user, &mount]);
             execute(cmd).map_err(|err| EnsureFilesystemError {
                 name: name.to_string(),
-                mountpoint: mountpoint.clone(),
                 err: err.into(),
             })?;
         }
 
-        if let Some(SizeDetails { quota, reservation, compression }) =
-            size_details
-        {
-            // Apply any quota and compression mode.
-            Self::apply_properties(
-                name,
-                &mountpoint,
-                quota,
-                reservation,
-                compression,
-            )?;
-        }
+        Self::set_values(name, props.as_vec().as_slice())
+            .map_err(|err| {
+                EnsureFilesystemError {
+                    name: name.to_string(),
+                    err: err.err.into(),
+                }
+            })?;
 
-        Ok(())
-    }
-
-    /// Applies the following properties to the filesystem.
-    ///
-    /// If any of the options are not supplied, a default "none" or "off"
-    /// value is supplied.
-    fn apply_properties(
-        name: &str,
-        mountpoint: &Mountpoint,
-        quota: Option<ByteCount>,
-        reservation: Option<ByteCount>,
-        compression: CompressionAlgorithm,
-    ) -> Result<(), EnsureFilesystemError> {
-        let quota = quota
-            .map(|q| q.to_bytes().to_string())
-            .unwrap_or_else(|| String::from("none"));
-        let reservation = reservation
-            .map(|r| r.to_bytes().to_string())
-            .unwrap_or_else(|| String::from("none"));
-        let compression = compression.to_string();
-
-        if let Err(err) = Self::set_value(name, "quota", &quota) {
-            return Err(EnsureFilesystemError {
-                name: name.to_string(),
-                mountpoint: mountpoint.clone(),
-                // Take the execution error from the SetValueError
-                err: err.err.into(),
-            });
-        }
-        if let Err(err) = Self::set_value(name, "reservation", &reservation) {
-            return Err(EnsureFilesystemError {
-                name: name.to_string(),
-                mountpoint: mountpoint.clone(),
-                // Take the execution error from the SetValueError
-                err: err.err.into(),
-            });
-        }
-        if let Err(err) = Self::set_value(name, "compression", &compression) {
-            return Err(EnsureFilesystemError {
-                name: name.to_string(),
-                mountpoint: mountpoint.clone(),
-                // Take the execution error from the SetValueError
-                err: err.err.into(),
-            });
-        }
         Ok(())
     }
 
     fn mount_encrypted_dataset(
         name: &str,
-        mountpoint: &Mountpoint,
     ) -> Result<(), EnsureFilesystemError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "mount", "-l", name]);
         execute(cmd).map_err(|err| EnsureFilesystemError {
             name: name.to_string(),
-            mountpoint: mountpoint.clone(),
             err: EnsureFilesystemErrorRaw::MountEncryptedFsFailed(err),
         })?;
         Ok(())
@@ -657,13 +674,11 @@ impl Zfs {
 
     pub fn mount_overlay_dataset(
         name: &str,
-        mountpoint: &Mountpoint,
     ) -> Result<(), EnsureFilesystemError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "mount", "-O", name]);
         execute(cmd).map_err(|err| EnsureFilesystemError {
             name: name.to_string(),
-            mountpoint: mountpoint.clone(),
             err: EnsureFilesystemErrorRaw::MountOverlayFsFailed(err),
         })?;
         Ok(())
@@ -689,7 +704,6 @@ impl Zfs {
             if &values[..3] != &[name, "filesystem", &mountpoint.to_string()] {
                 return Err(EnsureFilesystemError {
                     name: name.to_string(),
-                    mountpoint: mountpoint.clone(),
                     err: EnsureFilesystemErrorRaw::Output(stdout.to_string()),
                 });
             }
@@ -714,13 +728,29 @@ impl Zfs {
         name: &str,
         value: &str,
     ) -> Result<(), SetValueError> {
+        Self::set_values(
+            filesystem_name,
+            &[(name, value)]
+        )
+    }
+
+    fn set_values<'a>(
+        filesystem_name: &'a str,
+        name_values: &'a [(&'a str, &'a str)],
+    ) -> Result<(), SetValueError> {
+        if name_values.is_empty() {
+            return Ok(());
+        }
+
         let mut command = std::process::Command::new(PFEXEC);
-        let value_arg = format!("{}={}", name, value);
-        let cmd = command.args(&[ZFS, "set", &value_arg, filesystem_name]);
+        let cmd = command.args(&[ZFS, "set"]);
+        for (name, value) in name_values {
+            cmd.arg(format!("{name}={value}"));
+        }
+        cmd.arg(filesystem_name);
         execute(cmd).map_err(|err| SetValueError {
             filesystem: filesystem_name.to_string(),
-            name: name.to_string(),
-            value: value.to_string(),
+            values: name_values.iter().map(|(k,v)| format!("{k}={v}")).join(","),
             err,
         })?;
         Ok(())
