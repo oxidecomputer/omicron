@@ -48,15 +48,13 @@ impl ArtifactStore<SimArtifactStorage> {
         log: &slog::Logger,
         dropshot_config: &ConfigDropshot,
     ) -> HttpServer<Self> {
-        let mut config = dropshot_config.clone();
-        config.bind_address.set_port(0);
         ServerBuilder::new(
             repo_depot_api_mod::api_description::<RepoDepotImpl>()
                 .expect("registered entrypoints"),
             self.clone(),
             log.new(o!("component" => "dropshot (Repo Depot)")),
         )
-        .config(config)
+        .config(dropshot_config.clone())
         .start()
         .unwrap()
     }

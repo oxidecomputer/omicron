@@ -6,33 +6,32 @@
 //!
 //! `Nexus::updates_put_repository` accepts a TUF repository, which Nexus
 //! unpacks, verifies, and reasons about the artifacts in. This uses temporary
-//! storage within the Nexus zone, so the update artifacts have to go somewhere.
-//! We've settled for now on "everywhere": a copy of each artifact is stored on
-//! each sled's M.2 devices.
+//! storage within the Nexus zone. After that, the update artifacts have to
+//! go somewhere else. We've settled for now on "everywhere": a copy of each
+//! artifact is stored on each sled's M.2 devices.
 //!
 //! This background task is responsible for getting locally-stored artifacts
 //! onto sleds, and ensuring all sleds have copies of all artifacts.
 //! `Nexus::updates_put_repository` sends the [`ArtifactsWithPlan`] object to
-//! this task via an [`mpsc`] channel and activates it.
+//! this task via an [`mpsc`] channel and activates it. Once enough sleds have a
+//! copy of each artifact in an `ArtifactsWithPlan`, the local copy is removed.
 //!
 //! During each activation:
 //!
-//! 1. The task moves `ArtifactsWithPlan` objects of the `mpsc` channel and into
-//!    a `Vec`.
+//! 1. The task moves `ArtifactsWithPlan` objects off the `mpsc` channel and
+//!    into a `Vec` that represents the set of artifacts stored locally in this
+//!    Nexus zone.
 //! 2. The task queries the list of artifacts stored on each sled, and compares
-//!    it to the list of artifacts in CockroachDB. Sled artifact storage is
-//!    content-addressed by SHA-256 checksum. Errors are logged but otherwise
-//!    ignored (unless no sleds respond); the task proceeds as if that sled
-//!    has no artifacts. (This means that the task will always be trying to
-//!    replicate artifacts to that sled until it comes back or is pulled out
-//!    of service.)
-//! 3. The task compares the list of artifacts from the database to the list of
-//!    artifacts available locally.
-//! 4. If all the artifacts belonging to an `ArtifactsWithPlan` object have
+//!    it to the list of artifacts in CockroachDB. Sled artifact storage
+//!    is content-addressed by SHA-256 checksum. Errors querying a sled are
+//!    logged but otherwise ignored: the task proceeds as if that sled has no
+//!    artifacts. (This means that the task will always be trying to replicate
+//!    artifacts to that sled until it comes back or is pulled out of service.)
+//! 3. If all the artifacts belonging to an `ArtifactsWithPlan` object have
 //!    been replicated to at least `MIN_SLED_REPLICATION` sleds, the task drops
 //!    the object from its `Vec` (thus cleaning up the local storage of those
 //!    files).
-//! 5. The task generates a list of requests that need to be sent:
+//! 4. The task generates a list of requests that need to be sent:
 //!    - PUT each locally-stored artifact not present on any sleds to a random
 //!      sled.
 //!    - For each partially-replicated artifact, choose a sled that is missing
@@ -40,7 +39,7 @@
 //!      artifact from a random sled that has it.
 //!    - DELETE all artifacts no longer tracked in CockroachDB from all sleds
 //!      that have that artifact.
-//! 6. The task randomly choose requests up to per-activation limits and
+//! 5. The task randomly choose requests up to per-activation limits and
 //!    sends them. Up to `MAX_REQUESTS` total requests are sent, with up to
 //!    `MAX_PUT_REQUESTS` PUT requests. Successful and unsuccessful responses
 //!    are logged.

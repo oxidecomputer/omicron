@@ -33,7 +33,7 @@ use std::io::Write;
 use tufaceous_lib::assemble::{DeserializedManifest, ManifestTweak};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_repo_upload_uninitialized() -> Result<()> {
+async fn test_repo_upload_unconfigured() -> Result<()> {
     let mut config = load_test_config();
     let logctx = LogContext::new("test_update_uninitialized", &config.pkg.log);
     let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
