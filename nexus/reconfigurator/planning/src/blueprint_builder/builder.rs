@@ -2177,17 +2177,22 @@ pub mod test {
         // All InService disks should have debug and zone root datasets.
         for (sled_id, disk_config) in &blueprint.blueprint_disks {
             for disk in &disk_config.disks {
-                eprintln!(
-                    "checking datasets for sled {sled_id} disk {}",
-                    disk.id
-                );
-                let zpool = ZpoolName::new_external(disk.pool_id);
-                let datasets = datasets_for_sled(&blueprint, *sled_id);
-
-                let dataset =
-                    find_dataset(&datasets, &zpool, DatasetKind::Debug);
-                if dataset.disposition == BlueprintDatasetDisposition::InService
+                if disk.disposition
+                    == BlueprintPhysicalDiskDisposition::InService
                 {
+                    eprintln!(
+                        "checking datasets for sled {sled_id} disk {}",
+                        disk.id
+                    );
+                    let zpool = ZpoolName::new_external(disk.pool_id);
+                    let datasets = datasets_for_sled(&blueprint, *sled_id);
+
+                    let dataset =
+                        find_dataset(&datasets, &zpool, DatasetKind::Debug);
+                    assert_eq!(
+                        dataset.disposition,
+                        BlueprintDatasetDisposition::InService
+                    );
                     let dataset = find_dataset(
                         &datasets,
                         &zpool,

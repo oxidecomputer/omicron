@@ -982,6 +982,8 @@ pub enum PlanningInputBuildError {
         #[source]
         err: SourceNatConfigError,
     },
+    #[error("sled not found: {0}")]
+    SledNotFound(SledUuid),
 }
 
 /// Constructor for [`PlanningInput`].
@@ -1049,6 +1051,26 @@ impl PlanningInputBuilder {
                 Err(PlanningInputBuildError::DuplicateSledId(sled_id))
             }
         }
+    }
+
+    /// Expunge a sled and all its disks
+    ///
+    /// In the real code, the `PlanningInput` comes from the database. In this
+    /// case all disks in a sled are marked expunged when the sled is expunged
+    /// inside a transaction. We do the same thing here for testing purposes.
+    pub fn expunge_sled(
+        &mut self,
+        sled_id: &SledUuid,
+    ) -> Result<(), PlanningInputBuildError> {
+        let sled_details = self
+            .sleds_mut()
+            .get_mut(&sled_id)
+            .ok_or(PlanningInputBuildError::SledNotFound(*sled_id))?;
+        sled_details.policy = SledPolicy::Expunged;
+        for (_, (sled_disk, _)) in sled_details.resources.zpools.iter_mut() {
+            sled_disk.policy = PhysicalDiskPolicy::Expunged;
+        }
+        Ok(())
     }
 
     pub fn add_omicron_zone_external_ip(

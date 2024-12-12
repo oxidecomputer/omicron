@@ -1533,11 +1533,7 @@ mod test {
         // external DNS zones; two external DNS zones should then be added to
         // the remaining sleds.
         let mut input_builder = input.into_builder();
-        input_builder
-            .sleds_mut()
-            .get_mut(&sled_1)
-            .expect("found sled 1 again")
-            .policy = SledPolicy::Expunged;
+        input_builder.expunge_sled(&sled_1).expect("found sled 1 again");
         let input = input_builder.build();
         let blueprint3 = Planner::new_based_on(
             logctx.log.clone(),
@@ -1923,11 +1919,7 @@ mod test {
         // decommission because by definition expunging a sled means it's
         // already gone.
         let mut builder = input.into_builder();
-        let sled_details = builder.sleds_mut().get_mut(&sled_id).unwrap();
-        sled_details.policy = SledPolicy::Expunged;
-        for (_, (sled_disk, _)) in sled_details.resources.zpools.iter_mut() {
-            sled_disk.policy = PhysicalDiskPolicy::Expunged;
-        }
+        builder.expunge_sled(sled_id).unwrap();
         let input = builder.build();
 
         let blueprint4 = Planner::new_based_on(
@@ -1965,6 +1957,8 @@ mod test {
             assert_eq!(disk.state, PhysicalDiskState::Decommissioned);
             println!("{disk:?}");
         }
+
+        logctx.cleanup_successful();
     }
 
     #[test]
@@ -2041,7 +2035,7 @@ mod test {
         assert_eq!(diff.zones.removed.len(), 0);
         assert_eq!(diff.zones.modified.len(), 1);
         assert_eq!(diff.physical_disks.added.len(), 0);
-        assert_eq!(diff.physical_disks.removed.len(), 1);
+        assert_eq!(diff.physical_disks.removed.len(), 0);
         assert_eq!(diff.datasets.added.len(), 0);
         // NOTE: Expunging a disk doesn't immediately delete datasets; see the
         // "decommissioned_disk_cleaner" background task for more context.
@@ -2244,8 +2238,9 @@ mod test {
         };
         println!("1 -> 2: marked non-provisionable {nonprovisionable_sled_id}");
         let expunged_sled_id = {
-            let (sled_id, details) = sleds_iter.next().expect("no sleds");
-            details.policy = SledPolicy::Expunged;
+            let (sled_id, _) = sleds_iter.next().expect("no sleds");
+            // We need to call builde.expunge, but can't while iterating; we defer
+            // that work to after we're done with `sleds_iter`.
             *sled_id
         };
         println!("1 -> 2: expunged {expunged_sled_id}");
@@ -2253,18 +2248,27 @@ mod test {
             let (sled_id, details) = sleds_iter.next().expect("no sleds");
             details.state = SledState::Decommissioned;
 
+            // Drop the mutable borrow on the builder so we can call
+            // `builder.expunge_sled()`
+            let sled_id = *sled_id;
+            // Let's also properly expunge the sled and its disks. We can't have
+            // a decommissioned sled that is not expunged also.
+            builder.expunge_sled(&sled_id).unwrap();
+
             // Decommissioned sleds can only occur if their zones have been
             // expunged, so lie and pretend like that already happened
             // (otherwise the planner will rightfully fail to generate a new
             // blueprint, because we're feeding it invalid inputs).
             for zone in
-                &mut blueprint1.blueprint_zones.get_mut(sled_id).unwrap().zones
+                &mut blueprint1.blueprint_zones.get_mut(&sled_id).unwrap().zones
             {
                 zone.disposition = BlueprintZoneDisposition::Expunged;
             }
 
-            *sled_id
+            sled_id
         };
+        // Actually expunge the sled (the work that was deferred during iteration above)
+        builder.expunge_sled(&expunged_sled_id).unwrap();
         println!("1 -> 2: decommissioned {decommissioned_sled_id}");
 
         // Now run the planner with a high number of target Nexus zones. The
