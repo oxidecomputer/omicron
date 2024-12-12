@@ -1930,6 +1930,8 @@ impl JsonSchema for L4PortRange {
     DeserializeFromStr,
     PartialEq,
     Eq,
+    PartialOrd,
+    Ord,
     SerializeDisplay,
     Hash,
 )]
