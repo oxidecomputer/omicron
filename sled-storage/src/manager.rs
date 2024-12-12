@@ -983,6 +983,50 @@ impl StorageManager {
         DatasetsManagementResult { status }
     }
 
+    fn should_skip_dataset_ensure(
+        log: &Logger,
+        config: &DatasetConfig,
+        old_dataset: Option<&DatasetProperties>,
+    ) -> Result<bool, Error> {
+        let Some(old_dataset) = old_dataset else {
+            info!(log, "This dataset did not exist");
+            return Ok(false);
+        };
+
+        let Some(old_id) = old_dataset.id else {
+            info!(log, "Old properties missing UUID");
+            return Ok(false);
+        };
+
+        let old_props = match SharedDatasetConfig::try_from(old_dataset) {
+            Ok(old_props) => old_props,
+            Err(err) => {
+                warn!(log, "Failed to parse old properties"; "err" => ?err);
+                return Ok(false);
+            }
+        };
+
+        info!(log, "Parsed old dataset properties"; "props" => ?old_props);
+        if old_id != config.id {
+            return Err(Error::UuidMismatch {
+                name: config.name.full_name(),
+                old: old_id.into_untyped_uuid(),
+                new: config.id.into_untyped_uuid(),
+            });
+        }
+        if old_props != config.inner {
+            info!(
+                log,
+                "Dataset properties changed";
+                "old_props" => ?old_props,
+                "requested_props" => ?config.inner,
+            );
+            return Ok(false);
+        }
+        info!(log, "No changes necessary, returning early");
+        return Ok(true);
+    }
+
     async fn dataset_ensure_internal(
         &self,
         log: &Logger,
@@ -996,51 +1040,13 @@ impl StorageManager {
             err: None,
         };
 
-        // If this dataset already exists, we're willing to skip the work of
-        // "ensure" under specific circumstances
-        if let Some(old_dataset) = old_dataset {
-            info!(log, "This dataset already existed");
-            // First, we must validate that the old config matches our current
-            // configuration.
-            match SharedDatasetConfig::try_from(old_dataset) {
-                Ok(old_props) => {
-                    info!(log, "Parsed old properties");
-                    // We also need to ensure that the old dataset exists and
-                    // has our UUID.
-                    if let Some(old_id) = old_dataset.id {
-                        if old_id != config.id {
-                            status.err = Some(
-                                Error::UuidMismatch {
-                                    name: config.name.full_name(),
-                                    old: old_id.into_untyped_uuid(),
-                                    new: config.id.into_untyped_uuid(),
-                                }
-                                .to_string(),
-                            );
-                            return status;
-                        }
-                        if old_props == config.inner {
-                            // In this case, there is no work to do.
-                            info!(log, "No changes necessary, returning early");
-                            return status;
-                        } else {
-                            info!(
-                                log,
-                                "Old properties changed {:?} vs {:?}",
-                                old_props,
-                                config.inner
-                            );
-                        }
-                    } else {
-                        info!(log, "Old properties missing UUID");
-                    }
-                }
-                Err(err) => {
-                    warn!(log, "Failed to parse old properties"; "err" => ?err);
-                }
+        match Self::should_skip_dataset_ensure(&log, config, old_dataset) {
+            Ok(true) => return status,
+            Ok(false) => (),
+            Err(err) => {
+                status.err = Some(err.to_string());
+                return status;
             }
-        } else {
-            info!(log, "This dataset did not exist");
         }
 
         let mountpoint_root = &self.resources.disks().mount_config().root;
@@ -1277,9 +1283,13 @@ impl StorageManager {
                             generation: config.generation,
                         });
                     }
+                    info!(
+                        log,
+                        "Request looks identical to last request, re-sending"
+                    );
+                } else {
+                    info!(log, "Request looks newer than prior requests");
                 }
-
-                info!(log, "Request looks newer than prior requests");
                 ledger
             }
             None => {
