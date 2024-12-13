@@ -5492,12 +5492,12 @@
                 "type": "object",
                 "properties": {
                   "command": {
-                    "description": "The command and it's arguments.",
+                    "description": "The command and its arguments.",
                     "type": "string"
                   },
                   "exit_code": {
                     "nullable": true,
-                    "description": "The exit code if one was present when the comman exited.",
+                    "description": "The exit code if one was present when the command exited.",
                     "type": "integer",
                     "format": "int32"
                   },
