@@ -761,8 +761,9 @@ Query oximeter collector state
 Usage: omdb oximeter [OPTIONS] <COMMAND>
 
 Commands:
-  list-producers  List the producers the collector is assigned to poll
-  help            Print this message or the help of the given subcommand(s)
+  list-producers    List the producers the collector is assigned to poll
+  producer-details  Fetch details about a single assigned producer
+  help              Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
