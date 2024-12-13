@@ -983,6 +983,7 @@ impl BlueprintDatasetDisposition {
 /// Information about a dataset as recorded in a blueprint
 #[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub struct BlueprintDatasetConfig {
+    // TODO: Display this in diffs - leave for now, for backwards compat
     pub disposition: BlueprintDatasetDisposition,
 
     pub id: DatasetUuid,

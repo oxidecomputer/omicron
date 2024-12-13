@@ -1832,8 +1832,8 @@ mod test {
         // "decommissioned_disk_cleaner" background task for more context.
         assert_eq!(diff.datasets.removed.len(), 0);
 
-        println!("{:#?}", diff.datasets.modified.first_key_value().unwrap().1);
-        assert_eq!(diff.datasets.modified.len(), 0);
+        // The disposition has changed from `InService` to `Expunged`
+        assert_eq!(diff.datasets.modified.len(), 1);
 
         let (_zone_id, modified_zones) =
             diff.zones.modified.iter().next().unwrap();
