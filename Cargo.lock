@@ -10741,7 +10741,7 @@ version = "0.1.0"
 dependencies = [
  "futures",
  "omicron-workspace-hack",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
 ]
 
