@@ -201,12 +201,11 @@ impl TryFrom<RawApiMetadata> for AllApiMetadata {
 }
 
 /// Describes how an API in the system manages drift between client and server
-#[derive(Default, Deserialize, PartialEq, Eq)]
+#[derive(Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "versioned_how", content = "versioned_how_reason")]
 pub enum VersionedHow {
     /// We have not yet determined how this API will be versioned.
-    #[default]
     Unknown,
 
     /// This API will be versioned solely on the server.  (The update system
