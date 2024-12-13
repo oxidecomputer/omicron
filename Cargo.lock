@@ -4464,6 +4464,7 @@ dependencies = [
  "futures",
  "http",
  "ipnetwork",
+ "itertools 0.13.0",
  "libc",
  "macaddr",
  "mockall",
@@ -10816,6 +10817,7 @@ dependencies = [
  "slog",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-stream",
  "uuid",
 ]
 
