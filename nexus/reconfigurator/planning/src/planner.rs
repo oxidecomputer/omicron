@@ -1831,6 +1831,8 @@ mod test {
         // NOTE: Expunging a disk doesn't immediately delete datasets; see the
         // "decommissioned_disk_cleaner" background task for more context.
         assert_eq!(diff.datasets.removed.len(), 0);
+
+        println!("{:#?}", diff.datasets.modified.first_key_value().unwrap().1);
         assert_eq!(diff.datasets.modified.len(), 0);
 
         let (_zone_id, modified_zones) =

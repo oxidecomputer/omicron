@@ -17,7 +17,6 @@ use super::{
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
-use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::{BTreeMap, BTreeSet};
@@ -27,8 +26,8 @@ use crate::deployment::blueprint_display::BpClickhouseKeepersTableSchema;
 use crate::deployment::{
     BlueprintDatasetConfig, BlueprintDatasetsConfig, BlueprintMetadata,
     BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
-    BlueprintZoneDisposition, BlueprintZonesConfig, DiffBeforeMetadata,
-    ZoneSortKey,
+    BlueprintZoneDisposition, BlueprintZonesConfig,
+    CollectionDatasetIdentifier, DiffBeforeMetadata, ZoneSortKey,
 };
 use crate::external_api::views::SledState;
 
@@ -550,7 +549,7 @@ pub struct DiffDatasetsDetails {
     pub after_generation: Option<Generation>,
 
     // Datasets added, removed, modified, or unmodified
-    pub datasets: BTreeMap<DatasetUuid, BlueprintDatasetConfig>,
+    pub datasets: BTreeMap<CollectionDatasetIdentifier, BlueprintDatasetConfig>,
 }
 
 impl BpTableData for DiffDatasetsDetails {
@@ -653,13 +652,15 @@ impl BpDiffDatasets {
                 let b = before_datasets
                     .datasets
                     .values()
-                    .map(|d| (d.id, d.clone()));
-                let mut added: BTreeMap<DatasetUuid, BlueprintDatasetConfig> =
-                    after_datasets
-                        .datasets
-                        .values()
-                        .map(|d| (d.id, d.clone()))
-                        .collect();
+                    .map(|d| (CollectionDatasetIdentifier::from(d), d.clone()));
+                let mut added: BTreeMap<
+                    CollectionDatasetIdentifier,
+                    BlueprintDatasetConfig,
+                > = after_datasets
+                    .datasets
+                    .values()
+                    .map(|d| (d.into(), d.clone()))
+                    .collect();
 
                 for (id, dataset_before) in b {
                     if let Some(dataset_after) = added.remove(&id) {
@@ -726,7 +727,11 @@ impl BpDiffDatasets {
                     DiffDatasetsDetails {
                         before_generation: Some(before_generation),
                         after_generation: None,
-                        datasets: before_datasets.datasets,
+                        datasets: before_datasets
+                            .datasets
+                            .into_values()
+                            .map(|d| (CollectionDatasetIdentifier::from(&d), d))
+                            .collect(),
                     },
                 );
             }
@@ -735,11 +740,12 @@ impl BpDiffDatasets {
         // Any sleds remaining in `after` have just been added, since we remove
         // sleds from `after`, that were also in `before`, in the above loop.
         for (sled_id, after_datasets) in after {
-            let added: BTreeMap<DatasetUuid, _> = after_datasets
-                .datasets
-                .into_values()
-                .map(|d| (d.id, d))
-                .collect();
+            let added: BTreeMap<CollectionDatasetIdentifier, _> =
+                after_datasets
+                    .datasets
+                    .into_values()
+                    .map(|d| (CollectionDatasetIdentifier::from(&d), d))
+                    .collect();
             if !added.is_empty() {
                 diffs.added.insert(
                     sled_id,

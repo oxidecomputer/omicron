@@ -1116,6 +1116,30 @@ impl From<&Blueprint> for DiffBeforeClickhouseClusterConfig {
     }
 }
 
+/// A unique identifier for a dataset within a collection.
+/// TODO: Should we use just the `DatasetUuid` and re-organize the tables to put the `DatasetUuid` first?
+/// This was kept for backwards compatibility, even though IDs are not optional
+#[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
+pub struct CollectionDatasetIdentifier {
+    name: String,
+    id: Option<DatasetUuid>,
+}
+
+impl From<&BlueprintDatasetConfig> for CollectionDatasetIdentifier {
+    fn from(d: &BlueprintDatasetConfig) -> Self {
+        Self {
+            id: Some(d.id),
+            name: DatasetName::new(d.pool.clone(), d.kind.clone()).full_name(),
+        }
+    }
+}
+
+impl From<&crate::inventory::Dataset> for CollectionDatasetIdentifier {
+    fn from(d: &crate::inventory::Dataset) -> Self {
+        Self { id: d.id, name: d.name.clone() }
+    }
+}
+
 /// Encapsulates Reconfigurator state
 ///
 /// This serialized from is intended for saving state from hand-constructed or
