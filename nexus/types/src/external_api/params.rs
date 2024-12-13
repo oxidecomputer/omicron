@@ -143,6 +143,15 @@ impl From<Name> for SiloSelector {
     }
 }
 
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SupportBundleFilePath {
+    #[serde(flatten)]
+    pub bundle: SupportBundlePath,
+
+    /// The file within the bundle to download
+    pub file: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalSiloSelector {
     /// Name or ID of the silo
