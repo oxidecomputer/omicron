@@ -70,7 +70,7 @@ banner ls-apis
     ptime -m cargo xtask ls-apis apis &&
         ptime -m cargo xtask ls-apis deployment-units &&
         ptime -m cargo xtask ls-apis servers &&
-        ptime -m cargo xtask ls-apis dag-check
+        ptime -m cargo xtask ls-apis check
 )
 
 #

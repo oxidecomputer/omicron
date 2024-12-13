@@ -118,7 +118,7 @@ This tool verifies these properties.  If you add a new API or a new API dependen
 You can verify the versioning metadata using:
 
 ```
-$ cargo xtask ls-apis dag-check
+$ cargo xtask ls-apis check
 ```
 
 You might see any of the following errors:

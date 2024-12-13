@@ -35,7 +35,7 @@ enum Cmds {
     /// print out each API, what exports it, and what consumes it
     Apis(ShowDepsArgs),
     /// check the update DAG and propose changes
-    DagCheck,
+    Check,
     /// print out APIs exported and consumed by each deployment unit
     DeploymentUnits(DotArgs),
     /// print out APIs exported and consumed, by server component
@@ -83,7 +83,7 @@ fn main() -> Result<()> {
     match cli_args.cmd {
         Cmds::Adoc => run_adoc(&apis),
         Cmds::Apis(args) => run_apis(&apis, args),
-        Cmds::DagCheck => run_dag_check(&apis),
+        Cmds::Check => run_check(&apis),
         Cmds::DeploymentUnits(args) => run_deployment_units(&apis, args),
         Cmds::Servers(args) => run_servers(&apis, args),
     }
@@ -274,7 +274,7 @@ impl TryFrom<&LsApis> for LoadArgs {
     }
 }
 
-fn run_dag_check(apis: &SystemApis) -> Result<()> {
+fn run_check(apis: &SystemApis) -> Result<()> {
     let dag_check = apis.dag_check()?;
 
     for (pkg, reasons) in dag_check.proposed_server_managed() {
