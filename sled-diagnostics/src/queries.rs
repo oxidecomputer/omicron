@@ -4,8 +4,13 @@
 
 //! Wrapper for command execution with timeout.
 
-use std::{process::Command, time::Duration};
+use std::{
+    process::{Command, ExitStatus},
+    time::Duration,
+};
 
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
 
@@ -25,7 +30,27 @@ const ZONEADM: &str = "/usr/sbin/zoneadm";
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub trait SledDiagnosticsCommandHttpOutput {
-    fn get_output(self) -> String;
+    fn get_output(self) -> SledDiagnosticsQueryOutput;
+}
+
+#[derive(Clone, Debug, JsonSchema, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SledDiagnosticsQueryOutput {
+    Success {
+        /// The command and its arguments.
+        command: String,
+        /// Any stdout/stderr produced by the command.
+        stdio: String,
+        /// The exit status of the command. This will be the exit code (if any)
+        /// and exit reason such as from a signal.
+        exit_status: String,
+        /// The exit code if one was present when the command exited.
+        exit_code: Option<i32>,
+    },
+    Failure {
+        /// The reason the command failed to execute.
+        error: String,
+    },
 }
 
 #[derive(Error, Debug)]
@@ -54,24 +79,23 @@ pub enum SledDiagnosticsCmdError {
 pub struct SledDiagnosticsCmdOutput {
     pub command: String,
     pub stdio: String,
-    pub exit_status: String,
-}
-
-impl std::fmt::Display for SledDiagnosticsCmdOutput {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Command executed [{}]:", self.command)?;
-        writeln!(f, "    ==== stdio ====\n{}", self.stdio)?;
-        writeln!(f, "    ==== exit status ====\n{}", self.exit_status)
-    }
+    pub exit_status: ExitStatus,
 }
 
 impl SledDiagnosticsCommandHttpOutput
     for Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>
 {
-    fn get_output(self) -> String {
+    fn get_output(self) -> SledDiagnosticsQueryOutput {
         match self {
-            Ok(output) => format!("{output}"),
-            Err(error) => format!("{error}"),
+            Ok(output) => SledDiagnosticsQueryOutput::Success {
+                command: output.command,
+                stdio: output.stdio,
+                exit_status: output.exit_status.to_string(),
+                exit_code: output.exit_status.code(),
+            },
+            Err(error) => {
+                SledDiagnosticsQueryOutput::Failure { error: error.to_string() }
+            }
         }
     }
 }
@@ -134,13 +158,9 @@ async fn execute(
         }
     })?;
 
-    let exit_status =
-        child.wait().await.map(|es| format!("{es}")).map_err(|e| {
-            SledDiagnosticsCmdError::Wait {
-                command: cmd_string.clone(),
-                error: e,
-            }
-        })?;
+    let exit_status = child.wait().await.map_err(|e| {
+        SledDiagnosticsCmdError::Wait { command: cmd_string.clone(), error: e }
+    })?;
 
     Ok(SledDiagnosticsCmdOutput { command: cmd_string, stdio, exit_status })
 }
