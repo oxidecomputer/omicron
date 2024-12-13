@@ -23,7 +23,7 @@
 
 use camino::Utf8PathBuf;
 use illumos_utils::zfs::{
-    DatasetEnsureArgs, EnsureFilesystemError, GetValueError, Mountpoint,
+    DatasetEnsureArgs, EnsureDatasetError, GetValueError, Mountpoint,
     SizeDetails, Zfs,
 };
 use omicron_common::api::external::ByteCount;
@@ -39,7 +39,7 @@ pub enum BackingFsError {
     DatasetProperty(#[from] GetValueError),
 
     #[error("Error initializing dataset: {0}")]
-    Mount(#[from] EnsureFilesystemError),
+    Mount(#[from] EnsureDatasetError),
 
     #[error("Failed to ensure subdirectory {0}")]
     EnsureSubdir(#[from] io::Error),

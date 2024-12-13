@@ -65,7 +65,7 @@ pub struct DestroyDatasetError {
 }
 
 #[derive(thiserror::Error, Debug)]
-enum EnsureFilesystemErrorRaw {
+enum EnsureDatasetErrorRaw {
     #[error("ZFS execution error: {0}")]
     Execution(#[from] crate::ExecutionError),
 
@@ -82,10 +82,10 @@ enum EnsureFilesystemErrorRaw {
 /// Error returned by [`Zfs::ensure_dataset`].
 #[derive(thiserror::Error, Debug)]
 #[error("Failed to ensure filesystem '{name}': {err}")]
-pub struct EnsureFilesystemError {
+pub struct EnsureDatasetError {
     name: String,
     #[source]
-    err: EnsureFilesystemErrorRaw,
+    err: EnsureDatasetErrorRaw,
 }
 
 /// Error returned by [`Zfs::set_oxide_value`]
@@ -566,13 +566,13 @@ impl Zfs {
             id,
             additional_options,
         }: DatasetEnsureArgs,
-    ) -> Result<(), EnsureFilesystemError> {
+    ) -> Result<(), EnsureDatasetError> {
         let (exists, mounted) = Self::dataset_exists(name, &mountpoint)?;
 
         let props = build_zfs_set_key_value_pairs(size_details, id);
         if exists {
             Self::set_values(name, props.as_slice()).map_err(|err| {
-                EnsureFilesystemError {
+                EnsureDatasetError {
                     name: name.to_string(),
                     err: err.err.into(),
                 }
@@ -621,7 +621,7 @@ impl Zfs {
 
         cmd.args(&["-o", &format!("mountpoint={}", mountpoint), name]);
 
-        execute(cmd).map_err(|err| EnsureFilesystemError {
+        execute(cmd).map_err(|err| EnsureDatasetError {
             name: name.to_string(),
             err: err.into(),
         })?;
@@ -633,42 +633,35 @@ impl Zfs {
             let user = whoami::username();
             let mount = format!("{mountpoint}");
             let cmd = command.args(["chown", "-R", &user, &mount]);
-            execute(cmd).map_err(|err| EnsureFilesystemError {
+            execute(cmd).map_err(|err| EnsureDatasetError {
                 name: name.to_string(),
                 err: err.into(),
             })?;
         }
 
         Self::set_values(name, props.as_slice()).map_err(|err| {
-            EnsureFilesystemError {
-                name: name.to_string(),
-                err: err.err.into(),
-            }
+            EnsureDatasetError { name: name.to_string(), err: err.err.into() }
         })?;
 
         Ok(())
     }
 
-    fn mount_encrypted_dataset(
-        name: &str,
-    ) -> Result<(), EnsureFilesystemError> {
+    fn mount_encrypted_dataset(name: &str) -> Result<(), EnsureDatasetError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "mount", "-l", name]);
-        execute(cmd).map_err(|err| EnsureFilesystemError {
+        execute(cmd).map_err(|err| EnsureDatasetError {
             name: name.to_string(),
-            err: EnsureFilesystemErrorRaw::MountEncryptedFsFailed(err),
+            err: EnsureDatasetErrorRaw::MountEncryptedFsFailed(err),
         })?;
         Ok(())
     }
 
-    pub fn mount_overlay_dataset(
-        name: &str,
-    ) -> Result<(), EnsureFilesystemError> {
+    pub fn mount_overlay_dataset(name: &str) -> Result<(), EnsureDatasetError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "mount", "-O", name]);
-        execute(cmd).map_err(|err| EnsureFilesystemError {
+        execute(cmd).map_err(|err| EnsureDatasetError {
             name: name.to_string(),
-            err: EnsureFilesystemErrorRaw::MountOverlayFsFailed(err),
+            err: EnsureDatasetErrorRaw::MountOverlayFsFailed(err),
         })?;
         Ok(())
     }
@@ -678,7 +671,7 @@ impl Zfs {
     fn dataset_exists(
         name: &str,
         mountpoint: &Mountpoint,
-    ) -> Result<(bool, bool), EnsureFilesystemError> {
+    ) -> Result<(bool, bool), EnsureDatasetError> {
         let mut command = std::process::Command::new(ZFS);
         let cmd = command.args(&[
             "list",
@@ -691,9 +684,9 @@ impl Zfs {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let values: Vec<&str> = stdout.trim().split('\t').collect();
             if &values[..3] != &[name, "filesystem", &mountpoint.to_string()] {
-                return Err(EnsureFilesystemError {
+                return Err(EnsureDatasetError {
                     name: name.to_string(),
-                    err: EnsureFilesystemErrorRaw::Output(stdout.to_string()),
+                    err: EnsureDatasetErrorRaw::Output(stdout.to_string()),
                 });
             }
             let mounted = values[3] == "yes";

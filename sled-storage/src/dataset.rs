@@ -158,7 +158,7 @@ pub enum DatasetError {
     #[error(transparent)]
     DestroyFilesystem(#[from] illumos_utils::zfs::DestroyDatasetError),
     #[error(transparent)]
-    EnsureFilesystem(#[from] illumos_utils::zfs::EnsureFilesystemError),
+    EnsureDataset(#[from] illumos_utils::zfs::EnsureDatasetError),
     #[error("KeyManager error: {0}")]
     KeyManager(#[from] key_manager::Error),
     #[error("Missing StorageKeyRequester when creating U.2 disk")]
@@ -353,7 +353,7 @@ pub enum DatasetEncryptionMigrationError {
     FailedCommand { command: String, stderr: Option<String> },
 
     #[error("Cannot create new encrypted dataset")]
-    DatasetCreation(#[from] illumos_utils::zfs::EnsureFilesystemError),
+    DatasetCreation(#[from] illumos_utils::zfs::EnsureDatasetError),
 
     #[error("Missing stdout stream during 'zfs send' command")]
     MissingStdoutForZfsSend,
