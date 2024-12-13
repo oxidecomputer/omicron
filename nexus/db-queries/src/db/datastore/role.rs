@@ -209,6 +209,11 @@ impl DataStore {
         // We might instead want to first-class the idea of Policies in the
         // database so that we can build up a whole new Policy in batches and
         // then flip the resource over to using it.
+
+        // This method should probably be retryable, but this is slightly
+        // complicated by the cloning semantics of the queries, which
+        // must be Clone to be retried.
+        #[allow(clippy::disallowed_methods)]
         self.pool_connection_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {

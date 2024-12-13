@@ -1041,6 +1041,7 @@ pub(crate) mod test {
 
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
+        #[allow(clippy::disallowed_methods)]
         conn.transaction_async(|conn| async move {
             // Selecting all regions requires a full table scan
             conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await.unwrap();
