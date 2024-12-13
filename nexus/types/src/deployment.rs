@@ -274,8 +274,7 @@ impl Blueprint {
     /// Summarize the difference between two blueprints.
     ///
     /// The argument provided is the "before" side, and `self` is the "after"
-    /// side. This matches the order of arguments to
-    /// [`Blueprint::diff_since_collection`].
+    /// side.
     pub fn diff_since_blueprint(&self, before: &Blueprint) -> BlueprintDiff {
         BlueprintDiff::new(
             DiffBeforeMetadata::Blueprint(Box::new(before.metadata())),
