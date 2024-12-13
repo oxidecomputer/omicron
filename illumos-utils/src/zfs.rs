@@ -390,44 +390,32 @@ pub enum WhichDatasets {
     SelfAndChildren,
 }
 
-// A helper structure for gathering all possible key/value pairs to pass to "zfs
-// set". This helps callers minimize the number of calls to "zfs set" they need
-// to make.
-struct PropertySetter {
-    props: Vec<(&'static str, String)>,
-}
-
-impl PropertySetter {
-    fn new() -> Self {
-        PropertySetter { props: Vec::new() }
-    }
-
-    fn add_size_details(&mut self, details: SizeDetails) -> &mut Self {
-        let SizeDetails { quota, reservation, compression } = details;
+fn build_zfs_set_key_value_pairs(
+    size_details: Option<SizeDetails>,
+    dataset_id: Option<DatasetUuid>,
+) -> Vec<(&'static str, String)> {
+    let mut props = Vec::new();
+    if let Some(SizeDetails { quota, reservation, compression }) = size_details
+    {
         let quota = quota
             .map(|q| q.to_bytes().to_string())
             .unwrap_or_else(|| String::from("none"));
-        self.props.push(("quota", quota));
+        props.push(("quota", quota));
 
         let reservation = reservation
             .map(|r| r.to_bytes().to_string())
             .unwrap_or_else(|| String::from("none"));
-        self.props.push(("reservation", reservation));
+        props.push(("reservation", reservation));
 
         let compression = compression.to_string();
-        self.props.push(("compression", compression));
-
-        self
+        props.push(("compression", compression));
     }
 
-    fn add_id(&mut self, id: DatasetUuid) -> &mut Self {
-        self.props.push(("oxide:uuid", id.to_string()));
-        self
+    if let Some(id) = dataset_id {
+        props.push(("oxide:uuid", id.to_string()));
     }
 
-    fn as_vec(&self) -> &Vec<(&str, String)> {
-        &self.props
-    }
+    props
 }
 
 impl Zfs {
@@ -559,21 +547,14 @@ impl Zfs {
     ) -> Result<(), EnsureFilesystemError> {
         let (exists, mounted) = Self::dataset_exists(name, &mountpoint)?;
 
-        let mut props = PropertySetter::new();
-        if let Some(size_details) = size_details {
-            props.add_size_details(size_details);
-        }
-        if let Some(id) = id {
-            props.add_id(id);
-        }
-
+        let props = build_zfs_set_key_value_pairs(size_details, id);
         if exists {
-            Self::set_values(name, props.as_vec().as_slice()).map_err(
-                |err| EnsureFilesystemError {
+            Self::set_values(name, props.as_slice()).map_err(|err| {
+                EnsureFilesystemError {
                     name: name.to_string(),
                     err: err.err.into(),
-                },
-            )?;
+                }
+            })?;
 
             if encryption_details.is_none() {
                 // If the dataset exists, we're done. Unencrypted datasets are
@@ -643,7 +624,7 @@ impl Zfs {
             })?;
         }
 
-        Self::set_values(name, props.as_vec().as_slice()).map_err(|err| {
+        Self::set_values(name, props.as_slice()).map_err(|err| {
             EnsureFilesystemError {
                 name: name.to_string(),
                 err: err.err.into(),
