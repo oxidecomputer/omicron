@@ -669,13 +669,22 @@ impl<'a> DagCheck<'a> {
             .push(reason);
     }
 
+    /// Propose that one of these two packages should be client-managed (because
+    /// they depend on each other, so they can't both be server-managed).
     fn propose_upick(
         &mut self,
         client_pkgname1: &'a ClientPackageName,
         client_pkgname2: &'a ClientPackageName,
     ) {
-        // Avoid duplicates.  (It's easier for us to do this here than for the
-        // caller to avoid this case.)
+        // A "upick" is a situation where you (the person running the tool)
+        // should choose either of `pkg1` or `pkg2` to be client-managed.  The
+        // caller will identify this situation twice: once when looking at
+        // `pkg1` and once when looking at `pkg2`.  But we only want to report
+        // it once.  So we'll ignore duplicates here because it's easier here
+        // than in the caller.
+        //
+        // To do that, first check whether the caller has already proposed this
+        // "upick" with the packages in the other order.  If so, do nothing.
         if let Some(other_pkg_upicks) = self.proposed_upick.get(client_pkgname2)
         {
             if other_pkg_upicks.contains(client_pkgname1) {
@@ -683,6 +692,9 @@ impl<'a> DagCheck<'a> {
             }
         }
 
+        // Now go ahead and insert the pair in this order.  This construction
+        // will also do nothing if this same pair has already been inserted in
+        // this order.
         self.proposed_upick
             .entry(client_pkgname1)
             .or_insert_with(BTreeSet::new)
