@@ -16,7 +16,9 @@ use debug_ignore::DebugIgnore;
 use futures::future::FutureExt;
 use futures::Stream;
 use futures::StreamExt;
-use illumos_utils::zfs::{DatasetProperties, Mountpoint, WhichDatasets, Zfs};
+use illumos_utils::zfs::{
+    DatasetEnsureArgs, DatasetProperties, Mountpoint, WhichDatasets, Zfs,
+};
 use illumos_utils::zpool::{ZpoolName, ZPOOL_MOUNTPOINT_ROOT};
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::{
@@ -1447,7 +1449,6 @@ impl StorageManager {
         }
 
         let DatasetCreationDetails { zoned, mountpoint, full_name } = details;
-        let do_format = true;
         // The "crypt" dataset needs these details, but should already exist
         // by the time we're creating datasets inside.
         let encryption_details = None;
@@ -1456,16 +1457,15 @@ impl StorageManager {
             reservation: config.reservation,
             compression: config.compression,
         });
-        Zfs::ensure_filesystem(
-            &full_name,
-            mountpoint.clone(),
-            *zoned,
-            do_format,
+        Zfs::ensure_dataset(DatasetEnsureArgs {
+            name: &full_name,
+            mountpoint: mountpoint.clone(),
+            zoned: *zoned,
             encryption_details,
             size_details,
-            dataset_id,
-            None,
-        )?;
+            id: dataset_id,
+            additional_options: None,
+        })?;
 
         Ok(())
     }
@@ -1490,19 +1490,17 @@ impl StorageManager {
 
         let zoned = true;
         let fs_name = &request.dataset_name.full_name();
-        let do_format = true;
         let encryption_details = None;
         let size_details = None;
-        Zfs::ensure_filesystem(
-            fs_name,
-            Mountpoint::Path(Utf8PathBuf::from("/data")),
+        Zfs::ensure_dataset(DatasetEnsureArgs {
+            name: fs_name,
+            mountpoint: Mountpoint::Path(Utf8PathBuf::from("/data")),
             zoned,
-            do_format,
             encryption_details,
             size_details,
-            Some(DatasetUuid::from_untyped_uuid(request.dataset_id)),
-            None,
-        )?;
+            id: Some(DatasetUuid::from_untyped_uuid(request.dataset_id)),
+            additional_options: None,
+        })?;
         // Ensure the dataset has a usable UUID.
         if let Ok(id_str) = Zfs::get_oxide_value(&fs_name, "uuid") {
             if let Ok(id) = id_str.parse::<Uuid>() {

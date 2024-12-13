@@ -200,7 +200,6 @@ pub(crate) async fn ensure_zpool_has_datasets(
     };
 
     let zoned = false;
-    let do_format = true;
 
     // Ensure the root encrypted filesystem exists
     // Datasets below this in the hierarchy will inherit encryption
@@ -261,16 +260,15 @@ pub(crate) async fn ensure_zpool_has_datasets(
             log,
             "Ensuring encrypted filesystem: {} for epoch {}", dataset, epoch
         );
-        let result = Zfs::ensure_filesystem(
-            &format!("{}/{}", zpool_name, dataset),
-            Mountpoint::Path(mountpoint),
+        let result = Zfs::ensure_dataset(zfs::DatasetEnsureArgs {
+            name: &format!("{}/{}", zpool_name, dataset),
+            mountpoint: Mountpoint::Path(mountpoint),
             zoned,
-            do_format,
-            Some(encryption_details),
-            None,
-            None,
-            None,
-        );
+            encryption_details: Some(encryption_details),
+            size_details: None,
+            id: None,
+            additional_options: None,
+        });
 
         keyfile.zero_and_unlink().await.map_err(|error| {
             DatasetError::IoError { path: keyfile.path().0.clone(), error }
@@ -324,16 +322,15 @@ pub(crate) async fn ensure_zpool_has_datasets(
             reservation: None,
             compression: dataset.compression,
         });
-        Zfs::ensure_filesystem(
+        Zfs::ensure_dataset(zfs::DatasetEnsureArgs {
             name,
-            Mountpoint::Path(mountpoint),
+            mountpoint: Mountpoint::Path(mountpoint),
             zoned,
-            do_format,
             encryption_details,
             size_details,
-            None,
-            None,
-        )?;
+            id: None,
+            additional_options: None,
+        })?;
 
         if dataset.wipe {
             Zfs::set_oxide_value(name, "agent", agent_local_value).map_err(
