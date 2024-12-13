@@ -2321,9 +2321,9 @@ dependencies = [
 
 [[package]]
 name = "diesel-dtrace"
-version = "0.4.0"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e5130181059723aae1cfdb678d3698052a225aaadb18000f77fec4200047acc"
+checksum = "2750c8bd7a42381620b57f370ca5f757a71d554814e02a43c1bf54ae2656e01d"
 dependencies = [
  "diesel",
  "serde",
