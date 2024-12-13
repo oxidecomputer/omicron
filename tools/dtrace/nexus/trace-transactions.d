@@ -33,15 +33,9 @@ diesel_db$target:::query-start
 /*
  * As transactions complete, print the number of statements we ran and the
  * duration.
- *
- * NOTE: The depth, arg1, is intentionally 1 here. When we first enter a
- * non-nested transaction, the depth is 0, because there is no outer
- * transaction. However, when the `transaction-done` probe fires, we are still
- * in a transaction, in which case the depth is currently 1. It's decremented
- * _after_ the transaction itself is committed or rolled back.
  */
-diesel_db$targe:::transaction-done
-/arg1 == 1 && ts[copyinstr(arg0)]/
+diesel_db$target:::transaction-done
+/arg1 == 0 && ts[copyinstr(arg0)]/
 {
     this->key = copyinstr(arg0);
     this->conn_id = json(this->key, "ok");
