@@ -14,14 +14,12 @@ use indent_write::fmt::IndentWriter;
 use internal_dns_types::diff::DnsDiff;
 use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
-use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
 use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{SledBuilder, SystemDescription};
 use nexus_reconfigurator_simulation::SimState;
 use nexus_reconfigurator_simulation::SimStateBuilder;
 use nexus_reconfigurator_simulation::Simulator;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::execution;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
@@ -819,37 +817,15 @@ fn cmd_blueprint_edit(
 
     let label = match args.edit_command {
         BlueprintEditCommands::AddNexus { sled_id } => {
-            let current = builder
-                .sled_num_running_zones_of_kind(sled_id, ZoneKind::Nexus);
-            let added = builder
-                .sled_ensure_zone_multiple_nexus(sled_id, current + 1)
+            builder
+                .sled_add_zone_nexus(sled_id)
                 .context("failed to add Nexus zone")?;
-            assert_matches::assert_matches!(
-                added,
-                EnsureMultiple::Changed {
-                    added: 1,
-                    updated: 0,
-                    expunged: 0,
-                    removed: 0
-                }
-            );
             format!("added Nexus zone to sled {}", sled_id)
         }
         BlueprintEditCommands::AddCockroach { sled_id } => {
-            let current = builder
-                .sled_num_running_zones_of_kind(sled_id, ZoneKind::CockroachDb);
-            let added = builder
-                .sled_ensure_zone_multiple_cockroachdb(sled_id, current + 1)
+            builder
+                .sled_add_zone_cockroachdb(sled_id)
                 .context("failed to add CockroachDB zone")?;
-            assert_matches::assert_matches!(
-                added,
-                EnsureMultiple::Changed {
-                    added: 1,
-                    updated: 0,
-                    expunged: 0,
-                    removed: 0
-                }
-            );
             format!("added CockroachDB zone to sled {}", sled_id)
         }
         BlueprintEditCommands::ExpungeZone { sled_id, zone_id } => {

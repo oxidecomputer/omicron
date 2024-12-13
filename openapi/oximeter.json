@@ -84,6 +84,39 @@
       }
     },
     "/producers/{producer_id}": {
+      "get": {
+        "summary": "Get details about a producer by ID.",
+        "operationId": "producer_details",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "producer_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProducerDetails"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
       "delete": {
         "summary": "Delete a producer by ID.",
         "operationId": "producer_delete",
@@ -169,6 +202,114 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "FailedCollection": {
+        "description": "Details about a previous failed collection.",
+        "type": "object",
+        "properties": {
+          "reason": {
+            "description": "The reason the collection failed.",
+            "type": "string"
+          },
+          "started_at": {
+            "description": "The time at which we started a collection.\n\nNote that this is the time we queued a request to collect for processing by a background task. The `time_queued` can be added to this time to figure out when processing began, and `time_collecting` can be added to that to figure out how long the actual collection process took.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_collecting": {
+            "description": "The time it took for the actual collection.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "time_queued": {
+            "description": "The time this request spent queued before being processed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          }
+        },
+        "required": [
+          "reason",
+          "started_at",
+          "time_collecting",
+          "time_queued"
+        ]
+      },
+      "ProducerDetails": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "description": "The current collection address.",
+            "type": "string"
+          },
+          "id": {
+            "description": "The producer's ID.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "interval": {
+            "description": "The current collection interval.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "last_failure": {
+            "nullable": true,
+            "description": "Details about the last failed collection.\n\nThis is None if we've never failed to collect from the producer.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FailedCollection"
+              }
+            ]
+          },
+          "last_success": {
+            "nullable": true,
+            "description": "Details about the last successful collection.\n\nThis is None if we've never successfully collected from the producer.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SuccessfulCollection"
+              }
+            ]
+          },
+          "n_collections": {
+            "description": "The total number of successful collections we've made.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "n_failures": {
+            "description": "The total number of failed collections.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "registered": {
+            "description": "The time the producer was first registered with us.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated": {
+            "description": "The last time the producer's information was updated.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "address",
+          "id",
+          "interval",
+          "n_collections",
+          "n_failures",
+          "registered",
+          "updated"
         ]
       },
       "ProducerEndpoint": {
@@ -260,6 +401,45 @@
               "management_gateway"
             ]
           }
+        ]
+      },
+      "SuccessfulCollection": {
+        "description": "Details about a previous successful collection.",
+        "type": "object",
+        "properties": {
+          "n_samples": {
+            "description": "The number of samples collected.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "started_at": {
+            "description": "The time at which we started a collection.\n\nNote that this is the time we queued a request to collect for processing by a background task. The `time_queued` can be added to this time to figure out when processing began, and `time_collecting` can be added to that to figure out how long the actual collection process took.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_collecting": {
+            "description": "The time it took for the actual collection.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "time_queued": {
+            "description": "The time this request spent queued before being processed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          }
+        },
+        "required": [
+          "n_samples",
+          "started_at",
+          "time_collecting",
+          "time_queued"
         ]
       }
     },

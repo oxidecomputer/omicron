@@ -14,6 +14,8 @@
 
 // NOTE: emanates from Tabled macros
 #![allow(clippy::useless_vec)]
+// NOTE: allowing "transaction_async" without retry
+#![allow(clippy::disallowed_methods)]
 
 use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::helpers::const_max_len;
@@ -130,6 +132,7 @@ use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_client::types::VolumeConstructionRequest;
@@ -1857,7 +1860,7 @@ async fn cmd_db_disk_physical(
 #[derive(Tabled)]
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
 struct PhysicalDiskRow {
-    id: Uuid,
+    id: PhysicalDiskUuid,
     serial: String,
     vendor: String,
     model: String,

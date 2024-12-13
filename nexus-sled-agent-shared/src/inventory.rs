@@ -11,7 +11,7 @@ use omicron_common::{
         external::{ByteCount, Generation},
         internal::shared::{NetworkInterface, SourceNatConfig},
     },
-    disk::{DatasetKind, DatasetName, DiskVariant},
+    disk::DiskVariant,
     zpool_name::ZpoolName,
 };
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
@@ -103,6 +103,7 @@ pub struct Inventory {
     pub disks: Vec<InventoryDisk>,
     pub zpools: Vec<InventoryZpool>,
     pub datasets: Vec<InventoryDataset>,
+    pub omicron_physical_disks_generation: Generation,
 }
 
 /// Describes the role of the sled within the rack.
@@ -167,22 +168,6 @@ impl OmicronZoneConfig {
     /// currently true).
     pub fn underlay_ip(&self) -> Ipv6Addr {
         self.zone_type.underlay_ip()
-    }
-
-    /// If this zone has a transient filesystem, return the dataset's name.
-    /// Otherwise, return `None`.
-    pub fn transient_zone_dataset_name(&self) -> Option<DatasetName> {
-        self.filesystem_pool.as_ref().map(|pool| {
-            DatasetName::new(
-                pool.clone(),
-                DatasetKind::TransientZone {
-                    name: illumos_utils::zone::zone_name(
-                        self.zone_type.kind().zone_prefix(),
-                        Some(self.id),
-                    ),
-                },
-            )
-        })
     }
 }
 

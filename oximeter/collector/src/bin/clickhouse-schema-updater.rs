@@ -11,7 +11,6 @@ use anyhow::Context;
 use camino::Utf8PathBuf;
 use clap::Parser;
 use clap::Subcommand;
-use omicron_common::address::CLICKHOUSE_HTTP_PORT;
 use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use oximeter_db::Client;
 use oximeter_db::OXIMETER_VERSION;
@@ -23,14 +22,7 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 
-const DEFAULT_HTTP_HOST: SocketAddr = SocketAddr::V6(SocketAddrV6::new(
-    Ipv6Addr::LOCALHOST,
-    CLICKHOUSE_HTTP_PORT,
-    0,
-    0,
-));
-
-const DEFAULT_NATIVE_HOST: SocketAddr = SocketAddr::V6(SocketAddrV6::new(
+const DEFAULT_HOST: SocketAddr = SocketAddr::V6(SocketAddrV6::new(
     Ipv6Addr::LOCALHOST,
     CLICKHOUSE_TCP_PORT,
     0,
@@ -44,14 +36,10 @@ fn parse_log_level(s: &str) -> anyhow::Result<Level> {
 /// Tool to apply offline updates to ClickHouse schema.
 #[derive(Clone, Debug, Parser)]
 struct Args {
-    /// IP address and port at which to access ClickHouse.
-    #[arg(long, default_value_t = DEFAULT_HTTP_HOST, env = "CLICKHOUSE_HOST")]
-    host: SocketAddr,
-
     /// IP address and port at which to access ClickHouse via the native TCP
     /// protocol.
-    #[arg(long, default_value_t = DEFAULT_NATIVE_HOST, env = "CLICKHOUSE_NATIVE_HOST")]
-    native_host: SocketAddr,
+    #[arg(long, default_value_t = DEFAULT_HOST, env = "CLICKHOUSE_HOST")]
+    host: SocketAddr,
 
     /// Directory from which to read schema files for each version.
     #[arg(
@@ -100,7 +88,7 @@ fn build_logger(level: Level) -> Logger {
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let log = build_logger(args.log_level);
-    let client = Client::new(args.host, args.native_host, &log);
+    let client = Client::new(args.host, &log);
     let is_replicated = client.is_oximeter_cluster().await?;
     match args.cmd {
         Cmd::List => {

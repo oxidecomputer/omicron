@@ -400,6 +400,8 @@ impl<'a> EarlyNetworkSetup<'a> {
             0 => SwitchLocation::Switch0,
             1 => SwitchLocation::Switch1,
             _ => {
+                // bail here because MGS is not reporting what we expect
+                // and we cannot proceed without trustworthy MGS
                 return Err(EarlyNetworkSetupError::Mgs(format!(
                     "Local switch zone returned nonsense switch \
                      slot {switch_slot}"
@@ -431,6 +433,8 @@ impl<'a> EarlyNetworkSetup<'a> {
 
         // configure uplink for each requested uplink in configuration that
         // matches our switch_location
+        let mut uplink_configuration_errors = vec![];
+
         for port_config in &our_ports {
             let (dpd_port_settings, port_id) =
                 self.build_port_config(port_config)?;
@@ -443,38 +447,45 @@ impl<'a> EarlyNetworkSetup<'a> {
                 "config" => #?dpd_port_settings
             );
 
-            loop {
-                match dpd
-                    .port_settings_apply(
-                        &port_id,
-                        Some(OMICRON_DPD_TAG),
-                        &dpd_port_settings,
-                    )
-                    .await
-                {
-                    Ok(_) => break Ok(()),
-                    Err(e) => {
-                        if let Some(StatusCode::SERVICE_UNAVAILABLE) =
-                            e.status()
-                        {
-                            warn!(
-                                self.log,
-                                "unable to apply uplink configuration, dendrite not available";
-                                "port_id" => ?port_id,
-                                "configuration" => ?dpd_port_settings,
-                            );
-                            sleep(Duration::from_secs(5)).await;
-                            continue;
-                        } else {
-                            break Err(EarlyNetworkSetupError::Dendrite(
-                                format!(
-                                "unable to apply uplink port configuration: {e}"
-                            ),
-                            ));
-                        }
-                    }
+            while let Err(e) = dpd
+                .port_settings_apply(
+                    &port_id,
+                    Some(OMICRON_DPD_TAG),
+                    &dpd_port_settings,
+                )
+                .await
+            {
+                if let Some(StatusCode::SERVICE_UNAVAILABLE) = e.status() {
+                    warn!(
+                        self.log,
+                        "dendrite not available, re-attempting port configuration in 5 seconds";
+                        "port_id" => ?port_id,
+                        "configuration" => ?dpd_port_settings,
+                    );
+                    sleep(Duration::from_secs(5)).await;
+                    continue;
+                } else {
+                    // log and move on to the next uplink instead of bailing on the
+                    // entire uplink process
+                    error!(
+                        self.log,
+                        "unable to apply uplink port configuration";
+                        "error" => ?e,
+                        "port_id" => ?port_id,
+                        "configuration" => ?dpd_port_settings
+                    );
+                    uplink_configuration_errors.push(e);
+
+                    break;
                 }
-            }?;
+            }
+        }
+
+        if uplink_configuration_errors.len() == our_ports.len() {
+            let message = format!(
+                "unable to configure any uplinks for {switch_location}"
+            );
+            return Err(EarlyNetworkSetupError::Dendrite(message));
         }
 
         let mgd = MgdClient::new(
@@ -494,26 +505,32 @@ impl<'a> EarlyNetworkSetup<'a> {
             for peer in &port.bgp_peers {
                 if let Some(config) = &config {
                     if peer.asn != config.asn {
-                        return Err(EarlyNetworkSetupError::BadConfig(
-                            "only one ASN per switch is supported".into(),
-                        ));
+                        // Log and skip configs that have conflicting ASNs
+                        error!(
+                            self.log,
+                            "only one ASN per switch is supported: expected {}, found {}",
+                            config.asn,
+                            peer.asn,
+                        );
+                        continue;
                     }
                 } else {
-                    config = Some(
-                        rack_network_config
-                            .bgp
-                            .iter()
-                            .find(|x| x.asn == peer.asn)
-                            .ok_or(
-                                EarlyNetworkSetupError::BgpConfigurationError(
-                                    format!(
-                                        "asn {} referenced by peer undefined",
-                                        peer.asn
-                                    ),
-                                ),
-                            )?
-                            .clone(),
-                    );
+                    config = rack_network_config
+                        .bgp
+                        .iter()
+                        .find(|x| x.asn == peer.asn)
+                        .cloned();
+
+                    // skip configuration for this peer if the asn does not reference a provided
+                    // bgp configuration
+                    if config.is_none() {
+                        error!(
+                            self.log,
+                            "asn {} referenced by peer is not present in bgp config",
+                            peer.asn,
+                        );
+                        continue;
+                    }
                 }
 
                 let bpc = MgBgpPeerConfig {
@@ -592,7 +609,7 @@ impl<'a> EarlyNetworkSetup<'a> {
 
         if !bgp_peer_configs.is_empty() {
             if let Some(config) = &config {
-                mgd.bgp_apply(&ApplyRequest {
+                let request = ApplyRequest {
                     asn: config.asn,
                     peers: bgp_peer_configs,
                     shaper: config.shaper.as_ref().map(|x| ShaperSource {
@@ -608,13 +625,16 @@ impl<'a> EarlyNetworkSetup<'a> {
                         .iter()
                         .map(|x| Prefix4 { length: x.width(), value: x.addr() })
                         .collect(),
-                })
-                .await
-                .map_err(|e| {
-                    EarlyNetworkSetupError::BgpConfigurationError(format!(
-                        "BGP peer configuration failed: {e}",
-                    ))
-                })?;
+                };
+
+                if let Err(e) = mgd.bgp_apply(&request).await {
+                    error!(
+                        self.log,
+                        "BGP peer configuration failed";
+                        "error" => ?e,
+                        "configuration" => ?request,
+                    );
+                }
             }
         }
 
@@ -646,17 +666,22 @@ impl<'a> EarlyNetworkSetup<'a> {
                 rq.routes.list.push(sr);
             }
         }
-        mgd.static_add_v4_route(&rq).await.map_err(|e| {
-            EarlyNetworkSetupError::BgpConfigurationError(format!(
-                "static routing configuration failed: {e}",
-            ))
-        })?;
+
+        if let Err(e) = mgd.static_add_v4_route(&rq).await {
+            error!(
+                self.log,
+                "static route configuration failed";
+                "error" => ?e,
+                "configuration" => ?rq,
+            );
+        };
 
         // BFD config
         for spec in &rack_network_config.bfd {
             if spec.switch != switch_location {
                 continue;
             }
+
             let cfg = MgBfdPeerConfig {
                 detection_threshold: spec.detection_threshold,
                 listen: spec.local.unwrap_or(Ipv4Addr::UNSPECIFIED.into()),
@@ -671,9 +696,15 @@ impl<'a> EarlyNetworkSetup<'a> {
                 peer: spec.remote,
                 required_rx: spec.required_rx,
             };
-            mgd.add_bfd_peer(&cfg).await.map_err(|e| {
-                EarlyNetworkSetupError::BfdConfigurationError(e.to_string())
-            })?;
+
+            if let Err(e) = mgd.add_bfd_peer(&cfg).await {
+                error!(
+                    self.log,
+                    "BFD peer configuration failed";
+                    "error" => ?e,
+                    "configuration" => ?cfg,
+                );
+            };
         }
 
         Ok(our_ports)

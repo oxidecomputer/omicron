@@ -4,8 +4,8 @@
 
 //! Integration tests for oximeter collectors and producers.
 
-use crate::integration_tests::metrics::wait_for_producer;
 use nexus_test_interface::NexusServer;
+use nexus_test_utils::wait_for_producer;
 use nexus_test_utils_macros::nexus_test;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oximeter_db::DbWrite;
@@ -117,13 +117,8 @@ async fn test_oximeter_reregistration() {
         row.get::<&str, chrono::DateTime<chrono::Utc>>("time_modified");
 
     // ClickHouse client for verifying collection.
-    let ch_address = context.clickhouse.http_address().into();
     let native_address = context.clickhouse.native_address().into();
-    let client = oximeter_db::Client::new(
-        ch_address,
-        native_address,
-        &context.logctx.log,
-    );
+    let client = oximeter_db::Client::new(native_address, &context.logctx.log);
     client
         .init_single_node_db()
         .await
@@ -306,7 +301,6 @@ async fn test_oximeter_reregistration() {
     context.oximeter = nexus_test_utils::start_oximeter(
         context.logctx.log.new(o!("component" => "oximeter")),
         context.server.get_http_server_internal_address().await,
-        context.clickhouse.http_address().port(),
         context.clickhouse.native_address().port(),
         oximeter_id,
     )

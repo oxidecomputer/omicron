@@ -263,8 +263,8 @@ mod tests {
     use omicron_common::disk::CompressionAlgorithm;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::ZpoolUuid;
-    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -393,7 +393,7 @@ mod tests {
             let zpool = Zpool::new(
                 new_zpool_id.into_untyped_uuid(),
                 sled_id.into_untyped_uuid(),
-                Uuid::new_v4(), // physical_disk_id
+                PhysicalDiskUuid::new_v4(),
             );
             datastore
                 .zpool_insert(opctx, zpool)

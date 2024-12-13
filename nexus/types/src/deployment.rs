@@ -31,12 +31,15 @@ use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
 use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::DiskIdentity;
+use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -376,7 +379,7 @@ impl Blueprint {
     }
 }
 
-impl BpTableData for &OmicronPhysicalDisksConfig {
+impl BpTableData for &BlueprintPhysicalDisksConfig {
     fn bp_generation(&self) -> BpGeneration {
         BpGeneration::Value(self.generation)
     }
@@ -733,6 +736,17 @@ impl BlueprintZoneConfig {
     pub fn underlay_ip(&self) -> Ipv6Addr {
         self.zone_type.underlay_ip()
     }
+
+    /// Returns the dataset used for the the zone's (transient) root filesystem.
+    pub fn filesystem_dataset(&self) -> Option<DatasetName> {
+        let pool_name = self.filesystem_pool.clone()?;
+        let name = illumos_utils::zone::zone_name(
+            self.zone_type.kind().zone_prefix(),
+            Some(self.id),
+        );
+        let kind = DatasetKind::TransientZone { name };
+        Some(DatasetName::new(pool_name, kind))
+    }
 }
 
 impl From<BlueprintZoneConfig> for OmicronZoneConfig {
@@ -890,14 +904,100 @@ pub enum BlueprintDatasetFilter {
     InService,
 }
 
-/// Information about an Omicron physical disk as recorded in a blueprint.
+/// The desired state of an Omicron-managed physical disk in a blueprint.
+#[derive(
+    Debug,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    JsonSchema,
+    Deserialize,
+    Serialize,
+    EnumIter,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum BlueprintPhysicalDiskDisposition {
+    /// The physical disk is in-service.
+    InService,
+
+    /// The physical disk is permanently gone.
+    Expunged,
+}
+
+impl BlueprintPhysicalDiskDisposition {
+    /// Returns true if the disk disposition matches this filter.
+    pub fn matches(self, filter: DiskFilter) -> bool {
+        match self {
+            Self::InService => match filter {
+                DiskFilter::All => true,
+                DiskFilter::InService => true,
+                // TODO remove this variant?
+                DiskFilter::ExpungedButActive => false,
+            },
+            Self::Expunged => match filter {
+                DiskFilter::All => true,
+                DiskFilter::InService => false,
+                // TODO remove this variant?
+                DiskFilter::ExpungedButActive => true,
+            },
+        }
+    }
+}
+
+/// Information about an Omicron physical disk as recorded in a bluerprint.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct BlueprintPhysicalDiskConfig {
+    pub disposition: BlueprintPhysicalDiskDisposition,
+    pub identity: DiskIdentity,
+    pub id: PhysicalDiskUuid,
+    pub pool_id: ZpoolUuid,
+}
+
+/// Information about Omicron physical disks as recorded in a blueprint.
 ///
 /// Part of [`Blueprint`].
-pub type BlueprintPhysicalDisksConfig =
-    omicron_common::disk::OmicronPhysicalDisksConfig;
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct BlueprintPhysicalDisksConfig {
+    pub generation: Generation,
+    pub disks: Vec<BlueprintPhysicalDiskConfig>,
+}
 
-pub type BlueprintPhysicalDiskConfig =
-    omicron_common::disk::OmicronPhysicalDiskConfig;
+// Required by RSS
+impl Default for BlueprintPhysicalDisksConfig {
+    fn default() -> Self {
+        BlueprintPhysicalDisksConfig {
+            generation: Generation::new(),
+            disks: vec![],
+        }
+    }
+}
+
+impl From<BlueprintPhysicalDiskConfig> for OmicronPhysicalDiskConfig {
+    fn from(value: BlueprintPhysicalDiskConfig) -> Self {
+        OmicronPhysicalDiskConfig {
+            identity: value.identity,
+            id: value.id,
+            pool_id: value.pool_id,
+        }
+    }
+}
+
+impl From<BlueprintPhysicalDisksConfig> for OmicronPhysicalDisksConfig {
+    fn from(value: BlueprintPhysicalDisksConfig) -> Self {
+        OmicronPhysicalDisksConfig {
+            generation: value.generation,
+            disks: value
+                .disks
+                .into_iter()
+                .map(OmicronPhysicalDiskConfig::from)
+                .collect(),
+        }
+    }
+}
 
 /// Information about Omicron datasets as recorded in a blueprint.
 #[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
@@ -994,13 +1094,29 @@ impl From<BlueprintDatasetConfig> for DatasetConfig {
 ///
 /// This struct acts as a "lowest common denominator" between the
 /// inventory and blueprint types, for the purposes of comparison.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq)]
 pub struct BlueprintDatasetConfigForDiff {
     pub name: String,
+    pub kind: Option<DatasetKind>,
     pub id: Option<DatasetUuid>,
     pub quota: Option<ByteCount>,
     pub reservation: Option<ByteCount>,
     pub compression: String,
+}
+
+impl PartialEq for BlueprintDatasetConfigForDiff {
+    fn eq(&self, other: &Self) -> bool {
+        // We intentionally ignore `kind` when comparing; it's always `None`
+        // from collections because inventory doesn't report it, but we don't
+        // want to mark a dataset as modified in a collection-to-blueprint diff
+        // for this reason.
+        let Self { name, kind: _, id, quota, reservation, compression } = self;
+        *name == other.name
+            && *id == other.id
+            && *quota == other.quota
+            && *reservation == other.reservation
+            && *compression == other.compression
+    }
 }
 
 fn unwrap_or_none<T: ToString>(opt: &Option<T>) -> String {
@@ -1023,6 +1139,9 @@ impl From<crate::inventory::Dataset> for BlueprintDatasetConfigForDiff {
     fn from(dataset: crate::inventory::Dataset) -> Self {
         Self {
             name: dataset.name,
+            // TODO Should we know the dataset kind from inventory? We could
+            // probably infer it from the name, but yuck.
+            kind: None,
             id: dataset.id,
             quota: dataset.quota,
             reservation: dataset.reservation,
@@ -1034,7 +1153,9 @@ impl From<crate::inventory::Dataset> for BlueprintDatasetConfigForDiff {
 impl From<BlueprintDatasetConfig> for BlueprintDatasetConfigForDiff {
     fn from(dataset: BlueprintDatasetConfig) -> Self {
         Self {
-            name: DatasetName::new(dataset.pool, dataset.kind).full_name(),
+            name: DatasetName::new(dataset.pool, dataset.kind.clone())
+                .full_name(),
+            kind: Some(dataset.kind),
             id: Some(dataset.id),
             quota: dataset.quota,
             reservation: dataset.reservation,

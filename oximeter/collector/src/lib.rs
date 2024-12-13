@@ -4,8 +4,9 @@
 
 //! Implementation of the `oximeter` metric collection server.
 
-// Copyright 2023 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
+pub use collection_task::ForcedCollectionError;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::HttpError;
@@ -41,7 +42,9 @@ use thiserror::Error;
 use uuid::Uuid;
 
 mod agent;
+mod collection_task;
 mod http_entrypoints;
+mod results_sink;
 mod self_stats;
 mod standalone;
 
@@ -64,28 +67,29 @@ pub enum Error {
 
     #[error("Error running standalone")]
     Standalone(#[from] anyhow::Error),
+
+    #[error("No registered producer with id '{id}'")]
+    NoSuchProducer { id: Uuid },
 }
 
 impl From<Error> for HttpError {
     fn from(e: Error) -> Self {
-        HttpError::for_internal_error(e.to_string())
+        if let Error::NoSuchProducer { .. } = e {
+            HttpError::for_not_found(None, e.to_string())
+        } else {
+            HttpError::for_internal_error(e.to_string())
+        }
     }
 }
 
 /// Configuration for interacting with the metric database.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub struct DbConfig {
-    /// Optional address of the ClickHouse server's HTTP interface.
-    ///
-    /// If "None", will be inferred from DNS.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub address: Option<SocketAddr>,
-
     /// Optional address of the ClickHouse server's native TCP interface.
     ///
     /// If None, will be inferred from DNS.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_address: Option<SocketAddr>,
+    pub address: Option<SocketAddr>,
 
     /// Batch size of samples at which to insert.
     pub batch_size: usize,
@@ -117,7 +121,6 @@ impl DbConfig {
     fn with_address(address: SocketAddr) -> Self {
         Self {
             address: Some(address),
-            native_address: None,
             batch_size: Self::DEFAULT_BATCH_SIZE,
             batch_interval: Self::DEFAULT_BATCH_INTERVAL,
             replicated: Self::DEFAULT_REPLICATED,
@@ -256,38 +259,17 @@ impl Oximeter {
                 }
             };
 
-        // Closure to create _two_ resolvers, one to resolve the ClickHouse HTTP
-        // SRV record, and one for the native TCP record.
-        //
-        // TODO(cleanup): This should be removed if / when we entirely switch to
-        // the native protocol.
-        let make_clickhouse_resolvers = || -> (BoxedResolver, BoxedResolver) {
-            let http_resolver = make_resolver(
-                config.db.address,
-                if config.db.replicated {
-                    ServiceName::ClickhouseServer
-                } else {
-                    ServiceName::Clickhouse
-                },
-            );
-            let native_resolver = make_resolver(
-                config.db.native_address,
-                ServiceName::ClickhouseNative,
-            );
-            (http_resolver, native_resolver)
-        };
-
         let make_agent = || async {
             debug!(log, "creating ClickHouse client");
-            let (http_resolver, native_resolver) = make_clickhouse_resolvers();
+            let resolver =
+                make_resolver(config.db.address, ServiceName::ClickhouseNative);
             Ok(Arc::new(
                 OximeterAgent::with_id(
                     args.id,
                     args.address,
                     config.refresh_interval,
                     config.db,
-                    http_resolver,
-                    native_resolver,
+                    resolver,
                     &log,
                     config.db.replicated,
                 )
@@ -483,8 +465,13 @@ impl Oximeter {
     ///
     /// This is particularly useful during tests, which would prefer to
     /// avoid waiting until a collection interval completes.
-    pub async fn force_collect(&self) {
-        self.server.app_private().force_collection().await
+    ///
+    /// NOTE: As the name implies, this is best effort. It can fail if there are
+    /// already outstanding calls to force a collection. It rarely makes sense
+    /// to have multiple concurrent calls here, so that should not impact most
+    /// callers.
+    pub async fn try_force_collect(&self) -> Result<(), ForcedCollectionError> {
+        self.server.app_private().try_force_collection().await
     }
 
     /// List producers.

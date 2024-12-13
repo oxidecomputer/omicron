@@ -222,13 +222,10 @@ pub struct TimeseriesPageSelector {
 /// Create a client to the timeseries database, and ensure the database exists.
 pub async fn make_client(
     address: IpAddr,
-    http_port: u16,
-    native_port: u16,
+    port: u16,
     log: &Logger,
 ) -> Result<Client, anyhow::Error> {
-    let http_address = SocketAddr::new(address, http_port);
-    let native_address = SocketAddr::new(address, native_port);
-    let client = Client::new(http_address, native_address, &log);
+    let client = Client::new(SocketAddr::new(address, port), &log);
     client
         .init_single_node_db()
         .await

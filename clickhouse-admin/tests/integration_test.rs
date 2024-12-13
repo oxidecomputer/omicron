@@ -42,8 +42,6 @@ fn get_keeper_raft_port(keeper_id: KeeperId) -> u16 {
 
 #[tokio::test]
 async fn test_lgif_parsing() -> anyhow::Result<()> {
-    let log = log();
-
     let clickhouse_cli = ClickhouseCli::new(
         Utf8PathBuf::from_str("clickhouse")?,
         SocketAddrV6::new(
@@ -52,8 +50,8 @@ async fn test_lgif_parsing() -> anyhow::Result<()> {
             0,
             0,
         ),
-    )
-    .with_log(log);
+        log(),
+    );
 
     let lgif = clickhouse_cli.lgif().await.unwrap();
 
@@ -65,8 +63,6 @@ async fn test_lgif_parsing() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn test_raft_config_parsing() -> anyhow::Result<()> {
-    let log = log();
-
     let clickhouse_cli = ClickhouseCli::new(
         Utf8PathBuf::from_str("clickhouse").unwrap(),
         SocketAddrV6::new(
@@ -75,8 +71,8 @@ async fn test_raft_config_parsing() -> anyhow::Result<()> {
             0,
             0,
         ),
-    )
-    .with_log(log);
+        log(),
+    );
 
     let raft_config = clickhouse_cli.raft_config().await.unwrap();
 
@@ -103,8 +99,6 @@ async fn test_raft_config_parsing() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn test_keeper_conf_parsing() -> anyhow::Result<()> {
-    let log = log();
-
     let clickhouse_cli = ClickhouseCli::new(
         Utf8PathBuf::from_str("clickhouse").unwrap(),
         SocketAddrV6::new(
@@ -113,8 +107,8 @@ async fn test_keeper_conf_parsing() -> anyhow::Result<()> {
             0,
             0,
         ),
-    )
-    .with_log(log);
+        log(),
+    );
 
     let conf = clickhouse_cli.keeper_conf().await.unwrap();
 
@@ -125,8 +119,6 @@ async fn test_keeper_conf_parsing() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn test_keeper_cluster_membership() -> anyhow::Result<()> {
-    let log = log();
-
     let clickhouse_cli = ClickhouseCli::new(
         Utf8PathBuf::from_str("clickhouse").unwrap(),
         SocketAddrV6::new(
@@ -135,8 +127,8 @@ async fn test_keeper_cluster_membership() -> anyhow::Result<()> {
             0,
             0,
         ),
-    )
-    .with_log(log);
+        log(),
+    );
 
     let keeper_cluster_membership =
         clickhouse_cli.keeper_cluster_membership().await.unwrap();

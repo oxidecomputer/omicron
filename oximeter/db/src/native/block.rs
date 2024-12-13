@@ -210,7 +210,7 @@ impl Block {
     ///
     /// Types which have native JSON represenation, such as strings and numbers,
     /// are converted directly. Those without, like dates, are stringified.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "sql"))]
     pub fn json_rows(&self) -> Vec<serde_json::Map<String, serde_json::Value>> {
         use serde_json::Value;
         let mut out = Vec::with_capacity(self.n_rows());

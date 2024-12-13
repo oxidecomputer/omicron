@@ -402,6 +402,101 @@ impl SledAgentApi for SledAgentSimImpl {
         Ok(HttpResponseUpdatedNoContent())
     }
 
+    async fn support_bundle_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundleListPathParam>,
+    ) -> Result<HttpResponseOk<Vec<SupportBundleMetadata>>, HttpError> {
+        let sa = rqctx.context();
+
+        let SupportBundleListPathParam { zpool_id, dataset_id } =
+            path_params.into_inner();
+
+        let bundles = sa.support_bundle_list(zpool_id, dataset_id).await?;
+        Ok(HttpResponseOk(bundles))
+    }
+
+    async fn support_bundle_create(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        query_params: Query<SupportBundleCreateQueryParams>,
+        _body: StreamingBody,
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
+        let sa = rqctx.context();
+
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+        let SupportBundleCreateQueryParams { hash } = query_params.into_inner();
+
+        Ok(HttpResponseCreated(
+            sa.support_bundle_create(
+                zpool_id,
+                dataset_id,
+                support_bundle_id,
+                hash,
+            )
+            .await?,
+        ))
+    }
+
+    async fn support_bundle_get(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        _body: TypedBody<SupportBundleGetQueryParams>,
+    ) -> Result<http::Response<dropshot::Body>, HttpError> {
+        let sa = rqctx.context();
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+
+        sa.support_bundle_get(zpool_id, dataset_id, support_bundle_id).await?;
+
+        Ok(http::Response::builder()
+            .status(http::StatusCode::OK)
+            .header(http::header::CONTENT_TYPE, "text/html")
+            .body(dropshot::Body::with_content(
+                "simulated support bundle; do not eat",
+            ))
+            .unwrap())
+    }
+
+    async fn support_bundle_head(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        _body: TypedBody<SupportBundleGetQueryParams>,
+    ) -> Result<http::Response<dropshot::Body>, HttpError> {
+        let sa = rqctx.context();
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+
+        sa.support_bundle_get(zpool_id, dataset_id, support_bundle_id).await?;
+
+        let fictional_length = 10000;
+
+        Ok(http::Response::builder()
+            .status(http::StatusCode::OK)
+            .header(http::header::CONTENT_TYPE, "text/html")
+            .header(hyper::header::ACCEPT_RANGES, "bytes")
+            .header(hyper::header::CONTENT_LENGTH, fictional_length)
+            .body(dropshot::Body::empty())
+            .unwrap())
+    }
+
+    async fn support_bundle_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let sa = rqctx.context();
+
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+
+        sa.support_bundle_delete(zpool_id, dataset_id, support_bundle_id)
+            .await?;
+
+        Ok(HttpResponseDeleted())
+    }
+
+    // --- Unimplemented endpoints ---
+
     async fn set_eip_gateways(
         rqctx: RequestContext<Self::Context>,
         _body: TypedBody<ExternalIpGatewayMap>,
@@ -410,8 +505,6 @@ impl SledAgentApi for SledAgentSimImpl {
         // sa.set_vpc_routes(body.into_inner()).await;
         Ok(HttpResponseUpdatedNoContent())
     }
-
-    // --- Unimplemented endpoints ---
 
     async fn zone_bundle_list_all(
         _rqctx: RequestContext<Self::Context>,
@@ -550,6 +643,12 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn support_ipadm_info(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn support_dladm_info(
         _request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
         method_unimplemented()
