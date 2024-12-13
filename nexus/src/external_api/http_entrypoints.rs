@@ -81,7 +81,6 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Probe;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
-use omicron_common::api::external::SupportBundleGetQueryParams;
 use omicron_common::api::external::SwitchPort;
 use omicron_common::api::external::SwitchPortSettings;
 use omicron_common::api::external::SwitchPortSettingsView;
@@ -6074,10 +6073,55 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn support_bundle_index(
+        rqctx: RequestContext<Self::Context>,
+        _path_params: Path<params::SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            Err(nexus
+                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
+                .await
+                .into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
         _path_params: Path<params::SupportBundlePath>,
-        _body: TypedBody<SupportBundleGetQueryParams>,
+    ) -> Result<Response<Body>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            Err(nexus
+                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
+                .await
+                .into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn support_bundle_download_file(
+        rqctx: RequestContext<Self::Context>,
+        _path_params: Path<params::SupportBundleFilePath>,
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -6101,7 +6145,29 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn support_bundle_head(
         rqctx: RequestContext<Self::Context>,
         _path_params: Path<params::SupportBundlePath>,
-        _body: TypedBody<SupportBundleGetQueryParams>,
+    ) -> Result<Response<Body>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            Err(nexus
+                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
+                .await
+                .into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn support_bundle_head_file(
+        rqctx: RequestContext<Self::Context>,
+        _path_params: Path<params::SupportBundleFilePath>,
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
