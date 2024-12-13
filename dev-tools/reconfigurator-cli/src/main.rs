@@ -993,8 +993,9 @@ fn cmd_blueprint_diff_inventory(
     let state = sim.current_state();
     let _collection = state.system().get_collection(collection_id)?;
     let _blueprint = state.system().get_blueprint(blueprint_id)?;
-    //  let diff = blueprint.diff_since_collection(&collection);
-    //  Ok(Some(diff.display().to_string()))
+    // See https://github.com/oxidecomputer/omicron/issues/7242
+    // let diff = blueprint.diff_since_collection(&collection);
+    // Ok(Some(diff.display().to_string()))
     bail!("Not Implemented")
 }
 

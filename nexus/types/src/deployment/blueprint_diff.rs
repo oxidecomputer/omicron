@@ -108,7 +108,7 @@ impl ModifiedZone {
             );
             reason.push_str(&msg);
         }
-        if before.zone_type == after.zone_type {
+        if before.zone_type != after.zone_type {
             let msg = format!(
                 "mismatched zone type: after: {:#?}\n",
                 after.zone_type
