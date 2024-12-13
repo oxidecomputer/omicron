@@ -1896,12 +1896,10 @@ pub mod test {
     use crate::example::ExampleSystemBuilder;
     use crate::example::SimRngState;
     use crate::system::SledBuilder;
-    use expectorate::assert_contents;
     use nexus_inventory::CollectionBuilder;
     use nexus_types::deployment::BlueprintDatasetConfig;
     use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::BlueprintDatasetFilter;
-    use nexus_types::deployment::BlueprintOrCollectionZoneConfig;
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::OmicronZoneNetworkResources;
     use nexus_types::external_api::views::SledPolicy;
@@ -2130,44 +2128,6 @@ pub mod test {
     }
 
     #[test]
-    fn test_initial() {
-        // Test creating a blueprint from a collection and verifying that it
-        // describes no changes.
-        static TEST_NAME: &str = "blueprint_builder_test_initial";
-        let logctx = test_setup_log(TEST_NAME);
-        let (collection, input, blueprint_initial) =
-            example(&logctx.log, TEST_NAME);
-        verify_blueprint(&blueprint_initial);
-
-        let diff = blueprint_initial.diff_since_collection(&collection);
-        // There are some differences with even a no-op diff between a
-        // collection and a blueprint, such as new data being added to
-        // blueprints like DNS generation numbers.
-        println!(
-            "collection -> initial blueprint \
-             (expected no non-trivial changes):\n{}",
-            diff.display()
-        );
-        assert_contents(
-            "tests/output/blueprint_builder_initial_diff.txt",
-            &diff.display().to_string(),
-        );
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 0);
-
-        // Test a no-op planning iteration.
-        assert_planning_makes_no_changes(
-            &logctx.log,
-            &blueprint_initial,
-            &input,
-            TEST_NAME,
-        );
-
-        logctx.cleanup_successful();
-    }
-
-    #[test]
     fn test_basic() {
         static TEST_NAME: &str = "blueprint_builder_test_basic";
         let logctx = test_setup_log(TEST_NAME);
@@ -2264,17 +2224,13 @@ pub mod test {
         // Check for an NTP zone.  Its sockaddr's IP should also be on the
         // sled's subnet.
         assert!(new_sled_zones.zones.iter().any(|z| {
-            if let BlueprintOrCollectionZoneConfig::Blueprint(
-                BlueprintZoneConfig {
-                    zone_type:
-                        BlueprintZoneType::InternalNtp(
-                            blueprint_zone_type::InternalNtp {
-                                address, ..
-                            },
-                        ),
-                    ..
-                },
-            ) = &z
+            if let BlueprintZoneConfig {
+                zone_type:
+                    BlueprintZoneType::InternalNtp(
+                        blueprint_zone_type::InternalNtp { address, .. },
+                    ),
+                ..
+            } = &z
             {
                 assert!(new_sled_resources
                     .subnet
@@ -2285,12 +2241,12 @@ pub mod test {
                 false
             }
         }));
-        let crucible_pool_names = new_sled_zones
-            .zones
-            .iter()
-            .filter_map(|z| {
-                if let BlueprintOrCollectionZoneConfig::Blueprint(
-                    BlueprintZoneConfig {
+        let crucible_pool_names =
+            new_sled_zones
+                .zones
+                .iter()
+                .filter_map(|z| {
+                    if let BlueprintZoneConfig {
                         zone_type:
                             BlueprintZoneType::Crucible(
                                 blueprint_zone_type::Crucible {
@@ -2299,17 +2255,16 @@ pub mod test {
                                 },
                             ),
                         ..
-                    },
-                ) = &z
-                {
-                    let ip = address.ip();
-                    assert!(new_sled_resources.subnet.net().contains(*ip));
-                    Some(dataset.pool_name.clone())
-                } else {
-                    None
-                }
-            })
-            .collect::<BTreeSet<_>>();
+                    } = &z
+                    {
+                        let ip = address.ip();
+                        assert!(new_sled_resources.subnet.net().contains(*ip));
+                        Some(dataset.pool_name.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<BTreeSet<_>>();
         assert_eq!(
             crucible_pool_names,
             new_sled_resources

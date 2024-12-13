@@ -1843,7 +1843,7 @@ mod test {
             modified_zone.kind()
         );
         assert_eq!(
-            modified_zone.disposition(),
+            modified_zone.disposition,
             BlueprintZoneDisposition::Expunged,
             "Should have expunged this zone"
         );
@@ -1966,7 +1966,7 @@ mod test {
         assert_eq!(modified_zones.zones.len(), zones_using_zpool);
         for modified_zone in &modified_zones.zones {
             assert_eq!(
-                modified_zone.zone.disposition(),
+                modified_zone.zone.disposition,
                 BlueprintZoneDisposition::Expunged,
                 "Should have expunged this zone"
             );
@@ -2268,10 +2268,10 @@ mod test {
 
         for modified_zone in &modified_zones.zones {
             assert_eq!(
-                modified_zone.zone.disposition(),
+                modified_zone.zone.disposition,
                 BlueprintZoneDisposition::Expunged,
                 "for {desc}, zone {} should have been marked expunged",
-                modified_zone.zone.id()
+                modified_zone.zone.id
             );
         }
     }
@@ -2852,13 +2852,6 @@ mod test {
         assert_contents(
             "tests/output/planner_deploy_all_keeper_nodes_3_4.txt",
             &diff.display().to_string(),
-        );
-
-        let coll_diff = blueprint4.diff_since_collection(&collection);
-        println!("coll_diff = {coll_diff:#?}");
-        assert_contents(
-            "tests/output/planner_deploy_all_keeper_nodes_4_collection.txt",
-            &coll_diff.display().to_string(),
         );
 
         let bp3_config = blueprint3.clickhouse_cluster_config.as_ref().unwrap();
