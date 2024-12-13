@@ -10,14 +10,26 @@ dtrace:::BEGIN
 /*
  * Record the start and number of statements for each transaction.
  *
- * We're only recording the initial transactions, which are not nested.
+ * Note that we're using the Nexus-provided transaction start / done probes.
+ * This lets us associate the other data we might collect (number of statements,
+ * ustacks, etc) with the Nexus code itself. Although there are transaction
+ * start / done probes in `diesel-dtrace`, the existing way we run transactions
+ * with `async-bb8-diesel` involves spawning a future to run the transactions on
+ * a blocking thread-pool. That spawning makes it impossible to associate the
+ * context in which the `diesel-dtrace` probes fire with the Nexus code that
+ * actually spawned the transaction itself.
  */
-diesel_db$target:::transaction-start
-/arg1 == 0/
+nexus_db_queries$target:::transaction-start
 {
     this->key = copyinstr(arg0);
+    transaction_names[this->key] = copyinstr(arg1);
     ts[this->key] = timestamp;
     n_statements[this->key] = 0;
+    printf(
+        "Started transaction '%s' on conn %s\n",
+        transaction_names[this->key],
+        json(this->key, "ok")
+    );
 }
 
 /*
@@ -34,20 +46,22 @@ diesel_db$target:::query-start
  * As transactions complete, print the number of statements we ran and the
  * duration.
  */
-diesel_db$target:::transaction-done
-/arg1 == 0 && ts[copyinstr(arg0)]/
+nexus_db_queries$target:::transaction-done
+/ts[copyinstr(arg0)]/
 {
     this->key = copyinstr(arg0);
     this->conn_id = json(this->key, "ok");
     this->latency = (timestamp - ts[this->key]) / 1000;
     this->n_statements = n_statements[this->key];
     printf(
-        "%s %d statements on connection %s (%d us)\n",
+        "%s %d statement(s) in transaction '%s' on connection %s (%d us)\n",
         arg2 ? "COMMIT" : "ROLLBACK",
         n_statements[this->key],
+        transaction_names[this->key],
         this->conn_id,
         this->latency
     );
     ts[this->key] = 0;
     n_statements[this->key] = 0;
+    transaction_names[this->key] = 0;
 }
