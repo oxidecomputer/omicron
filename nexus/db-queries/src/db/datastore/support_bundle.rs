@@ -36,8 +36,8 @@ use uuid::Uuid;
 
 const CANNOT_ALLOCATE_ERR_MSG: &'static str =
 "Current policy limits support bundle creation to 'one per external disk', and \
- no disks are available. Either delete old support bundles or add additional \
- disks";
+ no disks are available. You must delete old support bundles before new ones \
+ can be created";
 
 const FAILURE_REASON_NO_DATASET: &'static str =
     "Allocated dataset no longer exists";
@@ -50,8 +50,8 @@ pub struct SupportBundleExpungementReport {
     /// Bundles marked "failed" because the datasets storing them have been
     /// expunged.
     pub bundles_failed_missing_datasets: usize,
-    /// Bundles deleted because the datasets storing them have been
-    /// expunged.
+    /// Bundles already in the "destroying" state that have been deleted because
+    /// the datasets storing them have been expunged.
     pub bundles_deleted_missing_datasets: usize,
 
     /// Bundles marked "destroying" because the nexuses managing them have been
@@ -79,7 +79,7 @@ impl DataStore {
         reason_for_creation: &'static str,
         this_nexus_id: OmicronZoneUuid,
     ) -> CreateResult<SupportBundle> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
         #[derive(Debug)]
@@ -164,7 +164,7 @@ impl DataStore {
         opctx: &OpContext,
         id: SupportBundleUuid,
     ) -> LookupResult<SupportBundle> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use db::schema::support_bundle::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -182,7 +182,7 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<SupportBundle> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use db::schema::support_bundle::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -202,7 +202,7 @@ impl DataStore {
         nexus_id: OmicronZoneUuid,
         states: Vec<SupportBundleState>,
     ) -> ListResultVec<SupportBundle> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use db::schema::support_bundle::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -223,7 +223,7 @@ impl DataStore {
         opctx: &OpContext,
         blueprint: &nexus_types::deployment::Blueprint,
     ) -> Result<SupportBundleExpungementReport, Error> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
         // For this blueprint: The set of all expunged Nexus zones
         let invalid_nexus_zones = blueprint
@@ -327,11 +327,10 @@ impl DataStore {
                     // the dataset expungement speeds up the process.
                     let bundles_deleted_missing_datasets =
                         diesel::delete(dsl::support_bundle)
-                            .filter(dsl::state.eq_any(state.valid_old_states()))
                             .filter(dsl::id.eq_any(bundles_to_delete))
                             // This check should be redundant (we already
                             // partitioned above based on this state) but out of
-                            // an abundance of catuion we don't auto-delete a
+                            // an abundance of caution we don't auto-delete a
                             // bundle in any other state.
                             .filter(dsl::state.eq(SupportBundleState::Destroying))
                             .execute_async(conn)
@@ -410,7 +409,7 @@ impl DataStore {
         id: SupportBundleUuid,
         state: SupportBundleState,
     ) -> Result<(), Error> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
         use db::schema::support_bundle::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -443,7 +442,7 @@ impl DataStore {
         opctx: &OpContext,
         id: SupportBundleUuid,
     ) -> Result<(), Error> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
         use db::schema::support_bundle::dsl;
 
@@ -899,7 +898,7 @@ mod test {
         let observed_bundles = datastore
             .support_bundle_list(&opctx, &pagparams)
             .await
-            .expect("Should be able to get bundle we just created");
+            .expect("Should be able to query when no bundles exist");
         assert!(observed_bundles.is_empty());
 
         db.terminate().await;
@@ -1068,6 +1067,121 @@ mod test {
             .reason_for_failure
             .unwrap()
             .contains(FAILURE_REASON_NO_DATASET));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_bundle_deleted_from_expunged_dataset() {
+        static TEST_NAME: &str = "test_bundle_deleted_from_expunged_dataset";
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+        let (_example, mut bp1) = ExampleSystemBuilder::new_with_rng(
+            &logctx.log,
+            rng.next_system_rng(),
+        )
+        .build();
+
+        // Weirdly, the "ExampleSystemBuilder" blueprint has a parent blueprint,
+        // but which isn't exposed through the API. Since we're only able to see
+        // the blueprint it emits, that means we can't actually make it the
+        // target because "the parent blueprint is not the current target".
+        //
+        // Instead of dealing with that, we lie: claim this is the primordial
+        // blueprint, with no parent.
+        //
+        // Regardless, make this starter blueprint our target.
+        bp1.parent_blueprint_id = None;
+        bp_insert_and_make_target(&opctx, &datastore, &bp1).await;
+
+        // Manually perform the equivalent of blueprint execution to populate
+        // database records.
+        let sleds = TestSled::new_from_blueprint(&bp1);
+        for sled in &sleds {
+            sled.create_database_records(&datastore, &opctx).await;
+        }
+
+        // Extract Nexus and Dataset information from the generated blueprint.
+        let this_nexus_id = get_nexuses_from_blueprint(
+            &bp1,
+            BlueprintZoneFilter::ShouldBeRunning,
+        )
+        .get(0)
+        .map(|id| *id)
+        .expect("There should be a Nexus in the example blueprint");
+        let debug_datasets = get_debug_datasets_from_blueprint(
+            &bp1,
+            BlueprintDatasetFilter::InService,
+        );
+        assert!(!debug_datasets.is_empty());
+
+        // When we create a bundle, it should exist on a dataset provisioned by
+        // the blueprint.
+        let bundle = datastore
+            .support_bundle_create(&opctx, "for the test", this_nexus_id)
+            .await
+            .expect("Should be able to create bundle");
+        assert_eq!(bundle.assigned_nexus, Some(this_nexus_id.into()));
+        assert!(
+            debug_datasets.contains(&DatasetUuid::from(bundle.dataset_id)),
+            "Bundle should have been allocated from a blueprint dataset"
+        );
+
+        // Start the deletion of this bundle
+        datastore
+            .support_bundle_update(
+                &opctx,
+                bundle.id.into(),
+                SupportBundleState::Destroying,
+            )
+            .await
+            .expect("Should have been able to update state");
+
+        // If we try to "fail support bundles" from expunged datasets/nexuses,
+        // we should see a no-op. Nothing has been expunged yet!
+        let report =
+            datastore.support_bundle_fail_expunged(&opctx, &bp1).await.expect(
+                "Should have been able to perform no-op support bundle failure",
+            );
+        assert_eq!(SupportBundleExpungementReport::default(), report);
+
+        // Expunge the bundle's dataset (manually)
+        let bp2 = {
+            let mut bp2 = bp1.clone();
+            bp2.id = Uuid::new_v4();
+            bp2.parent_blueprint_id = Some(bp1.id);
+            expunge_dataset_for_bundle(&mut bp2, &bundle);
+            bp2
+        };
+        bp_insert_and_make_target(&opctx, &datastore, &bp2).await;
+
+        datastore
+            .support_bundle_fail_expunged(&opctx, &bp1)
+            .await
+            .expect_err("bp1 is no longer the target; this should fail");
+        let report = datastore
+            .support_bundle_fail_expunged(&opctx, &bp2)
+            .await
+            .expect("Should have been able to mark bundle state as failed");
+        assert_eq!(
+            SupportBundleExpungementReport {
+                bundles_deleted_missing_datasets: 1,
+                ..Default::default()
+            },
+            report
+        );
+
+        // Should observe no bundles (it should have been deleted)
+        let pagparams = DataPageParams::max_page();
+        let observed_bundles = datastore
+            .support_bundle_list(&opctx, &pagparams)
+            .await
+            .expect("Should be able to query when no bundles exist");
+        assert!(observed_bundles.is_empty());
 
         db.terminate().await;
         logctx.cleanup_successful();
