@@ -425,6 +425,9 @@ impl SystemApis {
 
     /// Verifies various important properties about the assignment of which APIs
     /// are server-managed vs. client-managed.
+    ///
+    /// Returns a structure with proposals for how to assign APIs that are
+    /// currently unassigned.
     pub fn dag_check(&self) -> Result<DagCheck<'_>> {
         // In this function, we'll use the following ApiDependencyFilter a bunch
         // when walking the component dependency graph.  "Default" is the
@@ -631,9 +634,22 @@ impl SystemApis {
     }
 }
 
+/// Describes proposals for assigning how APIs should be versioned, based on
+/// heuristics applied while checking the DAG
 pub struct DagCheck<'a> {
+    /// set of APIs (identified by client package name) that we propose should
+    /// be server-managed, along with a list of reasons why we think so
     proposed_server_managed: BTreeMap<&'a ClientPackageName, Vec<String>>,
+    /// set of APIs (identified by client package name) that we propose should
+    /// be client-managed, along with a list of reasons why we think so
     proposed_client_managed: BTreeMap<&'a ClientPackageName, Vec<String>>,
+    /// set of pairs of APIs where we propose that the user must pick one
+    /// package in each pair to be client-managed (because the two packages have
+    /// a mutual dependency)
+    ///
+    /// The ordering in these pairs is not semantically significant.  The
+    /// implementation will ensure that each pair of packages is represented at
+    /// most once in this structure.
     proposed_upick:
         BTreeMap<&'a ClientPackageName, BTreeSet<&'a ClientPackageName>>,
 }
