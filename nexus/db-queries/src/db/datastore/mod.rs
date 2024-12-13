@@ -328,7 +328,7 @@ impl DataStore {
     }
 
     /// Returns a connection to a connection from the database connection pool.
-    pub(super) async fn pool_connection_authorized(
+    pub async fn pool_connection_authorized(
         &self,
         opctx: &OpContext,
     ) -> Result<DataStoreConnection, Error> {
