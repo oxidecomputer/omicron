@@ -1000,15 +1000,6 @@ impl StorageManager {
             return Ok(false);
         };
 
-        let old_props = match SharedDatasetConfig::try_from(old_dataset) {
-            Ok(old_props) => old_props,
-            Err(err) => {
-                warn!(log, "Failed to parse old properties"; "err" => ?err);
-                return Ok(false);
-            }
-        };
-
-        info!(log, "Parsed old dataset properties"; "props" => ?old_props);
         if old_id != config.id {
             return Err(Error::UuidMismatch {
                 name: config.name.full_name(),
@@ -1016,6 +1007,16 @@ impl StorageManager {
                 new: config.id.into_untyped_uuid(),
             });
         }
+
+        let old_props = match SharedDatasetConfig::try_from(old_dataset) {
+            Ok(old_props) => old_props,
+            Err(err) => {
+                warn!(log, "Failed to parse old properties"; "err" => #%err);
+                return Ok(false);
+            }
+        };
+
+        info!(log, "Parsed old dataset properties"; "props" => ?old_props);
         if old_props != config.inner {
             info!(
                 log,
