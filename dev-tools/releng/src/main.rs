@@ -308,6 +308,15 @@ async fn main() -> Result<()> {
             .ensure_success(&logger)
             .await?;
     }
+
+    // Use the correct version for Release V12:
+    Command::new(&args.git_bin)
+        .arg("-C")
+        .arg(&args.helios_dir)
+        .args(["reset", "--hard", "53bc8bcccb29641cca9248dac64ce901acb8732b"])
+        .ensure_success(&logger)
+        .await?;
+
     // Record the branch and commit in the output
     Command::new(&args.git_bin)
         .arg("-C")
@@ -512,6 +521,8 @@ async fn main() -> Result<()> {
             .arg(args.output_dir.join(format!("os-{}", target)))
             .arg("-F") // pass extra image builder features
             .arg(format!("optever={}", opte_version.trim()))
+            .arg("-F") // lock packages to versions expected for the release
+            .arg("extra_packages+=/consolidation/oxide/omicron-release-incorporation@12")
             .arg("-P") // include all files from extra proto area
             .arg(proto_dir.join("root"))
             .arg("-N") // image name
