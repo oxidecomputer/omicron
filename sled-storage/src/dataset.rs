@@ -269,6 +269,7 @@ pub(crate) async fn ensure_zpool_has_datasets(
             Some(encryption_details),
             None,
             None,
+            None,
         );
 
         keyfile.zero_and_unlink().await.map_err(|error| {
@@ -330,6 +331,7 @@ pub(crate) async fn ensure_zpool_has_datasets(
             do_format,
             encryption_details,
             size_details,
+            None,
             None,
         )?;
 

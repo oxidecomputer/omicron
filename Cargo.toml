@@ -108,6 +108,7 @@ members = [
     "sled-agent/bootstrap-agent-api",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
+    "sled-diagnostics",
     "sled-hardware",
     "sled-hardware/types",
     "sled-storage",
@@ -240,6 +241,7 @@ default-members = [
     "sled-agent/bootstrap-agent-api",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
+    "sled-diagnostics",
     "sled-hardware",
     "sled-hardware/types",
     "sled-storage",
@@ -361,7 +363,7 @@ derive_more = "0.99.18"
 derive-where = "1.2.7"
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
 diesel = { version = "2.2.4", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
-diesel-dtrace = "0.4.0"
+diesel-dtrace = "0.4.2"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
@@ -596,6 +598,7 @@ sled = "=0.34.7"
 sled-agent-api = { path = "sled-agent/api" }
 sled-agent-client = { path = "clients/sled-agent-client" }
 sled-agent-types = { path = "sled-agent/types" }
+sled-diagnostics = { path = "sled-diagnostics" }
 sled-hardware = { path = "sled-hardware" }
 sled-hardware-types = { path = "sled-hardware/types" }
 sled-storage = { path = "sled-storage" }

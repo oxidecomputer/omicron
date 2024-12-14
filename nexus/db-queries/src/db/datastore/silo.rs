@@ -24,7 +24,6 @@ use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
 use crate::db::pool::DbConnection;
-use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -227,9 +226,9 @@ impl DataStore {
 
         // This method uses nested transactions, which are not supported
         // with retryable transactions.
-        #[allow(clippy::disallowed_methods)]
-        let silo = conn
-            .transaction_async(|conn| async move {
+        let silo = self
+            .transaction_non_retry_wrapper("silo_create")
+            .transaction(&conn, |conn| async move {
                 let silo = silo_create_query
                     .get_result_async(&conn)
                     .await
@@ -429,48 +428,49 @@ impl DataStore {
 
         // This method uses nested transactions, which are not supported
         // with retryable transactions.
-        #[allow(clippy::disallowed_methods)]
-        conn.transaction_async(|conn| async move {
-            let updated_rows = diesel::update(silo::dsl::silo)
-                .filter(silo::dsl::time_deleted.is_null())
-                .filter(silo::dsl::id.eq(id))
-                .filter(silo::dsl::rcgen.eq(rcgen))
-                .set(silo::dsl::time_deleted.eq(now))
-                .execute_async(&conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(
-                        e,
-                        ErrorHandler::NotFoundByResource(authz_silo),
-                    )
-                })?;
+        self.transaction_non_retry_wrapper("silo_delete")
+            .transaction(&conn, |conn| async move {
+                let updated_rows = diesel::update(silo::dsl::silo)
+                    .filter(silo::dsl::time_deleted.is_null())
+                    .filter(silo::dsl::id.eq(id))
+                    .filter(silo::dsl::rcgen.eq(rcgen))
+                    .set(silo::dsl::time_deleted.eq(now))
+                    .execute_async(&conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(
+                            e,
+                            ErrorHandler::NotFoundByResource(authz_silo),
+                        )
+                    })?;
 
-            if updated_rows == 0 {
-                return Err(TxnError::CustomError(Error::invalid_request(
-                    "silo deletion failed due to concurrent modification",
-                )));
-            }
+                if updated_rows == 0 {
+                    return Err(TxnError::CustomError(Error::invalid_request(
+                        "silo deletion failed due to concurrent modification",
+                    )));
+                }
 
-            self.silo_quotas_delete(opctx, &conn, &authz_silo).await?;
+                self.silo_quotas_delete(opctx, &conn, &authz_silo).await?;
 
-            self.virtual_provisioning_collection_delete_on_connection(
-                &opctx.log, &conn, id,
-            )
-            .await?;
+                self.virtual_provisioning_collection_delete_on_connection(
+                    &opctx.log, &conn, id,
+                )
+                .await?;
 
-            self.dns_update_incremental(dns_opctx, &conn, dns_update).await?;
+                self.dns_update_incremental(dns_opctx, &conn, dns_update)
+                    .await?;
 
-            info!(opctx.log, "deleted silo {}", id);
+                info!(opctx.log, "deleted silo {}", id);
 
-            Ok(())
-        })
-        .await
-        .map_err(|e| match e {
-            TxnError::CustomError(e) => e,
-            TxnError::Database(e) => {
-                public_error_from_diesel(e, ErrorHandler::Server)
-            }
-        })?;
+                Ok(())
+            })
+            .await
+            .map_err(|e| match e {
+                TxnError::CustomError(e) => e,
+                TxnError::Database(e) => {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })?;
 
         // TODO-correctness This needs to happen in a saga or some other
         // mechanism that ensures it happens even if we crash at this point.
