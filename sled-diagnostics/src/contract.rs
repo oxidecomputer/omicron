@@ -1,3 +1,9 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+// ! Bindings to libcontract(3lib).
+
 use fs_err as fs;
 use libc::{c_char, c_int, c_void, pid_t};
 use slog::{warn, Logger};
