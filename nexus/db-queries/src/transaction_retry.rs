@@ -106,9 +106,15 @@ impl RetryHelper {
             + Send
             + Sync,
     {
+        crate::probes::transaction__start!(|| {
+            (conn.as_sync_conn().id(), self.name)
+        });
         let result = conn
             .transaction_async_with_retry(f, || self.retry_callback())
             .await;
+        crate::probes::transaction__done!(|| {
+            (conn.as_sync_conn().id(), self.name)
+        });
 
         let retry_info = self.inner.lock().unwrap();
         if retry_info.has_retried() {
@@ -176,6 +182,48 @@ impl oximeter::Producer for Producer {
     ) -> Result<Box<dyn Iterator<Item = Sample> + 'static>, MetricsError> {
         let samples = std::mem::take(&mut *self.samples.lock().unwrap());
         Ok(Box::new(samples.into_iter()))
+    }
+}
+
+/// Helper utility to have a similar interface to RetryHelper (also emitting
+/// probes) but for non-retryable transactions.
+pub struct NonRetryHelper {
+    log: Logger,
+    name: &'static str,
+}
+
+impl NonRetryHelper {
+    pub(crate) fn new(log: &Logger, name: &'static str) -> Self {
+        Self { log: log.new(o!("transaction" => name)), name }
+    }
+
+    /// Calls the function "f" in an asynchronous, non-retryable transaction.
+    pub async fn transaction<R, E, Func, Fut>(
+        self,
+        conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
+        f: Func,
+    ) -> Result<R, E>
+    where
+        R: Send + 'static,
+        E: From<DieselError> + std::fmt::Debug + Send + 'static,
+        Fut: std::future::Future<Output = Result<R, E>> + Send,
+        Func: FnOnce(async_bb8_diesel::Connection<crate::db::DbConnection>) -> Fut
+            + Send
+            + Sync,
+    {
+        crate::probes::transaction__start!(|| {
+            (conn.as_sync_conn().id(), self.name)
+        });
+
+        #[allow(clippy::disallowed_methods)]
+        let result = conn.transaction_async(f).await;
+        crate::probes::transaction__done!(|| {
+            (conn.as_sync_conn().id(), self.name)
+        });
+        if let Err(err) = result.as_ref() {
+            warn!(self.log, "Non-retryable transaction failure"; "err" => ?err);
+        }
+        result
     }
 }
 
