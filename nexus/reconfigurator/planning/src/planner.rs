@@ -1841,15 +1841,12 @@ mod test {
         let test_transient_zone_kind = DatasetKind::TransientZone {
             name: "some-crucible-zone-name".to_string(),
         };
-        let mut expected_kinds = BTreeSet::from_iter(
-            [
-                DatasetKind::Crucible,
-                DatasetKind::Debug,
-                DatasetKind::TransientZoneRoot,
-                test_transient_zone_kind.clone(),
-            ]
-            .into_iter(),
-        );
+        let mut expected_kinds = BTreeSet::from_iter([
+            DatasetKind::Crucible,
+            DatasetKind::Debug,
+            DatasetKind::TransientZoneRoot,
+            test_transient_zone_kind.clone(),
+        ]);
         for modified in
             &diff.datasets.modified.first_key_value().unwrap().1.datasets
         {
@@ -1861,9 +1858,7 @@ mod test {
                 modified.after.disposition,
                 BlueprintDatasetDisposition::Expunged
             );
-            if let &DatasetKind::TransientZone { ref name } =
-                &modified.before.kind
-            {
+            if let DatasetKind::TransientZone { name } = &modified.before.kind {
                 assert!(name.starts_with("oxz_crucible"));
                 assert!(expected_kinds.remove(&test_transient_zone_kind));
             } else {
