@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! Allocator for zone underlay IP addresses with a single sled's subnet.
+
 use ipnet::IpAdd;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::address::get_sled_address;
