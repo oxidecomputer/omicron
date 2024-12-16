@@ -19,10 +19,6 @@ use crate::params::OmicronZoneTypeExt;
 use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::StorageMonitorHandle;
-use crate::support_bundle::queries::{
-    dladm_info, ipadm_info, zoneadm_info, SupportBundleCmdError,
-    SupportBundleCmdOutput,
-};
 use crate::support_bundle::storage::SupportBundleManager;
 use crate::updates::{ConfigUpdates, UpdateManager};
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
@@ -76,6 +72,7 @@ use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     PriorityOrder, StorageLimit, ZoneBundleMetadata,
 };
+use sled_diagnostics::{SledDiagnosticsCmdError, SledDiagnosticsCmdOutput};
 use sled_hardware::{underlay, HardwareManager};
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_hardware_types::Baseboard;
@@ -1367,20 +1364,38 @@ impl SledAgent {
 
     pub(crate) async fn support_zoneadm_info(
         &self,
-    ) -> Result<SupportBundleCmdOutput, SupportBundleCmdError> {
-        zoneadm_info().await
+    ) -> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
+        sled_diagnostics::zoneadm_info().await
     }
 
     pub(crate) async fn support_ipadm_info(
         &self,
-    ) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
-        ipadm_info().await
+    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+        sled_diagnostics::ipadm_info().await
     }
 
     pub(crate) async fn support_dladm_info(
         &self,
-    ) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
-        dladm_info().await
+    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+        sled_diagnostics::dladm_info().await
+    }
+
+    pub(crate) async fn support_pargs_info(
+        &self,
+    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+        sled_diagnostics::pargs_oxide_processes(&self.log).await
+    }
+
+    pub(crate) async fn support_pstack_info(
+        &self,
+    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+        sled_diagnostics::pstack_oxide_processes(&self.log).await
+    }
+
+    pub(crate) async fn support_pfiles_info(
+        &self,
+    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+        sled_diagnostics::pfiles_oxide_processes(&self.log).await
     }
 }
 

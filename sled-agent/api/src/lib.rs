@@ -54,6 +54,7 @@ use sled_agent_types::{
         ZoneBundleId, ZoneBundleMetadata,
     },
 };
+use sled_diagnostics::SledDiagnosticsQueryOutput;
 use uuid::Uuid;
 
 #[dropshot::api_description]
@@ -592,7 +593,7 @@ pub trait SledAgentApi {
     }]
     async fn support_zoneadm_info(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<FreeformBody>, HttpError>;
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError>;
 
     #[endpoint {
         method = GET,
@@ -600,7 +601,7 @@ pub trait SledAgentApi {
     }]
     async fn support_ipadm_info(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<FreeformBody>, HttpError>;
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
 
     #[endpoint {
         method = GET,
@@ -608,7 +609,31 @@ pub trait SledAgentApi {
     }]
     async fn support_dladm_info(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<FreeformBody>, HttpError>;
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/pargs-info",
+    }]
+    async fn support_pargs_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/pstack-info",
+    }]
+    async fn support_pstack_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/pfiles-info",
+    }]
+    async fn support_pfiles_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]

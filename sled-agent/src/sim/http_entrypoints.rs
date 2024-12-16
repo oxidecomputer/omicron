@@ -58,6 +58,7 @@ use sled_agent_types::zone_bundle::CleanupContext;
 use sled_agent_types::zone_bundle::CleanupCount;
 use sled_agent_types::zone_bundle::ZoneBundleId;
 use sled_agent_types::zone_bundle::ZoneBundleMetadata;
+use sled_diagnostics::SledDiagnosticsQueryOutput;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -638,19 +639,42 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_zoneadm_info(
         _request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
         method_unimplemented()
     }
 
     async fn support_ipadm_info(
         _request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
         method_unimplemented()
     }
 
     async fn support_dladm_info(
         _request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
+        method_unimplemented()
+    }
+
+    async fn support_pargs_info(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
+        method_unimplemented()
+    }
+
+    async fn support_pstack_info(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
+        method_unimplemented()
+    }
+
+    async fn support_pfiles_info(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
         method_unimplemented()
     }
 }
