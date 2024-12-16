@@ -51,7 +51,7 @@ impl SupportBundleState {
             Destroying => vec![Active, Collecting, Failing],
             Failing => vec![Collecting, Active],
             // The "Failed" state is terminal.
-            Failed => vec![Collecting, Active, Failing],
+            Failed => vec![Active, Collecting, Failing],
         }
     }
 }
@@ -69,8 +69,9 @@ impl From<SupportBundleState> for SupportBundleStateView {
             // whether or not the bundle record can be safely deleted.
             //
             // Either way, it should be possible to delete the bundle.
+            // If a user requests that we delete a bundle in these states:
             // - "Failing" bundles will become "Destroying"
-            // - "Failed" bundles will be destroyed immediately
+            // - "Failed" bundles can be deleted immediately
             Failing => SupportBundleStateView::Failed,
             Failed => SupportBundleStateView::Failed,
         }

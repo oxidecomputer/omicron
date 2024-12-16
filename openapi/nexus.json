@@ -390,7 +390,7 @@
         "tags": [
           "hidden"
         ],
-        "summary": "View a single support bundle",
+        "summary": "View a support bundle",
         "operationId": "support_bundle_view",
         "parameters": [
           {
@@ -460,7 +460,7 @@
         "tags": [
           "hidden"
         ],
-        "summary": "Download the contents of a single support bundle",
+        "summary": "Download the contents of a support bundle",
         "operationId": "support_bundle_download",
         "parameters": [
           {
@@ -474,16 +474,6 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SupportBundleGetQueryParams"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "default": {
             "description": "",
@@ -499,7 +489,7 @@
         "tags": [
           "hidden"
         ],
-        "summary": "Download the metadata of a single support bundle",
+        "summary": "Download the metadata of a support bundle",
         "operationId": "support_bundle_head",
         "parameters": [
           {
@@ -513,16 +503,115 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SupportBundleGetQueryParams"
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
               }
             }
+          }
+        }
+      }
+    },
+    "/experimental/v1/system/support-bundles/{support_bundle}/download/{file}": {
+      "get": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Download a file within a support bundle",
+        "operationId": "support_bundle_download_file",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file",
+            "description": "The file within the bundle to download",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           },
-          "required": true
-        },
+          {
+            "in": "path",
+            "name": "support_bundle",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Download the metadata of a file within the support bundle",
+        "operationId": "support_bundle_head_file",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file",
+            "description": "The file within the bundle to download",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "support_bundle",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/experimental/v1/system/support-bundles/{support_bundle}/index": {
+      "get": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Download the index of a support bundle",
+        "operationId": "support_bundle_index",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "support_bundle",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "default": {
             "description": "",
@@ -20293,18 +20382,6 @@
           "items"
         ]
       },
-      "SupportBundleGetQueryParams": {
-        "description": "Query parameters for reading the support bundle",
-        "type": "object",
-        "properties": {
-          "query_type": {
-            "$ref": "#/components/schemas/SupportBundleQueryType"
-          }
-        },
-        "required": [
-          "query_type"
-        ]
-      },
       "SupportBundleInfo": {
         "type": "object",
         "properties": {
@@ -20352,60 +20429,6 @@
         },
         "required": [
           "items"
-        ]
-      },
-      "SupportBundleQueryType": {
-        "description": "Describes the type of access to the support bundle",
-        "oneOf": [
-          {
-            "description": "Access the whole support bundle",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "whole"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "description": "Access the names of all files within the support bundle",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "index"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "description": "Access a specific file within the support bundle",
-            "type": "object",
-            "properties": {
-              "file_path": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "path"
-                ]
-              }
-            },
-            "required": [
-              "file_path",
-              "type"
-            ]
-          }
         ]
       },
       "SupportBundleState": {

@@ -2793,7 +2793,7 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<shared::SupportBundleInfo>>, HttpError>;
 
-    /// View a single support bundle
+    /// View a support bundle
     #[endpoint {
         method = GET,
         path = "/experimental/v1/system/support-bundles/{support_bundle}",
@@ -2804,7 +2804,18 @@ pub trait NexusExternalApi {
         path_params: Path<params::SupportBundlePath>,
     ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError>;
 
-    /// Download the contents of a single support bundle
+    /// Download the index of a support bundle
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/system/support-bundles/{support_bundle}/index",
+        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+    }]
+    async fn support_bundle_index(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Download the contents of a support bundle
     #[endpoint {
         method = GET,
         path = "/experimental/v1/system/support-bundles/{support_bundle}/download",
@@ -2813,10 +2824,20 @@ pub trait NexusExternalApi {
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SupportBundlePath>,
-        body: TypedBody<SupportBundleGetQueryParams>,
     ) -> Result<Response<Body>, HttpError>;
 
-    /// Download the metadata of a single support bundle
+    /// Download a file within a support bundle
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/system/support-bundles/{support_bundle}/download/{file}",
+        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+    }]
+    async fn support_bundle_download_file(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundleFilePath>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Download the metadata of a support bundle
     #[endpoint {
         method = HEAD,
         path = "/experimental/v1/system/support-bundles/{support_bundle}/download",
@@ -2825,7 +2846,17 @@ pub trait NexusExternalApi {
     async fn support_bundle_head(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SupportBundlePath>,
-        body: TypedBody<SupportBundleGetQueryParams>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Download the metadata of a file within the support bundle
+    #[endpoint {
+        method = HEAD,
+        path = "/experimental/v1/system/support-bundles/{support_bundle}/download/{file}",
+        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+    }]
+    async fn support_bundle_head_file(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundleFilePath>,
     ) -> Result<Response<Body>, HttpError>;
 
     /// Create a new support bundle
