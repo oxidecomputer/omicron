@@ -54,13 +54,7 @@ external_dns_servers = ["1.1.1.1", "9.9.9.9"]
 # This config file uses 12222 to avoid colliding with the usual 12220 that's
 # used by `omicron-dev run-all`
 bind_address = "127.0.0.1:12222"
-# Allow large request bodies to support uploading TUF archives. The number here
-# is picked based on the typical size for tuf-mupdate.zip as of 2024-01
-# (~1.5GiB) and multiplying it by 2.
-#
-# This should be brought back down to a more reasonable value once per-endpoint
-# request body limits are implemented.
-default_request_body_max_bytes = 3221225472
+default_request_body_max_bytes = 1048576
 # To have Nexus's external HTTP endpoint use TLS, uncomment the line below.  You
 # will also need to provide an initial TLS certificate during rack
 # initialization.  If you're using this config file, you're probably running a

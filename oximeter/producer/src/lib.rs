@@ -94,7 +94,7 @@ pub struct Config {
     /// configured.
     pub registration_address: Option<SocketAddr>,
     /// The maximum size of Dropshot requests.
-    pub request_body_max_bytes: usize,
+    pub default_request_body_max_bytes: usize,
     /// The logging configuration or actual logger used to emit logs.
     pub log: LogConfig,
 }
@@ -132,7 +132,7 @@ impl Server {
             registry,
             config.server_info,
             config.registration_address.as_ref(),
-            config.request_body_max_bytes,
+            config.default_request_body_max_bytes,
             &config.log,
         )
     }
@@ -205,7 +205,7 @@ impl Server {
         registry: ProducerRegistry,
         mut server_info: ProducerEndpoint,
         registration_address: Option<&SocketAddr>,
-        request_body_max_bytes: usize,
+        default_request_body_max_bytes: usize,
         log: &LogConfig,
     ) -> Result<Self, Error> {
         if registry.producer_id() != server_info.id {
@@ -216,7 +216,7 @@ impl Server {
         let log = Self::build_logger(log)?;
         let dropshot = ConfigDropshot {
             bind_address: server_info.address,
-            default_request_body_max_bytes: request_body_max_bytes,
+            default_request_body_max_bytes,
             default_handler_task_mode: dropshot::HandlerTaskMode::Detached,
             log_headers: vec![],
         };
@@ -535,7 +535,7 @@ mod tests {
                 interval: Duration::from_secs(10),
             },
             registration_address: Some(fake_nexus.local_addr()),
-            request_body_max_bytes: 1024,
+            default_request_body_max_bytes: 1024,
             log: LogConfig::Logger(log),
         };
 

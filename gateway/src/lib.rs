@@ -64,7 +64,7 @@ pub struct Server {
     /// collection of `wait_for_shutdown` futures for each server inserted into
     /// `http_servers`
     all_servers_shutdown: FuturesUnordered<ShutdownWaitFuture>,
-    request_body_max_bytes: usize,
+    default_request_body_max_bytes: usize,
     /// handle to the SP sensor metrics subsystem
     metrics: metrics::Metrics,
     log: Logger,
@@ -82,7 +82,7 @@ pub struct Server {
 fn start_dropshot_server(
     apictx: &Arc<ServerContext>,
     addr: SocketAddrV6,
-    request_body_max_bytes: usize,
+    default_request_body_max_bytes: usize,
     http_servers: &mut HashMap<SocketAddrV6, HttpServer>,
     all_servers_shutdown: &FuturesUnordered<ShutdownWaitFuture>,
     log: &Logger,
@@ -91,7 +91,7 @@ fn start_dropshot_server(
         Entry::Vacant(slot) => {
             let dropshot = ConfigDropshot {
                 bind_address: SocketAddr::V6(addr),
-                default_request_body_max_bytes: request_body_max_bytes,
+                default_request_body_max_bytes,
                 default_handler_task_mode: HandlerTaskMode::Detached,
                 log_headers: vec![],
             };
@@ -168,7 +168,7 @@ impl Server {
             start_dropshot_server(
                 &apictx,
                 addr,
-                config.dropshot.request_body_max_bytes,
+                config.dropshot.default_request_body_max_bytes,
                 &mut http_servers,
                 &all_servers_shutdown,
                 &log,
@@ -179,7 +179,9 @@ impl Server {
             apictx,
             http_servers,
             all_servers_shutdown,
-            request_body_max_bytes: config.dropshot.request_body_max_bytes,
+            default_request_body_max_bytes: config
+                .dropshot
+                .default_request_body_max_bytes,
             metrics,
             log,
         })
@@ -267,7 +269,7 @@ impl Server {
                 start_dropshot_server(
                     &self.apictx,
                     addr,
-                    self.request_body_max_bytes,
+                    self.default_request_body_max_bytes,
                     &mut http_servers,
                     &self.all_servers_shutdown,
                     &self.log,

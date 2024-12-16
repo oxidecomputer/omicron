@@ -1617,7 +1617,7 @@ pub fn start_producer_server(
     let config = oximeter_producer::Config {
         server_info,
         registration_address: Some(nexus_address),
-        request_body_max_bytes: 1024,
+        default_request_body_max_bytes: 1024,
         log: LogConfig::Config(ConfigLogging::StderrTerminal {
             level: ConfigLoggingLevel::Error,
         }),
