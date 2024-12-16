@@ -95,7 +95,15 @@ impl SledUnderlayIpAllocator {
     ) -> Result<(), SledUnderlayIpOutOfRange> {
         // We intentionally ignore any internal DNS underlay IPs; they live
         // outside the sled subnet and are allocated separately.
-        if zone_kind == ZoneKind::InternalDns {
+        //
+        // Also ignore `::1` and IPv6-mapped `127.0.0.1`, as they are used by
+        // the test suite. (Ideally we'd gate the localhost checks behind
+        // `#[cfg(test)]`, but that only works if _this_ crate is compiled in
+        // test mode. Checking for localhost in production should be harmless.)
+        if zone_kind == ZoneKind::InternalDns
+            || ip.is_loopback()
+            || ip.to_ipv4_mapped().map_or(false, |ip| ip.is_loopback())
+        {
             return Ok(());
         }
 
