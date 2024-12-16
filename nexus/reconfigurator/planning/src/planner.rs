@@ -797,6 +797,7 @@ mod test {
     use chrono::Utc;
     use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
     use clickhouse_admin_types::KeeperId;
+    use diffus::Diffable;
     use expectorate::assert_contents;
     use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_types::deployment::blueprint_zone_type;
@@ -909,6 +910,12 @@ mod test {
             "2 -> 3 (expect new NTP zone on new sled):\n{}",
             diff.display()
         );
+        let diffus_diff = blueprint3.diff(&blueprint2);
+        println!("_______DIFFUS __________\n");
+        let change = diffus_diff.change();
+        println!("{:#?}", diffus_diff);
+        println!("{:#?}", change);
+        println!("________DIFFUS __________\n");
         assert_contents(
             "tests/output/planner_basic_add_sled_2_3.txt",
             &diff.display().to_string(),

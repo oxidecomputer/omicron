@@ -8,6 +8,7 @@ use crate::{
     address::NUM_SOURCE_NAT_PORTS,
     api::external::{self, BfdMode, ImportExportPolicy, Name, Vni},
 };
+use diffus::Diffus;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
@@ -35,6 +36,7 @@ use super::nexus::HostIdentifier;
     Serialize,
     JsonSchema,
     Hash,
+    Diffus,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum NetworkInterfaceKind {
@@ -48,7 +50,15 @@ pub enum NetworkInterfaceKind {
 
 /// Information required to construct a virtual network interface
 #[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    Diffus,
 )]
 pub struct NetworkInterface {
     pub id: Uuid,
@@ -68,7 +78,9 @@ pub struct NetworkInterface {
 /// outbound network connections from guests or services.
 // Note that `Deserialize` is manually implemented; if you make any changes to
 // the fields of this structure, you must make them to that implementation too.
-#[derive(Debug, Clone, Copy, Serialize, JsonSchema, PartialEq, Eq, Hash)]
+#[derive(
+    Debug, Clone, Copy, Serialize, JsonSchema, PartialEq, Eq, Hash, Diffus,
+)]
 pub struct SourceNatConfig {
     /// The external address provided to the instance or service.
     pub ip: IpAddr,
@@ -871,7 +883,9 @@ pub struct ExternalIpGatewayMap {
 }
 
 /// Describes the purpose of the dataset.
-#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, EnumCount)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, EnumCount, Diffus,
+)]
 #[cfg_attr(feature = "testing", derive(test_strategy::Arbitrary))]
 pub enum DatasetKind {
     // Durable datasets for zones
