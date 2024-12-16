@@ -279,22 +279,17 @@ fn ensure_zfs_key_directory_exists(log: &Logger) -> Result<(), StartError> {
 }
 
 fn ensure_zfs_ramdisk_dataset() -> Result<(), StartError> {
-    let zoned = false;
-    let do_format = true;
-    let encryption_details = None;
-    let quota = None;
-    Zfs::ensure_filesystem(
-        zfs::ZONE_ZFS_RAMDISK_DATASET,
-        zfs::Mountpoint::Path(Utf8PathBuf::from(
+    Zfs::ensure_dataset(zfs::DatasetEnsureArgs {
+        name: zfs::ZONE_ZFS_RAMDISK_DATASET,
+        mountpoint: zfs::Mountpoint::Path(Utf8PathBuf::from(
             zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT,
         )),
-        zoned,
-        do_format,
-        encryption_details,
-        quota,
-        None,
-        None,
-    )
+        zoned: false,
+        encryption_details: None,
+        size_details: None,
+        id: None,
+        additional_options: None,
+    })
     .map_err(StartError::EnsureZfsRamdiskDataset)
 }
 
