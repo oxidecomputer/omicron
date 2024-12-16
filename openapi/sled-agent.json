@@ -785,59 +785,6 @@
       }
     },
     "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}": {
-      "get": {
-        "summary": "Fetch a support bundle from a particular dataset",
-        "operationId": "support_bundle_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "dataset_id",
-            "description": "The dataset on which this support bundle was provisioned",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
-            }
-          },
-          {
-            "in": "path",
-            "name": "support_bundle_id",
-            "description": "The ID of the support bundle itself",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
-            }
-          },
-          {
-            "in": "path",
-            "name": "zpool_id",
-            "description": "The zpool on which this support bundle was provisioned",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SupportBundleGetQueryParams"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "default": {
-            "description": "",
-            "content": {
-              "*/*": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      },
       "post": {
         "summary": "Create a support bundle within a particular dataset",
         "operationId": "support_bundle_create",
@@ -952,6 +899,51 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/download": {
+      "get": {
+        "summary": "Fetch a support bundle from a particular dataset",
+        "operationId": "support_bundle_download",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "description": "The dataset on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "support_bundle_id",
+            "description": "The ID of the support bundle itself",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "zpool_id",
+            "description": "The zpool on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
       },
       "head": {
         "summary": "Fetch a support bundle from a particular dataset",
@@ -985,16 +977,148 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SupportBundleGetQueryParams"
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
               }
             }
+          }
+        }
+      }
+    },
+    "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/download/{file}": {
+      "get": {
+        "summary": "Fetch a file within a support bundle from a particular dataset",
+        "operationId": "support_bundle_download_file",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "description": "The dataset on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+            }
           },
-          "required": true
-        },
+          {
+            "in": "path",
+            "name": "file",
+            "description": "The path of the file within the support bundle to query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "support_bundle_id",
+            "description": "The ID of the support bundle itself",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "zpool_id",
+            "description": "The zpool on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/index": {
+      "get": {
+        "summary": "Fetch the index (list of files within a support bundle)",
+        "operationId": "support_bundle_index",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "description": "The dataset on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "support_bundle_id",
+            "description": "The ID of the support bundle itself",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "zpool_id",
+            "description": "The zpool on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "summary": "Fetch a file within a support bundle from a particular dataset",
+        "operationId": "support_bundle_head_index",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "description": "The dataset on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "support_bundle_id",
+            "description": "The ID of the support bundle itself",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "zpool_id",
+            "description": "The zpool on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+            }
+          }
+        ],
         "responses": {
           "default": {
             "description": "",
@@ -5613,18 +5737,6 @@
         "format": "uint8",
         "minimum": 0
       },
-      "SupportBundleGetQueryParams": {
-        "description": "Query parameters for reading the support bundle",
-        "type": "object",
-        "properties": {
-          "query_type": {
-            "$ref": "#/components/schemas/SupportBundleQueryType"
-          }
-        },
-        "required": [
-          "query_type"
-        ]
-      },
       "SupportBundleMetadata": {
         "description": "Metadata about a support bundle",
         "type": "object",
@@ -5639,60 +5751,6 @@
         "required": [
           "state",
           "support_bundle_id"
-        ]
-      },
-      "SupportBundleQueryType": {
-        "description": "Describes the type of access to the support bundle",
-        "oneOf": [
-          {
-            "description": "Access the whole support bundle",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "whole"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "description": "Access the names of all files within the support bundle",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "index"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "description": "Access a specific file within the support bundle",
-            "type": "object",
-            "properties": {
-              "file_path": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "path"
-                ]
-              }
-            },
-            "required": [
-              "file_path",
-              "type"
-            ]
-          }
         ]
       },
       "SupportBundleState": {

@@ -438,10 +438,9 @@ impl SledAgentApi for SledAgentSimImpl {
         ))
     }
 
-    async fn support_bundle_get(
+    async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePathParam>,
-        _body: TypedBody<SupportBundleGetQueryParams>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
@@ -458,10 +457,71 @@ impl SledAgentApi for SledAgentSimImpl {
             .unwrap())
     }
 
+    async fn support_bundle_download_file(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundleFilePathParam>,
+    ) -> Result<http::Response<dropshot::Body>, HttpError> {
+        let sa = rqctx.context();
+        let SupportBundleFilePathParam {
+            parent:
+                SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id },
+            file: _,
+        } = path_params.into_inner();
+
+        sa.support_bundle_get(zpool_id, dataset_id, support_bundle_id).await?;
+
+        Ok(http::Response::builder()
+            .status(http::StatusCode::OK)
+            .header(http::header::CONTENT_TYPE, "text/html")
+            .body(dropshot::Body::with_content(
+                "simulated support bundle file; do not eat",
+            ))
+            .unwrap())
+    }
+
+    async fn support_bundle_index(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<http::Response<dropshot::Body>, HttpError> {
+        let sa = rqctx.context();
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+
+        sa.support_bundle_get(zpool_id, dataset_id, support_bundle_id).await?;
+
+        Ok(http::Response::builder()
+            .status(http::StatusCode::OK)
+            .header(http::header::CONTENT_TYPE, "text/html")
+            .body(dropshot::Body::with_content(
+                "simulated support bundle index; do not eat",
+            ))
+            .unwrap())
+    }
+
     async fn support_bundle_head(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePathParam>,
-        _body: TypedBody<SupportBundleGetQueryParams>,
+    ) -> Result<http::Response<dropshot::Body>, HttpError> {
+        let sa = rqctx.context();
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+
+        sa.support_bundle_get(zpool_id, dataset_id, support_bundle_id).await?;
+
+        let fictional_length = 10000;
+
+        Ok(http::Response::builder()
+            .status(http::StatusCode::OK)
+            .header(http::header::CONTENT_TYPE, "text/html")
+            .header(hyper::header::ACCEPT_RANGES, "bytes")
+            .header(hyper::header::CONTENT_LENGTH, fictional_length)
+            .body(dropshot::Body::empty())
+            .unwrap())
+    }
+
+    async fn support_bundle_head_index(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
