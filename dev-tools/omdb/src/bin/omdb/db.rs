@@ -797,10 +797,21 @@ enum ValidateCommands {
     /// Validate each `volume_references` column in the region snapshots table
     ValidateVolumeReferences,
 
+    /// Find either regions Nexus knows about that the corresponding Crucible
+    /// agent says were deleted, or regions that Nexus doesn't know about.
+    ValidateRegions(ValidateRegionsArgs),
+
     /// Find either region snapshots Nexus knows about that the corresponding
     /// Crucible agent says were deleted, or region snapshots that Nexus doesn't
     /// know about.
     ValidateRegionSnapshots,
+}
+
+#[derive(Debug, Args)]
+struct ValidateRegionsArgs {
+    /// Delete Regions Nexus is unaware of
+    #[clap(long, default_value_t = false)]
+    clean_up_orphaned_regions: bool,
 }
 
 #[derive(Debug, Args)]
@@ -1093,6 +1104,15 @@ impl DbArgs {
             DbCommands::Validate(ValidateArgs {
                 command: ValidateCommands::ValidateVolumeReferences,
             }) => cmd_db_validate_volume_references(&datastore).await,
+            DbCommands::Validate(ValidateArgs {
+                command: ValidateCommands::ValidateRegions(args),
+            }) => {
+                cmd_db_validate_regions(
+                    &datastore,
+                    args.clean_up_orphaned_regions,
+                )
+                .await
+            }
             DbCommands::Validate(ValidateArgs {
                 command: ValidateCommands::ValidateRegionSnapshots,
             }) => cmd_db_validate_region_snapshots(&datastore).await,
@@ -4526,6 +4546,264 @@ async fn cmd_db_validate_volume_references(
     Ok(())
 }
 
+async fn cmd_db_validate_regions(
+    datastore: &DataStore,
+    clean_up_orphaned_regions: bool,
+) -> Result<(), anyhow::Error> {
+    // *Lifetime note*:
+    //
+    // The lifetime of the region record in cockroachdb is longer than the time
+    // the Crucible agent's region is in a non-destroyed state: Nexus will
+    // perform the query to allocate regions (inserting them into the database)
+    // before it ensures those regions are created (i.e. making the POST request
+    // to the appropriate Crucible agent to create them), and it will request
+    // that the regions be deleted (then wait for that region to transition to
+    // the destroyed state) before hard-deleting the records in the database.
+
+    // First, get all region records (with their corresponding dataset)
+    let datasets_and_regions: Vec<(Dataset, Region)> = datastore
+        .pool_connection_for_tests()
+        .await?
+        .transaction_async(|conn| async move {
+            // Selecting all datasets and regions requires a full table scan
+            conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
+            use db::schema::dataset::dsl as dataset_dsl;
+            use db::schema::region::dsl;
+
+            dsl::region
+                .inner_join(
+                    dataset_dsl::dataset
+                        .on(dsl::dataset_id.eq(dataset_dsl::id)),
+                )
+                .select((Dataset::as_select(), Region::as_select()))
+                .get_results_async(&conn)
+                .await
+        })
+        .await?;
+
+    #[derive(Tabled)]
+    struct Row {
+        dataset_id: DatasetUuid,
+        region_id: Uuid,
+        dataset_addr: std::net::SocketAddrV6,
+        error: String,
+    }
+
+    let mut rows = Vec::new();
+
+    // Reconcile with the corresponding Crucible Agent: are they aware of each
+    // region in the database?
+    for (dataset, region) in &datasets_and_regions {
+        // If the dataset was expunged, do not attempt to contact the Crucible
+        // agent!
+        let in_service =
+            datastore.dataset_physical_disk_in_service(dataset.id()).await?;
+
+        if !in_service {
+            continue;
+        }
+
+        use crucible_agent_client::types::RegionId;
+        use crucible_agent_client::types::State;
+        use crucible_agent_client::Client as CrucibleAgentClient;
+
+        let Some(dataset_addr) = dataset.address() else {
+            eprintln!("Dataset {} missing an IP address", dataset.id());
+            continue;
+        };
+
+        let url = format!("http://{}", dataset_addr);
+        let client = CrucibleAgentClient::new(&url);
+
+        let actual_region =
+            match client.region_get(&RegionId(region.id().to_string())).await {
+                Ok(region) => region.into_inner(),
+
+                Err(e) => {
+                    // Either there was a communication error, or the agent is
+                    // unaware of the Region (this would be a 404).
+                    match e {
+                        crucible_agent_client::Error::ErrorResponse(rv)
+                            if rv.status() == http::StatusCode::NOT_FOUND =>
+                        {
+                            rows.push(Row {
+                                dataset_id: dataset.id(),
+                                region_id: region.id(),
+                                dataset_addr,
+                                error: String::from(
+                                    "Agent does not know about this region!",
+                                ),
+                            });
+                        }
+
+                        _ => {
+                            eprintln!(
+                                "{} region_get {:?}: {e}",
+                                dataset_addr,
+                                region.id(),
+                            );
+                        }
+                    }
+
+                    continue;
+                }
+            };
+
+        // The Agent is aware of this region, but is it in the appropriate
+        // state?
+
+        match actual_region.state {
+            State::Destroyed => {
+                // If it is destroyed, then this is invalid as the record should
+                // be hard-deleted as well (see the lifetime note above). Note
+                // that omdb could be racing a Nexus that is performing region
+                // deletion: if the region transitioned to Destroyed but Nexus
+                // is waiting to re-poll, it will not have hard-deleted the
+                // region record yet.
+
+                rows.push(Row {
+                    dataset_id: dataset.id(),
+                    region_id: region.id(),
+                    dataset_addr,
+                    error: String::from(
+                        "region may need to be manually hard-deleted",
+                    ),
+                });
+            }
+
+            _ => {
+                // ok
+            }
+        }
+    }
+
+    // Reconcile with the Crucible agents: are there regions that Nexus does not
+    // know about? Ask each Crucible agent for its list of regions, then check
+    // in the database: if that region is _not_ in the database, then either it
+    // was never created by Nexus, or it was hard-deleted by Nexus. Either way,
+    // omdb should (if the command line argument is supplied) request that the
+    // orphaned region be deleted.
+    //
+    // Note: This should not delete what is actually a valid region, see the
+    // lifetime note above.
+
+    let mut orphaned_bytes: u64 = 0;
+
+    let db_region_ids: BTreeSet<Uuid> =
+        datasets_and_regions.iter().map(|(_, r)| r.id()).collect();
+
+    // Find all the Crucible datasets
+    let datasets: Vec<Dataset> = datastore
+        .pool_connection_for_tests()
+        .await?
+        .transaction_async(|conn| async move {
+            // Selecting all datasets and regions requires a full table scan
+            conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
+            use db::schema::dataset::dsl;
+
+            dsl::dataset
+                .filter(dsl::kind.eq(nexus_db_model::DatasetKind::Crucible))
+                .select(Dataset::as_select())
+                .get_results_async(&conn)
+                .await
+        })
+        .await?;
+
+    for dataset in &datasets {
+        // If the dataset was expunged, do not attempt to contact the Crucible
+        // agent!
+        let in_service =
+            datastore.dataset_physical_disk_in_service(dataset.id()).await?;
+
+        if !in_service {
+            continue;
+        }
+
+        use crucible_agent_client::types::State;
+        use crucible_agent_client::Client as CrucibleAgentClient;
+
+        let Some(dataset_addr) = dataset.address() else {
+            eprintln!("Dataset {} missing an IP address", dataset.id());
+            continue;
+        };
+
+        let url = format!("http://{}", dataset_addr);
+        let client = CrucibleAgentClient::new(&url);
+
+        let actual_regions = match client.region_list().await {
+            Ok(v) => v.into_inner(),
+            Err(e) => {
+                eprintln!("{} region_list: {e}", dataset_addr);
+                continue;
+            }
+        };
+
+        for actual_region in actual_regions {
+            // Skip doing anything if the region is already tombstoned or
+            // destroyed
+            match actual_region.state {
+                State::Destroyed | State::Tombstoned => {
+                    // the Crucible agent will eventually clean this up, or
+                    // already has.
+                    continue;
+                }
+
+                State::Failed | State::Requested | State::Created => {
+                    // this region needs cleaning up if there isn't an
+                    // associated db record
+                }
+            }
+
+            let actual_region_id: Uuid = actual_region.id.0.parse().unwrap();
+            if !db_region_ids.contains(&actual_region_id) {
+                orphaned_bytes += actual_region.block_size
+                    * actual_region.extent_size
+                    * u64::from(actual_region.extent_count);
+
+                if clean_up_orphaned_regions {
+                    match client.region_delete(&actual_region.id).await {
+                        Ok(_) => {
+                            eprintln!(
+                                "{} region {} deleted ok",
+                                dataset_addr, actual_region.id,
+                            );
+                        }
+
+                        Err(e) => {
+                            eprintln!(
+                                "{} region_delete {:?}: {e}",
+                                dataset_addr, actual_region.id,
+                            );
+                        }
+                    }
+                } else {
+                    // Do not delete this region, just print a row
+                    rows.push(Row {
+                        dataset_id: dataset.id(),
+                        region_id: actual_region_id,
+                        dataset_addr,
+                        error: String::from(
+                            "Nexus does not know about this region!",
+                        ),
+                    });
+                }
+            }
+        }
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .to_string();
+
+    println!("{}", table);
+
+    eprintln!("found {} orphaned bytes", orphaned_bytes);
+
+    Ok(())
+}
+
 async fn cmd_db_validate_region_snapshots(
     datastore: &DataStore,
 ) -> Result<(), anyhow::Error> {
@@ -4581,6 +4859,15 @@ async fn cmd_db_validate_region_snapshots(
             .or_default()
             .insert(region_snapshot.snapshot_id);
 
+        // If the dataset was expunged, do not attempt to contact the Crucible
+        // agent!
+        let in_service =
+            datastore.dataset_physical_disk_in_service(dataset.id()).await?;
+
+        if !in_service {
+            continue;
+        }
+
         use crucible_agent_client::types::RegionId;
         use crucible_agent_client::types::State;
         use crucible_agent_client::Client as CrucibleAgentClient;
@@ -4593,11 +4880,21 @@ async fn cmd_db_validate_region_snapshots(
         let url = format!("http://{}", dataset_addr);
         let client = CrucibleAgentClient::new(&url);
 
-        let actual_region_snapshots = client
+        let actual_region_snapshots = match client
             .region_get_snapshots(&RegionId(
                 region_snapshot.region_id.to_string(),
             ))
-            .await?;
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!(
+                    "{} region_get_snapshots {:?}: {e}",
+                    dataset_addr, region_snapshot.region_id,
+                );
+                continue;
+            }
+        };
 
         let snapshot_id = region_snapshot.snapshot_id.to_string();
 
@@ -4741,6 +5038,15 @@ async fn cmd_db_validate_region_snapshots(
     // Reconcile with the Crucible agents: are there snapshots that Nexus does
     // not know about?
     for (dataset, region) in datasets_and_regions {
+        // If the dataset was expunged, do not attempt to contact the Crucible
+        // agent!
+        let in_service =
+            datastore.dataset_physical_disk_in_service(dataset.id()).await?;
+
+        if !in_service {
+            continue;
+        }
+
         use crucible_agent_client::types::RegionId;
         use crucible_agent_client::types::State;
         use crucible_agent_client::Client as CrucibleAgentClient;
@@ -4753,9 +5059,20 @@ async fn cmd_db_validate_region_snapshots(
         let url = format!("http://{}", dataset_addr);
         let client = CrucibleAgentClient::new(&url);
 
-        let actual_region_snapshots = client
+        let actual_region_snapshots = match client
             .region_get_snapshots(&RegionId(region.id().to_string()))
-            .await?;
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!(
+                    "{} region_get_snapshots {:?}: {e}",
+                    dataset_addr,
+                    region.id(),
+                );
+                continue;
+            }
+        };
 
         let default = HashSet::default();
         let nexus_region_snapshots: &HashSet<Uuid> =
