@@ -211,7 +211,7 @@ pub trait SledAgentApi {
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<Body>, HttpError>;
 
-    /// Fetch a support bundle from a particular dataset
+    /// Fetch metadata about a support bundle from a particular dataset
     #[endpoint {
         method = HEAD,
         path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/download"
@@ -221,7 +221,17 @@ pub trait SledAgentApi {
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<Body>, HttpError>;
 
-    /// Fetch a file within a support bundle from a particular dataset
+    /// Fetch metadata about a file within a support bundle from a particular dataset
+    #[endpoint {
+        method = HEAD,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/download/{file}"
+    }]
+    async fn support_bundle_head_file(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundleFilePathParam>,
+    ) -> Result<http::Response<Body>, HttpError>;
+
+    /// Fetch metadata about the list of files within a support bundle
     #[endpoint {
         method = HEAD,
         path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/index"

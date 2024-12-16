@@ -946,7 +946,7 @@
         }
       },
       "head": {
-        "summary": "Fetch a support bundle from a particular dataset",
+        "summary": "Fetch metadata about a support bundle from a particular dataset",
         "operationId": "support_bundle_head",
         "parameters": [
           {
@@ -993,6 +993,58 @@
       "get": {
         "summary": "Fetch a file within a support bundle from a particular dataset",
         "operationId": "support_bundle_download_file",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "description": "The dataset on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file",
+            "description": "The path of the file within the support bundle to query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "support_bundle_id",
+            "description": "The ID of the support bundle itself",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "zpool_id",
+            "description": "The zpool on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "summary": "Fetch metadata about a file within a support bundle from a particular dataset",
+        "operationId": "support_bundle_head_file",
         "parameters": [
           {
             "in": "path",
@@ -1088,7 +1140,7 @@
         }
       },
       "head": {
-        "summary": "Fetch a file within a support bundle from a particular dataset",
+        "summary": "Fetch metadata about the list of files within a support bundle",
         "operationId": "support_bundle_head_index",
         "parameters": [
           {

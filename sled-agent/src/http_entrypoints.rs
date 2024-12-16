@@ -355,6 +355,30 @@ impl SledAgentApi for SledAgentImpl {
             .await?)
     }
 
+    async fn support_bundle_head_file(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundleFilePathParam>,
+    ) -> Result<http::Response<Body>, HttpError> {
+        let sa = rqctx.context();
+        let SupportBundleFilePathParam {
+            parent:
+                SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id },
+            file,
+        } = path_params.into_inner();
+
+        let range = rqctx.range();
+        Ok(sa
+            .as_support_bundle_storage()
+            .head(
+                zpool_id,
+                dataset_id,
+                support_bundle_id,
+                range,
+                SupportBundleQueryType::Path { file_path: file },
+            )
+            .await?)
+    }
+
     async fn support_bundle_head_index(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePathParam>,
