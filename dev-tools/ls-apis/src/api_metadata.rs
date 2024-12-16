@@ -108,6 +108,20 @@ impl AllApiMetadata {
 
         Ok(which_rules[0].evaluation)
     }
+
+    /// Returns the list of APIs that have non-DAG dependency rules
+    pub(crate) fn non_dag_apis(&self) -> impl Iterator<Item = &ApiMetadata> {
+        self.dependency_rules.iter().filter_map(|(client_pkgname, rules)| {
+            rules.iter().any(|r| r.evaluation == Evaluation::NonDag).then(
+                || {
+                    // unwrap(): we previously verified that the "client" for
+                    // all dependency rules corresponds to an API that we have
+                    // metadata for.
+                    self.apis.get(client_pkgname).unwrap()
+                },
+            )
+        })
+    }
 }
 
 /// Format of the `api-manifest.toml` file
@@ -186,6 +200,23 @@ impl TryFrom<RawApiMetadata> for AllApiMetadata {
     }
 }
 
+/// Describes how an API in the system manages drift between client and server
+#[derive(Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "versioned_how", content = "versioned_how_reason")]
+pub enum VersionedHow {
+    /// We have not yet determined how this API will be versioned.
+    Unknown,
+
+    /// This API will be versioned solely on the server.  (The update system
+    /// will ensure that servers are always updated before clients.)
+    Server,
+
+    /// This API will be versioned on the client.  (The update system cannot
+    /// ensure that servers are always updated before clients.)
+    Client(String),
+}
+
 /// Describes one API in the system
 #[derive(Deserialize)]
 pub struct ApiMetadata {
@@ -199,6 +230,9 @@ pub struct ApiMetadata {
     pub server_package_name: ServerPackageName,
     /// human-readable notes about this API
     pub notes: Option<String>,
+    /// describes how we've decided this API will be versioned
+    #[serde(default, flatten)]
+    pub versioned_how: VersionedHow,
     /// If `dev_only` is true, then this API's server is not deployed in a
     /// production system.  It's only used in development environments.  The
     /// default is that APIs *are* deployed.

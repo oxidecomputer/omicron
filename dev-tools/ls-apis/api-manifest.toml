@@ -132,6 +132,28 @@ packages = [ "oximeter-collector" ]
 #
 # `server_package_name`: the package that contains the Dropshot API definition.
 #
+# `versioned_how`: one of:
+#
+#   "server":  this component uses server-side versioning only, meaning that the
+#              update system can ensure that servers are always updated before
+#              clients.
+#
+#   "client":  this component uses client-side versioning, meaning that the
+#              update system cannot ensure that servers are always updated
+#              before clients, so clients need to deal with multiple different
+#              server versions.
+#
+#              You must also specify `versioned_how_reason` if you use "client".
+#
+#   "unknown": this has not been determined.  This will break tests.  But the
+#              tooling supports this value so that during development you can
+#              relax these constraints.
+#
+# [`versioned_how_reason`]: free text string explaining why `versioned_how` must
+# be "client" for this API.  This is printed in documentation and command output
+# and serves as documentation for developers to understand why we made this
+# choice.  This should be present only if `versioned_how = "client"`.
+#
 # [`notes`]: optional free-form human-readable summary documentation about this
 # API
 ################################################################################
@@ -140,11 +162,14 @@ packages = [ "oximeter-collector" ]
 client_package_name = "bootstrap-agent-client"
 label = "Bootstrap Agent"
 server_package_name = "bootstrap-agent-api"
+versioned_how = "client"
+versioned_how_reason = "depends on itself (i.e., instances call each other)"
 
 [[apis]]
 client_package_name = "clickhouse-admin-keeper-client"
 label = "Clickhouse Cluster Admin for Keepers"
 server_package_name = "clickhouse-admin-api"
+versioned_how = "server"
 notes = """
 This is the server running inside multi-node Clickhouse keeper zones that's \
 responsible for local configuration and monitoring.
@@ -154,6 +179,7 @@ responsible for local configuration and monitoring.
 client_package_name = "clickhouse-admin-server-client"
 label = "Clickhouse Cluster Admin for Servers"
 server_package_name = "clickhouse-admin-api"
+versioned_how = "server"
 notes = """
 This is the server running inside multi-node Clickhouse server zones that's \
 responsible for local configuration and monitoring.
@@ -163,6 +189,7 @@ responsible for local configuration and monitoring.
 client_package_name = "clickhouse-admin-single-client"
 label = "Clickhouse Single-Node Cluster Admin"
 server_package_name = "clickhouse-admin-api"
+versioned_how = "server"
 notes = """
 This is the server running inside single-node Clickhouse server zones that's \
 responsible for local configuration and monitoring.
@@ -172,6 +199,7 @@ responsible for local configuration and monitoring.
 client_package_name = "cockroach-admin-client"
 label = "CockroachDB Cluster Admin"
 server_package_name = "cockroach-admin-api"
+versioned_how = "server"
 notes = """
 This is the server running inside CockroachDB zones that performs \
 configuration and monitoring that requires the `cockroach` CLI.
@@ -181,11 +209,14 @@ configuration and monitoring that requires the `cockroach` CLI.
 client_package_name = "crucible-agent-client"
 label = "Crucible Agent"
 server_package_name = "crucible-agent"
+versioned_how = "server"
 
 [[apis]]
 client_package_name = "repair-client"
 label = "Crucible Repair"
 server_package_name = "crucible-downstairs"
+versioned_how = "client"
+versioned_how_reason = "depends on itself (i.e., instances call each other)"
 notes = """
 The repair service offered by a crucible-downstairs supports both repairing \
 one downstairs from another, and making a clone of a read-only downstairs \
@@ -196,11 +227,13 @@ when creating a new region in the crucible agent.
 client_package_name = "crucible-pantry-client"
 label = "Crucible Pantry"
 server_package_name = "crucible-pantry"
+versioned_how = "server"
 
 [[apis]]
 client_package_name = "ddm-admin-client"
 label = "Maghemite DDM Admin"
 server_package_name = "ddmd"
+versioned_how = "server"
 notes = """
 The `ddmd` server runs in each sled GZ and each switch zone. These daemons \
 provide an interface for advertising network prefixes, and observing what \
@@ -216,11 +249,17 @@ observability APIs in the future.
 client_package_name = "dns-service-client"
 label = "DNS Server"
 server_package_name = "dns-server-api"
+versioned_how = "server"
 
 [[apis]]
 client_package_name = "dpd-client"
 label = "Dendrite DPD"
 server_package_name = "dpd"
+# TODO We might need to pick this apart more carefully.  DPD invokes and is
+# invoked by several different services.  It's possible that some of them can
+# treat it as server-managed.
+versioned_how = "client"
+versioned_how_reason = "Sled Agent calling DPD creates a circular dependency"
 notes = """
 Dendrite's data plane daemon (`dpd`) is the interface to configure and manage \
 the rack switches. It's consumed by sled-agent to get the rack off the \
@@ -235,17 +274,29 @@ repo is not currently open source.
 client_package_name = "gateway-client"
 label = "Management Gateway Service"
 server_package_name = "gateway-api"
+versioned_how = "server"
 notes = "Wicketd is deployed in a unit with MGS so we can ignore that one."
 
 [[apis]]
 client_package_name = "installinator-client"
 label = "Wicketd Installinator"
 server_package_name = "installinator-api"
+# The installinator-client is used only by Installinator.  This is part of the
+# recovery OS image.  Today, this is not really "shipped" in the traditional
+# sense.  The only way it gets used today is by an operator uploading it to
+# Wicket and then performing a MUPdate.  In this sense, we do not control the
+# client, so we mark this client-managed -- it's up to the operator to make sure
+# they're using a TUF repo whose recovery image contains an Installinator that's
+# compatible with the API served by Wicket on the deployed system.  In practice,
+# we're almost certainly just going to avoid changing this API.
+versioned_how = "client"
+versioned_how_reason = "client is provided implicitly by the operator"
 
 [[apis]]
 client_package_name = "mg-admin-client"
 label = "Maghemite MG Admin"
 server_package_name = "mgd"
+versioned_how = "server"
 notes = """
 The `mgd` daemon runs in each switch zone. This daemon is responsible for all \
 external route management for a switch. It provides interfaces for static \
@@ -258,17 +309,25 @@ bring the rack up.
 client_package_name = "nexus-client"
 label = "Nexus Internal API"
 server_package_name = "nexus-internal-api"
+# nexus-client has to be client-versioned today because it's got a cyclic
+# dependency with sled-agent-client, which is server-versioned.
+versioned_how = "client"
+versioned_how_reason = "Circular dependencies between Nexus and other services"
 
 [[apis]]
 client_package_name = "oxide-client"
 label = "External API"
 server_package_name = "nexus-external-api"
+# The versioning strategy for the external API is outside the scope of this
+# tool.  It doesn't matter what we put here.
+versioned_how = "server"
 notes = "Special case, since we don't fully control all clients"
 
 [[apis]]
 client_package_name = "oximeter-client"
 label = "Oximeter"
 server_package_name = "oximeter-api"
+versioned_how = "server"
 notes = """
 Shared types for this interface are in `omicron-common`. The producer makes \
 requests to Nexus, and receives them from `oximeter-collector`. \
@@ -281,6 +340,7 @@ and makes the periodic renewal requests to `oximeter-collector`.
 client_package_name = "propolis-client"
 label = "Propolis"
 server_package_name = "propolis-server"
+versioned_how = "server"
 notes = """
 Sled Agent is deployed in a unit with Propolis so we can ignore that one.
 """
@@ -289,16 +349,20 @@ Sled Agent is deployed in a unit with Propolis so we can ignore that one.
 client_package_name = "sled-agent-client"
 label = "Sled Agent"
 server_package_name = "sled-agent-api"
+versioned_how = "server"
 
 [[apis]]
 client_package_name = "repo-depot-client"
 label = "Repo Depot API"
 server_package_name = "repo-depot-api"
+versioned_how = "client"
+versioned_how_reason = "depends on itself (i.e., instances call each other)"
 
 [[apis]]
 client_package_name = "wicketd-client"
 label = "Wicketd"
 server_package_name = "wicketd-api"
+versioned_how = "server"
 notes = """
 wicketd-client is only used by wicket, which is deployed in a unit with wicketd.
 """
@@ -307,6 +371,7 @@ wicketd-client is only used by wicket, which is deployed in a unit with wicketd.
 client_package_name = "crucible-control-client"
 label = "Crucible Control (for testing only)"
 server_package_name = "crucible"
+versioned_how = "server"
 notes = """
 Exposed by Crucible upstairs for debugging via the `cmon` debugging tool.
 """
@@ -315,6 +380,7 @@ Exposed by Crucible upstairs for debugging via the `cmon` debugging tool.
 client_package_name = "dsc-client"
 label = "Downstairs Controller (debugging only)"
 server_package_name = "dsc"
+versioned_how = "server"
 dev_only = true
 notes = """
 `dsc` is a control program for spinning up and controlling instances of Crucible
@@ -398,6 +464,16 @@ evaluation = "not-deployed"
 note = """
 DNS server depends on itself only to provide TransientServer, which is not a
 deployed component.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "omicron-sled-agent"
+client = "sled-agent-client"
+evaluation = "not-deployed"
+note = """
+Sled Agent uses a Sled Agent client in two ways: RSS, which we don't care about
+for the purpose of upgrade, and in the `zone-bundle` binary, which is not
+deployed.
 """
 
 #

@@ -15,5 +15,5 @@ disallowed-methods = [
     # and can fail spuriously.
     # Instead, the "transaction_retry_wrapper" should be preferred, as it
     # automatically retries transactions experiencing contention.
-    { path = "async_bb8_diesel::AsyncConnection::transaction_async", reason = "Prefer to use transaction_retry_wrapper, if possible. Feel free to override this for tests and nested transactions." },
+    { path = "async_bb8_diesel::AsyncConnection::transaction_async", reason = "Prefer to use transaction_retry_wrapper, if possible. For tests and nested transactions, use transaction_non_retry_wrapper to at least get dtrace probes" },
 ]

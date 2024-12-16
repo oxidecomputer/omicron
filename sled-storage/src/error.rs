@@ -77,6 +77,9 @@ pub enum Error {
     #[error("Not ready to manage U.2s (key manager is not ready)")]
     KeyManagerNotReady,
 
+    #[error("Physical disk configuration changed for the same generation number: {generation}")]
+    PhysicalDiskConfigurationChanged { generation: Generation },
+
     #[error("Physical disk configuration out-of-date (asked for {requested}, but latest is {current})")]
     PhysicalDiskConfigurationOutdated {
         requested: Generation,
