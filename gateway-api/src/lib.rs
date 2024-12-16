@@ -29,6 +29,9 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
+/// The host phase 2 recovery image is currently (Dec 2024) ~130 MiB.
+const HOST_PHASE2_MAX_BYTES: usize = 512 * 1024 * 1024;
+
 #[dropshot::api_description]
 pub trait GatewayApi {
     type Context;
@@ -434,6 +437,7 @@ pub trait GatewayApi {
     #[endpoint {
         method = POST,
         path = "/recovery/host-phase2",
+        request_body_max_bytes = HOST_PHASE2_MAX_BYTES,
     }]
     async fn recovery_host_phase2_upload(
         rqctx: RequestContext<Self::Context>,

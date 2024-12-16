@@ -21,6 +21,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
+const PROGRESS_REPORT_MAX_BYTES: usize = 4 * 1024 * 1024;
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ReportQuery {
     /// A unique identifier for the update.
@@ -50,6 +52,7 @@ pub trait InstallinatorApi {
     #[endpoint {
         method = POST,
         path = "/report-progress/{update_id}",
+        request_body_max_bytes = PROGRESS_REPORT_MAX_BYTES,
     }]
     async fn report_progress(
         rqctx: RequestContext<Self::Context>,
@@ -120,16 +123,7 @@ impl EventReportStatus {
 pub fn default_config(bind_address: std::net::SocketAddr) -> ConfigDropshot {
     ConfigDropshot {
         bind_address,
-        // Even though the installinator sets an upper bound on the number of
-        // items in a progress report, they can get pretty large if they
-        // haven't gone through for a bit. Ensure that hitting the max request
-        // size won't cause a failure by setting a generous upper bound for the
-        // request size.
-        //
-        // TODO: replace with an endpoint-specific option once
-        // https://github.com/oxidecomputer/dropshot/pull/618 lands and is
-        // available in omicron.
-        default_request_body_max_bytes: 4 * 1024 * 1024,
+        default_request_body_max_bytes: 1024,
         default_handler_task_mode: HandlerTaskMode::Detached,
         log_headers: vec![],
     }
