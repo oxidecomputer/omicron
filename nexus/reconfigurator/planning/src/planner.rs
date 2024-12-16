@@ -801,6 +801,7 @@ mod test {
     use expectorate::assert_contents;
     use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_types::deployment::blueprint_zone_type;
+    use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::BlueprintDiff;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneFilter;
@@ -817,6 +818,7 @@ mod test {
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external::Generation;
+    use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DiskIdentity;
     use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
     use omicron_test_utils::dev::test_setup_log;
@@ -1832,8 +1834,43 @@ mod test {
         // "decommissioned_disk_cleaner" background task for more context.
         assert_eq!(diff.datasets.removed.len(), 0);
 
-        // The disposition has changed from `InService` to `Expunged`
+        // The disposition has changed from `InService` to `Expunged` for the 4
+        // datasets on this sled.
         assert_eq!(diff.datasets.modified.len(), 1);
+        // We don't know the expected name, other than the fact it's a crucible zone
+        let test_transient_zone_kind = DatasetKind::TransientZone {
+            name: "some-crucible-zone-name".to_string(),
+        };
+        let mut expected_kinds = BTreeSet::from_iter(
+            [
+                DatasetKind::Crucible,
+                DatasetKind::Debug,
+                DatasetKind::TransientZoneRoot,
+                test_transient_zone_kind.clone(),
+            ]
+            .into_iter(),
+        );
+        for modified in
+            &diff.datasets.modified.first_key_value().unwrap().1.datasets
+        {
+            assert_eq!(
+                modified.before.disposition,
+                BlueprintDatasetDisposition::InService
+            );
+            assert_eq!(
+                modified.after.disposition,
+                BlueprintDatasetDisposition::Expunged
+            );
+            if let &DatasetKind::TransientZone { ref name } =
+                &modified.before.kind
+            {
+                assert!(name.starts_with("oxz_crucible"));
+                assert!(expected_kinds.remove(&test_transient_zone_kind));
+            } else {
+                assert!(expected_kinds.remove(&modified.before.kind));
+            }
+        }
+        assert!(expected_kinds.is_empty());
 
         let (_zone_id, modified_zones) =
             diff.zones.modified.iter().next().unwrap();
