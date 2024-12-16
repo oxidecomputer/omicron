@@ -38,4 +38,10 @@ mod probes {
 
     // Fires when we fail to find a VNI in the provided range.
     fn vni__search__range__empty(_: &usdt::UniqueId) {}
+
+    // Fires when a transaction has started
+    fn transaction__start(conn_id: uuid::Uuid, name: &str) {}
+
+    // Fires when a transaction has completed
+    fn transaction__done(conn_id: uuid::Uuid, name: &str) {}
 }
