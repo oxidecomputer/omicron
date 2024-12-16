@@ -2321,9 +2321,9 @@ dependencies = [
 
 [[package]]
 name = "diesel-dtrace"
-version = "0.4.0"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e5130181059723aae1cfdb678d3698052a225aaadb18000f77fec4200047acc"
+checksum = "2750c8bd7a42381620b57f370ca5f757a71d554814e02a43c1bf54ae2656e01d"
 dependencies = [
  "diesel",
  "serde",
@@ -4464,6 +4464,7 @@ dependencies = [
  "futures",
  "http",
  "ipnetwork",
+ "itertools 0.13.0",
  "libc",
  "macaddr",
  "mockall",
@@ -6070,6 +6071,7 @@ dependencies = [
  "indexmap 2.6.0",
  "internal-dns-resolver",
  "ipnet",
+ "itertools 0.13.0",
  "maplit",
  "nexus-config",
  "nexus-inventory",
@@ -7397,6 +7399,7 @@ dependencies = [
  "getrandom",
  "group",
  "hashbrown 0.15.1",
+ "heck 0.4.1",
  "hex",
  "hickory-proto",
  "hmac",
@@ -10820,6 +10823,7 @@ dependencies = [
  "slog",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-stream",
  "uuid",
 ]
 
@@ -11022,7 +11026,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.87",
