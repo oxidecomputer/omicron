@@ -5,6 +5,16 @@
 //! Diagnostics for an Oxide sled that exposes common support commands.
 
 use futures::{stream::FuturesUnordered, StreamExt};
+use slog::Logger;
+
+cfg_if::cfg_if! {
+    if #[cfg(target_os = "illumos")] {
+        mod contract;
+    } else {
+        mod contract_stub;
+        use contract_stub as contract;
+    }
+}
 
 mod queries;
 pub use crate::queries::{
@@ -28,7 +38,7 @@ pub async fn ipadm_info(
             execute_command_with_timeout(c, DEFAULT_TIMEOUT).await
         })
         .collect::<FuturesUnordered<_>>()
-        .collect::<Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>>>()
+        .collect::<Vec<Result<_, _>>>()
         .await
 }
 
@@ -47,6 +57,48 @@ pub async fn dladm_info(
             execute_command_with_timeout(c, DEFAULT_TIMEOUT).await
         })
         .collect::<FuturesUnordered<_>>()
-        .collect::<Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>>>()
+        .collect::<Vec<Result<_, _>>>()
+        .await
+}
+
+pub async fn pargs_oxide_processes(
+    log: &Logger,
+) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+    // In a diagnostics context we care about looping over every pid we find,
+    // but on failure we should just return a single error in a vec that
+    // represents the entire failed operation.
+    let pids = match contract::find_oxide_pids(log) {
+        Ok(pids) => pids,
+        Err(e) => return vec![Err(e.into())],
+    };
+
+    pids.iter()
+        .map(|pid| pargs_process(*pid))
+        .map(|c| async move {
+            execute_command_with_timeout(c, DEFAULT_TIMEOUT).await
+        })
+        .collect::<FuturesUnordered<_>>()
+        .collect::<Vec<Result<_, _>>>()
+        .await
+}
+
+pub async fn pstack_oxide_processes(
+    log: &Logger,
+) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+    // In a diagnostics context we care about looping over every pid we find,
+    // but on failure we should just return a single error in a vec that
+    // represents the entire failed operation.
+    let pids = match contract::find_oxide_pids(log) {
+        Ok(pids) => pids,
+        Err(e) => return vec![Err(e.into())],
+    };
+
+    pids.iter()
+        .map(|pid| pstack_process(*pid))
+        .map(|c| async move {
+            execute_command_with_timeout(c, DEFAULT_TIMEOUT).await
+        })
+        .collect::<FuturesUnordered<_>>()
+        .collect::<Vec<Result<_, _>>>()
         .await
 }
