@@ -7265,6 +7265,7 @@ dependencies = [
  "sled-agent-api",
  "sled-agent-client",
  "sled-agent-types",
+ "sled-diagnostics",
  "sled-hardware",
  "sled-hardware-types",
  "sled-storage",
@@ -10677,6 +10678,7 @@ dependencies = [
  "schemars",
  "serde",
  "sled-agent-types",
+ "sled-diagnostics",
  "sled-hardware-types",
  "uuid",
 ]
@@ -10732,6 +10734,22 @@ dependencies = [
  "thiserror 1.0.69",
  "toml 0.8.19",
  "uuid",
+]
+
+[[package]]
+name = "sled-diagnostics"
+version = "0.1.0"
+dependencies = [
+ "cfg-if",
+ "fs-err",
+ "futures",
+ "libc",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
+ "slog",
+ "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]
