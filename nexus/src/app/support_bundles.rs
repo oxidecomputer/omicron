@@ -16,12 +16,42 @@ use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::SupportBundleGetQueryParams;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use range_requests::PotentialRange;
 use uuid::Uuid;
+
+/// Describes the type of access to the support bundle
+#[derive(Clone, Debug)]
+pub enum SupportBundleQueryType {
+    /// Access the whole support bundle
+    Whole,
+    /// Access the names of all files within the support bundle
+    Index,
+    /// Access a specific file within the support bundle
+    Path { file_path: String },
+}
+
+// TODO: Remove me once https://github.com/oxidecomputer/omicron/pull/7259
+// merges
+use omicron_common::api::external::SupportBundleQueryType as SledAgentSupportBundleQueryType;
+
+impl From<SupportBundleQueryType> for SledAgentSupportBundleQueryType {
+    fn from(query: SupportBundleQueryType) -> Self {
+        match query {
+            SupportBundleQueryType::Whole => {
+                SledAgentSupportBundleQueryType::Whole
+            }
+            SupportBundleQueryType::Index => {
+                SledAgentSupportBundleQueryType::Index
+            }
+            SupportBundleQueryType::Path { file_path } => {
+                SledAgentSupportBundleQueryType::Path { file_path }
+            }
+        }
+    }
+}
 
 impl super::Nexus {
     pub async fn support_bundle_list(
@@ -52,7 +82,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         id: SupportBundleUuid,
-        query: &SupportBundleGetQueryParams,
+        query: SupportBundleQueryType,
         head: bool,
         _range: Option<PotentialRange>,
     ) -> Result<Response<Body>, Error> {
@@ -73,6 +103,10 @@ impl super::Nexus {
 
         // TODO: Use "range"?
 
+        let query =
+            omicron_common::api::external::SupportBundleGetQueryParams {
+                query_type: query.into(),
+            };
         let response = if head {
             client
                 .support_bundle_head(

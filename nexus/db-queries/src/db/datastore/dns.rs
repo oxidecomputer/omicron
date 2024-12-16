@@ -20,7 +20,6 @@ use crate::db::pagination::Paginator;
 use crate::db::pool::DbConnection;
 use crate::db::TransactionError;
 use crate::transaction_retry::OptionalError;
-use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use futures::future::BoxFuture;
@@ -453,20 +452,24 @@ impl DataStore {
 
         // This method is used in nested transactions, which are not supported
         // with retryable transactions.
-        #[allow(clippy::disallowed_methods)]
-        conn.transaction_async(|c| async move {
-            let version = self
-                .dns_group_latest_version_conn(opctx, conn, update.dns_group)
-                .await?;
-            self.dns_write_version_internal(
-                &c,
-                update,
-                zones,
-                Generation(version.version.next()),
-            )
+        self.transaction_non_retry_wrapper("dns_update_incremental")
+            .transaction(&conn, |c| async move {
+                let version = self
+                    .dns_group_latest_version_conn(
+                        opctx,
+                        conn,
+                        update.dns_group,
+                    )
+                    .await?;
+                self.dns_write_version_internal(
+                    &c,
+                    update,
+                    zones,
+                    Generation(version.version.next()),
+                )
+                .await
+            })
             .await
-        })
-        .await
     }
 
     // This must only be used inside a transaction.  Otherwise, it may make

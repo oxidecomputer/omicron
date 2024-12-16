@@ -4,12 +4,12 @@
 
 //! Show information about Progenitor-based APIs
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use omicron_ls_apis::{
     AllApiMetadata, ApiDependencyFilter, LoadArgs, ServerComponentName,
-    SystemApis,
+    SystemApis, VersionedHow,
 };
 use parse_display::{Display, FromStr};
 
@@ -34,6 +34,8 @@ enum Cmds {
     Adoc,
     /// print out each API, what exports it, and what consumes it
     Apis(ShowDepsArgs),
+    /// check the update DAG and propose changes
+    Check,
     /// print out APIs exported and consumed by each deployment unit
     DeploymentUnits(DotArgs),
     /// print out APIs exported and consumed, by server component
@@ -81,6 +83,7 @@ fn main() -> Result<()> {
     match cli_args.cmd {
         Cmds::Adoc => run_adoc(&apis),
         Cmds::Apis(args) => run_apis(&apis, args),
+        Cmds::Check => run_check(&apis),
         Cmds::DeploymentUnits(args) => run_deployment_units(&apis, args),
         Cmds::Servers(args) => run_servers(&apis, args),
     }
@@ -93,12 +96,13 @@ fn run_adoc(apis: &SystemApis) -> Result<()> {
     println!(
         ".List of OpenAPI/Progenitor-based interfaces for online upgrade."
     );
-    println!(r#"[cols="1h,2,2,2a,2", options="header"]"#);
+    println!(r#"[cols="1h,2,2,2a,2,2", options="header"]"#);
     println!("|===");
     println!("|API");
     println!("|Server location (`repo:path`)");
     println!("|Client packages (`repo:path`)");
     println!("|Consumers (`repo:path`; excluding omdb and tests)");
+    println!("|Versioning");
     println!("|Notes");
     println!("");
 
@@ -121,6 +125,14 @@ fn run_adoc(apis: &SystemApis) -> Result<()> {
         )? {
             println!("* {}", apis.adoc_label(c)?);
         }
+
+        match &api.versioned_how {
+            VersionedHow::Unknown => println!("|TBD"),
+            VersionedHow::Server => println!("|Server-side only"),
+            VersionedHow::Client(reason) => {
+                println!("|Client-side ({})", reason);
+            }
+        };
 
         print!("|{}", api.notes.as_deref().unwrap_or("-\n"));
         println!("");
@@ -260,4 +272,85 @@ impl TryFrom<&LsApis> for LoadArgs {
             .unwrap_or_else(|| self_manifest_dir.join("api-manifest.toml"));
         Ok(LoadArgs { api_manifest_path })
     }
+}
+
+fn run_check(apis: &SystemApis) -> Result<()> {
+    let dag_check = apis.dag_check()?;
+
+    for (pkg, reasons) in dag_check.proposed_server_managed() {
+        println!(
+            "proposal: make {:?} server-managed: {}",
+            pkg,
+            reasons.join(", ")
+        );
+    }
+
+    for (pkg, reasons) in dag_check.proposed_client_managed() {
+        println!(
+            "proposal: make {:?} client-managed: {}",
+            pkg,
+            reasons.join(", ")
+        );
+    }
+
+    for (pkg1, pkg2) in dag_check.proposed_upick() {
+        println!(
+            "proposal: choose either {:?} or {:?} to be client-managed \
+             (they directly depend on each other)",
+            pkg1, pkg2,
+        );
+    }
+
+    println!("\n");
+    println!("Server-managed APIs:\n");
+    for api in apis
+        .api_metadata()
+        .apis()
+        .filter(|f| f.deployed() && f.versioned_how == VersionedHow::Server)
+    {
+        println!(
+            "    {} ({}, exposed by {})",
+            api.label,
+            api.client_package_name,
+            apis.api_producer(&api.client_package_name).unwrap()
+        );
+    }
+
+    println!("\n");
+    println!("Client-managed API:\n");
+    for api in apis.api_metadata().apis().filter(|f| f.deployed()) {
+        if let VersionedHow::Client(reason) = &api.versioned_how {
+            println!(
+                "    {} ({}, exposed by {})",
+                api.label,
+                api.client_package_name,
+                apis.api_producer(&api.client_package_name).unwrap()
+            );
+            println!("        reason: {}", reason);
+        }
+    }
+
+    println!("\n");
+    print!("APIs with unknown version management:");
+    let unknown: Vec<_> = apis
+        .api_metadata()
+        .apis()
+        .filter(|f| f.versioned_how == VersionedHow::Unknown)
+        .collect();
+    if unknown.is_empty() {
+        println!(" none");
+    } else {
+        println!("\n");
+        for api in unknown {
+            println!(
+                "    {} ({}, exposed by {})",
+                api.label,
+                api.client_package_name,
+                apis.api_producer(&api.client_package_name).unwrap()
+            );
+        }
+        bail!("at least one API has unknown version strategy (see above)");
+    }
+
+    Ok(())
 }

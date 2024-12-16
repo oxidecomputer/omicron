@@ -228,6 +228,14 @@ pub struct SledEditCounts {
 }
 
 impl SledEditCounts {
+    pub fn zeroes() -> Self {
+        Self {
+            disks: EditCounts::zeroes(),
+            datasets: EditCounts::zeroes(),
+            zones: EditCounts::zeroes(),
+        }
+    }
+
     fn has_nonzero_counts(&self) -> bool {
         let Self { disks, datasets, zones } = self;
         disks.has_nonzero_counts()
@@ -548,7 +556,7 @@ impl<'a> BlueprintBuilder<'a> {
                     generation: Generation::new(),
                     datasets: BTreeMap::new(),
                 });
-            let editor = SledEditor::new(
+            let editor = SledEditor::for_existing(
                 state,
                 zones.clone(),
                 disks,
@@ -565,8 +573,7 @@ impl<'a> BlueprintBuilder<'a> {
         // that weren't in the parent blueprint. (These are newly-added sleds.)
         for sled_id in input.all_sled_ids(SledFilter::Commissioned) {
             if let Entry::Vacant(slot) = sled_editors.entry(sled_id) {
-                slot.insert(SledEditor::new_empty(
-                    SledState::Active,
+                slot.insert(SledEditor::for_new_active(
                     build_preexisting_dataset_ids(sled_id)?,
                 ));
             }
@@ -735,8 +742,8 @@ impl<'a> BlueprintBuilder<'a> {
             .retain(|sled_id, _| in_service_sled_ids.contains(sled_id));
 
         // If we have the clickhouse cluster setup enabled via policy and we
-        // don't yet have a `ClickhouseClusterConfiguration`, then we must create
-        // one and feed it to our `ClickhouseAllocator`.
+        // don't yet have a `ClickhouseClusterConfiguration`, then we must
+        // create one and feed it to our `ClickhouseAllocator`.
         let clickhouse_allocator = if self.input.clickhouse_cluster_enabled() {
             let parent_config = self
                 .parent_blueprint
@@ -815,18 +822,18 @@ impl<'a> BlueprintBuilder<'a> {
     }
 
     /// Set the desired state of the given sled.
-    pub fn set_sled_state(
+    pub fn set_sled_decommissioned(
         &mut self,
         sled_id: SledUuid,
-        desired_state: SledState,
     ) -> Result<(), Error> {
         let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!(
                 "tried to set sled state for unknown sled {sled_id}"
             ))
         })?;
-        editor.set_state(desired_state);
-        Ok(())
+        editor
+            .decommission()
+            .map_err(|err| Error::SledEditError { sled_id, err })
     }
 
     /// Within tests, set an RNG for deterministic results.
@@ -1046,15 +1053,18 @@ impl<'a> BlueprintBuilder<'a> {
         // blueprint
         for (disk_id, (zpool, disk)) in database_disks {
             database_disk_ids.insert(disk_id);
-            editor.ensure_disk(
-                BlueprintPhysicalDiskConfig {
-                    disposition: BlueprintPhysicalDiskDisposition::InService,
-                    identity: disk.disk_identity.clone(),
-                    id: disk_id,
-                    pool_id: *zpool,
-                },
-                &mut self.rng,
-            );
+            editor
+                .ensure_disk(
+                    BlueprintPhysicalDiskConfig {
+                        disposition:
+                            BlueprintPhysicalDiskDisposition::InService,
+                        identity: disk.disk_identity.clone(),
+                        id: disk_id,
+                        pool_id: *zpool,
+                    },
+                    &mut self.rng,
+                )
+                .map_err(|err| Error::SledEditError { sled_id, err })?;
         }
 
         // Remove any disks that appear in the blueprint, but not the database

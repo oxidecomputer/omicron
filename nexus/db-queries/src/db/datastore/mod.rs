@@ -322,6 +322,14 @@ impl DataStore {
         )
     }
 
+    /// Constructs a non-retryable transaction helper
+    pub fn transaction_non_retry_wrapper(
+        &self,
+        name: &'static str,
+    ) -> crate::transaction_retry::NonRetryHelper {
+        crate::transaction_retry::NonRetryHelper::new(&self.log, name)
+    }
+
     #[cfg(test)]
     pub(crate) fn transaction_retry_producer(
         &self,
