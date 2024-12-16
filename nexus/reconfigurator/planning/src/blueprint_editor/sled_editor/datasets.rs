@@ -7,7 +7,6 @@ use crate::planner::PlannerRng;
 use illumos_utils::zpool::ZpoolName;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
-use nexus_types::deployment::BlueprintDatasetFilter;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolFilter;
@@ -23,6 +22,9 @@ use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
+
+#[cfg(test)]
+use nexus_types::deployment::BlueprintDatasetFilter;
 
 #[derive(Debug, thiserror::Error)]
 #[error(
@@ -269,7 +271,7 @@ impl DatasetsEditor {
         self.counts
     }
 
-    #[allow(dead_code)] // currently only used by tests; this will change soon
+    #[cfg(test)]
     pub fn datasets(
         &self,
         filter: BlueprintDatasetFilter,

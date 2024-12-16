@@ -6071,6 +6071,7 @@ dependencies = [
  "indexmap 2.6.0",
  "internal-dns-resolver",
  "ipnet",
+ "itertools 0.13.0",
  "maplit",
  "nexus-config",
  "nexus-inventory",
