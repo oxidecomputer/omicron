@@ -568,7 +568,7 @@ impl BpTableData for DiffDatasetsDetails {
         // by sorting by dataset kind: after UUID redaction, that produces
         // a stable table ordering for datasets.
         let mut rows = self.datasets.values().collect::<Vec<_>>();
-        rows.sort_unstable_by_key(|d| &d.kind);
+        rows.sort_unstable_by_key(|d| (&d.kind, &d.pool));
         rows.into_iter().map(move |dataset| {
             BpTableRow::from_strings(state, dataset.as_strings())
         })
