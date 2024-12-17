@@ -115,7 +115,7 @@ pub enum StartError {
     CreateDdmAdminLocalhostClient(#[source] DdmError),
 
     #[error("Failed to create ZFS ramdisk dataset")]
-    EnsureZfsRamdiskDataset(#[source] zfs::EnsureFilesystemError),
+    EnsureZfsRamdiskDataset(#[source] zfs::EnsureDatasetError),
 
     #[error("Failed to list zones")]
     ListZones(#[source] zone::AdmError),

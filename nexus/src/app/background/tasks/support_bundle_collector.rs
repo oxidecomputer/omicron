@@ -295,15 +295,10 @@ impl SupportBundleCollector {
                         }
                     }
                 }
-                Err(e)
-                    if matches!(
-                        e,
-                        Error::ObjectNotFound {
-                            type_name: ResourceType::Zpool,
-                            ..
-                        }
-                    ) =>
-                {
+                Err(Error::ObjectNotFound {
+                    type_name: ResourceType::Zpool,
+                    ..
+                }) => {
                     // If the pool wasn't found in the database, it was
                     // expunged. Delete the support bundle, since there is no
                     // sled agent state to manage anymore.
