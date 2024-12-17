@@ -31,6 +31,7 @@
     timeout_seconds='0' />
 
   <exec_method type='method' name='stop' exec=':true' timeout_seconds='0' />
+  <exec_method type='method' name='refresh' exec=':kill -USR1' timeout_seconds='0' />
 
   <property_group name='startd' type='framework'>
     <propval name='duration' type='astring' value='transient' />
