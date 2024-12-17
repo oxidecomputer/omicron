@@ -119,7 +119,7 @@ pub(crate) fn display_api_spec(spec: &ApiSpec, styles: &Styles) -> String {
         "{} ({} v{})",
         spec.filename.style(styles.filename),
         spec.title,
-        spec.version,
+        spec.latest_version(),
     )
 }
 

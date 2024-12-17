@@ -18,7 +18,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
     vec![
         ApiSpec {
             title: "Bootstrap Agent API",
-            version: semver::Version::new(0, 0, 1),
+            versions: Versions::Lockstep(semver::Version::new(0, 0, 1)),
             description: "Per-sled API for setup and teardown",
             boundary: ApiBoundary::Internal,
             api_description:
@@ -28,7 +28,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
         },
         ApiSpec {
             title: "ClickHouse Cluster Admin Keeper API",
-            version: semver::Version::new(0, 0, 1),
+            versions: Versions::Lockstep(semver::Version::new(0, 0, 1)),
             description: "API for interacting with the Oxide \
                 control plane's ClickHouse cluster keepers",
             boundary: ApiBoundary::Internal,
@@ -39,7 +39,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
         },
         ApiSpec {
             title: "ClickHouse Cluster Admin Server API",
-            version: semver::Version::new(0, 0, 1),
+            versions: Versions::Lockstep(semver::Version::new(0, 0, 1)),
             description: "API for interacting with the Oxide \
                 control plane's ClickHouse cluster replica servers",
             boundary: ApiBoundary::Internal,
@@ -50,7 +50,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
         },
         ApiSpec {
             title: "ClickHouse Single-Node Admin Server API",
-            version: semver::Version::new(0, 0, 1),
+            versions: Versions::Lockstep(semver::Version::new(0, 0, 1)),
             description: "API for interacting with the Oxide \
                 control plane's single-node ClickHouse database",
             boundary: ApiBoundary::Internal,
@@ -61,7 +61,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
         },
         ApiSpec {
             title: "CockroachDB Cluster Admin API",
-            version: semver::Version::new(0, 0, 1),
+            versions: Versions::Lockstep(semver::Version::new(0, 0, 1)),
             description: "API for interacting with the Oxide \
                 control plane's CockroachDB cluster",
             boundary: ApiBoundary::Internal,
@@ -72,7 +72,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
         },
         ApiSpec {
             title: "Oxide Management Gateway Service API",
-            version: semver::Version::new(0, 0, 1),
+            versions: Versions::Lockstep(semver::Version::new(0, 0, 1)),
             description: "API for interacting with the Oxide \
                 control plane's gateway service",
             boundary: ApiBoundary::Internal,
@@ -83,7 +83,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
         },
         ApiSpec {
             title: "Internal DNS",
-            version: semver::Version::new(0, 0, 1),
+            versions: Versions::Lockstep(semver::Version::new(0, 0, 1)),
             description: "API for the internal DNS server",
             boundary: ApiBoundary::Internal,
             api_description:
@@ -93,7 +93,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
         },
         ApiSpec {
             title: "Installinator API",
-            version: semver::Version::new(0, 0, 1),
+            versions: Versions::Lockstep(semver::Version::new(0, 0, 1)),
             description: "API for installinator to fetch artifacts \
                 and report progress",
             boundary: ApiBoundary::Internal,
@@ -104,7 +104,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
         },
         ApiSpec {
             title: "Oxide Region API",
-            version: semver::Version::new(20241204, 0, 0),
+            versions: Versions::Lockstep(semver::Version::new(20241204, 0, 0)),
             description: "API for interacting with the Oxide control plane",
             boundary: ApiBoundary::External,
             api_description:
@@ -114,7 +114,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
         },
         ApiSpec {
             title: "Nexus internal API",
-            version: semver::Version::new(0, 0, 1),
+            versions: Versions::Lockstep(semver::Version::new(0, 0, 1)),
             description: "Nexus internal API",
             boundary: ApiBoundary::Internal,
             api_description:
@@ -124,7 +124,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
         },
         ApiSpec {
             title: "Oxide Oximeter API",
-            version: semver::Version::new(0, 0, 1),
+            versions: Versions::Lockstep(semver::Version::new(0, 0, 1)),
             description: "API for interacting with oximeter",
             boundary: ApiBoundary::Internal,
             api_description:
@@ -134,7 +134,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
         },
         ApiSpec {
             title: "Oxide TUF Repo Depot API",
-            version: semver::Version::new(0, 0, 1),
+            versions: Versions::Lockstep(semver::Version::new(0, 0, 1)),
             description: "API for fetching update artifacts",
             boundary: ApiBoundary::Internal,
             api_description: repo_depot_api::repo_depot_api_mod::stub_api_description,
@@ -143,7 +143,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
         },
         ApiSpec {
             title: "Oxide Sled Agent API",
-            version: semver::Version::new(0, 0, 1),
+            versions: Versions::Lockstep(semver::Version::new(0, 0, 1)),
             description: "API for interacting with individual sleds",
             boundary: ApiBoundary::Internal,
             api_description:
@@ -153,7 +153,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
         },
         ApiSpec {
             title: "Oxide Technician Port Control Service",
-            version: semver::Version::new(0, 0, 1),
+            versions: Versions::Lockstep(semver::Version::new(0, 0, 1)),
             description: "API for use by the technician port TUI: wicket",
             boundary: ApiBoundary::Internal,
             api_description: wicketd_api::wicketd_api_mod::stub_api_description,
@@ -168,8 +168,8 @@ pub struct ApiSpec {
     /// The title.
     pub title: &'static str,
 
-    /// The version.
-    pub version: semver::Version,
+    /// Supported version(s) of this API
+    pub versions: Versions,
 
     /// The description string.
     pub description: &'static str,
@@ -255,6 +255,10 @@ impl ApiSpec {
         contents_to_openapi(&contents)
     }
 
+    pub(crate) fn latest_version(&self) -> &semver::Version {
+        self.versions.latest()
+    }
+
     fn to_json_bytes(&self) -> Result<Vec<u8>> {
         let description = (self.api_description)().map_err(|error| {
             // ApiDescriptionBuildError is actually a list of errors so it
@@ -263,7 +267,7 @@ impl ApiSpec {
             anyhow::anyhow!("{}", error)
         })?;
         let mut openapi_def =
-            description.openapi(&self.title, self.version.clone());
+            description.openapi(&self.title, self.latest_version().clone());
         openapi_def
             .description(&self.description)
             .contact_url("https://oxide.computer")
@@ -325,6 +329,20 @@ impl ApiSpec {
             DocumentSummary::new(&openapi_doc),
             ValidationResult { extra_files },
         ))
+    }
+}
+
+pub enum Versions {
+    Lockstep(semver::Version),
+    Versioned { latest: semver::Version, other_supported: Vec<semver::Version> },
+}
+
+impl Versions {
+    pub fn latest(&self) -> &semver::Version {
+        match self {
+            Versions::Lockstep(v) => v,
+            Versions::Versioned { latest, .. } => latest,
+        }
     }
 }
 

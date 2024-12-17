@@ -47,7 +47,7 @@ pub(crate) fn list_impl(
                 "{initial_indent} {}: {} v{}",
                 "title".style(styles.header),
                 api.title,
-                api.version,
+                api.latest_version(),
             )?;
 
             write!(
