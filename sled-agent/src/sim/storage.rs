@@ -941,13 +941,10 @@ impl NestedDatasetStorage {
         // Create a mountpoint for the nested dataset storage that lasts
         // as long as the nested dataset does.
         let mountpoint = name.mountpoint(zpool_root);
-        println!("NestedDatasetStorage: Mountpoint {mountpoint}");
         let parent = mountpoint.as_path().parent().unwrap();
-        println!("NestedDatasetStorage: Creating parent dir: {parent}");
         std::fs::create_dir_all(&parent).unwrap();
 
         let new_dir_name = mountpoint.as_path().file_name().unwrap();
-        println!("NestedDatasetStorage: New dir name: {new_dir_name}");
         let mountpoint = camino_tempfile::Builder::new()
             .rand_bytes(0)
             .prefix(new_dir_name)
