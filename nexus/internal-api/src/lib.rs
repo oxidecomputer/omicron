@@ -47,6 +47,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+const RACK_INITIALIZATION_REQUEST_MAX_BYTES: usize = 10 * 1024 * 1024;
+
 #[dropshot::api_description]
 pub trait NexusInternalApi {
     type Context;
@@ -92,6 +94,7 @@ pub trait NexusInternalApi {
     #[endpoint {
         method = PUT,
         path = "/racks/{rack_id}/initialization-complete",
+        request_body_max_bytes = RACK_INITIALIZATION_REQUEST_MAX_BYTES,
     }]
     async fn rack_initialization_complete(
         rqctx: RequestContext<Self::Context>,

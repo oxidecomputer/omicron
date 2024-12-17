@@ -39,6 +39,10 @@ use wicket_common::rack_update::ClearUpdateStateResponse;
 use wicket_common::rack_update::StartUpdateOptions;
 use wicket_common::update_events::EventReport;
 
+/// Full release repositories are currently (Dec 2024) 1.8 GiB and are likely to
+/// continue growing.
+const PUT_REPOSITORY_MAX_BYTES: usize = 4 * 1024 * 1024 * 1024;
+
 #[dropshot::api_description]
 pub trait WicketdApi {
     type Context;
@@ -203,6 +207,7 @@ pub trait WicketdApi {
     #[endpoint {
         method = PUT,
         path = "/repository",
+        request_body_max_bytes = PUT_REPOSITORY_MAX_BYTES,
     }]
     async fn put_repository(
         rqctx: RequestContext<Self::Context>,

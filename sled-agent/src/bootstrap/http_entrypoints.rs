@@ -20,7 +20,6 @@ use dropshot::{
     ApiDescription, HttpError, HttpResponseOk, HttpResponseUpdatedNoContent,
     RequestContext, TypedBody,
 };
-use http::StatusCode;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;
@@ -143,9 +142,9 @@ impl BootstrapAgentApi for BootstrapAgentImpl {
         match ctx.sled_reset_tx.try_send(response_tx) {
             Ok(()) => (),
             Err(TrySendError::Full(_)) => {
-                return Err(HttpError::for_status(
+                return Err(HttpError::for_client_error_with_status(
                     Some("ResetPending".to_string()),
-                    StatusCode::TOO_MANY_REQUESTS,
+                    dropshot::ClientErrorStatusCode::TOO_MANY_REQUESTS,
                 ));
             }
             Err(TrySendError::Closed(_)) => {

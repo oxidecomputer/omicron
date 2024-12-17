@@ -25,6 +25,13 @@ use openapiv3::OpenAPI;
 
 pub const API_VERSION: &str = "20241204.0.0";
 
+const MIB: usize = 1024 * 1024;
+const GIB: usize = 1024 * MIB;
+const DISK_BULK_WRITE_MAX_BYTES: usize = 8 * MIB;
+// Full release repositories are currently (Dec 2024) 1.8 GiB and are likely to
+// continue growing.
+const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
+
 // API ENDPOINT FUNCTION NAMING CONVENTIONS
 //
 // Generally, HTTP resources are grouped within some collection. For a
@@ -1033,6 +1040,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/disks/{disk}/bulk-write",
         tags = ["disks"],
+        request_body_max_bytes = DISK_BULK_WRITE_MAX_BYTES,
     }]
     async fn disk_bulk_write_import(
         rqctx: RequestContext<Self::Context>,
@@ -2595,6 +2603,7 @@ pub trait NexusExternalApi {
         path = "/v1/system/update/repository",
         tags = ["system/update"],
         unpublished = true,
+        request_body_max_bytes = PUT_UPDATE_REPOSITORY_MAX_BYTES,
     }]
     async fn system_update_put_repository(
         rqctx: RequestContext<Self::Context>,
