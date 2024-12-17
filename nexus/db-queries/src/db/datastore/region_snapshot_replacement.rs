@@ -802,7 +802,7 @@ impl DataStore {
                             region_snapshot_replacement_id,
                         )
                         .execute_and_check(&conn)
-                            .await?;
+                        .await?;
 
                     match result.status {
                         UpdateStatus::Updated => Ok(()),
