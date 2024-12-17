@@ -769,10 +769,9 @@ async fn test_disk_region_creation_failure(
     .await
     .unwrap();
 
-    // After the failed allocation, the disk should be Faulted
+    // After the failed allocation, the disk creation should have unwound
     let disks = disks_list(&client, &disks_url).await;
-    assert_eq!(disks.len(), 1);
-    assert_eq!(disks[0].state, DiskState::Faulted);
+    assert_eq!(disks.len(), 0);
 }
 
 // Tests that invalid block sizes are rejected

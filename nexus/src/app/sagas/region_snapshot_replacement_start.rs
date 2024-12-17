@@ -101,9 +101,43 @@ declare_saga_actions! {
     FIND_NEW_REGION -> "new_dataset_and_region" {
         + rsrss_find_new_region
     }
+    // One of the common sharp edges of sagas is that the compensating action of
+    // a node does _not_ run if the forward action fails. Said another way, for
+    // this node:
+    //
+    // EXAMPLE -> "output" {
+    //   + forward_action
+    //   - forward_action_undo
+    // }
+    //
+    // If `forward_action` fails, `forward_action_undo` is never executed.
+    // Forward actions are therefore required to be atomic, in that they either
+    // fully apply or don't apply at all.
+    //
+    // Sagas with nodes that ensure multiple regions exist cannot be atomic
+    // because they can partially fail (for example: what if only 2 out of 3
+    // ensures succeed?). In order for the compensating action to be run, it
+    // must exist as a separate node that has a no-op forward action:
+    //
+    // EXAMPLE_UNDO -> "not_used" {
+    //   + noop
+    //   - forward_action_undo
+    // }
+    // EXAMPLE -> "output" {
+    //   + forward_action
+    // }
+    //
+    // This saga will only ever ensure that a single region exists, so you might
+    // think you could get away with a single node that combines the forward and
+    // compensating action - you'd be mistaken! The Crucible agent's region
+    // ensure is not atomic in all cases: if the region fails to create, it
+    // enters the `failed` state, but is not deleted. Nexus must clean these up.
+    NEW_REGION_ENSURE_UNDO -> "not_used" {
+        + rsrss_noop
+        - rsrss_new_region_ensure_undo
+    }
     NEW_REGION_ENSURE -> "ensured_dataset_and_region" {
         + rsrss_new_region_ensure
-        - rsrss_new_region_ensure_undo
     }
     GET_OLD_SNAPSHOT_VOLUME_ID -> "old_snapshot_volume_id" {
         + rsrss_get_old_snapshot_volume_id
@@ -153,6 +187,7 @@ impl NexusSaga for SagaRegionSnapshotReplacementStart {
         builder.append(get_alloc_region_params_action());
         builder.append(alloc_new_region_action());
         builder.append(find_new_region_action());
+        builder.append(new_region_ensure_undo_action());
         builder.append(new_region_ensure_action());
         builder.append(get_old_snapshot_volume_id_action());
         builder.append(create_fake_volume_action());
@@ -380,6 +415,10 @@ async fn rsrss_find_new_region(
     Ok(dataset_and_region)
 }
 
+async fn rsrss_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
+    Ok(())
+}
+
 async fn rsrss_new_region_ensure(
     sagactx: NexusActionContext,
 ) -> Result<
@@ -390,10 +429,6 @@ async fn rsrss_new_region_ensure(
     let osagactx = sagactx.user_data();
     let log = osagactx.log();
 
-    // With a list of datasets and regions to ensure, other sagas need to have a
-    // separate no-op forward step for the undo action to ensure that the undo
-    // step occurs in the case that the ensure partially fails. Here this is not
-    // required, there's only one dataset and region.
     let new_dataset_and_region = sagactx
         .lookup::<(db::model::Dataset, db::model::Region)>(
             "new_dataset_and_region",
@@ -830,7 +865,7 @@ pub(crate) mod test {
     /// Create four zpools, a disk, and a snapshot of that disk
     async fn prepare_for_test(
         cptestctx: &ControlPlaneTestContext,
-    ) -> PrepareResult {
+    ) -> PrepareResult<'_> {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
@@ -876,20 +911,21 @@ pub(crate) mod test {
                 panic!("test snapshot {:?} should exist", snapshot_id)
             });
 
-        PrepareResult { db_disk, snapshot, db_snapshot }
+        PrepareResult { db_disk, snapshot, db_snapshot, disk_test }
     }
 
-    struct PrepareResult {
+    struct PrepareResult<'a> {
         db_disk: nexus_db_model::Disk,
         snapshot: views::Snapshot,
         db_snapshot: nexus_db_model::Snapshot,
+        disk_test: DiskTest<'a, crate::Server>,
     }
 
     #[nexus_test(server = crate::Server)]
     async fn test_region_snapshot_replacement_start_saga(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let PrepareResult { db_disk, snapshot, db_snapshot } =
+        let PrepareResult { db_disk, snapshot, db_snapshot, .. } =
             prepare_for_test(cptestctx).await;
 
         let nexus = &cptestctx.server.server_context().nexus;
@@ -1009,9 +1045,11 @@ pub(crate) mod test {
 
     pub(crate) async fn verify_clean_slate(
         cptestctx: &ControlPlaneTestContext,
+        test: &DiskTest<'_, crate::Server>,
         request: &RegionSnapshotReplacement,
         affected_volume_original: &Volume,
     ) {
+        let sled_agent = &cptestctx.sled_agent.sled_agent;
         let datastore = cptestctx.server.server_context().nexus.datastore();
 
         crate::app::sagas::test_helpers::assert_no_failed_undo_steps(
@@ -1024,6 +1062,10 @@ pub(crate) mod test {
         // original disk, and three for the (currently unused) snapshot
         // destination volume
         assert_eq!(region_allocations(&datastore).await, 6);
+
+        // Assert that only those six provisioned regions are non-destroyed
+        assert_no_other_ensured_regions(sled_agent, test, &datastore).await;
+
         assert_region_snapshot_replacement_request_untouched(
             cptestctx, &datastore, &request,
         )
@@ -1031,11 +1073,12 @@ pub(crate) mod test {
         assert_volume_untouched(&datastore, &affected_volume_original).await;
     }
 
-    async fn region_allocations(datastore: &DataStore) -> usize {
+    async fn regions(datastore: &DataStore) -> Vec<db::model::Region> {
         use async_bb8_diesel::AsyncConnection;
         use async_bb8_diesel::AsyncRunQueryDsl;
         use async_bb8_diesel::AsyncSimpleConnection;
         use diesel::QueryDsl;
+        use diesel::SelectableHelper;
         use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
         use nexus_db_queries::db::schema::region::dsl;
 
@@ -1047,13 +1090,54 @@ pub(crate) mod test {
             conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await.unwrap();
 
             dsl::region
-                .count()
-                .get_result_async(&conn)
+                .select(db::model::Region::as_select())
+                .get_results_async(&conn)
                 .await
-                .map(|x: i64| x as usize)
         })
         .await
         .unwrap()
+    }
+
+    async fn region_allocations(datastore: &DataStore) -> usize {
+        regions(datastore).await.len()
+    }
+
+    async fn assert_no_other_ensured_regions(
+        sled_agent: &omicron_sled_agent::sim::SledAgent,
+        test: &DiskTest<'_, crate::Server>,
+        datastore: &DataStore,
+    ) {
+        let mut non_destroyed_regions_from_agent = vec![];
+
+        for zpool in test.zpools() {
+            for dataset in &zpool.datasets {
+                let crucible_dataset =
+                    sled_agent.get_crucible_dataset(zpool.id, dataset.id).await;
+                for region in crucible_dataset.list().await {
+                    match region.state {
+                        crucible_agent_client::types::State::Tombstoned
+                        | crucible_agent_client::types::State::Destroyed => {
+                            // ok
+                        }
+
+                        _ => {
+                            non_destroyed_regions_from_agent
+                                .push(region.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        let db_regions = regions(datastore).await;
+        let db_region_ids: Vec<Uuid> =
+            db_regions.iter().map(|x| x.id()).collect();
+
+        for region in non_destroyed_regions_from_agent {
+            let region_id = region.id.0.parse().unwrap();
+            let contains = db_region_ids.contains(&region_id);
+            assert!(contains, "db does not have {:?}", region_id);
+        }
     }
 
     async fn assert_region_snapshot_replacement_request_untouched(
@@ -1095,10 +1179,10 @@ pub(crate) mod test {
     }
 
     #[nexus_test(server = crate::Server)]
-    async fn test_action_failure_can_unwind_idempotently(
+    async fn test_action_failure_can_unwind(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let PrepareResult { db_disk, snapshot, db_snapshot } =
+        let PrepareResult { db_disk, snapshot, db_snapshot, disk_test } =
             prepare_for_test(cptestctx).await;
 
         let log = &cptestctx.logctx.log;
@@ -1130,8 +1214,80 @@ pub(crate) mod test {
         let affected_volume_original =
             datastore.volume_get(db_snapshot.volume_id).await.unwrap().unwrap();
 
-        verify_clean_slate(&cptestctx, &request, &affected_volume_original)
-            .await;
+        verify_clean_slate(
+            &cptestctx,
+            &disk_test,
+            &request,
+            &affected_volume_original,
+        )
+        .await;
+
+        crate::app::sagas::test_helpers::action_failure_can_unwind::<
+            SagaRegionSnapshotReplacementStart,
+            _,
+            _,
+        >(
+            nexus,
+            || Box::pin(async { new_test_params(&opctx, &request) }),
+            || {
+                Box::pin(async {
+                    verify_clean_slate(
+                        &cptestctx,
+                        &disk_test,
+                        &request,
+                        &affected_volume_original,
+                    )
+                    .await;
+                })
+            },
+            log,
+        )
+        .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_action_failure_can_unwind_idempotently(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let PrepareResult { db_disk, snapshot, db_snapshot, disk_test } =
+            prepare_for_test(cptestctx).await;
+
+        let log = &cptestctx.logctx.log;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = test_opctx(cptestctx);
+
+        let disk_allocated_regions =
+            datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        assert_eq!(disk_allocated_regions.len(), 3);
+
+        let region: &nexus_db_model::Region = &disk_allocated_regions[0].1;
+        let snapshot_id = snapshot.identity.id;
+
+        let region_snapshot = datastore
+            .region_snapshot_get(region.dataset_id(), region.id(), snapshot_id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let request =
+            RegionSnapshotReplacement::for_region_snapshot(&region_snapshot);
+
+        datastore
+            .insert_region_snapshot_replacement_request(&opctx, request.clone())
+            .await
+            .unwrap();
+
+        let affected_volume_original =
+            datastore.volume_get(db_snapshot.volume_id).await.unwrap().unwrap();
+
+        verify_clean_slate(
+            &cptestctx,
+            &disk_test,
+            &request,
+            &affected_volume_original,
+        )
+        .await;
 
         crate::app::sagas::test_helpers::action_failure_can_unwind_idempotently::<
             SagaRegionSnapshotReplacementStart,
@@ -1143,6 +1299,7 @@ pub(crate) mod test {
             || Box::pin(async {
                 verify_clean_slate(
                     &cptestctx,
+                    &disk_test,
                     &request,
                     &affected_volume_original,
                 ).await;
@@ -1155,7 +1312,7 @@ pub(crate) mod test {
     async fn test_actions_succeed_idempotently(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let PrepareResult { db_disk, snapshot, db_snapshot: _ } =
+        let PrepareResult { db_disk, snapshot, .. } =
             prepare_for_test(cptestctx).await;
 
         let nexus = &cptestctx.server.server_context().nexus;
@@ -1189,6 +1346,68 @@ pub(crate) mod test {
             .unwrap();
         crate::app::sagas::test_helpers::actions_succeed_idempotently(
             nexus, dag,
+        )
+        .await;
+    }
+
+    /// Assert this saga does not leak regions if the replacement read-only
+    /// region cannot be created.
+    #[nexus_test(server = crate::Server)]
+    async fn test_no_leak_region(cptestctx: &ControlPlaneTestContext) {
+        let PrepareResult { db_disk, snapshot, db_snapshot, disk_test } =
+            prepare_for_test(cptestctx).await;
+
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = test_opctx(cptestctx);
+
+        let disk_allocated_regions =
+            datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        assert_eq!(disk_allocated_regions.len(), 3);
+
+        let region: &nexus_db_model::Region = &disk_allocated_regions[0].1;
+        let snapshot_id = snapshot.identity.id;
+
+        let region_snapshot = datastore
+            .region_snapshot_get(region.dataset_id(), region.id(), snapshot_id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let request =
+            RegionSnapshotReplacement::for_region_snapshot(&region_snapshot);
+
+        datastore
+            .insert_region_snapshot_replacement_request(&opctx, request.clone())
+            .await
+            .unwrap();
+
+        let affected_volume_original =
+            datastore.volume_get(db_snapshot.volume_id).await.unwrap().unwrap();
+
+        disk_test.set_always_fail_callback().await;
+
+        // Run the region snapshot replacement start saga
+        let dag =
+            create_saga_dag::<SagaRegionSnapshotReplacementStart>(Params {
+                serialized_authn: Serialized::for_opctx(&opctx),
+                request: request.clone(),
+                allocation_strategy: RegionAllocationStrategy::Random {
+                    seed: None,
+                },
+            })
+            .unwrap();
+
+        let runnable_saga = nexus.sagas.saga_prepare(dag).await.unwrap();
+
+        // Actually run the saga
+        runnable_saga.run_to_completion().await.unwrap();
+
+        verify_clean_slate(
+            &cptestctx,
+            &disk_test,
+            &request,
+            &affected_volume_original,
         )
         .await;
     }
