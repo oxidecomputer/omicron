@@ -77,7 +77,7 @@ impl super::Nexus {
         // Lookup the sled holding the bundle, forward the request there
         let sled_id = self
             .db_datastore
-            .zpool_get_sled(&opctx, bundle.zpool_id.into())
+            .zpool_get_sled_if_in_service(&opctx, bundle.zpool_id.into())
             .await?;
         let client = self.sled_client(&sled_id).await?;
 
