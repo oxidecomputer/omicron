@@ -4611,6 +4611,11 @@ async fn cmd_db_validate_regions(
             datastore.dataset_physical_disk_in_service(dataset.id()).await?;
 
         if !in_service {
+            eprintln!(
+                "dataset {} {:?} is not in service, skipping",
+                dataset.id(),
+                dataset.address(),
+            );
             continue;
         }
 
@@ -4728,6 +4733,11 @@ async fn cmd_db_validate_regions(
             datastore.dataset_physical_disk_in_service(dataset.id()).await?;
 
         if !in_service {
+            eprintln!(
+                "dataset {} {:?} is not in service, skipping",
+                dataset.id(),
+                dataset.address(),
+            );
             continue;
         }
 
