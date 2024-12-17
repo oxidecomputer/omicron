@@ -24,7 +24,7 @@ pub enum Error {
     ZfsListDataset(#[from] illumos_utils::zfs::ListDatasetsError),
 
     #[error(transparent)]
-    ZfsEnsureFilesystem(#[from] illumos_utils::zfs::EnsureFilesystemError),
+    ZfsEnsureDataset(#[from] illumos_utils::zfs::EnsureDatasetError),
 
     #[error(transparent)]
     ZfsSetValue(#[from] illumos_utils::zfs::SetValueError),
