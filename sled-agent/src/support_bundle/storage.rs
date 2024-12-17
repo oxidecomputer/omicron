@@ -100,6 +100,17 @@ impl From<Error> for HttpError {
     }
 }
 
+/// Describes the type of access to the support bundle
+#[derive(Clone, Debug)]
+pub(crate) enum SupportBundleQueryType {
+    /// Access the whole support bundle
+    Whole,
+    /// Access the names of all files within the support bundle
+    Index,
+    /// Access a specific file within the support bundle
+    Path { file_path: String },
+}
+
 // Implements "seeking" and "putting a capacity on a file" manually.
 //
 // TODO: When https://github.com/zip-rs/zip2/issues/231 is resolved,
