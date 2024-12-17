@@ -288,7 +288,15 @@ impl DataStore {
             .select(dsl::sled_id)
             .first_async::<Uuid>(&*conn)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Zpool,
+                        LookupType::by_id(id.into_untyped_uuid()),
+                    ),
+                )
+            })?;
 
         Ok(SledUuid::from_untyped_uuid(id))
     }

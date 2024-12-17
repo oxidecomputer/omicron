@@ -5,6 +5,7 @@
 //! HTTP entrypoint functions for the sled agent's exposed API
 
 use super::collection::PokeMode;
+use crate::support_bundle::storage::SupportBundleQueryType;
 use camino::Utf8PathBuf;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -438,23 +439,62 @@ impl SledAgentApi for SledAgentSimImpl {
         ))
     }
 
-    async fn support_bundle_get(
+    async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePathParam>,
-        body: TypedBody<SupportBundleGetQueryParams>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
         let range = rqctx.range();
-        let query = body.into_inner().query_type;
         sa.support_bundle_get(
             zpool_id,
             dataset_id,
             support_bundle_id,
             range,
-            query,
+            SupportBundleQueryType::Whole,
+        )
+        .await
+    }
+
+    async fn support_bundle_download_file(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundleFilePathParam>,
+    ) -> Result<http::Response<dropshot::Body>, HttpError> {
+        let sa = rqctx.context();
+        let SupportBundleFilePathParam {
+            parent:
+                SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id },
+            file,
+        } = path_params.into_inner();
+
+        let range = rqctx.range();
+        sa.support_bundle_get(
+            zpool_id,
+            dataset_id,
+            support_bundle_id,
+            range,
+            SupportBundleQueryType::Path { file_path: file },
+        )
+        .await
+    }
+
+    async fn support_bundle_index(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<http::Response<dropshot::Body>, HttpError> {
+        let sa = rqctx.context();
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+
+        let range = rqctx.range();
+        sa.support_bundle_get(
+            zpool_id,
+            dataset_id,
+            support_bundle_id,
+            range,
+            SupportBundleQueryType::Index,
         )
         .await
     }
@@ -462,20 +502,59 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn support_bundle_head(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePathParam>,
-        body: TypedBody<SupportBundleGetQueryParams>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
         let range = rqctx.range();
-        let query = body.into_inner().query_type;
+        sa.support_bundle_head(
+            zpool_id,
+            dataset_id,
+            support_bundle_id,
+            range,
+            SupportBundleQueryType::Whole,
+        )
+        .await
+    }
+
+    async fn support_bundle_head_file(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundleFilePathParam>,
+    ) -> Result<http::Response<dropshot::Body>, HttpError> {
+        let sa = rqctx.context();
+        let SupportBundleFilePathParam {
+            parent:
+                SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id },
+            file,
+        } = path_params.into_inner();
+
+        let range = rqctx.range();
         sa.support_bundle_get(
             zpool_id,
             dataset_id,
             support_bundle_id,
             range,
-            query,
+            SupportBundleQueryType::Path { file_path: file },
+        )
+        .await
+    }
+
+    async fn support_bundle_head_index(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<http::Response<dropshot::Body>, HttpError> {
+        let sa = rqctx.context();
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+
+        let range = rqctx.range();
+        sa.support_bundle_head(
+            zpool_id,
+            dataset_id,
+            support_bundle_id,
+            range,
+            SupportBundleQueryType::Index,
         )
         .await
     }

@@ -75,8 +75,6 @@ progenitor::generate_api!(
         RouterVersion = omicron_common::api::internal::shared::RouterVersion,
         SledRole = nexus_sled_agent_shared::inventory::SledRole,
         SourceNatConfig = omicron_common::api::internal::shared::SourceNatConfig,
-        SupportBundleGetQueryParams = omicron_common::api::external::SupportBundleGetQueryParams,
-        SupportBundleQueryType = omicron_common::api::external::SupportBundleQueryType,
         SwitchLocation = omicron_common::api::external::SwitchLocation,
         TypedUuidForDatasetKind = omicron_uuid_kinds::DatasetUuid,
         TypedUuidForInstanceKind = omicron_uuid_kinds::InstanceUuid,

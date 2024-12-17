@@ -14,6 +14,7 @@ use super::storage::Storage;
 use crate::artifact_store::ArtifactStore;
 use crate::nexus::NexusClient;
 use crate::sim::simulatable::Simulatable;
+use crate::support_bundle::storage::SupportBundleQueryType;
 use crate::updates::UpdateManager;
 use anyhow::bail;
 use anyhow::Context;
@@ -51,7 +52,6 @@ use propolis_client::{
 };
 use range_requests::PotentialRange;
 use sled_agent_api::SupportBundleMetadata;
-use sled_agent_api::SupportBundleQueryType;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
@@ -922,7 +922,7 @@ impl SledAgent {
             .map_err(|err| err.into())
     }
 
-    pub async fn support_bundle_get(
+    pub(crate) async fn support_bundle_get(
         &self,
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
@@ -933,6 +933,21 @@ impl SledAgent {
         self.storage
             .as_support_bundle_storage(&self.log)
             .get(zpool_id, dataset_id, support_bundle_id, range, query)
+            .await
+            .map_err(|err| err.into())
+    }
+
+    pub(crate) async fn support_bundle_head(
+        &self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+        support_bundle_id: SupportBundleUuid,
+        range: Option<PotentialRange>,
+        query: SupportBundleQueryType,
+    ) -> Result<http::Response<Body>, HttpError> {
+        self.storage
+            .as_support_bundle_storage(&self.log)
+            .head(zpool_id, dataset_id, support_bundle_id, range, query)
             .await
             .map_err(|err| err.into())
     }

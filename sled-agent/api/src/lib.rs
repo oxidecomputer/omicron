@@ -184,23 +184,61 @@ pub trait SledAgentApi {
     /// Fetch a support bundle from a particular dataset
     #[endpoint {
         method = GET,
-        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}"
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/download"
     }]
-    async fn support_bundle_get(
+    async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePathParam>,
-        body: TypedBody<SupportBundleGetQueryParams>,
     ) -> Result<http::Response<Body>, HttpError>;
 
-    /// Fetch a support bundle from a particular dataset
+    /// Fetch a file within a support bundle from a particular dataset
+    #[endpoint {
+        method = GET,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/download/{file}"
+    }]
+    async fn support_bundle_download_file(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundleFilePathParam>,
+    ) -> Result<http::Response<Body>, HttpError>;
+
+    /// Fetch the index (list of files within a support bundle)
+    #[endpoint {
+        method = GET,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/index"
+    }]
+    async fn support_bundle_index(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<http::Response<Body>, HttpError>;
+
+    /// Fetch metadata about a support bundle from a particular dataset
     #[endpoint {
         method = HEAD,
-        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}"
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/download"
     }]
     async fn support_bundle_head(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePathParam>,
-        body: TypedBody<SupportBundleGetQueryParams>,
+    ) -> Result<http::Response<Body>, HttpError>;
+
+    /// Fetch metadata about a file within a support bundle from a particular dataset
+    #[endpoint {
+        method = HEAD,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/download/{file}"
+    }]
+    async fn support_bundle_head_file(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundleFilePathParam>,
+    ) -> Result<http::Response<Body>, HttpError>;
+
+    /// Fetch metadata about the list of files within a support bundle
+    #[endpoint {
+        method = HEAD,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/index"
+    }]
+    async fn support_bundle_head_index(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<Body>, HttpError>;
 
     /// Delete a support bundle from a particular dataset
@@ -689,6 +727,9 @@ pub struct SupportBundlePathParam {
 pub struct SupportBundleFilePathParam {
     #[serde(flatten)]
     pub parent: SupportBundlePathParam,
+
+    /// The path of the file within the support bundle to query
+    pub file: String,
 }
 
 /// Metadata about a support bundle
@@ -701,9 +742,6 @@ pub struct SupportBundleCreateQueryParams {
 pub struct SupportBundleGetHeaders {
     range: String,
 }
-
-pub use omicron_common::api::external::SupportBundleGetQueryParams;
-pub use omicron_common::api::external::SupportBundleQueryType;
 
 #[derive(Deserialize, Debug, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]

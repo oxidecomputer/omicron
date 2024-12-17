@@ -21,10 +21,12 @@ use nexus_types::deployment::SledFilter;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::ResourceType;
 use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde::Serialize;
@@ -58,6 +60,20 @@ struct CleanupReport {
     db_failing_bundles_updated: usize,
 }
 
+// Result of asking a sled agent to clean up a bundle
+enum SledAgentBundleCleanupResult {
+    Deleted,
+    NotFound,
+    Failed,
+}
+
+// Result of asking the database to delete a bundle
+enum DatabaseBundleCleanupResult {
+    DestroyingBundleRemoved,
+    FailingBundleUpdated,
+    BadState,
+}
+
 /// The background task responsible for cleaning and collecting support bundles
 pub struct SupportBundleCollector {
     datastore: Arc<DataStore>,
@@ -72,6 +88,135 @@ impl SupportBundleCollector {
         nexus_id: OmicronZoneUuid,
     ) -> Self {
         SupportBundleCollector { datastore, disable, nexus_id }
+    }
+
+    // Tells a sled agent to delete a support bundle
+    async fn cleanup_bundle_from_sled_agent(
+        &self,
+        opctx: &OpContext,
+        sled_id: SledUuid,
+        bundle: &SupportBundle,
+    ) -> anyhow::Result<SledAgentBundleCleanupResult> {
+        let sled_client = nexus_networking::sled_client(
+            &self.datastore,
+            &opctx,
+            sled_id.into_untyped_uuid(),
+            &opctx.log,
+        )
+        .await?;
+
+        let result = sled_client
+            .support_bundle_delete(
+                &ZpoolUuid::from(bundle.zpool_id),
+                &DatasetUuid::from(bundle.dataset_id),
+                &SupportBundleUuid::from(bundle.id),
+            )
+            .await;
+
+        match result {
+            Ok(_) => {
+                info!(
+                    &opctx.log,
+                    "SupportBundleCollector deleted bundle";
+                    "id" => %bundle.id
+                );
+                return Ok(SledAgentBundleCleanupResult::Deleted);
+            }
+            Err(progenitor_client::Error::ErrorResponse(err))
+                if err.status() == http::StatusCode::NOT_FOUND =>
+            {
+                warn!(
+                    &opctx.log,
+                    "SupportBundleCollector could not delete bundle (not found)";
+                    "id" => %bundle.id
+                );
+
+                return Ok(SledAgentBundleCleanupResult::NotFound);
+            }
+            err => {
+                warn!(
+                    &opctx.log,
+                    "SupportBundleCollector could not delete bundle";
+                    "id" => %bundle.id,
+                    "err" => ?err,
+                );
+
+                return Ok(SledAgentBundleCleanupResult::Failed);
+            }
+        }
+    }
+
+    async fn cleanup_bundle_from_database(
+        &self,
+        opctx: &OpContext,
+        bundle: &SupportBundle,
+    ) -> anyhow::Result<DatabaseBundleCleanupResult> {
+        match bundle.state {
+            SupportBundleState::Destroying => {
+                // Destroying is a terminal state; no one should be able to
+                // change this state from underneath us.
+                self.datastore.support_bundle_delete(
+                    opctx,
+                    bundle.id.into(),
+                ).await.map_err(|err| {
+                    warn!(
+                        &opctx.log,
+                        "SupportBundleCollector: Could not delete 'destroying' bundle";
+                        "err" => %err
+                    );
+                    anyhow::anyhow!("Could not delete 'destroying' bundle: {:#}", err)
+                })?;
+
+                return Ok(
+                    DatabaseBundleCleanupResult::DestroyingBundleRemoved,
+                );
+            }
+            SupportBundleState::Failing => {
+                if let Err(err) = self
+                    .datastore
+                    .support_bundle_update(
+                        &opctx,
+                        bundle.id.into(),
+                        SupportBundleState::Failed,
+                    )
+                    .await
+                {
+                    if matches!(err, Error::InvalidRequest { .. }) {
+                        // It's possible that the bundle is marked "destroying" by a
+                        // user request, concurrently with our operation.
+                        //
+                        // In this case, we log that this happened, but do nothing.
+                        // The next iteration of this background task should treat
+                        // this as the "Destroying" case, and delete the bundle.
+                        info!(
+                            &opctx.log,
+                            "SupportBundleCollector: Concurrent state change failing bundle";
+                            "bundle" => %bundle.id,
+                            "err" => ?err,
+                        );
+                        return Ok(DatabaseBundleCleanupResult::BadState);
+                    } else {
+                        anyhow::bail!(
+                            "Could not delete 'failing' bundle: {:#}",
+                            err
+                        );
+                    }
+                }
+
+                return Ok(DatabaseBundleCleanupResult::FailingBundleUpdated);
+            }
+            other => {
+                // We should be filtering to only see "Destroying" and
+                // "Failing" bundles in our database request above.
+                error!(
+                    &opctx.log,
+                    "SupportBundleCollector: Cleaning bundle in unexpected state";
+                    "id" => %bundle.id,
+                    "state" => ?other
+                );
+                return Ok(DatabaseBundleCleanupResult::BadState);
+            }
+        }
     }
 
     // Monitors all bundles that are "destroying" or "failing" and assigned to
@@ -117,130 +262,60 @@ impl SupportBundleCollector {
             );
 
             // Find the sled where we're storing this bundle.
-            //
-            // TODO: What happens if the zpool is concurrently expunged here?
-            // TODO: Should we "continue" to other bundles rather than bailing
-            // early?
-            let sled_id = self
+            let result = self
                 .datastore
                 .zpool_get_sled(&opctx, bundle.zpool_id.into())
-                .await?;
-            let sled_client = nexus_networking::sled_client(
-                &self.datastore,
-                &opctx,
-                sled_id.into_untyped_uuid(),
-                &opctx.log,
-            )
-            .await?;
-
-            let result = sled_client
-                .support_bundle_delete(
-                    &ZpoolUuid::from(bundle.zpool_id),
-                    &DatasetUuid::from(bundle.dataset_id),
-                    &SupportBundleUuid::from(bundle.id),
-                )
                 .await;
 
-            match result {
-                Ok(_) => {
-                    info!(
-                        &opctx.log,
-                        "SupportBundleCollector deleted bundle";
-                        "id" => %bundle.id
-                    );
-                    report.sled_bundles_deleted_ok += 1;
+            println!("zpool_get_sled result: {result:?}");
 
-                    // Safe to fall-through; we deleted sled-local state.
-                }
-                Err(progenitor_client::Error::ErrorResponse(err))
-                    if err.status() == http::StatusCode::NOT_FOUND =>
-                {
-                    warn!(
-                        &opctx.log,
-                        "SupportBundleCollector could not delete bundle (not found)";
-                        "id" => %bundle.id
-                    );
-
-                    report.sled_bundles_deleted_not_found += 1;
-
-                    // Safe to fall-through; sled-local state does not exist
-                }
-                err => {
-                    warn!(
-                        &opctx.log,
-                        "SupportBundleCollector could not delete bundle";
-                        "id" => %bundle.id,
-                        "err" => ?err,
-                    );
-
-                    report.sled_bundles_delete_failed += 1;
-
-                    // We don't delete this bundle -- the sled storage may be
-                    // experiencing a transient error.
-                    continue;
-                }
-            }
-
-            match bundle.state {
-                SupportBundleState::Destroying => {
-                    // Destroying is a terminal state; no one should be able to
-                    // change this state from underneath us.
-                    self.datastore.support_bundle_delete(
-                        opctx,
-                        bundle.id.into(),
-                    ).await.map_err(|err| {
-                        warn!(
-                            &opctx.log,
-                            "SupportBundleCollector: Could not delete 'destroying' bundle";
-                            "err" => %err
-                        );
-                        anyhow::anyhow!("Could not delete 'destroying' bundle: {:#}", err)
-                    })?;
-
-                    report.db_destroying_bundles_removed += 1;
-                }
-                SupportBundleState::Failing => {
-                    if let Err(err) = self
-                        .datastore
-                        .support_bundle_update(
-                            &opctx,
-                            bundle.id.into(),
-                            SupportBundleState::Failed,
+            let delete_from_db = match result {
+                Ok(sled_id) => {
+                    match self
+                        .cleanup_bundle_from_sled_agent(
+                            &opctx, sled_id, &bundle,
                         )
-                        .await
+                        .await?
                     {
-                        if matches!(err, Error::InvalidRequest { .. }) {
-                            // It's possible that the bundle is marked "destroying" by a
-                            // user request, concurrently with our operation.
-                            //
-                            // In this case, we log that this happened, but do nothing.
-                            // The next iteration of this background task should treat
-                            // this as the "Destroying" case, and delete the bundle.
-                            info!(
-                                &opctx.log,
-                                "SupportBundleCollector: Concurrent state change failing bundle";
-                                "bundle" => %bundle.id,
-                                "err" => ?err,
-                            );
-                        } else {
-                            anyhow::bail!(
-                                "Could not delete 'failing' bundle: {:#}",
-                                err
-                            );
+                        SledAgentBundleCleanupResult::Deleted => {
+                            report.sled_bundles_deleted_ok += 1;
+                            true
+                        }
+                        SledAgentBundleCleanupResult::NotFound => {
+                            report.sled_bundles_deleted_not_found += 1;
+                            true
+                        }
+                        SledAgentBundleCleanupResult::Failed => {
+                            report.sled_bundles_delete_failed += 1;
+
+                            // If the sled agent reports any other error, don't
+                            // delete the bundle from the database. It might be
+                            // transiently unavailable.
+                            false
                         }
                     }
-
-                    report.db_failing_bundles_updated += 1;
                 }
-                other => {
-                    // We should be filtering to only see "Destroying" and
-                    // "Failing" bundles in our database request above.
-                    error!(
-                        &opctx.log,
-                        "SupportBundleCollector: Cleaning bundle in unexpected state";
-                        "id" => %bundle.id,
-                        "state" => ?other
-                    );
+                Err(Error::ObjectNotFound {
+                    type_name: ResourceType::Zpool,
+                    ..
+                }) => {
+                    // If the pool wasn't found in the database, it was
+                    // expunged. Delete the support bundle, since there is no
+                    // sled agent state to manage anymore.
+                    true
+                }
+                Err(_) => false,
+            };
+
+            if delete_from_db {
+                match self.cleanup_bundle_from_database(opctx, &bundle).await? {
+                    DatabaseBundleCleanupResult::DestroyingBundleRemoved => {
+                        report.db_destroying_bundles_removed += 1;
+                    }
+                    DatabaseBundleCleanupResult::FailingBundleUpdated => {
+                        report.db_failing_bundles_updated += 1;
+                    }
+                    DatabaseBundleCleanupResult::BadState => {}
                 }
             }
         }
@@ -1265,6 +1340,78 @@ mod test {
                 // we have simply marked the bundle "failed" and kept the
                 // simulated server running.
                 sled_bundles_deleted_ok: 1,
+                // The database state was "failing", and now it's updated.
+                //
+                // Note that it isn't immediately deleted, so the end-user
+                // should have a chance to observe the new state.
+                db_failing_bundles_updated: 1,
+                ..Default::default()
+            }
+        );
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_bundle_cleanup_after_zpool_deletion(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        // Before we can create any bundles, we need to create the
+        // space for them to be provisioned.
+        let _datasets =
+            TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
+
+        // We can allocate a support bundle and collect it
+        let bundle = datastore
+            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .await
+            .expect("Couldn't allocate a support bundle");
+        assert_eq!(bundle.state, SupportBundleState::Collecting);
+
+        let collector =
+            SupportBundleCollector::new(datastore.clone(), false, nexus.id());
+        let request = BundleRequest { skip_sled_info: true };
+        let report = collector
+            .collect_bundle(&opctx, &request)
+            .await
+            .expect("Collection should have succeeded under test")
+            .expect("Collecting the bundle should have generated a report");
+        assert_eq!(report.bundle, bundle.id.into());
+
+        // Mark the bundle as "failing" - this should be triggered
+        // automatically by the blueprint executor if the corresponding
+        // storage has been expunged.
+        datastore
+            .support_bundle_update(
+                &opctx,
+                bundle.id.into(),
+                SupportBundleState::Failing,
+            )
+            .await
+            .unwrap();
+
+        // Delete the zpool holding the bundle.
+        //
+        // This should call the "zpool_get_sled" call to fail!
+        datastore
+            .zpool_delete_self_and_all_datasets(&opctx, bundle.zpool_id.into())
+            .await
+            .unwrap();
+
+        // We can cleanup this bundle, even though it has already been
+        // collected.
+        let report = collector
+            .cleanup_destroyed_bundles(&opctx)
+            .await
+            .expect("Cleanup should delete failing bundle");
+        assert_eq!(
+            report,
+            CleanupReport {
                 // The database state was "failing", and now it's updated.
                 //
                 // Note that it isn't immediately deleted, so the end-user
