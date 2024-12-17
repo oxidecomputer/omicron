@@ -29,6 +29,9 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
+/// This endpoint is used to upload SP and ROT Hubris archives as well as phase 1 host OS
+/// images. The phase 1 image is 32 MiB, driven by the QSPI flash on hardware.
+const SP_COMPONENT_UPDATE_MAX_BYTES: usize = 64 * 1024 * 1024;
 /// The host phase 2 recovery image is currently (Dec 2024) ~130 MiB.
 const HOST_PHASE2_MAX_BYTES: usize = 512 * 1024 * 1024;
 
@@ -233,6 +236,7 @@ pub trait GatewayApi {
     #[endpoint {
         method = POST,
         path = "/sp/{type}/{slot}/component/{component}/update",
+        request_body_max_bytes = SP_COMPONENT_UPDATE_MAX_BYTES,
     }]
     async fn sp_component_update(
         rqctx: RequestContext<Self::Context>,
