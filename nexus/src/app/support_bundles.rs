@@ -33,26 +33,6 @@ pub enum SupportBundleQueryType {
     Path { file_path: String },
 }
 
-// TODO: Remove me once https://github.com/oxidecomputer/omicron/pull/7259
-// merges
-use omicron_common::api::external::SupportBundleQueryType as SledAgentSupportBundleQueryType;
-
-impl From<SupportBundleQueryType> for SledAgentSupportBundleQueryType {
-    fn from(query: SupportBundleQueryType) -> Self {
-        match query {
-            SupportBundleQueryType::Whole => {
-                SledAgentSupportBundleQueryType::Whole
-            }
-            SupportBundleQueryType::Index => {
-                SledAgentSupportBundleQueryType::Index
-            }
-            SupportBundleQueryType::Path { file_path } => {
-                SledAgentSupportBundleQueryType::Path { file_path }
-            }
-        }
-    }
-}
-
 impl super::Nexus {
     pub async fn support_bundle_list(
         &self,
@@ -103,28 +83,63 @@ impl super::Nexus {
 
         // TODO: Use "range"?
 
-        let query =
-            omicron_common::api::external::SupportBundleGetQueryParams {
-                query_type: query.into(),
-            };
-        let response = if head {
-            client
-                .support_bundle_head(
-                    &ZpoolUuid::from(bundle.zpool_id),
-                    &DatasetUuid::from(bundle.dataset_id),
-                    &SupportBundleUuid::from(bundle.id),
-                    &query,
-                )
-                .await
-        } else {
-            client
-                .support_bundle_get(
-                    &ZpoolUuid::from(bundle.zpool_id),
-                    &DatasetUuid::from(bundle.dataset_id),
-                    &SupportBundleUuid::from(bundle.id),
-                    &query,
-                )
-                .await
+        let response = match (query, head) {
+            (SupportBundleQueryType::Whole, true) => {
+                client
+                    .support_bundle_head(
+                        &ZpoolUuid::from(bundle.zpool_id),
+                        &DatasetUuid::from(bundle.dataset_id),
+                        &SupportBundleUuid::from(bundle.id),
+                    )
+                    .await
+            }
+            (SupportBundleQueryType::Whole, false) => {
+                client
+                    .support_bundle_download(
+                        &ZpoolUuid::from(bundle.zpool_id),
+                        &DatasetUuid::from(bundle.dataset_id),
+                        &SupportBundleUuid::from(bundle.id),
+                    )
+                    .await
+            }
+            (SupportBundleQueryType::Index, true) => {
+                client
+                    .support_bundle_head_index(
+                        &ZpoolUuid::from(bundle.zpool_id),
+                        &DatasetUuid::from(bundle.dataset_id),
+                        &SupportBundleUuid::from(bundle.id),
+                    )
+                    .await
+            }
+            (SupportBundleQueryType::Index, false) => {
+                client
+                    .support_bundle_index(
+                        &ZpoolUuid::from(bundle.zpool_id),
+                        &DatasetUuid::from(bundle.dataset_id),
+                        &SupportBundleUuid::from(bundle.id),
+                    )
+                    .await
+            }
+            (SupportBundleQueryType::Path { file_path }, true) => {
+                client
+                    .support_bundle_head_file(
+                        &ZpoolUuid::from(bundle.zpool_id),
+                        &DatasetUuid::from(bundle.dataset_id),
+                        &SupportBundleUuid::from(bundle.id),
+                        &file_path,
+                    )
+                    .await
+            }
+            (SupportBundleQueryType::Path { file_path }, false) => {
+                client
+                    .support_bundle_download_file(
+                        &ZpoolUuid::from(bundle.zpool_id),
+                        &DatasetUuid::from(bundle.dataset_id),
+                        &SupportBundleUuid::from(bundle.id),
+                        &file_path,
+                    )
+                    .await
+            }
         };
 
         let response =
