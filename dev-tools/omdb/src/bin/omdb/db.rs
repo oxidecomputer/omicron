@@ -1107,11 +1107,16 @@ impl DbArgs {
             DbCommands::Validate(ValidateArgs {
                 command: ValidateCommands::ValidateRegions(args),
             }) => {
-                cmd_db_validate_regions(
-                    &datastore,
-                    args.clean_up_orphaned_regions,
-                )
-                .await
+                let clean_up_orphaned_regions =
+                    if args.clean_up_orphaned_regions {
+                        let token = omdb.check_allow_destructive()?;
+                        CleanUpOrphanedRegions::Yes { _token: token }
+                    } else {
+                        CleanUpOrphanedRegions::No
+                    };
+
+                cmd_db_validate_regions(&datastore, clean_up_orphaned_regions)
+                    .await
             }
             DbCommands::Validate(ValidateArgs {
                 command: ValidateCommands::ValidateRegionSnapshots,
@@ -4546,9 +4551,14 @@ async fn cmd_db_validate_volume_references(
     Ok(())
 }
 
+enum CleanUpOrphanedRegions {
+    Yes { _token: DestructiveOperationToken },
+    No,
+}
+
 async fn cmd_db_validate_regions(
     datastore: &DataStore,
-    clean_up_orphaned_regions: bool,
+    clean_up_orphaned_regions: CleanUpOrphanedRegions,
 ) -> Result<(), anyhow::Error> {
     // *Lifetime note*:
     //
@@ -4762,32 +4772,36 @@ async fn cmd_db_validate_regions(
                     * actual_region.extent_size
                     * u64::from(actual_region.extent_count);
 
-                if clean_up_orphaned_regions {
-                    match client.region_delete(&actual_region.id).await {
-                        Ok(_) => {
-                            eprintln!(
-                                "{} region {} deleted ok",
-                                dataset_addr, actual_region.id,
-                            );
-                        }
+                match clean_up_orphaned_regions {
+                    CleanUpOrphanedRegions::Yes { .. } => {
+                        match client.region_delete(&actual_region.id).await {
+                            Ok(_) => {
+                                eprintln!(
+                                    "{} region {} deleted ok",
+                                    dataset_addr, actual_region.id,
+                                );
+                            }
 
-                        Err(e) => {
-                            eprintln!(
-                                "{} region_delete {:?}: {e}",
-                                dataset_addr, actual_region.id,
-                            );
+                            Err(e) => {
+                                eprintln!(
+                                    "{} region_delete {:?}: {e}",
+                                    dataset_addr, actual_region.id,
+                                );
+                            }
                         }
                     }
-                } else {
-                    // Do not delete this region, just print a row
-                    rows.push(Row {
-                        dataset_id: dataset.id(),
-                        region_id: actual_region_id,
-                        dataset_addr,
-                        error: String::from(
-                            "Nexus does not know about this region!",
-                        ),
-                    });
+
+                    CleanUpOrphanedRegions::No => {
+                        // Do not delete this region, just print a row
+                        rows.push(Row {
+                            dataset_id: dataset.id(),
+                            region_id: actual_region_id,
+                            dataset_addr,
+                            error: String::from(
+                                "Nexus does not know about this region!",
+                            ),
+                        });
+                    }
                 }
             }
         }
