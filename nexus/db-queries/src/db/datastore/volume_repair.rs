@@ -21,6 +21,18 @@ use omicron_common::api::external::Error;
 use uuid::Uuid;
 
 impl DataStore {
+    /// Insert a volume repair record, taking a "lock" on the volume pointed to
+    /// by volume id with some repair id.
+    ///
+    /// If there exists a record that has a matching volume id and repair id,
+    /// return Ok(()).
+    ///
+    /// If there is no volume that matches the given volume id, return an error:
+    /// it should not be possible to lock a volume that does not exist! Note
+    /// that it is possible to lock a soft-deleted volume.
+    ///
+    /// If there is already an existing record that has a matching volume id but
+    /// a different repair id, then this function returns an Error::conflict.
     pub(super) async fn volume_repair_insert_in_txn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         err: OptionalError<Error>,
