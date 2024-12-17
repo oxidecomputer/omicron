@@ -2479,6 +2479,7 @@ dependencies = [
  "internal-dns-types",
  "omicron-workspace-hack",
  "schemars",
+ "semver 1.0.23",
  "serde",
 ]
 

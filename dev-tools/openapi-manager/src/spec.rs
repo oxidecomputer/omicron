@@ -83,7 +83,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
         },
         ApiSpec {
             title: "Internal DNS",
-            versions: Versions::Lockstep { version: semver::Version::new(0,0,1) },
+            versions: Versions::versioned(dns_server_api::VERSIONS_SUPPORTED),
             description: "API for the internal DNS server",
             boundary: ApiBoundary::Internal,
             api_description:
@@ -339,14 +339,34 @@ impl ApiSpec {
 
 pub enum Versions {
     Lockstep { version: semver::Version },
-    Versioned { latest: semver::Version, other_supported: Vec<semver::Version> },
+    Versioned { supported_versions: Vec<semver::Version> },
 }
 
 impl Versions {
+    pub fn versioned(supported_versions: &[&semver::Version]) -> Versions {
+        assert!(!supported_versions.is_empty());
+        // XXX-dap this is unstable
+        // assert!(
+        //     supported_versions.is_sorted(),
+        //     "array of supported API versions is not sorted"
+        // );
+        Versions::Versioned {
+            supported_versions: supported_versions
+                .into_iter()
+                .cloned()
+                .cloned()
+                .collect(),
+        }
+    }
+
     pub fn latest(&self) -> &semver::Version {
         match self {
             Versions::Lockstep { version } => version,
-            Versions::Versioned { latest, .. } => latest,
+            // unwrap: we verified in the constructor that there is at least one
+            // item here.
+            Versions::Versioned { supported_versions } => {
+                supported_versions.last().unwrap()
+            }
         }
     }
 }

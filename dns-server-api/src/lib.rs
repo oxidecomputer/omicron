@@ -92,6 +92,9 @@
 use dropshot::{HttpError, HttpResponseOk, RequestContext};
 use internal_dns_types::config::{DnsConfig, DnsConfigParams};
 
+pub const VERSION_INITIAL: semver::Version = semver::Version::new(0, 0, 1);
+pub static VERSIONS_SUPPORTED: &[&semver::Version] = &[&VERSION_INITIAL];
+
 #[dropshot::api_description]
 pub trait DnsServerApi {
     type Context;
