@@ -15,6 +15,7 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
 use crate::db::model::PhysicalDisk;
+use crate::db::model::PhysicalDiskPolicy;
 use crate::db::model::PhysicalDiskState;
 use crate::db::model::Sled;
 use crate::db::model::Zpool;
@@ -273,19 +274,28 @@ impl DataStore {
         Ok(())
     }
 
-    pub async fn zpool_get_sled(
+    pub async fn zpool_get_sled_if_in_service(
         &self,
         opctx: &OpContext,
         id: ZpoolUuid,
     ) -> LookupResult<SledUuid> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        use db::schema::zpool::dsl;
+        use db::schema::physical_disk::dsl as physical_disk_dsl;
+        use db::schema::zpool::dsl as zpool_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let id = dsl::zpool
-            .filter(dsl::id.eq(id.into_untyped_uuid()))
-            .filter(dsl::time_deleted.is_null())
-            .select(dsl::sled_id)
+        let id = zpool_dsl::zpool
+            .filter(zpool_dsl::id.eq(id.into_untyped_uuid()))
+            .filter(zpool_dsl::time_deleted.is_null())
+            .inner_join(
+                physical_disk_dsl::physical_disk
+                    .on(zpool_dsl::physical_disk_id.eq(physical_disk_dsl::id)),
+            )
+            .filter(
+                physical_disk_dsl::disk_policy
+                    .eq(PhysicalDiskPolicy::InService),
+            )
+            .select(zpool_dsl::sled_id)
             .first_async::<Uuid>(&*conn)
             .await
             .map_err(|e| {

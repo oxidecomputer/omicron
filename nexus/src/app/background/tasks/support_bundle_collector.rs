@@ -264,10 +264,10 @@ impl SupportBundleCollector {
             // Find the sled where we're storing this bundle.
             let result = self
                 .datastore
-                .zpool_get_sled(&opctx, bundle.zpool_id.into())
+                .zpool_get_sled_if_in_service(&opctx, bundle.zpool_id.into())
                 .await;
 
-            println!("zpool_get_sled result: {result:?}");
+            println!("zpool_get_sled_if_in_service result: {result:?}");
 
             let delete_from_db = match result {
                 Ok(sled_id) => {
@@ -473,7 +473,10 @@ impl<'a> BundleCollection<'a> {
         let sled_id = self
             .collector
             .datastore
-            .zpool_get_sled(&self.opctx, self.bundle.zpool_id.into())
+            .zpool_get_sled_if_in_service(
+                &self.opctx,
+                self.bundle.zpool_id.into(),
+            )
             .await?;
         let sled_client = nexus_networking::sled_client(
             &self.collector.datastore,
@@ -1397,7 +1400,7 @@ mod test {
 
         // Delete the zpool holding the bundle.
         //
-        // This should call the "zpool_get_sled" call to fail!
+        // This should call the "zpool_get_sled_if_in_service" call to fail!
         datastore
             .zpool_delete_self_and_all_datasets(&opctx, bundle.zpool_id.into())
             .await
