@@ -16,7 +16,6 @@ use crate::db::DbConnection;
 use crate::db::TransactionError;
 use crate::transaction_retry::OptionalError;
 use anyhow::Context;
-use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
@@ -106,7 +105,7 @@ impl DataStore {
         blueprint: &Blueprint,
     ) -> Result<(), Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        Self::blueprint_insert_on_connection(&conn, opctx, blueprint).await
+        self.blueprint_insert_on_connection(&conn, opctx, blueprint).await
     }
 
     /// Creates a transaction iff the current blueprint is "bp_id".
@@ -182,6 +181,7 @@ impl DataStore {
     /// Variant of [Self::blueprint_insert] which may be called from a
     /// transaction context.
     pub(crate) async fn blueprint_insert_on_connection(
+        &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
         blueprint: &Blueprint,
@@ -335,7 +335,13 @@ impl DataStore {
         // batch rather than making a bunch of round-trips to the database.
         // We'd do that if we had an interface for doing that with bound
         // parameters, etc.  See oxidecomputer/omicron#973.
-        conn.transaction_async(|conn| async move {
+
+        // The risk of a serialization error is possible here, but low,
+        // as most of the operations should be insertions rather than in-place
+        // modifications of existing tables.
+        #[allow(clippy::disallowed_methods)]
+        self.transaction_non_retry_wrapper("blueprint_insert")
+            .transaction(&conn, |conn| async move {
             // Insert the row for the blueprint.
             {
                 use db::schema::blueprint::dsl;
@@ -1087,6 +1093,7 @@ impl DataStore {
         // start removing it and we'd also need to make sure we didn't leak a
         // collection if we crash while deleting it.
         let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
 
         let (
             nblueprints,
@@ -1101,19 +1108,23 @@ impl DataStore {
             nclickhouse_cluster_configs,
             nclickhouse_keepers,
             nclickhouse_servers,
-        ) = conn
-            .transaction_async(|conn| async move {
+        ) = self.transaction_retry_wrapper("blueprint_delete")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
                 // Ensure that blueprint we're about to delete is not the
                 // current target.
-                let current_target =
-                    Self::blueprint_current_target_only(&conn).await?;
+                let current_target = Self::blueprint_current_target_only(&conn)
+                    .await
+                    .map_err(|txn_err| txn_err.into_diesel(&err))?;
+
                 if current_target.target_id == blueprint_id {
-                    return Err(TransactionError::CustomError(
+                    return Err(err.bail(TransactionError::CustomError(
                         Error::conflict(format!(
                             "blueprint {blueprint_id} is the \
                              current target and cannot be deleted",
                         )),
-                    ));
+                    )));
                 }
 
                 // Remove the record describing the blueprint itself.
@@ -1130,9 +1141,9 @@ impl DataStore {
                 // references to it in any of the remaining tables either, since
                 // deletion always goes through this transaction.
                 if nblueprints == 0 {
-                    return Err(TransactionError::CustomError(
+                    return Err(err.bail(TransactionError::CustomError(
                         authz_blueprint.not_found(),
-                    ));
+                    )));
                 }
 
                 // Remove rows associated with sled states.
@@ -1259,13 +1270,12 @@ impl DataStore {
                     nclickhouse_keepers,
                     nclickhouse_servers,
                 ))
+                }
             })
             .await
-            .map_err(|error| match error {
-                TransactionError::CustomError(e) => e,
-                TransactionError::Database(e) => {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                }
+            .map_err(|e| match err.take() {
+                Some(err) => err.into(),
+                None => public_error_from_diesel(e, ErrorHandler::Server),
             })?;
 
         info!(&opctx.log, "removed blueprint";

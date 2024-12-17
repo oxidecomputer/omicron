@@ -16,6 +16,7 @@ illumos-utils.workspace = true
 indexmap.workspace = true
 internal-dns-resolver.workspace = true
 ipnet.workspace = true
+itertools.workspace = true
 nexus-config.workspace = true
 nexus-inventory.workspace = true
 nexus-sled-agent-shared.workspace = true
@@ -39,6 +40,7 @@ omicron-workspace-hack.workspace = true
 [dev-dependencies]
 expectorate.workspace = true
 maplit.workspace = true
+omicron-common = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
 proptest.workspace = true
 test-strategy.workspace = true

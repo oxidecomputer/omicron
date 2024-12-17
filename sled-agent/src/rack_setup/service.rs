@@ -16,19 +16,22 @@
 //! Rack setup occurs in distinct phases that are denoted by the presence of
 //! state files that get generated as RSS executes:
 //!
-//! - /pool/int/UUID/config/rss-sled-plan.json (Sled Plan)
-//! - /pool/int/UUID/config/rss-service-plan-v5.json (Service Plan)
-//! - /pool/int/UUID/config/rss-plan-completed.marker (Plan Execution Complete)
+//! - /pool/int/UUID/config/rss-started.marker (RSS has started)
+//! - /pool/int/UUID/config/rss-plan-completed.marker (RSS Complete)
 //!
-//! These phases are described below.  As each phase completes, a corresponding
-//! state file is written.  This mechanism is designed so that if RSS restarts
-//! (e.g., after a crash) then it will resume execution using the same plans.
+//! In its current incarnation, RSS is not capable of restarting without a
+//! clean-slate of the rack. Rather than persisting plan files which may let
+//! us pick up and restart at certain given points we instead only record two
+//! marker files. These marker files indicate one of two things:
 //!
-//! The service plan file has "-v2" in the filename because its structure
-//! changed in omicron#4466.  It is possible that on startup, RSS finds an
-//! older-form service plan.  In that case, it fails altogether.  We do not
-//! expect this condition to happen in practice.  See the implementation for
-//! details.
+//!   * RSS has started. We must clean-slate the rack if we try to start RSS and
+//!     see this file, as it indicates the original RSS attempt failed.
+//!   * RSS has completed and handed off to nexus. The system is up and running
+//!     and any clean-slate would reset the rack to factory default state losing
+//!     any existing data.
+//!
+//! Between these two marker states we perform RSS which performs the following
+//! operations.
 //!
 //! ## Sled Plan
 //!
@@ -36,11 +39,7 @@
 //! (Scrimlet). It must communicate with other sleds on the bootstrap network to
 //! discover neighbors. RSS uses the bootstrap network to identify peers, assign
 //! them subnets and UUIDs, and initialize a trust quorum. Once RSS decides
-//! these values it commits them to a local file as the "Sled Plan", before
-//! sending requests.
-//!
-//! As a result, restarting RSS should result in retransmission of the same
-//! values, as long as the same configuration file is used.
+//! these values it constructs a `SledPlan`.
 //!
 //! ## Service Plan
 //!
@@ -53,16 +52,20 @@
 //! - Nexus itself
 //!
 //! Once the distribution of these services is decided (which sled should run
-//! what service? On what zpools should CockroachDB be provisioned?) it is
-//! committed to the Service Plan, and executed.
+//! what service? On what zpools should CockroachDB be provisioned?), the
+//! `ServicePlan` is created and executed.
 //!
-//! ## Execution Complete
+//! ## Handoff to Nexus
 //!
-//! Once the both the Sled and Service plans have finished execution, handoff of
-//! control to Nexus can occur. <https://rfd.shared.oxide.computer/rfd/0278>
-//! covers this in more detail, but in short, RSS creates a "marker" file after
-//! completing execution, and unconditionally calls the "handoff to Nexus" API
-//! thereafter.
+//! Once the both the Sled and Service plans have finished execution, handoff
+//! of control to Nexus can occur. <https://rfd.shared.oxide.computer/rfd/0278>
+//! covers this in more detail, but in short, RSS creates a "marker" file
+//! after completing execution and calling the "handoff to Nexus" API. In prior
+//! versions of RSS this marker file was written prior to handoff. However, in
+//! order to simplify state management we decided to eliminate plan persistence
+//! and force RSS to run to completion through nexus handoff or be restarted
+//! after a clean slate upon failure.
+//! See <https://github.com/oxidecomputer/omicron/issues/7174> for details.
 
 use super::plan::service::SledConfig;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
@@ -73,9 +76,7 @@ use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
 };
-use crate::rack_setup::plan::sled::{
-    Plan as SledPlan, PlanError as SledPlanError,
-};
+use crate::rack_setup::plan::sled::Plan as SledPlan;
 use anyhow::{bail, Context};
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
@@ -103,8 +104,7 @@ use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::disk::{
-    DatasetKind, DatasetsConfig, OmicronPhysicalDiskConfig,
-    OmicronPhysicalDisksConfig,
+    DatasetKind, DatasetsConfig, OmicronPhysicalDisksConfig,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
@@ -131,7 +131,7 @@ use slog::Logger;
 use std::collections::{btree_map, BTreeMap, BTreeSet};
 use std::collections::{HashMap, HashSet};
 use std::iter;
-use std::net::{Ipv6Addr, SocketAddrV6};
+use std::net::SocketAddrV6;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::watch;
@@ -168,9 +168,6 @@ pub enum SetupServiceError {
 
     #[error("Cannot create plan for sled services: {0}")]
     ServicePlan(#[from] ServicePlanError),
-
-    #[error("Cannot create plan for sled setup: {0}")]
-    SledPlan(#[from] SledPlanError),
 
     #[error("Bad configuration for setting up rack: {0}")]
     BadConfig(String),
@@ -215,6 +212,12 @@ pub enum SetupServiceError {
     // of error variants already in this type
     #[error(transparent)]
     EarlyNetworkSetup(#[from] EarlyNetworkSetupError),
+
+    #[error("Rack already initialized")]
+    RackAlreadyInitialized,
+
+    #[error("Rack initialization was interrupted. Clean-slate required")]
+    RackInitInterrupted,
 }
 
 // The workload / information allocated to a single sled.
@@ -293,6 +296,18 @@ impl RackSetupService {
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
+struct RssStartedMarker {}
+
+impl Ledgerable for RssStartedMarker {
+    fn is_newer_than(&self, _other: &Self) -> bool {
+        true
+    }
+    fn generation_bump(&mut self) {}
+}
+
+const RSS_STARTED_FILENAME: &str = "rss-started.marker";
+
+#[derive(Clone, Serialize, Deserialize, Default)]
 struct RssCompleteMarker {}
 
 impl Ledgerable for RssCompleteMarker {
@@ -329,19 +344,7 @@ impl ServiceInner {
                 // Ensure all the physical disks are initialized
                 self.initialize_disks_on_sled(
                     *sled_address,
-                    OmicronPhysicalDisksConfig {
-                        generation: config.disks.generation,
-                        disks: config
-                            .disks
-                            .disks
-                            .iter()
-                            .map(|disk| OmicronPhysicalDiskConfig {
-                                identity: disk.identity.clone(),
-                                id: disk.id,
-                                pool_id: disk.pool_id,
-                            })
-                            .collect(),
-                    },
+                    config.disks.clone().into(),
                 )
                 .await?;
 
@@ -1205,7 +1208,15 @@ impl ServiceInner {
             config.az_subnet(),
         )?;
 
-        let marker_paths: Vec<Utf8PathBuf> = storage_manager
+        let started_marker_paths: Vec<Utf8PathBuf> = storage_manager
+            .get_latest_disks()
+            .await
+            .all_m2_mountpoints(CONFIG_DATASET)
+            .into_iter()
+            .map(|p| p.join(RSS_STARTED_FILENAME))
+            .collect();
+
+        let completed_marker_paths: Vec<Utf8PathBuf> = storage_manager
             .get_latest_disks()
             .await
             .all_m2_mountpoints(CONFIG_DATASET)
@@ -1213,106 +1224,72 @@ impl ServiceInner {
             .map(|p| p.join(RSS_COMPLETED_FILENAME))
             .collect();
 
-        let ledger =
-            Ledger::<RssCompleteMarker>::new(&self.log, marker_paths.clone())
-                .await;
+        let started_ledger = Ledger::<RssStartedMarker>::new(
+            &self.log,
+            started_marker_paths.clone(),
+        )
+        .await;
+        let completed_ledger = Ledger::<RssCompleteMarker>::new(
+            &self.log,
+            completed_marker_paths.clone(),
+        )
+        .await;
 
         // Check if a previous RSS plan has completed successfully.
         //
-        // If it has, the system should be up-and-running.
-        if ledger.is_some() {
-            // TODO(https://github.com/oxidecomputer/omicron/issues/724): If the
-            // running configuration doesn't match Config, we could try to
-            // update things.
-            info!(
-                self.log,
-                "RSS configuration looks like it has already been applied",
-            );
-
-            rss_step.update(RssStep::LoadExistingPlan);
-            let sled_plan = SledPlan::load(&self.log, storage_manager)
-                .await?
-                .expect("Sled plan should exist if completed marker exists");
-            if &sled_plan.config != config {
-                return Err(SetupServiceError::BadConfig(
-                    "Configuration changed".to_string(),
-                ));
-            }
-            let service_plan = ServicePlan::load(&self.log, storage_manager)
-                .await?
-                .expect("Service plan should exist if completed marker exists");
-
-            let switch_mgmt_addrs = EarlyNetworkSetup::new(&self.log)
-                .lookup_switch_zone_underlay_addrs(&resolver)
-                .await;
-
-            let nexus_address =
-                resolver.lookup_socket_v6(ServiceName::Nexus).await?;
-
-            rss_step.update(RssStep::NexusHandoff);
-            self.handoff_to_nexus(
-                &config,
-                &sled_plan,
-                &service_plan,
-                ExternalPortDiscovery::Auto(switch_mgmt_addrs),
-                nexus_address,
-            )
-            .await?;
-            return Ok(());
-        } else {
-            info!(self.log, "RSS configuration has not been fully applied yet");
+        // If we see the completion marker in the `completed_ledger` then the
+        // system should be up-and-running. If we see the started marker in
+        // the `started_ledger`, then RSS did not complete and the rack should
+        // be clean-slated before RSS is run again.
+        if completed_ledger.is_some() {
+            info!(self.log, "RSS configuration has already been applied",);
+            return Err(SetupServiceError::RackAlreadyInitialized);
+        } else if started_ledger.is_some() {
+            error!(self.log, "RSS failed to complete rack initialization");
+            return Err(SetupServiceError::RackInitInterrupted);
         }
 
-        rss_step.update(RssStep::CreateSledPlan);
-        // Wait for either:
-        // - All the peers to re-load an old plan (if one exists)
-        // - Enough peers to create a new plan (if one does not exist)
+        info!(self.log, "RSS not previously run. Creating plans.");
+
+        // Wait for enough peers to create a new plan
         let bootstrap_addrs = match &config.bootstrap_discovery {
             BootstrapAddressDiscovery::OnlyOurs => {
                 BTreeSet::from([local_bootstrap_agent.our_address()])
             }
             BootstrapAddressDiscovery::OnlyThese { addrs } => addrs.clone(),
         };
-        let maybe_sled_plan =
-            SledPlan::load(&self.log, storage_manager).await?;
-        if let Some(plan) = &maybe_sled_plan {
-            let stored_peers: BTreeSet<Ipv6Addr> =
-                plan.sleds.keys().map(|a| *a.ip()).collect();
-            if stored_peers != bootstrap_addrs {
-                let e = concat!(
-                    "Set of sleds requested does not match those in",
-                    " existing sled plan"
-                );
-                return Err(SetupServiceError::BadConfig(e.to_string()));
-            }
-        }
+
         if bootstrap_addrs.is_empty() {
             return Err(SetupServiceError::BadConfig(
                 "Must request at least one peer".to_string(),
             ));
         }
 
-        // If we created a plan, reuse it. Otherwise, create a new plan.
+        // Create a new plan.
         //
         // NOTE: This is a "point-of-no-return" -- before sending any requests
-        // to neighboring sleds, the plan must be recorded to durable storage.
-        // This way, if the RSS power-cycles, it can idempotently provide the
-        // same subnets to the same sleds.
-        let plan = if let Some(plan) = maybe_sled_plan {
-            info!(self.log, "Re-using existing allocation plan");
-            plan
-        } else {
-            info!(self.log, "Creating new allocation plan");
-            SledPlan::create(
-                &self.log,
-                config,
-                &storage_manager,
-                bootstrap_addrs,
-                config.trust_quorum_peers.is_some(),
-            )
-            .await?
-        };
-        let config = &plan.config;
+        // to neighboring sleds, we record that RSS has started.
+        // This way, if the RSS power-cycles, it can be detected and we can
+        // clean-slate and try again.
+
+        // Record that we have started RSS
+        let mut ledger = Ledger::<RssStartedMarker>::new_with(
+            &self.log,
+            started_marker_paths.clone(),
+            RssStartedMarker::default(),
+        );
+        ledger.commit().await?;
+
+        rss_step.update(RssStep::CreateSledPlan);
+        info!(self.log, "Creating new allocation plan");
+        let sled_plan = SledPlan::create(
+            &self.log,
+            config,
+            bootstrap_addrs,
+            config.trust_quorum_peers.is_some(),
+        )
+        .await;
+        let config = &sled_plan.config;
 
         rss_step.update(RssStep::InitTrustQuorum);
         // Initialize the trust quorum if there are peers configured.
@@ -1320,7 +1297,7 @@ impl ServiceInner {
             let initial_membership: BTreeSet<_> =
                 peers.iter().cloned().collect();
             bootstore
-                .init_rack(plan.rack_id.into(), initial_membership)
+                .init_rack(sled_plan.rack_id.into(), initial_membership)
                 .await?;
         }
 
@@ -1344,7 +1321,8 @@ impl ServiceInner {
         // Forward the sled initialization requests to our sled-agent.
         local_bootstrap_agent
             .initialize_sleds(
-                plan.sleds
+                sled_plan
+                    .sleds
                     .iter()
                     .map(move |(bootstrap_addr, initialization_request)| {
                         (*bootstrap_addr, initialization_request.clone())
@@ -1356,26 +1334,8 @@ impl ServiceInner {
 
         // Now that sled agents have been initialized, we can create
         // a service allocation plan.
-        let sled_addresses: Vec<_> = plan
-            .sleds
-            .values()
-            .map(|initialization_request| {
-                get_sled_address(initialization_request.body.subnet)
-            })
-            .collect();
-        let service_plan = if let Some(plan) =
-            ServicePlan::load(&self.log, storage_manager).await?
-        {
-            plan
-        } else {
-            ServicePlan::create(
-                &self.log,
-                &config,
-                &storage_manager,
-                &plan.sleds,
-            )
-            .await?
-        };
+        let service_plan =
+            ServicePlan::create(&self.log, &config, &sled_plan.sleds).await?;
 
         rss_step.update(RssStep::EnsureStorage);
         // Before we can ask for any services, we need to ensure that storage is
@@ -1418,8 +1378,15 @@ impl ServiceInner {
         );
         self.ensure_zone_config_at_least(v3generator.sled_configs()).await?;
 
-        rss_step.update(RssStep::WaitForTimeSync);
         // Wait until time is synchronized on all sleds before proceeding.
+        rss_step.update(RssStep::WaitForTimeSync);
+        let sled_addresses: Vec<_> = sled_plan
+            .sleds
+            .values()
+            .map(|initialization_request| {
+                get_sled_address(initialization_request.body.subnet)
+            })
+            .collect();
         self.wait_for_timesync(&sled_addresses).await?;
 
         info!(self.log, "Finished setting up Internal DNS and NTP");
@@ -1447,14 +1414,6 @@ impl ServiceInner {
 
         info!(self.log, "Finished setting up services");
 
-        // Finally, mark that we've completed executing the plans.
-        let mut ledger = Ledger::<RssCompleteMarker>::new_with(
-            &self.log,
-            marker_paths.clone(),
-            RssCompleteMarker::default(),
-        );
-        ledger.commit().await?;
-
         let nexus_address =
             resolver.lookup_socket_v6(ServiceName::Nexus).await?;
 
@@ -1463,12 +1422,20 @@ impl ServiceInner {
         // services, or DNS records.
         self.handoff_to_nexus(
             &config,
-            &plan,
+            &sled_plan,
             &service_plan,
             ExternalPortDiscovery::Auto(switch_mgmt_addrs),
             nexus_address,
         )
         .await?;
+
+        // Finally, mark that we've completed executing the plans and handed off to nexus.
+        let mut ledger = Ledger::<RssCompleteMarker>::new_with(
+            &self.log,
+            completed_marker_paths.clone(),
+            RssCompleteMarker::default(),
+        );
+        ledger.commit().await?;
 
         Ok(())
     }

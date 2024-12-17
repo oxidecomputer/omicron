@@ -52,6 +52,19 @@ impl OximeterApi for OximeterApiImpl {
         .map(HttpResponseOk)
     }
 
+    async fn producer_details(
+        request_context: RequestContext<Self::Context>,
+        path: dropshot::Path<ProducerIdPathParams>,
+    ) -> Result<HttpResponseOk<ProducerDetails>, HttpError> {
+        let agent = request_context.context();
+        let producer_id = path.into_inner().producer_id;
+        agent
+            .producer_details(producer_id)
+            .await
+            .map_err(HttpError::from)
+            .map(HttpResponseOk)
+    }
+
     async fn producer_delete(
         request_context: RequestContext<Self::Context>,
         path: dropshot::Path<ProducerIdPathParams>,

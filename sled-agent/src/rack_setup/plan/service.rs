@@ -4,7 +4,6 @@
 
 //! Plan generation for "where should services be initialized".
 
-use camino::Utf8PathBuf;
 use illumos_utils::zpool::ZpoolName;
 use internal_dns_types::config::{
     DnsConfigBuilder, DnsConfigParams, Host, Zone,
@@ -14,8 +13,9 @@ use nexus_sled_agent_shared::inventory::{
     Inventory, OmicronZoneDataset, SledRole,
 };
 use nexus_types::deployment::{
-    blueprint_zone_type, BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
-    BlueprintZoneDisposition, BlueprintZoneType,
+    blueprint_zone_type, BlueprintPhysicalDiskConfig,
+    BlueprintPhysicalDiskDisposition, BlueprintPhysicalDisksConfig,
+    BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
     OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
     OmicronZoneExternalSnatIp,
 };
@@ -35,10 +35,8 @@ use omicron_common::backoff::{
 };
 use omicron_common::disk::{
     CompressionAlgorithm, DatasetConfig, DatasetKind, DatasetName,
-    DatasetsConfig, DiskVariant, OmicronPhysicalDiskConfig,
-    OmicronPhysicalDisksConfig, SharedDatasetConfig,
+    DatasetsConfig, DiskVariant, SharedDatasetConfig,
 };
-use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_common::policy::{
     BOUNDARY_NTP_REDUNDANCY, COCKROACHDB_REDUNDANCY,
     CRUCIBLE_PANTRY_REDUNDANCY, INTERNAL_DNS_REDUNDANCY, NEXUS_REDUNDANCY,
@@ -57,8 +55,6 @@ use sled_agent_client::{
 };
 use sled_agent_types::rack_init::RackInitializeRequest as Config;
 use sled_agent_types::sled::StartSledAgentRequest;
-use sled_storage::dataset::CONFIG_DATASET;
-use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -78,9 +74,6 @@ pub enum PlanError {
         err: std::io::Error,
     },
 
-    #[error("Failed to access ledger: {0}")]
-    Ledger(#[from] ledger::Error),
-
     #[error("Error making HTTP request to Sled Agent: {0}")]
     SledApi(#[from] SledAgentError<SledAgentTypes::Error>),
 
@@ -98,18 +91,6 @@ pub enum PlanError {
 
     #[error("Unexpected dataset kind: {0}")]
     UnexpectedDataset(String),
-
-    #[error("Found only v1 service plan")]
-    FoundV1,
-
-    #[error("Found only v2 service plan")]
-    FoundV2,
-
-    #[error("Found only v3 service plan")]
-    FoundV3,
-
-    #[error("Found only v4 service plan")]
-    FoundV4,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
@@ -182,18 +163,6 @@ pub struct Plan {
     pub dns_config: DnsConfigParams,
 }
 
-impl Ledgerable for Plan {
-    fn is_newer_than(&self, _other: &Self) -> bool {
-        true
-    }
-    fn generation_bump(&mut self) {}
-}
-const RSS_SERVICE_PLAN_V1_FILENAME: &str = "rss-service-plan.json";
-const RSS_SERVICE_PLAN_V2_FILENAME: &str = "rss-service-plan-v2.json";
-const RSS_SERVICE_PLAN_V3_FILENAME: &str = "rss-service-plan-v3.json";
-const RSS_SERVICE_PLAN_V4_FILENAME: &str = "rss-service-plan-v4.json";
-const RSS_SERVICE_PLAN_FILENAME: &str = "rss-service-plan-v5.json";
-
 pub fn from_sockaddr_to_external_floating_addr(
     addr: SocketAddr,
 ) -> OmicronZoneExternalFloatingAddr {
@@ -240,160 +209,6 @@ pub fn from_source_nat_config_to_external_snat_ip(
 }
 
 impl Plan {
-    pub async fn load(
-        log: &Logger,
-        storage_manager: &StorageHandle,
-    ) -> Result<Option<Plan>, PlanError> {
-        let paths: Vec<Utf8PathBuf> = storage_manager
-            .get_latest_disks()
-            .await
-            .all_m2_mountpoints(CONFIG_DATASET)
-            .into_iter()
-            .map(|p| p.join(RSS_SERVICE_PLAN_FILENAME))
-            .collect();
-
-        // If we already created a plan for this RSS to allocate
-        // services to sleds, re-use that existing plan.
-        let ledger = Ledger::<Self>::new(log, paths.clone()).await;
-
-        if let Some(ledger) = ledger {
-            info!(log, "RSS plan already created, loading from file");
-            Ok(Some(ledger.data().clone()))
-        } else if Self::has_v1(storage_manager).await.map_err(|err| {
-            PlanError::Io {
-                message: String::from("looking for v1 RSS plan"),
-                err,
-            }
-        })? {
-            // If we found no current-version service plan, but we _do_ find
-            // a v1 plan present, bail out.  We do not expect to ever see this
-            // in practice because that would indicate that:
-            //
-            // - We ran RSS previously on this same system using an older
-            //   version of the software that generates v1 service plans and it
-            //   got far enough through RSS to have written the v1 service plan.
-            // - That means it must have finished initializing all sled agents,
-            //   including itself, causing it to record a
-            //   `StartSledAgentRequest`s in its ledger -- while still running
-            //   the older RSS.
-            // - But we're currently running software that knows about v2
-            //   service plans.  Thus, this process started some time after that
-            //   ledger was written.
-            // - But the bootstrap agent refuses to execute RSS if it has a
-            //   local `StartSledAgentRequest` ledgered.  So we shouldn't get
-            //   here if all of the above happened.
-            //
-            // This sounds like a complicated set of assumptions.  If we got
-            // this wrong, we'll fail spuriously here and we'll have to figure
-            // out what happened.  But the alternative is doing extra work to
-            // support a condition that we do not believe can ever happen in any
-            // system.
-            Err(PlanError::FoundV1)
-        } else if Self::has_v2(storage_manager).await.map_err(|err| {
-            // Same as the comment above, but for version 2.
-            PlanError::Io {
-                message: String::from("looking for v2 RSS plan"),
-                err,
-            }
-        })? {
-            Err(PlanError::FoundV2)
-        } else if Self::has_v3(storage_manager).await.map_err(|err| {
-            // Same as the comment above, but for version 3.
-            PlanError::Io {
-                message: String::from("looking for v3 RSS plan"),
-                err,
-            }
-        })? {
-            Err(PlanError::FoundV3)
-        } else if Self::has_v4(storage_manager).await.map_err(|err| {
-            // Same as the comment above, but for version 4.
-            PlanError::Io {
-                message: String::from("looking for v4 RSS plan"),
-                err,
-            }
-        })? {
-            Err(PlanError::FoundV4)
-        } else {
-            Ok(None)
-        }
-    }
-
-    async fn has_v1(
-        storage_manager: &StorageHandle,
-    ) -> Result<bool, std::io::Error> {
-        let paths = storage_manager
-            .get_latest_disks()
-            .await
-            .all_m2_mountpoints(CONFIG_DATASET)
-            .into_iter()
-            .map(|p| p.join(RSS_SERVICE_PLAN_V1_FILENAME));
-
-        for p in paths {
-            if p.try_exists()? {
-                return Ok(true);
-            }
-        }
-
-        Ok(false)
-    }
-
-    async fn has_v2(
-        storage_manager: &StorageHandle,
-    ) -> Result<bool, std::io::Error> {
-        let paths = storage_manager
-            .get_latest_disks()
-            .await
-            .all_m2_mountpoints(CONFIG_DATASET)
-            .into_iter()
-            .map(|p| p.join(RSS_SERVICE_PLAN_V2_FILENAME));
-
-        for p in paths {
-            if p.try_exists()? {
-                return Ok(true);
-            }
-        }
-
-        Ok(false)
-    }
-
-    async fn has_v3(
-        storage_manager: &StorageHandle,
-    ) -> Result<bool, std::io::Error> {
-        let paths = storage_manager
-            .get_latest_disks()
-            .await
-            .all_m2_mountpoints(CONFIG_DATASET)
-            .into_iter()
-            .map(|p| p.join(RSS_SERVICE_PLAN_V3_FILENAME));
-
-        for p in paths {
-            if p.try_exists()? {
-                return Ok(true);
-            }
-        }
-
-        Ok(false)
-    }
-
-    async fn has_v4(
-        storage_manager: &StorageHandle,
-    ) -> Result<bool, std::io::Error> {
-        let paths = storage_manager
-            .get_latest_disks()
-            .await
-            .all_m2_mountpoints(CONFIG_DATASET)
-            .into_iter()
-            .map(|p| p.join(RSS_SERVICE_PLAN_V4_FILENAME));
-
-        for p in paths {
-            if p.try_exists()? {
-                return Ok(true);
-            }
-        }
-
-        Ok(false)
-    }
-
     async fn is_sled_scrimlet(
         log: &Logger,
         address: SocketAddrV6,
@@ -512,14 +327,16 @@ impl Plan {
                 .disks
                 .iter()
                 .filter(|disk| matches!(disk.variant, DiskVariant::U2))
-                .map(|disk| OmicronPhysicalDiskConfig {
+                .map(|disk| BlueprintPhysicalDiskConfig {
+                    disposition: BlueprintPhysicalDiskDisposition::InService,
                     identity: disk.identity.clone(),
                     id: PhysicalDiskUuid::new_v4(),
                     pool_id: ZpoolUuid::new_v4(),
                 })
                 .collect();
-            sled_info.request.disks = OmicronPhysicalDisksConfig {
-                generation: Generation::new(),
+            sled_info.request.disks = BlueprintPhysicalDisksConfig {
+                // Any non-empty config must start at generation 2
+                generation: Generation::new().next(),
                 disks,
             };
             sled_info.u2_zpools = sled_info
@@ -937,7 +754,6 @@ impl Plan {
     pub async fn create(
         log: &Logger,
         config: &Config,
-        storage_manager: &StorageHandle,
         sleds: &BTreeMap<SocketAddrV6, StartSledAgentRequest>,
     ) -> Result<Self, PlanError> {
         // Load the information we need about each Sled to be able to allocate
@@ -966,18 +782,6 @@ impl Plan {
         };
 
         let plan = Self::create_transient(config, sled_info)?;
-
-        // Once we've constructed a plan, write it down to durable storage.
-        let paths: Vec<Utf8PathBuf> = storage_manager
-            .get_latest_disks()
-            .await
-            .all_m2_mountpoints(CONFIG_DATASET)
-            .into_iter()
-            .map(|p| p.join(RSS_SERVICE_PLAN_FILENAME))
-            .collect();
-        let mut ledger = Ledger::<Self>::new_with(log, paths, plan.clone());
-        ledger.commit().await?;
-        info!(log, "Service plan written to storage");
         Ok(plan)
     }
 }
@@ -1479,15 +1283,6 @@ mod tests {
             internal_service_ips.push(ip.to_string());
         }
         assert_eq!(internal_service_ips, expected_internal_service_ips);
-    }
-
-    #[test]
-    fn test_rss_service_plan_v5_schema() {
-        let schema = schemars::schema_for!(Plan);
-        expectorate::assert_contents(
-            "../schema/rss-service-plan-v5.json",
-            &serde_json::to_string_pretty(&schema).unwrap(),
-        );
     }
 
     #[test]

@@ -26,7 +26,6 @@ use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
 use crate::db::TransactionError;
-use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -674,12 +673,11 @@ impl DataStore {
         let log = opctx.log.clone();
         let err = Arc::new(OnceLock::new());
 
-        // NOTE: This transaction cannot yet be made retryable, as it uses
-        // nested transactions.
-        let rack = self
-            .pool_connection_authorized(opctx)
-            .await?
-            .transaction_async(|conn| {
+        // This method uses nested transactions, which are not supported
+        // with retryable transactions.
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let rack = self.transaction_non_retry_wrapper("rack_set_initialized")
+            .transaction(&conn, |conn| {
                 let err = err.clone();
                 let log = log.clone();
                 let authz_service_pool = authz_service_pool.clone();
@@ -751,7 +749,7 @@ impl DataStore {
                     }
 
                     // Insert the RSS-generated blueprint.
-                    Self::blueprint_insert_on_connection(
+                    self.blueprint_insert_on_connection(
                         &conn, opctx, &blueprint,
                     )
                     .await

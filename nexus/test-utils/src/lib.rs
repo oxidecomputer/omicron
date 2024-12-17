@@ -41,6 +41,8 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintDatasetsConfig;
+use nexus_types::deployment::BlueprintPhysicalDiskConfig;
+use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -68,10 +70,10 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::disk::CompressionAlgorithm;
-use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
+use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -831,7 +833,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     let mut datasets = BTreeMap::new();
                     for zone in zones {
                         if let Some(zpool) = &zone.filesystem_pool {
-                            disks.push(OmicronPhysicalDiskConfig {
+                            disks.push(BlueprintPhysicalDiskConfig {
+                                disposition:
+                                    BlueprintPhysicalDiskDisposition::InService,
                                 identity: omicron_common::disk::DiskIdentity {
                                     vendor: "nexus-tests".to_string(),
                                     model: "nexus-test-model".to_string(),
@@ -868,7 +872,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     // Populate extra fake disks, giving each sled 10 total.
                     if disks.len() < 10 {
                         for _ in disks.len()..10 {
-                            disks.push(OmicronPhysicalDiskConfig {
+                            disks.push(BlueprintPhysicalDiskConfig {
+                                disposition:
+                                    BlueprintPhysicalDiskDisposition::InService,
                                 identity: omicron_common::disk::DiskIdentity {
                                     vendor: "nexus-tests".to_string(),
                                     model: "nexus-test-model".to_string(),
@@ -1710,4 +1716,41 @@ pub async fn start_dns_server(
     let resolver = TokioAsyncResolver::tokio(resolver_config, resolver_opts);
 
     Ok((dns_server, http_server, resolver))
+}
+
+/// Wait until a producer is registered with Oximeter.
+///
+/// This blocks until the producer is registered, for up to 60s. It panics if
+/// the retry loop hits a permanent error.
+pub async fn wait_for_producer<G: GenericUuid>(
+    oximeter: &oximeter_collector::Oximeter,
+    producer_id: G,
+) {
+    wait_for_producer_impl(oximeter, producer_id.into_untyped_uuid()).await;
+}
+
+// This function is outlined from wait_for_producer to avoid unnecessary
+// monomorphization.
+async fn wait_for_producer_impl(
+    oximeter: &oximeter_collector::Oximeter,
+    producer_id: Uuid,
+) {
+    wait_for_condition(
+        || async {
+            if oximeter
+                .list_producers(None, usize::MAX)
+                .await
+                .iter()
+                .any(|p| p.id == producer_id)
+            {
+                Ok(())
+            } else {
+                Err(CondCheckError::<()>::NotYet)
+            }
+        },
+        &Duration::from_secs(1),
+        &Duration::from_secs(60),
+    )
+    .await
+    .expect("Failed to find producer within time limit");
 }

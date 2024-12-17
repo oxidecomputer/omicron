@@ -16,7 +16,6 @@ use crate::db::model::SiloGroup;
 use crate::db::model::SiloGroupMembership;
 use crate::db::pagination::paginated;
 use crate::db::IncompleteOnConflictExt;
-use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -198,10 +197,11 @@ impl DataStore {
         type TxnError = TransactionError<SiloDeleteError>;
 
         let group_id = authz_silo_group.id();
+        let conn = self.pool_connection_authorized(opctx).await?;
 
-        self.pool_connection_authorized(opctx)
-            .await?
-            .transaction_async(|conn| async move {
+        // Prefer to use "transaction_retry_wrapper"
+        self.transaction_non_retry_wrapper("silo_group_delete")
+            .transaction(&conn, |conn| async move {
                 use db::schema::silo_group_membership;
 
                 // Don't delete groups that still have memberships
