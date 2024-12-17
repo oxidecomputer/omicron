@@ -1610,11 +1610,19 @@ impl super::Nexus {
         if let Some(max_bytes) = params.max_bytes {
             request = request.max_bytes(max_bytes);
         }
-        if let Some(from_start) = params.from_start {
-            request = request.from_start(from_start);
-        }
-        if let Some(most_recent) = params.most_recent {
-            request = request.most_recent(most_recent);
+        match (params.from_start, params.most_recent) {
+            (Some(from_start), None) => {
+                request = request.from_start(from_start);
+            }
+            (None, Some(most_recent)) => {
+                request = request.most_recent(most_recent);
+            }
+            _ => {
+                return Err(Error::invalid_request(
+                    "Exactly one of 'from_start' \
+                    or 'most_recent' must be specified.",
+                ));
+            }
         }
         let data = request
             .send()
@@ -1714,29 +1722,30 @@ impl super::Nexus {
             match vmm.runtime.state {
                 DbVmmState::Running
                 | DbVmmState::Rebooting
-                | DbVmmState::Migrating => {
-                    Ok((vmm.clone(), SocketAddr::new(vmm.propolis_ip.ip(), vmm.propolis_port.into())))
-                }
+                | DbVmmState::Migrating => Ok((
+                    vmm.clone(),
+                    SocketAddr::new(
+                        vmm.propolis_ip.ip(),
+                        vmm.propolis_port.into(),
+                    ),
+                )),
 
                 DbVmmState::Starting
                 | DbVmmState::Stopping
                 | DbVmmState::Stopped
                 | DbVmmState::Failed
-                | DbVmmState::Creating => {
+                | DbVmmState::Creating
+                | DbVmmState::Destroyed
+                | DbVmmState::SagaUnwound => {
                     Err(Error::invalid_request(format!(
-                        "cannot connect to serial console of instance in state \"{}\"",
+                        "cannot administer instance in state \"{}\"",
                         state.effective_state(),
                     )))
                 }
-
-                DbVmmState::Destroyed | DbVmmState::SagaUnwound => Err(Error::invalid_request(
-                    "cannot connect to serial console of instance in state \"Stopped\"",
-                )),
             }
         } else {
             Err(Error::invalid_request(format!(
-                "instance is {} and has no active serial console \
-                    server",
+                "instance is {} and cannot be administered",
                 state.effective_state(),
             )))
         }
