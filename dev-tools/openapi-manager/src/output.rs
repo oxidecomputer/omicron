@@ -117,7 +117,7 @@ where
 pub(crate) fn display_api_spec(spec: &ApiSpec, styles: &Styles) -> String {
     format!(
         "{} ({} v{})",
-        spec.filename.style(styles.filename),
+        spec.latest_file_name().style(styles.filename),
         spec.title,
         spec.latest_version(),
     )
@@ -130,7 +130,10 @@ pub(crate) fn display_api_spec_file(
 ) -> String {
     match spec_file {
         ApiSpecFile::Openapi => {
-            format!("OpenAPI document {}", spec.filename.style(styles.filename))
+            format!(
+                "OpenAPI document {}",
+                spec.latest_file_name().style(styles.filename)
+            )
         }
         ApiSpecFile::Extra(path) => {
             format!("Extra file {}", path.style(styles.filename))

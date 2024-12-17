@@ -23,7 +23,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
             boundary: ApiBoundary::Internal,
             api_description:
                 bootstrap_agent_api::bootstrap_agent_api_mod::stub_api_description,
-            filename: "bootstrap-agent.json",
+            file_stem: "bootstrap-agent",
             extra_validation: None,
         },
         ApiSpec {
@@ -34,7 +34,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
             boundary: ApiBoundary::Internal,
             api_description:
                 clickhouse_admin_api::clickhouse_admin_keeper_api_mod::stub_api_description,
-            filename: "clickhouse-admin-keeper.json",
+            file_stem: "clickhouse-admin-keeper",
             extra_validation: None,
         },
         ApiSpec {
@@ -45,7 +45,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
             boundary: ApiBoundary::Internal,
             api_description:
                 clickhouse_admin_api::clickhouse_admin_server_api_mod::stub_api_description,
-            filename: "clickhouse-admin-server.json",
+            file_stem: "clickhouse-admin-server",
             extra_validation: None,
         },
         ApiSpec {
@@ -56,7 +56,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
             boundary: ApiBoundary::Internal,
             api_description:
                 clickhouse_admin_api::clickhouse_admin_single_api_mod::stub_api_description,
-            filename: "clickhouse-admin-single.json",
+            file_stem: "clickhouse-admin-single",
             extra_validation: None,
         },
         ApiSpec {
@@ -67,7 +67,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
             boundary: ApiBoundary::Internal,
             api_description:
                 cockroach_admin_api::cockroach_admin_api_mod::stub_api_description,
-            filename: "cockroach-admin.json",
+            file_stem: "cockroach-admin",
             extra_validation: None,
         },
         ApiSpec {
@@ -78,7 +78,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
             boundary: ApiBoundary::Internal,
             api_description:
                 gateway_api::gateway_api_mod::stub_api_description,
-            filename: "gateway.json",
+            file_stem: "gateway",
             extra_validation: None,
         },
         ApiSpec {
@@ -88,7 +88,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
             boundary: ApiBoundary::Internal,
             api_description:
                 dns_server_api::dns_server_api_mod::stub_api_description,
-            filename: "dns-server.json",
+            file_stem: "dns-server",
             extra_validation: None,
         },
         ApiSpec {
@@ -99,7 +99,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
             boundary: ApiBoundary::Internal,
             api_description:
                 installinator_api::installinator_api_mod::stub_api_description,
-            filename: "installinator.json",
+            file_stem: "installinator",
             extra_validation: None,
         },
         ApiSpec {
@@ -109,7 +109,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
             boundary: ApiBoundary::External,
             api_description:
                 nexus_external_api::nexus_external_api_mod::stub_api_description,
-            filename: "nexus.json",
+            file_stem: "nexus",
             extra_validation: Some(nexus_external_api::validate_api),
         },
         ApiSpec {
@@ -119,7 +119,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
             boundary: ApiBoundary::Internal,
             api_description:
                 nexus_internal_api::nexus_internal_api_mod::stub_api_description,
-            filename: "nexus-internal.json",
+            file_stem: "nexus-internal",
             extra_validation: None,
         },
         ApiSpec {
@@ -129,7 +129,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
             boundary: ApiBoundary::Internal,
             api_description:
                 oximeter_api::oximeter_api_mod::stub_api_description,
-            filename: "oximeter.json",
+            file_stem: "oximeter",
             extra_validation: None,
         },
         ApiSpec {
@@ -138,7 +138,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
             description: "API for fetching update artifacts",
             boundary: ApiBoundary::Internal,
             api_description: repo_depot_api::repo_depot_api_mod::stub_api_description,
-            filename: "repo-depot.json",
+            file_stem: "repo-depot",
             extra_validation: None,
         },
         ApiSpec {
@@ -148,7 +148,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
             boundary: ApiBoundary::Internal,
             api_description:
                 sled_agent_api::sled_agent_api_mod::stub_api_description,
-            filename: "sled-agent.json",
+            file_stem: "sled-agent",
             extra_validation: None,
         },
         ApiSpec {
@@ -157,7 +157,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
             description: "API for use by the technician port TUI: wicket",
             boundary: ApiBoundary::Internal,
             api_description: wicketd_api::wicketd_api_mod::stub_api_description,
-            filename: "wicketd.json",
+            file_stem: "wicketd",
             extra_validation: None,
         },
         // Add your APIs here! Please keep this list sorted by filename.
@@ -169,7 +169,7 @@ pub struct ApiSpec {
     pub title: &'static str,
 
     /// Supported version(s) of this API
-    pub versions: Versions,
+    versions: Versions,
 
     /// The description string.
     pub description: &'static str,
@@ -182,8 +182,8 @@ pub struct ApiSpec {
     pub api_description:
         fn() -> Result<ApiDescription<StubContext>, ApiDescriptionBuildErrors>,
 
-    /// The JSON filename to write the API description to.
-    pub filename: &'static str,
+    /// The spec-specific part of the filename for API descriptions
+    file_stem: &'static str,
 
     /// Extra validation to perform on the OpenAPI spec, if any.
     pub extra_validation: Option<fn(&OpenAPI, ValidationContext<'_>)>,
@@ -200,7 +200,7 @@ impl ApiSpec {
             .validate_json(&contents)
             .context("OpenAPI document validation failed")?;
 
-        let full_path = env.openapi_dir.join(&self.filename);
+        let full_path = env.openapi_dir.join(self.latest_file_name());
         let openapi_doc_status = overwrite_file(&full_path, &contents)?;
 
         let extra_files = validation_result
@@ -226,7 +226,7 @@ impl ApiSpec {
             .validate_json(&contents)
             .context("OpenAPI document validation failed")?;
 
-        let full_path = env.openapi_dir.join(&self.filename);
+        let full_path = env.openapi_dir.join(self.latest_file_name());
         let openapi_doc_status = check_file(full_path, contents)?;
 
         let extra_files = validation_result
@@ -257,6 +257,11 @@ impl ApiSpec {
 
     pub(crate) fn latest_version(&self) -> &semver::Version {
         self.versions.latest()
+    }
+
+    pub(crate) fn latest_file_name(&self) -> String {
+        // XXX-dap more complicated for non-Lockstep
+        format!("{}.json", &self.file_stem)
     }
 
     fn to_json_bytes(&self) -> Result<Vec<u8>> {

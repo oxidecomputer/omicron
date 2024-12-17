@@ -39,7 +39,7 @@ pub(crate) fn list_impl(
             writeln!(
                 &mut out,
                 "{count:count_width$}) {}",
-                api.filename.style(styles.bold),
+                api.latest_file_name().style(styles.bold),
             )?;
 
             writeln!(
