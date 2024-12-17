@@ -77,6 +77,7 @@ mod sled;
 mod sled_instance;
 mod snapshot;
 mod ssh_key;
+pub(crate) mod support_bundles;
 mod switch;
 mod switch_interface;
 mod switch_port;
