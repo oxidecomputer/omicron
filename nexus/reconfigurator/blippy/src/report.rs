@@ -68,7 +68,7 @@ pub struct BlippyReportDisplay<'a> {
     report: &'a BlippyReport<'a>,
 }
 
-impl<'a> fmt::Display for BlippyReportDisplay<'_> {
+impl fmt::Display for BlippyReportDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let pluralize =
             if self.report.notes.len() == 1 { "" } else { "s" };
