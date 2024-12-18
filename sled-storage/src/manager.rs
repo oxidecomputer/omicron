@@ -1530,7 +1530,6 @@ mod tests {
     use std::collections::BTreeMap;
     use std::str::FromStr;
     use std::sync::atomic::Ordering;
-    use uuid::Uuid;
 
     // A helper struct to advance time.
     struct TimeTravel {}
@@ -1991,16 +1990,39 @@ mod tests {
             .expect("Ensuring disks should work after key manager is ready");
         assert!(!result.has_error(), "{:?}", result);
 
-        // Create a filesystem on the newly formatted U.2
-        let dataset_id = Uuid::new_v4();
+        // Create a filesystem on the newly formatted U.2.
+        //
+        // We can call "upsert_filesystem" both with and without a UUID.
+        let dataset_id = DatasetUuid::new_v4();
         let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
         let dataset_name =
             DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
         harness
             .handle()
-            .upsert_filesystem(dataset_id, dataset_name)
+            .upsert_filesystem(Some(dataset_id), dataset_name.clone())
             .await
             .unwrap();
+        // Observe the dataset exists, and the UUID is set.
+        let observed_dataset = &Zfs::get_dataset_properties(
+            &[dataset_name.full_name()],
+            WhichDatasets::SelfOnly,
+        )
+        .unwrap()[0];
+        assert_eq!(observed_dataset.id, Some(dataset_id));
+
+        harness
+            .handle()
+            .upsert_filesystem(None, dataset_name.clone())
+            .await
+            .unwrap();
+        // Observe the dataset still exists, and the UUID is still set,
+        // even though we did not ask for a new value explicitly.
+        let observed_dataset = &Zfs::get_dataset_properties(
+            &[dataset_name.full_name()],
+            WhichDatasets::SelfOnly,
+        )
+        .unwrap()[0];
+        assert_eq!(observed_dataset.id, Some(dataset_id));
 
         harness.cleanup().await;
         logctx.cleanup_successful();
