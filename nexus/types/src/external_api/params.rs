@@ -2655,3 +2655,12 @@ pub struct AlertReceiverProbe {
     #[serde(default)]
     pub resend: bool,
 }
+
+// Audit log has its own pagination scheme because it paginates by timestamp.
+#[derive(Deserialize, JsonSchema, Serialize, PartialEq, Debug, Clone)]
+pub struct AuditLog {
+    /// Required, inclusive
+    pub start_time: DateTime<Utc>,
+    /// Exclusive
+    pub end_time: Option<DateTime<Utc>>,
+}
