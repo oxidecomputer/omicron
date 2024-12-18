@@ -972,7 +972,8 @@ impl SledAgent {
             //
             // This means that:
             // - If the dataset exists and has a UUID, this will be a no-op
-            // - If the dataset doesn't exist, it'll be created
+            // - If the dataset doesn't exist, it'll be created without its
+            // oxide:uuid zfs property set
             // - If a subsequent call to "datasets_ensure" tries to set a UUID,
             // it should be able to get set (once).
             self.inner.storage.upsert_filesystem(None, dataset_name).await?;

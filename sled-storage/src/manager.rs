@@ -2024,6 +2024,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn upsert_filesystem_no_uuid() {
+        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
+        let logctx = test_setup_log("upsert_filesystem");
+        let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
+
+        // Test setup: Add a U.2 and M.2, adopt them into the "control plane"
+        // for usage.
+        harness.handle().key_manager_ready().await;
+        let raw_disks =
+            harness.add_vdevs(&["u2_under_test.vdev", "m2_helping.vdev"]).await;
+        let config = harness.make_config(1, &raw_disks);
+        let result = harness
+            .handle()
+            .omicron_physical_disks_ensure(config.clone())
+            .await
+            .expect("Ensuring disks should work after key manager is ready");
+        assert!(!result.has_error(), "{:?}", result);
+
+        // Create a filesystem on the newly formatted U.2, without a UUID
+        let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
+        let dataset_name =
+            DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
+        harness
+            .handle()
+            .upsert_filesystem(None, dataset_name.clone())
+            .await
+            .unwrap();
+        let observed_dataset = &Zfs::get_dataset_properties(
+            &[dataset_name.full_name()],
+            WhichDatasets::SelfOnly,
+        )
+        .unwrap()[0];
+        assert_eq!(observed_dataset.id, None);
+
+        // Later, we can set the UUID to a specific value
+        let dataset_id = DatasetUuid::new_v4();
+        harness
+            .handle()
+            .upsert_filesystem(Some(dataset_id), dataset_name.clone())
+            .await
+            .unwrap();
+        let observed_dataset = &Zfs::get_dataset_properties(
+            &[dataset_name.full_name()],
+            WhichDatasets::SelfOnly,
+        )
+        .unwrap()[0];
+        assert_eq!(observed_dataset.id, Some(dataset_id));
+
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn ensure_datasets() {
         illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("ensure_datasets");
