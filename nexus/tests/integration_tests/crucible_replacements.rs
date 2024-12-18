@@ -320,23 +320,39 @@ mod region_replacement {
 
                         let state = region_replacement.replacement_state;
 
-                        if state == expected_end_state.0 {
-                            // The saga transitioned the request ok
-                            Ok(())
-                        } else if state == expected_intermediate_state.0 {
-                            // The saga is still running
-                            Err(CondCheckError::<()>::NotYet)
-                        // If the expected start and end state are the same,
-                        // then it's impossible to determine when the saga
-                        // starts and stops based on the state.
-                        } else if expected_end_state.0 != expected_start_state.0
-                            && state == expected_start_state.0
-                        {
-                            // The saga hasn't started yet
-                            Err(CondCheckError::<()>::NotYet)
+                        // If the expected start and end state are the same
+                        // (i.e. there's a back edge in the associated request's
+                        // state machine), then it's impossible to determine
+                        // when the saga starts and stops based on the state.
+                        if expected_end_state.0 == expected_start_state.0 {
+                            if state == expected_end_state.0 {
+                                // The saga transitioned the request ok, or
+                                // hasn't started yet. Either way we have to
+                                // return here, and the call site should perform
+                                // an additional check for some associated
+                                // expected result.
+                                Ok(())
+                            } else if state == expected_intermediate_state.0 {
+                                // The saga is still running
+                                Err(CondCheckError::<()>::NotYet)
+                            } else {
+                                // Any other state is not expected
+                                panic!("unexpected state {state:?}!");
+                            }
                         } else {
-                            // Any other state is not expected
-                            panic!("unexpected state {state:?}!");
+                            if state == expected_end_state.0 {
+                                // The saga transitioned the request ok
+                                Ok(())
+                            } else if state == expected_intermediate_state.0
+                                || state == expected_start_state.0
+                            {
+                                // The saga is still running, or hasn't started
+                                // yet.
+                                Err(CondCheckError::<()>::NotYet)
+                            } else {
+                                // Any other state is not expected
+                                panic!("unexpected state {state:?}!");
+                            }
                         }
                     }
                 },
