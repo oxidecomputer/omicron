@@ -5,6 +5,7 @@ use clap::Subcommand;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 
+pub mod cargo_plan;
 pub mod dot;
 pub mod target;
 
@@ -110,6 +111,7 @@ pub enum BuildCommand {
         #[clap(long)]
         intermediate: bool,
     },
+    /// List the build commands that will be run
     /// Builds the packages specified in a manifest, and places them into an
     /// 'out' directory.
     Package {
@@ -130,6 +132,8 @@ pub enum BuildCommand {
         /// The version to be stamped onto the package.
         version: semver::Version,
     },
+    /// Show the Cargo commands that would be run to build the packages.
+    ShowCargoCommands,
     /// Checks the packages specified in a manifest, without building them.
     Check,
 }

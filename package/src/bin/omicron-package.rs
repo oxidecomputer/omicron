@@ -4,12 +4,13 @@
 
 //! Utility for bundling target binaries as tarfiles.
 
-use anyhow::{anyhow, bail, ensure, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Parser, Subcommand};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use illumos_utils::{zfs, zone};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use omicron_package::cargo_plan::build_cargo_plan;
 use omicron_package::target::KnownTarget;
 use omicron_package::{parse, BuildCommand, DeployCommand, TargetCommand};
 use omicron_zone_package::config::{Config as PackageConfig, PackageMap};
@@ -24,7 +25,7 @@ use slog::o;
 use slog::Drain;
 use slog::Logger;
 use slog::{info, warn};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::env;
 use std::fs::create_dir_all;
 use std::io::Write;
@@ -105,128 +106,59 @@ struct Args {
     subcommand: SubCommand,
 }
 
-#[derive(Debug, Default)]
-struct CargoPlan<'a> {
-    command: &'a str,
-    packages: BTreeSet<&'a String>,
-    bins: BTreeSet<&'a String>,
-    features: BTreeSet<&'a String>,
-    release: bool,
+async fn do_show_cargo_commands(config: &Config) -> Result<()> {
+    let metadata = cargo_metadata::MetadataCommand::new().no_deps().exec()?;
+    let features = config.cargo_features();
+    let cargo_plan =
+        build_cargo_plan(&metadata, config.packages_to_build(), &features)?;
+
+    let release_command = cargo_plan.release.build_command("<command>", true);
+    let debug_command = cargo_plan.debug.build_command("<command>", true);
+
+    print!("release command: ");
+    if let Some(command) = release_command {
+        println!("{}", command_to_string(&command));
+    } else {
+        println!("(none)");
+    }
+
+    print!("debug command: ");
+    if let Some(command) = debug_command {
+        println!("{}", command_to_string(&command));
+    } else {
+        println!("(none)");
+    }
+
+    Ok(())
 }
 
-impl<'a> CargoPlan<'a> {
-    async fn run(&self, log: &Logger) -> Result<()> {
-        if self.bins.is_empty() {
-            return Ok(());
-        }
+fn command_to_string(command: &Command) -> String {
+    // Use shell-words to join the command and arguments into a single string.
+    let mut v = vec![command
+        .as_std()
+        .get_program()
+        .to_str()
+        .expect("program is valid UTF-8")];
+    v.extend(
+        command
+            .as_std()
+            .get_args()
+            .map(|arg| arg.to_str().expect("argument is valid UTF-8")),
+    );
 
-        let mut cmd = Command::new("cargo");
-        // We rely on the rust-toolchain.toml file for toolchain information,
-        // rather than specifying one within the packaging tool.
-        cmd.arg(self.command);
-        // We specify _both_ --package and --bin; --bin does not imply
-        // --package, and without any --package options Cargo unifies features
-        // across all workspace default members. See rust-lang/cargo#8157.
-        for package in &self.packages {
-            cmd.arg("--package").arg(package);
-        }
-        for bin in &self.bins {
-            cmd.arg("--bin").arg(bin);
-        }
-        if !self.features.is_empty() {
-            cmd.arg("--features").arg(self.features.iter().fold(
-                String::new(),
-                |mut acc, s| {
-                    if !acc.is_empty() {
-                        acc.push(' ');
-                    }
-                    acc.push_str(s);
-                    acc
-                },
-            ));
-        }
-        if self.release {
-            cmd.arg("--release");
-        }
-        info!(log, "running: {:?}", cmd.as_std());
-        let status = cmd
-            .status()
-            .await
-            .context(format!("Failed to run command: ({:?})", cmd))?;
-        if !status.success() {
-            bail!("Failed to build packages");
-        }
-
-        Ok(())
-    }
+    shell_words::join(&v)
 }
 
 async fn do_for_all_rust_packages(
     config: &Config,
     command: &str,
 ) -> Result<()> {
-    // Collect a map of all of the workspace packages
-    let workspace = cargo_metadata::MetadataCommand::new().no_deps().exec()?;
-    let workspace_pkgs = workspace
-        .packages
-        .into_iter()
-        .filter_map(|package| {
-            workspace
-                .workspace_members
-                .contains(&package.id)
-                .then_some((package.name.clone(), package))
-        })
-        .collect::<BTreeMap<_, _>>();
+    let metadata = cargo_metadata::MetadataCommand::new().no_deps().exec()?;
+    let features = config.cargo_features();
+    let cargo_plan =
+        build_cargo_plan(&metadata, config.packages_to_build(), &features)?;
 
-    // Generate a list of all features we might want to request
-    let features = config
-        .target
-        .0
-        .iter()
-        .map(|(name, value)| format!("{name}-{value}"))
-        .collect::<Vec<_>>();
-
-    // We split the packages to be built into "release" and "debug" lists
-    let mut release =
-        CargoPlan { command, release: true, ..Default::default() };
-    let mut debug = CargoPlan { command, release: false, ..Default::default() };
-
-    for (name, pkg) in config.packages_to_build().0 {
-        // If this is a Rust package, `name` (the map key) is the name of the
-        // corresponding Rust crate.
-        if let PackageSource::Local { rust: Some(rust_pkg), .. } = &pkg.source {
-            let plan = if rust_pkg.release { &mut release } else { &mut debug };
-            // Add the package name to the plan
-            plan.packages.insert(name);
-            // Get the package metadata
-            let metadata = workspace_pkgs.get(name).with_context(|| {
-                format!("package '{name}' is not a workspace package")
-            })?;
-            // Add the binaries we want to build to the plan
-            let bins = metadata
-                .targets
-                .iter()
-                .filter_map(|target| target.is_bin().then_some(&target.name))
-                .collect::<BTreeSet<_>>();
-            for bin in &rust_pkg.binary_names {
-                ensure!(
-                    bins.contains(bin),
-                    "bin target '{bin}' does not belong to package '{name}'"
-                );
-                plan.bins.insert(bin);
-            }
-            // Add all features we want to request to the plan
-            plan.features.extend(
-                features
-                    .iter()
-                    .filter(|feature| metadata.features.contains_key(*feature)),
-            );
-        }
-    }
-
-    release.run(&config.log).await?;
-    debug.run(&config.log).await?;
-    Ok(())
+    cargo_plan.run(command, &config.log).await
 }
 
 async fn do_check(config: &Config) -> Result<()> {
@@ -1051,6 +983,19 @@ impl Config {
         }
         filtered_packages
     }
+
+    /// Return a list of all possible Cargo features that could be requested for
+    /// the packages being built.
+    ///
+    /// Out of these, the features that actually get requested are determined by
+    /// which features are available for the list of packages being built.
+    fn cargo_features(&self) -> Vec<String> {
+        self.target
+            .0
+            .iter()
+            .map(|(name, value)| format!("{name}-{value}"))
+            .collect::<Vec<_>>()
+    }
 }
 
 #[tokio::main]
@@ -1141,6 +1086,9 @@ async fn main() -> Result<()> {
                 &version,
             )
             .await?;
+        }
+        SubCommand::Build(BuildCommand::ShowCargoCommands) => {
+            do_show_cargo_commands(&get_config()?).await?;
         }
         SubCommand::Build(BuildCommand::Check) => {
             do_check(&get_config()?).await?
