@@ -28,7 +28,6 @@ use omicron_common::disk::{
 };
 use omicron_common::ledger::Ledger;
 use omicron_uuid_kinds::DatasetUuid;
-use omicron_uuid_kinds::GenericUuid;
 use slog::{error, info, o, warn, Logger};
 use std::collections::BTreeMap;
 use std::collections::HashSet;
@@ -1000,11 +999,17 @@ impl StorageManager {
         };
 
         if old_id != config.id {
-            return Err(Error::UuidMismatch {
-                name: config.name.full_name(),
-                old: old_id.into_untyped_uuid(),
-                new: config.id.into_untyped_uuid(),
-            });
+            // NOTE(https://github.com/oxidecomputer/omicron/issues/7265):
+            //
+            // This should potentially return a "UuidMismatch" error in the
+            // future, rather than overwriting the existing dataset UUID.
+            warn!(
+                log,
+                "Dataset UUID mismatch. Choosing to take new value.";
+                "old" => ?old_id,
+                "new" => ?config.id
+            );
+            return Ok(false);
         }
 
         let old_props = match SharedDatasetConfig::try_from(old_dataset) {
