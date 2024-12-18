@@ -10,13 +10,15 @@ use peg::error::ParseError as PegError;
 use peg::str::LineCol;
 
 pub mod ast;
+pub mod plan;
 pub mod query;
+pub mod schema;
 
 pub use self::query::Query;
 pub use anyhow::Error;
 
 /// Format a PEG parsing error into a nice anyhow error.
-fn fmt_parse_error(source: &str, err: PegError<LineCol>) -> Error {
+pub fn fmt_parse_error(source: &str, err: PegError<LineCol>) -> Error {
     use std::fmt::Write;
     let mut out =
         format!("Error at {}:{}", err.location.line, err.location.column);

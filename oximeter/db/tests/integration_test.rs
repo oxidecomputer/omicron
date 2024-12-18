@@ -211,7 +211,9 @@ async fn test_cluster() -> anyhow::Result<()> {
     // Get all the samples from the replica where the data was inserted
     let start = tokio::time::Instant::now();
     let oxql_res1 = client1
-        .oxql_query("get virtual_machine:cpu_busy")
+        .oxql_query(
+            "get virtual_machine:cpu_busy | filter timestamp > @2000-01-01",
+        )
         .await
         .expect("failed to get all samples");
     info!(log, "query samples from client1 time = {:?}", start.elapsed());
@@ -425,7 +427,7 @@ async fn wait_for_num_points(
     poll::wait_for_condition(
         || async {
             let oxql_res = client
-                .oxql_query("get virtual_machine:cpu_busy")
+                .oxql_query("get virtual_machine:cpu_busy | filter timestamp > @2000-01-01")
                 .await
                 .map_err(|_| {
                     poll::CondCheckError::<oximeter_db::Error>::NotYet

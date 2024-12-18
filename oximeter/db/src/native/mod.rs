@@ -239,6 +239,11 @@ pub enum Error {
 
     #[error("Expected an empty data block")]
     ExpectedEmptyDataBlock,
+
+    #[error(
+        "A query unexpectedly resulted in an empty data block; query: {query}"
+    )]
+    UnexpectedEmptyBlock { query: String },
 }
 
 impl Error {
