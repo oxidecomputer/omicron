@@ -9,6 +9,8 @@ use clickhouse_admin_server_client::types::{
     SystemTimeSeries, TimestampFormat,
 };
 use clickhouse_admin_server_client::Client as ClickhouseServerClient;
+use futures::stream::FuturesOrdered;
+use futures::StreamExt;
 use omicron_common::FileKv;
 use ratatui::crossterm::event::{self, Event, KeyCode};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -20,7 +22,9 @@ use slog::{o, Drain, Logger};
 use slog_async::Async;
 use slog_term::{FullFormat, PlainDecorator};
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::time::{Duration, Instant};
 
 use crate::chart::{ChartData, ChartMetadata, MetricName};
@@ -68,7 +72,7 @@ impl Clickana {
         let log = self.new_logger()?;
         let client = ClickhouseServerClient::new(&admin_url, log.clone());
 
-        let tick_rate = Duration::from_secs(self.refresh_interval);
+        let tick_interval = Duration::from_secs(self.refresh_interval);
         let mut last_tick = Instant::now();
         loop {
             // Charts we will be showing in the dashboard
@@ -88,40 +92,48 @@ impl Clickana {
                 (MetricName::RunningQueries, "Queries Running".to_string()),
             ]);
 
-            let mut tasks = Vec::new();
+            let mut tasks = FuturesOrdered::<
+                Pin<Box<dyn Future<Output = Result<ChartData>>>>,
+            >::new();
 
             for (metric_name, title) in charts {
                 let s = self.clone();
                 let c = client.clone();
 
-                let task = tokio::spawn(async move {
+                let task = Box::pin(async move {
                     let metadata = ChartMetadata::new(metric_name, title);
                     let data = s.get_api_data(&c, metric_name).await?;
                     ChartData::new(data, metadata)
                 });
-
-                tasks.push(task);
+                tasks.push_back(task);
             }
 
-            let mut results = futures::future::join_all(tasks)
-                .await
-                .into_iter()
-                .collect::<Result<Vec<_>, _>>()?;
-
-            if results.len() != 4 {
+            if tasks.len() != 4 {
                 bail!(
                     "expected information for 4 charts, received {} instead",
-                    results.len()
+                    tasks.len()
                 );
             }
+
             // TODO: Eventually we may want to not have a set amount of charts and make the
             // dashboard a bit more dynamic. Perhaps taking a toml configuration file or
             // something like that. We can then create a vector of "ChartData"s for Dashboard
             // to take and create the layout dynamically.
-            let top_left_frame: ChartData = results.remove(0)?;
-            let top_right_frame: ChartData = results.remove(0)?;
-            let bottom_left_frame: ChartData = results.remove(0)?;
-            let bottom_right_frame: ChartData = results.remove(0)?;
+            //
+            // IDEA (ajs): I think it would be useful to be able to have a little menu of charts
+            // on the side of the pane, and then you can scroll and select which ones to show
+            // without having to restart the app, or mess with a toml file.
+            // You could also allow toggling between a set of predefined layouts to make it always
+            // look nice. So you could show, 1, 2, 4, 6, 8 charts or something and allow selecting
+            // which to show in each view. You could even remember which charts to show in each layout,
+            // so you could toggle back and forth between different layouts and see all the charts,
+            // some with more detail.
+            //
+            // We have already checked that the length of tasks is 4, so it's safe to unwrap
+            let top_left_frame: ChartData = tasks.next().await.unwrap()?;
+            let top_right_frame: ChartData = tasks.next().await.unwrap()?;
+            let bottom_left_frame: ChartData = tasks.next().await.unwrap()?;
+            let bottom_right_frame: ChartData = tasks.next().await.unwrap()?;
 
             // We only need to retrieve from one chart as they will all be relatively the same.
             // Rarely, the charts may have a variance of a second or so depending on when
@@ -139,7 +151,7 @@ impl Clickana {
             };
             terminal.draw(|frame| self.draw(frame, dashboard))?;
 
-            let timeout = tick_rate.saturating_sub(last_tick.elapsed());
+            let timeout = tick_interval.saturating_sub(last_tick.elapsed());
             if event::poll(timeout)? {
                 if let Event::Key(key) = event::read()? {
                     // To exit the dashboard press the "q" key
@@ -149,7 +161,7 @@ impl Clickana {
                 }
             }
 
-            if last_tick.elapsed() >= tick_rate {
+            if last_tick.elapsed() >= tick_interval {
                 last_tick = Instant::now();
             }
         }

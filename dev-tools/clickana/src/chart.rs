@@ -15,6 +15,7 @@ use ratatui::{
 };
 use std::fmt::Display;
 
+// Ratatui requires data points in a Dataset to be f64
 const GIBIBYTE_F64: f64 = 1073741824.0;
 const MEBIBYTE_F64: f64 = 1048576.0;
 
