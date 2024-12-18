@@ -403,7 +403,7 @@ mod region_replacement {
             // the attachment request to the simulated pantry.
             //
             // If `wait_for_request_state` has the same expected start and end
-            // state (as it does above), it's possible to exit the function
+            // state (as it does above), it's possible to exit that function
             // having not yet started the saga yet, and this requires an
             // additional `wait_for_condition` to wait for the expected recorded
             // step.
@@ -426,8 +426,9 @@ mod region_replacement {
                             Some(step) => Ok(step),
 
                             None => {
-                                // The saga is still running - this can
-                                // happen when
+                                // The saga either has not started yet or is
+                                // still running - see the comment before this
+                                // check for mroe info.
                                 Err(CondCheckError::<()>::NotYet)
                             }
                         }
