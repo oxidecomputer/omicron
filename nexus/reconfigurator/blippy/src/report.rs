@@ -70,8 +70,7 @@ pub struct BlippyReportDisplay<'a> {
 
 impl fmt::Display for BlippyReportDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let pluralize =
-            if self.report.notes.len() == 1 { "" } else { "s" };
+        let pluralize = if self.report.notes.len() == 1 { "" } else { "s" };
         writeln!(
             f,
             "blippy report for blueprint {}: {} note{pluralize}",
