@@ -48,7 +48,16 @@ pub enum NetworkInterfaceKind {
 
 /// Information required to construct a virtual network interface
 #[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
 )]
 pub struct NetworkInterface {
     pub id: Uuid,

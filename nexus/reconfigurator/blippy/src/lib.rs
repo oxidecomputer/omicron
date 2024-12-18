@@ -6,5 +6,11 @@
 
 mod blippy;
 mod checks;
+mod report;
 
-pub use blippy::*;
+pub use blippy::Blippy;
+pub use blippy::Kind as BlippyKind;
+pub use blippy::Note as BlippyNote;
+pub use blippy::Severity as BlippySeverity;
+pub use report::BlippyReport;
+pub use report::BlippyReportSortKey;
