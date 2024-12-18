@@ -20,21 +20,32 @@ associates a webhook receiver with multiple event classes that the receiver is
 subscribed to.
 *** `up05.sql` creates an index `lookup_webhook_subscriptions_by_rx` for
 looking up all event classes that a receiver ID is subscribed to.
+*** `up06.sql` creates an index `lookup_webhook_rxs_for_event` on
+`omicron.public.webhook_rx_subscription` for looking up all receivers subscribed
+to a particular event class.
+* *Webhook message queue*:
+** `up07.sql` creates the `omicron.public.webhook_msg` table, which contains the
+queue of un-dispatched webhook events. The dispatcher operates on entries in
+this queue, dispatching the event to receivers and generating the payload for
+each receiver.
+** `up08.sql` creates the `lookup_undispatched_webhook_msgs` index on
+`omicron.public.webhook_msg` for looking up webhook messages which have not yet been
+dispatched and ordering by their creation times.
 * *Webhook message dispatching and delivery attempts*:
 ** *Dispatch table*:
-*** `up06.sql` creates the table `omicron.public.webhook_msg_dispatch`, which
+*** `up09.sql` creates the table `omicron.public.webhook_msg_dispatch`, which
 tracks the webhook messages that have been dispatched to receivers.
-*** `up07.sql` creates an index `lookup_webhook_dispatched_to_rx` for looking up
+*** `up10.sql` creates an index `lookup_webhook_dispatched_to_rx` for looking up
 entries in `omicron.public.webhook_msg_dispatch` by receiver ID.
-*** `up08.sql` creates an index `webhook_dispatch_in_flight` for looking up all currently in-flight webhook
+*** `up11.sql` creates an index `webhook_dispatch_in_flight` for looking up all currently in-flight webhook
 messages (entries in `omicron.public.webhook_msg_dispatch` where the
 `time_completed` field has not been set).
 ** *Delivery attempts*:
-*** `up09.sql` creates the enum `omicron.public.webhook_msg_delivery_result`,
+*** `up12.sql` creates the enum `omicron.public.webhook_msg_delivery_result`,
 representing the potential outcomes of a webhook delivery attempt.
-*** `up10.sql` creates the table `omicron.public.webhook_msg_delivery_attempt`,
+*** `up13.sql` creates the table `omicron.public.webhook_msg_delivery_attempt`,
 which records each individual delivery attempt for a webhook message in the
 `webhook_msg_dispatch` table.
-*** `up11.sql` creates an index `lookup_webhook_delivery_attempts_for_msg` on
+*** `up14.sql` creates an index `lookup_webhook_delivery_attempts_for_msg` on
 `omicron.public.webhook_msg_delivery_attempt`, for looking up all attempts to
 deliver a message with a given dispatch ID.
