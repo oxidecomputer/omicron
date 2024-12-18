@@ -49,20 +49,31 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
         home_dir.join(".cache/a4x2-deploy")
     };
 
+    // a4x2 dir. will be created by the unpack step
+    let a4x2_dir = work_dir.join("a4x2-package-out");
+
+    // Output. Maybe in CI we want this to be /out
+    let out_dir = work_dir.join("a4x2-deploy-out");
+
+    if  !args.ci {
+        let _popdir = sh.push_dir(&a4x2_dir);
+        // Teardown previous deploy if it exists, before wiping the data for it.
+        // If this errors, we assume the deploy doesn't exist and carry on.
+        let result = teardown_a4x2(&sh);
+        eprintln!("teardown result: {:?}", result);
+        eprintln!("continuing regardless of whether there were errors");
+    }
+
     // Delete any results from previous runs. We don't mind if there's errors.
     // This needs to run as root in case there are artifacts owned by root left
     // around from the deploy.
     cmd!(sh, "pfexec rm -rf {work_dir}").run()?;
+
     // Create work dir
+    fs::create_dir_all(&out_dir)?;
     fs::create_dir_all(&work_dir)?;
     sh.change_dir(&work_dir);
 
-    // Output. Maybe in CI we want this to be /out
-    let out_dir = work_dir.join("a4x2-deploy-out");
-    fs::create_dir_all(&out_dir)?;
-
-    // a4x2 dir. will be created by the unpack step
-    let a4x2_dir = work_dir.join("a4x2-package-out");
 
     // Unpack a4x2-package-out.tgz
     {
@@ -132,6 +143,8 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
     // Launch a4x2. This can fail. In fact it fails quite a bit... enough that
     // perhaps it's owed at least one retry.
     {
+        // XXX run a teardown first to clean up after past tests? can only
+        // clean so much though without state...
         let _popdir = sh.push_dir(a4x2_dir);
         try_launch_a4x2(&sh)?;
         // XXX teardown, but only outside of CI.
@@ -214,6 +227,11 @@ fn try_launch_a4x2(sh: &Shell) -> Result<()> {
     }
 
 
+    Ok(())
+}
+
+fn teardown_a4x2(sh: &Shell) -> Result<()> {
+    cmd!(sh, "pfexec ./a4x2 destroy").run()?;
     Ok(())
 }
 
