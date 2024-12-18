@@ -64,6 +64,7 @@ mod switch_interface;
 mod switch_port;
 mod v2p_mapping;
 mod vmm_state;
+mod webhook_msg_delivery;
 // These actually represent subqueries, not real table.
 // However, they must be defined in the same crate as our tables
 // for join-based marker trait generation.
@@ -129,6 +130,7 @@ mod db {
 
 pub use self::macaddr::*;
 pub use self::unsigned::*;
+pub use self::webhook_msg_delivery::*;
 pub use address_lot::*;
 pub use allow_list::*;
 pub use bfd::*;
