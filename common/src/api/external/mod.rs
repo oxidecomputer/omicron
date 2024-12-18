@@ -957,6 +957,7 @@ pub enum ResourceType {
     AntiAffinityGroup,
     AntiAffinityGroupMember,
     AllowList,
+    AuditLogEntry,
     BackgroundTask,
     BgpConfig,
     BgpAnnounceSet,

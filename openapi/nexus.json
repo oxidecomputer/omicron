@@ -5988,6 +5988,86 @@
         }
       }
     },
+    "/v1/system/audit-log": {
+      "get": {
+        "tags": [
+          "system/audit-log"
+        ],
+        "summary": "View audit log",
+        "operationId": "audit_log_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "end_time",
+            "description": "Exclusive",
+            "schema": {
+              "nullable": true,
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/TimeAndIdSortMode"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_time",
+            "description": "Required, inclusive",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditLogEntryResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": [
+            "start_time"
+          ]
+        }
+      }
+    },
     "/v1/system/hardware/disks": {
       "get": {
         "tags": [
@@ -12566,6 +12646,112 @@
             ]
           }
         }
+      },
+      "AuditLogEntry": {
+        "description": "Audit log entry",
+        "type": "object",
+        "properties": {
+          "access_method": {
+            "nullable": true,
+            "description": "API token or session cookie. Optional because it will not be defined on unauthenticated requests like login attempts.",
+            "type": "string"
+          },
+          "actor_id": {
+            "nullable": true,
+            "description": "User ID of the actor who performed the action",
+            "type": "string",
+            "format": "uuid"
+          },
+          "actor_silo_id": {
+            "nullable": true,
+            "type": "string",
+            "format": "uuid"
+          },
+          "error_code": {
+            "nullable": true,
+            "description": "Error information if the action failed",
+            "type": "string"
+          },
+          "error_message": {
+            "nullable": true,
+            "type": "string"
+          },
+          "http_status_code": {
+            "description": "HTTP status code",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "id": {
+            "description": "Unique identifier for the audit log entry",
+            "type": "string",
+            "format": "uuid"
+          },
+          "operation_id": {
+            "description": "API endpoint ID, e.g., `project_create`",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Request ID for tracing requests through the system",
+            "type": "string"
+          },
+          "request_uri": {
+            "description": "Full URL of the request",
+            "type": "string"
+          },
+          "resource_id": {
+            "nullable": true,
+            "description": "Resource identifier",
+            "type": "string",
+            "format": "uuid"
+          },
+          "source_ip": {
+            "description": "IP address that made the request",
+            "type": "string",
+            "format": "ip"
+          },
+          "time_completed": {
+            "description": "Time operation completed",
+            "type": "string",
+            "format": "date-time"
+          },
+          "timestamp": {
+            "description": "When the request was received",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "http_status_code",
+          "id",
+          "operation_id",
+          "request_id",
+          "request_uri",
+          "source_ip",
+          "time_completed",
+          "timestamp"
+        ]
+      },
+      "AuditLogEntryResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditLogEntry"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
       },
       "AuthzScope": {
         "description": "Authorization scope for a timeseries.\n\nThis describes the level at which a user must be authorized to read data from a timeseries. For example, fleet-scoping means the data is only visible to an operator or fleet reader. Project-scoped, on the other hand, indicates that a user will see data limited to the projects on which they have read permissions.",
@@ -24536,6 +24722,18 @@
           "ram_provisioned"
         ]
       },
+      "TimeAndIdSortMode": {
+        "description": "Supported set of sort modes for scanning by timestamp and ID\n\nCurrently, we only support scanning in ascending order.",
+        "oneOf": [
+          {
+            "description": "sort in increasing order of timestamp and ID",
+            "type": "string",
+            "enum": [
+              "ascending"
+            ]
+          }
+        ]
+      },
       "NameSortMode": {
         "description": "Supported set of sort modes for scanning by name only\n\nCurrently, we only support scanning in ascending order.",
         "oneOf": [
@@ -24659,6 +24857,13 @@
       "description": "Snapshots of virtual disks at a particular point in time.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/snapshots"
+      }
+    },
+    {
+      "name": "system/audit-log",
+      "description": "These endpoints relate to audit logs.",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/system-audit-log"
       }
     },
     {

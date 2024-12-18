@@ -10,6 +10,7 @@
 mod address_lots;
 mod affinity;
 mod allow_list;
+mod audit_log;
 mod authn_http;
 mod authz;
 mod basic;
