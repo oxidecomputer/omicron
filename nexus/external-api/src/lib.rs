@@ -3251,7 +3251,7 @@ pub trait NexusExternalApi {
 
     // Webhooks (experimental)
 
-    /// Get the configuration for a webhook.
+    /// Get the configuration for a webhook receiver.
     #[endpoint {
         method = GET,
         path = "/experimental/v1/webhooks/{webhook_id}",
@@ -3295,7 +3295,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::WebhookPath>,
     ) -> Result<HttpResponseOk<views::WebhookSecrets>, HttpError>;
 
-    /// Add a secret to a webhook.
+    /// Add a secret to a webhook receiver.
     #[endpoint {
         method = POST,
         path = "/experimental/v1/webhooks/{webhook_id}/secrets",
