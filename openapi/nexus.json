@@ -6752,6 +6752,87 @@
         }
       }
     },
+    "/v1/system/audit-log": {
+      "get": {
+        "tags": [
+          "system/audit-log"
+        ],
+        "summary": "View audit log",
+        "description": "A single item in the audit log represents both the beginning and end of the logged operation (represented by `time_initialized` and `time_completed`) so that clients do not have to find multiple entries and match them up by request ID to get the full picture of an operation. Because timestamps may not be unique, entries have also have a unique `id` that can be used to deduplicate items fetched from overlapping time intervals.\n\nNote that entries are immutable and are ordered by `time_completed`, not `time_initialized`, in order to ensure stable results. If you request entries from `t0 <= time_completed < t1` and `t1` is in the past, you can be confident that the resulting list is complete, i.e., requesting the same range again later will always produce the same list. We do not include items in the audit log response until they are marked completed.",
+        "operationId": "audit_log_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "end_time",
+            "description": "Exclusive",
+            "schema": {
+              "nullable": true,
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/TimeAndIdSortMode"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_time",
+            "description": "Required, inclusive",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditLogEntryResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": [
+            "start_time"
+          ]
+        }
+      }
+    },
     "/v1/system/hardware/disks": {
       "get": {
         "tags": [
@@ -14476,6 +14557,165 @@
           "kind",
           "name",
           "version"
+        ]
+      },
+      "AuditLogEntry": {
+        "description": "Audit log entry",
+        "type": "object",
+        "properties": {
+          "access_method": {
+            "nullable": true,
+            "description": "Indicates whether request was made with an API token or session cookie. Optional because it will not be defined on unauthenticated requests like login attempts.",
+            "type": "string"
+          },
+          "actor": {
+            "$ref": "#/components/schemas/AuditLogEntryActor"
+          },
+          "error_code": {
+            "nullable": true,
+            "description": "Error information if the action failed",
+            "type": "string"
+          },
+          "error_message": {
+            "nullable": true,
+            "type": "string"
+          },
+          "http_status_code": {
+            "description": "HTTP status code",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "id": {
+            "description": "Unique identifier for the audit log entry",
+            "type": "string",
+            "format": "uuid"
+          },
+          "operation_id": {
+            "description": "API endpoint ID, e.g., `project_create`",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Request ID for tracing requests through the system",
+            "type": "string"
+          },
+          "request_uri": {
+            "description": "Full URL of the request",
+            "type": "string"
+          },
+          "source_ip": {
+            "description": "IP address that made the request",
+            "type": "string",
+            "format": "ip"
+          },
+          "time_completed": {
+            "description": "Time operation completed",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_initialized": {
+            "description": "When the request was received",
+            "type": "string",
+            "format": "date-time"
+          },
+          "user_agent": {
+            "nullable": true,
+            "description": "User agent string from the request",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor",
+          "http_status_code",
+          "id",
+          "operation_id",
+          "request_id",
+          "request_uri",
+          "source_ip",
+          "time_completed",
+          "time_initialized"
+        ]
+      },
+      "AuditLogEntryActor": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "user_builtin"
+                ]
+              },
+              "user_builtin_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "kind",
+              "user_builtin_id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "silo_user"
+                ]
+              },
+              "silo_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "silo_user_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "kind",
+              "silo_id",
+              "silo_user_id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "unauthenticated"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        ]
+      },
+      "AuditLogEntryResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditLogEntry"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "AuthzScope": {
@@ -27606,6 +27846,13 @@
       "description": "Alerts deliver notifications for events that occur on the Oxide rack",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/alerts"
+      }
+    },
+    {
+      "name": "system/audit-log",
+      "description": "These endpoints relate to audit logs.",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/system-audit-log"
       }
     },
     {

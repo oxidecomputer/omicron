@@ -407,8 +407,66 @@ impl AuthorizedResource for IpPoolList {
         roleset: &'fut mut RoleSet,
     ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
         // There are no roles on the IpPoolList, only permissions. But we still
-        // need to load the Fleet-related roles to verify that the actor has the
-        // "admin" role on the Fleet (possibly conferred from a Silo role).
+        // need to load the Fleet-related roles to verify that the actor's role
+        // on the Fleet (possibly conferred from a Silo role).
+        load_roles_for_resource_tree(&FLEET, opctx, authn, roleset).boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
+// Similar to IpPoolList, the audit log is a collection that doesn't exist in
+// the database as an entity distinct from its children (IP pools, or in this
+// case, audit log entries). We need a dummy resource here because we need
+// something to hang permissions off of. We need to be able to create audit log
+// children (entries) for login attempts, when there is no authenticated user,
+// as well as for normal requests with an authenticated user. For retrieval, we
+// want (to start out) to allow only fleet viewers to list children.
+
+#[derive(Clone, Copy, Debug)]
+pub struct AuditLog;
+
+/// Singleton representing the [`AuditLog`] for authz purposes
+pub const AUDIT_LOG: AuditLog = AuditLog;
+
+impl Eq for AuditLog {}
+
+impl PartialEq for AuditLog {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl oso::PolarClass for AuditLog {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("fleet", |_: &AuditLog| FLEET)
+    }
+}
+
+impl AuthorizedResource for AuditLog {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on the AuditLog, only permissions. But we still
+        // need to load the Fleet-related roles to verify that the actor's role
+        // on the Fleet (possibly conferred from a Silo role).
         load_roles_for_resource_tree(&FLEET, opctx, authn, roleset).boxed()
     }
 

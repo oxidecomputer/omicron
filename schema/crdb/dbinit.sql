@@ -5767,6 +5767,71 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_record_per_volume_resource_usage on omicro
     region_snapshot_snapshot_id
 );
 
+CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
+    id UUID PRIMARY KEY,
+    time_initialized TIMESTAMPTZ NOT NULL,
+    -- request IDs are UUIDs but let's give them a little extra space
+    -- https://github.com/oxidecomputer/dropshot/blob/83f78e7/dropshot/src/server.rs#L743
+    request_id STRING(63) NOT NULL,
+    request_uri STRING NOT NULL,
+    operation_id STRING(512) NOT NULL,
+    source_ip INET NOT NULL,
+    -- Pulled from request header if present and truncated
+    user_agent STRING(256),
+
+    -- these three are all null if the request is unauthenticated. actor_id can
+    -- be present while silo ID is null if the user is built in (non-silo).
+    actor_id UUID,
+    actor_silo_id UUID,
+    -- The name of the authn scheme used
+    access_method STRING,
+
+    -- below are fields we can only fill in after the operation
+
+    time_completed TIMESTAMPTZ,
+    http_status_code INT4,
+
+    -- only present on errors
+    error_code STRING,
+    error_message STRING
+);
+
+-- When we query the audit log, we filter by time_completed and order by
+-- (time_completed, id). CRDB docs talk about hash-sharded indexes for
+-- sequential keys, but the PK on this table is the ID alone.
+CREATE UNIQUE INDEX IF NOT EXISTS audit_log_by_time_completed
+    ON omicron.public.audit_log (time_completed, id)
+    WHERE time_completed IS NOT NULL;
+
+-- View of audit log entries that have been "completed". This lets us treat that
+-- subset of rows as its own table in the data model code. Completing an entry
+-- means updating the entry after an operation is complete with the result of
+-- the operation. Because we do not intend to fail or roll back the operation
+-- if the completion write fails (while we do abort if the audit log entry
+-- initialization call fails), it is always possible (though rare) that there
+-- will be some incomplete entries remaining for operations that have in fact
+-- completed. We intend to complete those periodically with some kind of job
+-- and most likely mark them with a special third status that is neither success
+-- nor failure.
+CREATE VIEW IF NOT EXISTS omicron.public.audit_log_complete AS
+SELECT 
+    id,
+    time_initialized,
+    request_id,
+    request_uri,
+    operation_id,
+    source_ip,
+    user_agent,
+    actor_id,
+    actor_silo_id,
+    access_method,
+    time_completed,
+    http_status_code,
+    error_code,
+    error_message
+FROM omicron.public.audit_log
+WHERE time_completed IS NOT NULL;
+
 /*
  * Alerts
  */
@@ -6369,7 +6434,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '175.0.0', NULL)
+    (TRUE, NOW(), NOW(), '176.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
