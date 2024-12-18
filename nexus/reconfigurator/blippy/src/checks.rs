@@ -2,6 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::blippy::Blippy;
+use crate::blippy::Component;
+use crate::blippy::Kind;
+use crate::blippy::Severity;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetFilter;
@@ -18,11 +22,6 @@ use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::Ipv6Addr;
-
-use crate::Blippy;
-use crate::Component;
-use crate::Kind;
-use crate::Severity;
 
 pub(crate) fn perform_all_blueprint_only_checks(blippy: &mut Blippy<'_>) {
     check_underlay_ips(blippy);
@@ -55,7 +54,7 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
             blippy.push_note(
                 Component::Sled(sled_id),
                 Severity::Fatal,
-                Kind::DuplicateUnderlayIp { zone1: previous, zone2: zone, ip },
+                Kind::DuplicateUnderlayIp { zone1: previous, zone2: zone },
             );
         }
 
@@ -92,8 +91,7 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
                             Component::Sled(sled_id),
                             Severity::Fatal,
                             Kind::ConflictingSledSubnets {
-                                sled1: *prev.get(),
-                                sled2: sled_id,
+                                other_sled: *prev.get(),
                                 subnet,
                             },
                         );
@@ -334,6 +332,7 @@ impl<'a> DatasetsBySled<'a> {
         &mut self,
         blippy: &mut Blippy<'_>,
         sled_id: SledUuid,
+        why: &'static str,
     ) -> Option<&DatasetsByZpool<'a>> {
         let maybe_datasets = self.by_sled.get(&sled_id);
         if maybe_datasets.is_none()
@@ -342,7 +341,7 @@ impl<'a> DatasetsBySled<'a> {
             blippy.push_note(
                 Component::Sled(sled_id),
                 Severity::Fatal,
-                Kind::SledMissingDatasets { sled_id },
+                Kind::SledMissingDatasets { why },
             );
         }
         maybe_datasets
@@ -363,7 +362,11 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
     // blueprint; once we include expunged or decommissioned disks too, we
     // should filter here to only in-service.
     for (&sled_id, disk_config) in &blippy.blueprint().blueprint_disks {
-        let Some(sled_datasets) = datasets.for_sled(blippy, sled_id) else {
+        let Some(sled_datasets) = datasets.for_sled(
+            blippy,
+            sled_id,
+            "sled has an entry in blueprint_disks",
+        ) else {
             continue;
         };
 
@@ -410,7 +413,9 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
         .blueprint()
         .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
     {
-        let Some(sled_datasets) = datasets.for_sled(blippy, sled_id) else {
+        let Some(sled_datasets) =
+            datasets.for_sled(blippy, sled_id, "sled has running zones")
+        else {
             continue;
         };
 
@@ -499,7 +504,9 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
                 blippy.push_note(
                     Component::Sled(sled_id),
                     Severity::Fatal,
-                    Kind::SledMissingDisks { sled_id },
+                    Kind::SledMissingDisks {
+                        why: "sled has in-service datasets",
+                    },
                 );
             }
             continue;
@@ -509,7 +516,7 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
             blippy.push_note(
                 Component::Sled(sled_id),
                 Severity::Fatal,
-                Kind::DatasetOnNonexistentDisk { dataset },
+                Kind::DatasetOnNonexistentZpool { dataset },
             );
             continue;
         }
