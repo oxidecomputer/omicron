@@ -112,8 +112,8 @@ async fn do_show_cargo_commands(config: &Config) -> Result<()> {
     let cargo_plan =
         build_cargo_plan(&metadata, config.packages_to_build(), &features)?;
 
-    let release_command = cargo_plan.release.build_command("<command>", true);
-    let debug_command = cargo_plan.debug.build_command("<command>", true);
+    let release_command = cargo_plan.release.build_command("build", true);
+    let debug_command = cargo_plan.debug.build_command("build", true);
 
     print!("release command: ");
     if let Some(command) = release_command {

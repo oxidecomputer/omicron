@@ -68,17 +68,18 @@ impl BackgroundTask for RegionReplacementDetector {
 
             let mut status = RegionReplacementStatus::default();
 
-            // Find regions on expunged physical disks
+            // Find read/write regions on expunged physical disks
             let regions_to_be_replaced = match self
                 .datastore
-                .find_regions_on_expunged_physical_disks(opctx)
+                .find_read_write_regions_on_expunged_physical_disks(opctx)
                 .await
             {
                 Ok(regions) => regions,
 
                 Err(e) => {
                     let s = format!(
-                        "find_regions_on_expunged_physical_disks failed: {e}"
+                        "find_read_write_regions_on_expunged_physical_disks \
+                        failed: {e}"
                     );
                     error!(&log, "{s}");
                     status.errors.push(s);
