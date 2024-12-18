@@ -2108,3 +2108,78 @@ table! {
         region_snapshot_snapshot_id -> Nullable<Uuid>,
     }
 }
+
+table! {
+    webhook_rx (id) {
+        id -> Uuid,
+        name -> Text,
+        endpoint -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Nullable<Timestamptz>,
+        time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
+    webhook_rx_secret (rx_id, signature_id) {
+        rx_id -> Uuid,
+        signature_id -> Text,
+        secret -> Binary,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(webhook_rx, webhook_rx_secret);
+joinable!(webhook_rx_secret -> webhook_rx (rx_id));
+
+table! {
+    webhook_rx_subscription (rx_id, event_class) {
+        rx_id -> Uuid,
+        event_class -> Text,
+        time_created -> Timestamptz,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(webhook_rx, webhook_rx_subscription);
+joinable!(webhook_rx_subscription -> webhook_rx (rx_id));
+
+table! {
+    webhook_msg (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_dispatched -> Nullable<Timestamptz>,
+        event_class -> Text,
+        event -> Jsonb,
+    }
+}
+
+table! {
+    webhook_msg_dispatch (id) {
+        id -> Uuid,
+        rx_id -> Uuid,
+        payload -> Jsonb,
+        time_created -> Timestamptz,
+        time_completed -> Nullable<Timestamptz>,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(webhook_rx, webhook_msg_dispatch);
+joinable!(webhook_msg_dispatch -> webhook_rx (rx_id));
+
+table! {
+    webhook_msg_delivery_attempt (id) {
+        id -> Uuid,
+        dispatch_id -> Uuid,
+        result -> crate::WebhookDeliveryResultEnum,
+        response_status -> Nullable<Int2>,
+        response_duration -> Nullable<Interval>,
+        time_created -> Timestamptz,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(
+    webhook_msg_dispatch,
+    webhook_msg_delivery_attempt
+);
+joinable!(webhook_msg_delivery_attempt -> webhook_msg_dispatch (dispatch_id));
