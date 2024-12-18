@@ -1510,6 +1510,108 @@
           }
         }
       }
+    },
+    "/sp/{type}/{slot}/task-dump": {
+      "get": {
+        "summary": "Get the number of task dumps present on an SP",
+        "operationId": "sp_host_task_dump_count",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "uint32",
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/task-dump/{task_dump_index}": {
+      "get": {
+        "summary": "Read a single task dump from an SP",
+        "operationId": "sp_host_task_dump_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "task_dump_index",
+            "description": "The index of the task dump to be read.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskDump"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3430,6 +3532,55 @@
               "speed"
             ]
           }
+        ]
+      },
+      "TaskDump": {
+        "type": "object",
+        "properties": {
+          "archive_id": {
+            "description": "Hex-encoded Hubris archive ID.",
+            "type": "string"
+          },
+          "base64_memory": {
+            "description": "Base64-encoded raw memory read from the SP.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "bord": {
+            "description": "`BORD` field from the caboose.",
+            "type": "string"
+          },
+          "gitc": {
+            "description": "`GITC` field from the caboose.",
+            "type": "string"
+          },
+          "task_index": {
+            "description": "Index of the crashed task.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "timestamp": {
+            "description": "Timestamp at which the task crash occurred.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "vers": {
+            "nullable": true,
+            "description": "`VERS` field from the caboose, if present.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "archive_id",
+          "base64_memory",
+          "bord",
+          "gitc",
+          "task_index",
+          "timestamp"
         ]
       },
       "UpdateAbortBody": {

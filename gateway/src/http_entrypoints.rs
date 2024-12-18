@@ -43,6 +43,7 @@ use gateway_types::rot::RotCfpaSlot;
 use gateway_types::rot::RotCmpa;
 use gateway_types::rot::RotState;
 use gateway_types::sensor::SpSensorReading;
+use gateway_types::task_dump::TaskDump;
 use gateway_types::update::HostPhase2Progress;
 use gateway_types::update::HostPhase2RecoveryImageId;
 use gateway_types::update::InstallinatorImageId;
@@ -652,6 +653,66 @@ impl GatewayApi for GatewayImpl {
             Ok(HttpResponseOk(state.into()))
         };
 
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
+    }
+
+    async fn sp_host_task_dump_count(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSp>,
+    ) -> Result<HttpResponseOk<u32>, HttpError> {
+        let apictx = rqctx.context();
+        let sp_id = path.into_inner().sp.into();
+
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let ct = sp.task_dump_count().await.map_err(|err| {
+                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+            })?;
+
+            Ok(HttpResponseOk(ct))
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
+    }
+
+    async fn sp_host_task_dump_get(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSpTaskDumpIndex>,
+    ) -> Result<HttpResponseOk<TaskDump>, HttpError> {
+        let apictx = rqctx.context();
+        let path = path.into_inner();
+        let task_index = path.task_dump_index;
+        let sp_id = path.sp.into();
+
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let raw_dump =
+                sp.task_dump_read(task_index).await.map_err(|err| {
+                    SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+                })?;
+
+            let archive_id = hex::encode(raw_dump.archive_id);
+            let base64_memory = raw_dump
+                .memory
+                .into_iter()
+                .map(|(key, mem)| {
+                    let base64_mem =
+                        base64::engine::general_purpose::STANDARD.encode(mem);
+                    (key, base64_mem)
+                })
+                .collect();
+
+            let dump = TaskDump {
+                task_index: raw_dump.task_index,
+                timestamp: raw_dump.timestamp,
+                archive_id,
+                bord: raw_dump.bord,
+                gitc: raw_dump.gitc,
+                vers: raw_dump.vers,
+                base64_memory,
+            };
+
+            Ok(HttpResponseOk(dump))
+        };
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
