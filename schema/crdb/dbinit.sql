@@ -4724,7 +4724,7 @@ ON omicron.public.webhook_rx_secret (
 ) WHERE
     time_deleted IS NULL;
 
-CREATE TABLE IF NOT EXISTS omicron.public.webhook_subscription (
+CREATE TABLE IF NOT EXISTS omicron.public.webhook_rx_subscription (
     -- UUID of the webhook receiver (foreign key into
     -- `omicron.public.webhook_rx`)
     rx_id UUID NOT NULL,
@@ -4739,6 +4739,37 @@ CREATE INDEX IF NOT EXISTS lookup_webhook_subscriptions_by_rx
 ON omicron.public.webhook_rx_subscription (
     rx_id
 );
+
+-- Look up all webhook receivers subscribed to an event class. This is used by
+-- the dispatcher to determine who is interested in a particular event.
+CREATE INDEX IF NOT EXISTS lookup_webhook_rxs_for_event
+ON omicron.public.webhook_rx_subscription (
+    event_class
+);
+
+/*
+ * Webhook message queue.
+ */
+
+CREATE TABLE IF NOT EXISTS omicron.public.webhook_msg (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    -- Set when dispatch entries have been created for this event.
+    time_dispatched TIMESTAMPTZ,
+    -- The class of event that this is.
+    event_class STRING(512) NOT NULL,
+    -- Actual event data. The structure of this depends on the event class.
+    event JSONB NOT NULL
+);
+
+-- Look up webhook messages in need of dispatching.
+--
+-- This is used by the message dispatcher when looking for messages to dispatch.
+CREATE INDEX IF NOT EXISTS lookup_undispatched_webhook_msgs
+ON omicron.public.webhook_msg (
+    id, time_created
+) WHERE time_dispatched IS NULL;
+
 
 /*
  * Webhook message dispatching and delivery attempts.
