@@ -35,7 +35,6 @@ use std::collections::HashSet;
 use std::future::Future;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{interval, Duration, MissedTickBehavior};
-use uuid::Uuid;
 
 // The size of the mpsc bounded channel used to communicate
 // between the `StorageHandle` and `StorageManager`.
@@ -100,7 +99,7 @@ enum StorageManagerState {
 
 #[derive(Debug)]
 pub(crate) struct NewFilesystemRequest {
-    dataset_id: Uuid,
+    dataset_id: Option<DatasetUuid>,
     dataset_name: DatasetName,
     responder: DebugIgnore<oneshot::Sender<Result<(), Error>>>,
 }
@@ -526,7 +525,7 @@ impl StorageHandle {
     // and ask for the set of all datasets from Nexus.
     pub async fn upsert_filesystem(
         &self,
-        dataset_id: Uuid,
+        dataset_id: Option<DatasetUuid>,
         dataset_name: DatasetName,
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
@@ -1499,27 +1498,9 @@ impl StorageManager {
             zoned,
             encryption_details,
             size_details,
-            id: Some(DatasetUuid::from_untyped_uuid(request.dataset_id)),
+            id: request.dataset_id,
             additional_options: None,
         })?;
-        // Ensure the dataset has a usable UUID.
-        if let Ok(id_str) = Zfs::get_oxide_value(&fs_name, "uuid") {
-            if let Ok(id) = id_str.parse::<Uuid>() {
-                if id != request.dataset_id {
-                    return Err(Error::UuidMismatch {
-                        name: request.dataset_name.full_name(),
-                        old: id,
-                        new: request.dataset_id,
-                    });
-                }
-                return Ok(());
-            }
-        }
-        Zfs::set_oxide_value(
-            &fs_name,
-            "uuid",
-            &request.dataset_id.to_string(),
-        )?;
 
         Ok(())
     }

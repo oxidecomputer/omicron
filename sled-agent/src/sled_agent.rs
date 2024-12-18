@@ -962,12 +962,20 @@ impl SledAgent {
                 continue;
             };
 
-            // First, ensure the dataset exists
-            let dataset_id = zone.id.into_untyped_uuid();
-            self.inner
-                .storage
-                .upsert_filesystem(dataset_id, dataset_name)
-                .await?;
+            // NOTE: This code will be deprecated by https://github.com/oxidecomputer/omicron/pull/7160
+            //
+            // However, we need to ensure that all blueprints have datasets
+            // within them before we can remove this back-fill.
+            //
+            // Therefore, we do something hairy here: We ensure the filesystem
+            // exists, but don't specify any dataset UUID value.
+            //
+            // This means that:
+            // - If the dataset exists and has a UUID, this will be a no-op
+            // - If the dataset doesn't exist, it'll be created
+            // - If a subsequent call to "datasets_ensure" tries to set a UUID,
+            // it should be able to get set (once).
+            self.inner.storage.upsert_filesystem(None, dataset_name).await?;
         }
 
         self.inner
