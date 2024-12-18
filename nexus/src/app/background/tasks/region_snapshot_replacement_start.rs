@@ -246,7 +246,7 @@ impl RegionSnapshotReplacementDetector {
                                 completed ok"
                         );
                         info!(&log, "{s}");
-                        status.start_invoked_ok.push(s);
+                        status.requests_completed_ok.push(s);
                     }
 
                     Err(e) => {
@@ -257,9 +257,10 @@ impl RegionSnapshotReplacementDetector {
 
                         error!(&log, "{s}"; "request.id" => %request_id);
                         status.errors.push(s);
-                        continue;
                     }
                 }
+
+                continue;
             }
 
             let result = self
@@ -346,6 +347,7 @@ mod test {
     use nexus_db_model::Snapshot;
     use nexus_db_model::SnapshotIdentity;
     use nexus_db_model::SnapshotState;
+    use nexus_db_model::VolumeResourceUsage;
     use nexus_db_queries::authz;
     use nexus_db_queries::db::lookup::LookupPath;
     use nexus_test_utils::resource_helpers::create_project;
@@ -353,6 +355,7 @@ mod test {
     use omicron_common::api::external;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
+    use sled_agent_client::types::CrucibleOpts;
     use sled_agent_client::types::VolumeConstructionRequest;
     use std::collections::BTreeMap;
     use uuid::Uuid;
@@ -626,5 +629,195 @@ mod test {
         let dataset_id =
             dataset_to_zpool.get(&first_zpool.id.to_string()).unwrap();
         assert_eq!(&request.old_dataset_id.to_string(), dataset_id);
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_delete_region_snapshot_replacement_volume_causes_complete(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        let starter = Arc::new(NoopStartSaga::new());
+        let mut task = RegionSnapshotReplacementDetector::new(
+            datastore.clone(),
+            starter.clone(),
+        );
+
+        // Noop test
+        let result: RegionSnapshotReplacementStartStatus =
+            serde_json::from_value(task.activate(&opctx).await).unwrap();
+        assert_eq!(result, RegionSnapshotReplacementStartStatus::default());
+        assert_eq!(starter.count_reset(), 0);
+
+        // The volume reference counting machinery needs a fake dataset to exist
+        // (region snapshots are joined with the dataset table when creating the
+        // CrucibleResources object)
+
+        let disk_test = DiskTest::new(cptestctx).await;
+
+        let dataset_id = disk_test.zpools().next().unwrap().datasets[0].id;
+
+        // Add a region snapshot replacement request for a fake region snapshot
+
+        let region_id = Uuid::new_v4();
+        let snapshot_id = Uuid::new_v4();
+
+        let region_snapshot = RegionSnapshot::new(
+            dataset_id,
+            region_id,
+            snapshot_id,
+            "[::1]:12345".to_string(),
+        );
+
+        datastore
+            .region_snapshot_create(region_snapshot.clone())
+            .await
+            .unwrap();
+
+        let request =
+            RegionSnapshotReplacement::new(dataset_id, region_id, snapshot_id);
+
+        let request_id = request.id;
+
+        let volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(), // not required to match!
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: Some(Box::new(
+                        VolumeConstructionRequest::Region {
+                            block_size: 512,
+                            blocks_per_extent: 1,
+                            extent_count: 1,
+                            gen: 1,
+                            opts: CrucibleOpts {
+                                id: Uuid::new_v4(),
+                                target: vec![
+                                    // the region snapshot
+                                    String::from("[::1]:12345"),
+                                ],
+                                lossy: false,
+                                flush_timeout: None,
+                                key: None,
+                                cert_pem: None,
+                                key_pem: None,
+                                root_cert_pem: None,
+                                control: None,
+                                read_only: true,
+                            },
+                        },
+                    )),
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
+        // Assert usage
+
+        let records = datastore
+            .volume_usage_records_for_resource(
+                VolumeResourceUsage::RegionSnapshot {
+                    dataset_id: region_snapshot.dataset_id.into(),
+                    region_id: region_snapshot.region_id,
+                    snapshot_id: region_snapshot.snapshot_id,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(!records.is_empty());
+        assert_eq!(records[0].volume_id, volume_id);
+
+        datastore
+            .insert_region_snapshot_replacement_request_with_volume_id(
+                &opctx, request, volume_id,
+            )
+            .await
+            .unwrap();
+
+        // Before the task starts, soft-delete the volume, and delete the
+        // region snapshot (like the volume delete saga would do).
+
+        let crucible_resources =
+            datastore.soft_delete_volume(volume_id).await.unwrap();
+
+        // Assert no more usage
+
+        let records = datastore
+            .volume_usage_records_for_resource(
+                VolumeResourceUsage::RegionSnapshot {
+                    dataset_id: region_snapshot.dataset_id.into(),
+                    region_id: region_snapshot.region_id,
+                    snapshot_id: region_snapshot.snapshot_id,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(records.is_empty());
+
+        // The region snapshot should have been returned for deletion
+
+        let datasets_and_snapshots =
+            datastore.snapshots_to_delete(&crucible_resources).await.unwrap();
+
+        assert!(!datasets_and_snapshots.is_empty());
+
+        let region_snapshot_to_delete = &datasets_and_snapshots[0].1;
+
+        assert_eq!(
+            region_snapshot_to_delete.dataset_id,
+            region_snapshot.dataset_id,
+        );
+        assert_eq!(
+            region_snapshot_to_delete.region_id,
+            region_snapshot.region_id,
+        );
+        assert_eq!(
+            region_snapshot_to_delete.snapshot_id,
+            region_snapshot.snapshot_id,
+        );
+
+        // So delete it!
+
+        datastore
+            .region_snapshot_remove(
+                region_snapshot_to_delete.dataset_id.into(),
+                region_snapshot_to_delete.region_id,
+                region_snapshot_to_delete.snapshot_id,
+            )
+            .await
+            .unwrap();
+
+        // Activate the task - it should pick the request up but not attempt to
+        // run the start saga
+
+        let result: RegionSnapshotReplacementStartStatus =
+            serde_json::from_value(task.activate(&opctx).await).unwrap();
+
+        assert_eq!(
+            result,
+            RegionSnapshotReplacementStartStatus {
+                requests_created_ok: vec![],
+                start_invoked_ok: vec![],
+                requests_completed_ok: vec![format!(
+                    "region snapshot replacement {request_id} completed ok"
+                )],
+                errors: vec![],
+            },
+        );
+
+        // Assert start saga not invoked
+        assert_eq!(starter.count_reset(), 0);
     }
 }
