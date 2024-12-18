@@ -4684,6 +4684,137 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_record_per_volume_resource_usage on omicro
 );
 
 /*
+ * WEBHOOKS
+ */
+
+
+/*
+ * Webhook receivers, receiver secrets, and receiver subscriptions.
+ */
+
+CREATE TABLE IF NOT EXISTS omicron.public.webhook_rx (
+    id UUID PRIMARY KEY,
+    -- A human-readable identifier for this webhook receiver.
+    name STRING(63) NOT NULL,
+    -- URL of the endpoint webhooks are delivered to.
+    endpoint STRING(512) NOT NULL,
+    -- TODO(eliza): how do we track which roles are assigned to a webhook?
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ,
+    time_deleted TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.webhook_rx_secret (
+    -- UUID of the webhook receiver (foreign key into
+    -- `omicron.public.webhook_rx`)
+    rx_id UUID NOT NULL,
+    -- ID of this secret.
+    signature_id STRING(63) NOT NULL,
+    -- Secret value.
+    secret BYTES NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    PRIMARY KEY (signature_id, rx_id)
+);
+
+CREATE INDEX IF NOT EXISTS lookup_webhook_secrets_by_rx
+ON omicron.public.webhook_rx_secret (
+    rx_id
+) WHERE
+    time_deleted IS NULL;
+
+CREATE TABLE IF NOT EXISTS omicron.public.webhook_subscription (
+    -- UUID of the webhook receiver (foreign key into
+    -- `omicron.public.webhook_rx`)
+    rx_id UUID NOT NULL,
+    -- An event class to which this receiver is subscribed.
+    event_class STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+
+    PRIMARY KEY (rx_id, event_class)
+);
+
+CREATE INDEX IF NOT EXISTS lookup_webhook_subscriptions_by_rx
+ON omicron.public.webhook_rx_subscription (
+    rx_id
+);
+
+/*
+ * Webhook message dispatching and delivery attempts.
+ */
+
+CREATE TABLE IF NOT EXISTS omicron.public.webhook_msg_dispatch (
+    -- UUID of this dispatch.
+    id UUID PRIMARY KEY,
+    -- UUID of the webhook receiver (foreign key into
+    -- `omicron.public.webhook_rx`)
+    rx_id UUID NOT NULL,
+    payload JSONB NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    -- If this is set, then this webhook message has either been delivered
+    -- successfully, or is considered permanently failed.
+    time_completed TIMESTAMPTZ,
+);
+
+-- Index for looking up all webhook messages dispatched to a receiver ID
+CREATE INDEX IF NOT EXISTS lookup_webhook_dispatched_to_rx
+ON omicron.public.webhook_msg_dispatch (
+    rx_id
+);
+
+-- Index for looking up all currently in-flight webhook messages, and ordering
+-- them by their creation times.
+CREATE INDEX IF NOT EXISTS webhook_dispatch_in_flight
+ON omicron.public.webhook_msg_dispatch (
+    time_created, id
+) WHERE
+    time_completed IS NULL;
+
+CREATE TYPE IF NOT EXISTS omicron.public.webhook_msg_delivery_result as ENUM (
+    -- The delivery attempt failed with an HTTP error.
+    'failed_http_error',
+    -- The delivery attempt failed because the receiver endpoint was
+    -- unreachable.
+    'failed_unreachable',
+    -- The delivery attempt succeeded.
+    'succeeded'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.webhook_msg_delivery_attempt (
+    id UUID PRIMARY KEY,
+    -- Foreign key into `omicron.public.webhook_msg_dispatch`.
+    dispatch_id UUID NOT NULL,
+    result omicron.public.webhook_msg_delivery_result NOT NULL,
+    response_status INT2,
+    response_duration INTERVAL,
+    time_created TIMESTAMPTZ NOT NULL,
+
+    CONSTRAINT response_iff_not_unreachable CHECK (
+        (
+            -- If the result is 'succeedeed' or 'failed_http_error', response
+            -- data must be present.
+            (result = 'succeeded' OR result = 'failed_http_error') AND (
+                response_status IS NOT NULL AND
+                response_duration IS NOT NULL
+            )
+        ) OR (
+            -- If the result is 'failed_unreachable', no response data is
+            -- present.
+            (result = 'failed_unreachable') AND (
+                response_status IS NULL AND
+                response_duration IS NULL
+            )
+        )
+    )
+);
+
+CREATE INDEX IF NOT EXISTS lookup_webhook_delivery_attempts_for_msg
+ON omicron.public.webhook_msg_delivery_attempts (
+    dispatch_id
+);
+
+/*
  * Keep this at the end of file so that the database does not contain a version
  * until it is fully populated.
  */
