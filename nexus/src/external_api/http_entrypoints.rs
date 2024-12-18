@@ -62,9 +62,11 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByName;
 use omicron_common::api::external::http_pagination::PaginatedByNameOrId;
+use omicron_common::api::external::http_pagination::PaginatedByTimeAndId;
 use omicron_common::api::external::http_pagination::ScanById;
 use omicron_common::api::external::http_pagination::ScanByName;
 use omicron_common::api::external::http_pagination::ScanByNameOrId;
+use omicron_common::api::external::http_pagination::ScanByTimeAndId;
 use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::AddressLot;
 use omicron_common::api::external::AddressLotBlock;
@@ -857,13 +859,22 @@ impl NexusExternalApi for NexusExternalApiImpl {
         new_project: TypedBody<params::ProjectCreate>,
     ) -> Result<HttpResponseCreated<Project>, HttpError> {
         let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let project =
-                nexus.project_create(&opctx, &new_project.into_inner()).await?;
-            Ok(HttpResponseCreated(project.into()))
+            let nexus = &apictx.context.nexus;
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
+
+            let result = async {
+                let project = nexus
+                    .project_create(&opctx, &new_project.into_inner())
+                    .await?;
+                Ok(HttpResponseCreated(project.into()))
+            }
+            .await;
+
+            let _ = nexus.audit_log_entry_complete(&opctx, &audit).await;
+            result
         };
         apictx
             .context
@@ -6532,6 +6543,46 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn audit_log_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByTimeAndId<params::AuditLog>>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AuditLogEntry>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let scan_params = ScanByTimeAndId::from_query(&query)?;
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+
+            let log_entries = nexus
+                .audit_log_list(
+                    &opctx,
+                    &pag_params,
+                    scan_params.selector.start_time,
+                    scan_params.selector.end_time,
+                )
+                .await?
+                .into_iter()
+                .map(|entry| entry.into())
+                .collect::<Vec<_>>();
+            Ok(HttpResponseOk(ScanByTimeAndId::results_page(
+                &query,
+                log_entries,
+                &|_, entry: &views::AuditLogEntry| (entry.timestamp, entry.id),
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn login_saml_begin(
         rqctx: RequestContext<Self::Context>,
         _path_params: Path<params::LoginToProviderPathParam>,
@@ -6585,36 +6636,45 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
-            let path_params = path_params.into_inner();
 
             // By definition, this request is not authenticated.  These operations
             // happen using the Nexus "external authentication" context, which we
             // keep specifically for this purpose.
             let opctx = nexus.opctx_external_authn();
 
-            let (session, next_url) = nexus
-                .login_saml(
-                    opctx,
-                    body_bytes,
-                    &path_params.silo_name.into(),
-                    &path_params.provider_name.into(),
-                )
-                .await?;
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
 
-            let mut response = http_response_see_other(next_url)?;
-            {
-                let headers = response.headers_mut();
-                let cookie = session_cookie::session_cookie_header_value(
-                    &session.token,
-                    // use absolute timeout even though session might idle out first.
-                    // browser expiration is mostly for convenience, as the API will
-                    // reject requests with an expired session regardless
-                    apictx.context.session_absolute_timeout(),
-                    apictx.context.external_tls_enabled,
-                )?;
-                headers.append(header::SET_COOKIE, cookie);
+            let result = async {
+                let path_params = path_params.into_inner();
+                let (session, next_url) = nexus
+                    .login_saml(
+                        opctx,
+                        body_bytes,
+                        &path_params.silo_name.into(),
+                        &path_params.provider_name.into(),
+                    )
+                    .await?;
+
+                let mut response = http_response_see_other(next_url)?;
+                {
+                    let headers = response.headers_mut();
+                    let cookie = session_cookie::session_cookie_header_value(
+                        &session.token,
+                        // use absolute timeout even though session might idle out first.
+                        // browser expiration is mostly for convenience, as the API will
+                        // reject requests with an expired session regardless
+                        apictx.context.session_absolute_timeout(),
+                        apictx.context.external_tls_enabled,
+                    )?;
+                    headers.append(header::SET_COOKIE, cookie);
+                }
+                Ok(response)
             }
-            Ok(response)
+            .await;
+
+            let _ = nexus.audit_log_entry_complete(&opctx, &audit).await;
+
+            result
         };
         apictx
             .context
@@ -6646,36 +6706,44 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let credentials = credentials.into_inner();
-            let silo = path.silo_name.into();
-
             // By definition, this request is not authenticated.  These operations
             // happen using the Nexus "external authentication" context, which we
             // keep specifically for this purpose.
             let opctx = nexus.opctx_external_authn();
-            let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
-            let user =
-                nexus.login_local(&opctx, &silo_lookup, credentials).await?;
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
 
-            let session = nexus.create_session(opctx, user).await?;
-            let mut response = HttpResponseHeaders::new_unnamed(
-                HttpResponseUpdatedNoContent(),
-            );
+            let result = async {
+                let path = path_params.into_inner();
+                let credentials = credentials.into_inner();
+                let silo = path.silo_name.into();
 
-            {
-                let headers = response.headers_mut();
-                let cookie = session_cookie::session_cookie_header_value(
-                    &session.token,
-                    // use absolute timeout even though session might idle out first.
-                    // browser expiration is mostly for convenience, as the API will
-                    // reject requests with an expired session regardless
-                    apictx.context.session_absolute_timeout(),
-                    apictx.context.external_tls_enabled,
-                )?;
-                headers.append(header::SET_COOKIE, cookie);
+                let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
+                let user = nexus
+                    .login_local(&opctx, &silo_lookup, credentials)
+                    .await?;
+
+                let session = nexus.create_session(opctx, user).await?;
+                let mut response = HttpResponseHeaders::new_unnamed(
+                    HttpResponseUpdatedNoContent(),
+                );
+
+                {
+                    let headers = response.headers_mut();
+                    let cookie = session_cookie::session_cookie_header_value(
+                        &session.token,
+                        // use absolute timeout even though session might idle out first.
+                        // browser expiration is mostly for convenience, as the API will
+                        // reject requests with an expired session regardless
+                        apictx.context.session_absolute_timeout(),
+                        apictx.context.external_tls_enabled,
+                    )?;
+                    headers.append(header::SET_COOKIE, cookie);
+                }
+                Ok(response)
             }
-            Ok(response)
+            .await;
+            let _ = nexus.audit_log_entry_complete(&opctx, &audit).await;
+            result
         };
         apictx
             .context
@@ -6908,6 +6976,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
+
+    // TODO: decide whether to audit log the handler above or below. Both have
+    // their issues. For example, device_access_token is meant to be polled
+    // until the token is available (due to login success elsewhere). That means
+    // there are a bunch of requests that don't really deserve the audit log
+    // entry. For that reason, device_auth_confirm is probably more plausible
+    // because there's only one call and one success, and it's where the token
+    // is actually created.
 
     async fn device_access_token(
         rqctx: RequestContext<Self::Context>,

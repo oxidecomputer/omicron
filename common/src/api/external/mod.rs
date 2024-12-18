@@ -983,6 +983,7 @@ pub enum ResourceType {
     AddressLot,
     AddressLotBlock,
     AllowList,
+    AuditLogEntry,
     BackgroundTask,
     BgpConfig,
     BgpAnnounceSet,

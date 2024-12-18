@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::anyhow;
+use chrono::{DateTime, Utc};
 use dropshot::Body;
 use dropshot::{
     EmptyScanParams, EndpointTagPolicy, HttpError, HttpResponseAccepted,
@@ -11,6 +12,7 @@ use dropshot::{
     WebsocketChannelResult, WebsocketConnection,
 };
 use http::Response;
+use http_pagination::{PageSelector, PaginatedByTimeAndId};
 use ipnetwork::IpNetwork;
 use nexus_types::{
     authn::cookies::Cookies,
@@ -156,6 +158,12 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                 description = "Virtual Private Clouds (VPCs) provide isolated network environments for managing and deploying services.",
                 external_docs = {
                     url = "http://docs.oxide.computer/api/vpcs"
+                }
+            },
+            "system/audit-log" = {
+                description = "These endpoints relate to audit logs.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/system-audit-log"
                 }
             },
             "system/probes" = {
@@ -2978,6 +2986,19 @@ pub trait NexusExternalApi {
         path_params: Path<params::ProbePath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
+    // Audit logging
+
+    /// View audit log
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/audit-log",
+        tags = ["system/audit-log"],
+    }]
+    async fn audit_log_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByTimeAndId<params::AuditLog>>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AuditLogEntry>>, HttpError>;
+
     // Console API: logins
 
     /// SAML login console page (just a link to the IdP)
@@ -3350,3 +3371,8 @@ pub type IpPoolRangePaginationParams =
 /// Type used to paginate request to list timeseries schema
 pub type TimeseriesSchemaPaginationParams =
     PaginationParams<EmptyScanParams, oximeter_types::TimeseriesName>;
+
+pub type AuditLogPaginationParams = PaginationParams<
+    params::AuditLog,
+    PageSelector<params::AuditLog, DateTime<Utc>>,
+>;
