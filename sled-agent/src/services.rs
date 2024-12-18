@@ -104,6 +104,7 @@ use sled_storage::dataset::{CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
@@ -274,6 +275,12 @@ pub enum Error {
 
     #[error("Error querying simnet devices")]
     Simnet(#[from] GetSimnetError),
+
+    #[error("Failed to access storage")]
+    Storage(#[from] sled_storage::error::Error),
+
+    #[error("Missing datasets: {datasets:?}")]
+    MissingDatasets { datasets: BTreeSet<DatasetName> },
 
     #[error(
         "Requested generation ({requested}) is older than current ({current})"
@@ -3470,6 +3477,50 @@ impl ServiceManager {
         Ok(())
     }
 
+    // Compares the incoming set of zones with the datasets this sled is
+    // configured to use.
+    //
+    // If the requested zones contain any datasets not configured on this sled,
+    // an error is returned.
+    async fn check_requested_zone_datasets_exist(
+        &self,
+        request: &OmicronZonesConfig,
+    ) -> Result<(), Error> {
+        // Before we provision these zones, inspect the request, and
+        // check all the datasets we're trying to make.
+        let mut requested_datasets = BTreeSet::new();
+        for zone in &request.zones {
+            if let Some(dataset) = zone.dataset_name() {
+                requested_datasets.insert(dataset);
+            }
+            if let Some(dataset) = zone.transient_zone_dataset_name() {
+                requested_datasets.insert(dataset);
+            }
+        }
+
+        // These datasets are configured to be part of the control plane.
+        let datasets_config = self.inner.storage.datasets_config_list().await?;
+        let existing_datasets: BTreeSet<_> = datasets_config
+            .datasets
+            .into_values()
+            .map(|config| config.name)
+            .collect();
+
+        // Check that the request is no larger than the configured set.
+        //
+        // (It's fine to have "existing_datasets" not contained in the
+        // request set).
+        let missing_datasets: BTreeSet<_> = requested_datasets
+            .difference(&existing_datasets)
+            .cloned()
+            .collect();
+        if !missing_datasets.is_empty() {
+            warn!(self.inner.log, "Missing datasets: {missing_datasets:?}");
+            return Err(Error::MissingDatasets { datasets: missing_datasets });
+        }
+        Ok(())
+    }
+
     // Ensures that only the following Omicron zones are running.
     //
     // This method strives to be idempotent.
@@ -3493,6 +3544,8 @@ impl ServiceManager {
         new_request: OmicronZonesConfig,
         fake_install_dir: Option<&String>,
     ) -> Result<(), Error> {
+        self.check_requested_zone_datasets_exist(&new_request).await?;
+
         // Do some data-normalization to ensure we can compare the "requested
         // set" vs the "existing set" as HashSets.
         let old_zone_configs: HashSet<OmicronZoneConfig> = existing_zones
@@ -4694,6 +4747,7 @@ mod illumos_tests {
         zone::MockZones,
     };
 
+    use omicron_common::disk::DatasetsConfig;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use std::os::unix::process::ExitStatusExt;
@@ -5039,6 +5093,18 @@ mod illumos_tests {
             .await
             .expect("Failed to ensure disks");
         assert!(!result.has_error(), "{:?}", result);
+        let result = harness
+            .handle()
+            .datasets_ensure(DatasetsConfig {
+                generation: Generation::new(),
+                datasets: BTreeMap::new(),
+            })
+            .await
+            .unwrap();
+        assert!(
+            !result.has_error(),
+            "Failed to ensure empty dataset ledger: {result:?}"
+        );
         harness
     }
 
