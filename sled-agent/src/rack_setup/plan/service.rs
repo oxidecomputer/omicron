@@ -133,7 +133,10 @@ impl SledConfig {
 
         // If a durable dataset exists, add it.
         if let Some(dataset) = zone.zone_type.durable_dataset() {
-            let id = DatasetUuid::new_v4();
+            // NOTE(https://github.com/oxidecomputer/omicron/issues/7265): This
+            // UUID is intentionally set to the same value as the Zone UUID
+            let id =
+                DatasetUuid::from_untyped_uuid(zone.id.into_untyped_uuid());
             self.datasets.datasets.insert(
                 id,
                 DatasetConfig {
