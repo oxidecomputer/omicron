@@ -158,6 +158,10 @@ snapshot_delete                          DELETE   /v1/snapshots/{snapshot}
 snapshot_list                            GET      /v1/snapshots
 snapshot_view                            GET      /v1/snapshots/{snapshot}
 
+API operations found with tag "system/audit-log"
+OPERATION ID                             METHOD   URL PATH
+audit_log_list                           GET      /v1/system/audit-log
+
 API operations found with tag "system/hardware"
 OPERATION ID                             METHOD   URL PATH
 networking_switch_port_apply_settings    POST     /v1/system/hardware/switch-port/{port}/settings

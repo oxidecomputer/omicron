@@ -2164,3 +2164,42 @@ table! {
         region_snapshot_snapshot_id -> Nullable<Uuid>,
     }
 }
+
+table! {
+    audit_log (id) {
+        id -> Uuid,
+        timestamp -> Timestamptz,
+        request_id -> Text,
+        request_uri -> Text,
+        operation_id -> Text,
+        source_ip -> Inet,
+        resource_type -> Text,
+        actor_id -> Nullable<Uuid>,
+        actor_silo_id -> Nullable<Uuid>,
+        access_method -> Nullable<Text>,
+        resource_id -> Nullable<Uuid>,
+        time_completed -> Nullable<Timestamptz>,
+        http_status_code -> Nullable<Int4>, // SqlU16
+        error_code -> Nullable<Text>,
+        error_message -> Nullable<Text>
+    }
+}
+
+table! {
+    audit_log_complete (id) {
+        id -> Uuid,
+        timestamp -> Timestamptz,
+        request_id -> Text,
+        request_uri -> Text,
+        operation_id -> Text,
+        source_ip -> Inet,
+        actor_id -> Nullable<Uuid>,
+        actor_silo_id -> Nullable<Uuid>,
+        access_method -> Nullable<Text>,
+        resource_id -> Nullable<Uuid>,
+        time_completed -> Timestamptz,
+        http_status_code -> Int4, // SqlU16
+        error_code -> Nullable<Text>,
+        error_message -> Nullable<Text>
+    }
+}
