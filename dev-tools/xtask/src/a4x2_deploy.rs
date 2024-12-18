@@ -50,7 +50,9 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
     };
 
     // Delete any results from previous runs. We don't mind if there's errors.
-    fs::remove_dir_all(&work_dir).ok();
+    // This needs to run as root in case there are artifacts owned by root left
+    // around from the deploy.
+    cmd!(sh, "pfexec rm -rf {work_dir}").run()?;
     // Create work dir
     fs::create_dir_all(&work_dir)?;
     sh.change_dir(&work_dir);

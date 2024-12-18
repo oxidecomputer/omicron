@@ -13615,6 +13615,7 @@ dependencies = [
  "fs-err",
  "macaddr",
  "serde",
+ "serde_json",
  "sha2",
  "shell-words",
  "swrite",
