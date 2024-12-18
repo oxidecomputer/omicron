@@ -405,7 +405,7 @@ impl ExampleSystemBuilder {
         // pick addresses in the TEST-NET-2 (RFC 5737) range.
         for i in 0..self.external_dns_count.0 {
             builder
-                .add_external_dns_ip(IpAddr::V4(Ipv4Addr::new(
+                .inject_untracked_external_dns_ip(IpAddr::V4(Ipv4Addr::new(
                     198,
                     51,
                     100,
