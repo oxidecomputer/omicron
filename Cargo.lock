@@ -7446,6 +7446,7 @@ dependencies = [
  "managed",
  "memchr",
  "mio",
+ "newtype-uuid",
  "nom",
  "num-bigint-dig",
  "num-integer",
