@@ -101,6 +101,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
     let classes = [
         // Hand-written classes
         Action::get_polar_class(),
+        AuditLog::get_polar_class(),
         AnyActor::get_polar_class(),
         AuthenticatedActor::get_polar_class(),
         BlueprintConfig::get_polar_class(),
