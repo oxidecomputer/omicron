@@ -37,6 +37,13 @@ impl DataStore {
         opctx: &OpContext,
         region: &Region,
     ) -> Result<Uuid, Error> {
+        if region.read_only() {
+            return Err(Error::invalid_request(format!(
+                "region {} is read-only",
+                region.id(),
+            )));
+        }
+
         let request = RegionReplacement::for_region(region);
         let request_id = request.id;
 
