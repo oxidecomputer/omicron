@@ -441,6 +441,31 @@ has_relation(fleet: Fleet, "parent_fleet", ip_pool_list: IpPoolList)
 has_permission(actor: AuthenticatedActor, "create_child", ip_pool: IpPool)
 	if silo in actor.silo and silo.fleet = ip_pool.fleet;
 
+# Describes the policy for reading and writing the audit log 
+resource AuditLog {
+	permissions = [
+	    "list_children", # retrieve audit log
+	    "create_child",  # create audit log entry
+	];
+
+	relations = { parent_fleet: Fleet };
+
+	# Fleet viewers can read the audit log
+	"list_children" if "viewer" on "parent_fleet";
+}
+
+# Any actor should be able to write to the audit log because we need to be able
+# to write to the log from any request, authenticated or not. Audit log writes
+# are always a byproduct of other operations: there are no endpoints that allow
+# the user to write to the log deliberately. Note we use AuthenticatedActor
+# because we don't really mean unauthenticated -- in the case of login
+# operations, we use the external authenticator actor that creates the session
+# to authorize the audit log write.
+has_permission(_actor: AuthenticatedActor, "create_child", _audit_log: AuditLog);
+
+has_relation(fleet: Fleet, "parent_fleet", audit_log: AuditLog)
+	if audit_log.fleet = fleet;
+
 # Describes the policy for creating and managing web console sessions.
 resource ConsoleSessionList {
 	permissions = [ "create_child" ];

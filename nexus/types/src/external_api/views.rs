@@ -1575,3 +1575,50 @@ mod test {
         );
     }
 }
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AuditLogEntryActor {
+    UserBuiltin { user_builtin_id: Uuid },
+    SiloUser { silo_user_id: Uuid, silo_id: Uuid },
+    Unauthenticated,
+}
+
+/// Audit log entry
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AuditLogEntry {
+    /// Unique identifier for the audit log entry
+    pub id: Uuid,
+
+    /// When the request was received
+    pub time_initialized: DateTime<Utc>,
+
+    /// Request ID for tracing requests through the system
+    pub request_id: String,
+    /// Full URL of the request
+    pub request_uri: String,
+    /// API endpoint ID, e.g., `project_create`
+    pub operation_id: String,
+    /// IP address that made the request
+    pub source_ip: IpAddr,
+    /// User agent string from the request
+    pub user_agent: Option<String>,
+
+    pub actor: AuditLogEntryActor,
+
+    /// Indicates whether request was made with an API token or session cookie.
+    /// Optional because it will not be defined on unauthenticated requests like
+    /// login attempts.
+    pub access_method: Option<String>,
+
+    // Fields that are optional because they get filled in after the action completes
+    /// Time operation completed
+    pub time_completed: DateTime<Utc>,
+
+    /// HTTP status code
+    pub http_status_code: u16,
+
+    /// Error information if the action failed
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+}

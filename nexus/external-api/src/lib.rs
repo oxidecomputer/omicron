@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::anyhow;
+use chrono::{DateTime, Utc};
 use dropshot::Body;
 use dropshot::{
     EmptyScanParams, EndpointTagPolicy, Header, HttpError,
@@ -18,7 +19,7 @@ use nexus_types::{
 };
 use omicron_common::api::external::{
     http_pagination::{
-        PaginatedById, PaginatedByName, PaginatedByNameOrId,
+        PageSelector, PaginatedById, PaginatedByName, PaginatedByNameOrId,
         PaginatedByTimeAndId,
     },
     *,
@@ -178,6 +179,12 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                 description = "Alerts deliver notifications for events that occur on the Oxide rack",
                 external_docs = {
                     url = "http://docs.oxide.computer/api/alerts"
+                }
+            },
+            "system/audit-log" = {
+                description = "These endpoints relate to audit logs.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/system-audit-log"
                 }
             },
             "system/probes" = {
@@ -3428,6 +3435,34 @@ pub trait NexusExternalApi {
         path_params: Path<params::ProbePath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
+    // Audit logging
+
+    /// View audit log
+    ///
+    /// A single item in the audit log represents both the beginning and
+    /// end of the logged operation (represented by `time_initialized` and
+    /// `time_completed`) so that clients do not have to find multiple entries
+    /// and match them up by request ID to get the full picture of an operation.
+    /// Because timestamps may not be unique, entries have also have a unique
+    /// `id` that can be used to deduplicate items fetched from overlapping
+    /// time intervals.
+    ///
+    /// Note that entries are immutable and are ordered by `time_completed`, not
+    /// `time_initialized`, in order to ensure stable results. If you request
+    /// entries from `t0 <= time_completed < t1` and `t1` is in the past, you
+    /// can be confident that the resulting list is complete, i.e., requesting
+    /// the same range again later will always produce the same list. We do not
+    /// include items in the audit log response until they are marked completed.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/audit-log",
+        tags = ["system/audit-log"],
+    }]
+    async fn audit_log_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByTimeAndId<params::AuditLog>>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AuditLogEntry>>, HttpError>;
+
     // Console API: logins
 
     /// SAML login console page (just a link to the IdP)
@@ -4000,3 +4035,8 @@ pub type IpPoolRangePaginationParams =
 /// Type used to paginate request to list timeseries schema
 pub type TimeseriesSchemaPaginationParams =
     PaginationParams<EmptyScanParams, oximeter_types::TimeseriesName>;
+
+pub type AuditLogPaginationParams = PaginationParams<
+    params::AuditLog,
+    PageSelector<params::AuditLog, DateTime<Utc>>,
+>;
