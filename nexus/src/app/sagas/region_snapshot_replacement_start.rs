@@ -283,22 +283,44 @@ async fn rsrss_get_clone_source(
     let osagactx = sagactx.user_data();
     let log = osagactx.log();
 
-    // If the downstairs we're cloning from is on an expunged dataset, the clone
-    // will never succeed. Find either a region snapshot or a read-only region
-    // that is associated with the request snapshot that has not been expunged.
+    // Find either a region snapshot or a read-only region that is associated
+    // with the request snapshot that has not been expunged, and return that as
+    // the source to be used to populate the read-only region that will replace
+    // the request's region snapshot.
     //
     // Importantly, determine the clone source before new region alloc step in
     // this saga, otherwise the query that searches for read-only region
     // candidates will match the newly allocated region (that is not created
     // yet!).
     //
-    // Prefer to choose a clone source that isn't the region snapshot in the
-    // request: if it's flaky, it shouldn't be used as a clone source! If no
-    // other candidate clone source is found, then it will be chosen, as the
-    // alternative in that case is lost data.
+    // Choose a clone source based on the following policy:
+    //
+    // - choose a region snapshot associated with the one being replaced
+    //
+    // - choose a read-only region from the associated snapshot volume
+    //
+    // - choose the region snapshot being replaced (only if it is not expunged!
+    //   if the downstairs being cloned from is on an expunged dataset, we have
+    //   to assume that the clone will never succeed, even if the expunged
+    //   thing is still there)
+    //
+    // The policy here prefers to choose a clone source that isn't the region
+    // snapshot in the request: if it's flaky, it shouldn't be used as a clone
+    // source! This function does not know _why_ the replacement request was
+    // created for that region snapshot, and assumes that there may be a problem
+    // with it and will choose it as a last resort (if no other candidate clone
+    // source is found and the request's region snapshot is not on an expunged
+    // dataset, then it has to be chosen as a clone source, as the alternative
+    // is lost data). The request's region snapshot may also be completely fine,
+    // for example if a scrub is being requested.
+    //
+    // Also, the policy also prefers to choose to clone from a region snapshot
+    // instead of a read-only region: this is an arbitrary order, there is no
+    // reason behind this. The region snapshots and read-only regions will have
+    // identical contents.
 
-    // First, try to select another region snapshot that's part of this snapshot
-    // - they will all have identical contents.
+    // First, try to select another region snapshot that's part of this
+    // snapshot.
 
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
@@ -314,9 +336,9 @@ async fn rsrss_get_clone_source(
         .await
         .map_err(ActionError::action_failed)?;
 
-    // Filter out the request's region snapshot - this may be chosen later in
-    // this function, but follow the above preference to choose another one
-    // here.
+    // Filter out the request's region snapshot - if there are no other
+    // candidates, this could be chosen later in this function.
+
     non_expunged_region_snapshots.retain(|rs| {
         !(rs.dataset_id == params.request.old_dataset_id
             && rs.region_id == params.request.old_region_id
@@ -381,7 +403,7 @@ async fn rsrss_get_clone_source(
         return Ok(CloneSource::Region { region_id: candidate.id() });
     }
 
-    // If no other non-expunged region snapshot of read-only region exists, then
+    // If no other non-expunged region snapshot or read-only region exists, then
     // check if the request's region snapshot is non-expunged. This will use the
     // region snapshot that is being replaced as a clone source, which may not
     // work if there's a problem with that region snapshot that this replacement
@@ -394,8 +416,8 @@ async fn rsrss_get_clone_source(
         .map_err(ActionError::action_failed)?;
 
     if request_dataset_on_in_service_physical_disk {
-        // If the request region snapshot's dataset has not been expunged,
-        // it can be used
+        // If the request region snapshot's dataset has not been expunged, it
+        // can be used
         return Ok(CloneSource::RegionSnapshot {
             dataset_id: params.request.old_dataset_id.into(),
             region_id: params.request.old_region_id,
