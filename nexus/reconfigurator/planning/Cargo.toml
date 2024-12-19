@@ -19,6 +19,7 @@ ipnet.workspace = true
 itertools.workspace = true
 nexus-config.workspace = true
 nexus-inventory.workspace = true
+nexus-reconfigurator-blippy.workspace = true
 nexus-sled-agent-shared.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true

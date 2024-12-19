@@ -79,6 +79,7 @@ members = [
     "nexus/macros-common",
     "nexus/metrics-producer-gc",
     "nexus/networking",
+    "nexus/reconfigurator/blippy",
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
     "nexus/reconfigurator/preparation",
@@ -213,6 +214,7 @@ default-members = [
     "nexus/macros-common",
     "nexus/metrics-producer-gc",
     "nexus/networking",
+    "nexus/reconfigurator/blippy",
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
     "nexus/reconfigurator/preparation",
@@ -468,6 +470,7 @@ nexus-internal-api = { path = "nexus/internal-api" }
 nexus-macros-common = { path = "nexus/macros-common" }
 nexus-metrics-producer-gc = { path = "nexus/metrics-producer-gc" }
 nexus-networking = { path = "nexus/networking" }
+nexus-reconfigurator-blippy = { path = "nexus/reconfigurator/blippy" }
 nexus-reconfigurator-execution = { path = "nexus/reconfigurator/execution" }
 nexus-reconfigurator-planning = { path = "nexus/reconfigurator/planning" }
 nexus-reconfigurator-preparation = { path = "nexus/reconfigurator/preparation" }

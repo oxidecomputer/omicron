@@ -1253,6 +1253,21 @@ mod test {
         for (_sled_id, zones) in blueprint1.blueprint_zones.iter_mut().take(2) {
             zones.zones.retain(|z| !z.zone_type.is_internal_dns());
         }
+        for (_, dataset_config) in
+            blueprint1.blueprint_datasets.iter_mut().take(2)
+        {
+            dataset_config.datasets.retain(|_id, dataset| {
+                // This is gross; once zone configs know explicit dataset IDs,
+                // we should retain by ID instead.
+                match &dataset.kind {
+                    DatasetKind::InternalDns => false,
+                    DatasetKind::TransientZone { name } => {
+                        !name.starts_with("oxz_internal_dns")
+                    }
+                    _ => true,
+                }
+            });
+        }
 
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
