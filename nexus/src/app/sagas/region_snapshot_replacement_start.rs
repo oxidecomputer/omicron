@@ -271,7 +271,7 @@ async fn rsrss_set_saga_id_undo(
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub enum CloneSource {
+enum CloneSource {
     RegionSnapshot { dataset_id: DatasetUuid, region_id: Uuid },
     Region { region_id: Uuid },
 }
