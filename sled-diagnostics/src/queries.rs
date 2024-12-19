@@ -9,9 +9,17 @@ use std::{process::Command, time::Duration};
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
 
+#[cfg(target_os = "illumos")]
+use crate::contract::ContractError;
+
+#[cfg(not(target_os = "illumos"))]
+use crate::contract_stub::ContractError;
+
 const DLADM: &str = "/usr/sbin/dladm";
 const IPADM: &str = "/usr/sbin/ipadm";
 const PFEXEC: &str = "/usr/bin/pfexec";
+const PSTACK: &str = "/usr/bin/pstack";
+const PARGS: &str = "/usr/bin/pargs";
 const ZONEADM: &str = "/usr/sbin/zoneadm";
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -22,6 +30,8 @@ pub trait SledDiagnosticsCommandHttpOutput {
 
 #[derive(Error, Debug)]
 pub enum SledDiagnosticsCmdError {
+    #[error("libcontract error: {0}")]
+    Contract(#[from] ContractError),
     #[error("Failed to duplicate pipe for command [{command}]: {error}")]
     Dup { command: String, error: std::io::Error },
     #[error("Failed to proccess output for command [{command}]: {error}")]
@@ -205,9 +215,17 @@ pub fn dladm_show_linkprop() -> Command {
     cmd
 }
 
-/*
- * Public API
- */
+pub fn pargs_process(pid: i32) -> Command {
+    let mut cmd = std::process::Command::new(PFEXEC);
+    cmd.env_clear().arg(PARGS).arg("-ae").arg(pid.to_string());
+    cmd
+}
+
+pub fn pstack_process(pid: i32) -> Command {
+    let mut cmd = std::process::Command::new(PFEXEC);
+    cmd.env_clear().arg(PSTACK).arg(pid.to_string());
+    cmd
+}
 
 #[cfg(test)]
 mod test {
