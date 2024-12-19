@@ -177,8 +177,8 @@ to:   blueprint 1ac2d88f-27dd-4506-8585-6b2be832528e
     oxp_9d833141-18a1-4f24-8a34-6076c026aa87/crypt/debug                                                           f631d6a1-9db5-4fc7-978b-9ace485dfe16   100 GiB   none          gzip-9     
     oxp_a279461f-a7b9-413f-a79f-cb4dab4c3fce/crypt/debug                                                           1b9c97d6-c90d-4109-b99c-9ab799b3c3b9   100 GiB   none          gzip-9     
     oxp_ff7e002b-3ad8-4d45-b03a-c46ef0ac8e59/crypt/debug                                                           9427caff-29ec-4cd1-981b-26d4a7900052   100 GiB   none          gzip-9     
-+   oxp_1e2ec79e-9c11-4133-ac77-e0b994a507d5/crypt/zone/oxz_crucible_pantry_ff9ce09c-afbf-425b-bbfa-3d8fb254f98e   7d47e5d6-a1a5-451a-b4b4-3a9747f8154a   none      none          off        
-+   oxp_1e2ec79e-9c11-4133-ac77-e0b994a507d5/crypt/zone/oxz_nexus_845869e9-ecb2-4ec3-b6b8-2a836e459243             a759d2f3-003c-4fb8-b06b-f985e213b273   none      none          off        
++   oxp_440ae69d-5e2e-4539-91d0-e2930bdd7203/crypt/zone/oxz_crucible_pantry_ff9ce09c-afbf-425b-bbfa-3d8fb254f98e   7d47e5d6-a1a5-451a-b4b4-3a9747f8154a   none      none          off        
++   oxp_440ae69d-5e2e-4539-91d0-e2930bdd7203/crypt/zone/oxz_nexus_845869e9-ecb2-4ec3-b6b8-2a836e459243             a759d2f3-003c-4fb8-b06b-f985e213b273   none      none          off        
 
 
     omicron zones generation 2 -> 3:
