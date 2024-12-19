@@ -850,7 +850,7 @@ impl BackgroundTasksInitializer {
                 done",
             period: config.region_snapshot_replacement_finish.period_secs,
             task_impl: Box::new(RegionSnapshotReplacementFinishDetector::new(
-                datastore,
+                datastore, sagas,
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
