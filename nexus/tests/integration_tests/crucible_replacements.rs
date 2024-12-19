@@ -444,7 +444,7 @@ mod region_replacement {
                             None => {
                                 // The saga either has not started yet or is
                                 // still running - see the comment before this
-                                // check for mroe info.
+                                // check for more info.
                                 Err(CondCheckError::<()>::NotYet)
                             }
                         }
