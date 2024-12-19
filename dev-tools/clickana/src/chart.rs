@@ -31,7 +31,7 @@ impl Display for Unit {
         let s = match self {
             Unit::Count => "",
             Unit::Gibibyte => "GiB",
-            &Unit::Mebibyte => "MiB",
+            Unit::Mebibyte => "MiB",
         };
         write!(f, "{s}")
     }
