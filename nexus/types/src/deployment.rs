@@ -99,6 +99,7 @@ use blueprint_display::{
 };
 
 pub use blueprint_diff::BlueprintDiff;
+pub use blueprint_diff::BpDiff;
 
 /// Describes a complete set of software and configuration for the system
 // Blueprints are a fundamental part of how the system modifies itself.  Each

@@ -14,6 +14,8 @@ use super::{
     zone_sort_key, Blueprint, ClickhouseClusterConfig,
     CockroachDbPreserveDowngrade, DiffBeforeClickhouseClusterConfig,
 };
+use diffus::edit::{collection, enm, map, Edit};
+use diffus::Diffable;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
@@ -21,6 +23,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use uuid::Uuid;
 
 use crate::deployment::blueprint_display::BpClickhouseKeepersTableSchema;
 use crate::deployment::{
@@ -790,6 +793,92 @@ impl BpDiffDatasets {
         } else {
             Some(BpTable::new(BpDatasetsTableSchema {}, generation, rows))
         }
+    }
+}
+
+#[derive(Debug)]
+pub enum DiffItem<T: fmt::Debug> {
+    Unchanged,
+    Added(T),
+    Removed(T),
+    Modified { before: T, after: T },
+}
+
+/// Summarizes the differences between two blueprints
+/// Diffus based version
+#[derive(Debug)]
+pub struct BpDiff {
+    pub id: DiffItem<Uuid>,
+    pub sled_state: BTreeMap<SledUuid, DiffItem<SledState>>,
+}
+
+impl BpDiff {
+    /// Generate a `BpDiff` via Diffus.
+    ///
+    /// Return `None` if there are no changes between blueprints.
+    ///
+    /// We don't need or want to maintain the same structure from Diffus.
+    ///
+    /// We simplify to a `BpDiff` which we can more easily debug print and
+    /// render.
+    ///
+    /// Of particular importance to this simplification is that we don't
+    /// differentiate between changing of variants and variant contents, and we
+    /// discard unchanged items.
+    pub fn new(before: &Blueprint, after: &Blueprint) -> Option<BpDiff> {
+        let edit = before.diff(after);
+        if edit.is_copy() {
+            return None;
+        }
+        let change = edit.change().unwrap();
+        let id = {
+            let change = change.id.change().unwrap();
+            DiffItem::Modified { before: *change.0, after: *change.1 }
+        };
+        let sled_state = Self::sled_state_diff(&change.sled_state);
+        Some(BpDiff { id, sled_state })
+    }
+
+    fn sled_state_diff(
+        sled_states: &Edit<BTreeMap<SledUuid, SledState>>,
+    ) -> BTreeMap<SledUuid, DiffItem<SledState>> {
+        // Were there any changes?
+        sled_states
+            .change()
+            .map(|changes| {
+                // What type of changes?
+                changes
+                    .iter()
+                    .filter_map(|(sled_id, change)| match change {
+                        map::Edit::Copy(_) => None,
+                        map::Edit::Insert(sled_state) => {
+                            Some((**sled_id, DiffItem::Added(**sled_state)))
+                        }
+                        map::Edit::Remove(sled_state) => {
+                            Some((**sled_id, DiffItem::Removed(**sled_state)))
+                        }
+                        map::Edit::Change(change) => {
+                            let (before, after) = match change {
+                                enm::Edit::Copy(_) => {
+                                    return None;
+                                }
+                                enm::Edit::VariantChanged(before, after) => {
+                                    (**before, **after)
+                                }
+                                enm::Edit::AssociatedChanged(_) => {
+                                    // There's no associated data here
+                                    unreachable!()
+                                }
+                            };
+                            Some((
+                                **sled_id,
+                                DiffItem::Modified { before, after },
+                            ))
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or(BTreeMap::new())
     }
 }
 
