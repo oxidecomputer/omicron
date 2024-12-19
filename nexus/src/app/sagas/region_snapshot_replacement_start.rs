@@ -65,6 +65,7 @@ use crate::app::{authn, db};
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::DatasetUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::CrucibleOpts;
@@ -90,6 +91,9 @@ declare_saga_actions! {
     SET_SAGA_ID -> "unused_1" {
         + rsrss_set_saga_id
         - rsrss_set_saga_id_undo
+    }
+    GET_CLONE_SOURCE -> "clone_source" {
+        + rsrss_get_clone_source
     }
     GET_ALLOC_REGION_PARAMS -> "alloc_region_params" {
         + rsrss_get_alloc_region_params
@@ -194,6 +198,7 @@ impl NexusSaga for SagaRegionSnapshotReplacementStart {
         ));
 
         builder.append(set_saga_id_action());
+        builder.append(get_clone_source_action());
         builder.append(get_alloc_region_params_action());
         builder.append(alloc_new_region_action());
         builder.append(find_new_region_action());
@@ -263,6 +268,147 @@ async fn rsrss_set_saga_id_undo(
         .await?;
 
     Ok(())
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum CloneSource {
+    RegionSnapshot { dataset_id: DatasetUuid, region_id: Uuid },
+    Region { region_id: Uuid },
+}
+
+async fn rsrss_get_clone_source(
+    sagactx: NexusActionContext,
+) -> Result<CloneSource, ActionError> {
+    let params = sagactx.saga_params::<Params>()?;
+    let osagactx = sagactx.user_data();
+    let log = osagactx.log();
+
+    // If the downstairs we're cloning from is on an expunged dataset, the clone
+    // will never succeed. Find either a region snapshot or a read-only region
+    // that is associated with the request snapshot that has not been expunged.
+    //
+    // Importantly, determine the clone source before new region alloc step in
+    // this saga, otherwise the query that searches for read-only region
+    // candidates will match the newly allocated region (that is not created
+    // yet!).
+    //
+    // Prefer to choose a clone source that isn't the region snapshot in the
+    // request: if it's flaky, it shouldn't be used as a clone source! If no
+    // other candidate clone source is found, then it will be chosen, as the
+    // alternative in that case is lost data.
+
+    // First, try to select another region snapshot that's part of this snapshot
+    // - they will all have identical contents.
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let mut non_expunged_region_snapshots = osagactx
+        .datastore()
+        .find_non_expunged_region_snapshots(
+            &opctx,
+            params.request.old_snapshot_id,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    // Filter out the request's region snapshot - this may be chosen later in
+    // this function, but follow the above preference to choose another one
+    // here.
+    non_expunged_region_snapshots.retain(|rs| {
+        !(rs.dataset_id == params.request.old_dataset_id
+            && rs.region_id == params.request.old_region_id
+            && rs.snapshot_id == params.request.old_snapshot_id)
+    });
+
+    if let Some(candidate) = non_expunged_region_snapshots.pop() {
+        info!(
+            log,
+            "found another non-expunged region snapshot";
+            "snapshot_id" => %params.request.old_snapshot_id,
+            "dataset_id" => %candidate.dataset_id,
+            "region_id" => %candidate.region_id,
+        );
+
+        return Ok(CloneSource::RegionSnapshot {
+            dataset_id: candidate.dataset_id.into(),
+            region_id: candidate.region_id,
+        });
+    }
+
+    // Next, try to select a read-only region that's associated with the
+    // snapshot volume
+
+    info!(
+        log,
+        "no region snapshot clone source candidates";
+        "snapshot_id" => %params.request.old_snapshot_id,
+    );
+
+    // Look up the existing snapshot
+    let maybe_db_snapshot = osagactx
+        .datastore()
+        .snapshot_get(&opctx, params.request.old_snapshot_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let Some(db_snapshot) = maybe_db_snapshot else {
+        return Err(ActionError::action_failed(Error::internal_error(
+            &format!(
+                "snapshot {} was hard deleted!",
+                params.request.old_snapshot_id
+            ),
+        )));
+    };
+
+    let mut non_expunged_read_only_regions = osagactx
+        .datastore()
+        .find_non_expunged_regions(&opctx, db_snapshot.volume_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    if let Some(candidate) = non_expunged_read_only_regions.pop() {
+        info!(
+            log,
+            "found region clone source candidate";
+            "snapshot_id" => %params.request.old_snapshot_id,
+            "dataset_id" => %candidate.dataset_id(),
+            "region_id" => %candidate.id(),
+        );
+
+        return Ok(CloneSource::Region { region_id: candidate.id() });
+    }
+
+    // If no other non-expunged region snapshot of read-only region exists, then
+    // check if the request's region snapshot is non-expunged. This will use the
+    // region snapshot that is being replaced as a clone source, which may not
+    // work if there's a problem with that region snapshot that this replacement
+    // request is meant to fix!
+
+    let request_dataset_on_in_service_physical_disk = osagactx
+        .datastore()
+        .dataset_physical_disk_in_service(params.request.old_dataset_id.into())
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    if request_dataset_on_in_service_physical_disk {
+        // If the request region snapshot's dataset has not been expunged,
+        // it can be used
+        return Ok(CloneSource::RegionSnapshot {
+            dataset_id: params.request.old_dataset_id.into(),
+            region_id: params.request.old_region_id,
+        });
+    }
+
+    // If all targets of a Volume::Region are on expunged datasets, then the
+    // user's data is gone, and this code will fail to select a clone source.
+
+    return Err(ActionError::action_failed(format!(
+        "no clone source candidate for {}!",
+        params.request.old_snapshot_id,
+    )));
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -445,45 +591,66 @@ async fn rsrss_new_region_ensure(
             "new_dataset_and_region",
         )?;
 
-    let region_snapshot = osagactx
-        .datastore()
-        .region_snapshot_get(
-            params.request.old_dataset_id.into(),
-            params.request.old_region_id,
-            params.request.old_snapshot_id,
-        )
-        .await
-        .map_err(ActionError::action_failed)?;
+    let clone_source = sagactx.lookup::<CloneSource>("clone_source")?;
 
-    let Some(region_snapshot) = region_snapshot else {
-        return Err(ActionError::action_failed(format!(
-            "region snapshot {} {} {} deleted!",
-            params.request.old_dataset_id,
-            params.request.old_region_id,
-            params.request.old_snapshot_id,
-        )));
+    let mut source_repair_addr: SocketAddrV6 = match clone_source {
+        CloneSource::RegionSnapshot { dataset_id, region_id } => {
+            let region_snapshot = osagactx
+                .datastore()
+                .region_snapshot_get(
+                    dataset_id,
+                    region_id,
+                    params.request.old_snapshot_id,
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+
+            let Some(region_snapshot) = region_snapshot else {
+                return Err(ActionError::action_failed(format!(
+                    "region snapshot {} {} {} deleted!",
+                    dataset_id, region_id, params.request.old_snapshot_id,
+                )));
+            };
+
+            match region_snapshot.snapshot_addr.parse() {
+                Ok(addr) => addr,
+
+                Err(e) => {
+                    return Err(ActionError::action_failed(format!(
+                        "error parsing region_snapshot.snapshot_addr: {e}"
+                    )));
+                }
+            }
+        }
+
+        CloneSource::Region { region_id } => {
+            let maybe_addr = osagactx
+                .datastore()
+                .region_addr(region_id)
+                .await
+                .map_err(ActionError::action_failed)?;
+
+            match maybe_addr {
+                Some(addr) => addr,
+
+                None => {
+                    return Err(ActionError::action_failed(format!(
+                        "region clone source {region_id} has no port!"
+                    )));
+                }
+            }
+        }
     };
-
-    let (new_dataset, new_region) = new_dataset_and_region;
 
     // Currently, the repair port is set using a fixed offset above the
     // downstairs port. Once this goes away, Nexus will require a way to query
     // for the repair port!
 
-    let mut source_repair_addr: SocketAddrV6 =
-        match region_snapshot.snapshot_addr.parse() {
-            Ok(addr) => addr,
-
-            Err(e) => {
-                return Err(ActionError::action_failed(format!(
-                    "error parsing region_snapshot.snapshot_addr: {e}"
-                )));
-            }
-        };
-
     source_repair_addr.set_port(
         source_repair_addr.port() + crucible_common::REPAIR_PORT_OFFSET,
     );
+
+    let (new_dataset, new_region) = new_dataset_and_region;
 
     let ensured_region = osagactx
         .nexus()
@@ -945,6 +1112,7 @@ pub(crate) mod test {
         app::sagas::region_snapshot_replacement_start::*,
         app::sagas::test_helpers::test_opctx, app::RegionAllocationStrategy,
     };
+    use nexus_db_model::PhysicalDiskPolicy;
     use nexus_db_model::RegionSnapshotReplacement;
     use nexus_db_model::RegionSnapshotReplacementState;
     use nexus_db_model::Volume;
@@ -954,9 +1122,11 @@ pub(crate) mod test {
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::create_snapshot;
     use nexus_test_utils::resource_helpers::DiskTest;
+    use nexus_test_utils::resource_helpers::DiskTestBuilder;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::views;
     use nexus_types::identity::Asset;
+    use omicron_uuid_kinds::GenericUuid;
     use sled_agent_client::types::VolumeConstructionRequest;
 
     type ControlPlaneTestContext =
@@ -1516,5 +1686,323 @@ pub(crate) mod test {
             &affected_volume_original,
         )
         .await;
+    }
+
+    /// Tests that the region snapshot replacement start saga will not choose
+    /// the request's region snapshot, but instead will choose the other
+    /// non-expunged one.
+    #[nexus_test(server = crate::Server)]
+    async fn test_region_snapshot_replacement_start_prefer_not_self(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            datastore.clone(),
+        );
+
+        // Create four zpools, each with one dataset. This is required for
+        // region and region snapshot replacement to have somewhere to move the
+        // data, and for this test we're doing one expungements.
+        let sled_id = cptestctx.first_sled();
+
+        let disk_test = DiskTestBuilder::new(&cptestctx)
+            .on_specific_sled(sled_id)
+            .with_zpool_count(4)
+            .build()
+            .await;
+
+        // Any volumes sent to the Pantry for reconciliation should return
+        // active for this test
+
+        cptestctx
+            .sled_agent
+            .pantry_server
+            .as_ref()
+            .unwrap()
+            .pantry
+            .set_auto_activate_volumes()
+            .await;
+
+        // Create a disk and a snapshot
+        let client = &cptestctx.external_client;
+        let _project_id =
+            create_project(&client, PROJECT_NAME).await.identity.id;
+
+        let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+        let snapshot =
+            create_snapshot(&client, PROJECT_NAME, "disk", "snap").await;
+
+        // Before expunging any physical disk, save some DB models
+        let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+            .disk_id(disk.identity.id)
+            .fetch()
+            .await
+            .unwrap();
+
+        let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+            .snapshot_id(snapshot.identity.id)
+            .fetch()
+            .await
+            .unwrap();
+
+        let disk_allocated_regions =
+            datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        let snapshot_allocated_regions = datastore
+            .get_allocated_regions(db_snapshot.volume_id)
+            .await
+            .unwrap();
+
+        assert_eq!(disk_allocated_regions.len(), 3);
+        assert_eq!(snapshot_allocated_regions.len(), 0);
+
+        // Expunge one physical disk
+        {
+            let (dataset, _) = &disk_allocated_regions[0];
+
+            let zpool = disk_test
+                .zpools()
+                .find(|x| *x.id.as_untyped_uuid() == dataset.pool_id)
+                .expect("Expected at least one zpool");
+
+            let (_, db_zpool) = LookupPath::new(&opctx, datastore)
+                .zpool_id(zpool.id.into_untyped_uuid())
+                .fetch()
+                .await
+                .unwrap();
+
+            datastore
+                .physical_disk_update_policy(
+                    &opctx,
+                    db_zpool.physical_disk_id.into(),
+                    PhysicalDiskPolicy::Expunged,
+                )
+                .await
+                .unwrap();
+        }
+
+        // Request that the second region snapshot be replaced
+
+        let region_snapshot = datastore
+            .region_snapshot_get(
+                disk_allocated_regions[1].0.id(), // dataset id
+                disk_allocated_regions[1].1.id(), // region id
+                snapshot.identity.id,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+        let request_id = datastore
+            .create_region_snapshot_replacement_request(
+                &opctx,
+                &region_snapshot,
+            )
+            .await
+            .unwrap();
+
+        // Manually invoke the region snapshot replacement start saga
+
+        let saga_outputs = nexus
+            .sagas
+            .saga_execute::<SagaRegionSnapshotReplacementStart>(Params {
+                serialized_authn: Serialized::for_opctx(&opctx),
+
+                request: datastore
+                    .get_region_snapshot_replacement_request_by_id(
+                        &opctx, request_id,
+                    )
+                    .await
+                    .unwrap(),
+
+                allocation_strategy: RegionAllocationStrategy::Random {
+                    seed: None,
+                },
+            })
+            .await
+            .unwrap();
+
+        // The third region snapshot should have been selected as the clone
+        // source
+
+        let selected_clone_source = saga_outputs
+            .lookup_node_output::<CloneSource>("clone_source")
+            .unwrap();
+
+        assert_eq!(
+            selected_clone_source,
+            CloneSource::RegionSnapshot {
+                dataset_id: disk_allocated_regions[2].0.id(),
+                region_id: disk_allocated_regions[2].1.id(),
+            },
+        );
+
+        let snapshot_allocated_regions = datastore
+            .get_allocated_regions(db_snapshot.volume_id)
+            .await
+            .unwrap();
+
+        assert_eq!(snapshot_allocated_regions.len(), 1);
+        assert!(snapshot_allocated_regions.iter().all(|(_, r)| r.read_only()));
+    }
+
+    /// Tests that a region snapshot replacement request can select the region
+    /// snapshot being replaced as a clone source (but only if it is not
+    /// expunged!)
+    #[nexus_test(server = crate::Server)]
+    async fn test_region_snapshot_replacement_start_hail_mary(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            datastore.clone(),
+        );
+
+        // Create five zpools, each with one dataset. This is required for
+        // region and region snapshot replacement to have somewhere to move the
+        // data, and for this test we're doing two expungements.
+        let sled_id = cptestctx.first_sled();
+
+        let disk_test = DiskTestBuilder::new(&cptestctx)
+            .on_specific_sled(sled_id)
+            .with_zpool_count(5)
+            .build()
+            .await;
+
+        // Any volumes sent to the Pantry for reconciliation should return
+        // active for this test
+
+        cptestctx
+            .sled_agent
+            .pantry_server
+            .as_ref()
+            .unwrap()
+            .pantry
+            .set_auto_activate_volumes()
+            .await;
+
+        // Create a disk and a snapshot
+        let client = &cptestctx.external_client;
+        let _project_id =
+            create_project(&client, PROJECT_NAME).await.identity.id;
+
+        let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+        let snapshot =
+            create_snapshot(&client, PROJECT_NAME, "disk", "snap").await;
+
+        // Before expunging any physical disk, save some DB models
+        let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+            .disk_id(disk.identity.id)
+            .fetch()
+            .await
+            .unwrap();
+
+        let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+            .snapshot_id(snapshot.identity.id)
+            .fetch()
+            .await
+            .unwrap();
+
+        let disk_allocated_regions =
+            datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        let snapshot_allocated_regions = datastore
+            .get_allocated_regions(db_snapshot.volume_id)
+            .await
+            .unwrap();
+
+        assert_eq!(disk_allocated_regions.len(), 3);
+        assert_eq!(snapshot_allocated_regions.len(), 0);
+
+        // Expunge two physical disks
+        for i in [0, 1] {
+            let (dataset, _) = &disk_allocated_regions[i];
+
+            let zpool = disk_test
+                .zpools()
+                .find(|x| *x.id.as_untyped_uuid() == dataset.pool_id)
+                .expect("Expected at least one zpool");
+
+            let (_, db_zpool) = LookupPath::new(&opctx, datastore)
+                .zpool_id(zpool.id.into_untyped_uuid())
+                .fetch()
+                .await
+                .unwrap();
+
+            datastore
+                .physical_disk_update_policy(
+                    &opctx,
+                    db_zpool.physical_disk_id.into(),
+                    PhysicalDiskPolicy::Expunged,
+                )
+                .await
+                .unwrap();
+        }
+
+        // Request that the third region snapshot be replaced
+
+        let region_snapshot = datastore
+            .region_snapshot_get(
+                disk_allocated_regions[2].0.id(), // dataset id
+                disk_allocated_regions[2].1.id(), // region id
+                snapshot.identity.id,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+        let request_id = datastore
+            .create_region_snapshot_replacement_request(
+                &opctx,
+                &region_snapshot,
+            )
+            .await
+            .unwrap();
+
+        // Manually invoke the region snapshot replacement start saga
+
+        let saga_outputs = nexus
+            .sagas
+            .saga_execute::<SagaRegionSnapshotReplacementStart>(Params {
+                serialized_authn: Serialized::for_opctx(&opctx),
+
+                request: datastore
+                    .get_region_snapshot_replacement_request_by_id(
+                        &opctx, request_id,
+                    )
+                    .await
+                    .unwrap(),
+
+                allocation_strategy: RegionAllocationStrategy::Random {
+                    seed: None,
+                },
+            })
+            .await
+            .unwrap();
+
+        // This should have chosen the request's region snapshot as a clone
+        // source, and replaced it with a read-only region
+
+        let selected_clone_source = saga_outputs
+            .lookup_node_output::<CloneSource>("clone_source")
+            .unwrap();
+
+        assert_eq!(
+            selected_clone_source,
+            CloneSource::RegionSnapshot {
+                dataset_id: disk_allocated_regions[2].0.id(),
+                region_id: disk_allocated_regions[2].1.id(),
+            },
+        );
+
+        let snapshot_allocated_regions = datastore
+            .get_allocated_regions(db_snapshot.volume_id)
+            .await
+            .unwrap();
+
+        assert_eq!(snapshot_allocated_regions.len(), 1);
+        assert!(snapshot_allocated_regions.iter().all(|(_, r)| r.read_only()));
     }
 }
