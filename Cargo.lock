@@ -7591,6 +7591,7 @@ dependencies = [
  "toml_edit 0.22.22",
  "tracing",
  "unicode-xid",
+ "url",
  "usdt",
  "usdt-impl",
  "uuid",
