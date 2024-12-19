@@ -6055,9 +6055,9 @@ async fn test_no_zombie_read_only_regions(cptestctx: &ControlPlaneTestContext) {
                     opts: CrucibleOpts {
                         id: Uuid::new_v4(),
                         target: vec![
-                            SocketAddr::V6(region_addrs[0]),
-                            SocketAddr::V6(region_addrs[1]),
-                            SocketAddr::V6(region_addrs[2]),
+                            region_addrs[0].into(),
+                            region_addrs[1].into(),
+                            region_addrs[2].into(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -6241,9 +6241,9 @@ async fn test_no_zombie_read_write_regions(
                     opts: CrucibleOpts {
                         id: Uuid::new_v4(),
                         target: vec![
-                            SocketAddr::V6(region_addrs[0]),
-                            SocketAddr::V6(region_addrs[1]),
-                            SocketAddr::V6(region_addrs[2]),
+                            region_addrs[0].into(),
+                            region_addrs[1].into(),
+                            region_addrs[2].into(),
                         ],
                         lossy: false,
                         flush_timeout: None,

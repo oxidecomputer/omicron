@@ -3181,7 +3181,7 @@ impl DataStore {
                 gen: 1,
                 opts: sled_agent_client::CrucibleOpts {
                     id: volume_to_delete_id.0,
-                    target: vec![std::net::SocketAddr::V6(existing.0)],
+                    target: vec![existing.0.into()],
                     lossy: false,
                     flush_timeout: None,
                     key: None,
@@ -4216,9 +4216,9 @@ mod tests {
                             id: volume_id,
                             target: vec![
                                 // target to replace
-                                SocketAddr::V6(region_addresses[0]),
-                                SocketAddr::V6(region_addresses[1]),
-                                SocketAddr::V6(region_addresses[2]),
+                                region_addresses[0].into(),
+                                region_addresses[1].into(),
+                                region_addresses[2].into(),
                             ],
                             lossy: false,
                             flush_timeout: None,
@@ -4278,9 +4278,9 @@ mod tests {
                     opts: CrucibleOpts {
                         id: volume_id,
                         target: vec![
-                            SocketAddr::V6(replacement_region_addr), // replaced
-                            SocketAddr::V6(region_addresses[1]),
-                            SocketAddr::V6(region_addresses[2]),
+                            replacement_region_addr.into(), // replaced
+                            region_addresses[1].into(),
+                            region_addresses[2].into(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -4336,9 +4336,9 @@ mod tests {
                     opts: CrucibleOpts {
                         id: volume_id,
                         target: vec![
-                            SocketAddr::V6(region_addresses[0]), // back to what it was
-                            SocketAddr::V6(region_addresses[1]),
-                            SocketAddr::V6(region_addresses[2]),
+                            region_addresses[0].into(), // back to what it was
+                            region_addresses[1].into(),
+                            region_addresses[2].into(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -4503,9 +4503,9 @@ mod tests {
                         opts: CrucibleOpts {
                             id: volume_id,
                             target: vec![
-                                SocketAddr::V6(region_addresses[0]),
-                                SocketAddr::V6(region_addresses[1]),
-                                SocketAddr::V6(region_addresses[2]),
+                                region_addresses[0].into(),
+                                region_addresses[1].into(),
+                                region_addresses[2].into(),
                             ],
                             lossy: false,
                             flush_timeout: None,
@@ -4527,9 +4527,9 @@ mod tests {
                                 id: rop_id,
                                 target: vec![
                                     // target to replace
-                                    SocketAddr::V6(address_1),
-                                    SocketAddr::V6(address_2),
-                                    SocketAddr::V6(address_3),
+                                    address_1.into(),
+                                    address_2.into(),
+                                    address_3.into(),
                                 ],
                                 lossy: false,
                                 flush_timeout: None,
@@ -4626,9 +4626,9 @@ mod tests {
                     opts: CrucibleOpts {
                         id: volume_id,
                         target: vec![
-                            SocketAddr::V6(region_addresses[0]),
-                            SocketAddr::V6(region_addresses[1]),
-                            SocketAddr::V6(region_addresses[2]),
+                            region_addresses[0].into(),
+                            region_addresses[1].into(),
+                            region_addresses[2].into(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -4650,9 +4650,9 @@ mod tests {
                             id: rop_id,
                             target: vec![
                                 // target replaced
-                                SocketAddr::V6(replacement_region_addr),
-                                SocketAddr::V6(address_2),
-                                SocketAddr::V6(address_3),
+                                replacement_region_addr.into(),
+                                address_2.into(),
+                                address_3.into(),
                             ],
                             lossy: false,
                             flush_timeout: None,
@@ -4692,7 +4692,7 @@ mod tests {
                         id: volume_to_delete_id,
                         target: vec![
                             // replaced target stashed here
-                            SocketAddr::V6(address_1),
+                            address_1.into(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -4782,9 +4782,9 @@ mod tests {
                     opts: CrucibleOpts {
                         id: volume_id,
                         target: vec![
-                            SocketAddr::V6(region_addresses[0]),
-                            SocketAddr::V6(region_addresses[1]),
-                            SocketAddr::V6(region_addresses[2]),
+                            region_addresses[0].into(),
+                            region_addresses[1].into(),
+                            region_addresses[2].into(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -4806,9 +4806,9 @@ mod tests {
                             id: rop_id,
                             target: vec![
                                 // back to what it was
-                                SocketAddr::V6(address_1),
-                                SocketAddr::V6(address_2),
-                                SocketAddr::V6(address_3),
+                                address_1.into(),
+                                address_2.into(),
+                                address_3.into(),
                             ],
                             lossy: false,
                             flush_timeout: None,
@@ -4848,7 +4848,7 @@ mod tests {
                         id: volume_to_delete_id,
                         target: vec![
                             // replacement stashed here
-                            SocketAddr::V6(replacement_region_addr),
+                            replacement_region_addr.into(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -4964,9 +4964,9 @@ mod tests {
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
                                 target: vec![
-                                    SocketAddr::V6(address_1),
-                                    SocketAddr::V6(address_2),
-                                    SocketAddr::V6(address_3),
+                                    address_1.into(),
+                                    address_2.into(),
+                                    address_3.into(),
                                 ],
                                 lossy: false,
                                 flush_timeout: None,
@@ -4988,7 +4988,7 @@ mod tests {
         let volumes = datastore
             .find_volumes_referencing_socket_addr(
                 &opctx,
-                SocketAddr::V6(address_1),
+                address_1.into(),
             )
             .await
             .unwrap();
@@ -5191,7 +5191,7 @@ mod tests {
                             id: volume_id,
                             target: vec![
                                 "[fd00:1122:3344:104::1]:400".parse().unwrap(),
-                                SocketAddr::V6(new_target.0),
+                                new_target.0.into(),
                                 "[fd00:1122:3344:106::1]:402".parse().unwrap(),
                             ],
                             lossy: false,
@@ -5345,7 +5345,7 @@ mod tests {
                                     "[fd33:1122:3344:305::1]:2001"
                                         .parse()
                                         .unwrap(),
-                                    SocketAddr::V6(new_target.0),
+                                    new_target.0.into(),
                                 ],
                                 lossy: false,
                                 flush_timeout: None,
@@ -5465,7 +5465,7 @@ mod tests {
             opts: CrucibleOpts {
                 id: volume_id,
                 target: vec![
-                    SocketAddr::V6(new_target.0),
+                    new_target.0.into(),
                     "[fd33:1122:3344:305::1]:2001".parse().unwrap(),
                     "[fd33:1122:3344:306::1]:2002".parse().unwrap(),
                 ],

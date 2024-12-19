@@ -60,7 +60,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::CrucibleOpts;
 use sled_agent_client::VolumeConstructionRequest;
-use std::net::{SocketAddr, SocketAddrV6};
+use std::net::SocketAddrV6;
 use steno::ActionError;
 use steno::Node;
 use uuid::Uuid;
@@ -688,7 +688,7 @@ async fn srrs_create_fake_volume(
             gen: 0,
             opts: CrucibleOpts {
                 id: new_volume_id,
-                target: vec![SocketAddr::V6(old_region_address)],
+                target: vec![old_region_address.into()],
                 lossy: false,
                 flush_timeout: None,
                 key: None,

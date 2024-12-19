@@ -1439,22 +1439,22 @@ async fn ssc_start_running_snapshot(
         );
 
         // Map from the region to the snapshot
-        let region_addr = SocketAddr::V6(SocketAddrV6::new(
+        let region_addr = SocketAddrV6::new(
             *dataset_addr.ip(),
             crucible_region.port_number,
             0,
             0,
-        ));
+        );
 
-        let snapshot_addr = SocketAddr::V6(SocketAddrV6::new(
+        let snapshot_addr = SocketAddrV6::new(
             *dataset_addr.ip(),
             crucible_running_snapshot.port_number,
             0,
             0,
-        ));
+        );
 
         info!(log, "map {} to {}", region_addr, snapshot_addr);
-        map.insert(region_addr, snapshot_addr);
+        map.insert(region_addr.into(), snapshot_addr.into());
 
         // Once snapshot has been validated, and running snapshot has been
         // started, add an entry in the region_snapshot table to correspond to
