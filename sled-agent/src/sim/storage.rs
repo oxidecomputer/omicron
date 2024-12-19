@@ -173,12 +173,6 @@ impl CrucibleDataInner {
 
         let id = Uuid::from_str(&id.0).unwrap();
         if let Some(region) = self.regions.get_mut(&id) {
-            if region.state == State::Failed {
-                // The real Crucible agent would not let a Failed region be
-                // deleted
-                bail!("cannot delete in state Failed");
-            }
-
             region.state = State::Destroyed;
             self.used_ports.remove(&region.port_number);
             Ok(Some(region.clone()))
