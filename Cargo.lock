@@ -6325,6 +6325,7 @@ dependencies = [
  "test-strategy",
  "thiserror 1.0.69",
  "update-engine",
+ "url",
  "uuid",
 ]
 
@@ -10220,6 +10221,7 @@ dependencies = [
  "schemars_derive",
  "serde",
  "serde_json",
+ "url",
  "uuid",
 ]
 
@@ -12652,6 +12654,7 @@ dependencies = [
  "form_urlencoded",
  "idna 1.0.3",
  "percent-encoding",
+ "serde",
 ]
 
 [[package]]

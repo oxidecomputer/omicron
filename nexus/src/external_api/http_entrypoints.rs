@@ -6298,4 +6298,169 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<Response<Body>, HttpError> {
         device_auth::device_access_token(rqctx, params.into_inner()).await
     }
+
+    async fn webhook_view(
+        rqctx: RequestContext<Self::Context>,
+        _path_params: Path<params::WebhookPath>,
+    ) -> Result<HttpResponseOk<views::Webhook>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            Err(nexus
+                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
+                .await
+                .into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn webhook_create(
+        rqctx: RequestContext<Self::Context>,
+        _params: TypedBody<params::WebhookCreate>,
+    ) -> Result<HttpResponseCreated<views::Webhook>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            Err(nexus
+                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
+                .await
+                .into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn webhook_delete(
+        rqctx: RequestContext<Self::Context>,
+        _path_params: Path<params::WebhookPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            Err(nexus
+                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
+                .await
+                .into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn webhook_secrets_list(
+        rqctx: RequestContext<Self::Context>,
+        _path_params: Path<params::WebhookPath>,
+    ) -> Result<HttpResponseOk<views::WebhookSecrets>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            Err(nexus
+                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
+                .await
+                .into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    /// Add a secret to a webhook.
+    async fn webhook_secrets_add(
+        rqctx: RequestContext<Self::Context>,
+        _path_params: Path<params::WebhookPath>,
+        _params: TypedBody<params::WebhookSecret>,
+    ) -> Result<HttpResponseCreated<views::WebhookSecretId>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            Err(nexus
+                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
+                .await
+                .into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn webhook_delivery_list(
+        rqctx: RequestContext<Self::Context>,
+        _path_params: Path<params::WebhookPath>,
+        _query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::WebhookDelivery>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            Err(nexus
+                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
+                .await
+                .into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn webhook_delivery_resend(
+        rqctx: RequestContext<Self::Context>,
+        _path_params: Path<params::WebhookDeliveryPath>,
+    ) -> Result<HttpResponseCreated<views::WebhookDeliveryId>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            Err(nexus
+                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
+                .await
+                .into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
 }
