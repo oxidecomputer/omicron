@@ -27,6 +27,7 @@ members = [
     "cockroach-admin/types",
     "common",
     "dev-tools/cert-dev",
+    "dev-tools/clickana",
     "dev-tools/clickhouse-cluster-dev",
     "dev-tools/ch-dev",
     "dev-tools/crdb-seed",
@@ -158,6 +159,7 @@ default-members = [
     "cockroach-admin/types",
     "common",
     "dev-tools/cert-dev",
+    "dev-tools/clickana",
     "dev-tools/clickhouse-cluster-dev",
     "dev-tools/ch-dev",
     "dev-tools/crdb-seed",
@@ -332,6 +334,7 @@ chrono = { version = "0.4", features = [ "serde" ] }
 chrono-tz = "0.10.0"
 ciborium = "0.2.2"
 clap = { version = "4.5", features = ["cargo", "derive", "env", "wrap_help"] }
+clickana = { path = "dev-tools/clickana" }
 clickhouse-admin-api = { path = "clickhouse-admin/api" }
 clickhouse-admin-keeper-client = { path = "clients/clickhouse-admin-keeper-client" }
 clickhouse-admin-server-client = { path = "clients/clickhouse-admin-server-client" }
