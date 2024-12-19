@@ -76,6 +76,8 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::LldpLinkConfig;
+use omicron_common::api::external::LldpNeighbor;
 use omicron_common::api::external::LoopbackAddress;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Probe;
@@ -3002,6 +3004,97 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             nexus.switch_port_clear_settings(&opctx, &port, &query).await?;
             Ok(HttpResponseUpdatedNoContent {})
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_lldp_config_view(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortPathSelector>,
+        query_params: Query<params::SwitchPortSelector>,
+    ) -> Result<HttpResponseOk<LldpLinkConfig>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let settings = nexus
+                .lldp_config_get(
+                    &opctx,
+                    query.rack_id,
+                    query.switch_location,
+                    path.port,
+                )
+                .await?;
+            Ok(HttpResponseOk(settings))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_lldp_config_update(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortPathSelector>,
+        query_params: Query<params::SwitchPortSelector>,
+        config: TypedBody<LldpLinkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = rqctx.context();
+        let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let config = config.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            nexus
+                .lldp_config_update(
+                    &opctx,
+                    query.rack_id,
+                    query.switch_location,
+                    path.port,
+                    config,
+                )
+                .await?;
+            Ok(HttpResponseUpdatedNoContent {})
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_lldp_neighbors(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortPathSelector>,
+        query_params: Query<params::SwitchPortSelector>,
+    ) -> Result<HttpResponseOk<Vec<LldpNeighbor>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            Ok(HttpResponseOk(
+                nexus
+                    .lldp_neighbors_get(
+                        &opctx,
+                        query.rack_id,
+                        query.switch_location,
+                        path.port,
+                    )
+                    .await?,
+            ))
         };
         apictx
             .context
