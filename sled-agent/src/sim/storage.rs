@@ -36,7 +36,7 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use propolis_client::types::VolumeConstructionRequest;
+use propolis_client::VolumeConstructionRequest;
 use serde::Serialize;
 use sled_agent_api::SupportBundleMetadata;
 use sled_agent_api::SupportBundleState;

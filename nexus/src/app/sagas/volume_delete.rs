@@ -341,7 +341,7 @@ type FreedCrucibleRegions = Vec<(Dataset, Region, Option<Uuid>)>;
 /// It's insufficient to rely on the struct of CrucibleResources to clean up
 /// that is returned as part of svd_decrease_crucible_resource_count. Imagine a
 /// disk that is composed of three regions (a subset of
-/// [`sled_agent_client::types::VolumeConstructionRequest`] is shown here):
+/// [`sled_agent_client::VolumeConstructionRequest`] is shown here):
 ///
 /// ```json
 /// {

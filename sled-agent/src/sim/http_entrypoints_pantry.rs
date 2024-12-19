@@ -9,7 +9,7 @@ use dropshot::{
     HttpResponseDeleted, HttpResponseOk, HttpResponseUpdatedNoContent,
     Path as TypedPath, RequestContext, TypedBody,
 };
-use propolis_client::types::VolumeConstructionRequest;
+use propolis_client::VolumeConstructionRequest;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
