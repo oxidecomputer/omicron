@@ -50,6 +50,7 @@ fn parse_duration_ms(arg: &str) -> Result<std::time::Duration> {
     Ok(Duration::from_millis(ms))
 }
 
+#[derive(Debug)]
 pub struct Config {
     log: Logger,
     // Description of all possible packages.
