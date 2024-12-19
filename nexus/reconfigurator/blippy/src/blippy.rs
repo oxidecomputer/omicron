@@ -22,7 +22,6 @@ use std::net::IpAddr;
 
 #[derive(Debug, Clone)]
 pub struct Note<'a> {
-    pub component: Component,
     pub severity: Severity,
     pub kind: Kind<'a>,
 }
@@ -49,20 +48,50 @@ impl fmt::Display for Severity {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Component {
-    Sled(SledUuid),
+pub enum Kind<'a> {
+    Sled { sled_id: SledUuid, kind: SledKind<'a> },
 }
 
-impl fmt::Display for Component {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Kind<'_> {
+    pub fn display_component(&self) -> impl fmt::Display + '_ {
+        enum Component<'a> {
+            Sled(&'a SledUuid),
+        }
+
+        impl fmt::Display for Component<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                match self {
+                    Component::Sled(id) => write!(f, "sled {id}"),
+                }
+            }
+        }
+
         match self {
-            Component::Sled(id) => write!(f, "sled {id}"),
+            Kind::Sled { sled_id, .. } => Component::Sled(sled_id),
+        }
+    }
+
+    pub fn display_subkind(&self) -> impl fmt::Display + '_ {
+        enum Subkind<'a> {
+            Sled(&'a SledKind<'a>),
+        }
+
+        impl fmt::Display for Subkind<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                match self {
+                    Subkind::Sled(kind) => write!(f, "{kind}"),
+                }
+            }
+        }
+
+        match self {
+            Kind::Sled { kind, .. } => Subkind::Sled(kind),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Kind<'a> {
+pub enum SledKind<'a> {
     /// Two running zones have the same underlay IP address.
     DuplicateUnderlayIp {
         zone1: &'a BlueprintZoneConfig,
@@ -149,10 +178,10 @@ pub enum Kind<'a> {
     DatasetOnNonexistentZpool { dataset: &'a BlueprintDatasetConfig },
 }
 
-impl fmt::Display for Kind<'_> {
+impl fmt::Display for SledKind<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Kind::DuplicateUnderlayIp { zone1, zone2 } => {
+            SledKind::DuplicateUnderlayIp { zone1, zone2 } => {
                 write!(
                     f,
                     "duplicate underlay IP {} ({:?} {} and {:?} {})",
@@ -163,7 +192,7 @@ impl fmt::Display for Kind<'_> {
                     zone2.id,
                 )
             }
-            Kind::SledWithMixedUnderlaySubnets { zone1, zone2 } => {
+            SledKind::SledWithMixedUnderlaySubnets { zone1, zone2 } => {
                 write!(
                     f,
                     "zones have underlay IPs on two different sled subnets: \
@@ -176,14 +205,14 @@ impl fmt::Display for Kind<'_> {
                     zone2.underlay_ip(),
                 )
             }
-            Kind::ConflictingSledSubnets { other_sled, subnet } => {
+            SledKind::ConflictingSledSubnets { other_sled, subnet } => {
                 write!(
                     f,
                     "duplicate sled subnet {} with sled {other_sled}",
                     subnet.net()
                 )
             }
-            Kind::InternalDnsZoneBadSubnet { zone, rack_dns_subnets } => {
+            SledKind::InternalDnsZoneBadSubnet { zone, rack_dns_subnets } => {
                 write!(
                     f,
                     "internal DNS zone {} underlay IP {} is not \
@@ -193,7 +222,7 @@ impl fmt::Display for Kind<'_> {
                     rack_dns_subnets
                 )
             }
-            Kind::DuplicateExternalIp { zone1, zone2, ip } => {
+            SledKind::DuplicateExternalIp { zone1, zone2, ip } => {
                 write!(
                     f,
                     "duplicate external IP {ip} ({:?} {} and {:?} {})",
@@ -203,7 +232,7 @@ impl fmt::Display for Kind<'_> {
                     zone2.id,
                 )
             }
-            Kind::DuplicateNicIp { zone1, zone2, ip } => {
+            SledKind::DuplicateNicIp { zone1, zone2, ip } => {
                 write!(
                     f,
                     "duplicate NIC IP {ip} ({:?} {} and {:?} {})",
@@ -213,7 +242,7 @@ impl fmt::Display for Kind<'_> {
                     zone2.id,
                 )
             }
-            Kind::DuplicateNicMac { zone1, zone2, mac } => {
+            SledKind::DuplicateNicMac { zone1, zone2, mac } => {
                 write!(
                     f,
                     "duplicate NIC MAC {mac} ({:?} {} and {:?} {})",
@@ -223,7 +252,7 @@ impl fmt::Display for Kind<'_> {
                     zone2.id,
                 )
             }
-            Kind::ZoneDurableDatasetCollision { zone1, zone2, zpool } => {
+            SledKind::ZoneDurableDatasetCollision { zone1, zone2, zpool } => {
                 write!(
                     f,
                     "zpool {zpool} has two zone datasets of the same kind \
@@ -234,7 +263,11 @@ impl fmt::Display for Kind<'_> {
                     zone2.id,
                 )
             }
-            Kind::ZpoolFilesystemDatasetCollision { zone1, zone2, zpool } => {
+            SledKind::ZpoolFilesystemDatasetCollision {
+                zone1,
+                zone2,
+                zpool,
+            } => {
                 write!(
                     f,
                     "zpool {zpool} has two zone filesystems of the same kind \
@@ -245,7 +278,7 @@ impl fmt::Display for Kind<'_> {
                     zone2.id,
                 )
             }
-            Kind::ZpoolWithDuplicateDatasetKinds {
+            SledKind::ZpoolWithDuplicateDatasetKinds {
                 dataset1,
                 dataset2,
                 zpool,
@@ -257,13 +290,13 @@ impl fmt::Display for Kind<'_> {
                     dataset1.kind, dataset1.id, dataset2.kind, dataset2.id,
                 )
             }
-            Kind::ZpoolMissingDebugDataset { zpool } => {
+            SledKind::ZpoolMissingDebugDataset { zpool } => {
                 write!(f, "zpool {zpool} is missing its Debug dataset")
             }
-            Kind::ZpoolMissingZoneRootDataset { zpool } => {
+            SledKind::ZpoolMissingZoneRootDataset { zpool } => {
                 write!(f, "zpool {zpool} is missing its Zone Root dataset")
             }
-            Kind::ZoneMissingFilesystemDataset { zone } => {
+            SledKind::ZoneMissingFilesystemDataset { zone } => {
                 write!(
                     f,
                     "in-service zone's filesytem dataset is missing: {:?} {}",
@@ -271,7 +304,7 @@ impl fmt::Display for Kind<'_> {
                     zone.id,
                 )
             }
-            Kind::ZoneMissingDurableDataset { zone } => {
+            SledKind::ZoneMissingDurableDataset { zone } => {
                 write!(
                     f,
                     "in-service zone's durable dataset is missing: {:?} {}",
@@ -279,7 +312,7 @@ impl fmt::Display for Kind<'_> {
                     zone.id,
                 )
             }
-            Kind::ZoneWithDatasetsOnDifferentZpools {
+            SledKind::ZoneWithDatasetsOnDifferentZpools {
                 zone,
                 durable_zpool,
                 transient_zpool,
@@ -293,13 +326,13 @@ impl fmt::Display for Kind<'_> {
                     zone.id,
                 )
             }
-            Kind::SledMissingDatasets { why } => {
+            SledKind::SledMissingDatasets { why } => {
                 write!(f, "missing entry in blueprint_datasets ({why})")
             }
-            Kind::SledMissingDisks { why } => {
+            SledKind::SledMissingDisks { why } => {
                 write!(f, "missing entry in blueprint_disks ({why})")
             }
-            Kind::OrphanedDataset { dataset } => {
+            SledKind::OrphanedDataset { dataset } => {
                 let parent = match dataset.kind {
                     DatasetKind::Cockroach
                     | DatasetKind::Crucible
@@ -319,7 +352,7 @@ impl fmt::Display for Kind<'_> {
                     dataset.kind, dataset.id
                 )
             }
-            Kind::DatasetOnNonexistentZpool { dataset } => {
+            SledKind::DatasetOnNonexistentZpool { dataset } => {
                 write!(
                     f,
                     "in-service dataset ({:?} {}) on non-existent zpool {}",
@@ -345,18 +378,22 @@ pub struct NoteDisplay<'a> {
 impl fmt::Display for NoteDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.sort_key {
-            BlippyReportSortKey::Component => {
+            BlippyReportSortKey::Kind => {
                 write!(
                     f,
                     "{}: {} note: {}",
-                    self.note.component, self.note.severity, self.note.kind
+                    self.note.kind.display_component(),
+                    self.note.severity,
+                    self.note.kind.display_subkind(),
                 )
             }
             BlippyReportSortKey::Severity => {
                 write!(
                     f,
                     "{} note: {}: {}",
-                    self.note.severity, self.note.component, self.note.kind
+                    self.note.severity,
+                    self.note.kind.display_component(),
+                    self.note.kind.display_subkind(),
                 )
             }
         }
@@ -380,13 +417,13 @@ impl<'a> Blippy<'a> {
         self.blueprint
     }
 
-    pub(crate) fn push_note(
+    pub(crate) fn push_sled_note(
         &mut self,
-        component: Component,
+        sled_id: SledUuid,
         severity: Severity,
-        kind: Kind<'a>,
+        kind: SledKind<'a>,
     ) {
-        self.notes.push(Note { component, severity, kind });
+        self.notes.push(Note { severity, kind: Kind::Sled { sled_id, kind } });
     }
 
     pub fn into_report(

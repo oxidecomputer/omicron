@@ -8,7 +8,7 @@ use nexus_types::deployment::Blueprint;
 
 #[derive(Debug, Clone, Copy)]
 pub enum BlippyReportSortKey {
-    Component,
+    Kind,
     Severity,
 }
 
@@ -32,17 +32,17 @@ impl<'a> BlippyReport<'a> {
 
     pub fn sort_notes_by_key(&mut self, key: BlippyReportSortKey) {
         match key {
-            BlippyReportSortKey::Component => {
+            BlippyReportSortKey::Kind => {
                 self.notes.sort_unstable_by(|a, b| {
-                    let a = (&a.component, &a.severity, &a.kind);
-                    let b = (&b.component, &b.severity, &b.kind);
+                    let a = (&a.kind, &a.severity);
+                    let b = (&b.kind, &b.severity);
                     a.cmp(&b)
                 });
             }
             BlippyReportSortKey::Severity => {
                 self.notes.sort_unstable_by(|a, b| {
-                    let a = (&a.severity, &a.component, &a.kind);
-                    let b = (&b.severity, &b.component, &b.kind);
+                    let a = (&a.severity, &a.kind);
+                    let b = (&b.severity, &b.kind);
                     a.cmp(&b)
                 });
             }

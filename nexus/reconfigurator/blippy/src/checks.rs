@@ -3,9 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::blippy::Blippy;
-use crate::blippy::Component;
-use crate::blippy::Kind;
 use crate::blippy::Severity;
+use crate::blippy::SledKind;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetFilter;
@@ -51,10 +50,10 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
 
         // There should be no duplicate underlay IPs.
         if let Some(previous) = underlay_ips.insert(ip, zone) {
-            blippy.push_note(
-                Component::Sled(sled_id),
+            blippy.push_sled_note(
+                sled_id,
                 Severity::Fatal,
-                Kind::DuplicateUnderlayIp { zone1: previous, zone2: zone },
+                SledKind::DuplicateUnderlayIp { zone1: previous, zone2: zone },
             );
         }
 
@@ -68,10 +67,10 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
                 rack_dns_subnets.extend(subnet.rack_subnet().get_dns_subnets());
             }
             if !rack_dns_subnets.contains(&subnet) {
-                blippy.push_note(
-                    Component::Sled(sled_id),
+                blippy.push_sled_note(
+                    sled_id,
                     Severity::Fatal,
-                    Kind::InternalDnsZoneBadSubnet {
+                    SledKind::InternalDnsZoneBadSubnet {
                         zone,
                         rack_dns_subnets: rack_dns_subnets.clone(),
                     },
@@ -87,10 +86,10 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
                 }
                 Entry::Occupied(prev) => {
                     if *prev.get() != sled_id {
-                        blippy.push_note(
-                            Component::Sled(sled_id),
+                        blippy.push_sled_note(
+                            sled_id,
                             Severity::Fatal,
-                            Kind::ConflictingSledSubnets {
+                            SledKind::ConflictingSledSubnets {
                                 other_sled: *prev.get(),
                                 subnet,
                             },
@@ -110,10 +109,10 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
                 }
                 Entry::Occupied(prev) => {
                     if prev.get().0 != subnet {
-                        blippy.push_note(
-                            Component::Sled(sled_id),
+                        blippy.push_sled_note(
+                            sled_id,
                             Severity::Fatal,
-                            Kind::SledWithMixedUnderlaySubnets {
+                            SledKind::SledWithMixedUnderlaySubnets {
                                 zone1: prev.get().1,
                                 zone2: zone,
                             },
@@ -144,10 +143,10 @@ fn check_external_networking(blippy: &mut Blippy<'_>) {
     {
         // There should be no duplicate external IPs.
         if let Some(prev_zone) = used_external_ips.insert(external_ip, zone) {
-            blippy.push_note(
-                Component::Sled(sled_id),
+            blippy.push_sled_note(
+                sled_id,
                 Severity::Fatal,
-                Kind::DuplicateExternalIp {
+                SledKind::DuplicateExternalIp {
                     zone1: prev_zone,
                     zone2: zone,
                     ip: external_ip.ip(),
@@ -170,10 +169,10 @@ fn check_external_networking(blippy: &mut Blippy<'_>) {
 
         // There should be no duplicate NIC IPs or MACs.
         if let Some(prev_zone) = used_nic_ips.insert(nic.ip, zone) {
-            blippy.push_note(
-                Component::Sled(sled_id),
+            blippy.push_sled_note(
+                sled_id,
                 Severity::Fatal,
-                Kind::DuplicateNicIp {
+                SledKind::DuplicateNicIp {
                     zone1: prev_zone,
                     zone2: zone,
                     ip: nic.ip,
@@ -181,10 +180,10 @@ fn check_external_networking(blippy: &mut Blippy<'_>) {
             );
         }
         if let Some(prev_zone) = used_nic_macs.insert(nic.mac, zone) {
-            blippy.push_note(
-                Component::Sled(sled_id),
+            blippy.push_sled_note(
+                sled_id,
                 Severity::Fatal,
-                Kind::DuplicateNicMac {
+                SledKind::DuplicateNicMac {
                     zone1: prev_zone,
                     zone2: zone,
                     mac: nic.mac,
@@ -198,10 +197,10 @@ fn check_external_networking(blippy: &mut Blippy<'_>) {
     // floating IP at the same address.
     for (ip, (sled_id, zone2)) in used_external_snat_ips {
         if let Some(zone1) = used_external_floating_ips.get(&ip) {
-            blippy.push_note(
-                Component::Sled(sled_id),
+            blippy.push_sled_note(
+                sled_id,
                 Severity::Fatal,
-                Kind::DuplicateExternalIp { zone1, zone2, ip },
+                SledKind::DuplicateExternalIp { zone1, zone2, ip },
             );
         }
     }
@@ -234,10 +233,10 @@ fn check_dataset_zpool_uniqueness(blippy: &mut Blippy<'_>) {
                 .or_default()
                 .insert(kind, zone)
             {
-                blippy.push_note(
-                    Component::Sled(sled_id),
+                blippy.push_sled_note(
+                    sled_id,
                     Severity::Fatal,
-                    Kind::ZoneDurableDatasetCollision {
+                    SledKind::ZoneDurableDatasetCollision {
                         zone1: previous,
                         zone2: zone,
                         zpool: dataset.dataset.pool_name.clone(),
@@ -254,10 +253,10 @@ fn check_dataset_zpool_uniqueness(blippy: &mut Blippy<'_>) {
                 .or_default()
                 .insert(kind, zone)
             {
-                blippy.push_note(
-                    Component::Sled(sled_id),
+                blippy.push_sled_note(
+                    sled_id,
                     Severity::Fatal,
-                    Kind::ZpoolFilesystemDatasetCollision {
+                    SledKind::ZpoolFilesystemDatasetCollision {
                         zone1: previous,
                         zone2: zone,
                         zpool: dataset.into_parts().0,
@@ -270,10 +269,10 @@ fn check_dataset_zpool_uniqueness(blippy: &mut Blippy<'_>) {
         // the same pool.
         match (zone.zone_type.durable_zpool(), zone.filesystem_pool.as_ref()) {
             (Some(durable), Some(transient)) if durable != transient => {
-                blippy.push_note(
-                    Component::Sled(sled_id),
+                blippy.push_sled_note(
+                    sled_id,
                     Severity::Fatal,
-                    Kind::ZoneWithDatasetsOnDifferentZpools {
+                    SledKind::ZoneWithDatasetsOnDifferentZpools {
                         zone,
                         durable_zpool: durable.clone(),
                         transient_zpool: transient.clone(),
@@ -311,10 +310,10 @@ impl<'a> DatasetsBySled<'a> {
                         slot.insert(dataset);
                     }
                     Entry::Occupied(prev) => {
-                        blippy.push_note(
-                            Component::Sled(sled_id),
+                        blippy.push_sled_note(
+                            sled_id,
                             Severity::Fatal,
-                            Kind::ZpoolWithDuplicateDatasetKinds {
+                            SledKind::ZpoolWithDuplicateDatasetKinds {
                                 dataset1: prev.get(),
                                 dataset2: dataset,
                                 zpool: dataset.pool.id(),
@@ -338,10 +337,10 @@ impl<'a> DatasetsBySled<'a> {
         if maybe_datasets.is_none()
             && self.noted_sleds_missing_datasets.insert(sled_id)
         {
-            blippy.push_note(
-                Component::Sled(sled_id),
+            blippy.push_sled_note(
+                sled_id,
                 Severity::Fatal,
-                Kind::SledMissingDatasets { why },
+                SledKind::SledMissingDatasets { why },
             );
         }
         maybe_datasets
@@ -380,10 +379,12 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
                     expected_datasets.insert(dataset.id);
                 }
                 None => {
-                    blippy.push_note(
-                        Component::Sled(sled_id),
+                    blippy.push_sled_note(
+                        sled_id,
                         Severity::Fatal,
-                        Kind::ZpoolMissingDebugDataset { zpool: disk.pool_id },
+                        SledKind::ZpoolMissingDebugDataset {
+                            zpool: disk.pool_id,
+                        },
                     );
                 }
             }
@@ -395,10 +396,10 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
                     expected_datasets.insert(dataset.id);
                 }
                 None => {
-                    blippy.push_note(
-                        Component::Sled(sled_id),
+                    blippy.push_sled_note(
+                        sled_id,
                         Severity::Fatal,
-                        Kind::ZpoolMissingZoneRootDataset {
+                        SledKind::ZpoolMissingZoneRootDataset {
                             zpool: disk.pool_id,
                         },
                     );
@@ -429,10 +430,10 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
                         expected_datasets.insert(dataset.id);
                     }
                     None => {
-                        blippy.push_note(
-                            Component::Sled(sled_id),
+                        blippy.push_sled_note(
+                            sled_id,
                             Severity::Fatal,
-                            Kind::ZoneMissingFilesystemDataset {
+                            SledKind::ZoneMissingFilesystemDataset {
                                 zone: zone_config,
                             },
                         );
@@ -454,10 +455,12 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
                     expected_datasets.insert(dataset.id);
                 }
                 None => {
-                    blippy.push_note(
-                        Component::Sled(sled_id),
+                    blippy.push_sled_note(
+                        sled_id,
                         Severity::Fatal,
-                        Kind::ZoneMissingDurableDataset { zone: zone_config },
+                        SledKind::ZoneMissingDurableDataset {
+                            zone: zone_config,
+                        },
                     );
                 }
             }
@@ -491,20 +494,20 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
         .all_omicron_datasets(BlueprintDatasetFilter::InService)
     {
         if !expected_datasets.contains(&dataset.id) {
-            blippy.push_note(
-                Component::Sled(sled_id),
+            blippy.push_sled_note(
+                sled_id,
                 Severity::Fatal,
-                Kind::OrphanedDataset { dataset },
+                SledKind::OrphanedDataset { dataset },
             );
             continue;
         }
 
         let Some(sled_zpools) = in_service_sled_zpools.get(&sled_id) else {
             if noted_sleds_without_disks.insert(sled_id) {
-                blippy.push_note(
-                    Component::Sled(sled_id),
+                blippy.push_sled_note(
+                    sled_id,
                     Severity::Fatal,
-                    Kind::SledMissingDisks {
+                    SledKind::SledMissingDisks {
                         why: "sled has in-service datasets",
                     },
                 );
@@ -513,10 +516,10 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
         };
 
         if !sled_zpools.contains(&dataset.pool.id()) {
-            blippy.push_note(
-                Component::Sled(sled_id),
+            blippy.push_sled_note(
+                sled_id,
                 Severity::Fatal,
-                Kind::DatasetOnNonexistentZpool { dataset },
+                SledKind::DatasetOnNonexistentZpool { dataset },
             );
             continue;
         }

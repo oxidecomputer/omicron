@@ -1925,7 +1925,7 @@ pub mod test {
     #[track_caller]
     pub fn verify_blueprint(blueprint: &Blueprint) {
         let blippy_report =
-            Blippy::new(blueprint).into_report(BlippyReportSortKey::Component);
+            Blippy::new(blueprint).into_report(BlippyReportSortKey::Kind);
         if !blippy_report.notes().is_empty() {
             eprintln!("{}", blueprint.display());
             eprintln!("---");
