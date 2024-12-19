@@ -4299,7 +4299,7 @@ impl ServiceManager {
                 if let Some(info) = self.inner.sled_info.get() {
                     nsmfh.addpropvalue_type(
                         "config/gateway",
-                        &format!("{}", info.underlay_address),
+                        &info.underlay_address,
                         "astring",
                     )?;
                 } else {
@@ -4319,7 +4319,7 @@ impl ServiceManager {
                     if *address != Ipv6Addr::LOCALHOST {
                         nsmfh.addpropvalue_type(
                             "config/static_addr",
-                            &format!("{address}"),
+                            &address,
                             "astring",
                         )?;
                     }
