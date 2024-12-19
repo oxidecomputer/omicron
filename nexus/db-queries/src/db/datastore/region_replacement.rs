@@ -59,19 +59,22 @@ impl DataStore {
         opctx: &OpContext,
         request: RegionReplacement,
     ) -> Result<(), Error> {
+        let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
 
         self.transaction_retry_wrapper("insert_region_replacement_request")
             .transaction(&conn, |conn| {
                 let request = request.clone();
+                let err = err.clone();
                 async move {
                     use db::schema::region_replacement::dsl;
 
-                    Self::volume_repair_insert_query(
+                    Self::volume_repair_insert_in_txn(
+                        &conn,
+                        err,
                         request.volume_id,
                         request.id,
                     )
-                    .execute_async(&conn)
                     .await?;
 
                     diesel::insert_into(dsl::region_replacement)
@@ -83,7 +86,13 @@ impl DataStore {
                 }
             })
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    err
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
     }
 
     pub async fn get_region_replacement_request_by_id(
@@ -915,6 +924,7 @@ mod test {
 
     use crate::db::pub_test_utils::TestDatabase;
     use omicron_test_utils::dev;
+    use sled_agent_client::types::VolumeConstructionRequest;
 
     #[tokio::test]
     async fn test_one_replacement_per_volume() {
@@ -925,6 +935,20 @@ mod test {
         let region_1_id = Uuid::new_v4();
         let region_2_id = Uuid::new_v4();
         let volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: volume_id,
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
 
         let request_1 = RegionReplacement::new(region_1_id, volume_id);
         let request_2 = RegionReplacement::new(region_2_id, volume_id);
@@ -956,6 +980,20 @@ mod test {
 
         let region_id = Uuid::new_v4();
         let volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: volume_id,
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
 
         let request = {
             let mut request = RegionReplacement::new(region_id, volume_id);
@@ -1048,6 +1086,20 @@ mod test {
 
         let region_id = Uuid::new_v4();
         let volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: volume_id,
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
 
         let request = {
             let mut request = RegionReplacement::new(region_id, volume_id);

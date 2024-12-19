@@ -139,6 +139,10 @@ declare_saga_actions! {
     NEW_REGION_ENSURE -> "ensured_dataset_and_region" {
         + rsrss_new_region_ensure
     }
+    NEW_REGION_VOLUME_CREATE -> "new_region_volume" {
+        + rsrss_new_region_volume_create
+        - rsrss_new_region_volume_create_undo
+    }
     GET_OLD_SNAPSHOT_VOLUME_ID -> "old_snapshot_volume_id" {
         + rsrss_get_old_snapshot_volume_id
     }
@@ -183,12 +187,19 @@ impl NexusSaga for SagaRegionSnapshotReplacementStart {
             ACTION_GENERATE_ID.as_ref(),
         ));
 
+        builder.append(Node::action(
+            "new_region_volume_id",
+            "GenerateNewRegionVolumeId",
+            ACTION_GENERATE_ID.as_ref(),
+        ));
+
         builder.append(set_saga_id_action());
         builder.append(get_alloc_region_params_action());
         builder.append(alloc_new_region_action());
         builder.append(find_new_region_action());
         builder.append(new_region_ensure_undo_action());
         builder.append(new_region_ensure_action());
+        builder.append(new_region_volume_create_action());
         builder.append(get_old_snapshot_volume_id_action());
         builder.append(create_fake_volume_action());
         builder.append(replace_snapshot_in_volume_action());
@@ -509,6 +520,94 @@ async fn rsrss_new_region_ensure_undo(
     Ok(())
 }
 
+async fn rsrss_new_region_volume_create(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+
+    let new_region_volume_id =
+        sagactx.lookup::<Uuid>("new_region_volume_id")?;
+
+    let (new_dataset, ensured_region) = sagactx.lookup::<(
+        db::model::Dataset,
+        crucible_agent_client::types::Region,
+    )>(
+        "ensured_dataset_and_region",
+    )?;
+
+    let Some(new_dataset_address) = new_dataset.address() else {
+        return Err(ActionError::action_failed(format!(
+            "dataset {} does not have an address!",
+            new_dataset.id(),
+        )));
+    };
+
+    let new_region_address = SocketAddrV6::new(
+        *new_dataset_address.ip(),
+        ensured_region.port_number,
+        0,
+        0,
+    );
+
+    // Create a volume to inflate the reference count of the newly created
+    // read-only region. If this is not done it's possible that a user could
+    // delete the snapshot volume _after_ the new read-only region was swapped
+    // in, removing the last reference to it and causing garbage collection.
+
+    let volume_construction_request = VolumeConstructionRequest::Volume {
+        id: new_region_volume_id,
+        block_size: 0,
+        sub_volumes: vec![VolumeConstructionRequest::Region {
+            block_size: 0,
+            blocks_per_extent: 0,
+            extent_count: 0,
+            gen: 0,
+            opts: CrucibleOpts {
+                id: new_region_volume_id,
+                target: vec![new_region_address.to_string()],
+                lossy: false,
+                flush_timeout: None,
+                key: None,
+                cert_pem: None,
+                key_pem: None,
+                root_cert_pem: None,
+                control: None,
+                read_only: true,
+            },
+        }],
+        read_only_parent: None,
+    };
+
+    let volume_data = serde_json::to_string(&volume_construction_request)
+        .map_err(|e| {
+            ActionError::action_failed(Error::internal_error(&e.to_string()))
+        })?;
+
+    let volume = db::model::Volume::new(new_region_volume_id, volume_data);
+
+    osagactx
+        .datastore()
+        .volume_create(volume)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
+async fn rsrss_new_region_volume_create_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+
+    // Delete the volume.
+
+    let new_region_volume_id =
+        sagactx.lookup::<Uuid>("new_region_volume_id")?;
+    osagactx.datastore().volume_hard_delete(new_region_volume_id).await?;
+
+    Ok(())
+}
+
 async fn rsrss_get_old_snapshot_volume_id(
     sagactx: NexusActionContext,
 ) -> Result<Uuid, ActionError> {
@@ -695,7 +794,7 @@ async fn get_replace_params(
 
 async fn rsrss_replace_snapshot_in_volume(
     sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
+) -> Result<VolumeReplaceResult, ActionError> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
 
@@ -729,10 +828,11 @@ async fn rsrss_replace_snapshot_in_volume(
             // if the transaction occurred on the non-deleted volume so proceed
             // with the rest of the saga.
 
-            Ok(())
+            Ok(volume_replace_snapshot_result)
         }
 
-        VolumeReplaceResult::ExistingVolumeDeleted => {
+        VolumeReplaceResult::ExistingVolumeSoftDeleted
+        | VolumeReplaceResult::ExistingVolumeHardDeleted => {
             // If the snapshot volume was deleted, we still want to proceed with
             // replacing the rest of the uses of the region snapshot. Note this
             // also covers the case where this saga node runs (performing the
@@ -741,7 +841,7 @@ async fn rsrss_replace_snapshot_in_volume(
             // deleted. If this saga unwound here, that would violate the
             // property of idempotency.
 
-            Ok(())
+            Ok(volume_replace_snapshot_result)
         }
     }
 }
@@ -815,6 +915,9 @@ async fn rsrss_update_request_record(
 
     let old_region_volume_id = sagactx.lookup::<Uuid>("new_volume_id")?;
 
+    let new_region_volume_id =
+        sagactx.lookup::<Uuid>("new_region_volume_id")?;
+
     // Now that the region has been ensured and the construction request has
     // been updated, update the replacement request record to 'ReplacementDone'
     // and clear the operating saga id. There is no undo step for this, it
@@ -825,6 +928,7 @@ async fn rsrss_update_request_record(
             params.request.id,
             saga_id,
             new_region_id,
+            new_region_volume_id,
             old_region_volume_id,
         )
         .await
@@ -1026,8 +1130,10 @@ pub(crate) mod test {
             .await
             .unwrap();
 
-        assert_eq!(volumes.len(), 1);
-        assert_eq!(volumes[0].id(), db_snapshot.volume_id);
+        assert!(volumes
+            .iter()
+            .map(|v| v.id())
+            .any(|vid| vid == db_snapshot.volume_id));
     }
 
     fn new_test_params(

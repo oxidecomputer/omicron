@@ -3764,12 +3764,13 @@ impl TestReadOnlyRegionReferenceUsage {
 
     // read-only regions should never be returned by find_deleted_volume_regions
     pub async fn region_not_returned_by_find_deleted_volume_regions(&self) {
-        let deleted_volume_regions =
+        let freed_crucible_resources =
             self.datastore.find_deleted_volume_regions().await.unwrap();
 
-        assert!(!deleted_volume_regions
+        assert!(!freed_crucible_resources
+            .datasets_and_regions
             .into_iter()
-            .any(|(_, r, _)| r.id() == self.region.id()));
+            .any(|(_, r)| r.id() == self.region.id()));
     }
 
     pub async fn create_first_volume_region_in_rop(&self) {
