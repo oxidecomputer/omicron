@@ -258,7 +258,7 @@ mod test {
     use omicron_uuid_kinds::UpstairsKind;
     use omicron_uuid_kinds::UpstairsRepairKind;
     use omicron_uuid_kinds::UpstairsSessionKind;
-    use sled_agent_client::types::VolumeConstructionRequest;
+    use sled_agent_client::VolumeConstructionRequest;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =

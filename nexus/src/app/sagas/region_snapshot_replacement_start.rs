@@ -67,8 +67,9 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::CrucibleOpts;
-use sled_agent_client::types::VolumeConstructionRequest;
+use sled_agent_client::CrucibleOpts;
+use sled_agent_client::VolumeConstructionRequest;
+use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use steno::ActionError;
 use steno::Node;
@@ -542,12 +543,12 @@ async fn rsrss_new_region_volume_create(
         )));
     };
 
-    let new_region_address = SocketAddrV6::new(
+    let new_region_address = SocketAddr::V6(SocketAddrV6::new(
         *new_dataset_address.ip(),
         ensured_region.port_number,
         0,
         0,
-    );
+    ));
 
     // Create a volume to inflate the reference count of the newly created
     // read-only region. If this is not done it's possible that a user could
@@ -564,7 +565,7 @@ async fn rsrss_new_region_volume_create(
             gen: 0,
             opts: CrucibleOpts {
                 id: new_region_volume_id,
-                target: vec![new_region_address.to_string()],
+                target: vec![new_region_address],
                 lossy: false,
                 flush_timeout: None,
                 key: None,
@@ -957,7 +958,7 @@ pub(crate) mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::views;
     use nexus_types::identity::Asset;
-    use sled_agent_client::types::VolumeConstructionRequest;
+    use sled_agent_client::VolumeConstructionRequest;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;

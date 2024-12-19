@@ -10,7 +10,7 @@ use nexus_db_queries::db;
 use omicron_common::api::external::Error;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::VolumeConstructionRequest;
+use sled_agent_client::VolumeConstructionRequest;
 use steno::{ActionError, Node};
 use uuid::Uuid;
 
