@@ -119,7 +119,7 @@ pub(crate) struct Sensor {
 impl Sensor {
     fn units(&self) -> &str {
         match self.kind {
-            MeasurementKind::Temperature => "°C",
+            MeasurementKind::Temperature | MeasurementKind::CpuTctl => "°C",
             MeasurementKind::Current | MeasurementKind::InputCurrent => "A",
             MeasurementKind::Voltage | MeasurementKind::InputVoltage => "V",
             MeasurementKind::Speed => "RPM",
@@ -150,6 +150,7 @@ impl Sensor {
     fn to_kind_string(&self) -> &str {
         match self.kind {
             MeasurementKind::Temperature => "temp",
+            MeasurementKind::CpuTctl => "tctl",
             MeasurementKind::Power => "power",
             MeasurementKind::Current => "current",
             MeasurementKind::Voltage => "voltage",

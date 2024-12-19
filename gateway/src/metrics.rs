@@ -804,6 +804,7 @@ impl SpPoller {
                             MeasurementKind::InputCurrent => "input_current",
                             MeasurementKind::InputVoltage => "input_voltage",
                             MeasurementKind::Speed => "fan_speed",
+                            MeasurementKind::CpuTctl => "cpu_tctl",
                         };
                         let error = match error {
                             MeasurementError::InvalidSensor => "invalid_sensor",
@@ -858,6 +859,10 @@ impl SpPoller {
                                 &metric::AmdCpuTctl { sensor, datum },
                             )
                         }
+                        (Ok(datum), MeasurementKind::CpuTctl) => Sample::new(
+                            target,
+                            &metric::AmdCpuTctl { sensor, datum },
+                        ),
                         // Other measurements with the "temperature" measurement
                         // kind are physical temperatures that actually exist in
                         // reality (and are always in Celsius).
@@ -868,6 +873,12 @@ impl SpPoller {
                             )
                         }
                         (Err(_), MeasurementKind::Temperature) if is_tctl => {
+                            Sample::new_missing(
+                                target,
+                                &metric::AmdCpuTctl { sensor, datum: 0.0 },
+                            )
+                        }
+                        (Err(_), MeasurementKind::CpuTctl) => {
                             Sample::new_missing(
                                 target,
                                 &metric::AmdCpuTctl { sensor, datum: 0.0 },
@@ -1204,6 +1215,9 @@ fn comms_error_str(error: CommunicationError) -> &'static str {
         }
         CommunicationError::BadTrailingDataSize { .. } => {
             "bad_trailing_data_size"
+        }
+        CommunicationError::BadDecompressionSize { .. } => {
+            "bad_decompression_size"
         }
     }
 }

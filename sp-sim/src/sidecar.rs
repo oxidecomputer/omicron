@@ -34,6 +34,10 @@ use gateway_messages::ComponentAction;
 use gateway_messages::ComponentActionResponse;
 use gateway_messages::ComponentDetails;
 use gateway_messages::DiscoverResponse;
+use gateway_messages::DumpCompression;
+use gateway_messages::DumpError;
+use gateway_messages::DumpSegment;
+use gateway_messages::DumpTask;
 use gateway_messages::IgnitionCommand;
 use gateway_messages::IgnitionState;
 use gateway_messages::MgsError;
@@ -54,6 +58,7 @@ use slog::debug;
 use slog::info;
 use slog::warn;
 use slog::Logger;
+use std::collections::HashMap;
 use std::iter;
 use std::net::SocketAddrV6;
 use std::pin::Pin;
@@ -400,6 +405,7 @@ struct Handler {
     should_fail_to_respond_signal: Option<Box<dyn FnOnce() + Send>>,
     no_stage0_caboose: bool,
     old_rot_state: bool,
+    inflight_dump_reads: HashMap<[u8; 16], u32>,
 }
 
 impl Handler {
@@ -440,6 +446,7 @@ impl Handler {
             should_fail_to_respond_signal: None,
             old_rot_state,
             no_stage0_caboose,
+            inflight_dump_reads: HashMap::new(),
         }
     }
 
@@ -1209,6 +1216,64 @@ impl SpHandler for Handler {
                 })),
             }
         }
+    }
+
+    fn get_task_dump_count(&mut self) -> std::result::Result<u32, SpError> {
+        Ok(1)
+    }
+
+    fn task_dump_read_start(
+        &mut self,
+        index: u32,
+        key: [u8; 16],
+    ) -> std::result::Result<gateway_messages::DumpTask, SpError> {
+        if index != 0 {
+            return Err(SpError::Dump(DumpError::BadIndex));
+        }
+
+        self.inflight_dump_reads.insert(key, 0);
+
+        Ok(DumpTask { task: 0, time: 2, compression: DumpCompression::Lzss })
+    }
+
+    fn task_dump_read_continue(
+        &mut self,
+        key: [u8; 16],
+        seq: u32,
+        buf: &mut [u8],
+    ) -> std::result::Result<Option<gateway_messages::DumpSegment>, SpError>
+    {
+        const DATA: &'static [u8] = b"CAFECAFECAFECAFE";
+        const MAX_SEQ: u32 = 2;
+
+        let Some(current_seq) = self.inflight_dump_reads.get_mut(&key) else {
+            return Err(SpError::Dump(DumpError::BadKey));
+        };
+
+        let expected_seq = *current_seq;
+        if seq != expected_seq {
+            return Err(SpError::Dump(DumpError::BadSequenceNumber));
+        }
+
+        // Dump read complete.
+        if seq > MAX_SEQ {
+            self.inflight_dump_reads.remove(&key);
+            return Ok(None);
+        }
+
+        if buf.len() < DATA.len() {
+            return Err(SpError::Dump(DumpError::SegmentTooLong));
+        }
+
+        *current_seq += 1;
+        buf.copy_from_slice(DATA);
+
+        Ok(Some(DumpSegment {
+            address: expected_seq,
+            compressed_length: DATA.len() as u16,
+            uncompressed_length: DATA.len() as u16,
+            seq: expected_seq,
+        }))
     }
 }
 
