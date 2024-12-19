@@ -800,6 +800,7 @@ mod test {
     use diffus::Diffable;
     use expectorate::assert_contents;
     use nexus_sled_agent_shared::inventory::ZoneKind;
+    use nexus_types::deployment::blueprint_visitor::*;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::BlueprintDiff;
@@ -3441,6 +3442,107 @@ mod test {
                 .count()
         );
 
+        logctx.cleanup_successful();
+    }
+
+    /// This is just to test our diffus output during development
+    /// Should likely be removed prior to merge
+    #[test]
+    fn test_diffus() {
+        static TEST_NAME: &str = "diffus";
+        let logctx = test_setup_log(TEST_NAME);
+        // Use our example system.
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+        let (mut example, blueprint1) = ExampleSystemBuilder::new_with_rng(
+            &logctx.log,
+            rng.next_system_rng(),
+        )
+        .build();
+        verify_blueprint(&blueprint1);
+        //println!("{}", blueprint1.display());
+        // Now run the planner.  It should do nothing because our initial
+        // system didn't have any issues that the planner currently knows how to
+        // fix.
+        let blueprint2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint1,
+            &example.input,
+            "no-op?",
+            &example.collection,
+        )
+        .expect("failed to create planner")
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
+        .plan()
+        .expect("failed to plan");
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        /*
+            println!("1 -> 2 (expected no changes):\n{}", diff.display());
+        */
+        assert_eq!(diff.sleds_added.len(), 0);
+        assert_eq!(diff.sleds_removed.len(), 0);
+        assert_eq!(diff.sleds_modified.len(), 0);
+        assert_eq!(diff.zones.added.len(), 0);
+        assert_eq!(diff.zones.removed.len(), 0);
+        assert_eq!(diff.zones.modified.len(), 0);
+        assert_eq!(diff.zones.errors.len(), 0);
+        assert_eq!(diff.physical_disks.added.len(), 0);
+        assert_eq!(diff.physical_disks.removed.len(), 0);
+        assert_eq!(diff.datasets.added.len(), 0);
+        assert_eq!(diff.datasets.removed.len(), 0);
+        assert_eq!(diff.datasets.modified.len(), 0);
+        assert_eq!(diff.datasets.unchanged.len(), 3);
+        verify_blueprint(&blueprint2);
+        // Now add a new sled.
+        let mut sled_id_rng = rng.next_sled_id_rng();
+        let new_sled_id = sled_id_rng.next();
+        let _ =
+            example.system.sled(SledBuilder::new().id(new_sled_id)).unwrap();
+        let input = example.system.to_planning_input_builder().unwrap().build();
+        // Check that the first step is to add an NTP zone
+        let blueprint3 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint2,
+            &input,
+            "test: add NTP?",
+            &example.collection,
+        )
+        .expect("failed to create planner")
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
+        .plan()
+        .expect("failed to plan");
+        let diff = blueprint3.diff_since_blueprint(&blueprint2);
+        /*
+        println!(
+            "2 -> 3 (expect new NTP zone on new sled):\n{}",
+            diff.display()
+        );
+        */
+        println!("_______DIFFUS __________\n");
+        println!("bp2 -> bp3 visit\n");
+        let mut visitor = DebugVisitor;
+        visitor.visit_blueprint_edit(&blueprint2.diff(&blueprint3));
+        /*
+        let diffus_diff = blueprint3.diff(&blueprint2);
+        let change = diffus_diff.change();
+        println!("{:#?}", diffus_diff);
+        println!("{:#?}", change);
+        */
+        println!("________DIFFUS __________\n");
+        assert_eq!(diff.sleds_added.len(), 1);
+        assert_eq!(diff.physical_disks.added.len(), 1);
+        assert_eq!(diff.datasets.added.len(), 1);
+        let sled_id = *diff.sleds_added.first().unwrap();
+        let sled_zones = diff.zones.added.get(&sled_id).unwrap();
+        // We have defined elsewhere that the first generation contains no
+        // zones.  So the first one with zones must be newer.  See
+        // OmicronZonesConfig::INITIAL_GENERATION.
+        assert!(sled_zones.generation_after.unwrap() > Generation::new());
+        assert_eq!(sled_id, new_sled_id);
+        assert_eq!(sled_zones.zones.len(), 1);
+        assert!(matches!(sled_zones.zones[0].kind(), ZoneKind::InternalNtp));
+        assert_eq!(diff.sleds_removed.len(), 0);
+        assert_eq!(diff.sleds_modified.len(), 0);
+        verify_blueprint(&blueprint3);
         logctx.cleanup_successful();
     }
 }
