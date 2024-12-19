@@ -1114,7 +1114,7 @@ mod test {
         */
         println!("_______DIFFUS __________\n");
         let bpdiff = BpDiff::new(&blueprint2, &blueprint3);
-        println!("bp2 -> bp3 \n{bpdiff:#?}");
+        println!("bp2 -> bp3 \n{bpdiff}");
         /*
         let diffus_diff = blueprint3.diff(&blueprint2);
         let change = diffus_diff.change();

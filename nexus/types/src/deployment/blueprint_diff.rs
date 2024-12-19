@@ -8,7 +8,8 @@ use super::blueprint_display::{
     constants::*, linear_table_modified, linear_table_unchanged,
     BpClickhouseServersTableSchema, BpDatasetsTableSchema, BpDiffState,
     BpGeneration, BpOmicronZonesTableSchema, BpPhysicalDisksTableSchema,
-    BpTable, BpTableColumn, BpTableData, BpTableRow, KvListWithHeading, KvPair,
+    BpTable, BpTableColumn, BpTableData, BpTableRow, BpTableSchema,
+    KvListWithHeading, KvPair,
 };
 use super::{
     zone_sort_key, Blueprint, ClickhouseClusterConfig,
@@ -796,23 +797,15 @@ impl BpDiffDatasets {
     }
 }
 
-#[derive(Debug)]
-pub enum DiffItem<T: fmt::Debug> {
-    Unchanged,
-    Added(T),
-    Removed(T),
-    Modified { before: T, after: T },
-}
-
 /// Summarizes the differences between two blueprints
+///
 /// Diffus based version
 #[derive(Debug)]
-pub struct BpDiff {
-    pub id: DiffItem<Uuid>,
-    pub sled_state: BTreeMap<SledUuid, DiffItem<SledState>>,
+pub struct BpDiff<'a> {
+    edit: Edit<'a, Blueprint>,
 }
 
-impl BpDiff {
+impl<'a> BpDiff<'a> {
     /// Generate a `BpDiff` via Diffus.
     ///
     /// Return `None` if there are no changes between blueprints.
@@ -825,60 +818,76 @@ impl BpDiff {
     /// Of particular importance to this simplification is that we don't
     /// differentiate between changing of variants and variant contents, and we
     /// discard unchanged items.
-    pub fn new(before: &Blueprint, after: &Blueprint) -> Option<BpDiff> {
+    pub fn new(before: &'a Blueprint, after: &'a Blueprint) -> BpDiff<'a> {
         let edit = before.diff(after);
-        if edit.is_copy() {
-            return None;
-        }
-        let change = edit.change().unwrap();
-        let id = {
-            let change = change.id.change().unwrap();
-            DiffItem::Modified { before: *change.0, after: *change.1 }
-        };
-        let sled_state = Self::sled_state_diff(&change.sled_state);
-        Some(BpDiff { id, sled_state })
+        BpDiff { edit }
     }
+}
 
-    fn sled_state_diff(
-        sled_states: &Edit<BTreeMap<SledUuid, SledState>>,
-    ) -> BTreeMap<SledUuid, DiffItem<SledState>> {
-        // Were there any changes?
-        sled_states
-            .change()
-            .map(|changes| {
-                // What type of changes?
-                changes
-                    .iter()
-                    .filter_map(|(sled_id, change)| match change {
-                        map::Edit::Copy(_) => None,
-                        map::Edit::Insert(sled_state) => {
-                            Some((**sled_id, DiffItem::Added(**sled_state)))
-                        }
-                        map::Edit::Remove(sled_state) => {
-                            Some((**sled_id, DiffItem::Removed(**sled_state)))
-                        }
-                        map::Edit::Change(change) => {
-                            let (before, after) = match change {
-                                enm::Edit::Copy(_) => {
-                                    return None;
-                                }
-                                enm::Edit::VariantChanged(before, after) => {
-                                    (**before, **after)
-                                }
-                                enm::Edit::AssociatedChanged(_) => {
-                                    // There's no associated data here
-                                    unreachable!()
-                                }
-                            };
-                            Some((
-                                **sled_id,
-                                DiffItem::Modified { before, after },
+impl<'a> fmt::Display for BpDiff<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Some(edited_blueprint) = self.edit.change() else {
+            return write!(f, "No change");
+        };
+
+        // Write out the blueprint ids
+        // Safety: we know we have different ids if there was an overall change
+        let (before_id, after_id) = edited_blueprint.id.change().unwrap();
+        writeln!(f, "from: blueprint {before_id}")?;
+        writeln!(f, "to:   blueprint {after_id}")?;
+
+        if let Some(state_edits) = edited_blueprint.sled_state.change() {}
+
+        Ok(())
+    }
+}
+
+impl BpTableSchema for &BTreeMap<&SledUuid, Edit<'_, SledState>> {
+    fn table_name(&self) -> &'static str {
+        "sled state"
+    }
+    fn column_names(&self) -> &'static [&'static str] {
+        &["sled uuid", "sled state"]
+    }
+}
+
+impl BpTableData for &BTreeMap<&SledUuid, map::Edit<'_, SledState>> {
+    fn bp_generation(&self) -> BpGeneration {
+        BpGeneration::Diff { before: None, after: None }
+    }
+    fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
+        self.iter().filter_map(|(sled_id, edited_state)| match edited_state {
+            map::Edit::Copy(_) => None,
+            map::Edit::Insert(state) => Some(BpTableRow::new(
+                BpDiffState::Added,
+                vec![
+                    BpTableColumn::Value(sled_id.to_string()),
+                    BpTableColumn::Value(state.to_string()),
+                ],
+            )),
+            map::Edit::Remove(state) => Some(BpTableRow::new(
+                BpDiffState::Removed,
+                vec![
+                    BpTableColumn::Value(sled_id.to_string()),
+                    BpTableColumn::Value(state.to_string()),
+                ],
+            )),
+            map::Edit::Change(change) => {
+                match change {
+                    enm::Edit::Copy(_) => None,
+                    enm::Edit::VariantChanged(before, after) => {
+                        Some(BpTableRow::new(
+                            BpDiffState::Modified,
+                            vec![BpTableColumn::Value(sled_id.to_string()
                             ))
-                        }
-                    })
-                    .collect()
-            })
-            .unwrap_or(BTreeMap::new())
+                    }
+                    enm::Edit::AssociatedChanged(_) => {
+                        // No associated data
+                        unreachable!()
+                    }
+                }
+            }
+        })
     }
 }
 

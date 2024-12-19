@@ -193,6 +193,11 @@ pub trait BpTableData {
     fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow>;
 }
 
+// New with diffus
+pub trait BpDiffTableData {
+    fn rows(&self) -> impl Iterator<Item = BpTableRow>;
+}
+
 /// A table specific to a sled resource, such as a zone or disk.
 pub struct BpTable {
     table_name: &'static str,
