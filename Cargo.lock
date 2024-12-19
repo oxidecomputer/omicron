@@ -7140,6 +7140,7 @@ dependencies = [
  "ring 0.17.8",
  "semver 1.0.23",
  "serde",
+ "shell-words",
  "sled-hardware",
  "slog",
  "slog-async",
