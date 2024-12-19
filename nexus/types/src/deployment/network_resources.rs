@@ -5,6 +5,7 @@
 use super::tri_map::TriMap;
 use super::tri_map::TriMapEntry;
 use anyhow::anyhow;
+use diffus::Diffus;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_uuid_kinds::ExternalIpUuid;
@@ -199,7 +200,16 @@ pub enum OmicronZoneExternalIpKey {
 /// necessary for blueprint planning, and requires that the zone have a single
 /// IP.
 #[derive(
-    Debug, Clone, Copy, Hash, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    Hash,
+    PartialEq,
+    Eq,
+    JsonSchema,
+    Serialize,
+    Deserialize,
+    Diffus,
 )]
 pub struct OmicronZoneExternalFloatingIp {
     pub id: ExternalIpUuid,
@@ -208,7 +218,15 @@ pub struct OmicronZoneExternalFloatingIp {
 
 /// Floating external address with port allocated to an Omicron-managed zone.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    JsonSchema,
+    Serialize,
+    Deserialize,
+    Diffus,
 )]
 pub struct OmicronZoneExternalFloatingAddr {
     pub id: ExternalIpUuid,
@@ -227,7 +245,16 @@ impl OmicronZoneExternalFloatingAddr {
 /// necessary for blueprint planning, and requires that the zone have a single
 /// IP.
 #[derive(
-    Debug, Clone, Copy, Hash, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    Hash,
+    PartialEq,
+    Eq,
+    JsonSchema,
+    Serialize,
+    Deserialize,
+    Diffus,
 )]
 pub struct OmicronZoneExternalSnatIp {
     pub id: ExternalIpUuid,

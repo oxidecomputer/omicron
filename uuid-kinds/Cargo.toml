@@ -12,6 +12,7 @@ workspace = true
 # within omicron.
 
 [dependencies]
+diffus.workspace = true
 newtype-uuid.workspace = true
 schemars = { workspace = true, optional = true }
 paste.workspace = true
