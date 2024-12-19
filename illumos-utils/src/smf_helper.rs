@@ -165,6 +165,38 @@ impl<'t> SmfHelper<'t> {
         Ok(())
     }
 
+    pub fn delpropvalue<P, V>(&self, prop: P, val: V) -> Result<(), Error>
+    where
+        P: ToString,
+        V: ToString,
+    {
+        match self
+            .running_zone
+            .run_cmd(&[
+                SVCCFG,
+                "-s",
+                &self.smf_name,
+                "delpropvalue",
+                &prop.to_string(),
+                &val.to_string(),
+            ])
+            .map_err(|err| Error::ZoneCommand {
+                intent: format!("del {} smf property value", prop.to_string()),
+                err,
+            }) {
+            Ok(_) => (),
+            Err(e) => {
+                // If a property already doesn't exist we don't need to
+                // return an error
+                if !e.to_string().contains("No such property") {
+                    return Err(e);
+                }
+            }
+        };
+
+        Ok(())
+    }
+
     pub fn delpropvalue_default_instance<P, V>(
         &self,
         prop: P,
