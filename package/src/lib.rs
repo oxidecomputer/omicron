@@ -111,7 +111,6 @@ pub enum BuildCommand {
         #[clap(long)]
         intermediate: bool,
     },
-    /// List the build commands that will be run
     /// Builds the packages specified in a manifest, and places them into an
     /// 'out' directory.
     Package {

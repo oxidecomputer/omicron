@@ -35,8 +35,8 @@ pub fn build_cargo_plan<'a>(
         })
         .collect::<BTreeMap<_, _>>();
 
-    let mut release = CargoTargets::default();
-    let mut debug = CargoTargets::default();
+    let mut release = CargoTargets::new(BuildKind::Release);
+    let mut debug = CargoTargets::new(BuildKind::Debug);
 
     for (name, pkg) in package_map.0 {
         // If this is a Rust package, `name` (the map key) is the name of the
@@ -82,26 +82,32 @@ pub struct CargoPlan<'a> {
 
 impl CargoPlan<'_> {
     pub async fn run(&self, command: &str, log: &Logger) -> Result<()> {
-        self.release.run(command, true, log).await?;
-        self.debug.run(command, false, log).await?;
+        self.release.run(command, log).await?;
+        self.debug.run(command, log).await?;
         Ok(())
     }
 }
 
 /// A set of packages, binaries, and features to operate on.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CargoTargets<'a> {
+    pub kind: BuildKind,
     pub packages: BTreeSet<&'a String>,
     pub bins: BTreeSet<&'a String>,
     pub features: BTreeSet<&'a String>,
 }
 
 impl CargoTargets<'_> {
-    pub fn build_command(
-        &self,
-        command: &str,
-        release: bool,
-    ) -> Option<Command> {
+    fn new(kind: BuildKind) -> Self {
+        Self {
+            kind,
+            packages: BTreeSet::new(),
+            bins: BTreeSet::new(),
+            features: BTreeSet::new(),
+        }
+    }
+
+    pub fn build_command(&self, command: &str) -> Option<Command> {
         if self.bins.is_empty() {
             return None;
         }
@@ -131,20 +137,18 @@ impl CargoTargets<'_> {
                 },
             ));
         }
-        if release {
-            cmd.arg("--release");
+        match self.kind {
+            BuildKind::Release => {
+                cmd.arg("--release");
+            }
+            BuildKind::Debug => {}
         }
 
         Some(cmd)
     }
 
-    pub async fn run(
-        &self,
-        command: &str,
-        release: bool,
-        log: &Logger,
-    ) -> Result<()> {
-        let Some(mut cmd) = self.build_command(command, release) else {
+    pub async fn run(&self, command: &str, log: &Logger) -> Result<()> {
+        let Some(mut cmd) = self.build_command(command) else {
             return Ok(());
         };
 
@@ -159,4 +163,10 @@ impl CargoTargets<'_> {
 
         Ok(())
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BuildKind {
+    Release,
+    Debug,
 }
