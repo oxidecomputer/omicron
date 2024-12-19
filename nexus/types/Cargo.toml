@@ -17,6 +17,7 @@ clickhouse-admin-types.workspace = true
 cookie.workspace = true
 derive-where.workspace = true
 derive_more.workspace = true
+diffus.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 http.workspace = true
