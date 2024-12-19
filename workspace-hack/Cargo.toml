@@ -103,7 +103,7 @@ reqwest = { version = "0.12.9", features = ["blocking", "cookies", "json", "rust
 rsa = { version = "0.9.6", features = ["serde", "sha2"] }
 rustls = { version = "0.23.14", features = ["ring"] }
 rustls-webpki = { version = "0.102.8", default-features = false, features = ["aws_lc_rs", "ring", "std"] }
-schemars = { version = "0.8.21", features = ["bytes", "chrono", "uuid1"] }
+schemars = { version = "0.8.21", features = ["bytes", "chrono", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.23", features = ["serde"] }
 serde = { version = "1.0.215", features = ["alloc", "derive", "rc"] }
@@ -128,6 +128,7 @@ toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.22", featu
 tracing = { version = "0.1.40", features = ["log"] }
 unicode-bidi = { version = "0.3.17" }
 unicode-normalization = { version = "0.1.24" }
+url = { version = "2.5.3", features = ["serde"] }
 usdt = { version = "0.5.0" }
 usdt-impl = { version = "0.5.0", default-features = false, features = ["asm", "des"] }
 uuid = { version = "1.11.0", features = ["serde", "v4"] }
@@ -223,7 +224,7 @@ reqwest = { version = "0.12.9", features = ["blocking", "cookies", "json", "rust
 rsa = { version = "0.9.6", features = ["serde", "sha2"] }
 rustls = { version = "0.23.14", features = ["ring"] }
 rustls-webpki = { version = "0.102.8", default-features = false, features = ["aws_lc_rs", "ring", "std"] }
-schemars = { version = "0.8.21", features = ["bytes", "chrono", "uuid1"] }
+schemars = { version = "0.8.21", features = ["bytes", "chrono", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.23", features = ["serde"] }
 serde = { version = "1.0.215", features = ["alloc", "derive", "rc"] }
@@ -251,6 +252,7 @@ tracing = { version = "0.1.40", features = ["log"] }
 unicode-bidi = { version = "0.3.17" }
 unicode-normalization = { version = "0.1.24" }
 unicode-xid = { version = "0.2.6" }
+url = { version = "2.5.3", features = ["serde"] }
 usdt = { version = "0.5.0" }
 usdt-impl = { version = "0.5.0", default-features = false, features = ["asm", "des"] }
 uuid = { version = "1.11.0", features = ["serde", "v4"] }

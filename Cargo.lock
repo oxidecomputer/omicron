@@ -7474,6 +7474,7 @@ dependencies = [
  "unicode-bidi",
  "unicode-normalization",
  "unicode-xid",
+ "url",
  "usdt",
  "usdt-impl",
  "uuid",
