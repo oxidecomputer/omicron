@@ -39,6 +39,7 @@ pub mod project_create;
 pub mod region_replacement_drive;
 pub mod region_replacement_finish;
 pub mod region_replacement_start;
+pub mod region_snapshot_replacement_finish;
 pub mod region_snapshot_replacement_garbage_collect;
 pub mod region_snapshot_replacement_start;
 pub mod region_snapshot_replacement_step;
@@ -173,7 +174,8 @@ fn make_action_registry() -> ActionRegistry {
         region_snapshot_replacement_start::SagaRegionSnapshotReplacementStart,
         region_snapshot_replacement_garbage_collect::SagaRegionSnapshotReplacementGarbageCollect,
         region_snapshot_replacement_step::SagaRegionSnapshotReplacementStep,
-        region_snapshot_replacement_step_garbage_collect::SagaRegionSnapshotReplacementStepGarbageCollect
+        region_snapshot_replacement_step_garbage_collect::SagaRegionSnapshotReplacementStepGarbageCollect,
+        region_snapshot_replacement_finish::SagaRegionSnapshotReplacementFinish
     ];
 
     #[cfg(test)]

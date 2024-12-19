@@ -769,10 +769,9 @@ async fn test_disk_region_creation_failure(
     .await
     .unwrap();
 
-    // After the failed allocation, the disk should be Faulted
+    // After the failed allocation, the disk creation should have unwound
     let disks = disks_list(&client, &disks_url).await;
-    assert_eq!(disks.len(), 1);
-    assert_eq!(disks[0].state, DiskState::Faulted);
+    assert_eq!(disks.len(), 0);
 }
 
 // Tests that invalid block sizes are rejected
@@ -2574,7 +2573,7 @@ async fn test_disk_expunge(cptestctx: &ControlPlaneTestContext) {
 
     // All three regions should be returned
     let expunged_regions = datastore
-        .find_regions_on_expunged_physical_disks(&opctx)
+        .find_read_write_regions_on_expunged_physical_disks(&opctx)
         .await
         .unwrap();
 
