@@ -689,12 +689,14 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
         assert_eq!(expunged_region_snapshot.snapshot_id, snapshot.identity.id);
     }
 
-    // Either one or two regions can be returned, depending on if the snapshot
-    // destination volume was allocated on to the physical disk that was
-    // expunged.
+    // Either one or two read/write regions will be returned:
+    //
+    // - one for the disk, and
+    // - one for the snapshot destination volume, depending on if it was
+    //   allocated on to the physical disk that was expunged.
 
     let expunged_regions = datastore
-        .find_regions_on_expunged_physical_disks(&opctx)
+        .find_read_write_regions_on_expunged_physical_disks(&opctx)
         .await
         .unwrap();
 
