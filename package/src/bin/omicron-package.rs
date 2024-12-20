@@ -4,31 +4,29 @@
 
 //! Utility for bundling target binaries as tarfiles.
 
-use anyhow::{anyhow, bail, ensure, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Parser, Subcommand};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use illumos_utils::{zfs, zone};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use omicron_package::cargo_plan::build_cargo_plan;
+use omicron_package::config::{Config, ConfigArgs};
 use omicron_package::target::KnownTarget;
 use omicron_package::{parse, BuildCommand, DeployCommand, TargetCommand};
-use omicron_zone_package::config::{Config as PackageConfig, PackageMap};
+use omicron_zone_package::config::Config as PackageConfig;
 use omicron_zone_package::package::{Package, PackageOutput, PackageSource};
 use omicron_zone_package::progress::Progress;
 use omicron_zone_package::target::Target;
 use rayon::prelude::*;
 use ring::digest::{Context as DigestContext, Digest, SHA256};
 use sled_hardware::cleanup::cleanup_networking_resources;
-use slog::debug;
 use slog::o;
 use slog::Drain;
 use slog::Logger;
 use slog::{info, warn};
-use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs::create_dir_all;
-use std::io::Write;
-use std::str::FromStr;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
@@ -41,11 +39,6 @@ enum SubCommand {
     Build(BuildCommand),
     #[clap(flatten)]
     Deploy(DeployCommand),
-}
-
-fn parse_duration_ms(arg: &str) -> Result<std::time::Duration> {
-    let ms = arg.parse()?;
-    Ok(std::time::Duration::from_millis(ms))
 }
 
 #[derive(Debug, Parser)]
@@ -63,170 +56,70 @@ struct Args {
     )]
     manifest: Utf8PathBuf,
 
-    #[clap(
-        short,
-        long,
-        help = "The name of the build target to use for this command",
-        default_value_t = ACTIVE.to_string(),
-    )]
-    target: String,
-
     /// The output directory, where artifacts should be built and staged
     #[clap(long = "artifacts", default_value = "out/")]
-    artifact_dir: Utf8PathBuf,
+    pub artifact_dir: Utf8PathBuf,
 
-    #[clap(
-        short,
-        long,
-        help = "Skip confirmation prompt for destructive operations",
-        action,
-        default_value_t = false
-    )]
-    force: bool,
-
-    #[clap(
-        long,
-        help = "Number of retries to use when re-attempting failed package downloads",
-        action,
-        default_value_t = 10
-    )]
-    retry_count: usize,
-
-    #[clap(
-        long,
-        help = "Duration, in ms, to wait before re-attempting failed package downloads",
-        action,
-        value_parser = parse_duration_ms,
-        default_value = "1000",
-    )]
-    retry_duration: std::time::Duration,
+    #[clap(flatten)]
+    config_args: ConfigArgs,
 
     #[clap(subcommand)]
     subcommand: SubCommand,
 }
 
-#[derive(Debug, Default)]
-struct CargoPlan<'a> {
-    command: &'a str,
-    packages: BTreeSet<&'a String>,
-    bins: BTreeSet<&'a String>,
-    features: BTreeSet<&'a String>,
-    release: bool,
+async fn do_show_cargo_commands(config: &Config) -> Result<()> {
+    let metadata = cargo_metadata::MetadataCommand::new().no_deps().exec()?;
+    let features = config.cargo_features();
+    let cargo_plan =
+        build_cargo_plan(&metadata, config.packages_to_build(), &features)?;
+
+    let release_command = cargo_plan.release.build_command("build");
+    let debug_command = cargo_plan.debug.build_command("build");
+
+    print!("release command: ");
+    if let Some(command) = release_command {
+        println!("{}", command_to_string(&command));
+    } else {
+        println!("(none)");
+    }
+
+    print!("debug command: ");
+    if let Some(command) = debug_command {
+        println!("{}", command_to_string(&command));
+    } else {
+        println!("(none)");
+    }
+
+    Ok(())
 }
 
-impl<'a> CargoPlan<'a> {
-    async fn run(&self, log: &Logger) -> Result<()> {
-        if self.bins.is_empty() {
-            return Ok(());
-        }
+fn command_to_string(command: &Command) -> String {
+    // Use shell-words to join the command and arguments into a single string.
+    let mut v = vec![command
+        .as_std()
+        .get_program()
+        .to_str()
+        .expect("program is valid UTF-8")];
+    v.extend(
+        command
+            .as_std()
+            .get_args()
+            .map(|arg| arg.to_str().expect("argument is valid UTF-8")),
+    );
 
-        let mut cmd = Command::new("cargo");
-        // We rely on the rust-toolchain.toml file for toolchain information,
-        // rather than specifying one within the packaging tool.
-        cmd.arg(self.command);
-        // We specify _both_ --package and --bin; --bin does not imply
-        // --package, and without any --package options Cargo unifies features
-        // across all workspace default members. See rust-lang/cargo#8157.
-        for package in &self.packages {
-            cmd.arg("--package").arg(package);
-        }
-        for bin in &self.bins {
-            cmd.arg("--bin").arg(bin);
-        }
-        if !self.features.is_empty() {
-            cmd.arg("--features").arg(self.features.iter().fold(
-                String::new(),
-                |mut acc, s| {
-                    if !acc.is_empty() {
-                        acc.push(' ');
-                    }
-                    acc.push_str(s);
-                    acc
-                },
-            ));
-        }
-        if self.release {
-            cmd.arg("--release");
-        }
-        info!(log, "running: {:?}", cmd.as_std());
-        let status = cmd
-            .status()
-            .await
-            .context(format!("Failed to run command: ({:?})", cmd))?;
-        if !status.success() {
-            bail!("Failed to build packages");
-        }
-
-        Ok(())
-    }
+    shell_words::join(&v)
 }
 
 async fn do_for_all_rust_packages(
     config: &Config,
     command: &str,
 ) -> Result<()> {
-    // Collect a map of all of the workspace packages
-    let workspace = cargo_metadata::MetadataCommand::new().no_deps().exec()?;
-    let workspace_pkgs = workspace
-        .packages
-        .into_iter()
-        .filter_map(|package| {
-            workspace
-                .workspace_members
-                .contains(&package.id)
-                .then_some((package.name.clone(), package))
-        })
-        .collect::<BTreeMap<_, _>>();
+    let metadata = cargo_metadata::MetadataCommand::new().no_deps().exec()?;
+    let features = config.cargo_features();
+    let cargo_plan =
+        build_cargo_plan(&metadata, config.packages_to_build(), &features)?;
 
-    // Generate a list of all features we might want to request
-    let features = config
-        .target
-        .0
-        .iter()
-        .map(|(name, value)| format!("{name}-{value}"))
-        .collect::<Vec<_>>();
-
-    // We split the packages to be built into "release" and "debug" lists
-    let mut release =
-        CargoPlan { command, release: true, ..Default::default() };
-    let mut debug = CargoPlan { command, release: false, ..Default::default() };
-
-    for (name, pkg) in config.packages_to_build().0 {
-        // If this is a Rust package, `name` (the map key) is the name of the
-        // corresponding Rust crate.
-        if let PackageSource::Local { rust: Some(rust_pkg), .. } = &pkg.source {
-            let plan = if rust_pkg.release { &mut release } else { &mut debug };
-            // Add the package name to the plan
-            plan.packages.insert(name);
-            // Get the package metadata
-            let metadata = workspace_pkgs.get(name).with_context(|| {
-                format!("package '{name}' is not a workspace package")
-            })?;
-            // Add the binaries we want to build to the plan
-            let bins = metadata
-                .targets
-                .iter()
-                .filter_map(|target| target.is_bin().then_some(&target.name))
-                .collect::<BTreeSet<_>>();
-            for bin in &rust_pkg.binary_names {
-                ensure!(
-                    bins.contains(bin),
-                    "bin target '{bin}' does not belong to package '{name}'"
-                );
-                plan.bins.insert(bin);
-            }
-            // Add all features we want to request to the plan
-            plan.features.extend(
-                features
-                    .iter()
-                    .filter(|feature| metadata.features.contains_key(*feature)),
-            );
-        }
-    }
-
-    release.run(&config.log).await?;
-    debug.run(&config.log).await?;
-    Ok(())
+    cargo_plan.run(command, config.log()).await
 }
 
 async fn do_check(config: &Config) -> Result<()> {
@@ -240,7 +133,7 @@ async fn do_build(config: &Config) -> Result<()> {
 async fn do_dot(config: &Config) -> Result<()> {
     println!(
         "{}",
-        omicron_package::dot::do_dot(&config.target, &config.package_config)?
+        omicron_package::dot::do_dot(config.target(), config.package_config())?
     );
     Ok(())
 }
@@ -261,9 +154,6 @@ async fn do_list_outputs(
     }
     Ok(())
 }
-
-// The name reserved for the currently-in-use build target.
-const ACTIVE: &str = "active";
 
 async fn do_target(
     artifact_dir: &Utf8Path,
@@ -302,7 +192,8 @@ async fn do_target(
             println!("Created new build target '{name}' and set it as active");
         }
         TargetCommand::List => {
-            let active = tokio::fs::read_link(target_dir.join(ACTIVE)).await?;
+            let active =
+                tokio::fs::read_link(target_dir.join(Config::ACTIVE)).await?;
             let active = Utf8PathBuf::try_from(active)?;
             for entry in walkdir::WalkDir::new(&target_dir)
                 .max_depth(1)
@@ -341,7 +232,7 @@ async fn get_single_target(
     target_dir: impl AsRef<Utf8Path>,
     name: &str,
 ) -> Result<Utf8PathBuf> {
-    if name == ACTIVE {
+    if name == Config::ACTIVE {
         bail!(
             "The name '{name}' is reserved, please try another (e.g. 'default')\n\
             Usage: '{} -t <TARGET> target ...'",
@@ -358,7 +249,7 @@ async fn replace_active_link(
     let src = src.as_ref();
     let target_dir = target_dir.as_ref();
 
-    let dst = target_dir.join(ACTIVE);
+    let dst = target_dir.join(Config::ACTIVE);
     if !target_dir.join(src).exists() {
         bail!("Target file {} does not exist", src);
     }
@@ -467,7 +358,7 @@ async fn ensure_package(
     output_directory: &Utf8Path,
     disable_cache: bool,
 ) -> Result<()> {
-    let target = &config.target;
+    let target = config.target();
     let progress = ui.add_package(package_name.to_string());
     match &package.source {
         PackageSource::Prebuilt { repo, commit, sha256 } => {
@@ -484,7 +375,7 @@ async fn ensure_package(
             };
 
             if should_download {
-                let mut attempts_left = config.retry_count + 1;
+                let mut attempts_left = config.retry_count() + 1;
                 loop {
                     match download_prebuilt(
                         &progress,
@@ -504,7 +395,7 @@ async fn ensure_package(
                             if attempts_left == 0 {
                                 return Err(err);
                             }
-                            tokio::time::sleep(config.retry_duration).await;
+                            tokio::time::sleep(config.retry_duration()).await;
                             progress.reset();
                         }
                     }
@@ -555,7 +446,7 @@ async fn do_package(
     create_dir_all(&output_directory)
         .map_err(|err| anyhow!("Cannot create output directory: {}", err))?;
 
-    let ui = ProgressUI::new(&config.log);
+    let ui = ProgressUI::new(config.log());
 
     do_build(&config).await?;
 
@@ -596,8 +487,8 @@ async fn do_stamp(
 ) -> Result<()> {
     // Find the package which should be stamped
     let (_name, package) = config
-        .package_config
-        .packages_to_deploy(&config.target)
+        .package_config()
+        .packages_to_deploy(config.target())
         .0
         .into_iter()
         .find(|(name, _pkg)| name.as_str() == package_name)
@@ -620,7 +511,8 @@ async fn do_unpack(
     })?;
 
     // Copy all packages to the install location in parallel.
-    let packages = config.package_config.packages_to_deploy(&config.target).0;
+    let packages =
+        config.package_config().packages_to_deploy(&config.target()).0;
 
     packages.par_iter().try_for_each(
         |(package_name, package)| -> Result<()> {
@@ -629,7 +521,7 @@ async fn do_unpack(
             let dst =
                 package.get_output_path(&package.service_name, install_dir);
             info!(
-                &config.log,
+                config.log(),
                 "Installing service";
                 "src" => %src,
                 "dst" => %dst,
@@ -661,7 +553,7 @@ async fn do_unpack(
         let tar_path = install_dir.join(format!("{}.tar", service_name));
         let service_path = install_dir.join(service_name);
         info!(
-            &config.log,
+            config.log(),
             "Unpacking service tarball";
             "tar_path" => %tar_path,
             "service_path" => %service_path,
@@ -681,14 +573,14 @@ fn do_activate(config: &Config, install_dir: &Utf8Path) -> Result<()> {
     // Install the bootstrap service, which itself extracts and
     // installs other services.
     if let Some(package) =
-        config.package_config.packages.get("omicron-sled-agent")
+        config.package_config().packages.get("omicron-sled-agent")
     {
         let manifest_path = install_dir
             .join(&package.service_name)
             .join("pkg")
             .join("manifest.xml");
         info!(
-            config.log,
+            config.log(),
             "Installing bootstrap service from {}", manifest_path
         );
 
@@ -722,7 +614,7 @@ async fn uninstall_all_omicron_zones() -> Result<()> {
 fn uninstall_all_omicron_datasets(config: &Config) -> Result<()> {
     let datasets = match zfs::get_all_omicron_datasets_for_delete() {
         Err(e) => {
-            warn!(config.log, "Failed to get omicron datasets: {}", e);
+            warn!(config.log(), "Failed to get omicron datasets: {}", e);
             return Err(e);
         }
         Ok(datasets) => datasets,
@@ -737,7 +629,7 @@ fn uninstall_all_omicron_datasets(config: &Config) -> Result<()> {
         datasets
     ))?;
     for dataset in &datasets {
-        info!(config.log, "Deleting dataset: {dataset}");
+        info!(config.log(), "Deleting dataset: {dataset}");
         zfs::Zfs::destroy_dataset(dataset)?;
     }
 
@@ -747,8 +639,8 @@ fn uninstall_all_omicron_datasets(config: &Config) -> Result<()> {
 // Attempts to both disable and delete all requested packages.
 fn uninstall_all_packages(config: &Config) {
     for (_, package) in config
-        .package_config
-        .packages_to_deploy(&config.target)
+        .package_config()
+        .packages_to_deploy(config.target())
         .0
         .into_iter()
         .filter(|(_, package)| matches!(package.output, PackageOutput::Tarball))
@@ -812,18 +704,18 @@ fn remove_all_except<P: AsRef<Utf8Path>>(
 }
 
 async fn do_deactivate(config: &Config) -> Result<()> {
-    info!(&config.log, "Removing all Omicron zones");
+    info!(config.log(), "Removing all Omicron zones");
     uninstall_all_omicron_zones().await?;
-    info!(config.log, "Uninstalling all packages");
+    info!(config.log(), "Uninstalling all packages");
     uninstall_all_packages(config);
-    info!(config.log, "Removing networking resources");
-    cleanup_networking_resources(&config.log).await?;
+    info!(config.log(), "Removing networking resources");
+    cleanup_networking_resources(config.log()).await?;
     Ok(())
 }
 
 async fn do_uninstall(config: &Config) -> Result<()> {
     do_deactivate(config).await?;
-    info!(config.log, "Removing datasets");
+    info!(config.log(), "Removing datasets");
     uninstall_all_omicron_datasets(config)?;
     Ok(())
 }
@@ -834,7 +726,7 @@ async fn do_clean(
     install_dir: &Utf8Path,
 ) -> Result<()> {
     do_uninstall(&config).await?;
-    info!(config.log, "Removing artifacts from {}", artifact_dir);
+    info!(config.log(), "Removing artifacts from {}", artifact_dir);
     const ARTIFACTS_TO_KEEP: &[&str] = &[
         "clickhouse",
         "cockroachdb",
@@ -843,10 +735,10 @@ async fn do_clean(
         "downloads",
         "softnpu",
     ];
-    remove_all_except(artifact_dir, ARTIFACTS_TO_KEEP, &config.log)?;
-    info!(config.log, "Removing installed objects in: {}", install_dir);
+    remove_all_except(artifact_dir, ARTIFACTS_TO_KEEP, config.log())?;
+    info!(config.log(), "Removing installed objects in: {}", install_dir);
     const INSTALLED_OBJECTS_TO_KEEP: &[&str] = &["opte"];
-    remove_all_except(install_dir, INSTALLED_OBJECTS_TO_KEEP, &config.log)?;
+    remove_all_except(install_dir, INSTALLED_OBJECTS_TO_KEEP, config.log())?;
 
     Ok(())
 }
@@ -957,102 +849,6 @@ impl Progress for PackageProgress {
     }
 }
 
-struct Config {
-    log: Logger,
-    // Description of all possible packages.
-    package_config: PackageConfig,
-    // Description of the target we're trying to operate on.
-    target: Target,
-    // The list of packages the user wants us to build (all, if empty)
-    only: Vec<String>,
-    // True if we should skip confirmations for destructive operations.
-    force: bool,
-    // Number of times to retry failed downloads.
-    retry_count: usize,
-    // Duration to wait before retrying failed downloads.
-    retry_duration: std::time::Duration,
-}
-
-impl Config {
-    /// Prompts the user for input before proceeding with an operation.
-    fn confirm(&self, prompt: &str) -> Result<()> {
-        if self.force {
-            return Ok(());
-        }
-
-        print!("{prompt}\n[yY to confirm] >> ");
-        let _ = std::io::stdout().flush();
-
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input)?;
-        match input.as_str().trim() {
-            "y" | "Y" => Ok(()),
-            _ => bail!("Aborting"),
-        }
-    }
-
-    /// Returns target packages to be assembled on the builder machine, limited
-    /// to those specified in `only` (if set).
-    fn packages_to_build(&self) -> PackageMap<'_> {
-        let packages = self.package_config.packages_to_build(&self.target);
-        if self.only.is_empty() {
-            return packages;
-        }
-
-        let mut filtered_packages = PackageMap(BTreeMap::new());
-        let mut to_walk = PackageMap(BTreeMap::new());
-        // add the requested packages to `to_walk`
-        for package_name in &self.only {
-            to_walk.0.insert(
-                package_name,
-                packages.0.get(package_name).unwrap_or_else(|| {
-                    panic!(
-                        "Explicitly-requested package '{}' does not exist",
-                        package_name
-                    )
-                }),
-            );
-        }
-        // dependencies are listed by output name, so create a lookup table to
-        // get a package by its output name.
-        let lookup_by_output = packages
-            .0
-            .iter()
-            .map(|(name, package)| {
-                (package.get_output_file(name), (*name, *package))
-            })
-            .collect::<BTreeMap<_, _>>();
-        // packages yet to be walked are added to `to_walk`. pop each entry and
-        // add its dependencies to `to_walk`, then add the package we finished
-        // walking to `filtered_packages`.
-        while let Some((package_name, package)) = to_walk.0.pop_first() {
-            if let PackageSource::Composite { packages } = &package.source {
-                for output in packages {
-                    // find the package by output name
-                    let (dep_name, dep_package) =
-                        lookup_by_output.get(output).unwrap_or_else(|| {
-                            panic!(
-                                "Could not find a package which creates '{}'",
-                                output
-                            )
-                        });
-                    if dep_name.as_str() == package_name {
-                        panic!("'{}' depends on itself", package_name);
-                    }
-                    // if we've seen this package already, it will be in
-                    // `filtered_packages`. otherwise, add it to `to_walk`.
-                    if !filtered_packages.0.contains_key(dep_name) {
-                        to_walk.0.insert(dep_name, dep_package);
-                    }
-                }
-            }
-            // we're done looking at this package's deps
-            filtered_packages.0.insert(package_name, package);
-        }
-        filtered_packages
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::try_parse()?;
@@ -1069,43 +865,13 @@ async fn main() -> Result<()> {
     let drain = slog_async::Async::new(drain).build().fuse();
     let log = Logger::root(drain, o!());
 
-    let target_help_str = || -> String {
-        format!(
-            "Try calling: '{} -t default target create' to create a new build target",
-            env::current_exe().unwrap().display()
-        )
-    };
-
     let get_config = || -> Result<Config> {
-        let target_path = args.artifact_dir.join("target").join(&args.target);
-        let raw_target =
-            std::fs::read_to_string(&target_path).inspect_err(|_| {
-                eprintln!(
-                    "Failed to read build target: {}\n{}",
-                    target_path,
-                    target_help_str()
-                );
-            })?;
-        let target: Target = KnownTarget::from_str(&raw_target)
-            .inspect_err(|_| {
-                eprintln!(
-                    "Failed to parse {} as target\n{}",
-                    target_path,
-                    target_help_str()
-                );
-            })?
-            .into();
-        debug!(log, "target[{}]: {:?}", args.target, target);
-
-        Ok(Config {
-            log: log.clone(),
+        Config::get_config(
+            &log,
             package_config,
-            target,
-            only: Vec::new(),
-            force: args.force,
-            retry_count: args.retry_count,
-            retry_duration: args.retry_duration,
-        })
+            &args.config_args,
+            &args.artifact_dir,
+        )
     };
 
     // Use a CWD that is the root of the Omicron repository.
@@ -1119,7 +885,12 @@ async fn main() -> Result<()> {
 
     match args.subcommand {
         SubCommand::Build(BuildCommand::Target { subcommand }) => {
-            do_target(&args.artifact_dir, &args.target, &subcommand).await?;
+            do_target(
+                &args.artifact_dir,
+                &args.config_args.target,
+                &subcommand,
+            )
+            .await?;
         }
         SubCommand::Build(BuildCommand::Dot) => {
             do_dot(&get_config()?).await?;
@@ -1130,7 +901,7 @@ async fn main() -> Result<()> {
         }
         SubCommand::Build(BuildCommand::Package { disable_cache, only }) => {
             let mut config = get_config()?;
-            config.only = only;
+            config.set_only(only);
             do_package(&config, &args.artifact_dir, disable_cache).await?;
         }
         SubCommand::Build(BuildCommand::Stamp { package_name, version }) => {
@@ -1141,6 +912,9 @@ async fn main() -> Result<()> {
                 &version,
             )
             .await?;
+        }
+        SubCommand::Build(BuildCommand::ShowCargoCommands) => {
+            do_show_cargo_commands(&get_config()?).await?;
         }
         SubCommand::Build(BuildCommand::Check) => {
             do_check(&get_config()?).await?

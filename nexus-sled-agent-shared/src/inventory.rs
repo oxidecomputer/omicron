@@ -181,6 +181,8 @@ impl OmicronZoneConfig {
     JsonSchema,
     PartialEq,
     Eq,
+    PartialOrd,
+    Ord,
     Hash,
     Diffus,
 )]

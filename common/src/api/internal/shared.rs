@@ -57,6 +57,8 @@ pub enum NetworkInterfaceKind {
     JsonSchema,
     PartialEq,
     Eq,
+    PartialOrd,
+    Ord,
     Hash,
     Diffus,
 )]
@@ -79,7 +81,17 @@ pub struct NetworkInterface {
 // Note that `Deserialize` is manually implemented; if you make any changes to
 // the fields of this structure, you must make them to that implementation too.
 #[derive(
-    Debug, Clone, Copy, Serialize, JsonSchema, PartialEq, Eq, Hash, Diffus,
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Diffus,
 )]
 pub struct SourceNatConfig {
     /// The external address provided to the instance or service.

@@ -148,7 +148,18 @@ impl OmicronZoneNetworkResources {
 }
 
 /// External IP variants possible for Omicron-managed zones.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Hash,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+)]
 pub enum OmicronZoneExternalIp {
     Floating(OmicronZoneExternalFloatingIp),
     Snat(OmicronZoneExternalSnatIp),
@@ -204,6 +215,8 @@ pub enum OmicronZoneExternalIpKey {
     Clone,
     Copy,
     Hash,
+    PartialOrd,
+    Ord,
     PartialEq,
     Eq,
     JsonSchema,
@@ -223,6 +236,8 @@ pub struct OmicronZoneExternalFloatingIp {
     Copy,
     PartialEq,
     Eq,
+    PartialOrd,
+    Ord,
     JsonSchema,
     Serialize,
     Deserialize,
@@ -249,6 +264,8 @@ impl OmicronZoneExternalFloatingAddr {
     Clone,
     Copy,
     Hash,
+    PartialOrd,
+    Ord,
     PartialEq,
     Eq,
     JsonSchema,

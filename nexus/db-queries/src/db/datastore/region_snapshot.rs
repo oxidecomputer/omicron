@@ -120,4 +120,40 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
+
+    /// Find region snapshots not on expunged disks that match a snapshot id
+    pub async fn find_non_expunged_region_snapshots(
+        &self,
+        opctx: &OpContext,
+        snapshot_id: Uuid,
+    ) -> LookupResult<Vec<RegionSnapshot>> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::physical_disk::dsl as physical_disk_dsl;
+        use db::schema::region_snapshot::dsl as region_snapshot_dsl;
+        use db::schema::zpool::dsl as zpool_dsl;
+
+        region_snapshot_dsl::region_snapshot
+            .filter(region_snapshot_dsl::dataset_id.eq_any(
+                dataset_dsl::dataset
+                    .filter(dataset_dsl::time_deleted.is_null())
+                    .filter(dataset_dsl::pool_id.eq_any(
+                        zpool_dsl::zpool
+                            .filter(zpool_dsl::time_deleted.is_null())
+                            .filter(zpool_dsl::physical_disk_id.eq_any(
+                                physical_disk_dsl::physical_disk
+                                    .filter(physical_disk_dsl::disk_policy.eq(PhysicalDiskPolicy::InService))
+                                    .select(physical_disk_dsl::id)
+                            ))
+                            .select(zpool_dsl::id)
+                    ))
+                    .select(dataset_dsl::id)
+            ))
+            .filter(region_snapshot_dsl::snapshot_id.eq(snapshot_id))
+            .select(RegionSnapshot::as_select())
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
 }

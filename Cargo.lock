@@ -1333,6 +1333,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1462739cb27611015575c0c11df5df7601141071f07518d56fcc1be504cbec97"
 
 [[package]]
+name = "clickana"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "chrono",
+ "clap",
+ "clickhouse-admin-server-client",
+ "clickhouse-admin-types",
+ "dropshot 0.13.0",
+ "futures",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "ratatui",
+ "schemars",
+ "serde_json",
+ "slog",
+ "slog-async",
+ "slog-dtrace",
+ "slog-error-chain",
+ "slog-term",
+ "tokio",
+ "tokio-postgres",
+]
+
+[[package]]
 name = "clickhouse-admin-api"
 version = "0.1.0"
 dependencies = [
@@ -6033,6 +6059,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-reconfigurator-blippy"
+version = "0.1.0"
+dependencies = [
+ "nexus-reconfigurator-planning",
+ "nexus-sled-agent-shared",
+ "nexus-types",
+ "omicron-common",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+]
+
+[[package]]
 name = "nexus-reconfigurator-execution"
 version = "0.1.0"
 dependencies = [
@@ -6099,6 +6138,7 @@ dependencies = [
  "maplit",
  "nexus-config",
  "nexus-inventory",
+ "nexus-reconfigurator-blippy",
  "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
@@ -7141,6 +7181,7 @@ dependencies = [
  "ring 0.17.8",
  "semver 1.0.23",
  "serde",
+ "shell-words",
  "sled-hardware",
  "slog",
  "slog-async",
