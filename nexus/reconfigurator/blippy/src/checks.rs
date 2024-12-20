@@ -263,7 +263,7 @@ fn check_dataset_zpool_uniqueness(blippy: &mut Blippy<'_>) {
                 blippy.push_sled_note(
                     sled_id,
                     Severity::Fatal,
-                    SledKind::ZpoolFilesystemDatasetCollision {
+                    SledKind::ZoneFilesystemDatasetCollision {
                         zone1: previous.clone(),
                         zone2: zone.clone(),
                         zpool: dataset.into_parts().0,
@@ -547,6 +547,7 @@ mod tests {
     use crate::blippy::Note;
     use crate::BlippyReportSortKey;
     use nexus_reconfigurator_planning::example::example;
+    use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintZoneType;
     use omicron_test_utils::dev::test_setup_log;
@@ -801,19 +802,17 @@ mod tests {
             _ => unreachable!("this is a Nexus zone"),
         };
 
-        let expected_notes = [
-            Note {
-                severity: Severity::Fatal,
-                kind: Kind::Sled {
-                    sled_id: nexus1_sled_id,
-                    kind: SledKind::DuplicateExternalIp {
-                        zone1: nexus0.clone(),
-                        zone2: nexus1.clone(),
-                        ip: dup_ip.ip,
-                    },
+        let expected_notes = [Note {
+            severity: Severity::Fatal,
+            kind: Kind::Sled {
+                sled_id: nexus1_sled_id,
+                kind: SledKind::DuplicateExternalIp {
+                    zone1: nexus0.clone(),
+                    zone2: nexus1.clone(),
+                    ip: dup_ip.ip,
                 },
             },
-        ];
+        }];
 
         let report =
             Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
@@ -868,19 +867,17 @@ mod tests {
             _ => unreachable!("this is a Nexus zone"),
         };
 
-        let expected_notes = [
-            Note {
-                severity: Severity::Fatal,
-                kind: Kind::Sled {
-                    sled_id: nexus1_sled_id,
-                    kind: SledKind::DuplicateNicIp {
-                        zone1: nexus0.clone(),
-                        zone2: nexus1.clone(),
-                        ip: dup_ip,
-                    },
+        let expected_notes = [Note {
+            severity: Severity::Fatal,
+            kind: Kind::Sled {
+                sled_id: nexus1_sled_id,
+                kind: SledKind::DuplicateNicIp {
+                    zone1: nexus0.clone(),
+                    zone2: nexus1.clone(),
+                    ip: dup_ip,
                 },
             },
-        ];
+        }];
 
         let report =
             Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
@@ -935,15 +932,170 @@ mod tests {
             _ => unreachable!("this is a Nexus zone"),
         };
 
+        let expected_notes = [Note {
+            severity: Severity::Fatal,
+            kind: Kind::Sled {
+                sled_id: nexus1_sled_id,
+                kind: SledKind::DuplicateNicMac {
+                    zone1: nexus0.clone(),
+                    zone2: nexus1.clone(),
+                    mac: dup_mac,
+                },
+            },
+        }];
+
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        for note in expected_notes {
+            assert!(
+                report.notes().contains(&note),
+                "did not find expected note {note:?}"
+            );
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_durable_dataset_collision() {
+        static TEST_NAME: &str = "test_durable_dataset_collision";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, mut blueprint) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .external_dns_count(2)
+                .unwrap()
+                .build();
+
+        // Copy the durable zpool from one external DNS to another.
+        let mut dns_iter = blueprint.blueprint_zones.iter_mut().flat_map(
+            |(sled_id, zones_config)| {
+                zones_config.zones.iter_mut().filter_map(move |zone| {
+                    if zone.zone_type.is_external_dns() {
+                        Some((*sled_id, zone))
+                    } else {
+                        None
+                    }
+                })
+            },
+        );
+        let (dns0_sled_id, dns0) =
+            dns_iter.next().expect("at least one external DNS zone");
+        let (dns1_sled_id, dns1) =
+            dns_iter.next().expect("at least two external DNS zones");
+        assert_ne!(dns0_sled_id, dns1_sled_id);
+
+        let dup_zpool = dns0
+            .zone_type
+            .durable_zpool()
+            .expect("external DNS has a durable zpool")
+            .clone();
+        match &mut dns1.zone_type {
+            BlueprintZoneType::ExternalDns(
+                blueprint_zone_type::ExternalDns { dataset, .. },
+            ) => {
+                dataset.pool_name = dup_zpool.clone();
+            }
+            _ => unreachable!("this is an external DNS zone"),
+        };
+
         let expected_notes = [
             Note {
                 severity: Severity::Fatal,
                 kind: Kind::Sled {
-                    sled_id: nexus1_sled_id,
-                    kind: SledKind::DuplicateNicMac {
-                        zone1: nexus0.clone(),
-                        zone2: nexus1.clone(),
-                        mac: dup_mac,
+                    sled_id: dns1_sled_id,
+                    kind: SledKind::ZoneDurableDatasetCollision {
+                        zone1: dns0.clone(),
+                        zone2: dns1.clone(),
+                        zpool: dup_zpool.clone(),
+                    },
+                },
+            },
+            Note {
+                severity: Severity::Fatal,
+                kind: Kind::Sled {
+                    sled_id: dns1_sled_id,
+                    kind: SledKind::ZoneWithDatasetsOnDifferentZpools {
+                        zone: dns1.clone(),
+                        durable_zpool: dup_zpool.clone(),
+                        transient_zpool: dns1.filesystem_pool.clone().unwrap(),
+                    },
+                },
+            },
+        ];
+
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        for note in expected_notes {
+            assert!(
+                report.notes().contains(&note),
+                "did not find expected note {note:?}"
+            );
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_transient_root_dataset_collision() {
+        static TEST_NAME: &str = "test_transient_root_dataset_collision";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, mut blueprint) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .external_dns_count(2)
+                .unwrap()
+                .build();
+
+        // Copy the filesystem zpool from one external DNS to another.
+        let mut dns_iter = blueprint.blueprint_zones.iter_mut().flat_map(
+            |(sled_id, zones_config)| {
+                zones_config.zones.iter_mut().filter_map(move |zone| {
+                    if zone.zone_type.is_external_dns() {
+                        Some((*sled_id, zone))
+                    } else {
+                        None
+                    }
+                })
+            },
+        );
+        let (dns0_sled_id, dns0) =
+            dns_iter.next().expect("at least one external DNS zone");
+        let (dns1_sled_id, dns1) =
+            dns_iter.next().expect("at least two external DNS zones");
+        assert_ne!(dns0_sled_id, dns1_sled_id);
+
+        let dup_zpool = dns0
+            .filesystem_pool
+            .as_ref()
+            .expect("external DNS has a filesystem zpool")
+            .clone();
+        dns1.filesystem_pool = Some(dup_zpool.clone());
+
+        let expected_notes = [
+            Note {
+                severity: Severity::Fatal,
+                kind: Kind::Sled {
+                    sled_id: dns1_sled_id,
+                    kind: SledKind::ZoneFilesystemDatasetCollision {
+                        zone1: dns0.clone(),
+                        zone2: dns1.clone(),
+                        zpool: dup_zpool.clone(),
+                    },
+                },
+            },
+            Note {
+                severity: Severity::Fatal,
+                kind: Kind::Sled {
+                    sled_id: dns1_sled_id,
+                    kind: SledKind::ZoneWithDatasetsOnDifferentZpools {
+                        zone: dns1.clone(),
+                        durable_zpool: dns1
+                            .zone_type
+                            .durable_zpool()
+                            .unwrap()
+                            .clone(),
+                        transient_zpool: dup_zpool.clone(),
                     },
                 },
             },

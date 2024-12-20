@@ -138,7 +138,7 @@ pub enum SledKind {
         zpool: ZpoolName,
     },
     /// Two zones with the same filesystem dataset kind are on the same zpool.
-    ZpoolFilesystemDatasetCollision {
+    ZoneFilesystemDatasetCollision {
         zone1: BlueprintZoneConfig,
         zone2: BlueprintZoneConfig,
         zpool: ZpoolName,
@@ -263,7 +263,7 @@ impl fmt::Display for SledKind {
                     zone2.id,
                 )
             }
-            SledKind::ZpoolFilesystemDatasetCollision {
+            SledKind::ZoneFilesystemDatasetCollision {
                 zone1,
                 zone2,
                 zpool,
