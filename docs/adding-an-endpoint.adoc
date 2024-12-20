@@ -53,7 +53,7 @@ this document should act as a jumping-off point.
 === **Testing**
 
 * Authorization
-** There exists a https://github.com/oxidecomputer/omicron/blob/main/nexus/src/authz/policy_test[policy test] which compares all Oso objects against an expected policy. New resources are usually added to https://github.com/oxidecomputer/omicron/blob/main/nexus/src/authz/policy_test/resources.rs[resources.rs] to get coverage.
+** There exists a https://github.com/oxidecomputer/omicron/blob/main/nexus/db-queries/src/policy_test[policy test] which compares all Oso objects against an expected policy. New resources are usually added to https://github.com/oxidecomputer/omicron/blob/main/nexus/db-queries/src/policy_test/resources.rs[resources.rs] to get coverage.
 * OpenAPI
 ** Once you've added or changed endpoint definitions in `nexus-external-api` or `nexus-internal-api`, you'll need to update the corresponding OpenAPI documents (the JSON files in `openapi/`).
 ** To update all OpenAPI documents, run `cargo xtask openapi generate`.

@@ -1034,6 +1034,20 @@ resource: PhysicalDisk id "c9f923f6-caf3-4c83-96f9-8ffe8c627dd2"
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
+resource: SupportBundle id "d9f923f6-caf3-4c83-96f9-8ffe8c627dd2"
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  fleet-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
 resource: DeviceAuthRequest "a-device-user-code"
 
   USER                             Q  R LC RP  M MP CC  D

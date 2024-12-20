@@ -15,12 +15,14 @@ use futures::FutureExt;
 use futures::TryStreamExt;
 use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::SledFilter;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::DatasetUuid;
@@ -39,6 +41,14 @@ use tokio::io::AsyncSeekExt;
 use tokio::io::SeekFrom;
 use zip::write::FullFileOptions;
 use zip::ZipWriter;
+
+fn authz_support_bundle_from_id(id: SupportBundleUuid) -> authz::SupportBundle {
+    authz::SupportBundle::new(
+        authz::FLEET,
+        id,
+        LookupType::ById(id.into_untyped_uuid()),
+    )
+}
 
 // Specifies the data to be collected within the Support Bundle.
 #[derive(Default)]
@@ -151,13 +161,14 @@ impl SupportBundleCollector {
         opctx: &OpContext,
         bundle: &SupportBundle,
     ) -> anyhow::Result<DatabaseBundleCleanupResult> {
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         match bundle.state {
             SupportBundleState::Destroying => {
                 // Destroying is a terminal state; no one should be able to
                 // change this state from underneath us.
                 self.datastore.support_bundle_delete(
                     opctx,
-                    bundle.id.into(),
+                    &authz_bundle,
                 ).await.map_err(|err| {
                     warn!(
                         &opctx.log,
@@ -176,7 +187,7 @@ impl SupportBundleCollector {
                     .datastore
                     .support_bundle_update(
                         &opctx,
-                        bundle.id.into(),
+                        &authz_bundle,
                         SupportBundleState::Failed,
                     )
                     .await
@@ -371,12 +382,13 @@ impl SupportBundleCollector {
             bundle: &bundle,
         };
 
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         let mut report = collection.collect_bundle_and_store_on_sled().await?;
         if let Err(err) = self
             .datastore
             .support_bundle_update(
                 &opctx,
-                bundle.id.into(),
+                &authz_bundle,
                 SupportBundleState::Active,
             )
             .await
@@ -1128,10 +1140,11 @@ mod test {
         assert_eq!(bundle.state, SupportBundleState::Collecting);
 
         // Cancel the bundle immediately
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         datastore
             .support_bundle_update(
                 &opctx,
-                bundle.id.into(),
+                &authz_bundle,
                 SupportBundleState::Destroying,
             )
             .await
@@ -1193,10 +1206,11 @@ mod test {
         assert!(report.activated_in_db_ok);
 
         // Cancel the bundle after collection has completed
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         datastore
             .support_bundle_update(
                 &opctx,
-                bundle.id.into(),
+                &authz_bundle,
                 SupportBundleState::Destroying,
             )
             .await
@@ -1248,10 +1262,11 @@ mod test {
         // Mark the bundle as "failing" - this should be triggered
         // automatically by the blueprint executor if the corresponding
         // storage has been expunged.
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         datastore
             .support_bundle_update(
                 &opctx,
-                bundle.id.into(),
+                &authz_bundle,
                 SupportBundleState::Failing,
             )
             .await
@@ -1316,10 +1331,11 @@ mod test {
         // Mark the bundle as "failing" - this should be triggered
         // automatically by the blueprint executor if the corresponding
         // storage has been expunged.
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         datastore
             .support_bundle_update(
                 &opctx,
-                bundle.id.into(),
+                &authz_bundle,
                 SupportBundleState::Failing,
             )
             .await
@@ -1389,10 +1405,11 @@ mod test {
         // Mark the bundle as "failing" - this should be triggered
         // automatically by the blueprint executor if the corresponding
         // storage has been expunged.
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         datastore
             .support_bundle_update(
                 &opctx,
-                bundle.id.into(),
+                &authz_bundle,
                 SupportBundleState::Failing,
             )
             .await
