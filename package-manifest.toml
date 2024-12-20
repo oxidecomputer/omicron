@@ -935,3 +935,37 @@ source.rust.binary_names = ["clickana"]
 source.rust.release = true
 output.type = "zone"
 output.intermediate_only = true
+
+# Target configuration
+# --------------------
+#
+# This section defines "targets" built by Omicron. A target is a map of keys and
+# values that are used to filter out packages (via `only_for_targets`) and for
+# other purposes.
+#
+# For what the individual keys mean, see the definition for `TargetCommand` in
+# `package/src/lib.rs`.
+
+# A preset for the host image built during release.
+[target.preset.host]
+image = "standard"
+machine = "gimlet"
+switch = "asic"
+rack-topology = "multi-sled"
+clickhouse-topology = "single-node"
+
+# A preset for the recovery image built during release.
+[target.preset.recovery]
+image = "trampoline"
+# The trampoline image doesn't execute sled-agent and doesn't contain the switch
+# zone, so neither "machine" nor "switch" are defined.
+rack-topology = "single-sled"
+clickhouse-topology = "single-node"
+
+# A preset for development.
+[target.preset.dev]
+image = "standard"
+machine = "non-gimlet"
+switch = "softnpu"
+rack-topology = "single-sled"
+clickhouse-topology = "single-node"

@@ -838,7 +838,8 @@ opt-level = 3
 #
 #[patch."crates-io"]
 #dropshot = { path = "../dropshot/dropshot" }
-#[patch.crates-io]
+[patch.crates-io]
+omicron-zone-package = { path = "../omicron-package" }
 #steno = { path = "../steno" }
 # [patch."https://github.com/oxidecomputer/propolis"]
 # propolis-client = { path = "../propolis/lib/propolis-client" }
