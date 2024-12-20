@@ -12,7 +12,7 @@ use illumos_utils::{zfs, zone};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use omicron_package::cargo_plan::build_cargo_plan;
 use omicron_package::config::{Config, ConfigArgs};
-use omicron_package::target::KnownTarget;
+use omicron_package::target::{target_command_help, KnownTarget};
 use omicron_package::{parse, BuildCommand, DeployCommand, TargetCommand};
 use omicron_zone_package::config::Config as PackageConfig;
 use omicron_zone_package::package::{Package, PackageOutput, PackageSource};
@@ -157,7 +157,7 @@ async fn do_list_outputs(
 
 async fn do_target(
     artifact_dir: &Utf8Path,
-    name: &str,
+    name: Option<&str>,
     subcommand: &TargetCommand,
 ) -> Result<()> {
     let target_dir = artifact_dir.join("target");
@@ -180,7 +180,7 @@ async fn do_target(
                 clickhouse_topology.clone(),
             )?;
 
-            let path = get_single_target(&target_dir, name).await?;
+            let (name, path) = get_required_named_target(&target_dir, name)?;
             tokio::fs::write(&path, Target::from(target).to_string())
                 .await
                 .with_context(|| {
@@ -215,31 +215,46 @@ async fn do_target(
             }
         }
         TargetCommand::Set => {
-            let _ = get_single_target(&target_dir, name).await?;
+            let (name, _) = get_required_named_target(&target_dir, name)?;
             replace_active_link(&name, &target_dir).await?;
             println!("Set build target '{name}' as active");
         }
         TargetCommand::Delete => {
-            let path = get_single_target(&target_dir, name).await?;
-            tokio::fs::remove_file(&path).await?;
+            let (name, path) = get_required_named_target(&target_dir, name)?;
+            tokio::fs::remove_file(&path).await.with_context(|| {
+                format!("failed to remove target file {}", path)
+            })?;
             println!("Removed build target '{name}'");
         }
     };
     Ok(())
 }
 
-async fn get_single_target(
+/// Get the path to a named target as required by the `target` subcommand.
+///
+/// This function bans `active` as a target name, as it is reserved for the
+/// active target.
+fn get_required_named_target(
     target_dir: impl AsRef<Utf8Path>,
-    name: &str,
-) -> Result<Utf8PathBuf> {
-    if name == Config::ACTIVE {
-        bail!(
-            "The name '{name}' is reserved, please try another (e.g. 'default')\n\
-            Usage: '{} -t <TARGET> target ...'",
-            env::current_exe().unwrap().display(),
-        );
+    name: Option<&str>,
+) -> Result<(&str, Utf8PathBuf)> {
+    match name {
+        Some(name) if name == Config::ACTIVE => {
+            bail!(
+                "the name '{name}' is reserved, please try another (e.g. 'default')\n\
+                 Usage: {} ...",
+                target_command_help("<TARGET>"),
+            );
+        }
+        Some(name) => Ok((name, target_dir.as_ref().join(name))),
+        None => {
+            bail!(
+                "a target name is required for this operation (e.g. 'default')\n\
+                 Usage: {} ...",
+                target_command_help("<TARGET>"),
+            );
+        }
     }
-    Ok(target_dir.as_ref().join(name))
 }
 
 async fn replace_active_link(
@@ -887,7 +902,7 @@ async fn main() -> Result<()> {
         SubCommand::Build(BuildCommand::Target { subcommand }) => {
             do_target(
                 &args.artifact_dir,
-                &args.config_args.target,
+                args.config_args.target.as_deref(),
                 &subcommand,
             )
             .await?;

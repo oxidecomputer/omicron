@@ -11,21 +11,15 @@ use omicron_zone_package::{
     target::Target,
 };
 use slog::{debug, Logger};
-use std::{
-    collections::BTreeMap, env, io::Write, str::FromStr, time::Duration,
-};
+use std::{collections::BTreeMap, io::Write, str::FromStr, time::Duration};
 
-use crate::target::KnownTarget;
+use crate::target::{target_command_help, KnownTarget};
 
 #[derive(Debug, Args)]
 pub struct ConfigArgs {
     /// The name of the build target to use for this command
-    #[clap(
-        short,
-        long,
-        default_value_t = Config::ACTIVE.to_string(),
-    )]
-    pub target: String,
+    #[clap(short, long)]
+    pub target: Option<String>,
 
     /// Skip confirmation prompt for destructive operations
     #[clap(short, long, action, default_value_t = false)]
@@ -78,14 +72,17 @@ impl Config {
         args: &ConfigArgs,
         artifact_dir: &Utf8Path,
     ) -> Result<Self> {
+        // Within this path, the target is expected to be set.
+        let target = args.target.as_deref().unwrap_or(Self::ACTIVE);
+
         let target_help_str = || -> String {
             format!(
-                "Try calling: '{} -t default target create' to create a new build target",
-                env::current_exe().unwrap().display()
+                "Try calling: '{} target create' to create a new build target",
+                target_command_help("default"),
             )
         };
 
-        let target_path = artifact_dir.join("target").join(&args.target);
+        let target_path = artifact_dir.join("target").join(target);
         let raw_target =
             std::fs::read_to_string(&target_path).inspect_err(|_| {
                 eprintln!(
@@ -103,7 +100,7 @@ impl Config {
                 );
             })?
             .into();
-        debug!(log, "target[{}]: {:?}", args.target, target);
+        debug!(log, "target[{}]: {:?}", target, target);
 
         Ok(Config {
             log: log.clone(),
