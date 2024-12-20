@@ -28,6 +28,7 @@ impl StepSpec for ReconfiguratorExecutionSpec {
 )]
 pub enum ExecutionComponent {
     ExternalNetworking,
+    SupportBundles,
     SledList,
     PhysicalDisks,
     OmicronZones,
