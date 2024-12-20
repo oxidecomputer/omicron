@@ -3501,7 +3501,6 @@ mod test {
             diff.display()
         );
         */
-        println!("_______DIFFUS __________\n");
         println!("bp2 -> bp3 visit\n");
         let mut visitor = DebugVisitor;
         visitor.visit_blueprint_edit(&blueprint2.diff(&blueprint3));
@@ -3511,7 +3510,6 @@ mod test {
         println!("{:#?}", diffus_diff);
         println!("{:#?}", change);
         */
-        println!("________DIFFUS __________\n");
 
         logctx.cleanup_successful();
     }

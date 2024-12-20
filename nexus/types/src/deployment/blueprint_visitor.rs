@@ -11,7 +11,9 @@ use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
-use super::EditedBlueprint;
+use super::{
+    BlueprintZonesConfig, EditedBlueprint, EditedBlueprintZonesConfig,
+};
 
 #[derive(Debug, Clone)]
 pub struct Change<'e, T> {
@@ -52,7 +54,6 @@ pub trait Visit<'e> {
     ) {
         visit_sled_state_edit(self, node);
     }
-
     fn visit_sled_state_copy(
         &mut self,
         node: &'e BTreeMap<SledUuid, SledState>,
@@ -81,17 +82,59 @@ pub trait Visit<'e> {
     }
     fn visit_sled_state_map_remove(
         &mut self,
-        key: &'e SledUuid,
+        sled_id: &'e SledUuid,
         state: &'e SledState,
     ) {
-        visit_sled_state_map_remove(self, key, state);
+        visit_sled_state_map_remove(self, sled_id, state);
     }
     fn visit_sled_state_map_change(
         &mut self,
-        key: &'e SledUuid,
+        sled_id: &'e SledUuid,
         node: Change<'e, SledState>,
     ) {
-        visit_sled_state_map_change(self, key, node);
+        visit_sled_state_map_change(self, sled_id, node);
+    }
+
+    /// Visitors for `blueprint_zone`
+    fn visit_blueprint_zones_copy(
+        &mut self,
+        node: &'e BTreeMap<SledUuid, BlueprintZonesConfig>,
+    ) {
+        visit_blueprint_zones_copy(self, node);
+    }
+    fn visit_blueprint_zones_change(
+        &mut self,
+        node: &'e BTreeMap<&'e SledUuid, map::Edit<BlueprintZonesConfig>>,
+    ) {
+        visit_blueprint_zones_change(self, node);
+    }
+    fn visit_blueprint_zones_map_copy(
+        &mut self,
+        sled_id: &'e SledUuid,
+        node: &'e BlueprintZonesConfig,
+    ) {
+        visit_blueprint_zones_map_copy(self, sled_id, node);
+    }
+    fn visit_blueprint_zones_map_insert(
+        &mut self,
+        sled_id: &'e SledUuid,
+        node: &'e BlueprintZonesConfig,
+    ) {
+        visit_blueprint_zones_map_insert(self, sled_id, node);
+    }
+    fn visit_blueprint_zones_map_remove(
+        &mut self,
+        sled_id: &'e SledUuid,
+        node: &'e BlueprintZonesConfig,
+    ) {
+        visit_blueprint_zones_map_copy(self, sled_id, node);
+    }
+    fn visit_blueprint_zones_map_change(
+        &mut self,
+        sled_id: &'e SledUuid,
+        node: &'e EditedBlueprintZonesConfig,
+    ) {
+        visit_blueprint_zones_map_change(self, sled_id, node);
     }
 }
 
@@ -123,6 +166,11 @@ where
 {
     v.visit_id_edit(&node.id);
     v.visit_sled_state_edit(&node.sled_state);
+
+    match &node.blueprint_zones {
+        Edit::Copy(node) => v.visit_blueprint_zones_copy(node),
+        Edit::Change(node) => v.visit_blueprint_zones_change(&node),
+    }
 }
 
 pub fn visit_id_edit<'e, V>(v: &mut V, node: &'e Edit<Uuid>)
@@ -251,6 +299,79 @@ pub fn visit_sled_state_map_change<'e, V>(
     // Leaf node, nothing to do by default
 }
 
+pub fn visit_blueprint_zones_copy<'e, V>(
+    v: &mut V,
+    node: &'e BTreeMap<SledUuid, BlueprintZonesConfig>,
+) where
+    V: Visit<'e> + ?Sized,
+{
+    // Leaf node, nothing to do by default
+}
+
+pub fn visit_blueprint_zones_change<'e, V>(
+    v: &mut V,
+    node: &'e BTreeMap<&'e SledUuid, map::Edit<BlueprintZonesConfig>>,
+) where
+    V: Visit<'e> + ?Sized,
+{
+    for (sled_id, node) in node {
+        match node {
+            map::Edit::Copy(node) => {
+                v.visit_blueprint_zones_map_copy(sled_id, node)
+            }
+            map::Edit::Insert(node) => {
+                v.visit_blueprint_zones_map_insert(sled_id, node)
+            }
+            map::Edit::Remove(node) => {
+                v.visit_blueprint_zones_map_remove(sled_id, node)
+            }
+            map::Edit::Change(node) => {
+                v.visit_blueprint_zones_map_change(sled_id, node)
+            }
+        }
+    }
+}
+
+pub fn visit_blueprint_zones_map_copy<'e, V>(
+    v: &mut V,
+    sled_id: &'e SledUuid,
+    node: &'e BlueprintZonesConfig,
+) where
+    V: Visit<'e> + ?Sized,
+{
+    // Leaf node, nothing to do by default
+}
+
+pub fn visit_blueprint_zones_map_insert<'e, V>(
+    v: &mut V,
+    sled_id: &'e SledUuid,
+    node: &'e BlueprintZonesConfig,
+) where
+    V: Visit<'e> + ?Sized,
+{
+    // Leaf node, nothing to do by default
+}
+
+pub fn visit_blueprint_zones_map_remove<'e, V>(
+    v: &mut V,
+    sled_id: &'e SledUuid,
+    node: &'e BlueprintZonesConfig,
+) where
+    V: Visit<'e> + ?Sized,
+{
+    // Leaf node, nothing to do by default
+}
+
+pub fn visit_blueprint_zones_map_change<'e, V>(
+    v: &mut V,
+    sled_id: &'e SledUuid,
+    node: &'e EditedBlueprintZonesConfig,
+) where
+    V: Visit<'e> + ?Sized,
+{
+    todo!()
+}
+
 /// A visitor for debug printing walks of a blueprint
 pub struct DebugVisitor;
 
@@ -297,5 +418,21 @@ impl<'e> Visit<'e> for DebugVisitor {
         node: Change<'e, SledState>,
     ) {
         println!("sled state changed {}: {:?}", sled_id, node);
+    }
+
+    fn visit_blueprint_zones_map_insert(
+        &mut self,
+        sled_id: &'e SledUuid,
+        node: &'e BlueprintZonesConfig,
+    ) {
+        println!("Added zones to sled_{}: {:#?}", sled_id, node);
+    }
+
+    fn visit_blueprint_zones_map_remove(
+        &mut self,
+        sled_id: &'e SledUuid,
+        node: &'e BlueprintZonesConfig,
+    ) {
+        println!("Removed zones from sled_{}: {:#?}", sled_id, node);
     }
 }
