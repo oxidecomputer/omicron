@@ -127,7 +127,7 @@ pub trait Visit<'e> {
         sled_id: &'e SledUuid,
         node: &'e BlueprintZonesConfig,
     ) {
-        visit_blueprint_zones_map_copy(self, sled_id, node);
+        visit_blueprint_zones_map_remove(self, sled_id, node);
     }
     fn visit_blueprint_zones_map_change(
         &mut self,
