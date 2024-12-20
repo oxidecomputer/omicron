@@ -1564,7 +1564,7 @@ pub(crate) mod test {
         let opctx = test_opctx(cptestctx);
 
         let disk_allocated_regions =
-            datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+            datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
         assert_eq!(disk_allocated_regions.len(), 3);
 
         let region: &nexus_db_model::Region = &disk_allocated_regions[0].1;
@@ -1585,7 +1585,7 @@ pub(crate) mod test {
             .unwrap();
 
         let affected_volume_original =
-            datastore.volume_get(db_snapshot.volume_id).await.unwrap().unwrap();
+            datastore.volume_get(db_snapshot.volume_id()).await.unwrap().unwrap();
 
         verify_clean_slate(
             &cptestctx,
@@ -1668,7 +1668,7 @@ pub(crate) mod test {
         let opctx = test_opctx(cptestctx);
 
         let disk_allocated_regions =
-            datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+            datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
         assert_eq!(disk_allocated_regions.len(), 3);
 
         let region: &nexus_db_model::Region = &disk_allocated_regions[0].1;
@@ -1689,7 +1689,7 @@ pub(crate) mod test {
             .unwrap();
 
         let affected_volume_original =
-            datastore.volume_get(db_snapshot.volume_id).await.unwrap().unwrap();
+            datastore.volume_get(db_snapshot.volume_id()).await.unwrap().unwrap();
 
         disk_test.set_always_fail_callback().await;
 
@@ -1778,9 +1778,9 @@ pub(crate) mod test {
             .unwrap();
 
         let disk_allocated_regions =
-            datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+            datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
         let snapshot_allocated_regions = datastore
-            .get_allocated_regions(db_snapshot.volume_id)
+            .get_allocated_regions(db_snapshot.volume_id())
             .await
             .unwrap();
 
@@ -1869,7 +1869,7 @@ pub(crate) mod test {
         );
 
         let snapshot_allocated_regions = datastore
-            .get_allocated_regions(db_snapshot.volume_id)
+            .get_allocated_regions(db_snapshot.volume_id())
             .await
             .unwrap();
 
@@ -1937,9 +1937,9 @@ pub(crate) mod test {
             .unwrap();
 
         let disk_allocated_regions =
-            datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+            datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
         let snapshot_allocated_regions = datastore
-            .get_allocated_regions(db_snapshot.volume_id)
+            .get_allocated_regions(db_snapshot.volume_id())
             .await
             .unwrap();
 
@@ -2028,7 +2028,7 @@ pub(crate) mod test {
         );
 
         let snapshot_allocated_regions = datastore
-            .get_allocated_regions(db_snapshot.volume_id)
+            .get_allocated_regions(db_snapshot.volume_id())
             .await
             .unwrap();
 
