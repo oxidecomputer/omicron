@@ -15,7 +15,8 @@ use uuid::Uuid;
 // In this case each field of the edited version becomes a type like
 // `diffus::edit::Edit<'a, OriginalFieldType>`.
 use super::{
-    BlueprintZonesConfig, EditedBlueprint, EditedBlueprintZonesConfig,
+    BlueprintZoneConfig, BlueprintZonesConfig, EditedBlueprint,
+    EditedBlueprintZonesConfig,
 };
 
 #[derive(Debug, Clone)]
@@ -139,6 +140,8 @@ pub trait Visit<'e> {
     ) {
         visit_blueprint_zones_map_change(self, sled_id, node);
     }
+
+    // blueprint.blueprint_zones.generation
     fn visit_blueprint_zones_generation_copy(
         &mut self,
         sled_id: &'e SledUuid,
@@ -152,6 +155,15 @@ pub trait Visit<'e> {
         node: Change<'e, Generation>,
     ) {
         visit_blueprint_zones_generation_change(self, sled_id, node);
+    }
+
+    // blueprint.blueprint_zones.zones
+    fn visit_blueprint_zones_zones_copy(
+        &mut self,
+        sled_id: &'e SledUuid,
+        node: &'e Vec<BlueprintZoneConfig>,
+    ) {
+        visit_blueprint_zones_zones_copy(self, sled_id, node);
     }
 }
 
@@ -192,13 +204,6 @@ where
             v.visit_id_change(Change { before: *before, after: *after })
         }
     }
-}
-
-pub fn visit_id_change<'e, V>(v: &mut V, node: Change<'e, Uuid>)
-where
-    V: Visit<'e> + ?Sized,
-{
-    // Leaf node, nothing to do by default
 }
 
 pub fn visit_sled_state_edit<'e, V>(
@@ -252,16 +257,6 @@ pub fn visit_sled_state_change<'e, V>(
     }
 }
 
-pub fn visit_sled_state_map_change<'e, V>(
-    _v: &mut V,
-    _key: &'e SledUuid,
-    _node: Change<'e, SledState>,
-) where
-    V: Visit<'e> + ?Sized,
-{
-    // Leaf node, nothing to do by default
-}
-
 pub fn visit_blueprint_zones_change<'e, V>(
     v: &mut V,
     node: &'e BTreeMap<&'e SledUuid, map::Edit<BlueprintZonesConfig>>,
@@ -293,6 +288,7 @@ pub fn visit_blueprint_zones_map_change<'e, V>(
 ) where
     V: Visit<'e> + ?Sized,
 {
+    // Has the generation changed?
     match &node.generation {
         Edit::Copy(node) => {
             v.visit_blueprint_zones_generation_copy(sled_id, *node);
@@ -302,6 +298,21 @@ pub fn visit_blueprint_zones_map_change<'e, V>(
                 sled_id,
                 Change { before: *before, after: *after },
             );
+        }
+    }
+
+    // Have the underlying zones changed?
+    match &node.zones {
+        Edit::Copy(node) => v.visit_blueprint_zones_zones_copy(sled_id, *node),
+        Edit::Change(zones) => {
+            for node in zones {
+                match node {
+                    collection::Edit::Copy(node) => {}
+                    collection::Edit::Insert(node) => {}
+                    collection::Edit::Remove(node) => {}
+                    collection::Edit::Change(node) => {}
+                }
+            }
         }
     }
 }
@@ -355,8 +366,10 @@ macro_rules! empty_visit_3 {
 
 empty_visit_2!(visit_blueprint_copy, Blueprint);
 empty_visit_2!(visit_id_copy, Uuid);
+empty_visit_change_2!(visit_id_change, Uuid);
 empty_visit_2!(visit_sled_state_copy, BTreeMap <SledUuid, SledState>);
 empty_visit_3!(visit_sled_state_map_copy, SledUuid, SledState);
+empty_visit_change_3!(visit_sled_state_map_change, SledUuid, SledState);
 empty_visit_3!(visit_sled_state_map_insert, SledUuid, SledState);
 empty_visit_3!(visit_sled_state_map_remove, SledUuid, SledState);
 empty_visit_2!(visit_blueprint_zones_copy, BTreeMap<SledUuid, BlueprintZonesConfig>);
@@ -376,6 +389,11 @@ empty_visit_change_3!(
     visit_blueprint_zones_generation_change,
     SledUuid,
     Generation
+);
+empty_visit_3!(
+    visit_blueprint_zones_zones_copy,
+    SledUuid,
+    Vec<BlueprintZoneConfig>
 );
 
 /// A visitor for debug printing walks of a blueprint
