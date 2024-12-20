@@ -4,11 +4,14 @@
 
 use super::{impl_enum_type, ByteCount};
 use crate::schema::snapshot;
+use crate::typed_uuid::DbTypedUuid;
 use crate::BlockSize;
 use crate::Generation;
 use db_macros::Resource;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
+use omicron_uuid_kinds::VolumeKind;
+use omicron_uuid_kinds::VolumeUuid;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -45,10 +48,10 @@ pub struct Snapshot {
     pub project_id: Uuid,
     // which disk is this a snapshot of
     pub disk_id: Uuid,
-    pub volume_id: Uuid,
+    pub volume_id: DbTypedUuid<VolumeKind>,
 
     // destination of all snapshot blocks
-    pub destination_volume_id: Uuid,
+    pub destination_volume_id: DbTypedUuid<VolumeKind>,
 
     pub gen: Generation,
     pub state: SnapshotState,
@@ -78,5 +81,15 @@ impl From<SnapshotState> for views::SnapshotState {
             SnapshotState::Faulted => Self::Faulted,
             SnapshotState::Destroyed => Self::Destroyed,
         }
+    }
+}
+
+impl Snapshot {
+    pub fn volume_id(&self) -> VolumeUuid {
+        self.volume_id.into()
+    }
+
+    pub fn destination_volume_id(&self) -> VolumeUuid {
+        self.destination_volume_id.into()
     }
 }

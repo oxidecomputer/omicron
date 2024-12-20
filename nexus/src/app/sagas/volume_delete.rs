@@ -30,17 +30,17 @@ use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::authn;
 use nexus_db_queries::db::datastore::CrucibleResources;
 use nexus_db_queries::db::datastore::FreedCrucibleResources;
+use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
-use uuid::Uuid;
 
 // volume delete saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
-    pub volume_id: Uuid,
+    pub volume_id: VolumeUuid,
 }
 
 // volume delete saga: actions

@@ -341,7 +341,7 @@ impl super::Nexus {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             project_id: project.id(),
             disk_id: authz_disk.id(),
-            volume_id: db_disk.volume_id,
+            volume_id: db_disk.volume_id(),
         };
         self.sagas
             .saga_execute::<sagas::disk_delete::SagaDiskDelete>(saga_params)
@@ -366,7 +366,8 @@ impl super::Nexus {
             .fetch()
             .await?;
 
-        self.volume_remove_read_only_parent(&opctx, db_disk.volume_id).await?;
+        self.volume_remove_read_only_parent(&opctx, db_disk.volume_id())
+            .await?;
 
         Ok(())
     }

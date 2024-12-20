@@ -15,6 +15,8 @@ use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use nexus_config::RegionAllocationStrategy;
 use omicron_common::api::external;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::VolumeUuid;
 
 type AllColumnsOfRegion = AllColumnsOf<schema::region::table>;
 type AllColumnsOfDataset = AllColumnsOf<schema::dataset::table>;
@@ -85,7 +87,7 @@ pub struct RegionParameters {
 /// layers of the hierarchy). If that volume has region snapshots in the region
 /// set, a `snapshot_id` should be supplied matching those entries.
 pub fn allocation_query(
-    volume_id: uuid::Uuid,
+    volume_id: VolumeUuid,
     snapshot_id: Option<uuid::Uuid>,
     params: RegionParameters,
     allocation_strategy: &RegionAllocationStrategy,
@@ -124,7 +126,7 @@ pub fn allocation_query(
   old_regions AS (
     SELECT ").sql(AllColumnsOfRegion::with_prefix("region")).sql("
     FROM region WHERE (region.volume_id = ").param().sql(")),")
-    .bind::<sql_types::Uuid, _>(volume_id)
+    .bind::<sql_types::Uuid, _>(*volume_id.as_untyped_uuid())
 
     // Calculates the old size being used by zpools under consideration as targets for region
     // allocation.
@@ -265,7 +267,7 @@ pub fn allocation_query(
       SELECT COUNT(*) FROM old_regions
     ))
   ),")
-    .bind::<sql_types::Uuid, _>(volume_id)
+    .bind::<sql_types::Uuid, _>(*volume_id.as_untyped_uuid())
     .bind::<sql_types::BigInt, _>(params.block_size as i64)
     .bind::<sql_types::BigInt, _>(params.blocks_per_extent as i64)
     .bind::<sql_types::BigInt, _>(params.extent_count as i64)
@@ -418,7 +420,7 @@ mod test {
     // how the output SQL has been altered.
     #[tokio::test]
     async fn expectorate_query() {
-        let volume_id = Uuid::nil();
+        let volume_id = VolumeUuid::nil();
         let params = RegionParameters {
             block_size: 512,
             blocks_per_extent: 4,
@@ -509,7 +511,7 @@ mod test {
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
         let params = RegionParameters {
             block_size: 512,
             blocks_per_extent: 4,
