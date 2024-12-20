@@ -1584,8 +1584,11 @@ pub(crate) mod test {
             .await
             .unwrap();
 
-        let affected_volume_original =
-            datastore.volume_get(db_snapshot.volume_id()).await.unwrap().unwrap();
+        let affected_volume_original = datastore
+            .volume_get(db_snapshot.volume_id())
+            .await
+            .unwrap()
+            .unwrap();
 
         verify_clean_slate(
             &cptestctx,
@@ -1688,8 +1691,11 @@ pub(crate) mod test {
             .await
             .unwrap();
 
-        let affected_volume_original =
-            datastore.volume_get(db_snapshot.volume_id()).await.unwrap().unwrap();
+        let affected_volume_original = datastore
+            .volume_get(db_snapshot.volume_id())
+            .await
+            .unwrap()
+            .unwrap();
 
         disk_test.set_always_fail_callback().await;
 
