@@ -15,14 +15,14 @@ pub enum BlippyReportSortKey {
 #[derive(Debug)]
 pub struct BlippyReport<'a> {
     blueprint: &'a Blueprint,
-    notes: Vec<Note<'a>>,
+    notes: Vec<Note>,
     sort_key: BlippyReportSortKey,
 }
 
 impl<'a> BlippyReport<'a> {
     pub(crate) fn new(
         blueprint: &'a Blueprint,
-        notes: Vec<Note<'a>>,
+        notes: Vec<Note>,
         sort_key: BlippyReportSortKey,
     ) -> Self {
         let mut slf = Self { blueprint, notes, sort_key };
@@ -54,7 +54,7 @@ impl<'a> BlippyReport<'a> {
         self.blueprint
     }
 
-    pub fn notes(&self) -> &[Note<'a>] {
+    pub fn notes(&self) -> &[Note] {
         &self.notes
     }
 

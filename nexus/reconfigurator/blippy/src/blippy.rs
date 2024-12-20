@@ -20,10 +20,10 @@ use omicron_uuid_kinds::ZpoolUuid;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 
-#[derive(Debug, Clone)]
-pub struct Note<'a> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Note {
     pub severity: Severity,
-    pub kind: Kind<'a>,
+    pub kind: Kind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -48,11 +48,11 @@ impl fmt::Display for Severity {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Kind<'a> {
-    Sled { sled_id: SledUuid, kind: SledKind<'a> },
+pub enum Kind {
+    Sled { sled_id: SledUuid, kind: SledKind },
 }
 
-impl Kind<'_> {
+impl Kind {
     pub fn display_component(&self) -> impl fmt::Display + '_ {
         enum Component<'a> {
             Sled(&'a SledUuid),
@@ -73,7 +73,7 @@ impl Kind<'_> {
 
     pub fn display_subkind(&self) -> impl fmt::Display + '_ {
         enum Subkind<'a> {
-            Sled(&'a SledKind<'a>),
+            Sled(&'a SledKind),
         }
 
         impl fmt::Display for Subkind<'_> {
@@ -91,16 +91,16 @@ impl Kind<'_> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum SledKind<'a> {
+pub enum SledKind {
     /// Two running zones have the same underlay IP address.
     DuplicateUnderlayIp {
-        zone1: &'a BlueprintZoneConfig,
-        zone2: &'a BlueprintZoneConfig,
+        zone1: BlueprintZoneConfig,
+        zone2: BlueprintZoneConfig,
     },
     /// A sled has two zones that are not members of the same sled subnet.
     SledWithMixedUnderlaySubnets {
-        zone1: &'a BlueprintZoneConfig,
-        zone2: &'a BlueprintZoneConfig,
+        zone1: BlueprintZoneConfig,
+        zone2: BlueprintZoneConfig,
     },
     /// Two sleds are using the same sled subnet.
     ConflictingSledSubnets {
@@ -110,43 +110,43 @@ pub enum SledKind<'a> {
     /// An internal DNS zone has an IP that is not one of the expected rack DNS
     /// subnets.
     InternalDnsZoneBadSubnet {
-        zone: &'a BlueprintZoneConfig,
+        zone: BlueprintZoneConfig,
         rack_dns_subnets: BTreeSet<DnsSubnet>,
     },
     /// Two running zones have the same external IP address.
     DuplicateExternalIp {
-        zone1: &'a BlueprintZoneConfig,
-        zone2: &'a BlueprintZoneConfig,
+        zone1: BlueprintZoneConfig,
+        zone2: BlueprintZoneConfig,
         ip: IpAddr,
     },
     /// Two running zones' NICs have the same IP address.
     DuplicateNicIp {
-        zone1: &'a BlueprintZoneConfig,
-        zone2: &'a BlueprintZoneConfig,
+        zone1: BlueprintZoneConfig,
+        zone2: BlueprintZoneConfig,
         ip: IpAddr,
     },
     /// Two running zones' NICs have the same MAC address.
     DuplicateNicMac {
-        zone1: &'a BlueprintZoneConfig,
-        zone2: &'a BlueprintZoneConfig,
+        zone1: BlueprintZoneConfig,
+        zone2: BlueprintZoneConfig,
         mac: MacAddr,
     },
     /// Two zones with the same durable dataset kind are on the same zpool.
     ZoneDurableDatasetCollision {
-        zone1: &'a BlueprintZoneConfig,
-        zone2: &'a BlueprintZoneConfig,
+        zone1: BlueprintZoneConfig,
+        zone2: BlueprintZoneConfig,
         zpool: ZpoolName,
     },
     /// Two zones with the same filesystem dataset kind are on the same zpool.
     ZpoolFilesystemDatasetCollision {
-        zone1: &'a BlueprintZoneConfig,
-        zone2: &'a BlueprintZoneConfig,
+        zone1: BlueprintZoneConfig,
+        zone2: BlueprintZoneConfig,
         zpool: ZpoolName,
     },
     /// One zpool has two datasets of the same kind.
     ZpoolWithDuplicateDatasetKinds {
-        dataset1: &'a BlueprintDatasetConfig,
-        dataset2: &'a BlueprintDatasetConfig,
+        dataset1: BlueprintDatasetConfig,
+        dataset2: BlueprintDatasetConfig,
         zpool: ZpoolUuid,
     },
     /// A zpool is missing its Debug dataset.
@@ -154,13 +154,13 @@ pub enum SledKind<'a> {
     /// A zpool is missing its Zone Root dataset.
     ZpoolMissingZoneRootDataset { zpool: ZpoolUuid },
     /// A zone's filesystem dataset is missing from `blueprint_datasets`.
-    ZoneMissingFilesystemDataset { zone: &'a BlueprintZoneConfig },
+    ZoneMissingFilesystemDataset { zone: BlueprintZoneConfig },
     /// A zone's durable dataset is missing from `blueprint_datasets`.
-    ZoneMissingDurableDataset { zone: &'a BlueprintZoneConfig },
+    ZoneMissingDurableDataset { zone: BlueprintZoneConfig },
     /// A zone's durable dataset and transient root dataset are on different
     /// zpools.
     ZoneWithDatasetsOnDifferentZpools {
-        zone: &'a BlueprintZoneConfig,
+        zone: BlueprintZoneConfig,
         durable_zpool: ZpoolName,
         transient_zpool: ZpoolName,
     },
@@ -173,12 +173,12 @@ pub enum SledKind<'a> {
     /// `why` indicates why we expected this sled to have an entry.
     SledMissingDisks { why: &'static str },
     /// A dataset is present but not referenced by any in-service zone or disk.
-    OrphanedDataset { dataset: &'a BlueprintDatasetConfig },
+    OrphanedDataset { dataset: BlueprintDatasetConfig },
     /// A dataset claims to be on a zpool that does not exist.
-    DatasetOnNonexistentZpool { dataset: &'a BlueprintDatasetConfig },
+    DatasetOnNonexistentZpool { dataset: BlueprintDatasetConfig },
 }
 
-impl fmt::Display for SledKind<'_> {
+impl fmt::Display for SledKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SledKind::DuplicateUnderlayIp { zone1, zone2 } => {
@@ -363,7 +363,7 @@ impl fmt::Display for SledKind<'_> {
     }
 }
 
-impl Note<'_> {
+impl Note {
     pub fn display(&self, sort_key: BlippyReportSortKey) -> NoteDisplay<'_> {
         NoteDisplay { note: self, sort_key }
     }
@@ -371,7 +371,7 @@ impl Note<'_> {
 
 #[derive(Debug)]
 pub struct NoteDisplay<'a> {
-    note: &'a Note<'a>,
+    note: &'a Note,
     sort_key: BlippyReportSortKey,
 }
 
@@ -403,7 +403,7 @@ impl fmt::Display for NoteDisplay<'_> {
 #[derive(Debug)]
 pub struct Blippy<'a> {
     blueprint: &'a Blueprint,
-    notes: Vec<Note<'a>>,
+    notes: Vec<Note>,
 }
 
 impl<'a> Blippy<'a> {
@@ -421,7 +421,7 @@ impl<'a> Blippy<'a> {
         &mut self,
         sled_id: SledUuid,
         severity: Severity,
-        kind: SledKind<'a>,
+        kind: SledKind,
     ) {
         self.notes.push(Note { severity, kind: Kind::Sled { sled_id, kind } });
     }

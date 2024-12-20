@@ -53,7 +53,10 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
             blippy.push_sled_note(
                 sled_id,
                 Severity::Fatal,
-                SledKind::DuplicateUnderlayIp { zone1: previous, zone2: zone },
+                SledKind::DuplicateUnderlayIp {
+                    zone1: previous.clone(),
+                    zone2: zone.clone(),
+                },
             );
         }
 
@@ -71,7 +74,7 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
                     sled_id,
                     Severity::Fatal,
                     SledKind::InternalDnsZoneBadSubnet {
-                        zone,
+                        zone: zone.clone(),
                         rack_dns_subnets: rack_dns_subnets.clone(),
                     },
                 );
@@ -113,8 +116,8 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
                             sled_id,
                             Severity::Fatal,
                             SledKind::SledWithMixedUnderlaySubnets {
-                                zone1: prev.get().1,
-                                zone2: zone,
+                                zone1: prev.get().1.clone(),
+                                zone2: zone.clone(),
                             },
                         );
                     }
@@ -147,8 +150,8 @@ fn check_external_networking(blippy: &mut Blippy<'_>) {
                 sled_id,
                 Severity::Fatal,
                 SledKind::DuplicateExternalIp {
-                    zone1: prev_zone,
-                    zone2: zone,
+                    zone1: prev_zone.clone(),
+                    zone2: zone.clone(),
                     ip: external_ip.ip(),
                 },
             );
@@ -173,8 +176,8 @@ fn check_external_networking(blippy: &mut Blippy<'_>) {
                 sled_id,
                 Severity::Fatal,
                 SledKind::DuplicateNicIp {
-                    zone1: prev_zone,
-                    zone2: zone,
+                    zone1: prev_zone.clone(),
+                    zone2: zone.clone(),
                     ip: nic.ip,
                 },
             );
@@ -184,8 +187,8 @@ fn check_external_networking(blippy: &mut Blippy<'_>) {
                 sled_id,
                 Severity::Fatal,
                 SledKind::DuplicateNicMac {
-                    zone1: prev_zone,
-                    zone2: zone,
+                    zone1: prev_zone.clone(),
+                    zone2: zone.clone(),
                     mac: nic.mac,
                 },
             );
@@ -196,11 +199,15 @@ fn check_external_networking(blippy: &mut Blippy<'_>) {
     // SNAT / Floating overlaps. For each SNAT IP, ensure we don't have a
     // floating IP at the same address.
     for (ip, (sled_id, zone2)) in used_external_snat_ips {
-        if let Some(zone1) = used_external_floating_ips.get(&ip) {
+        if let Some(&zone1) = used_external_floating_ips.get(&ip) {
             blippy.push_sled_note(
                 sled_id,
                 Severity::Fatal,
-                SledKind::DuplicateExternalIp { zone1, zone2, ip },
+                SledKind::DuplicateExternalIp {
+                    zone1: zone1.clone(),
+                    zone2: zone2.clone(),
+                    ip,
+                },
             );
         }
     }
@@ -237,8 +244,8 @@ fn check_dataset_zpool_uniqueness(blippy: &mut Blippy<'_>) {
                     sled_id,
                     Severity::Fatal,
                     SledKind::ZoneDurableDatasetCollision {
-                        zone1: previous,
-                        zone2: zone,
+                        zone1: previous.clone(),
+                        zone2: zone.clone(),
                         zpool: dataset.dataset.pool_name.clone(),
                     },
                 );
@@ -257,8 +264,8 @@ fn check_dataset_zpool_uniqueness(blippy: &mut Blippy<'_>) {
                     sled_id,
                     Severity::Fatal,
                     SledKind::ZpoolFilesystemDatasetCollision {
-                        zone1: previous,
-                        zone2: zone,
+                        zone1: previous.clone(),
+                        zone2: zone.clone(),
                         zpool: dataset.into_parts().0,
                     },
                 );
@@ -273,7 +280,7 @@ fn check_dataset_zpool_uniqueness(blippy: &mut Blippy<'_>) {
                     sled_id,
                     Severity::Fatal,
                     SledKind::ZoneWithDatasetsOnDifferentZpools {
-                        zone,
+                        zone: zone.clone(),
                         durable_zpool: durable.clone(),
                         transient_zpool: transient.clone(),
                     },
@@ -314,8 +321,8 @@ impl<'a> DatasetsBySled<'a> {
                             sled_id,
                             Severity::Fatal,
                             SledKind::ZpoolWithDuplicateDatasetKinds {
-                                dataset1: prev.get(),
-                                dataset2: dataset,
+                                dataset1: (*prev.get()).clone(),
+                                dataset2: dataset.clone(),
                                 zpool: dataset.pool.id(),
                             },
                         );
@@ -439,7 +446,7 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
                             sled_id,
                             Severity::Fatal,
                             SledKind::ZoneMissingFilesystemDataset {
-                                zone: zone_config,
+                                zone: zone_config.clone(),
                             },
                         );
                     }
@@ -464,7 +471,7 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
                         sled_id,
                         Severity::Fatal,
                         SledKind::ZoneMissingDurableDataset {
-                            zone: zone_config,
+                            zone: zone_config.clone(),
                         },
                     );
                 }
@@ -502,7 +509,7 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
             blippy.push_sled_note(
                 sled_id,
                 Severity::Fatal,
-                SledKind::OrphanedDataset { dataset },
+                SledKind::OrphanedDataset { dataset: dataset.clone() },
             );
             continue;
         }
@@ -524,9 +531,228 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
             blippy.push_sled_note(
                 sled_id,
                 Severity::Fatal,
-                SledKind::DatasetOnNonexistentZpool { dataset },
+                SledKind::DatasetOnNonexistentZpool {
+                    dataset: dataset.clone(),
+                },
             );
             continue;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::blippy::Kind;
+    use crate::blippy::Note;
+    use crate::BlippyReportSortKey;
+    use nexus_reconfigurator_planning::example::example;
+    use nexus_types::deployment::blueprint_zone_type;
+    use nexus_types::deployment::BlueprintZoneType;
+    use omicron_test_utils::dev::test_setup_log;
+
+    // The tests below all take the example blueprint, mutate in some invalid
+    // way, and confirm that blippy reports the invalidity. This test confirms
+    // the unmutated blueprint has no blippy notes.
+    #[test]
+    fn test_example_blueprint_is_blippy_clean() {
+        static TEST_NAME: &str = "test_example_blueprint_is_blippy_clean";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, _, blueprint) = example(&logctx.log, TEST_NAME);
+
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        if !report.notes().is_empty() {
+            eprintln!("{}", report.display());
+            panic!("example blueprint should have no blippy notes");
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_duplicate_underlay_ips() {
+        static TEST_NAME: &str = "test_duplicate_underlay_ips";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
+
+        // Copy the underlay IP from one Nexus to another.
+        let mut nexus_iter = blueprint.blueprint_zones.iter_mut().flat_map(
+            |(sled_id, zones_config)| {
+                zones_config.zones.iter_mut().filter_map(move |zone| {
+                    if zone.zone_type.is_nexus() {
+                        Some((*sled_id, zone))
+                    } else {
+                        None
+                    }
+                })
+            },
+        );
+        let (nexus0_sled_id, nexus0) =
+            nexus_iter.next().expect("at least one Nexus zone");
+        let (nexus1_sled_id, nexus1) =
+            nexus_iter.next().expect("at least two Nexus zones");
+        assert_ne!(nexus0_sled_id, nexus1_sled_id);
+
+        let dup_ip = nexus0.underlay_ip();
+        match &mut nexus1.zone_type {
+            BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                internal_address,
+                ..
+            }) => {
+                internal_address.set_ip(dup_ip);
+            }
+            _ => unreachable!("this is a Nexus zone"),
+        };
+
+        // This illegal modification should result in at least three notes: a
+        // duplicate underlay IP, duplicate sled subnets, and sled1 having mixed
+        // underlay subnets (the details of which depend on the ordering of
+        // zones, so we'll sort that out here).
+        let nexus0 = nexus0.clone();
+        let nexus1 = nexus1.clone();
+        let (mixed_underlay_zone1, mixed_underlay_zone2) = {
+            let mut sled1_zones = blueprint
+                .blueprint_zones
+                .get(&nexus1_sled_id)
+                .unwrap()
+                .zones
+                .iter();
+            let sled1_zone1 = sled1_zones.next().expect("at least one zone");
+            let sled1_zone2 = sled1_zones.next().expect("at least two zones");
+            if sled1_zone1.id == nexus1.id {
+                (nexus1.clone(), sled1_zone2.clone())
+            } else {
+                (sled1_zone1.clone(), nexus1.clone())
+            }
+        };
+        let expected_notes = [
+            Note {
+                severity: Severity::Fatal,
+                kind: Kind::Sled {
+                    sled_id: nexus1_sled_id,
+                    kind: SledKind::DuplicateUnderlayIp {
+                        zone1: nexus0.clone(),
+                        zone2: nexus1.clone(),
+                    },
+                },
+            },
+            Note {
+                severity: Severity::Fatal,
+                kind: Kind::Sled {
+                    sled_id: nexus1_sled_id,
+                    kind: SledKind::SledWithMixedUnderlaySubnets {
+                        zone1: mixed_underlay_zone1,
+                        zone2: mixed_underlay_zone2,
+                    },
+                },
+            },
+            Note {
+                severity: Severity::Fatal,
+                kind: Kind::Sled {
+                    sled_id: nexus1_sled_id,
+                    kind: SledKind::ConflictingSledSubnets {
+                        other_sled: nexus0_sled_id,
+                        subnet: Ipv6Subnet::new(dup_ip),
+                    },
+                },
+            },
+        ];
+
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        for note in expected_notes {
+            assert!(
+                report.notes().contains(&note),
+                "did not find expected note {note:?}"
+            );
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_bad_internnal_dns_subnet() {
+        static TEST_NAME: &str = "test_bad_internnal_dns_subnet";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
+
+        // Change the second internal DNS zone to be from a different rack
+        // subnet.
+        let mut internal_dns_iter = blueprint
+            .blueprint_zones
+            .iter_mut()
+            .flat_map(|(sled_id, zones_config)| {
+                zones_config.zones.iter_mut().filter_map(move |zone| {
+                    if zone.zone_type.is_internal_dns() {
+                        Some((*sled_id, zone))
+                    } else {
+                        None
+                    }
+                })
+            });
+        let (dns0_sled_id, dns0) =
+            internal_dns_iter.next().expect("at least one internal DNS zone");
+        let (dns1_sled_id, dns1) =
+            internal_dns_iter.next().expect("at least two internal DNS zones");
+        assert_ne!(dns0_sled_id, dns1_sled_id);
+
+        let dns0_ip = dns0.underlay_ip();
+        let rack_subnet = DnsSubnet::from_addr(dns0_ip).rack_subnet();
+        let different_rack_subnet = {
+            // Flip the high bit of the existing underlay IP to guarantee a
+            // different rack subnet
+            let hi_bit = 1_u128 << 127;
+            let lo_bits = !hi_bit;
+            let hi_bit_ip = Ipv6Addr::from(hi_bit);
+            let lo_bits_ip = Ipv6Addr::from(lo_bits);
+            // Build XOR out of the operations we have...
+            let flipped_ip = if hi_bit_ip & dns0_ip == hi_bit_ip {
+                dns0_ip & lo_bits_ip
+            } else {
+                dns0_ip | hi_bit_ip
+            };
+            DnsSubnet::from_addr(flipped_ip).rack_subnet()
+        };
+        let different_dns_subnet = different_rack_subnet.get_dns_subnet(0);
+
+        match &mut dns1.zone_type {
+            BlueprintZoneType::InternalDns(
+                blueprint_zone_type::InternalDns {
+                    http_address,
+                    dns_address,
+                    ..
+                },
+            ) => {
+                http_address.set_ip(different_dns_subnet.dns_address());
+                dns_address.set_ip(different_dns_subnet.dns_address());
+            }
+            _ => unreachable!("this is an internal DNS zone"),
+        };
+
+        let expected_note = Note {
+            severity: Severity::Fatal,
+            kind: Kind::Sled {
+                sled_id: dns1_sled_id,
+                kind: SledKind::InternalDnsZoneBadSubnet {
+                    zone: dns1.clone(),
+                    rack_dns_subnets: rack_subnet
+                        .get_dns_subnets()
+                        .into_iter()
+                        .collect(),
+                },
+            },
+        };
+
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        assert!(
+            report.notes().contains(&expected_note),
+            "did not find expected note {expected_note:?}"
+        );
+
+        logctx.cleanup_successful();
     }
 }
