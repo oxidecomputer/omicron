@@ -1113,4 +1113,227 @@ mod tests {
 
         logctx.cleanup_successful();
     }
+
+    #[test]
+    fn test_zpool_with_duplicate_dataset_kinds() {
+        static TEST_NAME: &str = "test_zpool_with_duplicate_dataset_kinds";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
+
+        let mut by_kind = BTreeMap::new();
+
+        // Loop over the datasets until we find a dataset kind that already
+        // exists on a different zpool, then copy it over.
+        let mut found_sled_id = None;
+        let mut dataset1 = None;
+        let mut dataset2 = None;
+        let mut zpool = None;
+        'outer: for (sled_id, datasets_config) in
+            blueprint.blueprint_datasets.iter_mut()
+        {
+            for dataset in datasets_config.datasets.values_mut() {
+                if let Some(prev) =
+                    by_kind.insert(dataset.kind.clone(), dataset.clone())
+                {
+                    dataset.pool = prev.pool.clone();
+
+                    found_sled_id = Some(*sled_id);
+                    dataset1 = Some(prev);
+                    dataset2 = Some(dataset.clone());
+                    zpool = Some(dataset.pool.clone());
+                    break 'outer;
+                }
+            }
+        }
+        let sled_id = found_sled_id.expect("found dataset to move");
+        let dataset1 = dataset1.expect("found dataset to move");
+        let dataset2 = dataset2.expect("found dataset to move");
+        let zpool = zpool.expect("found dataset to move");
+
+        let expected_notes = [Note {
+            severity: Severity::Fatal,
+            kind: Kind::Sled {
+                sled_id,
+                kind: SledKind::ZpoolWithDuplicateDatasetKinds {
+                    dataset1,
+                    dataset2,
+                    zpool: zpool.id(),
+                },
+            },
+        }];
+
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        for note in expected_notes {
+            assert!(
+                report.notes().contains(&note),
+                "did not find expected note {note:?}"
+            );
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_zpool_missing_default_datasets() {
+        static TEST_NAME: &str = "test_zpool_missing_default_datasets";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
+
+        // Drop the Debug dataset from one zpool and the ZoneRoot dataset from
+        // another; we should catch both errors.
+        let (sled_id, datasets_config) = blueprint
+            .blueprint_datasets
+            .iter_mut()
+            .next()
+            .expect("at least one sled");
+
+        let mut debug_dataset = None;
+        let mut zoneroot_dataset = None;
+        for dataset in &mut datasets_config.datasets.values_mut() {
+            match &dataset.kind {
+                DatasetKind::Debug if debug_dataset.is_none() => {
+                    debug_dataset = Some(dataset.clone());
+                }
+                DatasetKind::TransientZoneRoot
+                    if debug_dataset.is_some()
+                        && zoneroot_dataset.is_none() =>
+                {
+                    if Some(&dataset.pool)
+                        != debug_dataset.as_ref().map(|d| &d.pool)
+                    {
+                        zoneroot_dataset = Some(dataset.clone());
+                        break;
+                    }
+                }
+                _ => (),
+            }
+        }
+        let debug_dataset =
+            debug_dataset.expect("found Debug dataset to prune");
+        let zoneroot_dataset =
+            zoneroot_dataset.expect("found ZoneRoot dataset to prune");
+        assert_ne!(debug_dataset.pool, zoneroot_dataset.pool);
+
+        // Actually strip these from the blueprint.
+        datasets_config.datasets.retain(|&dataset_id, _| {
+            dataset_id != debug_dataset.id && dataset_id != zoneroot_dataset.id
+        });
+
+        let expected_notes = [
+            Note {
+                severity: Severity::Fatal,
+                kind: Kind::Sled {
+                    sled_id: *sled_id,
+                    kind: SledKind::ZpoolMissingDebugDataset {
+                        zpool: debug_dataset.pool.id(),
+                    },
+                },
+            },
+            Note {
+                severity: Severity::Fatal,
+                kind: Kind::Sled {
+                    sled_id: *sled_id,
+                    kind: SledKind::ZpoolMissingZoneRootDataset {
+                        zpool: zoneroot_dataset.pool.id(),
+                    },
+                },
+            },
+        ];
+
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        for note in expected_notes {
+            assert!(
+                report.notes().contains(&note),
+                "did not find expected note {note:?}"
+            );
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_zone_missing_datasets() {
+        static TEST_NAME: &str = "test_zone_missing_datasets";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
+
+        let (sled_id, datasets_config) = blueprint
+            .blueprint_datasets
+            .iter_mut()
+            .next()
+            .expect("at least one sled");
+        let zones_config = blueprint
+            .blueprint_zones
+            .get(sled_id)
+            .expect("got zones for sled with datasets");
+
+        // Pick a zone with a durable dataset to remove, and a different zone
+        // with a filesystem_pool dataset to remove.
+        let mut durable_zone = None;
+        let mut root_zone = None;
+        for z in &zones_config.zones {
+            if durable_zone.is_none() {
+                if z.zone_type.durable_zpool().is_some() {
+                    durable_zone = Some(z.clone());
+                }
+            } else if root_zone.is_none() {
+                root_zone = Some(z);
+                break;
+            }
+        }
+        let durable_zone =
+            durable_zone.expect("found zone with durable dataset to prune");
+        let root_zone =
+            root_zone.expect("found zone with root dataset to prune");
+        assert_ne!(durable_zone.filesystem_pool, root_zone.filesystem_pool);
+
+        // Actually strip these from the blueprint.
+        datasets_config.datasets.retain(|_, dataset| {
+            let matches_durable = (dataset.pool
+                == *durable_zone.zone_type.durable_zpool().unwrap())
+                && (dataset.kind
+                    == durable_zone.zone_type.durable_dataset().unwrap().kind);
+            let root_dataset = root_zone.filesystem_dataset().unwrap();
+            let matches_root = (dataset.pool == *root_dataset.pool())
+                && (dataset.kind == *root_dataset.dataset());
+            !matches_durable && !matches_root
+        });
+
+        let expected_notes = [
+            Note {
+                severity: Severity::Fatal,
+                kind: Kind::Sled {
+                    sled_id: *sled_id,
+                    kind: SledKind::ZoneMissingFilesystemDataset {
+                        zone: root_zone.clone(),
+                    },
+                },
+            },
+            Note {
+                severity: Severity::Fatal,
+                kind: Kind::Sled {
+                    sled_id: *sled_id,
+                    kind: SledKind::ZoneMissingDurableDataset {
+                        zone: durable_zone,
+                    },
+                },
+            },
+        ];
+
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        for note in expected_notes {
+            assert!(
+                report.notes().contains(&note),
+                "did not find expected note {note:?}"
+            );
+        }
+
+        logctx.cleanup_successful();
+    }
 }
