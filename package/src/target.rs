@@ -200,3 +200,11 @@ impl std::str::FromStr for KnownTarget {
         )
     }
 }
+
+/// Generate a command to build a target, for use in usage strings.
+pub fn target_command_help(target_name: &str) -> String {
+    format!(
+        "{} -t {target_name} target",
+        std::env::current_exe().unwrap().display(),
+    )
+}
