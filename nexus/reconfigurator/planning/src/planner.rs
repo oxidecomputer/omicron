@@ -797,7 +797,6 @@ mod test {
     use chrono::Utc;
     use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
     use clickhouse_admin_types::KeeperId;
-    use diffus::Diffable;
     use expectorate::assert_contents;
     use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_types::deployment::blueprint_zone_type;
