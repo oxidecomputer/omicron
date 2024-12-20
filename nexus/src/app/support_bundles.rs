@@ -9,7 +9,9 @@ use futures::TryStreamExt;
 use http::Response;
 use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -47,7 +49,12 @@ impl super::Nexus {
         opctx: &OpContext,
         id: SupportBundleUuid,
     ) -> LookupResult<SupportBundle> {
-        self.db_datastore.support_bundle_get(&opctx, id).await
+        let (.., db_bundle) = LookupPath::new(opctx, &self.db_datastore)
+            .support_bundle(id)
+            .fetch()
+            .await?;
+
+        Ok(db_bundle)
     }
 
     pub async fn support_bundle_create(
@@ -67,7 +74,11 @@ impl super::Nexus {
         _range: Option<PotentialRange>,
     ) -> Result<Response<Body>, Error> {
         // Lookup the bundle, confirm it's accessible
-        let bundle = self.db_datastore.support_bundle_get(&opctx, id).await?;
+        let (.., bundle) = LookupPath::new(opctx, &self.db_datastore)
+            .support_bundle(id)
+            .fetch()
+            .await?;
+
         if !matches!(bundle.state, SupportBundleState::Active) {
             return Err(Error::invalid_request(
                 "Cannot download bundle in non-active state",
@@ -166,13 +177,22 @@ impl super::Nexus {
         opctx: &OpContext,
         id: SupportBundleUuid,
     ) -> DeleteResult {
+        let (authz_bundle, ..) = LookupPath::new(opctx, &self.db_datastore)
+            .support_bundle(id)
+            .lookup_for(authz::Action::Delete)
+            .await?;
+
         // NOTE: We can't necessarily delete the support bundle
         // immediately - it might have state that needs cleanup
         // by a background task - so, instead, we mark it deleting.
         //
         // This is a terminal state
         self.db_datastore
-            .support_bundle_update(&opctx, id, SupportBundleState::Destroying)
+            .support_bundle_update(
+                &opctx,
+                &authz_bundle,
+                SupportBundleState::Destroying,
+            )
             .await?;
         Ok(())
     }

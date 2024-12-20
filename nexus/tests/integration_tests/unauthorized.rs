@@ -18,7 +18,9 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::http_testing::TestResponse;
+use nexus_test_utils::resource_helpers::TestDataset;
 use nexus_test_utils_macros::nexus_test;
+use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use once_cell::sync::Lazy;
@@ -57,14 +59,25 @@ type DiskTest<'a> =
 //   403).
 #[nexus_test]
 async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
+    eprintln!("----- test unauthorized started");
     let mut disk_test = DiskTest::new(cptestctx).await;
+    eprintln!("----- test unauthorized finished making new disk test");
     let sled_id = cptestctx.first_sled();
     disk_test
         .add_zpool_with_dataset_ext(
             sled_id,
             nexus_test_utils::PHYSICAL_DISK_UUID.parse().unwrap(),
             ZpoolUuid::new_v4(),
-            DatasetUuid::new_v4(),
+            vec![
+                TestDataset {
+                    id: DatasetUuid::new_v4(),
+                    kind: DatasetKind::Crucible,
+                },
+                TestDataset {
+                    id: DatasetUuid::new_v4(),
+                    kind: DatasetKind::Debug,
+                },
+            ],
             DiskTest::DEFAULT_ZPOOL_SIZE_GIB,
         )
         .await;
@@ -72,6 +85,8 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let log = &cptestctx.logctx.log;
     let mut setup_results = std::collections::BTreeMap::new();
+
+    eprintln!("----- test unauthorized creating test data");
 
     // Create test data.
     info!(log, "setting up resource hierarchy");
@@ -104,6 +119,8 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
             setup_results.insert(id_route, result.clone());
         });
     }
+
+    eprintln!("----- test unauthorized verifying endpoints");
 
     // Verify the hardcoded endpoints.
     info!(log, "verifying endpoints");
@@ -320,6 +337,12 @@ static SETUP_REQUESTS: Lazy<Vec<SetupReq>> = Lazy::new(|| {
         SetupReq::Post {
             url: &DEMO_CERTIFICATES_URL,
             body: serde_json::to_value(&*DEMO_CERTIFICATE_CREATE).unwrap(),
+            id_routes: vec![],
+        },
+        // Create a Support Bundle
+        SetupReq::Post {
+            url: &SUPPORT_BUNDLES_URL,
+            body: serde_json::to_value(()).unwrap(),
             id_routes: vec![],
         },
     ]

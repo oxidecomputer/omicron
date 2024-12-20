@@ -12,6 +12,7 @@ use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
+use nexus_db_queries::db::lookup::LookupPath;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
@@ -236,20 +237,45 @@ impl super::Nexus {
             .await
     }
 
-    /// Upserts a physical disk into the database, updating it if it already exists.
-    pub(crate) async fn upsert_physical_disk(
+    /// Inserts a physical disk into the database unless it already exists.
+    ///
+    /// NOTE: I'd like to re-work this to avoid the upsert-like behavior - can
+    /// we restructure our tests to ensure they ask for this physical disk
+    /// exactly once?
+    pub(crate) async fn insert_test_physical_disk_if_not_exists(
         &self,
         opctx: &OpContext,
         request: PhysicalDiskPutRequest,
     ) -> Result<(), Error> {
         info!(
-            self.log, "upserting physical disk";
+            self.log, "inserting test physical disk";
             "physical_disk_id" => %request.id,
             "sled_id" => %request.sled_id,
             "vendor" => %request.vendor,
             "serial" => %request.serial,
             "model" => %request.model,
         );
+
+        match LookupPath::new(&opctx, &self.db_datastore)
+            .physical_disk(request.id)
+            .fetch()
+            .await
+        {
+            Ok((_authz_disk, existing_disk)) => {
+                if existing_disk.vendor != request.vendor
+                    || existing_disk.serial != request.serial
+                    || existing_disk.model != request.model
+                {
+                    return Err(Error::internal_error(
+                        "Invalid Physical Disk update (was: {existing_disk:?}, asking for {request:?})"
+                    ));
+                }
+                return Ok(());
+            }
+            Err(err) if matches!(err, Error::ObjectNotFound { .. }) => {}
+            Err(err) => return Err(err),
+        }
+
         let disk = db::model::PhysicalDisk::new(
             request.id,
             request.vendor,
@@ -309,23 +335,22 @@ impl super::Nexus {
 
     // Datasets (contained within zpools)
 
-    /// Upserts a crucible dataset into the database, updating it if it already exists.
-    pub(crate) async fn upsert_crucible_dataset(
+    /// Upserts a dataset into the database, updating it if it already exists.
+    pub(crate) async fn upsert_dataset(
         &self,
         id: DatasetUuid,
         zpool_id: Uuid,
-        address: SocketAddrV6,
+        kind: DatasetKind,
+        address: Option<SocketAddrV6>,
     ) -> Result<(), Error> {
         info!(
             self.log,
             "upserting dataset";
             "zpool_id" => zpool_id.to_string(),
             "dataset_id" => id.to_string(),
-            "address" => address.to_string()
+            "kind" => kind.to_string(),
         );
-        let kind = DatasetKind::Crucible;
-        let dataset =
-            db::model::Dataset::new(id, zpool_id, Some(address), kind);
+        let dataset = db::model::Dataset::new(id, zpool_id, address, kind);
         self.db_datastore.dataset_upsert(dataset).await?;
         Ok(())
     }

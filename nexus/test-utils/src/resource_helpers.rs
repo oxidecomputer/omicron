@@ -36,6 +36,7 @@ use nexus_types::internal_api::params as internal_params;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::Generation;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceAutoRestartPolicy;
@@ -46,7 +47,13 @@ use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::UserId;
+use omicron_common::disk::DatasetConfig;
+use omicron_common::disk::DatasetKind;
+use omicron_common::disk::DatasetName;
+use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::DiskIdentity;
+use omicron_common::disk::SharedDatasetConfig;
+use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim::SledAgent;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
@@ -1012,8 +1019,10 @@ pub async fn projects_list(
     .collect()
 }
 
+#[derive(Debug)]
 pub struct TestDataset {
     pub id: DatasetUuid,
+    pub kind: DatasetKind,
 }
 
 pub struct TestZpool {
@@ -1177,7 +1186,10 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                     *sled_id,
                     disk.id,
                     disk.pool_id,
-                    DatasetUuid::new_v4(),
+                    vec![TestDataset {
+                        id: DatasetUuid::new_v4(),
+                        kind: DatasetKind::Crucible,
+                    }],
                     Self::DEFAULT_ZPOOL_SIZE_GIB,
                 )
                 .await;
@@ -1190,7 +1202,10 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
             sled_id,
             PhysicalDiskUuid::new_v4(),
             ZpoolUuid::new_v4(),
-            DatasetUuid::new_v4(),
+            vec![TestDataset {
+                id: DatasetUuid::new_v4(),
+                kind: DatasetKind::Crucible,
+            }],
             Self::DEFAULT_ZPOOL_SIZE_GIB,
         )
         .await
@@ -1223,7 +1238,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         sled_id: SledUuid,
         physical_disk_id: PhysicalDiskUuid,
         zpool_id: ZpoolUuid,
-        dataset_id: DatasetUuid,
+        datasets: Vec<TestDataset>,
         gibibytes: u32,
     ) {
         let cptestctx = self.cptestctx;
@@ -1233,7 +1248,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         let zpool = TestZpool {
             id: zpool_id,
             size: ByteCount::from_gibibytes_u32(gibibytes),
-            datasets: vec![TestDataset { id: dataset_id }],
+            datasets,
         };
 
         let disk_identity = DiskIdentity {
@@ -1293,28 +1308,34 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         );
 
         for dataset in &zpool.datasets {
-            // Sled Agent side: Create the Dataset, make sure regions can be
-            // created immediately if Nexus requests anything.
-            let address =
-                sled_agent.create_crucible_dataset(zpool.id, dataset.id);
-            let crucible =
-                sled_agent.get_crucible_dataset(zpool.id, dataset.id);
-            crucible.set_create_callback(Box::new(|_| RegionState::Created));
+            let address = if matches!(dataset.kind, DatasetKind::Crucible) {
+                // Sled Agent side: Create the Dataset, make sure regions can be
+                // created immediately if Nexus requests anything.
+                let address =
+                    sled_agent.create_crucible_dataset(zpool.id, dataset.id);
+                let crucible =
+                    sled_agent.get_crucible_dataset(zpool.id, dataset.id);
+                crucible
+                    .set_create_callback(Box::new(|_| RegionState::Created));
 
-            // Nexus side: Notify Nexus of the physical disk/zpool/dataset
-            // combination that exists.
+                // Nexus side: Notify Nexus of the physical disk/zpool/dataset
+                // combination that exists.
 
-            let address = match address {
-                std::net::SocketAddr::V6(addr) => addr,
-                _ => panic!("Unsupported address type: {address} "),
+                match address {
+                    std::net::SocketAddr::V6(addr) => Some(addr),
+                    _ => panic!("Unsupported address type: {address} "),
+                }
+            } else {
+                None
             };
 
             cptestctx
                 .server
-                .upsert_crucible_dataset(
+                .upsert_test_dataset(
                     physical_disk_request.clone(),
                     zpool_request.clone(),
                     dataset.id,
+                    dataset.kind.clone(),
                     address,
                 )
                 .await;
@@ -1365,12 +1386,46 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 }
             },
             &Duration::from_millis(50),
-            &Duration::from_secs(30),
+            // TODO: put me back to 30 before merging
+            &Duration::from_secs(3),
         )
         .await
         .expect("expected to find inventory collection");
 
         zpools.push(zpool);
+
+        // Configure the Sled to use all datasets
+        let datasets = zpools
+            .iter()
+            .flat_map(|zpool| zpool.datasets.iter().map(|d| (zpool.id, d)))
+            .map(|(zpool_id, TestDataset { id, kind })| {
+                (
+                    *id,
+                    DatasetConfig {
+                        id: *id,
+                        name: DatasetName::new(
+                            ZpoolName::new_external(zpool_id),
+                            kind.clone(),
+                        ),
+                        inner: SharedDatasetConfig::default(),
+                    },
+                )
+            })
+            .collect();
+
+        // If there was any prior configuration, bump the generation.
+        // Otherwise, set it for the first time.
+        let generation = {
+            if let Ok(config) = sled_agent.datasets_config_list() {
+                config.generation.next()
+            } else {
+                Generation::new()
+            }
+        };
+
+        let dataset_config = DatasetsConfig { generation, datasets };
+        let res = sled_agent.datasets_ensure(dataset_config).unwrap();
+        assert!(!res.has_error());
     }
 
     pub async fn set_requested_then_created_callback(&self) {
