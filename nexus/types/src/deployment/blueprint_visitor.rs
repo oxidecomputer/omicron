@@ -151,14 +151,6 @@ where
     }
 }
 
-/// There is no difference between the blueprints
-pub fn visit_blueprint_copy<'e, V>(v: &mut V, node: &'e Blueprint)
-where
-    V: Visit<'e> + ?Sized,
-{
-    // Leaf node, nothing to do by default
-}
-
 /// The blueprint has changed in some manner
 pub fn visit_blueprint_change<'e, V>(v: &mut V, node: &'e EditedBlueprint)
 where
@@ -185,13 +177,6 @@ where
     }
 }
 
-pub fn visit_id_copy<'e, V>(v: &mut V, node: &'e Uuid)
-where
-    V: Visit<'e> + ?Sized,
-{
-    // Leaf node, nothing to do by default
-}
-
 pub fn visit_id_change<'e, V>(v: &mut V, node: Change<'e, Uuid>)
 where
     V: Visit<'e> + ?Sized,
@@ -209,15 +194,6 @@ pub fn visit_sled_state_edit<'e, V>(
         Edit::Copy(node) => v.visit_sled_state_copy(node),
         Edit::Change(node) => v.visit_sled_state_change(node),
     }
-}
-
-pub fn visit_sled_state_copy<'e, V>(
-    v: &mut V,
-    node: &'e BTreeMap<SledUuid, SledState>,
-) where
-    V: Visit<'e> + ?Sized,
-{
-    // Leaf node, nothing to do by default
 }
 
 pub fn visit_sled_state_change<'e, V>(
@@ -259,49 +235,10 @@ pub fn visit_sled_state_change<'e, V>(
     }
 }
 
-pub fn visit_sled_state_map_copy<'e, V>(
-    v: &mut V,
-    sled_id: &'e SledUuid,
-    state: &'e SledState,
-) where
-    V: Visit<'e> + ?Sized,
-{
-    // Leaf node, nothing to do by default
-}
-
-pub fn visit_sled_state_map_insert<'e, V>(
-    v: &mut V,
-    sled_id: &'e SledUuid,
-    state: &'e SledState,
-) where
-    V: Visit<'e> + ?Sized,
-{
-    // Leaf node, nothing to do by default
-}
-
-pub fn visit_sled_state_map_remove<'e, V>(
-    v: &mut V,
-    sled_id: &'e SledUuid,
-    state: &'e SledState,
-) where
-    V: Visit<'e> + ?Sized,
-{
-    // Leaf node, nothing to do by default
-}
-
 pub fn visit_sled_state_map_change<'e, V>(
     v: &mut V,
     key: &'e SledUuid,
     node: Change<'e, SledState>,
-) where
-    V: Visit<'e> + ?Sized,
-{
-    // Leaf node, nothing to do by default
-}
-
-pub fn visit_blueprint_zones_copy<'e, V>(
-    v: &mut V,
-    node: &'e BTreeMap<SledUuid, BlueprintZonesConfig>,
 ) where
     V: Visit<'e> + ?Sized,
 {
@@ -332,36 +269,6 @@ pub fn visit_blueprint_zones_change<'e, V>(
     }
 }
 
-pub fn visit_blueprint_zones_map_copy<'e, V>(
-    v: &mut V,
-    sled_id: &'e SledUuid,
-    node: &'e BlueprintZonesConfig,
-) where
-    V: Visit<'e> + ?Sized,
-{
-    // Leaf node, nothing to do by default
-}
-
-pub fn visit_blueprint_zones_map_insert<'e, V>(
-    v: &mut V,
-    sled_id: &'e SledUuid,
-    node: &'e BlueprintZonesConfig,
-) where
-    V: Visit<'e> + ?Sized,
-{
-    // Leaf node, nothing to do by default
-}
-
-pub fn visit_blueprint_zones_map_remove<'e, V>(
-    v: &mut V,
-    sled_id: &'e SledUuid,
-    node: &'e BlueprintZonesConfig,
-) where
-    V: Visit<'e> + ?Sized,
-{
-    // Leaf node, nothing to do by default
-}
-
 pub fn visit_blueprint_zones_map_change<'e, V>(
     v: &mut V,
     sled_id: &'e SledUuid,
@@ -371,6 +278,49 @@ pub fn visit_blueprint_zones_map_change<'e, V>(
 {
     todo!()
 }
+
+// 2 parameter version of macro to implement empty leaf visitor methods of the
+// right form
+macro_rules! empty_visit_2 {
+    ($name: ident, $t: ty) => {
+        fn $name<'e, V>(_v: &mut V, _node: &'e $t)
+        where
+            V: Visit<'e> + ?Sized,
+        {
+        }
+    };
+}
+
+// 3 parameter version of macro to implement empty leaf visitor methods of the
+// right form
+macro_rules! empty_visit_3 {
+    ($name: ident, $t: ty, $t2: ty) => {
+        fn $name<'e, V>(_v: &mut V, _node: &'e $t, _node2: &'e $t2)
+        where
+            V: Visit<'e> + ?Sized,
+        {
+        }
+    };
+}
+
+empty_visit_2!(visit_blueprint_copy, Blueprint);
+empty_visit_2!(visit_id_copy, Uuid);
+empty_visit_2!(visit_sled_state_copy, BTreeMap <SledUuid, SledState>);
+empty_visit_3!(visit_sled_state_map_copy, SledUuid, SledState);
+empty_visit_3!(visit_sled_state_map_insert, SledUuid, SledState);
+empty_visit_3!(visit_sled_state_map_remove, SledUuid, SledState);
+empty_visit_2!(visit_blueprint_zones_copy, BTreeMap<SledUuid, BlueprintZonesConfig>);
+empty_visit_3!(visit_blueprint_zones_map_copy, SledUuid, BlueprintZonesConfig);
+empty_visit_3!(
+    visit_blueprint_zones_map_insert,
+    SledUuid,
+    BlueprintZonesConfig
+);
+empty_visit_3!(
+    visit_blueprint_zones_map_remove,
+    SledUuid,
+    BlueprintZonesConfig
+);
 
 /// A visitor for debug printing walks of a blueprint
 pub struct DebugVisitor;
