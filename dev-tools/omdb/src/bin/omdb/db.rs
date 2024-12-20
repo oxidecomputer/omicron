@@ -135,7 +135,7 @@ use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
-use sled_agent_client::types::VolumeConstructionRequest;
+use sled_agent_client::VolumeConstructionRequest;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
