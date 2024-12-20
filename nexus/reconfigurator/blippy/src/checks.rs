@@ -1336,4 +1336,226 @@ mod tests {
 
         logctx.cleanup_successful();
     }
+
+    #[test]
+    fn test_sled_missing_datasets() {
+        static TEST_NAME: &str = "test_sled_missing_datasets";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
+
+        // Pick one sled and remove its blueprint_datasets entry entirely.
+        let removed_sled_id = *blueprint
+            .blueprint_datasets
+            .keys()
+            .next()
+            .expect("at least one sled");
+        blueprint
+            .blueprint_datasets
+            .retain(|&sled_id, _| sled_id != removed_sled_id);
+
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        let mut found_sled_missing_note = false;
+        for note in report.notes() {
+            if note.severity == Severity::Fatal {
+                match &note.kind {
+                    Kind::Sled {
+                        sled_id,
+                        kind: SledKind::SledMissingDatasets { .. },
+                    } if *sled_id == removed_sled_id => {
+                        found_sled_missing_note = true;
+                    }
+                    _ => (),
+                }
+            }
+        }
+        assert!(found_sled_missing_note, "found sled missing datasets note");
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_sled_missing_disks() {
+        static TEST_NAME: &str = "test_sled_missing_disks";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
+
+        // Pick one sled and remove its blueprint_disks entry entirely.
+        let removed_sled_id = *blueprint
+            .blueprint_disks
+            .keys()
+            .next()
+            .expect("at least one sled");
+        blueprint
+            .blueprint_disks
+            .retain(|&sled_id, _| sled_id != removed_sled_id);
+
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        let mut found_sled_missing_note = false;
+        for note in report.notes() {
+            if note.severity == Severity::Fatal {
+                match &note.kind {
+                    Kind::Sled {
+                        sled_id,
+                        kind: SledKind::SledMissingDisks { .. },
+                    } if *sled_id == removed_sled_id => {
+                        found_sled_missing_note = true;
+                    }
+                    _ => (),
+                }
+            }
+        }
+        assert!(found_sled_missing_note, "found sled missing disks note");
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_orphaned_datasets() {
+        static TEST_NAME: &str = "test_orphaned_datasets";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
+
+        // Pick two zones (one with a durable dataset and one with a filesystem
+        // root dataset), and remove both those zones, which should orphan their
+        // datasets.
+        let (sled_id, datasets_config) = blueprint
+            .blueprint_datasets
+            .iter_mut()
+            .next()
+            .expect("at least one sled");
+        let zones_config = blueprint
+            .blueprint_zones
+            .get_mut(sled_id)
+            .expect("got zones for sled with datasets");
+        let mut durable_zone = None;
+        let mut root_zone = None;
+        for z in &zones_config.zones {
+            if durable_zone.is_none() {
+                if z.zone_type.durable_zpool().is_some() {
+                    durable_zone = Some(z.clone());
+                }
+            } else if root_zone.is_none() {
+                root_zone = Some(z.clone());
+                break;
+            }
+        }
+        let durable_zone =
+            durable_zone.expect("found zone with durable dataset to prune");
+        let root_zone =
+            root_zone.expect("found zone with root dataset to prune");
+        zones_config
+            .zones
+            .retain(|z| z.id != durable_zone.id && z.id != root_zone.id);
+
+        let durable_dataset = durable_zone.zone_type.durable_dataset().unwrap();
+        let root_dataset = root_zone.filesystem_dataset().unwrap();
+
+        // Find the datasets we expect to have been orphaned.
+        let expected_notes = datasets_config
+            .datasets
+            .values()
+            .filter_map(|dataset| {
+                if (dataset.pool == durable_dataset.dataset.pool_name
+                    && dataset.kind == durable_dataset.kind)
+                    || (dataset.pool == *root_dataset.pool()
+                        && dataset.kind == *root_dataset.dataset())
+                {
+                    Some(Note {
+                        severity: Severity::Fatal,
+                        kind: Kind::Sled {
+                            sled_id: *sled_id,
+                            kind: SledKind::OrphanedDataset {
+                                dataset: dataset.clone(),
+                            },
+                        },
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        for note in expected_notes {
+            assert!(
+                report.notes().contains(&note),
+                "did not find expected note {note:?}"
+            );
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_dataset_on_nonexistent_zpool() {
+        static TEST_NAME: &str = "test_dataset_on_nonexistent_zpool";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
+
+        // Remove one zpool from one sled, then check that all datasets on that
+        // zpool produce report notes.
+        let (sled_id, disks_config) = blueprint
+            .blueprint_disks
+            .iter_mut()
+            .next()
+            .expect("at least one sled");
+        let removed_disk = disks_config.disks.remove(0);
+        eprintln!("removed disk {removed_disk:?}");
+
+        let expected_notes = blueprint
+            .blueprint_datasets
+            .get(sled_id)
+            .unwrap()
+            .datasets
+            .values()
+            .filter_map(|dataset| {
+                if dataset.pool.id() != removed_disk.pool_id {
+                    return None;
+                }
+
+                let note = match dataset.kind {
+                    DatasetKind::Debug | DatasetKind::TransientZoneRoot => {
+                        Note {
+                            severity: Severity::Fatal,
+                            kind: Kind::Sled {
+                                sled_id: *sled_id,
+                                kind: SledKind::OrphanedDataset {
+                                    dataset: dataset.clone(),
+                                },
+                            },
+                        }
+                    }
+                    _ => Note {
+                        severity: Severity::Fatal,
+                        kind: Kind::Sled {
+                            sled_id: *sled_id,
+                            kind: SledKind::DatasetOnNonexistentZpool {
+                                dataset: dataset.clone(),
+                            },
+                        },
+                    },
+                };
+                Some(note)
+            })
+            .collect::<Vec<_>>();
+        assert!(!expected_notes.is_empty());
+
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        for note in expected_notes {
+            assert!(
+                report.notes().contains(&note),
+                "did not find expected note {note:?}"
+            );
+        }
+
+        logctx.cleanup_successful();
+    }
 }
