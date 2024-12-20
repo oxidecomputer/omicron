@@ -6,6 +6,7 @@ use serde::de::DeserializeOwned;
 use thiserror::Error;
 
 pub mod cargo_plan;
+pub mod config;
 pub mod dot;
 pub mod target;
 
