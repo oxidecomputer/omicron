@@ -313,7 +313,7 @@ async fn main() -> Result<()> {
     Command::new(&args.git_bin)
         .arg("-C")
         .arg(&args.helios_dir)
-        .args(["reset", "--hard", "53bc8bcccb29641cca9248dac64ce901acb8732b"])
+        .args(["reset", "--hard", "68aae52278cdbc7049c703b3b0eb76173cee9067"])
         .ensure_success(&logger)
         .await?;
 
@@ -522,7 +522,7 @@ async fn main() -> Result<()> {
             .arg("-F") // pass extra image builder features
             .arg(format!("optever={}", opte_version.trim()))
             .arg("-F") // lock packages to versions expected for the release
-            .arg("extra_packages+=/consolidation/oxide/omicron-release-incorporation@12")
+            .arg("extra_packages+=/consolidation/oxide/omicron-release-incorporation@12.0.0.1")
             .arg("-P") // include all files from extra proto area
             .arg(proto_dir.join("root"))
             .arg("-N") // image name
