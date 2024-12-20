@@ -272,7 +272,7 @@ impl super::Nexus {
                 }
                 return Ok(());
             }
-            Err(err) if matches!(err, Error::ObjectNotFound { .. }) => {}
+            Err(Error::ObjectNotFound { .. }) => {}
             Err(err) => return Err(err),
         }
 
