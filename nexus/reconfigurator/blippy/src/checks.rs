@@ -223,14 +223,9 @@ fn check_dataset_zpool_uniqueness(blippy: &mut Blippy<'_>) {
 
     // On any given zpool, we should have at most one zone of any given
     // kind.
-    for (sled_id, zone) in
-        // TODO-john in `verify_blueprint` the filter here was `::All`, but I
-        // think that's wrong? It prevents (e.g.) a Nexus from running on a
-        // zpool where there was a previously-expunged Nexus. We only care about
-        // uniqueness-per-zpool for live zones, right?
-        blippy
-            .blueprint()
-            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+    for (sled_id, zone) in blippy
+        .blueprint()
+        .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
     {
         // Check "one kind per zpool" for durable datasets...
         if let Some(dataset) = zone.zone_type.durable_dataset() {
@@ -674,8 +669,8 @@ mod tests {
     }
 
     #[test]
-    fn test_bad_internnal_dns_subnet() {
-        static TEST_NAME: &str = "test_bad_internnal_dns_subnet";
+    fn test_bad_internal_dns_subnet() {
+        static TEST_NAME: &str = "test_bad_internal_dns_subnet";
         let logctx = test_setup_log(TEST_NAME);
         let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
 
@@ -1370,7 +1365,11 @@ mod tests {
                 }
             }
         }
-        assert!(found_sled_missing_note, "found sled missing datasets note");
+        assert!(
+            found_sled_missing_note,
+            "did not find expected note for missing datasets entry for \
+             sled {removed_sled_id}"
+        );
 
         logctx.cleanup_successful();
     }
@@ -1408,7 +1407,11 @@ mod tests {
                 }
             }
         }
-        assert!(found_sled_missing_note, "found sled missing disks note");
+        assert!(
+            found_sled_missing_note,
+            "did not find expected note for missing disks entry for \
+             sled {removed_sled_id}"
+        );
 
         logctx.cleanup_successful();
     }
