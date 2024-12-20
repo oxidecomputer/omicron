@@ -755,4 +755,210 @@ mod tests {
 
         logctx.cleanup_successful();
     }
+
+    #[test]
+    fn test_duplicate_external_ip() {
+        static TEST_NAME: &str = "test_duplicate_external_ip";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
+
+        // Copy the external IP from one Nexus to another.
+        let mut nexus_iter = blueprint.blueprint_zones.iter_mut().flat_map(
+            |(sled_id, zones_config)| {
+                zones_config.zones.iter_mut().filter_map(move |zone| {
+                    if zone.zone_type.is_nexus() {
+                        Some((*sled_id, zone))
+                    } else {
+                        None
+                    }
+                })
+            },
+        );
+        let (nexus0_sled_id, nexus0) =
+            nexus_iter.next().expect("at least one Nexus zone");
+        let (nexus1_sled_id, nexus1) =
+            nexus_iter.next().expect("at least two Nexus zones");
+        assert_ne!(nexus0_sled_id, nexus1_sled_id);
+
+        let dup_ip = match nexus0
+            .zone_type
+            .external_networking()
+            .expect("Nexus has external networking")
+            .0
+        {
+            OmicronZoneExternalIp::Floating(ip) => ip,
+            OmicronZoneExternalIp::Snat(_) => {
+                unreachable!("Nexus has a floating IP")
+            }
+        };
+        match &mut nexus1.zone_type {
+            BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                external_ip,
+                ..
+            }) => {
+                *external_ip = dup_ip;
+            }
+            _ => unreachable!("this is a Nexus zone"),
+        };
+
+        let expected_notes = [
+            Note {
+                severity: Severity::Fatal,
+                kind: Kind::Sled {
+                    sled_id: nexus1_sled_id,
+                    kind: SledKind::DuplicateExternalIp {
+                        zone1: nexus0.clone(),
+                        zone2: nexus1.clone(),
+                        ip: dup_ip.ip,
+                    },
+                },
+            },
+        ];
+
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        for note in expected_notes {
+            assert!(
+                report.notes().contains(&note),
+                "did not find expected note {note:?}"
+            );
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_duplicate_nic_ip() {
+        static TEST_NAME: &str = "test_duplicate_nic_ip";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
+
+        // Copy the external IP from one Nexus to another.
+        let mut nexus_iter = blueprint.blueprint_zones.iter_mut().flat_map(
+            |(sled_id, zones_config)| {
+                zones_config.zones.iter_mut().filter_map(move |zone| {
+                    if zone.zone_type.is_nexus() {
+                        Some((*sled_id, zone))
+                    } else {
+                        None
+                    }
+                })
+            },
+        );
+        let (nexus0_sled_id, nexus0) =
+            nexus_iter.next().expect("at least one Nexus zone");
+        let (nexus1_sled_id, nexus1) =
+            nexus_iter.next().expect("at least two Nexus zones");
+        assert_ne!(nexus0_sled_id, nexus1_sled_id);
+
+        let dup_ip = nexus0
+            .zone_type
+            .external_networking()
+            .expect("Nexus has external networking")
+            .1
+            .ip;
+        match &mut nexus1.zone_type {
+            BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                nic,
+                ..
+            }) => {
+                nic.ip = dup_ip;
+            }
+            _ => unreachable!("this is a Nexus zone"),
+        };
+
+        let expected_notes = [
+            Note {
+                severity: Severity::Fatal,
+                kind: Kind::Sled {
+                    sled_id: nexus1_sled_id,
+                    kind: SledKind::DuplicateNicIp {
+                        zone1: nexus0.clone(),
+                        zone2: nexus1.clone(),
+                        ip: dup_ip,
+                    },
+                },
+            },
+        ];
+
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        for note in expected_notes {
+            assert!(
+                report.notes().contains(&note),
+                "did not find expected note {note:?}"
+            );
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_duplicate_nic_mac() {
+        static TEST_NAME: &str = "test_duplicate_nic_mac";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
+
+        // Copy the external IP from one Nexus to another.
+        let mut nexus_iter = blueprint.blueprint_zones.iter_mut().flat_map(
+            |(sled_id, zones_config)| {
+                zones_config.zones.iter_mut().filter_map(move |zone| {
+                    if zone.zone_type.is_nexus() {
+                        Some((*sled_id, zone))
+                    } else {
+                        None
+                    }
+                })
+            },
+        );
+        let (nexus0_sled_id, nexus0) =
+            nexus_iter.next().expect("at least one Nexus zone");
+        let (nexus1_sled_id, nexus1) =
+            nexus_iter.next().expect("at least two Nexus zones");
+        assert_ne!(nexus0_sled_id, nexus1_sled_id);
+
+        let dup_mac = nexus0
+            .zone_type
+            .external_networking()
+            .expect("Nexus has external networking")
+            .1
+            .mac;
+        match &mut nexus1.zone_type {
+            BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                nic,
+                ..
+            }) => {
+                nic.mac = dup_mac;
+            }
+            _ => unreachable!("this is a Nexus zone"),
+        };
+
+        let expected_notes = [
+            Note {
+                severity: Severity::Fatal,
+                kind: Kind::Sled {
+                    sled_id: nexus1_sled_id,
+                    kind: SledKind::DuplicateNicMac {
+                        zone1: nexus0.clone(),
+                        zone2: nexus1.clone(),
+                        mac: dup_mac,
+                    },
+                },
+            },
+        ];
+
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        for note in expected_notes {
+            assert!(
+                report.notes().contains(&note),
+                "did not find expected note {note:?}"
+            );
+        }
+
+        logctx.cleanup_successful();
+    }
 }
