@@ -391,7 +391,7 @@ async fn rsrss_get_clone_source(
 
     let mut non_expunged_read_only_regions = osagactx
         .datastore()
-        .find_non_expunged_regions(&opctx, db_snapshot.volume_id)
+        .find_non_expunged_regions(&opctx, db_snapshot.volume_id())
         .await
         .map_err(ActionError::action_failed)?;
 
