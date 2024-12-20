@@ -16,13 +16,13 @@ use uuid::Uuid;
 // `diffus::edit::Edit<'a, OriginalFieldType>`.
 use super::{
     BlueprintZoneConfig, BlueprintZonesConfig, EditedBlueprint,
-    EditedBlueprintZonesConfig,
+    EditedBlueprintZoneConfig, EditedBlueprintZonesConfig,
 };
 
 #[derive(Debug, Clone)]
 pub struct Change<'e, T> {
-    before: &'e T,
-    after: &'e T,
+    pub before: &'e T,
+    pub after: &'e T,
 }
 
 /// A trait to visit all the edits of a `Blueprint`.
@@ -164,6 +164,34 @@ pub trait Visit<'e> {
         node: &'e Vec<BlueprintZoneConfig>,
     ) {
         visit_blueprint_zones_zones_copy(self, sled_id, node);
+    }
+    fn visit_blueprint_zones_zone_config_copy(
+        &mut self,
+        sled_id: &'e SledUuid,
+        node: &'e BlueprintZoneConfig,
+    ) {
+        visit_blueprint_zones_zone_config_copy(self, sled_id, node);
+    }
+    fn visit_blueprint_zones_zone_config_insert(
+        &mut self,
+        sled_id: &'e SledUuid,
+        node: &'e BlueprintZoneConfig,
+    ) {
+        visit_blueprint_zones_zone_config_insert(self, sled_id, node);
+    }
+    fn visit_blueprint_zones_zone_config_remove(
+        &mut self,
+        sled_id: &'e SledUuid,
+        node: &'e BlueprintZoneConfig,
+    ) {
+        visit_blueprint_zones_zone_config_remove(self, sled_id, node);
+    }
+    fn visit_blueprint_zones_zone_config_change(
+        &mut self,
+        sled_id: &'e SledUuid,
+        node: &'e EditedBlueprintZoneConfig,
+    ) {
+        visit_blueprint_zones_zone_config_change(self, sled_id, node);
     }
 }
 
@@ -307,15 +335,42 @@ pub fn visit_blueprint_zones_map_change<'e, V>(
         Edit::Change(zones) => {
             for node in zones {
                 match node {
-                    collection::Edit::Copy(node) => {}
-                    collection::Edit::Insert(node) => {}
-                    collection::Edit::Remove(node) => {}
-                    collection::Edit::Change(node) => {}
+                    collection::Edit::Copy(node) => {
+                        v.visit_blueprint_zones_zone_config_copy(
+                            sled_id, *node,
+                        );
+                    }
+                    collection::Edit::Insert(node) => {
+                        v.visit_blueprint_zones_zone_config_insert(
+                            sled_id, *node,
+                        );
+                    }
+                    collection::Edit::Remove(node) => {
+                        v.visit_blueprint_zones_zone_config_remove(
+                            sled_id, node,
+                        );
+                    }
+                    collection::Edit::Change(node) => {
+                        v.visit_blueprint_zones_zone_config_change(
+                            sled_id, node,
+                        );
+                    }
                 }
             }
         }
     }
 }
+
+pub fn visit_blueprint_zones_zone_config_change<'e, V>(
+    v: &mut V,
+    sled_id: &'e SledUuid,
+    node: &'e EditedBlueprintZoneConfig,
+) where
+    V: Visit<'e> + ?Sized,
+{
+    todo!()
+}
+
 // 2 parameter version of macro to implement empty leaf visitor methods with a
 // `Change` parameter last
 macro_rules! empty_visit_change_2 {
@@ -394,6 +449,21 @@ empty_visit_3!(
     visit_blueprint_zones_zones_copy,
     SledUuid,
     Vec<BlueprintZoneConfig>
+);
+empty_visit_3!(
+    visit_blueprint_zones_zone_config_copy,
+    SledUuid,
+    BlueprintZoneConfig
+);
+empty_visit_3!(
+    visit_blueprint_zones_zone_config_insert,
+    SledUuid,
+    BlueprintZoneConfig
+);
+empty_visit_3!(
+    visit_blueprint_zones_zone_config_remove,
+    SledUuid,
+    BlueprintZoneConfig
 );
 
 /// A visitor for debug printing walks of a blueprint
