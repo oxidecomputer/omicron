@@ -883,12 +883,26 @@ struct VmmListArgs {
 
 impl DbArgs {
     /// Run a `omdb db` subcommand.
+    ///
+    /// Mostly delegates to `run_cmd_inner`, taking care to properly terminate
+    /// the database connection.
     pub(crate) async fn run_cmd(
         &self,
         omdb: &Omdb,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
         let datastore = self.db_url_opts.connect(omdb, log).await?;
+        let res = self.run_cmd_inner(&datastore, omdb, log).await;
+        datastore.terminate().await;
+        res
+    }
+
+    async fn run_cmd_inner(
+        &self,
+        datastore: &Arc<DataStore>,
+        omdb: &Omdb,
+        log: &slog::Logger,
+    ) -> Result<(), anyhow::Error> {
         let opctx = OpContext::for_tests(log.clone(), datastore.clone());
         let res = match &self.command {
             DbCommands::Rack(RackArgs { command: RackCommands::List }) => {
@@ -1137,7 +1151,6 @@ impl DbArgs {
                 cmd_db_vmm_list(&datastore, &self.fetch_opts, args).await
             }
         };
-        datastore.terminate().await;
         res
     }
 }
