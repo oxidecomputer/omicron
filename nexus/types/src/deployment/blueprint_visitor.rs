@@ -4,13 +4,16 @@
 
 //! An API modelled after [`syn::visit`](https://docs.rs/syn/1/syn/visit).
 use crate::deployment::Blueprint;
-use crate::external_api::views::{EditedSledState, SledState};
+use crate::external_api::views::SledState;
 use diffus::edit::{collection, enm, map, Edit};
-use diffus::Diffable;
+use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
+// Structs are prefixed via `Edited` when `diffus_derive` generates them.
+// In this case each field of the edited version becomes a type like
+// `diffus::edit::Edit<'a, OriginalFieldType>`.
 use super::{
     BlueprintZonesConfig, EditedBlueprint, EditedBlueprintZonesConfig,
 };
@@ -136,6 +139,20 @@ pub trait Visit<'e> {
     ) {
         visit_blueprint_zones_map_change(self, sled_id, node);
     }
+    fn visit_blueprint_zones_generation_copy(
+        &mut self,
+        sled_id: &'e SledUuid,
+        node: &'e Generation,
+    ) {
+        visit_blueprint_zones_generation_copy(self, sled_id, node);
+    }
+    fn visit_blueprint_zones_generation_change(
+        &mut self,
+        sled_id: &'e SledUuid,
+        node: Change<'e, Generation>,
+    ) {
+        visit_blueprint_zones_generation_change(self, sled_id, node);
+    }
 }
 
 /// The root of the diff
@@ -236,9 +253,9 @@ pub fn visit_sled_state_change<'e, V>(
 }
 
 pub fn visit_sled_state_map_change<'e, V>(
-    v: &mut V,
-    key: &'e SledUuid,
-    node: Change<'e, SledState>,
+    _v: &mut V,
+    _key: &'e SledUuid,
+    _node: Change<'e, SledState>,
 ) where
     V: Visit<'e> + ?Sized,
 {
@@ -276,7 +293,40 @@ pub fn visit_blueprint_zones_map_change<'e, V>(
 ) where
     V: Visit<'e> + ?Sized,
 {
-    todo!()
+    match &node.generation {
+        Edit::Copy(node) => {
+            v.visit_blueprint_zones_generation_copy(sled_id, *node);
+        }
+        Edit::Change((before, after)) => {
+            v.visit_blueprint_zones_generation_change(
+                sled_id,
+                Change { before: *before, after: *after },
+            );
+        }
+    }
+}
+// 2 parameter version of macro to implement empty leaf visitor methods with a
+// `Change` parameter last
+macro_rules! empty_visit_change_2 {
+    ($name: ident, $t: ty) => {
+        fn $name<'e, V>(_v: &mut V, _change: Change<'e, $t>)
+        where
+            V: Visit<'e> + ?Sized,
+        {
+        }
+    };
+}
+
+// 3 parameter version of macro to implement empty leaf visitor methods with a
+// `Change` parameter last
+macro_rules! empty_visit_change_3 {
+    ($name: ident, $t: ty, $t2: ty) => {
+        fn $name<'e, V>(_v: &mut V, _key: &'e $t, _change: Change<'e, $t2>)
+        where
+            V: Visit<'e> + ?Sized,
+        {
+        }
+    };
 }
 
 // 2 parameter version of macro to implement empty leaf visitor methods of the
@@ -295,7 +345,7 @@ macro_rules! empty_visit_2 {
 // right form
 macro_rules! empty_visit_3 {
     ($name: ident, $t: ty, $t2: ty) => {
-        fn $name<'e, V>(_v: &mut V, _node: &'e $t, _node2: &'e $t2)
+        fn $name<'e, V>(_v: &mut V, _key: &'e $t, _node: &'e $t2)
         where
             V: Visit<'e> + ?Sized,
         {
@@ -320,6 +370,12 @@ empty_visit_3!(
     visit_blueprint_zones_map_remove,
     SledUuid,
     BlueprintZonesConfig
+);
+empty_visit_3!(visit_blueprint_zones_generation_copy, SledUuid, Generation);
+empty_visit_change_3!(
+    visit_blueprint_zones_generation_change,
+    SledUuid,
+    Generation
 );
 
 /// A visitor for debug printing walks of a blueprint
