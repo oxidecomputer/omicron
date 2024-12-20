@@ -327,7 +327,10 @@ impl<'a> DatasetsBySled<'a> {
         Self { by_sled, noted_sleds_missing_datasets: BTreeSet::new() }
     }
 
-    fn for_sled(
+    // Get the datasets for each zpool on a given sled, or add a fatal note to
+    // `blippy` that the sled is missing an entry in `blueprint_datasets` for
+    // the specified reason `why`.
+    fn get_sled_or_note_missing(
         &mut self,
         blippy: &mut Blippy<'_>,
         sled_id: SledUuid,
@@ -361,7 +364,7 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
     // blueprint; once we include expunged or decommissioned disks too, we
     // should filter here to only in-service.
     for (&sled_id, disk_config) in &blippy.blueprint().blueprint_disks {
-        let Some(sled_datasets) = datasets.for_sled(
+        let Some(sled_datasets) = datasets.get_sled_or_note_missing(
             blippy,
             sled_id,
             "sled has an entry in blueprint_disks",
@@ -414,9 +417,11 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
         .blueprint()
         .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
     {
-        let Some(sled_datasets) =
-            datasets.for_sled(blippy, sled_id, "sled has running zones")
-        else {
+        let Some(sled_datasets) = datasets.get_sled_or_note_missing(
+            blippy,
+            sled_id,
+            "sled has running zones",
+        ) else {
             continue;
         };
 
