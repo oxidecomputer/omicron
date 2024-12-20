@@ -627,6 +627,116 @@ async fn test_silo_certificates() {
         );
     }
 
+    // Verify that all this works with a larger number of TLS certificates.
+    // First, we'll create the silos.
+    let before = std::time::Instant::now();
+    let silos: Vec<_> = (0..NSILOS)
+        .into_iter()
+        .map(|i| SiloCert::new(format!("extra-silo-{}", i).parse().unwrap()))
+        .collect();
+
+    const NSILOS: usize = 250;
+    for silo_i in &silos {
+        let silo_i_cert = oxide_client::types::CertificateCreate::builder()
+            .name(silo_i.cert_name.clone())
+            .description("")
+            .cert(silo_i.cert.cert.clone())
+            .key(silo_i.cert.key.clone())
+            .service(oxide_client::types::ServiceUsingCertificate::ExternalApi);
+        silo1_client
+            .silo_create()
+            .body(
+                oxide_client::types::SiloCreate::builder()
+                    .name(silo_i.silo_name.clone())
+                    .description("")
+                    .discoverable(false)
+                    .quotas(oxide_client::types::SiloQuotasCreate {
+                        cpus: 0,
+                        memory: oxide_client::types::ByteCount(0),
+                        storage: oxide_client::types::ByteCount(0),
+                    })
+                    .identity_mode(
+                        oxide_client::types::SiloIdentityMode::LocalOnly,
+                    )
+                    .tls_certificates(vec![silo_i_cert.try_into().unwrap()]),
+            )
+            .send()
+            .await
+            .expect("failed to create Silo");
+    }
+
+    // Now create a user in each silo.
+    let silo_users: Vec<_> = futures::future::try_join_all(
+        silos
+            .iter()
+            .map(|silo_i| {
+                silo1_client
+                .local_idp_user_create()
+                .silo(silo_i.silo_name.clone())
+                .body(
+                    oxide_client::types::UserCreate::builder()
+                        .external_id("testuser")
+                        .password(
+                            oxide_client::types::UserPassword::LoginDisallowed,
+                        ),
+                )
+                .send()
+            })
+            .collect::<Vec<_>>(),
+    )
+    .await
+    .expect("failed to create user")
+    .into_iter()
+    .map(|u| u.into_inner().id)
+    .collect();
+
+    // Now try to access each silo using its own TLS certificate.
+    //
+    // This looks potentially _super_ time-consuming because we're waiting for
+    // 200 conditions to become true.  In practice, however, each activation of
+    // the background task will pick up all newly-created silos.  So in total
+    // across all loop iterations, we're just waiting for one round of the
+    // external_endpoints background task to complete that started after we
+    // created all the silos above.  So most of the wait_for_condition()s ought
+    // to complete immediately.
+    for (silo_i, silo_i_user) in silos.iter().zip(silo_users.iter()) {
+        let silo_i_client = silo_i.oxide_client(
+            silo_i.reqwest_client(),
+            resolver.clone(),
+            AuthnMode::SiloUser(*silo_i_user),
+            nexus_port,
+        );
+
+        wait_for_condition(
+            || async {
+                match silo_i_client.current_user_view().send().await {
+                    Ok(result) => {
+                        assert_eq!(result.into_inner().id, *silo_i_user);
+                        Ok(())
+                    }
+                    Err(oxide_client::Error::CommunicationError(error))
+                        if error.is_connect() =>
+                    {
+                        Err(CondCheckError::NotYet)
+                    }
+                    Err(e) => Err(CondCheckError::Failed(e)),
+                }
+            },
+            &Duration::from_millis(50),
+            &Duration::from_secs(30),
+        )
+        .await
+        .unwrap_or_else(|error| {
+            panic!(
+                "failed to connect to silo {}'s endpoint within timeout: {:#}",
+                &silo_i.silo_name.as_str(),
+                error
+            )
+        });
+    }
+
+    println!("scale part took {:?}", before.elapsed());
+
     cptestctx.teardown().await;
 }
 
