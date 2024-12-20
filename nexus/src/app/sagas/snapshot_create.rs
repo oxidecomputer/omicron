@@ -125,6 +125,8 @@ use steno::ActionError;
 use steno::Node;
 use uuid::Uuid;
 
+type ReplaceSocketsMap = BTreeMap<SocketAddrV6, SocketAddrV6>;
+
 // snapshot create saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1384,7 +1386,7 @@ async fn ssc_detach_disk_from_pantry(
 
 async fn ssc_start_running_snapshot(
     sagactx: NexusActionContext,
-) -> Result<BTreeMap<SocketAddr, SocketAddr>, ActionError> {
+) -> Result<ReplaceSocketsMap, ActionError> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
@@ -1410,7 +1412,7 @@ async fn ssc_start_running_snapshot(
         .await
         .map_err(ActionError::action_failed)?;
 
-    let mut map: BTreeMap<SocketAddr, SocketAddr> = BTreeMap::new();
+    let mut map: ReplaceSocketsMap = BTreeMap::new();
 
     for (dataset, region) in datasets_and_regions {
         let Some(dataset_addr) = dataset.address() else {
@@ -1454,7 +1456,7 @@ async fn ssc_start_running_snapshot(
         );
 
         info!(log, "map {} to {}", region_addr, snapshot_addr);
-        map.insert(region_addr.into(), snapshot_addr.into());
+        map.insert(region_addr, snapshot_addr);
 
         // Once snapshot has been validated, and running snapshot has been
         // started, add an entry in the region_snapshot table to correspond to
@@ -1564,8 +1566,8 @@ async fn ssc_create_volume_record(
     // The volume construction request must then be modified to point to the
     // read-only crucible agent downstairs (corresponding to this snapshot)
     // launched through this saga.
-    let replace_sockets_map = sagactx
-        .lookup::<BTreeMap<SocketAddr, SocketAddr>>("replace_sockets_map")?;
+    let replace_sockets_map =
+        sagactx.lookup::<ReplaceSocketsMap>("replace_sockets_map")?;
     let snapshot_volume_construction_request: VolumeConstructionRequest =
         create_snapshot_from_disk(
             &disk_volume_construction_request,
@@ -1689,7 +1691,7 @@ async fn ssc_release_volume_lock(
 /// VolumeConstructionRequest and modifying it accordingly.
 fn create_snapshot_from_disk(
     disk: &VolumeConstructionRequest,
-    socket_map: &BTreeMap<SocketAddr, SocketAddr>,
+    socket_map: &ReplaceSocketsMap,
 ) -> anyhow::Result<VolumeConstructionRequest> {
     // When copying a disk's VolumeConstructionRequest to turn it into a
     // snapshot:
@@ -1751,6 +1753,16 @@ fn create_snapshot_from_disk(
 
                 if work.socket_modification_required {
                     for target in &mut opts.target {
+                        let target = match target {
+                            SocketAddr::V6(v6) => v6,
+                            SocketAddr::V4(_) => {
+                                anyhow::bail!(
+                                    "unexpected IPv4 address in VCR: {:?}",
+                                    work.vcr_part
+                                )
+                            }
+                        };
+
                         *target = *socket_map.get(target).ok_or_else(|| {
                             anyhow!("target {} not found in map!", target)
                         })?;
@@ -1869,8 +1881,7 @@ mod test {
             ],
         };
 
-        let mut replace_sockets: BTreeMap<SocketAddr, SocketAddr> =
-            BTreeMap::new();
+        let mut replace_sockets = ReplaceSocketsMap::new();
 
         // Replacements for top level Region only
         replace_sockets.insert(

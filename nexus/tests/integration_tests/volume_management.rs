@@ -3567,7 +3567,7 @@ struct TestReadOnlyRegionReferenceUsage {
     datastore: Arc<DataStore>,
 
     region: db::model::Region,
-    region_address: SocketAddr,
+    region_address: SocketAddrV6,
 
     first_volume_id: Uuid,
     second_volume_id: Uuid,
@@ -3628,9 +3628,8 @@ impl TestReadOnlyRegionReferenceUsage {
         // so fill in a random port here.
         datastore.region_set_port(region.id(), 12345).await.unwrap();
 
-        let region_address = SocketAddr::V6(
-            datastore.region_addr(region.id()).await.unwrap().unwrap(),
-        );
+        let region_address =
+            datastore.region_addr(region.id()).await.unwrap().unwrap();
 
         let region = datastore.get_region(region.id()).await.unwrap();
 
@@ -3661,7 +3660,7 @@ impl TestReadOnlyRegionReferenceUsage {
                         gen: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
-                            target: vec![self.region_address],
+                            target: vec![self.region_address.into()],
                             lossy: false,
                             flush_timeout: None,
                             key: None,
@@ -3791,7 +3790,7 @@ impl TestReadOnlyRegionReferenceUsage {
                             gen: 1,
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
-                                target: vec![self.region_address],
+                                target: vec![self.region_address.into()],
                                 lossy: false,
                                 flush_timeout: None,
                                 key: None,
@@ -3824,7 +3823,7 @@ impl TestReadOnlyRegionReferenceUsage {
                         gen: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
-                            target: vec![self.region_address],
+                            target: vec![self.region_address.into()],
                             lossy: false,
                             flush_timeout: None,
                             key: None,
@@ -3859,7 +3858,7 @@ impl TestReadOnlyRegionReferenceUsage {
                             gen: 1,
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
-                                target: vec![self.region_address],
+                                target: vec![self.region_address.into()],
                                 lossy: false,
                                 flush_timeout: None,
                                 key: None,

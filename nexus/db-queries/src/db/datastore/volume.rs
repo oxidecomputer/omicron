@@ -2578,10 +2578,14 @@ fn region_in_vcr(
 
             VolumeConstructionRequest::Region { opts, .. } => {
                 for target in &opts.target {
-                    if let SocketAddr::V6(target) = target {
-                        if *target == *region {
+                    match target {
+                        SocketAddr::V6(t) if *t == *region => {
                             region_found = true;
                             break;
+                        }
+                        SocketAddr::V6(_) => {}
+                        SocketAddr::V4(_) => {
+                            bail!("region target contains an IPv4 address");
                         }
                     }
                 }
@@ -2644,9 +2648,15 @@ fn read_only_target_in_vcr(
                 }
 
                 for target in &opts.target {
-                    if let SocketAddr::V6(target) = target {
-                        if *target == *read_only_target && opts.read_only {
+                    match target {
+                        SocketAddr::V6(t)
+                            if *t == *read_only_target && opts.read_only =>
+                        {
                             return Ok(true);
+                        }
+                        SocketAddr::V6(_) => {}
+                        SocketAddr::V4(_) => {
+                            bail!("region target contains an IPv4 address");
                         }
                     }
                 }
@@ -4986,10 +4996,7 @@ mod tests {
             .unwrap();
 
         let volumes = datastore
-            .find_volumes_referencing_socket_addr(
-                &opctx,
-                address_1.into(),
-            )
+            .find_volumes_referencing_socket_addr(&opctx, address_1.into())
             .await
             .unwrap();
 

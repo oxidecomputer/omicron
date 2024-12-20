@@ -869,8 +869,8 @@ impl InstanceRunner {
         // components (e.g., converting device slot numbers into concrete PCI
         // bus/device/function numbers).
         //
-        // Today's Propolis VM creation API (the one used below) differs from
-        // this scheme in two important ways:
+        // The Propolis VM creation API used below differs from this scheme in
+        // two important ways:
         //
         // 1. Callers are responsible for filling in all the details of a VM's
         //    configuration (e.g., choosing PCI BDFs for PCI devices).
@@ -974,12 +974,12 @@ impl InstanceRunner {
         let nics: Vec<NicComponents> = running_zone
             .opte_ports()
             .map(|port| -> Result<NicComponents, Error> {
-                let pos = self
+                let nic = self
                     .requested_nics
                     .iter()
                     // We expect to match NIC slots to OPTE port slots.
                     // Error out if we can't find a NIC for a port.
-                    .position(|nic| nic.slot == port.slot())
+                    .find(|nic| nic.slot == port.slot())
                     .ok_or(Error::Opte(
                         illumos_utils::opte::Error::NoNicforPort(
                             port.name().into(),
@@ -987,7 +987,6 @@ impl InstanceRunner {
                         ),
                     ))?;
 
-                let nic = &self.requested_nics[pos];
                 Ok(NicComponents {
                     id: nic.id,
                     device: VirtioNic {
@@ -1012,7 +1011,7 @@ impl InstanceRunner {
         // - Crucible disks: the target needs to connect to its downstairs
         //   instances with new generation numbers supplied from Nexus
         // - OPTE ports: the target needs to bind its VNICs to the correct
-        //   devices for its new host, which devices may have different names
+        //   devices for its new host; those devices may have different names
         //   than their counterparts on the source host
         //
         // If this is a request to migrate, construct a list of source component

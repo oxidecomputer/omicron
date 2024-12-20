@@ -1052,7 +1052,6 @@ impl super::Nexus {
             )
             .await?;
 
-        let mut found_boot_disk = None;
         let mut disk_reqs = vec![];
         for disk in &disks {
             // Disks that are attached to an instance should always have a slot
@@ -1087,12 +1086,6 @@ impl super::Nexus {
                 )
                 .await?;
 
-            if let Some(wanted_id) = &db_instance.boot_disk_id {
-                if disk.id() == *wanted_id {
-                    found_boot_disk = Some(*wanted_id);
-                }
-            }
-
             disk_reqs.push(sled_agent_client::types::InstanceDisk {
                 disk_id: disk.id(),
                 name: disk.name().to_string(),
@@ -1102,38 +1095,13 @@ impl super::Nexus {
             });
         }
 
-        let boot_settings = if let Some(boot_disk_id) = found_boot_disk {
-            Some(InstanceBootSettings { order: vec![boot_disk_id] })
-        } else {
-            if let Some(instance_boot_disk_id) =
-                db_instance.boot_disk_id.as_ref()
-            {
-                // This should never occur: when setting the boot disk we ensure it is
-                // attached, and when detaching a disk we ensure it is not the boot
-                // disk. If this error is seen, the instance somehow had a boot disk
-                // that was not attached anyway.
-                //
-                // When Propolis accepts an ID rather than name, and we don't need to
-                // look up a name when assembling the Propolis request, we might as well
-                // remove this check; we can just pass the ID and rely on Propolis' own
-                // check that the boot disk is attached.
-                if found_boot_disk.is_none() {
-                    error!(self.log, "instance boot disk is not attached";
-                       "boot_disk_id" => ?instance_boot_disk_id,
-                       "instance id" => %db_instance.id());
-
-                    return Err(InstanceStateChangeError::Other(
-                        Error::internal_error(&format!(
-                            "instance {} has boot disk {:?} but it is not attached",
-                            db_instance.id(),
-                            db_instance.boot_disk_id.as_ref(),
-                        )),
-                    ));
-                }
-            }
-
-            None
-        };
+        // The routines that maintain an instance's boot options are supposed to
+        // guarantee that the boot disk ID, if present, is the ID of an attached
+        // disk. If this invariant isn't upheld, Propolis will catch the failure
+        // when it processes its received VM configuration.
+        let boot_settings = db_instance
+            .boot_disk_id
+            .map(|id| InstanceBootSettings { order: vec![id] });
 
         let nics = self
             .db_datastore
