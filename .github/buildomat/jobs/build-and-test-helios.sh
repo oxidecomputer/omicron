@@ -25,5 +25,10 @@
 #: name = "environment.json"
 #: from_output = "/work/environment.json"
 #:
+#: [[publish]]
+#: series = "live-tests"
+#: name = "live-tests-archive.tgz"
+#: from_output = "/work/oxidecomputer/omicron/target/live-tests-archive.tgz"
+#:
 
 exec .github/buildomat/build-and-test.sh illumos
