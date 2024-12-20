@@ -29,13 +29,6 @@ pub struct Note {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
     /// Indicator of a serious problem that means the blueprint is invalid.
-    ///
-    /// Many common blueprint use cases are likely to fail in some way if
-    /// performed with a blueprint reporting a `Fatal` note:
-    ///
-    /// * Uploading the blueprint to Nexus
-    /// * Attempting to execute the blueprint
-    /// * Attempting to generate a new child blueprint
     Fatal,
 }
 
