@@ -1386,8 +1386,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 }
             },
             &Duration::from_millis(50),
-            // TODO: put me back to 30 before merging
-            &Duration::from_secs(3),
+            &Duration::from_secs(30),
         )
         .await
         .expect("expected to find inventory collection");

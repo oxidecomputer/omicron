@@ -80,6 +80,10 @@ pub const SUPPORT_BUNDLES_URL: &'static str =
     "/experimental/v1/system/support-bundles";
 pub static SUPPORT_BUNDLE_URL: Lazy<String> =
     Lazy::new(|| format!("{SUPPORT_BUNDLES_URL}/{{id}}"));
+pub static SUPPORT_BUNDLE_INDEX_URL: Lazy<String> =
+    Lazy::new(|| format!("{SUPPORT_BUNDLES_URL}/{{id}}/index"));
+pub static SUPPORT_BUNDLE_DOWNLOAD_URL: Lazy<String> =
+    Lazy::new(|| format!("{SUPPORT_BUNDLES_URL}/{{id}}/download"));
 
 // Global policy
 pub const SYSTEM_POLICY_URL: &'static str = "/v1/system/policy";
@@ -2189,11 +2193,33 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             ],
         },
 
+//        VerifyEndpoint {
+//            url: &SUPPORT_BUNDLE_INDEX_URL,
+//            visibility: Visibility::Protected,
+//            unprivileged_access: UnprivilegedAccess::None,
+//            allowed_methods: vec![
+//                AllowedMethod::Get,
+//            ],
+//        },
+//
+//        VerifyEndpoint {
+//            url: &SUPPORT_BUNDLE_DOWNLOAD_URL,
+//            visibility: Visibility::Protected,
+//            unprivileged_access: UnprivilegedAccess::None,
+//            allowed_methods: vec![
+//                AllowedMethod::Get,
+//                AllowedMethod::Head,
+//            ],
+//        },
+
         VerifyEndpoint {
             url: &SUPPORT_BUNDLE_URL,
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Delete,
+            ],
         },
 
         /* Updates */

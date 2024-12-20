@@ -59,9 +59,7 @@ type DiskTest<'a> =
 //   403).
 #[nexus_test]
 async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
-    eprintln!("----- test unauthorized started");
     let mut disk_test = DiskTest::new(cptestctx).await;
-    eprintln!("----- test unauthorized finished making new disk test");
     let sled_id = cptestctx.first_sled();
     disk_test
         .add_zpool_with_dataset_ext(
@@ -85,8 +83,6 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let log = &cptestctx.logctx.log;
     let mut setup_results = std::collections::BTreeMap::new();
-
-    eprintln!("----- test unauthorized creating test data");
 
     // Create test data.
     info!(log, "setting up resource hierarchy");
@@ -119,8 +115,6 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
             setup_results.insert(id_route, result.clone());
         });
     }
-
-    eprintln!("----- test unauthorized verifying endpoints");
 
     // Verify the hardcoded endpoints.
     info!(log, "verifying endpoints");
@@ -343,7 +337,7 @@ static SETUP_REQUESTS: Lazy<Vec<SetupReq>> = Lazy::new(|| {
         SetupReq::Post {
             url: &SUPPORT_BUNDLES_URL,
             body: serde_json::to_value(()).unwrap(),
-            id_routes: vec![],
+            id_routes: vec!["/experimental/v1/system/support-bundles/{id}"],
         },
     ]
 });
