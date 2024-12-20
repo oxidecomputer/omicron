@@ -485,7 +485,6 @@ mod region_replacement {
                 .activate_background_attachment(
                     region_replacement.volume_id.to_string(),
                 )
-                .await
                 .unwrap();
         }
 
