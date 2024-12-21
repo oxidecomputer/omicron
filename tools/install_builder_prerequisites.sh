@@ -138,7 +138,6 @@ function install_packages {
     fi
   elif [[ "${HOST_OS}" == "SunOS" ]]; then
     CLANGVER=15
-    RTVER=13
     PGVER=13
     packages=(
       "pkg:/package/pkg"
@@ -146,13 +145,22 @@ function install_packages {
       "library/postgresql-$PGVER"
       "pkg-config"
       "library/libxmlsec1"
-      "system/library/gcc-runtime@$RTVER"
-      "system/library/g++-runtime@$RTVER"
       # "bindgen leverages libclang to preprocess, parse, and type check C and C++ header files."
       "pkg:/ooce/developer/clang-$CLANGVER"
       "system/library/gcc-runtime"
       "system/library/g++-runtime"
     )
+
+    # The clickhouse binary depends on the {gcc,g++}-runtime packages being
+    # at least version 13. If we are on a version below that, update to the
+    # latest.
+    RTVER=13
+    for p in system/library/gcc-runtime system/library/g++-runtime; do
+        # buildmat runners do not yet have a new enough `pkg` for -o
+        #v=$(pkg list -Ho release $p)
+        v=$(pkg list -H -F tsv $p | awk '{split($2, a, "-"); print a[1]}')
+        ((v < RTVER)) && packages+=($p@latest)
+    done
 
     # Install/update the set of packages.
     # Explicitly manage the return code using "rc" to observe the result of this
