@@ -227,7 +227,9 @@ CAUTION: This isn't the _only_ way to do it.  However, many other ways to do it 
 
 **In the next release** (we'll call it "release 2"):
 
-. Add `my_config: MyConfig` to appropriate spot in Sled Agent inventory.  Note that it is _not_ an optional field.  In this use case, Sled Agent always knows the current value of this field.
+. Add `my_config: MyConfig` to appropriate spot in Sled Agent inventory.
+** In the inventory API that Sled Agent exposes, this field can be non-optional.  In this use case, it's assumed that Sled Agent can know what the current value is.  That is, the code in this release must be aware that this value, which may previously have been hardcoded or even absent altogether, is now a variable to be reported in inventory (and eventually controlled by Nexus -- see below).
+** In the Nexus inventory structures and database inventory structures, the field still needs to be optional (`my_config: Option<MyConfig>` or equivalent) because Nexus generally needs to be able to read inventory structures written by the previous release.
 . Add `my_config: Option<MyConfig>` to the blueprint structures (both in-memory and in the database).  This field has to be optional so that when updating to this release, the system can still read the current target blueprint (that was written in the previous release that didn't have this field).
 . In the Reconfigurator planner, when generating a blueprint based on a parent blueprint where `my_config` is `None`, fill in `my_config` (using a `Some` value) based on the contents in inventory.
 . Add `my_config` to the Sled Agent request that will be used by Reconfigurator to _configure_ this on each sled.
@@ -248,7 +250,8 @@ This explains another reason why `my_config` should be optional in this structur
 **In the next release** (we'll call it "release 3"): all the optional fields can be made non-optional:
 
 * Blueprints' in-memory structure can go from `my_config: Option<MyConfig>` to `my_config: MyConfig`.
-* Blueprints' database representation can go from NULL-able columns to non-NULL-able ones, though only if we can populate the value or drop it from old blueprints.  More work is needed here.
+* Nexus's in-memory structure for inventory can go from `my_config: Option<MyConfig>` to `my_config: MyConfig`.
+* Blueprints' and inventory collections' database representations can go from NULL-able columns to non-NULL-able ones, though only if we can populate the value or drop old blueprints and collections.  More work is needed here (see below).
 * The Sled Agent API input types and ledgers that refer to `my_config` can go from `my_config: Option<MyConfig>` to `my_config: MyConfig`.  No on-disk changes are needed for this.
 
 **During the upgrade to the next release**: Blueprints that do not have `my_config` set will need to be deleted from the database prior to the upgrade.  See https://github.com/oxidecomputer/omicron/issues/7278[omicron#7278] for more on operationalizing this.
