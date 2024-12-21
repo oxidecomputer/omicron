@@ -6,7 +6,7 @@
 
 use anyhow::{bail, Result};
 use clap::ValueEnum;
-use omicron_zone_package::target::Target;
+use omicron_zone_package::target::TargetMap;
 use std::collections::BTreeMap;
 
 /// Type of OS image to build
@@ -123,8 +123,8 @@ impl Default for KnownTarget {
     }
 }
 
-impl From<KnownTarget> for Target {
-    fn from(kt: KnownTarget) -> Target {
+impl From<KnownTarget> for TargetMap {
+    fn from(kt: KnownTarget) -> TargetMap {
         let mut map = BTreeMap::new();
         map.insert("image".to_string(), kt.image.to_string());
         if let Some(machine) = kt.machine {
@@ -138,13 +138,13 @@ impl From<KnownTarget> for Target {
             "clickhouse-topology".to_string(),
             kt.clickhouse_topology.to_string(),
         );
-        Target(map)
+        TargetMap(map)
     }
 }
 
 impl std::fmt::Display for KnownTarget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let target: Target = self.clone().into();
+        let target: TargetMap = self.clone().into();
         target.fmt(f)
     }
 }
@@ -153,7 +153,7 @@ impl std::str::FromStr for KnownTarget {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let target = Target::from_str(s)?;
+        let target = TargetMap::from_str(s)?;
 
         let mut image = Self::default().image;
         let mut machine = None;
@@ -181,7 +181,7 @@ impl std::str::FromStr for KnownTarget {
                 _ => {
                     bail!(
                         "Unknown target key {k}\nValid keys include: [{}]",
-                        Target::from(Self::default())
+                        TargetMap::from(Self::default())
                             .0
                             .keys()
                             .cloned()

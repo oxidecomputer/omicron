@@ -11,6 +11,7 @@ use anyhow::Context;
 use anyhow::Result;
 use cargo_metadata::Metadata;
 use omicron_zone_package::config::PackageMap;
+use omicron_zone_package::config::PackageName;
 use omicron_zone_package::package::PackageSource;
 use slog::info;
 use slog::Logger;
@@ -46,9 +47,10 @@ pub fn build_cargo_plan<'a>(
             // Add the package name to the plan
             plan.packages.insert(name);
             // Get the package metadata
-            let metadata = workspace_pkgs.get(name).with_context(|| {
-                format!("package '{name}' is not a workspace package")
-            })?;
+            let metadata =
+                workspace_pkgs.get(name.as_str()).with_context(|| {
+                    format!("package '{name}' is not a workspace package")
+                })?;
             // Add the binaries we want to build to the plan
             let bins = metadata
                 .targets
@@ -92,7 +94,7 @@ impl CargoPlan<'_> {
 #[derive(Debug)]
 pub struct CargoTargets<'a> {
     pub kind: BuildKind,
-    pub packages: BTreeSet<&'a String>,
+    pub packages: BTreeSet<&'a PackageName>,
     pub bins: BTreeSet<&'a String>,
     pub features: BTreeSet<&'a String>,
 }
@@ -120,7 +122,7 @@ impl CargoTargets<'_> {
         // --package, and without any --package options Cargo unifies features
         // across all workspace default members. See rust-lang/cargo#8157.
         for package in &self.packages {
-            cmd.arg("--package").arg(package);
+            cmd.arg("--package").arg(package.as_str());
         }
         for bin in &self.bins {
             cmd.arg("--bin").arg(bin);

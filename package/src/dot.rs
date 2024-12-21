@@ -4,7 +4,7 @@ use anyhow::anyhow;
 use omicron_zone_package::config::Config;
 use omicron_zone_package::package::PackageOutput;
 use omicron_zone_package::package::PackageSource;
-use omicron_zone_package::target::Target;
+use omicron_zone_package::target::TargetMap;
 use petgraph::dot::Dot;
 use petgraph::graph::EdgeReference;
 use petgraph::graph::NodeIndex;
@@ -70,7 +70,7 @@ impl std::fmt::Display for GraphNode {
 
 // Returns a string that can be passed to dot(1) to visualize a package manifest
 pub fn do_dot(
-    target: &Target,
+    target: &TargetMap,
     package_config: &Config,
 ) -> anyhow::Result<String> {
     let packages = &package_config.packages;
@@ -295,7 +295,7 @@ mod test {
     fn dot_output_for(raw_toml: &str) -> Result<String, anyhow::Error> {
         let package_config =
             parse_manifest(raw_toml).expect("test toml was invalid");
-        do_dot(&Target::default(), &package_config)
+        do_dot(&TargetMap::default(), &package_config)
     }
 
     #[test]
