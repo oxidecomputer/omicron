@@ -14,11 +14,15 @@ use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
 use omicron_zone_package::config::Config;
+use omicron_zone_package::config::PackageName;
 use omicron_zone_package::package::PackageSource;
 use quote::quote;
 use std::env;
 use std::fs;
 use std::path::Path;
+
+const DENDRITE_ASIC_PACKAGE: PackageName =
+    PackageName::new_const("dendrite-asic");
 
 fn main() -> Result<()> {
     // Find the current dendrite repo commit from our package manifest.
@@ -31,7 +35,7 @@ fn main() -> Result<()> {
 
     let dendrite = config
         .packages
-        .get("dendrite-asic")
+        .get(&DENDRITE_ASIC_PACKAGE)
         .context("missing dendrite package in ../../package-manifest.toml")?;
 
     let local_path = match &dendrite.source {

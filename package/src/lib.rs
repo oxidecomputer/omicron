@@ -2,6 +2,7 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Subcommand;
+use omicron_zone_package::config::PackageName;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 
@@ -122,12 +123,12 @@ pub enum BuildCommand {
         disable_cache: bool,
         /// Limit to building only these packages
         #[clap(long)]
-        only: Vec<String>,
+        only: Vec<PackageName>,
     },
     /// Stamps semver versions onto packages within a manifest
     Stamp {
         /// The name of the artifact to be stamped.
-        package_name: String,
+        package_name: PackageName,
 
         /// The version to be stamped onto the package.
         version: semver::Version,

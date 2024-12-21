@@ -6,9 +6,9 @@ use anyhow::{bail, Result};
 use camino::Utf8Path;
 use clap::Args;
 use omicron_zone_package::{
-    config::{Config as PackageConfig, PackageMap},
+    config::{Config as PackageConfig, PackageMap, PackageName},
     package::PackageSource,
-    target::Target,
+    target::TargetMap,
 };
 use slog::{debug, Logger};
 use std::{collections::BTreeMap, io::Write, str::FromStr, time::Duration};
@@ -50,9 +50,9 @@ pub struct Config {
     // Description of all possible packages.
     package_config: PackageConfig,
     // Description of the target we're trying to operate on.
-    target: Target,
+    target: TargetMap,
     // The list of packages the user wants us to build (all, if empty)
-    only: Vec<String>,
+    only: Vec<PackageName>,
     // True if we should skip confirmations for destructive operations.
     force: bool,
     // Number of times to retry failed downloads.
@@ -91,7 +91,7 @@ impl Config {
                     target_help_str()
                 );
             })?;
-        let target: Target = KnownTarget::from_str(&raw_target)
+        let target: TargetMap = KnownTarget::from_str(&raw_target)
             .inspect_err(|_| {
                 eprintln!(
                     "Failed to parse {} as target\n{}",
@@ -115,7 +115,7 @@ impl Config {
 
     /// Sets the `only` field.
     #[inline]
-    pub fn set_only(&mut self, only: Vec<String>) -> &mut Self {
+    pub fn set_only(&mut self, only: Vec<PackageName>) -> &mut Self {
         self.only = only;
         self
     }
@@ -128,7 +128,7 @@ impl Config {
 
     /// Returns the target currently being operated on.
     #[inline]
-    pub fn target(&self) -> &Target {
+    pub fn target(&self) -> &TargetMap {
         &self.target
     }
 
@@ -212,7 +212,7 @@ impl Config {
                                 output
                             )
                         });
-                    if dep_name.as_str() == package_name {
+                    if *dep_name == package_name {
                         panic!("'{}' depends on itself", package_name);
                     }
                     // if we've seen this package already, it will be in
