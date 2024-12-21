@@ -6,6 +6,7 @@
 
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 
+use diffus::Diffus;
 use omicron_common::{
     api::{
         external::{ByteCount, Generation},
@@ -183,6 +184,7 @@ impl OmicronZoneConfig {
     PartialOrd,
     Ord,
     Hash,
+    Diffus,
 )]
 pub struct OmicronZoneDataset {
     pub pool_name: ZpoolName,
