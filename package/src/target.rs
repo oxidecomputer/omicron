@@ -85,7 +85,88 @@ pub struct KnownTarget {
 }
 
 impl KnownTarget {
-    pub fn new(
+    /// Creates a new `KnownTarget` from a [`TargetMap`] defined in configuration.
+    ///
+    /// Real `KnownTarget` instances might have overrides applied to them via
+    /// the command line.
+    pub fn from_target_map(target: &TargetMap) -> Result<Self> {
+        let mut image = Self::default().image;
+        let mut machine = None;
+        let mut switch = None;
+        let mut rack_topology = None;
+        let mut clickhouse_topology = None;
+
+        for (k, v) in &target.0 {
+            match k.as_str() {
+                "image" => {
+                    image = v.parse()?;
+                }
+                "machine" => {
+                    machine = Some(v.parse()?);
+                }
+                "switch" => {
+                    switch = Some(v.parse()?);
+                }
+                "rack-topology" => {
+                    rack_topology = Some(v.parse()?);
+                }
+                "clickhouse-topology" => {
+                    clickhouse_topology = Some(v.parse()?);
+                }
+                _ => {
+                    bail!(
+                        "Unknown target key {k}\nValid keys include: [{}]",
+                        TargetMap::from(Self::default())
+                            .0
+                            .keys()
+                            .cloned()
+                            .collect::<Vec<String>>()
+                            .join(", "),
+                    )
+                }
+            }
+        }
+
+        Self::validate_and_create(
+            image,
+            machine,
+            switch,
+            rack_topology.unwrap_or(RackTopology::MultiSled),
+            clickhouse_topology.unwrap_or(ClickhouseTopology::SingleNode),
+        )
+    }
+
+    /// Applies overrides to the target, returning a new `KnownTarget` with the
+    /// parameters applied.
+    ///
+    /// Errors if the new target does not satisfy target constraints.
+    pub fn with_overrides(
+        &self,
+        image: Option<Image>,
+        machine: Option<Machine>,
+        switch: Option<Switch>,
+        rack_topology: Option<RackTopology>,
+        clickhouse_topology: Option<ClickhouseTopology>,
+    ) -> Result<Self> {
+        let image = image.unwrap_or(self.image.clone());
+        let machine = machine.or(self.machine.clone());
+        let switch = switch.or(self.switch.clone());
+        let rack_topology = rack_topology.unwrap_or(self.rack_topology.clone());
+        let clickhouse_topology =
+            clickhouse_topology.unwrap_or(self.clickhouse_topology.clone());
+
+        Self::validate_and_create(
+            image,
+            machine,
+            switch,
+            rack_topology,
+            clickhouse_topology,
+        )
+    }
+
+    /// Creates a new `KnownTarget` from the given parameters, validating
+    /// constraints.
+    fn validate_and_create(
         image: Image,
         machine: Option<Machine>,
         switch: Option<Switch>,
@@ -154,50 +235,7 @@ impl std::str::FromStr for KnownTarget {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let target = TargetMap::from_str(s)?;
-
-        let mut image = Self::default().image;
-        let mut machine = None;
-        let mut switch = None;
-        let mut rack_topology = None;
-        let mut clickhouse_topology = None;
-
-        for (k, v) in target.0.into_iter() {
-            match k.as_str() {
-                "image" => {
-                    image = v.parse()?;
-                }
-                "machine" => {
-                    machine = Some(v.parse()?);
-                }
-                "switch" => {
-                    switch = Some(v.parse()?);
-                }
-                "rack-topology" => {
-                    rack_topology = Some(v.parse()?);
-                }
-                "clickhouse-topology" => {
-                    clickhouse_topology = Some(v.parse()?);
-                }
-                _ => {
-                    bail!(
-                        "Unknown target key {k}\nValid keys include: [{}]",
-                        TargetMap::from(Self::default())
-                            .0
-                            .keys()
-                            .cloned()
-                            .collect::<Vec<String>>()
-                            .join(", "),
-                    )
-                }
-            }
-        }
-        KnownTarget::new(
-            image,
-            machine,
-            switch,
-            rack_topology.unwrap_or(RackTopology::MultiSled),
-            clickhouse_topology.unwrap_or(ClickhouseTopology::SingleNode),
-        )
+        Self::from_target_map(&target)
     }
 }
 

@@ -332,56 +332,87 @@ In some configurations (not the one described here), it may be necessary to upda
 
 The `omicron-package` tool builds Omicron and bundles all required files into _packages_ that can be copied to another system (if necessary) and installed there.  This tool acts on `package-manifest.toml`, which describes the contents of the packages.
 
-Packages have a notion of "build targets", which are used to select between different variants of certain components.  A build target is composed of an image type, a machine type, and a switch type:
+Packages have a notion of "build targets", which are used to select between different variants of certain components. For example, the Sled Agent can be built for a real Oxide system, for a standalone Gimlet, or for a non-Gimlet system. This choice is represented by the `--machine` setting here:
 
 [source,console]
 ----
-$ cargo run --release --bin omicron-package -- target create -h
-    Finished release [optimized] target(s) in 0.70s
-     Running `target/release/omicron-package target create -h`
+$ cargo run --release --bin omicron-package -- target create --help
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.55s
+     Running `target/release/omicron-package target create --help`
 Error: Creates a new build target, and sets it as "active"
 
-Usage: omicron-package target create [OPTIONS]
+Usage: omicron-package target create [OPTIONS] --preset <PRESET>
 
 Options:
+  -p, --preset <PRESET>
+          The preset to use as part of the build (use `dev` for development).
+
+          Presets are defined in the `target.preset` section of the config. The other configurations are layered on top of
+          the preset.
+
   -i, --image <IMAGE>
-          [default: standard]
+          The image to use for the target.
+
+          If specified, this configuration is layered on top of the preset.
 
           Possible values:
           - standard:   A typical host OS image
           - trampoline: A recovery host OS image, intended to bootstrap a Standard image
 
   -m, --machine <MACHINE>
+          The kind of machine to build for
+
           Possible values:
           - gimlet:            Use sled agent configuration for a Gimlet
           - gimlet-standalone: Use sled agent configuration for a Gimlet running in isolation
           - non-gimlet:        Use sled agent configuration for a device emulating a Gimlet
 
   -s, --switch <SWITCH>
+          The switch to use for the target
+
           Possible values:
           - asic:    Use the "real" Dendrite, that attempts to interact with the Tofino
           - stub:    Use a "stub" Dendrite that does not require any real hardware
           - softnpu: Use a "softnpu" Dendrite that uses the SoftNPU asic emulator
 
   -r, --rack-topology <RACK_TOPOLOGY>
+          Specify whether nexus will run in a single-sled or multi-sled environment.
+
+          Set single-sled for dev purposes when you're running a single sled-agent. Set multi-sled if you're running with
+          multiple sleds. Currently this only affects the crucible disk allocation strategy- VM disks will require 3
+          distinct sleds with `multi-sled`, which will fail in a single-sled environment. `single-sled` relaxes this
+          requirement.
+
           Possible values:
           - multi-sled:  Use configurations suitable for a multi-sled deployment, such as dogfood and production racks
           - single-sled: Use configurations suitable for a single-sled deployment, such as CI and dev machines
 
+  -c, --clickhouse-topology <CLICKHOUSE_TOPOLOGY>
+          Specify whether clickhouse will be deployed as a replicated cluster or single-node configuration.
+
+          Replicated cluster configuration is an experimental feature to be used only for testing.
+
+          Possible values:
+          - replicated-cluster: Use configurations suitable for a replicated ClickHouse cluster deployment
+          - single-node:        Use configurations suitable for a single-node ClickHouse deployment
+
   -h, --help
           Print help (see a summary with '-h')
-
 ----
 
-To set up a build target for a non-Gimlet machine with simulated (but fully functional) external networking, you would run:
+Setting up a target is typically done by selecting a **preset**. Presets are defined in `package-manifest.toml` under `[target.preset]`.
+
+For development purposes, the recommended preset is `dev`. This preset sets up a build target for a non-Gimlet machine with simulated (but fully functional) external networking:
 
 [source,console]
 ----
-$ cargo run --release --bin omicron-package -- -t default target create -i standard -m non-gimlet -s softnpu -r single-sled
+$ cargo run --release --bin omicron-package -- -t default target create -p dev
     Finished release [optimized] target(s) in 0.66s
-     Running `target/release/omicron-package -t default target create -i standard -m non-gimlet -s softnpu -r single-sled`
+     Running `target/release/omicron-package -t default target create -p dev`
 Created new build target 'default' and set it as active
 ----
+
+To customize the target beyond the preset, use the other options (for example, `--image`). These options will override the settings in the preset.
 
 NOTE: The `target create` command will set the new target as active and thus let you omit the `-t` flag in subsequent commands.
 

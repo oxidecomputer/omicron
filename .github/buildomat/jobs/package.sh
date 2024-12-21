@@ -28,7 +28,7 @@ ptime -m cargo xtask download softnpu
 # Build the test target
 export CARGO_INCREMENTAL=0
 ptime -m cargo run --locked --release --bin omicron-package -- \
-  -t test target create -i standard -m non-gimlet -s softnpu -r single-sled
+  -t test target create -p dev
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t test package
 mapfile -t packages \
