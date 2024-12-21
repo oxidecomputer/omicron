@@ -30,6 +30,15 @@ probe_create                             POST     /experimental/v1/probes
 probe_delete                             DELETE   /experimental/v1/probes/{probe}
 probe_list                               GET      /experimental/v1/probes
 probe_view                               GET      /experimental/v1/probes/{probe}
+support_bundle_create                    POST     /experimental/v1/system/support-bundles
+support_bundle_delete                    DELETE   /experimental/v1/system/support-bundles/{support_bundle}
+support_bundle_download                  GET      /experimental/v1/system/support-bundles/{support_bundle}/download
+support_bundle_download_file             GET      /experimental/v1/system/support-bundles/{support_bundle}/download/{file}
+support_bundle_head                      HEAD     /experimental/v1/system/support-bundles/{support_bundle}/download
+support_bundle_head_file                 HEAD     /experimental/v1/system/support-bundles/{support_bundle}/download/{file}
+support_bundle_index                     GET      /experimental/v1/system/support-bundles/{support_bundle}/index
+support_bundle_list                      GET      /experimental/v1/system/support-bundles
+support_bundle_view                      GET      /experimental/v1/system/support-bundles/{support_bundle}
 timeseries_query                         POST     /v1/timeseries/query
 
 API operations found with tag "images"
