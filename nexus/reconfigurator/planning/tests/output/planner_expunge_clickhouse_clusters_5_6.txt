@@ -188,9 +188,9 @@ to:   blueprint df68d4d4-5af4-4b56-95bb-1654a6957d4f
     oxp_427b2ccd-998f-4085-af21-e600604cf21e/crypt/zone/oxz_crucible_befe73dd-5970-49a4-9adf-7b4f453c45cf            95d72ef9-e070-49e4-a57b-2c392def6025   none      none          off        
     oxp_2fa34d8e-13d9-42d3-b8ba-ca9d74ac496a/crypt/zone/oxz_crucible_d9106a19-f267-48db-a82b-004e643feb49            9b9fb14e-cd17-4a7a-a74a-bfd9c7682831   none      none          off        
     oxp_21d60319-5fe1-4a3b-a4c0-6aa7465e7bde/crypt/zone/oxz_crucible_pantry_6c7f6a84-78b3-4dd9-878e-51bedfda471f     aa190e01-9a4e-4131-9fcf-240532108c7f   none      none          off        
-    oxp_21d60319-5fe1-4a3b-a4c0-6aa7465e7bde/crypt/zone/oxz_crucible_pantry_7741bb11-0d99-4856-95ae-725b6b9ff4fa     4eb52e76-39fa-414d-ae9b-2dcb1c7737f9   none      none          off        
+    oxp_2acfbb84-5ce0-424e-8d73-44c5071d4430/crypt/zone/oxz_crucible_pantry_7741bb11-0d99-4856-95ae-725b6b9ff4fa     4eb52e76-39fa-414d-ae9b-2dcb1c7737f9   none      none          off        
     oxp_21d60319-5fe1-4a3b-a4c0-6aa7465e7bde/crypt/zone/oxz_internal_dns_0c42ad01-b854-4e7d-bd6c-25fdc3eddef4        1de9cde7-6c1e-4865-bd3d-378e22f62fb8   none      none          off        
-    oxp_21d60319-5fe1-4a3b-a4c0-6aa7465e7bde/crypt/zone/oxz_nexus_69789010-8689-43ab-9a68-a944afcba05a               e67b797b-a059-4c7e-a98b-fea18964bad6   none      none          off        
+    oxp_2acfbb84-5ce0-424e-8d73-44c5071d4430/crypt/zone/oxz_nexus_69789010-8689-43ab-9a68-a944afcba05a               e67b797b-a059-4c7e-a98b-fea18964bad6   none      none          off        
     oxp_21d60319-5fe1-4a3b-a4c0-6aa7465e7bde/crypt/zone/oxz_nexus_7e763480-0f4f-43cb-ab9a-52b667d8fda5               5773e3b1-dde0-4b54-bc13-3c3bf816015e   none      none          off        
     oxp_21d60319-5fe1-4a3b-a4c0-6aa7465e7bde/crypt/zone/oxz_ntp_f34f8d36-7137-48d3-9d13-6a46c4edcef4                 c8c03dec-65d4-4c97-87c3-a43a8363c97c   none      none          off        
     oxp_21d60319-5fe1-4a3b-a4c0-6aa7465e7bde/crypt/debug                                                             f015e445-2e52-45c9-9f0a-49cb5ceae245   100 GiB   none          gzip-9     

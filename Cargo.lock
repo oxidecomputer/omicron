@@ -693,7 +693,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739#220a6f367c18f2452dbc4fa9086f3fe73b961739"
+source = "git+https://github.com/oxidecomputer/propolis?rev=d4529fd8247386b422b78e1203315d5baea5ea8b#d4529fd8247386b422b78e1203315d5baea5ea8b"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -703,7 +703,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739#220a6f367c18f2452dbc4fa9086f3fe73b961739"
+source = "git+https://github.com/oxidecomputer/propolis?rev=d4529fd8247386b422b78e1203315d5baea5ea8b#d4529fd8247386b422b78e1203315d5baea5ea8b"
 dependencies = [
  "libc",
  "strum",
@@ -718,7 +718,7 @@ dependencies = [
  "bitflags 2.6.0",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "log",
@@ -3139,7 +3139,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "nanorand",
- "spin 0.9.8",
+ "spin",
 ]
 
 [[package]]
@@ -3769,7 +3769,7 @@ dependencies = [
  "atomic-polyfill",
  "hash32 0.2.1",
  "rustc_version 0.4.1",
- "spin 0.9.8",
+ "spin",
  "stable_deref_trait",
 ]
 
@@ -5028,7 +5028,7 @@ version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 dependencies = [
- "spin 0.9.8",
+ "spin",
 ]
 
 [[package]]
@@ -5130,7 +5130,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -5599,7 +5599,7 @@ dependencies = [
  "httparse",
  "memchr",
  "mime",
- "spin 0.9.8",
+ "spin",
  "version_check",
 ]
 
@@ -6036,6 +6036,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-reconfigurator-blippy"
+version = "0.1.0"
+dependencies = [
+ "nexus-reconfigurator-planning",
+ "nexus-sled-agent-shared",
+ "nexus-types",
+ "omicron-common",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+]
+
+[[package]]
 name = "nexus-reconfigurator-execution"
 version = "0.1.0"
 dependencies = [
@@ -6101,6 +6114,7 @@ dependencies = [
  "maplit",
  "nexus-config",
  "nexus-inventory",
+ "nexus-reconfigurator-blippy",
  "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
@@ -7009,14 +7023,14 @@ dependencies = [
  "pq-sys",
  "pretty_assertions",
  "progenitor-client",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=d4529fd8247386b422b78e1203315d5baea5ea8b)",
  "qorb",
  "rand",
  "rcgen",
  "ref-cast",
  "regex",
  "reqwest",
- "ring 0.17.8",
+ "ring",
  "rustls 0.22.4",
  "rustls-pemfile 2.2.0",
  "samael",
@@ -7137,7 +7151,7 @@ dependencies = [
  "petgraph",
  "rayon",
  "reqwest",
- "ring 0.17.8",
+ "ring",
  "semver 1.0.23",
  "serde",
  "shell-words",
@@ -7275,7 +7289,7 @@ dependencies = [
  "oximeter-producer",
  "oxnet",
  "pretty_assertions",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=d4529fd8247386b422b78e1203315d5baea5ea8b)",
  "propolis-mock-server",
  "propolis_api_types",
  "rand",
@@ -7350,7 +7364,7 @@ dependencies = [
  "rcgen",
  "regex",
  "reqwest",
- "ring 0.17.8",
+ "ring",
  "rustls 0.22.4",
  "serde",
  "slog",
@@ -7426,7 +7440,6 @@ dependencies = [
  "getrandom",
  "group",
  "hashbrown 0.15.1",
- "heck 0.4.1",
  "hex",
  "hickory-proto",
  "hmac",
@@ -7437,6 +7450,7 @@ dependencies = [
  "indicatif",
  "inout",
  "itertools 0.10.5",
+ "itertools 0.12.1",
  "lalrpop-util",
  "lazy_static",
  "libc",
@@ -7483,7 +7497,7 @@ dependencies = [
  "similar",
  "slog",
  "smallvec 1.13.2",
- "spin 0.9.8",
+ "spin",
  "string_cache",
  "subtle",
  "syn 1.0.109",
@@ -7514,9 +7528,9 @@ dependencies = [
 
 [[package]]
 name = "omicron-zone-package"
-version = "0.11.1"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5cd917080e98f2e325ad3d803432be83fbe7eb9ccabb0f0f20390072982f550"
+checksum = "8c74f14c5ac8ea6fe525e496c3d4b984e658857a1a34c758bc7a16a632ec9235"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7530,11 +7544,11 @@ dependencies = [
  "futures-util",
  "hex",
  "reqwest",
- "ring 0.16.20",
  "semver 1.0.23",
  "serde",
  "serde_derive",
  "serde_json",
+ "sha2",
  "slog",
  "tar",
  "thiserror 1.0.69",
@@ -8990,12 +9004,14 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739#220a6f367c18f2452dbc4fa9086f3fe73b961739"
+source = "git+https://github.com/oxidecomputer/propolis?rev=d4529fd8247386b422b78e1203315d5baea5ea8b#d4529fd8247386b422b78e1203315d5baea5ea8b"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
+ "crucible-client-types",
  "futures",
  "progenitor",
+ "propolis_api_types",
  "rand",
  "reqwest",
  "schemars",
@@ -9032,7 +9048,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739#220a6f367c18f2452dbc4fa9086f3fe73b961739"
+source = "git+https://github.com/oxidecomputer/propolis?rev=d4529fd8247386b422b78e1203315d5baea5ea8b#d4529fd8247386b422b78e1203315d5baea5ea8b"
 dependencies = [
  "anyhow",
  "atty",
@@ -9074,12 +9090,13 @@ dependencies = [
 [[package]]
 name = "propolis_api_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739#220a6f367c18f2452dbc4fa9086f3fe73b961739"
+source = "git+https://github.com/oxidecomputer/propolis?rev=d4529fd8247386b422b78e1203315d5baea5ea8b#d4529fd8247386b422b78e1203315d5baea5ea8b"
 dependencies = [
  "crucible-client-types",
  "propolis_types",
  "schemars",
  "serde",
+ "serde_with",
  "thiserror 1.0.69",
  "uuid",
 ]
@@ -9087,7 +9104,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739#220a6f367c18f2452dbc4fa9086f3fe73b961739"
+source = "git+https://github.com/oxidecomputer/propolis?rev=d4529fd8247386b422b78e1203315d5baea5ea8b#d4529fd8247386b422b78e1203315d5baea5ea8b"
 dependencies = [
  "schemars",
  "serde",
@@ -9196,7 +9213,7 @@ checksum = "fadfaed2cd7f389d0161bb73eeb07b7b78f8691047a6f3e73caaeae55310a4a6"
 dependencies = [
  "bytes",
  "rand",
- "ring 0.17.8",
+ "ring",
  "rustc-hash 2.0.0",
  "rustls 0.23.19",
  "slab",
@@ -9379,7 +9396,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48406db8ac1f3cbc7dcdb56ec355343817958a356ff430259bb07baf7607e1e1"
 dependencies = [
  "pem",
- "ring 0.17.8",
+ "ring",
  "time",
  "yasna",
 ]
@@ -9656,21 +9673,6 @@ dependencies = [
 
 [[package]]
 name = "ring"
-version = "0.16.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3053cf52e236a3ed746dfc745aa9cacf1b791d846bdaf412f60a8d7d6e17c8fc"
-dependencies = [
- "cc",
- "libc",
- "once_cell",
- "spin 0.5.2",
- "untrusted 0.7.1",
- "web-sys",
- "winapi",
-]
-
-[[package]]
-name = "ring"
 version = "0.17.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c17fa4cb658e3583423e915b9f3acc01cceaee1860e33d59ebae66adc3a2dc0d"
@@ -9679,7 +9681,7 @@ dependencies = [
  "cfg-if",
  "getrandom",
  "libc",
- "spin 0.9.8",
+ "spin",
  "untrusted 0.9.0",
  "windows-sys 0.52.0",
 ]
@@ -9978,7 +9980,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f56a14d1f48b391359b22f731fd4bd7e43c97f3c50eee276f3aa09c94784d3e"
 dependencies = [
  "log",
- "ring 0.17.8",
+ "ring",
  "rustls-webpki 0.101.7",
  "sct",
 ]
@@ -9990,7 +9992,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf4ef73721ac7bcd79b2b315da7779d8fc09718c6b3d2d1b2d94850eb8c18432"
 dependencies = [
  "log",
- "ring 0.17.8",
+ "ring",
  "rustls-pki-types",
  "rustls-webpki 0.102.8",
  "subtle",
@@ -10006,7 +10008,7 @@ dependencies = [
  "aws-lc-rs",
  "log",
  "once_cell",
- "ring 0.17.8",
+ "ring",
  "rustls-pki-types",
  "rustls-webpki 0.102.8",
  "subtle",
@@ -10056,7 +10058,7 @@ version = "0.101.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b6275d1ee7a1cd780b64aca7726599a1dbc893b1e64144529e55c3c2f745765"
 dependencies = [
- "ring 0.17.8",
+ "ring",
  "untrusted 0.9.0",
 ]
 
@@ -10067,7 +10069,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "64ca1bc8749bd4cf37b5ce386cc146580777b4e8572c7b97baf22c83f444bee9"
 dependencies = [
  "aws-lc-rs",
- "ring 0.17.8",
+ "ring",
  "rustls-pki-types",
  "untrusted 0.9.0",
 ]
@@ -10279,7 +10281,7 @@ version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da046153aa2352493d6cb7da4b6e5c0c057d8a1d0a9aa8560baffdd945acd414"
 dependencies = [
- "ring 0.17.8",
+ "ring",
  "untrusted 0.9.0",
 ]
 
@@ -10725,6 +10727,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=d4529fd8247386b422b78e1203315d5baea5ea8b)",
  "regress 0.9.1",
  "reqwest",
  "schemars",
@@ -10750,7 +10753,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=d4529fd8247386b422b78e1203315d5baea5ea8b)",
  "rcgen",
  "schemars",
  "serde",
@@ -11049,7 +11052,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.87",
@@ -11086,12 +11089,6 @@ dependencies = [
  "tokio",
  "toml 0.8.19",
 ]
-
-[[package]]
-name = "spin"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
 
 [[package]]
 name = "spin"

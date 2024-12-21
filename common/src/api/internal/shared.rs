@@ -48,7 +48,16 @@ pub enum NetworkInterfaceKind {
 
 /// Information required to construct a virtual network interface
 #[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
 )]
 pub struct NetworkInterface {
     pub id: Uuid,
@@ -68,7 +77,18 @@ pub struct NetworkInterface {
 /// outbound network connections from guests or services.
 // Note that `Deserialize` is manually implemented; if you make any changes to
 // the fields of this structure, you must make them to that implementation too.
-#[derive(Debug, Clone, Copy, Serialize, JsonSchema, PartialEq, Eq, Hash)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+)]
 pub struct SourceNatConfig {
     /// The external address provided to the instance or service.
     pub ip: IpAddr,
