@@ -254,7 +254,7 @@ This explains another reason why `my_config` should be optional in this structur
 * Blueprints' and inventory collections' database representations can go from NULL-able columns to non-NULL-able ones, though only if we can populate the value or drop old blueprints and collections.  More work is needed here (see below).
 * The Sled Agent API input types and ledgers that refer to `my_config` can go from `my_config: Option<MyConfig>` to `my_config: MyConfig`.  No on-disk changes are needed for this.
 
-**During the upgrade to the next release**: Blueprints that do not have `my_config` set will need to be deleted from the database prior to the upgrade.  See https://github.com/oxidecomputer/omicron/issues/7278[omicron#7278] for more on operationalizing this.
+**During the upgrade to the next release**: Blueprints and inventory collections that do not have `my_config` set will need to be deleted from the database prior to the upgrade.  See https://github.com/oxidecomputer/omicron/issues/7278[omicron#7278] for more on operationalizing this.
 
 Visually:
 
