@@ -74,7 +74,7 @@ pub enum ClickhouseTopology {
     SingleNode,
 }
 
-/// A strongly-typed variant of [Target].
+/// A strongly-typed variant of [`TargetMap`].
 #[derive(Clone, Debug)]
 pub struct KnownTarget {
     image: Image,

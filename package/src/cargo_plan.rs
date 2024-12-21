@@ -13,10 +13,9 @@ use anyhow::Context;
 use anyhow::Result;
 use cargo_metadata::Metadata;
 use indent_write::io::IndentWriter;
-use omicron_zone_package::config::ConfigIdent;
 use omicron_zone_package::config::PackageMap;
+use omicron_zone_package::config::PackageName;
 use omicron_zone_package::package::PackageSource;
-use omicron_zone_package::target::TargetMap;
 use slog::info;
 use slog::Logger;
 use tokio::process::Command;
@@ -109,7 +108,7 @@ impl<'a> CargoPlan<'a> {
 #[derive(Debug)]
 pub struct CargoTargets<'a> {
     pub kind: BuildKind,
-    pub packages: BTreeSet<&'a ConfigIdent>,
+    pub packages: BTreeSet<&'a PackageName>,
     pub bins: BTreeSet<&'a String>,
     pub features: BTreeSet<&'a String>,
 }
@@ -204,41 +203,17 @@ pub fn do_show_cargo_commands_for_presets(
     base_config: &BaseConfig,
     presets: &MultiPresetArg,
 ) -> Result<()> {
-    let presets = match presets {
-        MultiPresetArg::List(presets) => {
-            // Ensure that all specified presets are found in the base config.
-            let missing = presets
-                .iter()
-                .filter_map(|preset| {
-                    (!base_config.presets().contains_key(preset))
-                        .then(|| preset.as_str())
-                })
-                .collect::<Vec<_>>();
-            if !missing.is_empty() {
-                bail!(
-                    "presets not found in base config: {}",
-                    missing.join(", ")
-                );
-            }
-            presets.clone()
-        }
-        MultiPresetArg::All => base_config.presets().keys().cloned().collect(),
-    };
-
+    let presets = base_config.get_presets(presets)?;
     let metadata = cargo_metadata::MetadataCommand::new().no_deps().exec()?;
 
-    for preset in presets {
-        let target: TargetMap = base_config
-            .get_preset(&preset)
-            .expect("already checked that the presets are present above")
-            .clone()
-            .into();
-        let features = cargo_features_for_target(&target);
+    for (preset, target) in presets {
+        let target_map = target.clone().into();
+        let features = cargo_features_for_target(&target_map);
 
         // Build the cargo plan for this preset.
         let cargo_plan = build_cargo_plan(
             &metadata,
-            base_config.package_config().packages_to_build(&target),
+            base_config.package_config().packages_to_build(&target_map),
             &features,
         )
         .with_context(|| {

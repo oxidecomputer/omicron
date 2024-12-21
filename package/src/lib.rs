@@ -3,7 +3,7 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Subcommand;
 use config::MultiPresetArg;
-use omicron_zone_package::config::ConfigIdent;
+use omicron_zone_package::config::{PackageName, PresetName};
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 
@@ -42,7 +42,7 @@ pub enum TargetCommand {
         /// Presets are defined in the `target.preset` section of the config.
         /// The other configurations are layered on top of the preset.
         #[clap(short, long)]
-        preset: ConfigIdent,
+        preset: PresetName,
 
         /// The image to use for the target.
         ///
@@ -116,12 +116,12 @@ pub enum BuildCommand {
         disable_cache: bool,
         /// Limit to building only these packages
         #[clap(long)]
-        only: Vec<ConfigIdent>,
+        only: Vec<PackageName>,
     },
     /// Stamps semver versions onto packages within a manifest
     Stamp {
         /// The name of the artifact to be stamped.
-        package_name: ConfigIdent,
+        package_name: PackageName,
 
         /// The version to be stamped onto the package.
         version: semver::Version,

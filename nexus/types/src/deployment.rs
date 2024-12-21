@@ -244,11 +244,13 @@ impl Blueprint {
     pub fn all_omicron_datasets(
         &self,
         filter: BlueprintDatasetFilter,
-    ) -> impl Iterator<Item = &BlueprintDatasetConfig> {
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintDatasetConfig)> {
         self.blueprint_datasets
             .iter()
-            .flat_map(move |(_, datasets)| datasets.datasets.values())
-            .filter(move |d| d.disposition.matches(filter))
+            .flat_map(move |(sled_id, datasets)| {
+                datasets.datasets.values().map(|dataset| (*sled_id, dataset))
+            })
+            .filter(move |(_, d)| d.disposition.matches(filter))
     }
 
     /// Iterate over the [`BlueprintZoneConfig`] instances in the blueprint
@@ -630,7 +632,17 @@ fn zone_sort_key<T: ZoneSortKey>(z: &T) -> impl Ord {
 /// Describes one Omicron-managed zone in a blueprint.
 ///
 /// Part of [`BlueprintZonesConfig`].
-#[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+#[derive(
+    Debug,
+    Clone,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    JsonSchema,
+    Deserialize,
+    Serialize,
+)]
 pub struct BlueprintZoneConfig {
     /// The disposition (desired state) of this zone recorded in the blueprint.
     pub disposition: BlueprintZoneDisposition,
@@ -980,7 +992,17 @@ impl BlueprintDatasetDisposition {
 }
 
 /// Information about a dataset as recorded in a blueprint
-#[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+#[derive(
+    Debug,
+    Clone,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    JsonSchema,
+    Deserialize,
+    Serialize,
+)]
 pub struct BlueprintDatasetConfig {
     // TODO: Display this in diffs - leave for now, for backwards compat
     pub disposition: BlueprintDatasetDisposition,

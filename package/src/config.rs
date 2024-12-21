@@ -6,7 +6,10 @@ use anyhow::{bail, Context, Result};
 use camino::Utf8Path;
 use clap::Args;
 use omicron_zone_package::{
-    config::{Config as PackageConfig, ConfigIdent, PackageMap, TargetConfig},
+    config::{
+        Config as PackageConfig, PackageMap, PackageName, PresetName,
+        TargetConfig,
+    },
     package::PackageSource,
     target::TargetMap,
 };
@@ -48,7 +51,7 @@ fn parse_duration_ms(arg: &str) -> Result<std::time::Duration> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MultiPresetArg {
     /// A list of presets.
-    List(Vec<ConfigIdent>),
+    List(Vec<PresetName>),
     /// All presets.
     All,
 }
@@ -76,7 +79,7 @@ impl FromStr for MultiPresetArg {
         let list = s
             .split(',')
             .map(|x| {
-                let p = x.parse::<ConfigIdent>()?;
+                let p = x.parse::<PresetName>()?;
 
                 // Ensure that p isn't "all".
                 if p.as_str() == "all" {
@@ -97,7 +100,7 @@ impl FromStr for MultiPresetArg {
 #[derive(Debug)]
 pub struct BaseConfig {
     package_config: PackageConfig,
-    presets: BTreeMap<ConfigIdent, KnownTarget>,
+    presets: BTreeMap<PresetName, KnownTarget>,
 }
 
 impl BaseConfig {
@@ -117,26 +120,70 @@ impl BaseConfig {
 
     /// Gets the map of all presets.
     #[inline]
-    pub fn presets(&self) -> &BTreeMap<ConfigIdent, KnownTarget> {
+    pub fn presets(&self) -> &BTreeMap<PresetName, KnownTarget> {
         &self.presets
     }
 
+    /// Gets a list of available presets as a string.
+    pub fn available_presets_str(&self) -> String {
+        self.presets.keys().map(|x| x.as_str()).collect::<Vec<_>>().join(", ")
+    }
+
     /// Gets the preset with the given name.
-    pub fn get_preset(&self, name: &ConfigIdent) -> Result<&KnownTarget> {
+    pub fn get_preset(&self, name: &PresetName) -> Result<&KnownTarget> {
         self.presets.get(name).with_context(|| {
-            let names =
-                self.presets.keys().map(|x| x.as_str()).collect::<Vec<_>>();
             format!(
-                "preset '{name}' not found (available presets: {})",
-                names.join(", ")
+                "preset '{name}' not found\n(available presets: {})",
+                self.available_presets_str(),
             )
         })
+    }
+
+    /// Resolves the specified presets, returning an error if any of them are
+    /// invalid.
+    ///
+    /// Presets are returned in the order they were specified (keeping the order
+    /// the user specified on the command line).
+    pub fn get_presets(
+        &self,
+        presets: &MultiPresetArg,
+    ) -> Result<Vec<(&PresetName, &KnownTarget)>> {
+        match presets {
+            MultiPresetArg::List(list) => {
+                let mut valid = Vec::new();
+                // Ensure that all specified presets are found in the base config.
+                let mut missing = Vec::new();
+
+                for preset in list {
+                    if let Some((preset, target)) =
+                        self.presets.get_key_value(preset)
+                    {
+                        valid.push((preset, target));
+                    } else {
+                        missing.push(preset);
+                    }
+                }
+
+                if !missing.is_empty() {
+                    let names =
+                        missing.iter().map(|x| x.as_str()).collect::<Vec<_>>();
+                    bail!(
+                        "presets not found in base config: {}\n(available presets: {})",
+                        names.join(", "),
+                        self.available_presets_str(),
+                    );
+                }
+
+                Ok(valid)
+            }
+            MultiPresetArg::All => Ok(self.presets.iter().collect()),
+        }
     }
 }
 
 fn build_presets(
     config: &TargetConfig,
-) -> Result<BTreeMap<ConfigIdent, KnownTarget>> {
+) -> Result<BTreeMap<PresetName, KnownTarget>> {
     let mut presets = BTreeMap::new();
 
     for (name, value) in &config.presets {
@@ -159,7 +206,7 @@ pub struct Config {
     // Description of the target we're trying to operate on.
     target: TargetMap,
     // The list of packages the user wants us to build (all, if empty)
-    only: Vec<ConfigIdent>,
+    only: Vec<PackageName>,
     // True if we should skip confirmations for destructive operations.
     force: bool,
     // Number of times to retry failed downloads.
@@ -222,7 +269,7 @@ impl Config {
 
     /// Sets the `only` field.
     #[inline]
-    pub fn set_only(&mut self, only: Vec<ConfigIdent>) -> &mut Self {
+    pub fn set_only(&mut self, only: Vec<PackageName>) -> &mut Self {
         self.only = only;
         self
     }

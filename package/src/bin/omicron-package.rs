@@ -17,7 +17,7 @@ use omicron_package::cargo_plan::{
 use omicron_package::config::{BaseConfig, Config, ConfigArgs};
 use omicron_package::target::target_command_help;
 use omicron_package::{BuildCommand, DeployCommand, TargetCommand};
-use omicron_zone_package::config::ConfigIdent;
+use omicron_zone_package::config::PackageName;
 use omicron_zone_package::package::{Package, PackageOutput, PackageSource};
 use omicron_zone_package::progress::Progress;
 use omicron_zone_package::target::TargetMap;
@@ -34,8 +34,8 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 
-const OMICRON_SLED_AGENT: ConfigIdent =
-    ConfigIdent::new_const("omicron-sled-agent");
+const OMICRON_SLED_AGENT: PackageName =
+    PackageName::new_const("omicron-sled-agent");
 
 /// All packaging subcommands.
 #[derive(Debug, Subcommand)]
@@ -266,7 +266,7 @@ async fn get_sha256_digest(path: &Utf8PathBuf) -> Result<Digest> {
 
 async fn download_prebuilt(
     progress: &PackageProgress,
-    package_name: &ConfigIdent,
+    package_name: &PackageName,
     repo: &str,
     commit: &str,
     expected_digest: &Vec<u8>,
@@ -333,7 +333,7 @@ async fn download_prebuilt(
 async fn ensure_package(
     config: &Config,
     ui: &Arc<ProgressUI>,
-    package_name: &ConfigIdent,
+    package_name: &PackageName,
     package: &Package,
     output_directory: &Utf8Path,
     disable_cache: bool,
@@ -462,7 +462,7 @@ async fn do_package(
 async fn do_stamp(
     config: &Config,
     output_directory: &Utf8Path,
-    package_name: &ConfigIdent,
+    package_name: &PackageName,
     version: &semver::Version,
 ) -> Result<()> {
     // Find the package which should be stamped
@@ -498,8 +498,7 @@ async fn do_unpack(
         |(package_name, package)| -> Result<()> {
             let tarfile = package.get_output_path(&package_name, artifact_dir);
             let src = tarfile.as_path();
-            let dst =
-                package.get_output_path(&package.service_name, install_dir);
+            let dst = package.get_output_path_for_service(install_dir);
             info!(
                 config.log(),
                 "Installing service";

@@ -19,7 +19,7 @@ use chrono::Utc;
 use clap::Parser;
 use fs_err::tokio as fs;
 use omicron_zone_package::config::Config;
-use omicron_zone_package::config::ConfigIdent;
+use omicron_zone_package::config::PackageName;
 use once_cell::sync::Lazy;
 use semver::Version;
 use slog::debug;
@@ -57,34 +57,33 @@ enum InstallMethod {
 }
 
 /// Packages to install or bundle in the host OS image.
-const HOST_IMAGE_PACKAGES: [(&ConfigIdent, InstallMethod); 8] = [
-    (&ConfigIdent::new_const("mg-ddm-gz"), InstallMethod::Install),
-    (&ConfigIdent::new_const("omicron-sled-agent"), InstallMethod::Install),
-    (&ConfigIdent::new_const("overlay"), InstallMethod::Bundle),
-    (&ConfigIdent::new_const("oxlog"), InstallMethod::Install),
-    (&ConfigIdent::new_const("propolis-server"), InstallMethod::Bundle),
-    (&ConfigIdent::new_const("pumpkind-gz"), InstallMethod::Install),
-    (&ConfigIdent::new_const("crucible-dtrace"), InstallMethod::Install),
-    (&ConfigIdent::new_const("switch-asic"), InstallMethod::Bundle),
+const HOST_IMAGE_PACKAGES: [(&PackageName, InstallMethod); 8] = [
+    (&PackageName::new_const("mg-ddm-gz"), InstallMethod::Install),
+    (&PackageName::new_const("omicron-sled-agent"), InstallMethod::Install),
+    (&PackageName::new_const("overlay"), InstallMethod::Bundle),
+    (&PackageName::new_const("oxlog"), InstallMethod::Install),
+    (&PackageName::new_const("propolis-server"), InstallMethod::Bundle),
+    (&PackageName::new_const("pumpkind-gz"), InstallMethod::Install),
+    (&PackageName::new_const("crucible-dtrace"), InstallMethod::Install),
+    (&PackageName::new_const("switch-asic"), InstallMethod::Bundle),
 ];
 /// Packages to install or bundle in the recovery (trampoline) OS image.
-const RECOVERY_IMAGE_PACKAGES: [(&ConfigIdent, InstallMethod); 2] = [
-    (&ConfigIdent::new_const("installinator"), InstallMethod::Install),
-    (&ConfigIdent::new_const("mg-ddm-gz"), InstallMethod::Install),
+const RECOVERY_IMAGE_PACKAGES: [(&PackageName, InstallMethod); 2] = [
+    (&PackageName::new_const("installinator"), InstallMethod::Install),
+    (&PackageName::new_const("mg-ddm-gz"), InstallMethod::Install),
 ];
-/// Packages to ship with the TUF repo.
-const TUF_PACKAGES: [&ConfigIdent; 11] = [
-    &ConfigIdent::new_const("clickhouse_keeper"),
-    &ConfigIdent::new_const("clickhouse"),
-    &ConfigIdent::new_const("cockroachdb"),
-    &ConfigIdent::new_const("crucible-pantry-zone"),
-    &ConfigIdent::new_const("crucible-zone"),
-    &ConfigIdent::new_const("external-dns"),
-    &ConfigIdent::new_const("internal-dns"),
-    &ConfigIdent::new_const("nexus"),
-    &ConfigIdent::new_const("ntp"),
-    &ConfigIdent::new_const("oximeter"),
-    &ConfigIdent::new_const("probe"),
+const TUF_PACKAGES: [&PackageName; 11] = [
+    &PackageName::new_const("clickhouse_keeper"),
+    &PackageName::new_const("clickhouse"),
+    &PackageName::new_const("cockroachdb"),
+    &PackageName::new_const("crucible-pantry-zone"),
+    &PackageName::new_const("crucible-zone"),
+    &PackageName::new_const("external-dns"),
+    &PackageName::new_const("internal-dns"),
+    &PackageName::new_const("nexus"),
+    &PackageName::new_const("ntp"),
+    &PackageName::new_const("oximeter"),
+    &PackageName::new_const("probe"),
 ];
 
 const HELIOS_REPO: &str = "https://pkg.oxide.computer/helios/2/dev/";
@@ -455,8 +454,6 @@ async fn main() -> Result<()> {
                     artifacts_path.as_str(),
                     "target",
                     "create",
-                    "--preset",
-                    target.as_str(),
                 ])
                 .args(target.target_args())
                 .env_remove("CARGO_MANIFEST_DIR"),
@@ -660,14 +657,14 @@ impl Target {
 
     fn proto_packages(
         self,
-    ) -> &'static [(&'static ConfigIdent, InstallMethod)] {
+    ) -> &'static [(&'static PackageName, InstallMethod)] {
         match self {
             Target::Host => &HOST_IMAGE_PACKAGES,
             Target::Recovery => &RECOVERY_IMAGE_PACKAGES,
         }
     }
 
-    fn proto_package_names(self) -> impl Iterator<Item = &'static ConfigIdent> {
+    fn proto_package_names(self) -> impl Iterator<Item = &'static PackageName> {
         self.proto_packages().iter().map(|(name, _)| *name)
     }
 
@@ -699,7 +696,7 @@ impl std::fmt::Display for Target {
 async fn build_proto_area(
     mut package_dir: Utf8PathBuf,
     proto_dir: Utf8PathBuf,
-    packages: &'static [(&'static ConfigIdent, InstallMethod)],
+    packages: &'static [(&'static PackageName, InstallMethod)],
     manifest: Arc<Config>,
 ) -> Result<()> {
     let opt_oxide = proto_dir.join("root/opt/oxide");
@@ -738,7 +735,7 @@ async fn build_proto_area(
                     fs::rename(
                         smf_manifest,
                         manifest_site
-                            .join(&package.service_name.as_str())
+                            .join(package.service_name.as_str())
                             .with_extension("xml"),
                     )
                     .await?;
