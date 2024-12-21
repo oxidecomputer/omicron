@@ -173,9 +173,10 @@ pub fn do_dot(
                     let dep_node =
                         pkg_for_output.get(dependency).ok_or_else(|| {
                             anyhow!(
-                            "package {:?} has dependency on {:?}, which does \
-                            not correspond to the output of any package",
-                            pkgname, dependency)
+                                "package \"{}\" has dependency on {:?}, which does \
+                                not correspond to the output of any package",
+                                pkgname, dependency,
+                            )
                         })?;
                     graph.add_edge(*pkg_node, **dep_node, "merge");
                 }
