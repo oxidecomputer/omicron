@@ -94,6 +94,8 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
             cmd!(sh, "git remote add origin {src_dir}").run()?;
             cmd!(sh, "git fetch origin {treeish}").run()?;
             cmd!(sh, "git checkout {treeish}").run()?;
+
+            // XXX is this needed in CI?
             cmd!(sh, "./tools/install_builder_prerequisites.sh -yp").run()?;
         }
     }
@@ -153,8 +155,26 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
         )
         .run()?;
 
-        // and we need textest to execute it
+        // and we need nextest to execute it
         sh.copy_file(&nextest_path, &live_test_bundle_dir)?;
+
+        // Finally, the script that will run nextest
+        // TODO: make this into a rust program that runs in the VM
+        let switch_zone_script_path = live_test_bundle_dir.join("run-live-tests");
+        let switch_zone_script = r#"
+            set -euxo pipefail
+            /opt/oxide/omdb/bin/omdb -w nexus blueprints target enable current
+
+            TMPDIR=/var/tmp ./cargo-nextest nextest run \
+                --profile=live-tests \
+                --archive-file live-tests-archive/omicron-live-tests.tar.zst \
+                --workspace-remap live-tests-archive
+
+            # for debug
+            exit 1
+        "#;
+        sh.write_file(&switch_zone_script_path, switch_zone_script)?;
+        cmd!(sh, "chmod +x {switch_zone_script_path}").run()?;
 
         // output tar will have live-tests and nextest. this will get uploaded
         // into one of the a4x2 sleds, which is why it is a self contained tar

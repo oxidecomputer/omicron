@@ -17,6 +17,13 @@ use walkdir::WalkDir;
 use xshell::{cmd, Shell};
 use std::{thread, time};
 
+const INSECURE_SSH_ARGS: [&str; 8] = [
+    "-o", "StrictHostKeyChecking no",
+    "-o", "UserKnownHostsFile /dev/null",
+    "-o", "GlobalKnownHostsFile /dev/null",
+    "-o", "LogLevel error",
+];
+
 #[derive(Parser)]
 pub struct A4x2DeployArgs {
     /// Execute omicron live tests
@@ -30,6 +37,10 @@ pub struct A4x2DeployArgs {
     /// Are we running in CI or not?
     #[clap(long)]
     ci: bool,
+
+    /// Dev moment
+    #[clap(long)]
+    dev: bool,
 }
 
 pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
@@ -55,7 +66,7 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
     // Output. Maybe in CI we want this to be /out
     let out_dir = work_dir.join("a4x2-deploy-out");
 
-    if  !args.ci {
+    if !args.ci {
         let _popdir = sh.push_dir(&a4x2_dir);
         // Teardown previous deploy if it exists, before wiping the data for it.
         // If this errors, we assume the deploy doesn't exist and carry on.
@@ -121,6 +132,10 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
         // Generate an ssh key we will use to log into the sleds.
         cmd!(sh, "ssh-keygen -t ed25519 -N '' -f a4x2-ssh-key").run()?;
 
+        // We cannot ssh with it unless we restrict the permissions
+        // XXX needed?
+        cmd!(sh, "chmod 600 a4x2-ssh-key").run()?;
+
         // Copy the public side into the cargo bay
         sh.copy_file(
             "a4x2-ssh-key.pub",
@@ -145,7 +160,7 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
     {
         // XXX run a teardown first to clean up after past tests? can only
         // clean so much though without state...
-        let _popdir = sh.push_dir(a4x2_dir);
+        let _popdir = sh.push_dir(&a4x2_dir);
         try_launch_a4x2(&sh)?;
         // XXX teardown, but only outside of CI.
     }
@@ -156,6 +171,33 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
 
     if args.live_tests {
         cmd!(sh, "banner 'live tests'").run()?;
+        let _popdir = sh.push_dir(&a4x2_dir);
+        let g0ip = get_node_ip(&sh, "g0")?;
+
+        let ssh_host = format!("root@{g0ip}");
+        let mut ssh_args_owned = vec!["-i", "../a4x2-ssh-key"];
+        ssh_args_owned.extend_from_slice(&INSECURE_SSH_ARGS);
+        let ssh_args = &ssh_args_owned;
+
+        cmd!(sh, "scp {ssh_args...} live-tests-bundle.tgz {ssh_host}:/zone/oxz_switch/root/root").run()?;
+
+        // If you want any change in functionality for the test runner, update
+        // run-live-tests over in a4x2_package.rs. Don't add it here!
+        let switch_zone_script = r#"
+            set -euxo pipefail
+            tar xvzf live-tests-bundle.tgz
+            cd live-tests-bundle
+            ./run-live-tests
+        "#;
+
+        let remote_script = format!("zlogin oxz_switch bash -c '{switch_zone_script}'");
+
+        // XXX It looks like if the live tests fail, we get a fail here. That's
+        // great, but we want to report the error and then *cleanly teardown*,
+        // rather than just failing. Unless we're in CI, in which case I
+        // think we can just fail? Not sure if we would want to do that or
+        // also run the end to end tests in the same environment.
+        cmd!(sh, "ssh {ssh_args...} {ssh_host} {remote_script}").run()?;
     }
 
     Ok(())
@@ -232,7 +274,22 @@ fn try_launch_a4x2(sh: &Shell) -> Result<()> {
 
 fn teardown_a4x2(sh: &Shell) -> Result<()> {
     cmd!(sh, "pfexec ./a4x2 destroy").run()?;
+    // TODO destroy route
     Ok(())
+}
+
+/// Get the IP address of a node, so we can connect or ssh into it
+fn get_node_ip(sh: &Shell, node: &str) -> Result<String> {
+    let ipadm = cmd!(sh, "pfexec ./a4x2 exec {node} ipadm").read()?;
+
+    for ln in ipadm.lines() {
+        if ln.contains("dhcp") {
+            let ipv4 = ln.split_whitespace().nth(3).ok_or(anyhow!("get_host_ip: could not extract IP for node {node} from line {ln}"))?;
+            let ipv4 = ipv4.strip_suffix("/24").ok_or(anyhow!("get_host_ip: could not extract IP for node {node} from line {ln}"))?;
+            return Ok(ipv4.to_string())
+        }
+    }
+    bail!("get_host_ip: could not locate IP for node {node}");
 }
 
 /// effectively curl | bash, but reads the full script before running bash
