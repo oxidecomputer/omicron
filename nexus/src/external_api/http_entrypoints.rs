@@ -6927,6 +6927,54 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn webhook_event_class_list(
+        rqctx: RequestContext<Self::Context>,
+        _query_params: Query<
+            PaginationParams<params::EventClassFilter, params::EventClassPage>,
+        >,
+    ) -> Result<HttpResponseOk<ResultsPage<views::EventClass>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            Err(nexus
+                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
+                .await
+                .into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn webhook_event_class_view(
+        rqctx: RequestContext<Self::Context>,
+        _path_params: Path<params::EventClassSelector>,
+    ) -> Result<HttpResponseOk<views::EventClass>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            Err(nexus
+                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
+                .await
+                .into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn webhook_view(
         rqctx: RequestContext<Self::Context>,
         _path_params: Path<params::WebhookPath>,

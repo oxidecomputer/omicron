@@ -2305,6 +2305,25 @@ pub struct DeviceAccessTokenRequest {
 
 // Webhooks
 
+/// Query params for listing webhook event classes.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct EventClassFilter {
+    /// An optional glob pattern for filtering event class names.
+    pub filter: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct EventClassPage {
+    /// The last webhook event class returned by a previous page.
+    pub last_seen: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct EventClassSelector {
+    /// The name of the event class.
+    pub name: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookCreate {
     /// An identifier for this webhook receiver, which must be unique.
