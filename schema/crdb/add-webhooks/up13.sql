@@ -19,9 +19,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery_attempt (
                 response_duration IS NOT NULL
             )
         ) OR (
-            -- If the result is 'failed_unreachable', no response data is
-            -- present.
-            (result = 'failed_unreachable') AND (
+            -- If the result is 'failed_unreachable' or 'failed_timeout', no
+            -- response data is present.
+            (result = 'failed_unreachable' OR result = 'failed_timeout') AND (
                 response_status IS NULL AND
                 response_duration IS NULL
             )

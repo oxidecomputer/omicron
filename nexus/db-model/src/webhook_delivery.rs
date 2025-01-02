@@ -26,5 +26,6 @@ impl_enum_type!(
 
     FailedHttpError => b"failed_http_error"
     FailedUnreachable => b"failed_unreachable"
+    FailedTimeout => b"failed_timeout"
     Succeeded => b"succeeded"
 );
