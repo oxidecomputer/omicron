@@ -4778,6 +4778,8 @@ ON omicron.public.webhook_event (
 CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
     -- UUID of this dispatch.
     id UUID PRIMARY KEY,
+    --- UUID of the event (foreign key into `omicron.public.webhook_event`).
+    event_id UUID NOT NULL,
     -- UUID of the webhook receiver (foreign key into
     -- `omicron.public.webhook_rx`)
     rx_id UUID NOT NULL,
@@ -4791,7 +4793,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
 -- Index for looking up all webhook messages dispatched to a receiver ID
 CREATE INDEX IF NOT EXISTS lookup_webhook_dispatched_to_rx
 ON omicron.public.webhook_delivery (
-    rx_id
+    rx_id, event_id,
 );
 
 -- Index for looking up all currently in-flight webhook messages, and ordering
@@ -4802,7 +4804,7 @@ ON omicron.public.webhook_delivery (
 ) WHERE
     time_completed IS NULL;
 
-CREATE TYPE IF NOT EXISTS omicron.public.webhook_event_delivery_result as ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.webhook_delivery_result as ENUM (
     -- The delivery attempt failed with an HTTP error.
     'failed_http_error',
     -- The delivery attempt failed because the receiver endpoint was
@@ -4812,14 +4814,17 @@ CREATE TYPE IF NOT EXISTS omicron.public.webhook_event_delivery_result as ENUM (
     'succeeded'
 );
 
-CREATE TABLE IF NOT EXISTS omicron.public.webhook_event_delivery_attempt (
-    id UUID PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery_attempt (
     -- Foreign key into `omicron.public.webhook_delivery`.
     delivery_id UUID NOT NULL,
-    result omicron.public.webhook_event_delivery_result NOT NULL,
+    -- attempt number.
+    attempt INT2 NOT NULL,
+    result omicron.public.webhook_delivery_result NOT NULL,
     response_status INT2,
     response_duration INTERVAL,
     time_created TIMESTAMPTZ NOT NULL,
+
+    PRIMARY KEY (delivery_id, attempt),
 
     CONSTRAINT response_iff_not_unreachable CHECK (
         (
@@ -4841,7 +4846,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_event_delivery_attempt (
 );
 
 CREATE INDEX IF NOT EXISTS lookup_webhook_delivery_attempts_for_msg
-ON omicron.public.webhook_event_delivery_attempts (
+ON omicron.public.webhook_delivery_attempts (
     delivery_id
 );
 
