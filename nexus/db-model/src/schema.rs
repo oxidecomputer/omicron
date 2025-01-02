@@ -2145,7 +2145,7 @@ allow_tables_to_appear_in_same_query!(webhook_rx, webhook_rx_subscription);
 joinable!(webhook_rx_subscription -> webhook_rx (rx_id));
 
 table! {
-    webhook_msg (id) {
+    webhook_event (id) {
         id -> Uuid,
         time_created -> Timestamptz,
         time_dispatched -> Nullable<Timestamptz>,
@@ -2155,7 +2155,7 @@ table! {
 }
 
 table! {
-    webhook_msg_dispatch (id) {
+    webhook_delivery (id) {
         id -> Uuid,
         rx_id -> Uuid,
         payload -> Jsonb,
@@ -2164,13 +2164,13 @@ table! {
     }
 }
 
-allow_tables_to_appear_in_same_query!(webhook_rx, webhook_msg_dispatch);
-joinable!(webhook_msg_dispatch -> webhook_rx (rx_id));
+allow_tables_to_appear_in_same_query!(webhook_rx, webhook_delivery);
+joinable!(webhook_delivery -> webhook_rx (rx_id));
 
 table! {
-    webhook_msg_delivery_attempt (id) {
+    webhook_event_delivery_attempt (id) {
         id -> Uuid,
-        dispatch_id -> Uuid,
+        delivery_id -> Uuid,
         result -> crate::WebhookDeliveryResultEnum,
         response_status -> Nullable<Int2>,
         response_duration -> Nullable<Interval>,
@@ -2179,7 +2179,7 @@ table! {
 }
 
 allow_tables_to_appear_in_same_query!(
-    webhook_msg_dispatch,
-    webhook_msg_delivery_attempt
+    webhook_delivery,
+    webhook_event_delivery_attempt
 );
-joinable!(webhook_msg_delivery_attempt -> webhook_msg_dispatch (dispatch_id));
+joinable!(webhook_event_delivery_attempt -> webhook_delivery (delivery_id));

@@ -8,7 +8,7 @@ use serde::Serialize;
 
 impl_enum_type!(
     #[derive(SqlType, Debug, Clone)]
-    #[diesel(postgres_type(name = "webhook_msg_delivery_result", schema = "public"))]
+    #[diesel(postgres_type(name = "webhook_event_delivery_result", schema = "public"))]
     pub struct WebhookDeliveryResultEnum;
 
     #[derive(

@@ -4748,10 +4748,10 @@ ON omicron.public.webhook_rx_subscription (
 );
 
 /*
- * Webhook message queue.
+ * Webhook event message queue.
  */
 
-CREATE TABLE IF NOT EXISTS omicron.public.webhook_msg (
+CREATE TABLE IF NOT EXISTS omicron.public.webhook_event (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     -- Set when dispatch entries have been created for this event.
@@ -4762,11 +4762,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_msg (
     event JSONB NOT NULL
 );
 
--- Look up webhook messages in need of dispatching.
+-- Look up webhook events in need of dispatching.
 --
--- This is used by the message dispatcher when looking for messages to dispatch.
-CREATE INDEX IF NOT EXISTS lookup_undispatched_webhook_msgs
-ON omicron.public.webhook_msg (
+-- This is used by the message dispatcher when looking for events to dispatch.
+CREATE INDEX IF NOT EXISTS lookup_undispatched_webhook_events
+ON omicron.public.webhook_event (
     id, time_created
 ) WHERE time_dispatched IS NULL;
 
@@ -4775,7 +4775,7 @@ ON omicron.public.webhook_msg (
  * Webhook message dispatching and delivery attempts.
  */
 
-CREATE TABLE IF NOT EXISTS omicron.public.webhook_msg_dispatch (
+CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
     -- UUID of this dispatch.
     id UUID PRIMARY KEY,
     -- UUID of the webhook receiver (foreign key into
@@ -4790,19 +4790,19 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_msg_dispatch (
 
 -- Index for looking up all webhook messages dispatched to a receiver ID
 CREATE INDEX IF NOT EXISTS lookup_webhook_dispatched_to_rx
-ON omicron.public.webhook_msg_dispatch (
+ON omicron.public.webhook_delivery (
     rx_id
 );
 
 -- Index for looking up all currently in-flight webhook messages, and ordering
 -- them by their creation times.
-CREATE INDEX IF NOT EXISTS webhook_dispatch_in_flight
-ON omicron.public.webhook_msg_dispatch (
+CREATE INDEX IF NOT EXISTS webhook_deliverey_in_flight
+ON omicron.public.webhook_delivery (
     time_created, id
 ) WHERE
     time_completed IS NULL;
 
-CREATE TYPE IF NOT EXISTS omicron.public.webhook_msg_delivery_result as ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.webhook_event_delivery_result as ENUM (
     -- The delivery attempt failed with an HTTP error.
     'failed_http_error',
     -- The delivery attempt failed because the receiver endpoint was
@@ -4812,11 +4812,11 @@ CREATE TYPE IF NOT EXISTS omicron.public.webhook_msg_delivery_result as ENUM (
     'succeeded'
 );
 
-CREATE TABLE IF NOT EXISTS omicron.public.webhook_msg_delivery_attempt (
+CREATE TABLE IF NOT EXISTS omicron.public.webhook_event_delivery_attempt (
     id UUID PRIMARY KEY,
-    -- Foreign key into `omicron.public.webhook_msg_dispatch`.
-    dispatch_id UUID NOT NULL,
-    result omicron.public.webhook_msg_delivery_result NOT NULL,
+    -- Foreign key into `omicron.public.webhook_delivery`.
+    delivery_id UUID NOT NULL,
+    result omicron.public.webhook_event_delivery_result NOT NULL,
     response_status INT2,
     response_duration INTERVAL,
     time_created TIMESTAMPTZ NOT NULL,
@@ -4841,8 +4841,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_msg_delivery_attempt (
 );
 
 CREATE INDEX IF NOT EXISTS lookup_webhook_delivery_attempts_for_msg
-ON omicron.public.webhook_msg_delivery_attempts (
-    dispatch_id
+ON omicron.public.webhook_event_delivery_attempts (
+    delivery_id
 );
 
 /*
