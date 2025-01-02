@@ -37,7 +37,7 @@ dispatched and ordering by their creation times.
 tracks the webhook messages that have been dispatched to receivers.
 *** `up10.sql` creates an index `lookup_webhook_dispatched_to_rx` for looking up
 entries in `omicron.public.webhook_delivery` by receiver ID.
-*** `up11.sql` creates an index `webhook_deliverey_in_flight` for looking up all currently in-flight webhook
+*** `up11.sql` creates an index `webhook_delivery_in_flight` for looking up all currently in-flight webhook
 messages (entries in `omicron.public.webhook_delivery` where the
 `time_completed` field has not been set).
 ** *Delivery attempts*:
