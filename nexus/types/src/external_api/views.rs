@@ -1033,13 +1033,22 @@ pub struct OxqlQueryResult {
 /// The configuration for a webhook.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Webhook {
+    /// The UUID of this webhook receiver.
     pub id: WebhookUuid,
+    /// The identifier assigned to this webhook receiver upon creation.
     pub name: String,
+    /// The URL that webhook notification requests are sent to.
     pub endpoint: Url,
+    /// The UUID of the user associated with this webhook receiver for
+    /// role-based ccess control.
+    pub actor_id: Uuid,
+    // A list containing the IDs of the secret keys used to sign payloads sent
+    // to this receiver.
     pub secrets: Vec<WebhookSecretId>,
-    // XXX(eliza): should eventually be an enum?
+    /// The list of event classes to which this receiver is subscribed.
     pub events: Vec<String>,
-    // TODO(eliza): roles?
+    /// If `true`, liveness probe requests are not sent to this receiver.
+    pub disable_probes: bool,
 }
 
 /// A list of the IDs of secrets associated with a webhook.
@@ -1065,7 +1074,7 @@ pub struct WebhookDelivery {
     pub webhook_id: WebhookUuid,
 
     /// The event class.
-    pub event: String,
+    pub event_class: String,
 
     /// The UUID of the event.
     pub event_id: EventUuid,
@@ -1105,6 +1114,9 @@ pub enum WebhookDeliveryState {
     FailedHttpError,
     /// The webhook request could not be sent to the receiver endpoint.
     FailedUnreachable,
+    /// A connection to the receiver endpoint was successfully established, but
+    /// no response was received within the delivery timeout.
+    FailedTimeout,
 }
 
 /// The response received from a webhook receiver endpoint.

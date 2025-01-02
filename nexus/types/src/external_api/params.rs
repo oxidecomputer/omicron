@@ -2284,10 +2284,43 @@ pub struct DeviceAccessTokenRequest {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookCreate {
+    /// An identifier for this webhook receiver, which must be unique.
     pub name: String,
+
+    /// The URL that webhook notification requests should be sent to
     pub endpoint: Url,
+
+    /// A non-empty list of secret keys used to sign webhook payloads.
     pub secrets: Vec<String>,
+
+    /// A list of webhook event classes to subscribe to.
+    ///
+    /// If this list is empty or is not included in the request body, the
+    /// webhook will not be subscribed to any events.
+    #[serde(default)]
     pub events: Vec<String>,
+
+    /// If `true`, liveness probe requests will not be sent to this webhook receiver.
+    #[serde(default)]
+    pub disable_probes: bool,
+}
+
+/// Parameters to update a webhook configuration.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookUpdate {
+    /// An identifier for this webhook receiver, which must be unique.
+    pub name: String,
+
+    /// The URL that webhook notification requests should be sent to
+    pub endpoint: Url,
+
+    /// A list of webhook event classes to subscribe to.
+    ///
+    /// If this list is empty, the webhook will not be subscribed to any events.
+    pub events: Vec<String>,
+
+    /// If `true`, liveness probe requests will not be sent to this webhook receiver.
+    pub disable_probes: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -2298,5 +2331,5 @@ pub struct WebhookSecret {
 #[derive(Deserialize, JsonSchema)]
 pub struct WebhookDeliveryPath {
     pub webhook_id: Uuid,
-    pub delivery_id: Uuid,
+    pub event_id: Uuid,
 }

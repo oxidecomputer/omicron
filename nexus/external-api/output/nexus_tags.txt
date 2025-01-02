@@ -236,9 +236,10 @@ OPERATION ID                             METHOD   URL PATH
 webhook_create                           POST     /experimental/v1/webhooks
 webhook_delete                           DELETE   /experimental/v1/webhooks/{webhook_id}
 webhook_delivery_list                    GET      /experimental/v1/webhooks/{webhook_id}/deliveries
-webhook_delivery_resend                  POST     /experimental/v1/webhooks/{webhook_id}/deliveries/{delivery_id}/resend
+webhook_delivery_resend                  POST     /experimental/v1/webhooks/{webhook_id}/deliveries/{event_id}/resend
 webhook_secrets_add                      POST     /experimental/v1/webhooks/{webhook_id}/secrets
 webhook_secrets_list                     GET      /experimental/v1/webhooks/{webhook_id}/secrets
+webhook_update                           PUT      /experimental/v1/webhooks/{webhook_id}
 webhook_view                             GET      /experimental/v1/webhooks/{webhook_id}
 
 API operations found with tag "vpcs"
