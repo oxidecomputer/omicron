@@ -301,6 +301,105 @@
         }
       }
     },
+    "/experimental/v1/webhook-events/classes": {
+      "get": {
+        "tags": [
+          "system/webhooks"
+        ],
+        "summary": "List webhook event classes",
+        "operationId": "webhook_event_class_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "filter",
+            "description": "An optional glob pattern for filtering event class names.",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventClassResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/experimental/v1/webhook-events/classes/{name}": {
+      "get": {
+        "tags": [
+          "system/webhooks"
+        ],
+        "summary": "Fetch details on an event class by name.",
+        "operationId": "webhook_event_class_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "description": "The name of the event class.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventClass"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/experimental/v1/webhooks": {
       "post": {
         "tags": [
@@ -14294,6 +14393,45 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "EventClass": {
+        "description": "A webhook event class.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "A description of what this event class represents.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name of the event class.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
+      },
+      "EventClassResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventClass"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "ExternalIp": {

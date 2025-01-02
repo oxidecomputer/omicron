@@ -3097,6 +3097,30 @@ pub trait NexusExternalApi {
 
     // Webhooks (experimental)
 
+    /// List webhook event classes
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/webhook-events/classes",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_event_class_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginationParams<params::EventClassFilter, params::EventClassPage>,
+        >,
+    ) -> Result<HttpResponseOk<ResultsPage<views::EventClass>>, HttpError>;
+
+    /// Fetch details on an event class by name.
+    #[endpoint {
+        method = GET,
+        path ="/experimental/v1/webhook-events/classes/{name}",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_event_class_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::EventClassSelector>,
+    ) -> Result<HttpResponseOk<views::EventClass>, HttpError>;
+
     /// Get the configuration for a webhook receiver.
     #[endpoint {
         method = GET,

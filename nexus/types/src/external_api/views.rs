@@ -1030,6 +1030,16 @@ pub struct OxqlQueryResult {
 
 // WEBHOOKS
 
+/// A webhook event class.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct EventClass {
+    /// The name of the event class.
+    pub name: String,
+
+    /// A description of what this event class represents.
+    pub description: String,
+}
+
 /// The configuration for a webhook.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Webhook {
