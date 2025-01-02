@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS omicron.public.webhook_msg_dispatch (
+CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
     -- UUID of this dispatch.
     id UUID PRIMARY KEY,
     -- UUID of the webhook receiver (foreign key into

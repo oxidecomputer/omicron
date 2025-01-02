@@ -1,8 +1,8 @@
-CREATE TABLE IF NOT EXISTS omicron.public.webhook_msg_delivery_attempt (
+CREATE TABLE IF NOT EXISTS omicron.public.webhook_event_delivery_attempt (
     id UUID PRIMARY KEY,
-    -- Foreign key into `omicron.public.webhook_msg_dispatch`.
-    dispatch_id UUID NOT NULL,
-    result omicron.public.webhook_msg_delivery_result NOT NULL,
+    -- Foreign key into `omicron.public.webhook_delivery`.
+    delivery_id UUID NOT NULL,
+    result omicron.public.webhook_event_delivery_result NOT NULL,
     response_status INT2,
     response_duration INTERVAL,
     time_created TIMESTAMPTZ NOT NULL,

@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS omicron.public.webhook_msg (
+CREATE TABLE IF NOT EXISTS omicron.public.webhook_event (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     -- Set when dispatch entries have been created for this event.
