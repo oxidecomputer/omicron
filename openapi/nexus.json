@@ -666,7 +666,7 @@
         "tags": [
           "system/webhooks"
         ],
-        "summary": "Get the configuration for a webhook.",
+        "summary": "Get the configuration for a webhook receiver.",
         "operationId": "webhook_view",
         "parameters": [
           {
@@ -690,6 +690,46 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "system/webhooks"
+        ],
+        "summary": "Update the configuration of an existing webhook receiver.",
+        "operationId": "webhook_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "webhook_id",
+            "description": "ID of the webhook",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -799,7 +839,7 @@
         }
       }
     },
-    "/experimental/v1/webhooks/{webhook_id}/deliveries/{delivery_id}/resend": {
+    "/experimental/v1/webhooks/{webhook_id}/deliveries/{event_id}/resend": {
       "post": {
         "tags": [
           "system/webhooks"
@@ -809,7 +849,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "delivery_id",
+            "name": "event_id",
             "required": true,
             "schema": {
               "type": "string",
@@ -888,7 +928,7 @@
         "tags": [
           "system/webhooks"
         ],
-        "summary": "Add a secret to a webhook.",
+        "summary": "Add a secret to a webhook receiver.",
         "operationId": "webhook_secrets_add",
         "parameters": [
           {
@@ -23492,20 +23532,37 @@
         "description": "The configuration for a webhook.",
         "type": "object",
         "properties": {
+          "actor_id": {
+            "description": "The UUID of the user associated with this webhook receiver for role-based ccess control.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "disable_probes": {
+            "description": "If `true`, liveness probe requests are not sent to this receiver.",
+            "type": "boolean"
+          },
           "endpoint": {
+            "description": "The URL that webhook notification requests are sent to.",
             "type": "string",
             "format": "uri"
           },
           "events": {
+            "description": "The list of event classes to which this receiver is subscribed.",
             "type": "array",
             "items": {
               "type": "string"
             }
           },
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForWebhookKind"
+            "description": "The UUID of this webhook receiver.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForWebhookKind"
+              }
+            ]
           },
           "name": {
+            "description": "The identifier assigned to this webhook receiver upon creation.",
             "type": "string"
           },
           "secrets": {
@@ -23516,6 +23573,8 @@
           }
         },
         "required": [
+          "actor_id",
+          "disable_probes",
           "endpoint",
           "events",
           "id",
@@ -23526,20 +23585,30 @@
       "WebhookCreate": {
         "type": "object",
         "properties": {
+          "disable_probes": {
+            "description": "If `true`, liveness probe requests will not be sent to this webhook receiver.",
+            "default": false,
+            "type": "boolean"
+          },
           "endpoint": {
+            "description": "The URL that webhook notification requests should be sent to",
             "type": "string",
             "format": "uri"
           },
           "events": {
+            "description": "A list of webhook event classes to subscribe to.\n\nIf this list is empty or is not included in the request body, the webhook will not be subscribed to any events.",
+            "default": [],
             "type": "array",
             "items": {
               "type": "string"
             }
           },
           "name": {
+            "description": "An identifier for this webhook receiver, which must be unique.",
             "type": "string"
           },
           "secrets": {
+            "description": "A non-empty list of secret keys used to sign webhook payloads.",
             "type": "array",
             "items": {
               "type": "string"
@@ -23548,7 +23617,6 @@
         },
         "required": [
           "endpoint",
-          "events",
           "name",
           "secrets"
         ]
@@ -23557,7 +23625,7 @@
         "description": "A delivery attempt for a webhook event.",
         "type": "object",
         "properties": {
-          "event": {
+          "event_class": {
             "description": "The event class.",
             "type": "string"
           },
@@ -23613,7 +23681,7 @@
           }
         },
         "required": [
-          "event",
+          "event_class",
           "event_id",
           "id",
           "state",
@@ -23705,6 +23773,13 @@
             "enum": [
               "failed_unreachable"
             ]
+          },
+          {
+            "description": "A connection to the receiver endpoint was successfully established, but no response was received within the delivery timeout.",
+            "type": "string",
+            "enum": [
+              "failed_timeout"
+            ]
           }
         ]
       },
@@ -23744,6 +23819,38 @@
         },
         "required": [
           "secrets"
+        ]
+      },
+      "WebhookUpdate": {
+        "description": "Parameters to update a webhook configuration.",
+        "type": "object",
+        "properties": {
+          "disable_probes": {
+            "description": "If `true`, liveness probe requests will not be sent to this webhook receiver.",
+            "type": "boolean"
+          },
+          "endpoint": {
+            "description": "The URL that webhook notification requests should be sent to",
+            "type": "string",
+            "format": "uri"
+          },
+          "events": {
+            "description": "A list of webhook event classes to subscribe to.\n\nIf this list is empty, the webhook will not be subscribed to any events.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "description": "An identifier for this webhook receiver, which must be unique.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "disable_probes",
+          "endpoint",
+          "events",
+          "name"
         ]
       },
       "NameOrIdSortMode": {

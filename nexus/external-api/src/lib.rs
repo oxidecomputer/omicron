@@ -3273,6 +3273,18 @@ pub trait NexusExternalApi {
         params: TypedBody<params::WebhookCreate>,
     ) -> Result<HttpResponseCreated<views::Webhook>, HttpError>;
 
+    /// Update the configuration of an existing webhook receiver.
+    #[endpoint {
+        method = PUT,
+        path = "/experimental/v1/webhooks/{webhook_id}",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookPath>,
+        params: TypedBody<params::WebhookUpdate>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
     /// Delete a webhook receiver.
     #[endpoint {
         method = DELETE,
@@ -3322,7 +3334,7 @@ pub trait NexusExternalApi {
     /// Request re-delivery of a webhook event.
     #[endpoint {
         method = POST,
-        path = "/experimental/v1/webhooks/{webhook_id}/deliveries/{delivery_id}/resend",
+        path = "/experimental/v1/webhooks/{webhook_id}/deliveries/{event_id}/resend",
         tags = ["system/webhooks"],
     }]
     async fn webhook_delivery_resend(
