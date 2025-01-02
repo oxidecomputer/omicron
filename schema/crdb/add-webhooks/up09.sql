@@ -10,5 +10,5 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
     time_created TIMESTAMPTZ NOT NULL,
     -- If this is set, then this webhook message has either been delivered
     -- successfully, or is considered permanently failed.
-    time_completed TIMESTAMPTZ,
+    time_completed TIMESTAMPTZ
 );
