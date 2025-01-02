@@ -2189,7 +2189,7 @@ allow_tables_to_appear_in_same_query!(webhook_rx, webhook_delivery);
 joinable!(webhook_delivery -> webhook_rx (rx_id));
 
 table! {
-    webhook_event_delivery_attempt (id) {
+    webhook_delivery_attempt (id) {
         id -> Uuid,
         delivery_id -> Uuid,
         result -> crate::WebhookDeliveryResultEnum,
@@ -2201,6 +2201,6 @@ table! {
 
 allow_tables_to_appear_in_same_query!(
     webhook_delivery,
-    webhook_event_delivery_attempt
+    webhook_delivery_attempt
 );
-joinable!(webhook_event_delivery_attempt -> webhook_delivery (delivery_id));
+joinable!(webhook_delivery_attempt -> webhook_delivery (delivery_id));

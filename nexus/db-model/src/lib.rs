@@ -64,7 +64,7 @@ mod switch_interface;
 mod switch_port;
 mod v2p_mapping;
 mod vmm_state;
-mod webhook_event_delivery;
+mod webhook_delivery;
 // These actually represent subqueries, not real table.
 // However, they must be defined in the same crate as our tables
 // for join-based marker trait generation.
@@ -130,7 +130,6 @@ mod db {
 
 pub use self::macaddr::*;
 pub use self::unsigned::*;
-pub use self::webhook_event_delivery::*;
 pub use address_lot::*;
 pub use allow_list::*;
 pub use bfd::*;
@@ -232,6 +231,7 @@ pub use vpc_firewall_rule::*;
 pub use vpc_route::*;
 pub use vpc_router::*;
 pub use vpc_subnet::*;
+pub use webhook_delivery::*;
 pub use zpool::*;
 
 // TODO: The existence of both impl_enum_type and impl_enum_wrapper is a
