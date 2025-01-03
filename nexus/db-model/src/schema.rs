@@ -2136,6 +2136,7 @@ table! {
         name -> Text,
         description -> Text,
         endpoint -> Text,
+        probes_enabled -> Bool,
         time_created -> Timestamptz,
         time_modified -> Nullable<Timestamptz>,
         time_deleted -> Nullable<Timestamptz>,

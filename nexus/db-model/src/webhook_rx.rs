@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 pub struct WebhookReceiver {
     #[diesel(embed)]
     identity: WebhookReceiverIdentity,
-
+    pub probes_enabled: bool,
     pub endpoint: String,
 }
 
