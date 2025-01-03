@@ -7,8 +7,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
     -- `omicron.public.webhook_rx`)
     rx_id UUID NOT NULL,
     payload JSONB NOT NULL,
+
+    --- Delivery attempt count. Starts at 0.
+    attempts INT2 NOT NULL,
+
     time_created TIMESTAMPTZ NOT NULL,
     -- If this is set, then this webhook message has either been delivered
     -- successfully, or is considered permanently failed.
-    time_completed TIMESTAMPTZ
+    time_completed TIMESTAMPTZ,
+
+    CONSTRAINT attempts_is_non_negative CHECK (attempts >= 0)
 );

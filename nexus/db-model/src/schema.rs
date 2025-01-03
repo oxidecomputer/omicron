@@ -2157,8 +2157,10 @@ table! {
 table! {
     webhook_delivery (id) {
         id -> Uuid,
+        event_id -> Uuid,
         rx_id -> Uuid,
         payload -> Jsonb,
+        attempts -> Int2,
         time_created -> Timestamptz,
         time_completed -> Nullable<Timestamptz>,
     }
@@ -2168,9 +2170,9 @@ allow_tables_to_appear_in_same_query!(webhook_rx, webhook_delivery);
 joinable!(webhook_delivery -> webhook_rx (rx_id));
 
 table! {
-    webhook_delivery_attempt (id) {
-        id -> Uuid,
+    webhook_delivery_attempt (delivery_id, attempt) {
         delivery_id -> Uuid,
+        attempt -> Int2,
         result -> crate::WebhookDeliveryResultEnum,
         response_status -> Nullable<Int2>,
         response_duration -> Nullable<Interval>,

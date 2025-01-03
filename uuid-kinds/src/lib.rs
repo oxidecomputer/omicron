@@ -73,6 +73,8 @@ impl_typed_uuid_kind! {
     UpstairsRepair => "upstairs_repair",
     UpstairsSession => "upstairs_session",
     Vnic => "vnic",
-    Webhook => "webhook",
+    WebhookEvent => "webhook_event",
+    WebhookReceiver => "webhook_receiver",
+    WebhookDelivery => "webhook_delivery",
     Zpool => "zpool",
 }
