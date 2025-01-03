@@ -4900,10 +4900,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
     -- `omicron.public.webhook_rx`)
     rx_id UUID NOT NULL,
     payload JSONB NOT NULL,
+
+    --- Delivery attempt count. Starts at 0.
+    attempts INT2 NOT NULL,
+
     time_created TIMESTAMPTZ NOT NULL,
     -- If this is set, then this webhook message has either been delivered
     -- successfully, or is considered permanently failed.
-    time_completed TIMESTAMPTZ
+    time_completed TIMESTAMPTZ,
+
+    CONSTRAINT attempts_is_non_negative CHECK (attempts >= 0)
 );
 
 -- Index for looking up all webhook messages dispatched to a receiver ID
@@ -4939,11 +4945,26 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery_attempt (
     -- attempt number.
     attempt INT2 NOT NULL,
     result omicron.public.webhook_delivery_result NOT NULL,
+    -- A status code > 599 would be Very Surprising, so rather than using an
+    -- INT4 to store a full unsigned 16-bit number in the database, we'll use a
+    -- signed 16-bit integer with a check constraint that it's unsigned.
     response_status INT2,
     response_duration INTERVAL,
     time_created TIMESTAMPTZ NOT NULL,
 
     PRIMARY KEY (delivery_id, attempt),
+
+    -- Attempt numbers start at 1
+    CONSTRAINT attempts_start_at_1 CHECK (attempt >= 1),
+
+    -- Ensure response status codes are not negative.
+    -- We could be more prescriptive here, and also check that they're >= 100
+    -- and <= 599, but some servers may return weird stuff, and we'd like to be
+    -- able to record that they did that.
+    CONSTRAINT response_status_is_unsigned CHECK (
+        (response_status IS NOT NULL AND response_status >= 0) OR
+            (response_status IS NULL)
+    ),
 
     CONSTRAINT response_iff_not_unreachable CHECK (
         (

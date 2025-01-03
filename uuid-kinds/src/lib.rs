@@ -77,6 +77,8 @@ impl_typed_uuid_kind! {
     UpstairsSession => "upstairs_session",
     Vnic => "vnic",
     Volume => "volume",
-    Webhook => "webhook",
+    WebhookEvent => "webhook_event",
+    WebhookReceiver => "webhook_receiver",
+    WebhookDelivery => "webhook_delivery",
     Zpool => "zpool",
 }

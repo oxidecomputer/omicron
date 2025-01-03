@@ -60,11 +60,13 @@ mod producer_endpoint;
 mod project;
 mod rendezvous_debug_dataset;
 mod semver_version;
+mod serde_time_delta;
 mod switch_interface;
 mod switch_port;
 mod v2p_mapping;
 mod vmm_state;
 mod webhook_delivery;
+mod webhook_event;
 // These actually represent subqueries, not real table.
 // However, they must be defined in the same crate as our tables
 // for join-based marker trait generation.
