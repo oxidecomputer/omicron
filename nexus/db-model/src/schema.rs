@@ -2134,6 +2134,7 @@ table! {
     webhook_rx (id) {
         id -> Uuid,
         name -> Text,
+        description -> Text,
         endpoint -> Text,
         time_created -> Timestamptz,
         time_modified -> Nullable<Timestamptz>,
