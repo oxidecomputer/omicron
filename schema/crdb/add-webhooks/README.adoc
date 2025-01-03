@@ -46,6 +46,6 @@ representing the potential outcomes of a webhook delivery attempt.
 *** `up13.sql` creates the table `omicron.public.webhook_delivery_attempt`,
 which records each individual delivery attempt for a webhook message in the
 `webhook_delivery` table.
-*** `up14.sql` creates an index `lookup_webhook_delivery_attempts_for_msg` on
+*** `up14.sql` creates an index `lookup_webhook_delivery_attempt_for_msg` on
 `omicron.public.webhook_delivery_attempt`, for looking up all attempts to
 deliver a message with a given dispatch ID.
