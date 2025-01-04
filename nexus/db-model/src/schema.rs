@@ -2160,6 +2160,7 @@ table! {
     webhook_rx_subscription (rx_id, event_class) {
         rx_id -> Uuid,
         event_class -> Text,
+        similar_to -> Text,
         time_created -> Timestamptz,
     }
 }
