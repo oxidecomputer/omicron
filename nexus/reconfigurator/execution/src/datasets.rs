@@ -255,16 +255,19 @@ mod tests {
     use super::*;
     use nexus_db_model::Zpool;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
+    use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintZoneFilter;
     use omicron_common::api::external::ByteCount;
+    use omicron_common::api::external::Generation;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::CompressionAlgorithm;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use std::net::SocketAddr;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -288,6 +291,96 @@ mod tests {
                 })
             })
             .collect::<Vec<_>>()
+    }
+
+    #[nexus_test]
+    async fn test_deploy_datasets(cptestctx: &ControlPlaneTestContext) {
+        // Set up.
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        let sim_sled_agent_addr =
+            match cptestctx.sled_agent.http_server.local_addr() {
+                SocketAddr::V6(addr) => addr,
+                _ => panic!(
+                    "Unexpected address type for sled agent (wanted IPv6)"
+                ),
+            };
+        let sim_sled_agent = &cptestctx.sled_agent.sled_agent;
+
+        // This is a fully fabricated dataset list for a simulated sled agent.
+        //
+        // We're testing the validity of the deployment calls here, not of any
+        // blueprint.
+
+        let sleds_by_id = BTreeMap::from([(
+            sim_sled_agent.id,
+            Sled::new(
+                sim_sled_agent.id,
+                sim_sled_agent_addr,
+                SledRole::Scrimlet,
+            ),
+        )]);
+
+        // Create two datasets which look like they came from the blueprint: One
+        // which is in-service, and one which is expunged.
+        //
+        // During deployment, the in-service dataset should be deployed, but the
+        // expunged dataset should be ignored.
+        let dataset_id = DatasetUuid::new_v4();
+        let expunged_dataset_id = DatasetUuid::new_v4();
+        let datasets_config = BlueprintDatasetsConfig {
+            generation: Generation::new(),
+            datasets: BTreeMap::from([
+                (
+                    dataset_id,
+                    BlueprintDatasetConfig {
+                        disposition: BlueprintDatasetDisposition::InService,
+                        id: dataset_id,
+                        pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
+                        kind: DatasetKind::Crucible,
+                        address: None,
+                        quota: None,
+                        reservation: None,
+                        compression: CompressionAlgorithm::Off,
+                    },
+                ),
+                (
+                    expunged_dataset_id,
+                    BlueprintDatasetConfig {
+                        disposition: BlueprintDatasetDisposition::Expunged,
+                        id: expunged_dataset_id,
+                        pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
+                        kind: DatasetKind::Crucible,
+                        address: None,
+                        quota: None,
+                        reservation: None,
+                        compression: CompressionAlgorithm::Off,
+                    },
+                ),
+            ]),
+        };
+        let sled_configs =
+            BTreeMap::from([(sim_sled_agent.id, datasets_config.clone())]);
+
+        // Give the simulated sled agent a configuration to deploy
+        deploy_datasets(&opctx, &sleds_by_id, &sled_configs)
+            .await
+            .expect("Deploying datasets should have succeeded");
+
+        // Observe the latest configuration stored on the simulated sled agent,
+        // and verify that this output matches the "deploy_datasets" input.
+        let observed_config =
+            sim_sled_agent.datasets_config_list().await.unwrap();
+        assert_eq!(observed_config, datasets_config.into(),);
+
+        // We expect to see the single in-service dataset we supplied as input.
+        assert_eq!(observed_config.datasets.len(), 1,);
+        assert!(observed_config.datasets.contains_key(&dataset_id));
     }
 
     #[nexus_test]

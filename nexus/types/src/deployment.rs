@@ -969,7 +969,14 @@ impl From<BlueprintDatasetsConfig> for DatasetsConfig {
             datasets: config
                 .datasets
                 .into_iter()
-                .map(|(id, d)| (id, d.into()))
+                .filter_map(|(id, d)| {
+                    if d.disposition.matches(BlueprintDatasetFilter::InService)
+                    {
+                        Some((id, d.into()))
+                    } else {
+                        None
+                    }
+                })
                 .collect(),
         }
     }
