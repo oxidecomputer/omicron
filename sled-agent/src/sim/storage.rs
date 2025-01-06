@@ -401,6 +401,11 @@ impl CrucibleDataInner {
 #[cfg(test)]
 mod test {
     use super::*;
+    use omicron_common::api::external::Generation;
+    use omicron_common::disk::DatasetConfig;
+    use omicron_common::disk::DatasetKind;
+    use omicron_common::disk::DatasetName;
+    use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
 
     /// Validate that the simulated Crucible agent reuses ports when regions are
@@ -658,6 +663,243 @@ mod test {
         agent.delete(RegionId(region_id.to_string())).unwrap();
 
         agent.create_snapshot(region_id, snapshot_id).unwrap_err();
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn nested_dataset_not_found_missing_dataset() {
+        let logctx = test_setup_log("nested_dataset_not_found_missing_dataset");
+
+        let storage = StorageInner::new(
+            Uuid::new_v4(),
+            std::net::Ipv4Addr::LOCALHOST.into(),
+            logctx.log.clone(),
+        );
+
+        let zpool_id = ZpoolUuid::new_v4();
+
+        let err = storage
+            .nested_dataset_list(
+                NestedDatasetLocation {
+                    path: String::new(),
+                    root: DatasetName::new(
+                        ZpoolName::new_external(zpool_id),
+                        DatasetKind::Debug,
+                    ),
+                },
+                NestedDatasetListOptions::SelfAndChildren,
+            )
+            .expect_err("Nested dataset listing should fail on fake dataset");
+
+        assert_eq!(err.status_code, 404);
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn nested_dataset() {
+        let logctx = test_setup_log("nested_dataset");
+
+        let mut storage = StorageInner::new(
+            Uuid::new_v4(),
+            std::net::Ipv4Addr::LOCALHOST.into(),
+            logctx.log.clone(),
+        );
+
+        let zpool_id = ZpoolUuid::new_v4();
+        let zpool_name = ZpoolName::new_external(zpool_id);
+        let dataset_id = DatasetUuid::new_v4();
+        let dataset_name = DatasetName::new(zpool_name, DatasetKind::Debug);
+
+        let config = DatasetsConfig {
+            generation: Generation::new(),
+            datasets: BTreeMap::from([(
+                dataset_id,
+                DatasetConfig {
+                    id: dataset_id,
+                    name: dataset_name.clone(),
+                    inner: SharedDatasetConfig::default(),
+                },
+            )]),
+        };
+
+        // Create the debug dataset on which we'll store everything else.
+        let result = storage.datasets_ensure(config).unwrap();
+        assert!(!result.has_error());
+
+        // The list of nested datasets should only contain the root dataset.
+        let nested_datasets = storage
+            .nested_dataset_list(
+                NestedDatasetLocation {
+                    path: String::new(),
+                    root: dataset_name.clone(),
+                },
+                NestedDatasetListOptions::SelfAndChildren,
+            )
+            .unwrap();
+        assert_eq!(
+            nested_datasets,
+            vec![NestedDatasetConfig {
+                name: NestedDatasetLocation {
+                    path: String::new(),
+                    root: dataset_name.clone(),
+                },
+                inner: SharedDatasetConfig::default(),
+            }]
+        );
+
+        // Or, if we're requesting children explicitly, it should be empty.
+        let nested_dataset_root = NestedDatasetLocation {
+            path: String::new(),
+            root: dataset_name.clone(),
+        };
+
+        let nested_datasets = storage
+            .nested_dataset_list(
+                nested_dataset_root.clone(),
+                NestedDatasetListOptions::ChildrenOnly,
+            )
+            .unwrap();
+        assert_eq!(nested_datasets, vec![]);
+
+        // We can request a nested dataset explicitly.
+        let foo_config = NestedDatasetConfig {
+            name: NestedDatasetLocation {
+                path: "foo".into(),
+                root: dataset_name.clone(),
+            },
+            inner: SharedDatasetConfig::default(),
+        };
+        storage.nested_dataset_ensure(foo_config.clone()).unwrap();
+        let foobar_config = NestedDatasetConfig {
+            name: NestedDatasetLocation {
+                path: "foo/bar".into(),
+                root: dataset_name.clone(),
+            },
+            inner: SharedDatasetConfig::default(),
+        };
+        storage.nested_dataset_ensure(foobar_config.clone()).unwrap();
+
+        // We can observe the nested datasets we just created
+        let nested_datasets = storage
+            .nested_dataset_list(
+                nested_dataset_root.clone(),
+                NestedDatasetListOptions::ChildrenOnly,
+            )
+            .unwrap();
+        assert_eq!(nested_datasets, vec![foo_config.clone(),]);
+
+        let nested_datasets = storage
+            .nested_dataset_list(
+                foo_config.name.clone(),
+                NestedDatasetListOptions::ChildrenOnly,
+            )
+            .unwrap();
+        assert_eq!(nested_datasets, vec![foobar_config.clone(),]);
+
+        // We can destroy nested datasets too
+        storage.nested_dataset_destroy(foobar_config.name.clone()).unwrap();
+        storage.nested_dataset_destroy(foo_config.name.clone()).unwrap();
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn nested_dataset_child_parent_relationship() {
+        let logctx = test_setup_log("nested_dataset_child_parent_relationship");
+
+        let mut storage = StorageInner::new(
+            Uuid::new_v4(),
+            std::net::Ipv4Addr::LOCALHOST.into(),
+            logctx.log.clone(),
+        );
+
+        let zpool_id = ZpoolUuid::new_v4();
+        let zpool_name = ZpoolName::new_external(zpool_id);
+        let dataset_id = DatasetUuid::new_v4();
+        let dataset_name = DatasetName::new(zpool_name, DatasetKind::Debug);
+
+        let config = DatasetsConfig {
+            generation: Generation::new(),
+            datasets: BTreeMap::from([(
+                dataset_id,
+                DatasetConfig {
+                    id: dataset_id,
+                    name: dataset_name.clone(),
+                    inner: SharedDatasetConfig::default(),
+                },
+            )]),
+        };
+
+        // Create the debug dataset on which we'll store everything else.
+        let result = storage.datasets_ensure(config).unwrap();
+        assert!(!result.has_error());
+        let nested_dataset_root = NestedDatasetLocation {
+            path: String::new(),
+            root: dataset_name.clone(),
+        };
+        let nested_datasets = storage
+            .nested_dataset_list(
+                nested_dataset_root.clone(),
+                NestedDatasetListOptions::ChildrenOnly,
+            )
+            .unwrap();
+        assert_eq!(nested_datasets, vec![]);
+
+        // If we try to create a nested dataset "foo/bar" before the parent
+        // "foo", we expect an error.
+
+        let foo_config = NestedDatasetConfig {
+            name: NestedDatasetLocation {
+                path: "foo".into(),
+                root: dataset_name.clone(),
+            },
+            inner: SharedDatasetConfig::default(),
+        };
+        let foobar_config = NestedDatasetConfig {
+            name: NestedDatasetLocation {
+                path: "foo/bar".into(),
+                root: dataset_name.clone(),
+            },
+            inner: SharedDatasetConfig::default(),
+        };
+
+        let err = storage
+            .nested_dataset_ensure(foobar_config.clone())
+            .expect_err("Should have failed to provision foo/bar before foo");
+        assert_eq!(err.status_code, 404);
+
+        // Try again, but creating them successfully this time.
+        storage.nested_dataset_ensure(foo_config.clone()).unwrap();
+        storage.nested_dataset_ensure(foobar_config.clone()).unwrap();
+
+        // We can observe the nested datasets we just created
+        let nested_datasets = storage
+            .nested_dataset_list(
+                nested_dataset_root.clone(),
+                NestedDatasetListOptions::ChildrenOnly,
+            )
+            .unwrap();
+        assert_eq!(nested_datasets, vec![foo_config.clone(),]);
+        let nested_datasets = storage
+            .nested_dataset_list(
+                foo_config.name.clone(),
+                NestedDatasetListOptions::ChildrenOnly,
+            )
+            .unwrap();
+        assert_eq!(nested_datasets, vec![foobar_config.clone(),]);
+
+        // Destroying the nested dataset parent should destroy children.
+        storage.nested_dataset_destroy(foo_config.name.clone()).unwrap();
+
+        let nested_datasets = storage
+            .nested_dataset_list(
+                nested_dataset_root.clone(),
+                NestedDatasetListOptions::ChildrenOnly,
+            )
+            .unwrap();
+        assert_eq!(nested_datasets, vec![]);
 
         logctx.cleanup_successful();
     }
@@ -1158,14 +1400,15 @@ impl StorageInner {
             ));
         };
 
-        for path_component in nested_path.split('/') {
+        let mut path_components = nested_path.split('/').peekable();
+        while let Some(path_component) = path_components.next() {
             if path_component.is_empty() {
                 continue;
             }
 
             // Final component of path -- insert it here if it doesn't exist
             // already.
-            if !path_component.contains('/') {
+            if path_components.peek().is_none() {
                 let entry =
                     nested_dataset.children.entry(path_component.to_string());
                 entry
@@ -1211,13 +1454,14 @@ impl StorageInner {
             ));
         };
 
-        for path_component in name.path.split('/') {
+        let mut path_components = name.path.split('/').peekable();
+        while let Some(path_component) = path_components.next() {
             if path_component.is_empty() {
                 continue;
             }
 
             // Final component of path -- remove it if it exists.
-            if !path_component.contains('/') {
+            if path_components.peek().is_none() {
                 if nested_dataset.children.remove(path_component).is_none() {
                     return Err(HttpError::for_not_found(
                         None,
