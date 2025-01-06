@@ -58,7 +58,7 @@ use omicron_uuid_kinds::UpstairsRepairKind;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
-use sled_agent_client::types::VolumeConstructionRequest;
+use sled_agent_client::VolumeConstructionRequest;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::net::AddrParseError;
@@ -1118,7 +1118,7 @@ impl DataStore {
     ) -> CreateResult<Volume> {
         let volume = self.volume_checkout(volume_id, reason).await?;
 
-        let vcr: sled_agent_client::types::VolumeConstructionRequest =
+        let vcr: sled_agent_client::VolumeConstructionRequest =
             serde_json::from_str(volume.data())?;
 
         let randomized_vcr = serde_json::to_string(
@@ -2578,10 +2578,15 @@ fn region_in_vcr(
 
             VolumeConstructionRequest::Region { opts, .. } => {
                 for target in &opts.target {
-                    let parsed_target: SocketAddrV6 = target.parse()?;
-                    if parsed_target == *region {
-                        region_found = true;
-                        break;
+                    match target {
+                        SocketAddr::V6(t) if *t == *region => {
+                            region_found = true;
+                            break;
+                        }
+                        SocketAddr::V6(_) => {}
+                        SocketAddr::V4(_) => {
+                            bail!("region target contains an IPv4 address");
+                        }
                     }
                 }
             }
@@ -2643,9 +2648,16 @@ fn read_only_target_in_vcr(
                 }
 
                 for target in &opts.target {
-                    let parsed_target: SocketAddrV6 = target.parse()?;
-                    if parsed_target == *read_only_target && opts.read_only {
-                        return Ok(true);
+                    match target {
+                        SocketAddr::V6(t)
+                            if *t == *read_only_target && opts.read_only =>
+                        {
+                            return Ok(true);
+                        }
+                        SocketAddr::V6(_) => {}
+                        SocketAddr::V4(_) => {
+                            bail!("region target contains an IPv4 address");
+                        }
                     }
                 }
             }
@@ -3177,9 +3189,9 @@ impl DataStore {
                 blocks_per_extent: 1,
                 extent_count: 1,
                 gen: 1,
-                opts: sled_agent_client::types::CrucibleOpts {
+                opts: sled_agent_client::CrucibleOpts {
                     id: volume_to_delete_id.0,
-                    target: vec![existing.0.to_string()],
+                    target: vec![existing.0.into()],
                     lossy: false,
                     flush_timeout: None,
                     key: None,
@@ -3442,7 +3454,9 @@ pub fn read_only_resources_associated_with_volume(
             VolumeConstructionRequest::Region { opts, .. } => {
                 for target in &opts.target {
                     if opts.read_only {
-                        crucible_targets.read_only_targets.push(target.clone());
+                        crucible_targets
+                            .read_only_targets
+                            .push(target.to_string());
                     }
                 }
             }
@@ -3481,7 +3495,7 @@ pub fn read_write_resources_associated_with_volume(
             VolumeConstructionRequest::Region { opts, .. } => {
                 if !opts.read_only {
                     for target in &opts.target {
-                        targets.push(target.clone());
+                        targets.push(target.to_string());
                     }
                 }
             }
@@ -3597,10 +3611,11 @@ fn replace_region_in_vcr(
 
             VolumeConstructionRequest::Region { opts, gen, .. } => {
                 for target in &mut opts.target {
-                    let parsed_target: SocketAddrV6 = target.parse()?;
-                    if parsed_target == old_region {
-                        *target = new_region.to_string();
-                        old_region_found = true;
+                    if let SocketAddr::V6(target) = target {
+                        if *target == old_region {
+                            *target = new_region;
+                            old_region_found = true;
+                        }
                     }
                 }
 
@@ -3681,10 +3696,11 @@ fn replace_read_only_target_in_vcr(
                 }
 
                 for target in &mut opts.target {
-                    let parsed_target: SocketAddrV6 = target.parse()?;
-                    if parsed_target == old_target.0 && opts.read_only {
-                        *target = new_target.0.to_string();
-                        replacements += 1;
+                    if let SocketAddr::V6(target) = target {
+                        if *target == old_target.0 && opts.read_only {
+                            *target = new_target.0;
+                            replacements += 1;
+                        }
                     }
                 }
             }
@@ -3727,9 +3743,10 @@ fn find_matching_rw_regions_in_volume(
             VolumeConstructionRequest::Region { opts, .. } => {
                 if !opts.read_only {
                     for target in &opts.target {
-                        let parsed_target: SocketAddrV6 = target.parse()?;
-                        if parsed_target.ip() == ip {
-                            matched_targets.push(parsed_target);
+                        if let SocketAddr::V6(target) = target {
+                            if target.ip() == ip {
+                                matched_targets.push(*target);
+                            }
                         }
                     }
                 }
@@ -4006,7 +4023,7 @@ mod tests {
     use nexus_types::external_api::params::DiskSource;
     use omicron_common::api::external::ByteCount;
     use omicron_test_utils::dev;
-    use sled_agent_client::types::CrucibleOpts;
+    use sled_agent_client::CrucibleOpts;
 
     // Assert that Nexus will not fail to deserialize an old version of
     // CrucibleResources that was serialized before schema update 6.0.0.
@@ -4145,7 +4162,7 @@ mod tests {
             .await
             .unwrap();
 
-        let mut region_addresses: Vec<String> =
+        let mut region_addresses: Vec<SocketAddrV6> =
             Vec::with_capacity(datasets_and_regions.len());
 
         for (i, (_, region)) in datasets_and_regions.iter().enumerate() {
@@ -4162,7 +4179,7 @@ mod tests {
             let address: SocketAddrV6 =
                 datastore.region_addr(region.id()).await.unwrap().unwrap();
 
-            region_addresses.push(address.to_string());
+            region_addresses.push(address);
         }
 
         // Manually create a replacement region at the first dataset
@@ -4209,9 +4226,9 @@ mod tests {
                             id: volume_id,
                             target: vec![
                                 // target to replace
-                                region_addresses[0].clone(),
-                                region_addresses[1].clone(),
-                                region_addresses[2].clone(),
+                                region_addresses[0].into(),
+                                region_addresses[1].into(),
+                                region_addresses[2].into(),
                             ],
                             lossy: false,
                             flush_timeout: None,
@@ -4238,7 +4255,7 @@ mod tests {
                 db::datastore::VolumeReplacementParams {
                     volume_id,
                     region_id: datasets_and_regions[0].1.id(),
-                    region_addr: region_addresses[0].parse().unwrap(),
+                    region_addr: region_addresses[0],
                 },
                 /* replacement */
                 db::datastore::VolumeReplacementParams {
@@ -4271,9 +4288,9 @@ mod tests {
                     opts: CrucibleOpts {
                         id: volume_id,
                         target: vec![
-                            replacement_region_addr.to_string(), // replaced
-                            region_addresses[1].clone(),
-                            region_addresses[2].clone(),
+                            replacement_region_addr.into(), // replaced
+                            region_addresses[1].into(),
+                            region_addresses[2].into(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -4302,7 +4319,7 @@ mod tests {
                 db::datastore::VolumeReplacementParams {
                     volume_id: volume_to_delete_id,
                     region_id: datasets_and_regions[0].1.id(),
-                    region_addr: region_addresses[0].parse().unwrap(),
+                    region_addr: region_addresses[0],
                 },
             )
             .await
@@ -4329,9 +4346,9 @@ mod tests {
                     opts: CrucibleOpts {
                         id: volume_id,
                         target: vec![
-                            region_addresses[0].clone(), // back to what it was
-                            region_addresses[1].clone(),
-                            region_addresses[2].clone(),
+                            region_addresses[0].into(), // back to what it was
+                            region_addresses[1].into(),
+                            region_addresses[2].into(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -4383,7 +4400,7 @@ mod tests {
             .await
             .unwrap();
 
-        let mut region_addresses: Vec<String> =
+        let mut region_addresses: Vec<SocketAddrV6> =
             Vec::with_capacity(datasets_and_regions.len());
 
         for (i, (_, region)) in datasets_and_regions.iter().enumerate() {
@@ -4400,7 +4417,7 @@ mod tests {
             let address: SocketAddrV6 =
                 datastore.region_addr(region.id()).await.unwrap().unwrap();
 
-            region_addresses.push(address.to_string());
+            region_addresses.push(address);
         }
 
         // Manually create a replacement region at the first dataset
@@ -4435,28 +4452,31 @@ mod tests {
         // need to add region snapshot objects to satisfy volume create
         // transaction's search for resources
 
-        let address_1 = String::from("[fd00:1122:3344:104::1]:400");
-        let address_2 = String::from("[fd00:1122:3344:105::1]:401");
-        let address_3 = String::from("[fd00:1122:3344:106::1]:402");
+        let address_1: SocketAddrV6 =
+            "[fd00:1122:3344:104::1]:400".parse().unwrap();
+        let address_2: SocketAddrV6 =
+            "[fd00:1122:3344:105::1]:401".parse().unwrap();
+        let address_3: SocketAddrV6 =
+            "[fd00:1122:3344:106::1]:402".parse().unwrap();
 
         let region_snapshots = [
             RegionSnapshot::new(
                 DatasetUuid::new_v4(),
                 Uuid::new_v4(),
                 Uuid::new_v4(),
-                address_1.clone(),
+                address_1.to_string(),
             ),
             RegionSnapshot::new(
                 DatasetUuid::new_v4(),
                 Uuid::new_v4(),
                 Uuid::new_v4(),
-                address_2.clone(),
+                address_2.to_string(),
             ),
             RegionSnapshot::new(
                 DatasetUuid::new_v4(),
                 Uuid::new_v4(),
                 Uuid::new_v4(),
-                address_3.clone(),
+                address_3.to_string(),
             ),
         ];
 
@@ -4493,9 +4513,9 @@ mod tests {
                         opts: CrucibleOpts {
                             id: volume_id,
                             target: vec![
-                                region_addresses[0].clone(),
-                                region_addresses[1].clone(),
-                                region_addresses[2].clone(),
+                                region_addresses[0].into(),
+                                region_addresses[1].into(),
+                                region_addresses[2].into(),
                             ],
                             lossy: false,
                             flush_timeout: None,
@@ -4517,9 +4537,9 @@ mod tests {
                                 id: rop_id,
                                 target: vec![
                                     // target to replace
-                                    address_1.clone(),
-                                    address_2.clone(),
-                                    address_3.clone(),
+                                    address_1.into(),
+                                    address_2.into(),
+                                    address_3.into(),
                                 ],
                                 lossy: false,
                                 flush_timeout: None,
@@ -4587,7 +4607,7 @@ mod tests {
         let volume_replace_snapshot_result = datastore
             .volume_replace_snapshot(
                 VolumeWithTarget(volume_id),
-                ExistingTarget(address_1.parse().unwrap()),
+                ExistingTarget(address_1),
                 ReplacementTarget(replacement_region_addr),
                 VolumeToDelete(volume_to_delete_id),
             )
@@ -4616,9 +4636,9 @@ mod tests {
                     opts: CrucibleOpts {
                         id: volume_id,
                         target: vec![
-                            region_addresses[0].clone(),
-                            region_addresses[1].clone(),
-                            region_addresses[2].clone(),
+                            region_addresses[0].into(),
+                            region_addresses[1].into(),
+                            region_addresses[2].into(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -4640,9 +4660,9 @@ mod tests {
                             id: rop_id,
                             target: vec![
                                 // target replaced
-                                replacement_region_addr.to_string(),
-                                address_2.clone(),
-                                address_3.clone(),
+                                replacement_region_addr.into(),
+                                address_2.into(),
+                                address_3.into(),
                             ],
                             lossy: false,
                             flush_timeout: None,
@@ -4682,7 +4702,7 @@ mod tests {
                         id: volume_to_delete_id,
                         target: vec![
                             // replaced target stashed here
-                            address_1.clone(),
+                            address_1.into(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -4745,7 +4765,7 @@ mod tests {
             .volume_replace_snapshot(
                 VolumeWithTarget(volume_id),
                 ExistingTarget(replacement_region_addr),
-                ReplacementTarget(address_1.parse().unwrap()),
+                ReplacementTarget(address_1),
                 VolumeToDelete(volume_to_delete_id),
             )
             .await
@@ -4772,9 +4792,9 @@ mod tests {
                     opts: CrucibleOpts {
                         id: volume_id,
                         target: vec![
-                            region_addresses[0].clone(),
-                            region_addresses[1].clone(),
-                            region_addresses[2].clone(),
+                            region_addresses[0].into(),
+                            region_addresses[1].into(),
+                            region_addresses[2].into(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -4796,7 +4816,9 @@ mod tests {
                             id: rop_id,
                             target: vec![
                                 // back to what it was
-                                address_1, address_2, address_3,
+                                address_1.into(),
+                                address_2.into(),
+                                address_3.into(),
                             ],
                             lossy: false,
                             flush_timeout: None,
@@ -4836,7 +4858,7 @@ mod tests {
                         id: volume_to_delete_id,
                         target: vec![
                             // replacement stashed here
-                            replacement_region_addr.to_string(),
+                            replacement_region_addr.into(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -4899,16 +4921,19 @@ mod tests {
         // need to add region snapshot objects to satisfy volume create
         // transaction's search for resources
 
-        let address_1 = String::from("[fd00:1122:3344:104::1]:400");
-        let address_2 = String::from("[fd00:1122:3344:105::1]:401");
-        let address_3 = String::from("[fd00:1122:3344:106::1]:402");
+        let address_1: SocketAddrV6 =
+            "[fd00:1122:3344:104::1]:400".parse().unwrap();
+        let address_2: SocketAddrV6 =
+            "[fd00:1122:3344:105::1]:401".parse().unwrap();
+        let address_3: SocketAddrV6 =
+            "[fd00:1122:3344:106::1]:402".parse().unwrap();
 
         datastore
             .region_snapshot_create(RegionSnapshot::new(
                 DatasetUuid::new_v4(),
                 Uuid::new_v4(),
                 Uuid::new_v4(),
-                address_1.clone(),
+                address_1.to_string(),
             ))
             .await
             .unwrap();
@@ -4917,7 +4942,7 @@ mod tests {
                 DatasetUuid::new_v4(),
                 Uuid::new_v4(),
                 Uuid::new_v4(),
-                address_2.clone(),
+                address_2.to_string(),
             ))
             .await
             .unwrap();
@@ -4926,7 +4951,7 @@ mod tests {
                 DatasetUuid::new_v4(),
                 Uuid::new_v4(),
                 Uuid::new_v4(),
-                address_3.clone(),
+                address_3.to_string(),
             ))
             .await
             .unwrap();
@@ -4949,9 +4974,9 @@ mod tests {
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
                                 target: vec![
-                                    address_1.clone(),
-                                    address_2,
-                                    address_3,
+                                    address_1.into(),
+                                    address_2.into(),
+                                    address_3.into(),
                                 ],
                                 lossy: false,
                                 flush_timeout: None,
@@ -4971,10 +4996,7 @@ mod tests {
             .unwrap();
 
         let volumes = datastore
-            .find_volumes_referencing_socket_addr(
-                &opctx,
-                address_1.parse().unwrap(),
-            )
+            .find_volumes_referencing_socket_addr(&opctx, address_1.into())
             .await
             .unwrap();
 
@@ -5014,9 +5036,9 @@ mod tests {
                     opts: CrucibleOpts {
                         id: Uuid::new_v4(),
                         target: vec![
-                            String::from("[fd00:1122:3344:104::1]:400"),
-                            String::from("[fd00:1122:3344:105::1]:401"),
-                            String::from("[fd00:1122:3344:106::1]:402"),
+                            "[fd00:1122:3344:104::1]:400".parse().unwrap(),
+                            "[fd00:1122:3344:105::1]:401".parse().unwrap(),
+                            "[fd00:1122:3344:106::1]:402".parse().unwrap(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -5050,9 +5072,9 @@ mod tests {
                 opts: CrucibleOpts {
                     id: Uuid::new_v4(),
                     target: vec![
-                        String::from("[fd00:1122:3344:104::1]:400"),
-                        String::from("[fd00:1122:3344:105::1]:401"),
-                        String::from("[fd00:1122:3344:106::1]:402"),
+                        "[fd00:1122:3344:104::1]:400".parse().unwrap(),
+                        "[fd00:1122:3344:105::1]:401".parse().unwrap(),
+                        "[fd00:1122:3344:106::1]:402".parse().unwrap(),
                     ],
                     lossy: false,
                     flush_timeout: None,
@@ -5089,9 +5111,9 @@ mod tests {
                     opts: CrucibleOpts {
                         id: Uuid::new_v4(),
                         target: vec![
-                            String::from("[fd00:1122:3344:104::1]:400"),
-                            String::from("[fd00:1122:3344:105::1]:401"),
-                            String::from("[fd00:1122:3344:106::1]:402"),
+                            "[fd00:1122:3344:104::1]:400".parse().unwrap(),
+                            "[fd00:1122:3344:105::1]:401".parse().unwrap(),
+                            "[fd00:1122:3344:106::1]:402".parse().unwrap(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -5133,9 +5155,9 @@ mod tests {
                     opts: CrucibleOpts {
                         id: volume_id,
                         target: vec![
-                            String::from("[fd00:1122:3344:104::1]:400"),
-                            String::from("[fd00:1122:3344:105::1]:401"),
-                            String::from("[fd00:1122:3344:106::1]:402"),
+                            "[fd00:1122:3344:104::1]:400".parse().unwrap(),
+                            "[fd00:1122:3344:105::1]:401".parse().unwrap(),
+                            "[fd00:1122:3344:106::1]:402".parse().unwrap(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -5175,9 +5197,9 @@ mod tests {
                         opts: CrucibleOpts {
                             id: volume_id,
                             target: vec![
-                                String::from("[fd00:1122:3344:104::1]:400"),
-                                new_target.0.to_string(),
-                                String::from("[fd00:1122:3344:106::1]:402"),
+                                "[fd00:1122:3344:104::1]:400".parse().unwrap(),
+                                new_target.0.into(),
+                                "[fd00:1122:3344:106::1]:402".parse().unwrap(),
                             ],
                             lossy: false,
                             flush_timeout: None,
@@ -5210,9 +5232,9 @@ mod tests {
                     opts: CrucibleOpts {
                         id: volume_id,
                         target: vec![
-                            String::from("[fd55:1122:3344:204::1]:1000"),
-                            String::from("[fd55:1122:3344:205::1]:1001"),
-                            String::from("[fd55:1122:3344:206::1]:1002"),
+                            "[fd55:1122:3344:204::1]:1000".parse().unwrap(),
+                            "[fd55:1122:3344:205::1]:1001".parse().unwrap(),
+                            "[fd55:1122:3344:206::1]:1002".parse().unwrap(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -5233,9 +5255,9 @@ mod tests {
                         opts: CrucibleOpts {
                             id: volume_id,
                             target: vec![
-                                String::from("[fd33:1122:3344:304::1]:2000"),
-                                String::from("[fd33:1122:3344:305::1]:2001"),
-                                String::from("[fd33:1122:3344:306::1]:2002"),
+                                "[fd33:1122:3344:304::1]:2000".parse().unwrap(),
+                                "[fd33:1122:3344:305::1]:2001".parse().unwrap(),
+                                "[fd33:1122:3344:306::1]:2002".parse().unwrap(),
                             ],
                             lossy: false,
                             flush_timeout: None,
@@ -5258,9 +5280,9 @@ mod tests {
                     opts: CrucibleOpts {
                         id: volume_id,
                         target: vec![
-                            String::from("[fd00:1122:3344:104::1]:400"),
-                            String::from("[fd00:1122:3344:105::1]:401"),
-                            String::from("[fd00:1122:3344:106::1]:402"),
+                            "[fd00:1122:3344:104::1]:400".parse().unwrap(),
+                            "[fd00:1122:3344:105::1]:401".parse().unwrap(),
+                            "[fd00:1122:3344:106::1]:402".parse().unwrap(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -5301,9 +5323,9 @@ mod tests {
                         opts: CrucibleOpts {
                             id: volume_id,
                             target: vec![
-                                String::from("[fd55:1122:3344:204::1]:1000"),
-                                String::from("[fd55:1122:3344:205::1]:1001"),
-                                String::from("[fd55:1122:3344:206::1]:1002"),
+                                "[fd55:1122:3344:204::1]:1000".parse().unwrap(),
+                                "[fd55:1122:3344:205::1]:1001".parse().unwrap(),
+                                "[fd55:1122:3344:206::1]:1002".parse().unwrap(),
                             ],
                             lossy: false,
                             flush_timeout: None,
@@ -5324,13 +5346,13 @@ mod tests {
                             opts: CrucibleOpts {
                                 id: volume_id,
                                 target: vec![
-                                    String::from(
-                                        "[fd33:1122:3344:304::1]:2000"
-                                    ),
-                                    String::from(
-                                        "[fd33:1122:3344:305::1]:2001"
-                                    ),
-                                    new_target.0.to_string(),
+                                    "[fd33:1122:3344:304::1]:2000"
+                                        .parse()
+                                        .unwrap(),
+                                    "[fd33:1122:3344:305::1]:2001"
+                                        .parse()
+                                        .unwrap(),
+                                    new_target.0.into(),
                                 ],
                                 lossy: false,
                                 flush_timeout: None,
@@ -5353,9 +5375,9 @@ mod tests {
                         opts: CrucibleOpts {
                             id: volume_id,
                             target: vec![
-                                String::from("[fd00:1122:3344:104::1]:400"),
-                                String::from("[fd00:1122:3344:105::1]:401"),
-                                String::from("[fd00:1122:3344:106::1]:402"),
+                                "[fd00:1122:3344:104::1]:400".parse().unwrap(),
+                                "[fd00:1122:3344:105::1]:401".parse().unwrap(),
+                                "[fd00:1122:3344:106::1]:402".parse().unwrap(),
                             ],
                             lossy: false,
                             flush_timeout: None,
@@ -5383,9 +5405,9 @@ mod tests {
             opts: CrucibleOpts {
                 id: volume_id,
                 target: vec![
-                    String::from("[fd33:1122:3344:304::1]:2000"),
-                    String::from("[fd33:1122:3344:305::1]:2001"),
-                    String::from("[fd33:1122:3344:306::1]:2002"),
+                    "[fd33:1122:3344:304::1]:2000".parse().unwrap(),
+                    "[fd33:1122:3344:305::1]:2001".parse().unwrap(),
+                    "[fd33:1122:3344:306::1]:2002".parse().unwrap(),
                 ],
                 lossy: false,
                 flush_timeout: None,
@@ -5412,9 +5434,9 @@ mod tests {
                     opts: CrucibleOpts {
                         id: volume_id,
                         target: vec![
-                            String::from("[fd55:1122:3344:204::1]:1000"),
-                            String::from("[fd55:1122:3344:205::1]:1001"),
-                            String::from("[fd55:1122:3344:206::1]:1002"),
+                            "[fd55:1122:3344:204::1]:1000".parse().unwrap(),
+                            "[fd55:1122:3344:205::1]:1001".parse().unwrap(),
+                            "[fd55:1122:3344:206::1]:1002".parse().unwrap(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -5450,9 +5472,9 @@ mod tests {
             opts: CrucibleOpts {
                 id: volume_id,
                 target: vec![
-                    new_target.0.to_string(),
-                    String::from("[fd33:1122:3344:305::1]:2001"),
-                    String::from("[fd33:1122:3344:306::1]:2002"),
+                    new_target.0.into(),
+                    "[fd33:1122:3344:305::1]:2001".parse().unwrap(),
+                    "[fd33:1122:3344:306::1]:2002".parse().unwrap(),
                 ],
                 lossy: false,
                 flush_timeout: None,
@@ -5481,9 +5503,9 @@ mod tests {
                         opts: CrucibleOpts {
                             id: volume_id,
                             target: vec![
-                                String::from("[fd55:1122:3344:204::1]:1000"),
-                                String::from("[fd55:1122:3344:205::1]:1001"),
-                                String::from("[fd55:1122:3344:206::1]:1002"),
+                                "[fd55:1122:3344:204::1]:1000".parse().unwrap(),
+                                "[fd55:1122:3344:205::1]:1001".parse().unwrap(),
+                                "[fd55:1122:3344:206::1]:1002".parse().unwrap(),
                             ],
                             lossy: false,
                             flush_timeout: None,

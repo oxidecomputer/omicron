@@ -6,6 +6,7 @@
 
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 
+use diffus::Diffus;
 use omicron_common::{
     api::{
         external::{ByteCount, Generation},
@@ -173,7 +174,17 @@ impl OmicronZoneConfig {
 
 /// Describes a persistent ZFS dataset associated with an Omicron zone
 #[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Diffus,
 )]
 pub struct OmicronZoneDataset {
     pub pool_name: ZpoolName,

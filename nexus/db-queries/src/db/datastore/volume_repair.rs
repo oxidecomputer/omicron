@@ -169,7 +169,7 @@ mod test {
 
     use crate::db::pub_test_utils::TestDatabase;
     use omicron_test_utils::dev;
-    use sled_agent_client::types::VolumeConstructionRequest;
+    use sled_agent_client::VolumeConstructionRequest;
 
     #[tokio::test]
     async fn volume_lock_conflict_error_returned() {
