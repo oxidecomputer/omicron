@@ -196,6 +196,11 @@ impl SupportBundleCollector {
                         );
                         return Ok(DatabaseBundleCleanupResult::BadState);
                     } else {
+                        warn!(
+                            &opctx.log,
+                            "Could not delete 'failing' bundle";
+                            "err" => ?err,
+                        );
                         anyhow::bail!(
                             "Could not delete 'failing' bundle: {:#}",
                             err
