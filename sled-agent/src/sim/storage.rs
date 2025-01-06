@@ -38,7 +38,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use propolis_client::types::VolumeConstructionRequest;
+use propolis_client::VolumeConstructionRequest;
 use serde::Serialize;
 use sled_storage::manager::NestedDatasetConfig;
 use sled_storage::manager::NestedDatasetListOptions;
@@ -122,6 +122,8 @@ impl CrucibleDataInner {
             bail!("region creation error!");
         }
 
+        let read_only = params.source.is_some();
+
         let region = Region {
             id: params.id,
             block_size: params.block_size,
@@ -134,8 +136,8 @@ impl CrucibleDataInner {
             cert_pem: None,
             key_pem: None,
             root_pem: None,
-            source: None,
-            read_only: params.source.is_some(),
+            source: params.source,
+            read_only,
         };
 
         let old = self.regions.insert(id, region.clone());
@@ -1456,29 +1458,41 @@ pub struct PantryVolume {
     activate_job: Option<String>,
 }
 
+pub struct PantryInner {
+    /// Map Volume UUID to PantryVolume struct
+    volumes: HashMap<String, PantryVolume>,
+
+    jobs: HashSet<String>,
+
+    /// Auto activate volumes attached in the background
+    auto_activate_volumes: bool,
+}
+
 /// Simulated crucible pantry
 pub struct Pantry {
     pub id: OmicronZoneUuid,
-    /// Map Volume UUID to PantryVolume struct
-    volumes: Mutex<HashMap<String, PantryVolume>>,
     sled_agent: Arc<SledAgent>,
-    jobs: Mutex<HashSet<String>>,
+    inner: Mutex<PantryInner>,
 }
 
 impl Pantry {
     pub fn new(sled_agent: Arc<SledAgent>) -> Self {
         Self {
             id: OmicronZoneUuid::new_v4(),
-            volumes: Mutex::new(HashMap::default()),
             sled_agent,
-            jobs: Mutex::new(HashSet::default()),
+            inner: Mutex::new(PantryInner {
+                volumes: HashMap::default(),
+                jobs: HashSet::default(),
+                auto_activate_volumes: false,
+            }),
         }
     }
 
     pub fn status(&self) -> Result<PantryStatus, HttpError> {
+        let inner = self.inner.lock().unwrap();
         Ok(PantryStatus {
-            volumes: self.volumes.lock().unwrap().keys().cloned().collect(),
-            num_job_handles: self.jobs.lock().unwrap().len(),
+            volumes: inner.volumes.keys().cloned().collect(),
+            num_job_handles: inner.jobs.len(),
         })
     }
 
@@ -1486,8 +1500,9 @@ impl Pantry {
         &self,
         volume_id: String,
     ) -> Result<VolumeConstructionRequest, HttpError> {
-        let volumes = self.volumes.lock().unwrap();
-        match volumes.get(&volume_id) {
+        let inner = self.inner.lock().unwrap();
+
+        match inner.volumes.get(&volume_id) {
             Some(entry) => Ok(entry.vcr.clone()),
 
             None => Err(HttpError::for_not_found(None, volume_id)),
@@ -1499,9 +1514,9 @@ impl Pantry {
         volume_id: String,
         volume_construction_request: VolumeConstructionRequest,
     ) -> Result<()> {
-        let mut volumes = self.volumes.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
 
-        volumes.insert(
+        inner.volumes.insert(
             volume_id,
             PantryVolume {
                 vcr: volume_construction_request,
@@ -1517,29 +1532,34 @@ impl Pantry {
         Ok(())
     }
 
+    pub fn set_auto_activate_volumes(&self) {
+        self.inner.lock().unwrap().auto_activate_volumes = true;
+    }
+
     pub fn attach_activate_background(
         &self,
         volume_id: String,
         activate_job_id: String,
         volume_construction_request: VolumeConstructionRequest,
     ) -> Result<(), HttpError> {
-        let mut volumes = self.volumes.lock().unwrap();
-        let mut jobs = self.jobs.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
 
-        volumes.insert(
+        let auto_activate_volumes = inner.auto_activate_volumes;
+
+        inner.volumes.insert(
             volume_id,
             PantryVolume {
                 vcr: volume_construction_request,
                 status: VolumeStatus {
-                    active: false,
-                    seen_active: false,
+                    active: auto_activate_volumes,
+                    seen_active: auto_activate_volumes,
                     num_job_handles: 1,
                 },
                 activate_job: Some(activate_job_id.clone()),
             },
         );
 
-        jobs.insert(activate_job_id);
+        inner.jobs.insert(activate_job_id);
 
         Ok(())
     }
@@ -1549,8 +1569,8 @@ impl Pantry {
         volume_id: String,
     ) -> Result<String, HttpError> {
         let activate_job = {
-            let volumes = self.volumes.lock().unwrap();
-            volumes.get(&volume_id).unwrap().activate_job.clone().unwrap()
+            let inner = self.inner.lock().unwrap();
+            inner.volumes.get(&volume_id).unwrap().activate_job.clone().unwrap()
         };
 
         let mut status = self.volume_status(volume_id.clone())?;
@@ -1567,9 +1587,9 @@ impl Pantry {
         &self,
         volume_id: String,
     ) -> Result<VolumeStatus, HttpError> {
-        let volumes = self.volumes.lock().unwrap();
+        let inner = self.inner.lock().unwrap();
 
-        match volumes.get(&volume_id) {
+        match inner.volumes.get(&volume_id) {
             Some(pantry_volume) => Ok(pantry_volume.status.clone()),
 
             None => Err(HttpError::for_not_found(None, volume_id)),
@@ -1581,9 +1601,9 @@ impl Pantry {
         volume_id: String,
         status: VolumeStatus,
     ) -> Result<(), HttpError> {
-        let mut volumes = self.volumes.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
 
-        match volumes.get_mut(&volume_id) {
+        match inner.volumes.get_mut(&volume_id) {
             Some(pantry_volume) => {
                 pantry_volume.status = status;
                 Ok(())
@@ -1594,8 +1614,8 @@ impl Pantry {
     }
 
     pub fn is_job_finished(&self, job_id: String) -> Result<bool, HttpError> {
-        let jobs = self.jobs.lock().unwrap();
-        if !jobs.contains(&job_id) {
+        let inner = self.inner.lock().unwrap();
+        if !inner.jobs.contains(&job_id) {
             return Err(HttpError::for_not_found(None, job_id));
         }
         Ok(true)
@@ -1605,11 +1625,11 @@ impl Pantry {
         &self,
         job_id: String,
     ) -> Result<Result<bool>, HttpError> {
-        let mut jobs = self.jobs.lock().unwrap();
-        if !jobs.contains(&job_id) {
+        let mut inner = self.inner.lock().unwrap();
+        if !inner.jobs.contains(&job_id) {
             return Err(HttpError::for_not_found(None, job_id));
         }
-        jobs.remove(&job_id);
+        inner.jobs.remove(&job_id);
         Ok(Ok(true))
     }
 
@@ -1622,9 +1642,9 @@ impl Pantry {
         self.entry(volume_id)?;
 
         // Make up job
-        let mut jobs = self.jobs.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
         let job_id = Uuid::new_v4().to_string();
-        jobs.insert(job_id.clone());
+        inner.jobs.insert(job_id.clone());
 
         Ok(job_id)
     }
@@ -1638,8 +1658,9 @@ impl Pantry {
         // the simulated instance ensure, then call
         // [`instance_issue_disk_snapshot_request`] as the snapshot logic is the
         // same.
-        let volumes = self.volumes.lock().unwrap();
-        let volume_construction_request = &volumes.get(&volume_id).unwrap().vcr;
+        let inner = self.inner.lock().unwrap();
+        let volume_construction_request =
+            &inner.volumes.get(&volume_id).unwrap().vcr;
 
         self.sled_agent
             .map_disk_ids_to_region_ids(volume_construction_request)?;
@@ -1717,16 +1738,16 @@ impl Pantry {
         self.entry(volume_id)?;
 
         // Make up job
-        let mut jobs = self.jobs.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
         let job_id = Uuid::new_v4().to_string();
-        jobs.insert(job_id.clone());
+        inner.jobs.insert(job_id.clone());
 
         Ok(job_id)
     }
 
     pub fn detach(&self, volume_id: String) -> Result<()> {
-        let mut volumes = self.volumes.lock().unwrap();
-        volumes.remove(&volume_id);
+        let mut inner = self.inner.lock().unwrap();
+        inner.volumes.remove(&volume_id);
         Ok(())
     }
 }

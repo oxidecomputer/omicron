@@ -1374,15 +1374,20 @@ async fn test_instance_failed_when_on_expunged_sled(
 
     // The restarted instance should now transition back to `Running`, on its
     // new sled.
-    instance_wait_for_vmm_registration(cptestctx, &instance2_id).await;
-    instance_simulate(nexus, &instance2_id).await;
-    instance_wait_for_state(client, instance2_id, InstanceState::Running).await;
+    instance_wait_for_simulated_transition(
+        &cptestctx,
+        &instance2_id,
+        InstanceState::Running,
+    )
+    .await;
 
     // The auto-restartable instance should be...restarted automatically.
-
-    instance_wait_for_vmm_registration(cptestctx, &instance3_id).await;
-    instance_simulate(nexus, &instance3_id).await;
-    instance_wait_for_state(client, instance3_id, InstanceState::Running).await;
+    instance_wait_for_simulated_transition(
+        &cptestctx,
+        &instance3_id,
+        InstanceState::Running,
+    )
+    .await;
 }
 
 // Verifies that the instance-watcher background task transitions an instance
@@ -1393,7 +1398,6 @@ async fn test_instance_failed_by_instance_watcher_automatically_reincarnates(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.server_context().nexus;
     let instance_id = dbg!(
         make_forgotten_instance(
             &cptestctx,
@@ -1430,10 +1434,13 @@ async fn test_instance_failed_by_instance_watcher_automatically_reincarnates(
     // it.
     dbg!(instance_wait_for_vmm_registration(cptestctx, &instance_id).await);
     // Now, we can actually poke the instance.
-    dbg!(instance_simulate(nexus, &instance_id).await);
     dbg!(
-        instance_wait_for_state(client, instance_id, InstanceState::Running)
-            .await
+        instance_wait_for_simulated_transition(
+            &cptestctx,
+            &instance_id,
+            InstanceState::Running
+        )
+        .await
     );
 }
 
@@ -6670,6 +6677,67 @@ pub async fn instance_simulate_with_opctx(
         .expect("instance must be on a sled to simulate a state change");
 
     sled_info.sled_client.vmm_finish_transition(sled_info.propolis_id).await;
+}
+
+/// Wait for an instance to complete a simulated state transition, repeatedly
+/// poking the simulated sled-agent until the transition occurs.
+///
+/// This can be used to avoid races between Nexus processes (like sagas) which
+/// trigger a state transition but cannot be easily awaited by the test, and the
+/// actual request to simulate the state transition. However, it should be used
+/// cautiously to avoid simulating multiple state transitions accidentally.
+async fn instance_wait_for_simulated_transition(
+    cptestctx: &ControlPlaneTestContext,
+    id: &InstanceUuid,
+    state: InstanceState,
+) -> Instance {
+    const MAX_WAIT: Duration = Duration::from_secs(120);
+    let client = &cptestctx.external_client;
+    slog::info!(
+        &client.client_log,
+        "waiting for instance {id} transition to {state} \
+         (and poking simulated sled-agent)...";
+    );
+    let url = format!("/v1/instances/{id}");
+    let result = wait_for_condition(
+        || async {
+            let instance: Instance = NexusRequest::object_get(&client, &url)
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute()
+                .await?
+                .parsed_body()?;
+            if instance.runtime.run_state == state {
+                Ok(instance)
+            } else {
+                slog::info!(
+                    &client.client_log,
+                    "instance {id} has not transitioned to {state}, \
+                     poking sled-agent";
+                    "instance_id" => %instance.identity.id,
+                    "instance_runtime_state" => ?instance.runtime,
+                );
+                instance_simulate(&cptestctx.server.server_context().nexus, id)
+                    .await;
+                Err(CondCheckError::<anyhow::Error>::NotYet)
+            }
+        },
+        &Duration::from_secs(1),
+        &MAX_WAIT,
+    )
+    .await;
+    match result {
+        Ok(instance) => {
+            slog::info!(
+                &client.client_log,
+                "instance {id} has transitioned to {state}"
+            );
+            instance
+        }
+        Err(e) => panic!(
+            "instance {id} did not transition to {state:?} \
+             after {MAX_WAIT:?}: {e}"
+        ),
+    }
 }
 
 /// Simulates state transitions for the incarnation of the instance on the
