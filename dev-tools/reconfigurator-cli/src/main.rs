@@ -423,7 +423,7 @@ enum BlueprintEditCommands {
     /// add a CockroachDB instance to a particular sled
     AddCockroach { sled_id: SledUuid },
     /// expunge a particular zone from a particular sled
-    ExpungeZone { sled_id: SledUuid, zone_id: OmicronZoneUuid },
+    ExpungeZone { zone_id: OmicronZoneUuid },
 }
 
 #[derive(Debug, Args)]
@@ -828,7 +828,20 @@ fn cmd_blueprint_edit(
                 .context("failed to add CockroachDB zone")?;
             format!("added CockroachDB zone to sled {}", sled_id)
         }
-        BlueprintEditCommands::ExpungeZone { sled_id, zone_id } => {
+        BlueprintEditCommands::ExpungeZone { zone_id } => {
+            let mut parent_sled_id = None;
+            for sled_id in builder.sled_ids_with_zones() {
+                if builder
+                    .current_sled_zones(sled_id, BlueprintZoneFilter::All)
+                    .any(|z| z.id == zone_id)
+                {
+                    parent_sled_id = Some(sled_id);
+                    break;
+                }
+            }
+            let Some(sled_id) = parent_sled_id else {
+                bail!("could not find parent sled for zone {zone_id}");
+            };
             builder
                 .sled_expunge_zone(sled_id, zone_id)
                 .context("failed to expunge zone")?;
