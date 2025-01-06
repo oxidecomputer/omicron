@@ -449,10 +449,19 @@ pub fn visit_blueprint_zones_zone_config_change<'e, V>(
                     Change { before: *before, after: *after },
                 );
             }
-            enm::Edit::AssociatedChanged(_diff) => {
+            enm::Edit::AssociatedChanged(diff) => {
                 // `ZpoolName`'s cannot change
                 unreachable!();
             }
+        },
+    }
+
+    match &node.zone_type {
+        Edit::Copy(node) => {}
+        Edit::Change(node) => match node {
+            enm::Edit::Copy(node) => {}
+            enm::Edit::VariantChanged(before, after) => {}
+            enm::Edit::AssociatedChanged(diff) => {}
         },
     }
 }
