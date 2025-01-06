@@ -431,7 +431,7 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
             Some(dataset) => {
                 match sled_datasets
                     .get(&dataset.pool().id())
-                    .and_then(|by_zpool| by_zpool.get(dataset.dataset()))
+                    .and_then(|by_zpool| by_zpool.get(dataset.kind()))
                 {
                     Some(dataset) => {
                         expected_datasets.insert(dataset.id);

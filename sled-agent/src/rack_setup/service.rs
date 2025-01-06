@@ -834,13 +834,13 @@ impl ServiceInner {
             // to usage by specific zones.
             for dataset in sled_config.datasets.datasets.values() {
                 let duplicate = datasets.insert(
-                    (dataset.name.pool().id(), dataset.name.dataset().clone()),
+                    (dataset.name.pool().id(), dataset.name.kind().clone()),
                     NexusTypes::DatasetCreateRequest {
                         zpool_id: dataset.name.pool().id().into_untyped_uuid(),
                         dataset_id: dataset.id,
                         request: NexusTypes::DatasetPutRequest {
                             address: None,
-                            kind: dataset.name.dataset().clone(),
+                            kind: dataset.name.kind().clone(),
                         },
                     },
                 );
@@ -1559,7 +1559,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
                     disposition: BlueprintDatasetDisposition::InService,
                     id: d.id,
                     pool: d.name.pool().clone(),
-                    kind: d.name.dataset().clone(),
+                    kind: d.name.kind().clone(),
                     address,
                     compression: d.inner.compression,
                     quota: d.inner.quota,
