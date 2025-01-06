@@ -101,15 +101,7 @@ impl super::Nexus {
                 last_seen: n.last_seen,
                 link_name: match &n.system_info.port_id {
                     PortId::InterfaceAlias(s) => s.to_string(),
-                    PortId::MacAddress(mac) => format!(
-                        "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-                        mac.a[0],
-                        mac.a[1],
-                        mac.a[2],
-                        mac.a[3],
-                        mac.a[4],
-                        mac.a[5]
-                    ),
+                    PortId::MacAddress(mac) => mac.to_string(),
                     PortId::NetworkAddress(ip) => ip.to_string(),
                     PortId::InterfaceName(s) => s.to_string(),
                     PortId::PortComponent(s) => s.to_string(),
@@ -121,15 +113,7 @@ impl super::Nexus {
                     ChassisId::ChassisComponent(s) => s.to_string(),
                     ChassisId::InterfaceAlias(s) => s.to_string(),
                     ChassisId::PortComponent(s) => s.to_string(),
-                    ChassisId::MacAddress(mac) => format!(
-                        "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-                        mac.a[0],
-                        mac.a[1],
-                        mac.a[2],
-                        mac.a[3],
-                        mac.a[4],
-                        mac.a[5]
-                    ),
+                    ChassisId::MacAddress(mac) => mac.to_string(),
                     ChassisId::NetworkAddress(ip) => ip.to_string(),
                     ChassisId::InterfaceName(s) => s.to_string(),
                     ChassisId::LocallyAssigned(s) => s.to_string(),

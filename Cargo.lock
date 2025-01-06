@@ -718,7 +718,7 @@ dependencies = [
  "bitflags 2.6.0",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "log",
@@ -1537,7 +1537,7 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/lldp#471a2dc103081e003e700c9825de608073a850cb"
+source = "git+https://github.com/oxidecomputer/lldp#9f96ee79f219224d63d157b177004182960e793d"
 dependencies = [
  "anyhow",
  "schemars",
@@ -5119,7 +5119,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -5291,7 +5291,7 @@ dependencies = [
 [[package]]
 name = "lldpd-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/lldp#471a2dc103081e003e700c9825de608073a850cb"
+source = "git+https://github.com/oxidecomputer/lldp#9f96ee79f219224d63d157b177004182960e793d"
 dependencies = [
  "chrono",
  "common",
