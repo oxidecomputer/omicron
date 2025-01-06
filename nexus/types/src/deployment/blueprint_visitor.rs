@@ -5,9 +5,9 @@
 //! An API modelled after [`syn::visit`](https://docs.rs/syn/1/syn/visit).
 use crate::deployment::Blueprint;
 use crate::external_api::views::SledState;
-use diffus::edit::{collection, enm, map, Edit};
+use diffus::edit::{enm, map, Edit};
 use omicron_common::api::external::Generation;
-use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
@@ -161,7 +161,7 @@ pub trait Visit<'e> {
     fn visit_blueprint_zones_zones_copy(
         &mut self,
         sled_id: &'e SledUuid,
-        node: &'e Vec<BlueprintZoneConfig>,
+        node: &'e BTreeMap<OmicronZoneUuid, BlueprintZoneConfig>,
     ) {
         visit_blueprint_zones_zones_copy(self, sled_id, node);
     }
@@ -329,54 +329,27 @@ pub fn visit_blueprint_zones_map_change<'e, V>(
         }
     }
 
-    // Have the underlying zones changed?
-    // TODO: It makes little sense to diff on Vec contents, since zone's aren't understood.
-    //
-    // My notes:
-    // Probably going to let this sit for the holidays, but I'm in the
-    // middle of implementing the diff visitor for blueprint_zones. I'm unsure how a
-    // Vec<BlueprintZoneConfig> will diff when Diffable is derived. I don't expect it
-    // will do what we want, given the readme description and what I got for output
-    // when running that test.
-    //
-    // It seems to insert and remove things where the order changes, and has no
-    // understanding of IDs. I get why it's like that, but it doesn't make sense for
-    // us.
-    //
-    // Currently we only show a difference if the disposition changes. I could
-    // certainly do the same and then treat everything else as equal if all fields
-    // match in a manual Diffable impl.
-    //
-    // However, I think longer term we may want to let ZoneConfig values change
-    // if they can't already. For that to make sense, I'd suggest reworking the
-    // blueprint structure to turn a Vec<BlueprintZoneConfig> into a BTreeMap<ZoneId,
-    // BlueprintZoneConfig>. That would give us much better change semantics.
-    // Basically, any place we use Vecs where we want to diff the elements properly,
-    // they should likely become maps if they have a unique identifier.
-    //
-    // Rain agrees with me that we should switch to storing
-    // `BlueprintZoneConfig` in a map keyed by ID
     match &node.zones {
         Edit::Copy(node) => v.visit_blueprint_zones_zones_copy(sled_id, *node),
         Edit::Change(zones) => {
-            for node in zones {
+            for (zone_id, node) in zones {
                 match node {
-                    collection::Edit::Copy(node) => {
+                    map::Edit::Copy(node) => {
                         v.visit_blueprint_zones_zone_config_copy(
                             sled_id, *node,
                         );
                     }
-                    collection::Edit::Insert(node) => {
+                    map::Edit::Insert(node) => {
                         v.visit_blueprint_zones_zone_config_insert(
                             sled_id, *node,
                         );
                     }
-                    collection::Edit::Remove(node) => {
+                    map::Edit::Remove(node) => {
                         v.visit_blueprint_zones_zone_config_remove(
                             sled_id, node,
                         );
                     }
-                    collection::Edit::Change(node) => {
+                    map::Edit::Change(node) => {
                         v.visit_blueprint_zones_zone_config_change(
                             sled_id, node,
                         );
@@ -486,7 +459,7 @@ empty_visit_change_3!(
 empty_visit_3!(
     visit_blueprint_zones_zones_copy,
     SledUuid,
-    Vec<BlueprintZoneConfig>
+    BTreeMap<OmicronZoneUuid, BlueprintZoneConfig>
 );
 empty_visit_3!(
     visit_blueprint_zones_zone_config_copy,
@@ -566,99 +539,5 @@ impl<'e> Visit<'e> for DebugVisitor {
         node: &'e BlueprintZonesConfig,
     ) {
         println!("Removed zones from sled_{}: {:#?}", sled_id, node);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use diffus::Diffus;
-    use diffus::{
-        edit::{self, collection},
-        Diffable, Same,
-    };
-
-    #[derive(Diffus, Debug)]
-    struct Identified {
-        id: u32,
-        value: u32,
-    }
-
-    impl Same for Identified {
-        fn same(&self, other: &Self) -> bool {
-            self.id == other.id
-        }
-    }
-
-    #[test]
-    fn collection_test() {
-        let left = vec![
-            Identified { id: 1, value: 0 },
-            Identified { id: 2, value: 0 },
-            Identified { id: 3, value: 0 },
-            Identified { id: 4, value: 0 },
-            Identified { id: 5, value: 0 },
-            Identified { id: 6, value: 0 },
-            Identified { id: 7, value: 0 },
-        ];
-        let right = vec![
-            Identified { id: 1, value: 0 },
-            Identified { id: 2, value: 1 },
-            Identified { id: 4, value: 0 },
-            Identified { id: 3, value: 0 },
-            Identified { id: 5, value: 0 },
-            Identified { id: 6, value: 0 },
-        ];
-
-        let diff = left.diff(&right);
-
-        match diff {
-            edit::Edit::Copy(_) => println!("no difference"),
-            edit::Edit::Change(diff) => {
-                diff.into_iter()
-                    .map(|edit| {
-                        match edit {
-                            collection::Edit::Copy(elem) => {
-                                println!("copy: {:?}", elem)
-                            }
-                            collection::Edit::Insert(elem) => {
-                                println!("insert: {:?}", elem)
-                            }
-                            collection::Edit::Remove(elem) => {
-                                println!("remove: {:?}", elem)
-                            }
-                            collection::Edit::Change(EditedIdentified {
-                                id,
-                                value,
-                            }) => {
-                                println!("changed:");
-                                match id {
-                                    edit::Edit::Copy(id) => {
-                                        println!("    copy: {id}")
-                                    }
-                                    edit::Edit::Change((left_id, right_id)) => {
-                                        println!(
-                                            "    id: {} => {}",
-                                            left_id, right_id
-                                        )
-                                    }
-                                }
-                                match value {
-                                    edit::Edit::Copy(_) => {
-                                        println!("    copy: value")
-                                    }
-                                    edit::Edit::Change((
-                                        left_value,
-                                        right_value,
-                                    )) => println!(
-                                        "    value: {} => {}",
-                                        left_value, right_value
-                                    ),
-                                }
-                            }
-                        };
-                    })
-                    .collect::<Vec<_>>();
-            }
-        }
     }
 }
