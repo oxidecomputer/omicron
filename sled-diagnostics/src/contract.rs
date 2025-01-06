@@ -1,3 +1,9 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+// ! Bindings to libcontract(3lib).
+
 use fs_err as fs;
 use libc::{c_char, c_int, c_void, pid_t};
 use slog::{warn, Logger};
@@ -11,7 +17,10 @@ use std::{
 };
 
 const CT_ALL: &str = "/system/contract/all";
+// Most Oxide services
 const OXIDE_FMRI: &str = "svc:/oxide/";
+// NB: Used for propolis zones
+const ILLUMOS_FMRI: &str = "svc:/system/illumos/";
 const CTD_ALL: i32 = 2;
 
 #[allow(non_camel_case_types)]
@@ -162,8 +171,9 @@ pub fn find_oxide_pids(log: &Logger) -> Result<BTreeSet<i32>, ContractError> {
             }
         };
 
-        let fmri = status.get_fmri()?.unwrap_or_default();
-        if fmri.to_string_lossy().starts_with(OXIDE_FMRI) {
+        let fmri_owned = status.get_fmri()?.unwrap_or_default();
+        let fmri = fmri_owned.to_string_lossy();
+        if fmri.starts_with(OXIDE_FMRI) || fmri.starts_with(ILLUMOS_FMRI) {
             pids.extend(status.get_members()?);
         }
     }

@@ -159,8 +159,7 @@ impl<'a> Planner<'a> {
             let num_instances_assigned = 0;
 
             if all_zones_expunged && num_instances_assigned == 0 {
-                self.blueprint
-                    .set_sled_state(sled_id, SledState::Decommissioned)?;
+                self.blueprint.set_sled_decommissioned(sled_id)?;
             }
         }
 
@@ -801,6 +800,7 @@ mod test {
     use expectorate::assert_contents;
     use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_types::deployment::blueprint_zone_type;
+    use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::BlueprintDiff;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneFilter;
@@ -817,6 +817,7 @@ mod test {
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external::Generation;
+    use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DiskIdentity;
     use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
     use omicron_test_utils::dev::test_setup_log;
@@ -1251,6 +1252,21 @@ mod test {
         // zones back in their places.
         for (_sled_id, zones) in blueprint1.blueprint_zones.iter_mut().take(2) {
             zones.zones.retain(|z| !z.zone_type.is_internal_dns());
+        }
+        for (_, dataset_config) in
+            blueprint1.blueprint_datasets.iter_mut().take(2)
+        {
+            dataset_config.datasets.retain(|_id, dataset| {
+                // This is gross; once zone configs know explicit dataset IDs,
+                // we should retain by ID instead.
+                match &dataset.kind {
+                    DatasetKind::InternalDns => false,
+                    DatasetKind::TransientZone { name } => {
+                        !name.starts_with("oxz_internal_dns")
+                    }
+                    _ => true,
+                }
+            });
         }
 
         let blueprint2 = Planner::new_based_on(
@@ -1831,7 +1847,39 @@ mod test {
         // NOTE: Expunging a disk doesn't immediately delete datasets; see the
         // "decommissioned_disk_cleaner" background task for more context.
         assert_eq!(diff.datasets.removed.len(), 0);
-        assert_eq!(diff.datasets.modified.len(), 0);
+
+        // The disposition has changed from `InService` to `Expunged` for the 4
+        // datasets on this sled.
+        assert_eq!(diff.datasets.modified.len(), 1);
+        // We don't know the expected name, other than the fact it's a crucible zone
+        let test_transient_zone_kind = DatasetKind::TransientZone {
+            name: "some-crucible-zone-name".to_string(),
+        };
+        let mut expected_kinds = BTreeSet::from_iter([
+            DatasetKind::Crucible,
+            DatasetKind::Debug,
+            DatasetKind::TransientZoneRoot,
+            test_transient_zone_kind.clone(),
+        ]);
+        for modified in
+            &diff.datasets.modified.first_key_value().unwrap().1.datasets
+        {
+            assert_eq!(
+                modified.before.disposition,
+                BlueprintDatasetDisposition::InService
+            );
+            assert_eq!(
+                modified.after.disposition,
+                BlueprintDatasetDisposition::Expunged
+            );
+            if let DatasetKind::TransientZone { name } = &modified.before.kind {
+                assert!(name.starts_with("oxz_crucible"));
+                assert!(expected_kinds.remove(&test_transient_zone_kind));
+            } else {
+                assert!(expected_kinds.remove(&modified.before.kind));
+            }
+        }
+        assert!(expected_kinds.is_empty());
 
         let (_zone_id, modified_zones) =
             diff.zones.modified.iter().next().unwrap();
@@ -1843,7 +1891,7 @@ mod test {
             modified_zone.kind()
         );
         assert_eq!(
-            modified_zone.disposition(),
+            modified_zone.disposition,
             BlueprintZoneDisposition::Expunged,
             "Should have expunged this zone"
         );
@@ -1966,7 +2014,7 @@ mod test {
         assert_eq!(modified_zones.zones.len(), zones_using_zpool);
         for modified_zone in &modified_zones.zones {
             assert_eq!(
-                modified_zone.zone.disposition(),
+                modified_zone.zone.disposition,
                 BlueprintZoneDisposition::Expunged,
                 "Should have expunged this zone"
             );
@@ -2268,10 +2316,10 @@ mod test {
 
         for modified_zone in &modified_zones.zones {
             assert_eq!(
-                modified_zone.zone.disposition(),
+                modified_zone.zone.disposition,
                 BlueprintZoneDisposition::Expunged,
                 "for {desc}, zone {} should have been marked expunged",
-                modified_zone.zone.id()
+                modified_zone.zone.id
             );
         }
     }
@@ -2852,13 +2900,6 @@ mod test {
         assert_contents(
             "tests/output/planner_deploy_all_keeper_nodes_3_4.txt",
             &diff.display().to_string(),
-        );
-
-        let coll_diff = blueprint4.diff_since_collection(&collection);
-        println!("coll_diff = {coll_diff:#?}");
-        assert_contents(
-            "tests/output/planner_deploy_all_keeper_nodes_4_collection.txt",
-            &coll_diff.display().to_string(),
         );
 
         let bp3_config = blueprint3.clickhouse_cluster_config.as_ref().unwrap();

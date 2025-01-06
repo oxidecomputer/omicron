@@ -693,7 +693,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739#220a6f367c18f2452dbc4fa9086f3fe73b961739"
+source = "git+https://github.com/oxidecomputer/propolis?rev=d4529fd8247386b422b78e1203315d5baea5ea8b#d4529fd8247386b422b78e1203315d5baea5ea8b"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -703,7 +703,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739#220a6f367c18f2452dbc4fa9086f3fe73b961739"
+source = "git+https://github.com/oxidecomputer/propolis?rev=d4529fd8247386b422b78e1203315d5baea5ea8b#d4529fd8247386b422b78e1203315d5baea5ea8b"
 dependencies = [
  "libc",
  "strum",
@@ -1333,6 +1333,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1462739cb27611015575c0c11df5df7601141071f07518d56fcc1be504cbec97"
 
 [[package]]
+name = "clickana"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "chrono",
+ "clap",
+ "clickhouse-admin-server-client",
+ "clickhouse-admin-types",
+ "dropshot 0.13.0",
+ "futures",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "ratatui",
+ "schemars",
+ "serde_json",
+ "slog",
+ "slog-async",
+ "slog-dtrace",
+ "slog-error-chain",
+ "slog-term",
+ "tokio",
+ "tokio-postgres",
+]
+
+[[package]]
 name = "clickhouse-admin-api"
 version = "0.1.0"
 dependencies = [
@@ -1411,6 +1437,7 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "derive_more",
+ "diffus",
  "expectorate",
  "itertools 0.13.0",
  "omicron-common",
@@ -2321,9 +2348,9 @@ dependencies = [
 
 [[package]]
 name = "diesel-dtrace"
-version = "0.4.0"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e5130181059723aae1cfdb678d3698052a225aaadb18000f77fec4200047acc"
+checksum = "2750c8bd7a42381620b57f370ca5f757a71d554814e02a43c1bf54ae2656e01d"
 dependencies = [
  "diesel",
  "serde",
@@ -2365,6 +2392,28 @@ name = "difflib"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6184e33543162437515c2e2b48714794e37845ec9851711914eec9d308f6ebe8"
+
+[[package]]
+name = "diffus"
+version = "0.10.0"
+source = "git+https://github.com/oxidecomputer/diffus?branch=oxide/main#f6abe39bffd875b5fb1ebabf8144da15e3effe16"
+dependencies = [
+ "diffus-derive",
+ "itertools 0.10.5",
+ "newtype-uuid",
+ "oxnet",
+ "uuid",
+]
+
+[[package]]
+name = "diffus-derive"
+version = "0.10.0"
+source = "git+https://github.com/oxidecomputer/diffus?branch=oxide/main#f6abe39bffd875b5fb1ebabf8144da15e3effe16"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
 
 [[package]]
 name = "digest"
@@ -4464,6 +4513,7 @@ dependencies = [
  "futures",
  "http",
  "ipnetwork",
+ "itertools 0.13.0",
  "libc",
  "macaddr",
  "mockall",
@@ -6009,6 +6059,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-reconfigurator-blippy"
+version = "0.1.0"
+dependencies = [
+ "nexus-reconfigurator-planning",
+ "nexus-sled-agent-shared",
+ "nexus-types",
+ "omicron-common",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+]
+
+[[package]]
 name = "nexus-reconfigurator-execution"
 version = "0.1.0"
 dependencies = [
@@ -6064,15 +6127,18 @@ dependencies = [
  "chrono",
  "clickhouse-admin-types",
  "debug-ignore",
+ "diffus",
  "expectorate",
  "gateway-client",
  "illumos-utils",
  "indexmap 2.6.0",
  "internal-dns-resolver",
  "ipnet",
+ "itertools 0.13.0",
  "maplit",
  "nexus-config",
  "nexus-inventory",
+ "nexus-reconfigurator-blippy",
  "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
@@ -6164,6 +6230,7 @@ dependencies = [
 name = "nexus-sled-agent-shared"
 version = "0.1.0"
 dependencies = [
+ "diffus",
  "illumos-utils",
  "omicron-common",
  "omicron-passwords",
@@ -6266,6 +6333,7 @@ dependencies = [
  "cookie",
  "derive-where",
  "derive_more",
+ "diffus",
  "dropshot 0.13.0",
  "futures",
  "gateway-client",
@@ -6690,6 +6758,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
+ "diffus",
  "dropshot 0.13.0",
  "expectorate",
  "futures",
@@ -6981,7 +7050,7 @@ dependencies = [
  "pq-sys",
  "pretty_assertions",
  "progenitor-client",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=d4529fd8247386b422b78e1203315d5baea5ea8b)",
  "qorb",
  "rand",
  "rcgen",
@@ -7112,6 +7181,7 @@ dependencies = [
  "ring 0.17.8",
  "semver 1.0.23",
  "serde",
+ "shell-words",
  "sled-hardware",
  "slog",
  "slog-async",
@@ -7246,7 +7316,7 @@ dependencies = [
  "oximeter-producer",
  "oxnet",
  "pretty_assertions",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=d4529fd8247386b422b78e1203315d5baea5ea8b)",
  "propolis-mock-server",
  "propolis_api_types",
  "rand",
@@ -7340,6 +7410,7 @@ dependencies = [
 name = "omicron-uuid-kinds"
 version = "0.1.0"
 dependencies = [
+ "diffus",
  "newtype-uuid",
  "paste",
  "schemars",
@@ -7397,6 +7468,7 @@ dependencies = [
  "getrandom",
  "group",
  "hashbrown 0.15.1",
+ "heck 0.4.1",
  "hex",
  "hickory-proto",
  "hmac",
@@ -7415,6 +7487,7 @@ dependencies = [
  "managed",
  "memchr",
  "mio",
+ "newtype-uuid",
  "nom",
  "num-bigint-dig",
  "num-integer",
@@ -8960,12 +9033,14 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739#220a6f367c18f2452dbc4fa9086f3fe73b961739"
+source = "git+https://github.com/oxidecomputer/propolis?rev=d4529fd8247386b422b78e1203315d5baea5ea8b#d4529fd8247386b422b78e1203315d5baea5ea8b"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
+ "crucible-client-types",
  "futures",
  "progenitor",
+ "propolis_api_types",
  "rand",
  "reqwest",
  "schemars",
@@ -9002,7 +9077,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739#220a6f367c18f2452dbc4fa9086f3fe73b961739"
+source = "git+https://github.com/oxidecomputer/propolis?rev=d4529fd8247386b422b78e1203315d5baea5ea8b#d4529fd8247386b422b78e1203315d5baea5ea8b"
 dependencies = [
  "anyhow",
  "atty",
@@ -9044,12 +9119,13 @@ dependencies = [
 [[package]]
 name = "propolis_api_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739#220a6f367c18f2452dbc4fa9086f3fe73b961739"
+source = "git+https://github.com/oxidecomputer/propolis?rev=d4529fd8247386b422b78e1203315d5baea5ea8b#d4529fd8247386b422b78e1203315d5baea5ea8b"
 dependencies = [
  "crucible-client-types",
  "propolis_types",
  "schemars",
  "serde",
+ "serde_with",
  "thiserror 1.0.69",
  "uuid",
 ]
@@ -9057,7 +9133,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739#220a6f367c18f2452dbc4fa9086f3fe73b961739"
+source = "git+https://github.com/oxidecomputer/propolis?rev=d4529fd8247386b422b78e1203315d5baea5ea8b#d4529fd8247386b422b78e1203315d5baea5ea8b"
 dependencies = [
  "schemars",
  "serde",
@@ -10376,9 +10452,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.132"
+version = "1.0.133"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d726bfaff4b320266d395898905d0eba0345aae23b54aee3a737e260fd46db03"
+checksum = "c7fceb2473b9166b2294ef05efcb65a3db80803f0b03ef86a5fc88a2b85ee377"
 dependencies = [
  "itoa",
  "memchr",
@@ -10695,6 +10771,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=d4529fd8247386b422b78e1203315d5baea5ea8b)",
  "regress 0.9.1",
  "reqwest",
  "schemars",
@@ -10720,7 +10797,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=220a6f367c18f2452dbc4fa9086f3fe73b961739)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=d4529fd8247386b422b78e1203315d5baea5ea8b)",
  "rcgen",
  "schemars",
  "serde",
@@ -10820,6 +10897,7 @@ dependencies = [
  "slog",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-stream",
  "uuid",
 ]
 
@@ -11022,7 +11100,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.87",
@@ -13235,7 +13313,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

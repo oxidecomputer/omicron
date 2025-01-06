@@ -54,7 +54,6 @@ use illumos_utils::running_zone::{
 };
 use illumos_utils::smf_helper::SmfHelper;
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
-use illumos_utils::zone::AddressRequest;
 use illumos_utils::zpool::{PathInPool, ZpoolName};
 use illumos_utils::{execute, PFEXEC};
 use internal_dns_resolver::Resolver;
@@ -76,6 +75,7 @@ use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
 use omicron_common::address::{
     get_internal_dns_server_addresses, CLICKHOUSE_ADMIN_PORT,
+    CLICKHOUSE_TCP_PORT,
 };
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::address::{BOOTSTRAP_ARTIFACT_PORT, COCKROACH_ADMIN_PORT};
@@ -539,6 +539,18 @@ impl illumos_utils::smf_helper::Service for SwitchService {
 struct SwitchZoneConfigLocal {
     zone: SwitchZoneConfig,
     root: Utf8PathBuf,
+}
+
+/// Service that sets up common networking across zones
+struct ZoneNetworkSetupService {}
+
+impl illumos_utils::smf_helper::Service for ZoneNetworkSetupService {
+    fn service_name(&self) -> String {
+        "zone-network-setup".to_string()
+    }
+    fn smf_name(&self) -> String {
+        format!("svc:/oxide/{}", self.service_name())
+    }
 }
 
 /// Describes either an Omicron-managed zone or the switch zone, used for
@@ -1597,13 +1609,20 @@ impl ServiceManager {
                     addr.to_string()
                 };
 
+                // The ClickHouse client connects via the TCP port
+                let ch_address = {
+                    let mut addr = *address;
+                    addr.set_port(CLICKHOUSE_TCP_PORT);
+                    addr.to_string()
+                };
+
                 let clickhouse_admin_config =
                     PropertyGroupBuilder::new("config")
                         .add_property("http_address", "astring", admin_address)
                         .add_property(
                             "ch_address",
                             "astring",
-                            address.to_string(),
+                            ch_address.to_string(),
                         )
                         .add_property(
                             "ch_binary",
@@ -1668,13 +1687,20 @@ impl ServiceManager {
                     addr.to_string()
                 };
 
+                // The ClickHouse client connects via the TCP port
+                let ch_address = {
+                    let mut addr = *address;
+                    addr.set_port(CLICKHOUSE_TCP_PORT);
+                    addr.to_string()
+                };
+
                 let clickhouse_admin_config =
                     PropertyGroupBuilder::new("config")
                         .add_property("http_address", "astring", admin_address)
                         .add_property(
                             "ch_address",
                             "astring",
-                            address.to_string(),
+                            ch_address.to_string(),
                         )
                         .add_property(
                             "ch_binary",
@@ -4272,58 +4298,52 @@ impl ServiceManager {
                 );
                 *request = new_request;
 
+                // Add SMF properties here and restart zone-network-setup service
                 let first_address = request.addresses.get(0);
                 let address = first_address
                     .map(|addr| addr.to_string())
                     .unwrap_or_else(|| "".to_string());
 
-                for addr in &request.addresses {
-                    if *addr == Ipv6Addr::LOCALHOST {
-                        continue;
-                    }
-                    info!(
+                // Set new properties for the network set up service and refresh
+                let nw_setup_svc = ZoneNetworkSetupService {};
+                let nsmfh = SmfHelper::new(&zone, &nw_setup_svc);
+
+                nsmfh.delpropvalue("config/gateway", "*")?;
+                nsmfh.delpropvalue("config/static_addr", "*")?;
+
+                if let Some(info) = self.inner.sled_info.get() {
+                    nsmfh.addpropvalue_type(
+                        "config/gateway",
+                        &info.underlay_address,
+                        "astring",
+                    )?;
+                } else {
+                    // It should be impossible for the `sled_info` not to be set here.
+                    // When the request addresses have changed this means the underlay is
+                    // available as well.
+                    error!(
                         self.inner.log,
-                        "Ensuring address {} exists",
-                        addr.to_string()
-                    );
-                    let addr_request =
-                        AddressRequest::new_static(IpAddr::V6(*addr), None);
-                    zone.ensure_address(addr_request).await?;
-                    info!(
-                        self.inner.log,
-                        "Ensuring address {} exists - OK",
-                        addr.to_string()
+                        concat!(
+                            "sled agent info is not present,",
+                            " even though underlay address exists"
+                        )
                     );
                 }
 
-                // When the request addresses have changed this means the underlay is
-                // available now as well.
-                if let Some(info) = self.inner.sled_info.get() {
-                    info!(
-                        self.inner.log,
-                        "Ensuring there is a default route";
-                        "gateway" => ?info.underlay_address,
-                    );
-                    match zone.add_default_route(info.underlay_address).map_err(
-                        |err| Error::ZoneCommand {
-                            intent: "Adding Route".to_string(),
-                            err,
-                        },
-                    ) {
-                        Ok(_) => (),
-                        Err(e) => {
-                            if e.to_string().contains("entry exists") {
-                                info!(
-                                    self.inner.log,
-                                    "Default route already exists";
-                                    "gateway" => ?info.underlay_address,
-                                )
-                            } else {
-                                return Err(e);
-                            }
-                        }
-                    };
+                for address in &request.addresses {
+                    if *address != Ipv6Addr::LOCALHOST {
+                        nsmfh.addpropvalue_type(
+                            "config/static_addr",
+                            &address,
+                            "astring",
+                        )?;
+                    }
                 }
+                nsmfh.refresh()?;
+                info!(
+                    self.inner.log,
+                    "refreshed zone-network-setup service with new configuration"
+                );
 
                 for service in &request.services {
                     let smfh = SmfHelper::new(&zone, service);
