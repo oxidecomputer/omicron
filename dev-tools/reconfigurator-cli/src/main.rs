@@ -12,6 +12,7 @@ use clap::ValueEnum;
 use clap::{Args, Parser, Subcommand};
 use indent_write::fmt::IndentWriter;
 use internal_dns_types::diff::DnsDiff;
+use itertools::Itertools;
 use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
@@ -396,7 +397,10 @@ struct BlueprintPlanArgs {
     /// id of the blueprint on which this one will be based
     parent_blueprint_id: Uuid,
     /// id of the inventory collection to use in planning
-    collection_id: CollectionUuid,
+    ///
+    /// Must be provided unless there is only one collection in the loaded
+    /// state.
+    collection_id: Option<CollectionUuid>,
 }
 
 #[derive(Debug, Args)]
@@ -754,7 +758,20 @@ fn cmd_blueprint_plan(
     let parent_blueprint_id = args.parent_blueprint_id;
     let collection_id = args.collection_id;
     let parent_blueprint = system.get_blueprint(parent_blueprint_id)?;
-    let collection = system.get_collection(collection_id)?;
+    let collection = match collection_id {
+        Some(collection_id) => system.get_collection(collection_id)?,
+        None => {
+            let mut all_collections_iter = system.all_collections();
+            match all_collections_iter.len() {
+                0 => bail!("cannot plan blueprint with no loaded collections"),
+                1 => all_collections_iter.next().expect("iter length is 1"),
+                _ => bail!(
+                    "blueprint-plan: must specify collection ID (one of {:?})",
+                    all_collections_iter.map(|c| c.id).join(", ")
+                ),
+            }
+        }
+    };
 
     let creator = "reconfigurator-sim";
     let planning_input = sim.planning_input(parent_blueprint)?;

@@ -9445,6 +9445,7 @@ dependencies = [
  "humantime",
  "indent_write",
  "internal-dns-types",
+ "itertools 0.13.0",
  "nexus-client",
  "nexus-db-queries",
  "nexus-inventory",
