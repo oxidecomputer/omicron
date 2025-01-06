@@ -45,7 +45,11 @@ use omicron_uuid_kinds::{
 };
 use oxnet::Ipv6Net;
 use propolis_client::{
-    types::VolumeConstructionRequest, Client as PropolisClient,
+    types::{
+        Board, Chipset, ComponentV0, InstanceInitializationMethod,
+        InstanceSpecV0, SerialPort, SerialPortNumber,
+    },
+    Client as PropolisClient, VolumeConstructionRequest,
 };
 use sled_agent_api::SupportBundleMetadata;
 use sled_agent_api::SupportBundleState;
@@ -125,7 +129,7 @@ fn extract_targets_from_volume_construction_request(
 
             VolumeConstructionRequest::Region { opts, .. } => {
                 for target in &opts.target {
-                    res.push(SocketAddr::from_str(&target)?);
+                    res.push(*target);
                 }
             }
 
@@ -301,10 +305,7 @@ impl SledAgent {
 
             // Ensure that any disks that are in this request are attached to
             // this instance.
-            let id = match disk.volume_construction_request {
-                VolumeConstructionRequest::Volume { id, .. } => id,
-                _ => panic!("Unexpected construction type"),
-            };
+            let id = disk.disk_id;
             self.disks
                 .sim_ensure(
                     &id,
@@ -353,15 +354,30 @@ impl SledAgent {
                     description: "sled-agent-sim created instance".to_string(),
                     metadata,
                 };
+
                 let body = propolis_client::types::InstanceEnsureRequest {
                     properties,
-                    memory: hardware.properties.memory.to_whole_mebibytes(),
-                    vcpus: hardware.properties.ncpus.0 as u8,
-                    nics: vec![],
-                    disks: vec![],
-                    boot_settings: None,
-                    migrate: None,
-                    cloud_init_bytes: None,
+                    init: InstanceInitializationMethod::Spec {
+                        spec: InstanceSpecV0 {
+                            board: Board {
+                                cpus: hardware.properties.ncpus.0 as u8,
+                                chipset: Chipset::default(),
+                                memory_mb: hardware
+                                    .properties
+                                    .memory
+                                    .to_whole_mebibytes(),
+                                cpuid: None,
+                            },
+                            components: [(
+                                "com1".to_string(),
+                                ComponentV0::SerialPort(SerialPort {
+                                    num: SerialPortNumber::Com1,
+                                }),
+                            )]
+                            .into_iter()
+                            .collect(),
+                        },
+                    },
                 };
                 // Try to create the instance
                 client.instance_ensure().body(body).send().await.map_err(
@@ -397,7 +413,7 @@ impl SledAgent {
             .await?;
 
         for disk_request in &hardware.disks {
-            let vcr = &disk_request.volume_construction_request;
+            let vcr = serde_json::from_str(&disk_request.vcr_json.0)?;
             self.map_disk_ids_to_region_ids(&vcr).await?;
         }
 

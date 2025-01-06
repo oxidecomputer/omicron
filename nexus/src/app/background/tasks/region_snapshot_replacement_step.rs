@@ -566,8 +566,9 @@ mod test {
     use nexus_db_model::Volume;
     use nexus_test_utils_macros::nexus_test;
     use omicron_uuid_kinds::DatasetUuid;
-    use sled_agent_client::types::CrucibleOpts;
-    use sled_agent_client::types::VolumeConstructionRequest;
+    use sled_agent_client::CrucibleOpts;
+    use sled_agent_client::VolumeConstructionRequest;
+    use std::net::SocketAddrV6;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -575,7 +576,7 @@ mod test {
 
     async fn add_fake_volume_for_snapshot_addr(
         datastore: &DataStore,
-        snapshot_addr: String,
+        snapshot_addr: SocketAddrV6,
     ) -> Uuid {
         let new_volume_id = Uuid::new_v4();
 
@@ -587,7 +588,7 @@ mod test {
                 DatasetUuid::new_v4(),
                 Uuid::new_v4(),
                 Uuid::new_v4(),
-                snapshot_addr.clone(),
+                snapshot_addr.to_string(),
             ))
             .await
             .unwrap();
@@ -604,7 +605,7 @@ mod test {
                     gen: 0,
                     opts: CrucibleOpts {
                         id: Uuid::new_v4(),
-                        target: vec![snapshot_addr],
+                        target: vec![snapshot_addr.into()],
                         lossy: false,
                         flush_timeout: None,
                         key: None,
@@ -656,13 +657,14 @@ mod test {
         let dataset_id = DatasetUuid::new_v4();
         let region_id = Uuid::new_v4();
         let snapshot_id = Uuid::new_v4();
-        let snapshot_addr = String::from("[fd00:1122:3344::101]:9876");
+        let snapshot_addr: SocketAddrV6 =
+            "[fd00:1122:3344::101]:9876".parse().unwrap();
 
         let fake_region_snapshot = RegionSnapshot::new(
             dataset_id,
             region_id,
             snapshot_id,
-            snapshot_addr.clone(),
+            snapshot_addr.to_string(),
         );
 
         datastore.region_snapshot_create(fake_region_snapshot).await.unwrap();
@@ -746,28 +748,22 @@ mod test {
         // Add some fake volumes that reference the region snapshot being
         // replaced
 
-        let new_volume_1_id = add_fake_volume_for_snapshot_addr(
-            &datastore,
-            snapshot_addr.clone(),
-        )
-        .await;
-        let new_volume_2_id = add_fake_volume_for_snapshot_addr(
-            &datastore,
-            snapshot_addr.clone(),
-        )
-        .await;
+        let new_volume_1_id =
+            add_fake_volume_for_snapshot_addr(&datastore, snapshot_addr).await;
+        let new_volume_2_id =
+            add_fake_volume_for_snapshot_addr(&datastore, snapshot_addr).await;
 
         // Add some fake volumes that do not
 
         let other_volume_1_id = add_fake_volume_for_snapshot_addr(
             &datastore,
-            String::from("[fd00:1122:3344::101]:1000"),
+            "[fd00:1122:3344::101]:1000".parse().unwrap(),
         )
         .await;
 
         let other_volume_2_id = add_fake_volume_for_snapshot_addr(
             &datastore,
-            String::from("[fd12:5544:3344::912]:3901"),
+            "[fd12:5544:3344::912]:3901".parse().unwrap(),
         )
         .await;
 
