@@ -1271,6 +1271,8 @@ fn cmd_load_example(
                     .num_nexus()
                     .map_or(NEXUS_REDUNDANCY, |n| n.into()),
             )
+            .external_dns_count(3)
+            .context("invalid external DNS zone count")?
             .create_zones(!args.no_zones)
             .create_disks_in_blueprint(!args.no_disks_in_blueprint)
             .build();
