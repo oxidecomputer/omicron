@@ -16,7 +16,6 @@ use crate::db::DbConnection;
 use crate::db::TransactionError;
 use crate::transaction_retry::OptionalError;
 use anyhow::Context;
-use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
@@ -106,7 +105,7 @@ impl DataStore {
         blueprint: &Blueprint,
     ) -> Result<(), Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        Self::blueprint_insert_on_connection(&conn, opctx, blueprint).await
+        self.blueprint_insert_on_connection(&conn, opctx, blueprint).await
     }
 
     /// Creates a transaction iff the current blueprint is "bp_id".
@@ -182,6 +181,7 @@ impl DataStore {
     /// Variant of [Self::blueprint_insert] which may be called from a
     /// transaction context.
     pub(crate) async fn blueprint_insert_on_connection(
+        &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
         blueprint: &Blueprint,
@@ -340,7 +340,8 @@ impl DataStore {
         // as most of the operations should be insertions rather than in-place
         // modifications of existing tables.
         #[allow(clippy::disallowed_methods)]
-        conn.transaction_async(|conn| async move {
+        self.transaction_non_retry_wrapper("blueprint_insert")
+            .transaction(&conn, |conn| async move {
             // Insert the row for the blueprint.
             {
                 use db::schema::blueprint::dsl;

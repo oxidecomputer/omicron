@@ -219,8 +219,8 @@ pub(crate) mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
     use omicron_uuid_kinds::DatasetUuid;
-    use sled_agent_client::types::CrucibleOpts;
-    use sled_agent_client::types::VolumeConstructionRequest;
+    use sled_agent_client::CrucibleOpts;
+    use sled_agent_client::VolumeConstructionRequest;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -310,6 +310,20 @@ pub(crate) mod test {
             replacement_state: RegionReplacementState::ReplacementDone,
             operating_saga_id: None,
         };
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                new_volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: new_volume_id,
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
 
         datastore
             .insert_region_replacement_request(&opctx, request.clone())

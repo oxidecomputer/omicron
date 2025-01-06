@@ -400,7 +400,9 @@ fn register_dataset_records_step<'a>(
                     &opctx,
                     datastore,
                     bp_id,
-                    blueprint.all_omicron_datasets(BlueprintDatasetFilter::All),
+                    blueprint
+                        .all_omicron_datasets(BlueprintDatasetFilter::All)
+                        .map(|(_sled_id, dataset)| dataset),
                 )
                 .await?;
 
