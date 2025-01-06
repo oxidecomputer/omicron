@@ -6,7 +6,7 @@
 use crate::deployment::Blueprint;
 use crate::external_api::views::SledState;
 use diffus::edit::{enm, map, Edit};
-use omicron_common::api::external::Generation;
+use omicron_common::{api::external::Generation, zpool_name::EditedZpoolName};
 use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -15,8 +15,9 @@ use uuid::Uuid;
 // In this case each field of the edited version becomes a type like
 // `diffus::edit::Edit<'a, OriginalFieldType>`.
 use super::{
-    BlueprintZoneConfig, BlueprintZonesConfig, EditedBlueprint,
-    EditedBlueprintZoneConfig, EditedBlueprintZonesConfig,
+    BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZonesConfig,
+    EditedBlueprint, EditedBlueprintZoneConfig, EditedBlueprintZonesConfig,
+    ZpoolName,
 };
 
 #[derive(Debug, Clone)]
@@ -193,6 +194,40 @@ pub trait Visit<'e> {
     ) {
         visit_blueprint_zones_zone_config_change(self, sled_id, node);
     }
+    fn visit_blueprint_zones_zone_config_disposition_copy(
+        &mut self,
+        sled_id: &'e SledUuid,
+        node: &'e BlueprintZoneDisposition,
+    ) {
+        visit_blueprint_zones_zone_config_disposition_copy(self, sled_id, node);
+    }
+    fn visit_blueprint_zones_zone_config_disposition_change(
+        &mut self,
+        sled_id: &'e SledUuid,
+        node: Change<'e, BlueprintZoneDisposition>,
+    ) {
+        visit_blueprint_zones_zone_config_disposition_change(
+            self, sled_id, node,
+        )
+    }
+    fn visit_blueprint_zones_zone_config_filesystem_pool_copy(
+        &mut self,
+        sled_id: &'e SledUuid,
+        node: &'e Option<ZpoolName>,
+    ) {
+        visit_blueprint_zones_zone_config_filesystem_pool_copy(
+            self, sled_id, node,
+        );
+    }
+    fn visit_blueprint_zones_zone_config_filesystem_pool_change(
+        &mut self,
+        sled_id: &'e SledUuid,
+        node: Change<'e, Option<ZpoolName>>,
+    ) {
+        visit_blueprint_zones_zone_config_filesystem_pool_change(
+            self, sled_id, node,
+        );
+    }
 }
 
 /// The root of the diff
@@ -332,7 +367,7 @@ pub fn visit_blueprint_zones_map_change<'e, V>(
     match &node.zones {
         Edit::Copy(node) => v.visit_blueprint_zones_zones_copy(sled_id, *node),
         Edit::Change(zones) => {
-            for (zone_id, node) in zones {
+            for (_, node) in zones {
                 match node {
                     map::Edit::Copy(node) => {
                         v.visit_blueprint_zones_zone_config_copy(
@@ -368,17 +403,57 @@ pub fn visit_blueprint_zones_zone_config_change<'e, V>(
     V: Visit<'e> + ?Sized,
 {
     match &node.disposition {
-        Edit::Copy(node) => {}
+        Edit::Copy(node) => {
+            v.visit_blueprint_zones_zone_config_disposition_copy(
+                sled_id, *node,
+            );
+        }
         Edit::Change(node) => {
             match node {
-                enm::Edit::Copy(node) => {}
-                enm::Edit::VariantChanged(before, after) => {}
+                enm::Edit::Copy(node) => {
+                    v.visit_blueprint_zones_zone_config_disposition_copy(
+                        sled_id, *node,
+                    );
+                }
+                enm::Edit::VariantChanged(before, after) => {
+                    v.visit_blueprint_zones_zone_config_disposition_change(
+                        sled_id,
+                        Change { before: *before, after: *after },
+                    );
+                }
                 enm::Edit::AssociatedChanged(_) => {
                     // There's no associated data for a `BlueprintZoneDisposition`
                     unreachable!()
                 }
             }
         }
+    }
+
+    // No need to match on `id` as that will show up as a map insert in the prior node
+
+    match &node.filesystem_pool {
+        Edit::Copy(node) => {
+            v.visit_blueprint_zones_zone_config_filesystem_pool_copy(
+                sled_id, *node,
+            );
+        }
+        Edit::Change(node) => match node {
+            enm::Edit::Copy(node) => {
+                v.visit_blueprint_zones_zone_config_filesystem_pool_copy(
+                    sled_id, *node,
+                );
+            }
+            enm::Edit::VariantChanged(before, after) => {
+                v.visit_blueprint_zones_zone_config_filesystem_pool_change(
+                    sled_id,
+                    Change { before: *before, after: *after },
+                );
+            }
+            enm::Edit::AssociatedChanged(_diff) => {
+                // `ZpoolName`'s cannot change
+                unreachable!();
+            }
+        },
     }
 }
 
@@ -475,6 +550,26 @@ empty_visit_3!(
     visit_blueprint_zones_zone_config_remove,
     SledUuid,
     BlueprintZoneConfig
+);
+empty_visit_3!(
+    visit_blueprint_zones_zone_config_disposition_copy,
+    SledUuid,
+    BlueprintZoneDisposition
+);
+empty_visit_change_3!(
+    visit_blueprint_zones_zone_config_disposition_change,
+    SledUuid,
+    BlueprintZoneDisposition
+);
+empty_visit_3!(
+    visit_blueprint_zones_zone_config_filesystem_pool_copy,
+    SledUuid,
+    Option<ZpoolName>
+);
+empty_visit_change_3!(
+    visit_blueprint_zones_zone_config_filesystem_pool_change,
+    SledUuid,
+    Option<ZpoolName>
 );
 
 /// A visitor for debug printing walks of a blueprint
