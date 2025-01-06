@@ -117,8 +117,8 @@ impl ReconfiguratorSim {
         builder.set_internal_dns_version(parent_blueprint.internal_dns_version);
         builder.set_external_dns_version(parent_blueprint.external_dns_version);
 
-        for (_, zone) in
-            parent_blueprint.all_omicron_zones(BlueprintZoneFilter::All)
+        for (_, zone) in parent_blueprint
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
         {
             if let Some((external_ip, nic)) =
                 zone.zone_type.external_networking()
@@ -774,7 +774,9 @@ fn cmd_blueprint_plan(
     };
 
     let creator = "reconfigurator-sim";
-    let planning_input = sim.planning_input(parent_blueprint)?;
+    let planning_input = sim
+        .planning_input(parent_blueprint)
+        .context("failed to construct planning input")?;
     let planner = Planner::new_based_on(
         sim.log.clone(),
         parent_blueprint,
@@ -808,7 +810,9 @@ fn cmd_blueprint_edit(
     let blueprint_id = args.blueprint_id;
     let blueprint = system.get_blueprint(blueprint_id)?;
     let creator = args.creator.as_deref().unwrap_or("reconfigurator-cli");
-    let planning_input = sim.planning_input(blueprint)?;
+    let planning_input = sim
+        .planning_input(blueprint)
+        .context("failed to create planning input")?;
 
     // TODO: We may want to do something other than just using the latest
     // collection -- add a way to specify which collection to use.
