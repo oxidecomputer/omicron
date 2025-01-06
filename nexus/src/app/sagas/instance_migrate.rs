@@ -539,7 +539,6 @@ async fn sim_instance_migrate(
             InstanceStateChangeRequest::Migrate(
                 InstanceMigrationTargetParams {
                     src_propolis_addr: src_vmm_addr.to_string(),
-                    src_propolis_id,
                 },
             ),
         )
