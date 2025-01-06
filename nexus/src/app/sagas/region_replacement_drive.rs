@@ -148,7 +148,6 @@ use crate::app::{authn, authz, db};
 use chrono::DateTime;
 use chrono::Utc;
 use nexus_db_model::VmmState;
-use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use propolis_client::types::ReplaceResult;
 use serde::Deserialize;
@@ -1502,7 +1501,6 @@ async fn execute_propolis_drive_action(
         .instance_issue_crucible_vcr_request()
         .id(disk.id())
         .body(propolis_client::types::InstanceVcrReplace {
-            name: disk.name().to_string(),
             vcr_json: disk_new_volume_vcr,
         })
         .send()
