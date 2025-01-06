@@ -56,13 +56,12 @@ use crate::app::db::lookup::LookupPath;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use nexus_db_model::VmmState;
-use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use propolis_client::types::ReplaceResult;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::CrucibleOpts;
-use sled_agent_client::types::VolumeConstructionRequest;
+use sled_agent_client::CrucibleOpts;
+use sled_agent_client::VolumeConstructionRequest;
 use std::net::SocketAddrV6;
 use steno::ActionError;
 use steno::Node;
@@ -375,7 +374,8 @@ async fn rsrss_replace_snapshot_in_volume(
             // with the saga.
         }
 
-        VolumeReplaceResult::ExistingVolumeDeleted => {
+        VolumeReplaceResult::ExistingVolumeSoftDeleted
+        | VolumeReplaceResult::ExistingVolumeHardDeleted => {
             // Proceed with the saga but skip the notification step.
         }
     }
@@ -422,6 +422,20 @@ async fn rsrss_notify_upstairs(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let log = sagactx.user_data().log();
+
+    // If the associated volume was deleted, then skip this notification step as
+    // there is no Upstairs to talk to. Continue with the saga to transition the
+    // step request to Complete, and then perform the associated clean up.
+
+    let volume_replace_snapshot_result = sagactx
+        .lookup::<VolumeReplaceResult>("volume_replace_snapshot_result")?;
+    if matches!(
+        volume_replace_snapshot_result,
+        VolumeReplaceResult::ExistingVolumeSoftDeleted
+            | VolumeReplaceResult::ExistingVolumeHardDeleted
+    ) {
+        return Ok(());
+    }
 
     // Make an effort to notify a Propolis if one was booted for this volume.
     // This is best effort: if there is a failure, this saga will unwind and be
@@ -540,11 +554,13 @@ async fn rsrss_notify_upstairs(
         "vmm id" => ?vmm.id,
     );
 
+    // N.B. The ID passed to this request must match the disk backend ID that
+    // sled agent supplies to Propolis when it creates the instance. Currently,
+    // sled agent uses the disk ID as the backend ID.
     let result = client
         .instance_issue_crucible_vcr_request()
         .id(disk.id())
         .body(propolis_client::types::InstanceVcrReplace {
-            name: disk.name().to_string(),
             vcr_json: new_volume_vcr,
         })
         .send()

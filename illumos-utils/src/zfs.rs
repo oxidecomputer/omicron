@@ -65,12 +65,9 @@ pub struct DestroyDatasetError {
 }
 
 #[derive(thiserror::Error, Debug)]
-enum EnsureFilesystemErrorRaw {
+enum EnsureDatasetErrorRaw {
     #[error("ZFS execution error: {0}")]
     Execution(#[from] crate::ExecutionError),
-
-    #[error("Filesystem does not exist, and formatting was not requested")]
-    NotFoundNotFormatted,
 
     #[error("Unexpected output from ZFS commands: {0}")]
     Output(String),
@@ -82,13 +79,13 @@ enum EnsureFilesystemErrorRaw {
     MountOverlayFsFailed(crate::ExecutionError),
 }
 
-/// Error returned by [`Zfs::ensure_filesystem`].
+/// Error returned by [`Zfs::ensure_dataset`].
 #[derive(thiserror::Error, Debug)]
 #[error("Failed to ensure filesystem '{name}': {err}")]
-pub struct EnsureFilesystemError {
+pub struct EnsureDatasetError {
     name: String,
     #[source]
-    err: EnsureFilesystemErrorRaw,
+    err: EnsureDatasetErrorRaw,
 }
 
 /// Error returned by [`Zfs::set_oxide_value`]
@@ -418,6 +415,49 @@ fn build_zfs_set_key_value_pairs(
     props
 }
 
+/// Arguments to [Zfs::ensure_dataset].
+pub struct DatasetEnsureArgs<'a> {
+    /// The full path of the ZFS dataset.
+    pub name: &'a str,
+
+    /// The expected mountpoint of this filesystem.
+    /// If the filesystem already exists, and is not mounted here, an error is
+    /// returned.
+    pub mountpoint: Mountpoint,
+
+    /// Identifies whether or not this filesystem should be
+    /// used in a zone. Only used when creating a new filesystem - ignored
+    /// if the filesystem already exists.
+    pub zoned: bool,
+
+    /// Ensures a filesystem as an encryption root.
+    ///
+    /// For new filesystems, this supplies the key, and all datasets within this
+    /// root are implicitly encrypted. For existing filesystems, ensures that
+    /// they are mounted (and that keys are loaded), but does not verify the
+    /// input details.
+    pub encryption_details: Option<EncryptionDetails>,
+
+    /// Optional properties that can be set for the dataset regarding
+    /// space usage.
+    ///
+    /// Can be used to change settings on new or existing datasets.
+    pub size_details: Option<SizeDetails>,
+
+    /// An optional UUID of the dataset.
+    ///
+    /// If provided, this is set as the value "oxide:uuid" through "zfs set".
+    ///
+    /// Can be used to change settings on new or existing datasets.
+    pub id: Option<DatasetUuid>,
+
+    /// ZFS options passed to "zfs create" with the "-o" flag.
+    ///
+    /// Only used when the filesystem is being created.
+    /// Each string in this optional Vec should have the format "key=value".
+    pub additional_options: Option<Vec<String>>,
+}
+
 impl Zfs {
     /// Lists all datasets within a pool or existing dataset.
     ///
@@ -513,44 +553,26 @@ impl Zfs {
         Ok(())
     }
 
-    /// Creates a new ZFS filesystem unless one already exists.
+    /// Creates a new ZFS dataset unless one already exists.
     ///
-    /// - `name`: the full path to the zfs dataset
-    /// - `mountpoint`: The expected mountpoint of this filesystem.
-    /// If the filesystem already exists, and is not mounted here, and error is
-    /// returned.
-    /// - `zoned`: identifies whether or not this filesystem should be
-    /// used in a zone. Only used when creating a new filesystem - ignored
-    /// if the filesystem already exists.
-    /// - `do_format`: if "false", prevents a new filesystem from being created,
-    /// and returns an error if it is not found.
-    /// - `encryption_details`: Ensures a filesystem as an encryption root.
-    /// For new filesystems, this supplies the key, and all datasets within this
-    /// root are implicitly encrypted. For existing filesystems, ensures that
-    /// they are mounted (and that keys are loaded), but does not verify the
-    /// input details.
-    /// - `size_details`: If supplied, sets size-related information. These
-    /// values are set on both new filesystem creation as well as when loading
-    /// existing filesystems.
-    /// - `additional_options`: Additional ZFS options, which are only set when
-    /// creating new filesystems.
-    #[allow(clippy::too_many_arguments)]
-    pub fn ensure_filesystem(
-        name: &str,
-        mountpoint: Mountpoint,
-        zoned: bool,
-        do_format: bool,
-        encryption_details: Option<EncryptionDetails>,
-        size_details: Option<SizeDetails>,
-        id: Option<DatasetUuid>,
-        additional_options: Option<Vec<String>>,
-    ) -> Result<(), EnsureFilesystemError> {
+    /// Refer to [DatasetEnsureArgs] for details on the supplied arguments.
+    pub fn ensure_dataset(
+        DatasetEnsureArgs {
+            name,
+            mountpoint,
+            zoned,
+            encryption_details,
+            size_details,
+            id,
+            additional_options,
+        }: DatasetEnsureArgs,
+    ) -> Result<(), EnsureDatasetError> {
         let (exists, mounted) = Self::dataset_exists(name, &mountpoint)?;
 
         let props = build_zfs_set_key_value_pairs(size_details, id);
         if exists {
             Self::set_values(name, props.as_slice()).map_err(|err| {
-                EnsureFilesystemError {
+                EnsureDatasetError {
                     name: name.to_string(),
                     err: err.err.into(),
                 }
@@ -568,13 +590,6 @@ impl Zfs {
                 // We need to load the encryption key and mount the filesystem
                 return Self::mount_encrypted_dataset(name);
             }
-        }
-
-        if !do_format {
-            return Err(EnsureFilesystemError {
-                name: name.to_string(),
-                err: EnsureFilesystemErrorRaw::NotFoundNotFormatted,
-            });
         }
 
         // If it doesn't exist, make it.
@@ -606,7 +621,7 @@ impl Zfs {
 
         cmd.args(&["-o", &format!("mountpoint={}", mountpoint), name]);
 
-        execute(cmd).map_err(|err| EnsureFilesystemError {
+        execute(cmd).map_err(|err| EnsureDatasetError {
             name: name.to_string(),
             err: err.into(),
         })?;
@@ -618,42 +633,35 @@ impl Zfs {
             let user = whoami::username();
             let mount = format!("{mountpoint}");
             let cmd = command.args(["chown", "-R", &user, &mount]);
-            execute(cmd).map_err(|err| EnsureFilesystemError {
+            execute(cmd).map_err(|err| EnsureDatasetError {
                 name: name.to_string(),
                 err: err.into(),
             })?;
         }
 
         Self::set_values(name, props.as_slice()).map_err(|err| {
-            EnsureFilesystemError {
-                name: name.to_string(),
-                err: err.err.into(),
-            }
+            EnsureDatasetError { name: name.to_string(), err: err.err.into() }
         })?;
 
         Ok(())
     }
 
-    fn mount_encrypted_dataset(
-        name: &str,
-    ) -> Result<(), EnsureFilesystemError> {
+    fn mount_encrypted_dataset(name: &str) -> Result<(), EnsureDatasetError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "mount", "-l", name]);
-        execute(cmd).map_err(|err| EnsureFilesystemError {
+        execute(cmd).map_err(|err| EnsureDatasetError {
             name: name.to_string(),
-            err: EnsureFilesystemErrorRaw::MountEncryptedFsFailed(err),
+            err: EnsureDatasetErrorRaw::MountEncryptedFsFailed(err),
         })?;
         Ok(())
     }
 
-    pub fn mount_overlay_dataset(
-        name: &str,
-    ) -> Result<(), EnsureFilesystemError> {
+    pub fn mount_overlay_dataset(name: &str) -> Result<(), EnsureDatasetError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "mount", "-O", name]);
-        execute(cmd).map_err(|err| EnsureFilesystemError {
+        execute(cmd).map_err(|err| EnsureDatasetError {
             name: name.to_string(),
-            err: EnsureFilesystemErrorRaw::MountOverlayFsFailed(err),
+            err: EnsureDatasetErrorRaw::MountOverlayFsFailed(err),
         })?;
         Ok(())
     }
@@ -663,7 +671,7 @@ impl Zfs {
     fn dataset_exists(
         name: &str,
         mountpoint: &Mountpoint,
-    ) -> Result<(bool, bool), EnsureFilesystemError> {
+    ) -> Result<(bool, bool), EnsureDatasetError> {
         let mut command = std::process::Command::new(ZFS);
         let cmd = command.args(&[
             "list",
@@ -676,9 +684,9 @@ impl Zfs {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let values: Vec<&str> = stdout.trim().split('\t').collect();
             if &values[..3] != &[name, "filesystem", &mountpoint.to_string()] {
-                return Err(EnsureFilesystemError {
+                return Err(EnsureDatasetError {
                     name: name.to_string(),
-                    err: EnsureFilesystemErrorRaw::Output(stdout.to_string()),
+                    err: EnsureDatasetErrorRaw::Output(stdout.to_string()),
                 });
             }
             let mounted = values[3] == "yes";

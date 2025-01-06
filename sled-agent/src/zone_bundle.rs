@@ -18,7 +18,7 @@ use illumos_utils::running_zone::ServiceProcess;
 use illumos_utils::zfs::CreateSnapshotError;
 use illumos_utils::zfs::DestroyDatasetError;
 use illumos_utils::zfs::DestroySnapshotError;
-use illumos_utils::zfs::EnsureFilesystemError;
+use illumos_utils::zfs::EnsureDatasetError;
 use illumos_utils::zfs::GetValueError;
 use illumos_utils::zfs::ListDatasetsError;
 use illumos_utils::zfs::ListSnapshotsError;
@@ -565,8 +565,8 @@ pub enum BundleError {
     #[error("Failed to list ZFS snapshots")]
     ListSnapshot(#[from] ListSnapshotsError),
 
-    #[error("Failed to ensure ZFS filesystem")]
-    EnsureFilesystem(#[from] EnsureFilesystemError),
+    #[error("Failed to ensure ZFS dataset")]
+    EnsureDataset(#[from] EnsureDatasetError),
 
     #[error("Failed to destroy ZFS dataset")]
     DestroyDataset(#[from] DestroyDatasetError),
