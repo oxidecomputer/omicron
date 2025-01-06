@@ -6,8 +6,6 @@ loaded example system with:
 
 > 
 
-> # expunge external DNS from initial blueprint
-
 > blueprint-show 3f00b694-1b16-4aaa-8f78-e6b3a527b434
 blueprint  3f00b694-1b16-4aaa-8f78-e6b3a527b434
 parent:    06c88262-f435-410e-ba98-101bed41ec27
@@ -150,8 +148,6 @@ blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0 created from blueprint 3f00b694-1
 
 > 
 
-> # run planner, which adds a new external DNS
-
 > blueprint-show 366b0b68-d80e-4bc1-abd3-dc69837847e0
 blueprint  366b0b68-d80e-4bc1-abd3-dc69837847e0
 parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
@@ -293,8 +289,6 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
 generated blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2 based on parent blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0
 
 > 
-
-> # expunge newly-added external DNS
 
 > blueprint-show 9c998c1d-1a7b-440a-ae0c-40f781dea6e2
 blueprint  9c998c1d-1a7b-440a-ae0c-40f781dea6e2

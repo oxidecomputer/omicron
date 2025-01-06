@@ -1,13 +1,10 @@
 load-example
 
-# expunge external DNS from initial blueprint
 blueprint-show 3f00b694-1b16-4aaa-8f78-e6b3a527b434
 blueprint-edit 3f00b694-1b16-4aaa-8f78-e6b3a527b434 expunge-zone 90d08710-3c0b-4fae-b01e-9a826fd3124f
 
-# run planner, which adds a new external DNS
 blueprint-show 366b0b68-d80e-4bc1-abd3-dc69837847e0
 blueprint-plan 366b0b68-d80e-4bc1-abd3-dc69837847e0
 
-# expunge newly-added external DNS
 blueprint-show 9c998c1d-1a7b-440a-ae0c-40f781dea6e2
 blueprint-edit 9c998c1d-1a7b-440a-ae0c-40f781dea6e2 expunge-zone a9bc9526-feb0-4b9f-86e5-f56789a314f6
