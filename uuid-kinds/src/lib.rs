@@ -57,6 +57,7 @@ impl_typed_uuid_kind! {
     DemoSaga => "demo_saga",
     Downstairs => "downstairs",
     DownstairsRegion => "downstairs_region",
+    Event => "event",
     ExternalIp => "external_ip",
     Instance => "instance",
     LoopbackAddress => "loopback_address",
@@ -74,5 +75,6 @@ impl_typed_uuid_kind! {
     UpstairsRepair => "upstairs_repair",
     UpstairsSession => "upstairs_session",
     Vnic => "vnic",
+    Webhook => "webhook",
     Zpool => "zpool",
 }
