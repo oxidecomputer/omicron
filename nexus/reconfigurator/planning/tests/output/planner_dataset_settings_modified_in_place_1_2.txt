@@ -61,8 +61,8 @@ to:   blueprint fe13be30-94c2-4fa6-aad5-ae3c5028f6bb
     oxp_f843fb62-0f04-4c7d-a56f-62531104dc77/crypt/zone/oxz_crucible_fc4f1769-9611-42d3-b8c1-f2be9b5359f6          35fa6ec8-6b58-4fcc-a5a2-36e66736e9c1   none        none          off        
     oxp_96569b61-9e0c-4ee7-bd11-a5e0c541ca99/crypt/zone/oxz_crucible_fff71a84-09c2-4dab-bc18-8f4570f278bb          00abfe99-288d-4a63-abea-adfa62e74524   none        none          off        
     oxp_3b6e2ade-57fc-4f9d-85c3-38fca27f1df6/crypt/zone/oxz_crucible_pantry_197067bc-9a21-444e-9794-6051d9f78a00   19736dbd-1d01-41e9-a800-ffc450464c2d   none        none          off        
-    oxp_3b6e2ade-57fc-4f9d-85c3-38fca27f1df6/crypt/zone/oxz_crucible_pantry_350fba7f-b754-429e-a21d-e91d139713f2   8be4aa2f-1612-4bdf-a0f6-7458b151308f   none        none          off        
-    oxp_3b6e2ade-57fc-4f9d-85c3-38fca27f1df6/crypt/zone/oxz_crucible_pantry_504963cb-3077-477c-b4e5-2d69bf9caa0c   7fd439f9-dcef-4cfb-b1a1-d298be9d2e3b   none        none          off        
+    oxp_5192ef62-5a12-4a0c-829d-a409da87909c/crypt/zone/oxz_crucible_pantry_350fba7f-b754-429e-a21d-e91d139713f2   8be4aa2f-1612-4bdf-a0f6-7458b151308f   none        none          off        
+    oxp_8778bcc5-dddf-4345-9fdf-5c46a36497b0/crypt/zone/oxz_crucible_pantry_504963cb-3077-477c-b4e5-2d69bf9caa0c   7fd439f9-dcef-4cfb-b1a1-d298be9d2e3b   none        none          off        
     oxp_3b6e2ade-57fc-4f9d-85c3-38fca27f1df6/crypt/zone/oxz_internal_dns_1e9422ca-a3d9-4435-bb17-39d5ad22b4ba      5651c4fb-d146-4270-8794-6ed7ceb6f130   none        none          off        
     oxp_8778bcc5-dddf-4345-9fdf-5c46a36497b0/crypt/zone/oxz_internal_dns_4a0ec9f6-6ce6-4456-831e-5f8df7b57332      d2b9f103-8bf1-4603-873d-cec130430ba7   none        none          off        
     oxp_5192ef62-5a12-4a0c-829d-a409da87909c/crypt/zone/oxz_internal_dns_efecb8a2-ce0b-416f-958b-de1fad1bef02      158e226c-e44e-427f-93af-ee96d2cfb9be   none        none          off        

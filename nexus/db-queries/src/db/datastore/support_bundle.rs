@@ -262,7 +262,7 @@ impl DataStore {
             .all_omicron_datasets(
                 nexus_types::deployment::BlueprintDatasetFilter::Expunged,
             )
-            .filter_map(|dataset_config| {
+            .filter_map(|(_sled_id, dataset_config)| {
                 if matches!(
                     dataset_config.kind,
                     omicron_common::api::internal::shared::DatasetKind::Debug
