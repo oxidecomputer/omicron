@@ -278,13 +278,13 @@ impl DataStore {
         // batch rather than making a bunch of round-trips to the database.
         // We'd do that if we had an interface for doing that with bound
         // parameters, etc.  See oxidecomputer/omicron#973.
-        let pool = self.pool_connection_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         // The risk of a serialization error is possible here, but low,
         // as most of the operations should be insertions rather than in-place
         // modifications of existing tables.
-        #[allow(clippy::disallowed_methods)]
-        pool.transaction_async(|conn| async move {
+        self.transaction_non_retry_wrapper("inventory_insert_collection")
+            .transaction(&conn, |conn| async move {
             // Insert records (and generate ids) for any baseboards that do not
             // already exist in the database.  These rows are not scoped to a
             // particular collection.  They contain only immutable data --

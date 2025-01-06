@@ -20,7 +20,6 @@ use crate::db::model::RoleAssignment;
 use crate::db::model::RoleBuiltin;
 use crate::db::pagination::paginated_multicolumn;
 use crate::db::pool::DbConnection;
-use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_db_fixed_data::role_assignment::BUILTIN_ROLE_ASSIGNMENTS;
@@ -213,10 +212,9 @@ impl DataStore {
         // This method should probably be retryable, but this is slightly
         // complicated by the cloning semantics of the queries, which
         // must be Clone to be retried.
-        #[allow(clippy::disallowed_methods)]
-        self.pool_connection_authorized(opctx)
-            .await?
-            .transaction_async(|conn| async move {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.transaction_non_retry_wrapper("role_assignment_replace_visible")
+            .transaction(&conn, |conn| async move {
                 delete_old_query.execute_async(&conn).await?;
                 Ok(insert_new_query.get_results_async(&conn).await?)
             })

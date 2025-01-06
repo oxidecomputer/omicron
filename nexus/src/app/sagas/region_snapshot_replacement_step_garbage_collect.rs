@@ -131,8 +131,8 @@ pub(crate) mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::datastore::region_snapshot_replacement;
     use nexus_test_utils_macros::nexus_test;
-    use sled_agent_client::types::CrucibleOpts;
-    use sled_agent_client::types::VolumeConstructionRequest;
+    use sled_agent_client::CrucibleOpts;
+    use sled_agent_client::VolumeConstructionRequest;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -187,8 +187,24 @@ pub(crate) mod test {
             .await
             .unwrap();
 
+        let step_volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                step_volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(),
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
         let mut request =
-            RegionSnapshotReplacementStep::new(Uuid::new_v4(), Uuid::new_v4());
+            RegionSnapshotReplacementStep::new(Uuid::new_v4(), step_volume_id);
         request.replacement_state =
             RegionSnapshotReplacementStepState::Complete;
         request.old_snapshot_volume_id = Some(old_snapshot_volume_id);
