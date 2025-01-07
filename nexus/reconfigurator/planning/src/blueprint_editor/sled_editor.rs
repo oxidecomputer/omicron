@@ -460,7 +460,7 @@ impl ActiveSledEditor {
         }
 
         if let Some(dataset) = config.filesystem_dataset() {
-            self.datasets.expunge(&dataset.pool().id(), dataset.dataset())?;
+            self.datasets.expunge(&dataset.pool().id(), dataset.kind())?;
         }
         if let Some(dataset) = config.zone_type.durable_dataset() {
             self.datasets

@@ -1054,7 +1054,7 @@ impl StorageManager {
         let mountpoint_root = &self.resources.disks().mount_config().root;
         let mountpoint_path = config.name.mountpoint(mountpoint_root);
         let details = DatasetCreationDetails {
-            zoned: config.name.dataset().zoned(),
+            zoned: config.name.kind().zoned(),
             mountpoint: Mountpoint::Path(mountpoint_path),
             full_name: config.name.full_name(),
         };
