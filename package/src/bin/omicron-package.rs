@@ -10,11 +10,14 @@ use clap::{Parser, Subcommand};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use illumos_utils::{zfs, zone};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use omicron_package::cargo_plan::build_cargo_plan;
-use omicron_package::config::{Config, ConfigArgs};
-use omicron_package::target::{target_command_help, KnownTarget};
-use omicron_package::{parse, BuildCommand, DeployCommand, TargetCommand};
-use omicron_zone_package::config::{Config as PackageConfig, PackageName};
+use omicron_package::cargo_plan::{
+    build_cargo_plan, do_show_cargo_commands_for_config,
+    do_show_cargo_commands_for_presets,
+};
+use omicron_package::config::{BaseConfig, Config, ConfigArgs};
+use omicron_package::target::target_command_help;
+use omicron_package::{BuildCommand, DeployCommand, TargetCommand};
+use omicron_zone_package::config::PackageName;
 use omicron_zone_package::package::{Package, PackageOutput, PackageSource};
 use omicron_zone_package::progress::Progress;
 use omicron_zone_package::target::TargetMap;
@@ -30,7 +33,6 @@ use std::fs::create_dir_all;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::Command;
 
 const OMICRON_SLED_AGENT: PackageName =
     PackageName::new_const("omicron-sled-agent");
@@ -68,49 +70,6 @@ struct Args {
 
     #[clap(subcommand)]
     subcommand: SubCommand,
-}
-
-async fn do_show_cargo_commands(config: &Config) -> Result<()> {
-    let metadata = cargo_metadata::MetadataCommand::new().no_deps().exec()?;
-    let features = config.cargo_features();
-    let cargo_plan =
-        build_cargo_plan(&metadata, config.packages_to_build(), &features)?;
-
-    let release_command = cargo_plan.release.build_command("build");
-    let debug_command = cargo_plan.debug.build_command("build");
-
-    print!("release command: ");
-    if let Some(command) = release_command {
-        println!("{}", command_to_string(&command));
-    } else {
-        println!("(none)");
-    }
-
-    print!("debug command: ");
-    if let Some(command) = debug_command {
-        println!("{}", command_to_string(&command));
-    } else {
-        println!("(none)");
-    }
-
-    Ok(())
-}
-
-fn command_to_string(command: &Command) -> String {
-    // Use shell-words to join the command and arguments into a single string.
-    let mut v = vec![command
-        .as_std()
-        .get_program()
-        .to_str()
-        .expect("program is valid UTF-8")];
-    v.extend(
-        command
-            .as_std()
-            .get_args()
-            .map(|arg| arg.to_str().expect("argument is valid UTF-8")),
-    );
-
-    shell_words::join(&v)
 }
 
 async fn do_for_all_rust_packages(
@@ -159,6 +118,7 @@ async fn do_list_outputs(
 }
 
 async fn do_target(
+    base_config: &BaseConfig,
     artifact_dir: &Utf8Path,
     name: Option<&str>,
     subcommand: &TargetCommand,
@@ -169,13 +129,15 @@ async fn do_target(
     })?;
     match subcommand {
         TargetCommand::Create {
+            preset,
             image,
             machine,
             switch,
             rack_topology,
             clickhouse_topology,
         } => {
-            let target = KnownTarget::new(
+            let preset_target = base_config.get_preset(preset)?;
+            let target = preset_target.with_overrides(
                 image.clone(),
                 machine.clone(),
                 switch.clone(),
@@ -269,7 +231,7 @@ async fn replace_active_link(
 
     let dst = target_dir.join(Config::ACTIVE);
     if !target_dir.join(src).exists() {
-        bail!("TargetMap file {} does not exist", src);
+        bail!("Target file {} does not exist", src);
     }
     let _ = tokio::fs::remove_file(&dst).await;
     tokio::fs::symlink(src, &dst).await.with_context(|| {
@@ -869,7 +831,9 @@ impl Progress for PackageProgress {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::try_parse()?;
-    let package_config = parse::<_, PackageConfig>(&args.manifest)?;
+    let base_config = BaseConfig::load(&args.manifest).with_context(|| {
+        format!("failed to load base config from {:?}", args.manifest)
+    })?;
 
     let mut open_options = std::fs::OpenOptions::new();
     open_options.write(true).create(true).truncate(true);
@@ -883,9 +847,9 @@ async fn main() -> Result<()> {
     let log = Logger::root(drain, o!());
 
     let get_config = || -> Result<Config> {
-        Config::get_config(
+        Config::load(
             &log,
-            package_config,
+            base_config.package_config(),
             &args.config_args,
             &args.artifact_dir,
         )
@@ -903,6 +867,7 @@ async fn main() -> Result<()> {
     match args.subcommand {
         SubCommand::Build(BuildCommand::Target { subcommand }) => {
             do_target(
+                &base_config,
                 &args.artifact_dir,
                 args.config_args.target.as_deref(),
                 &subcommand,
@@ -930,8 +895,15 @@ async fn main() -> Result<()> {
             )
             .await?;
         }
-        SubCommand::Build(BuildCommand::ShowCargoCommands) => {
-            do_show_cargo_commands(&get_config()?).await?;
+        SubCommand::Build(BuildCommand::ShowCargoCommands { presets }) => {
+            // If presets is empty, show the commands from the
+            // default configuration, otherwise show the commands
+            // for the specified presets.
+            if let Some(presets) = presets {
+                do_show_cargo_commands_for_presets(&base_config, &presets)?;
+            } else {
+                do_show_cargo_commands_for_config(&get_config()?)?;
+            }
         }
         SubCommand::Build(BuildCommand::Check) => {
             do_check(&get_config()?).await?

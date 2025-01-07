@@ -7172,6 +7172,7 @@ dependencies = [
  "futures",
  "hex",
  "illumos-utils",
+ "indent_write",
  "indicatif",
  "omicron-workspace-hack",
  "omicron-zone-package",

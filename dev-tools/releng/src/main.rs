@@ -454,8 +454,13 @@ async fn main() -> Result<()> {
                     artifacts_path.as_str(),
                     "target",
                     "create",
+                    "--preset",
+                    target.as_str(),
                 ])
-                .args(target.target_args())
+                // Note: Do not override the preset by adding arguments like
+                // `-m`/`--machine` here, or anywhere else in the releng
+                // tooling! All release targets must be configured entirely via
+                // the `target.preset` table in `package-manifest.toml`.
                 .env_remove("CARGO_MANIFEST_DIR"),
         )
         .after("omicron-package");
@@ -636,22 +641,6 @@ impl Target {
             Target::Recovery => {
                 args.output_dir.join(format!("artifacts-{}", self))
             }
-        }
-    }
-
-    fn target_args(self) -> &'static [&'static str] {
-        match self {
-            Target::Host => &[
-                "--image",
-                "standard",
-                "--machine",
-                "gimlet",
-                "--switch",
-                "asic",
-                "--rack-topology",
-                "multi-sled",
-            ],
-            Target::Recovery => &["--image", "trampoline"],
         }
     }
 
