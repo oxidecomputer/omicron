@@ -272,8 +272,6 @@ impl SupportBundleCollector {
                 .zpool_get_sled_if_in_service(&opctx, bundle.zpool_id.into())
                 .await;
 
-            println!("zpool_get_sled_if_in_service result: {result:?}");
-
             let delete_from_db = match result {
                 Ok(sled_id) => {
                     match self
@@ -429,7 +427,6 @@ impl<'a> BundleCollection<'a> {
         // as it's being collected.
         let dir = tempdir()?;
 
-        println!("created tempdir, starting collection");
         let mut collection = Box::pin(self.collect_bundle_as_file(&dir));
 
         // We periodically check the state of the support bundle - if a user
