@@ -338,7 +338,7 @@ mod tests {
 
         // We expect to see CRDB zones 1 and 3 with their IPs but the ports
         // changed to `COCKROACH_ADMIN_PORT`.
-        let expected = vec![
+        let mut expected = vec![
             (
                 crdb_id1,
                 SocketAddrV6::new(*crdb_addr1.ip(), COCKROACH_ADMIN_PORT, 0, 0),
@@ -348,6 +348,9 @@ mod tests {
                 SocketAddrV6::new(*crdb_addr3.ip(), COCKROACH_ADMIN_PORT, 0, 0),
             ),
         ];
+        // We sort starting with zone id, since the original zones are sorted
+        // that way in a map.
+        expected.sort_unstable();
 
         let admin_addrs = CockroachAdminFromBlueprintViaFixedPort
             .cockroach_admin_addrs(&blueprint)
