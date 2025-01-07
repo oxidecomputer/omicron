@@ -386,13 +386,23 @@ impl SupportBundleCollector {
             )
             .await
         {
-            info!(
-                &opctx.log,
-                "SupportBundleCollector: Concurrent state change activating bundle";
-                "bundle" => %bundle.id,
-                "err" => ?err,
-            );
-            return Ok(Some(report));
+            if matches!(err, Error::InvalidRequest { .. }) {
+                info!(
+                    &opctx.log,
+                    "SupportBundleCollector: Concurrent state change activating bundle";
+                    "bundle" => %bundle.id,
+                    "err" => ?err,
+                );
+                return Ok(Some(report));
+            } else {
+                warn!(
+                    &opctx.log,
+                    "SupportBundleCollector: Unexpected error activating bundle";
+                    "bundle" => %bundle.id,
+                    "err" => ?err,
+                );
+                anyhow::bail!("failed to activate bundle: {:#}", err);
+            }
         }
         report.activated_in_db_ok = true;
         Ok(Some(report))
