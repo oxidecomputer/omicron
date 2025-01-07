@@ -1807,6 +1807,13 @@ mod test {
                 ),
                 5,
             ),
+            make_sled_info(
+                SledUuid::new_v4(),
+                Ipv6Subnet::<SLED_PREFIX>::new(
+                    "fd00:1122:3344:103::1".parse().unwrap(),
+                ),
+                5,
+            ),
         ]
     }
 
