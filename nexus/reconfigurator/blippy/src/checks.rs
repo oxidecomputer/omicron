@@ -1294,7 +1294,7 @@ mod tests {
                     == durable_zone.zone_type.durable_dataset().unwrap().kind);
             let root_dataset = root_zone.filesystem_dataset().unwrap();
             let matches_root = (dataset.pool == *root_dataset.pool())
-                && (dataset.kind == *root_dataset.dataset());
+                && (dataset.kind == *root_dataset.kind());
             !matches_durable && !matches_root
         });
 
@@ -1465,7 +1465,7 @@ mod tests {
                 if (dataset.pool == durable_dataset.dataset.pool_name
                     && dataset.kind == durable_dataset.kind)
                     || (dataset.pool == *root_dataset.pool()
-                        && dataset.kind == *root_dataset.dataset())
+                        && dataset.kind == *root_dataset.kind())
                 {
                     Some(Note {
                         severity: Severity::Fatal,

@@ -2790,7 +2790,7 @@ pub mod test {
             {
                 for dataset in dataset_configs {
                     let id = dataset.id;
-                    let kind = dataset.name.dataset();
+                    let kind = dataset.name.kind();
                     let by_kind: &mut BTreeMap<_, _> =
                         input_dataset_ids.entry(*zpool_id).or_default();
                     let prev = by_kind.insert(kind.clone(), id);
