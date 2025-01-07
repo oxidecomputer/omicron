@@ -969,3 +969,11 @@ machine = "non-gimlet"
 switch = "softnpu"
 rack-topology = "single-sled"
 clickhouse-topology = "single-node"
+
+# A preset for the `a4x2` testbed environment.
+[target.preset.a4x2]
+image = "standard"
+machine = "non-gimlet"
+switch = "softnpu"
+rack-topology = "multi-sled"
+clickhouse-topology = "single-node"
