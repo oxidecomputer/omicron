@@ -18,6 +18,7 @@ use crate::inventory::Collection;
 pub use crate::inventory::SourceNatConfig;
 pub use crate::inventory::ZpoolName;
 use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
+use diffus::Diffus;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -137,7 +138,9 @@ pub use blueprint_diff::BlueprintDiff;
 // zones deployed on each host and some supporting configuration (e.g., DNS).
 // This is aimed at supporting add/remove sleds.  The plan is to grow this to
 // include more of the system as we support more use cases.
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffus,
+)]
 pub struct Blueprint {
     /// unique identifier for this blueprint
     pub id: Uuid,
@@ -187,6 +190,7 @@ pub struct Blueprint {
     pub clickhouse_cluster_config: Option<ClickhouseClusterConfig>,
 
     /// when this blueprint was generated (for debugging)
+    #[diffus(ignore)]
     pub time_created: chrono::DateTime<chrono::Utc>,
     /// identity of the component that generated the blueprint (for debugging)
     /// This would generally be the Uuid of a Nexus instance.
@@ -538,7 +542,9 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
 /// per-zone [`BlueprintZoneDisposition`].
 ///
 /// Part of [`Blueprint`].
-#[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+#[derive(
+    Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffus,
+)]
 pub struct BlueprintZonesConfig {
     /// Generation number of this configuration.
     ///
@@ -642,6 +648,7 @@ fn zone_sort_key<T: ZoneSortKey>(z: &T) -> impl Ord {
     JsonSchema,
     Deserialize,
     Serialize,
+    Diffus,
 )]
 pub struct BlueprintZoneConfig {
     /// The disposition (desired state) of this zone recorded in the blueprint.
@@ -651,6 +658,12 @@ pub struct BlueprintZoneConfig {
     /// zpool used for the zone's (transient) root filesystem
     pub filesystem_pool: Option<ZpoolName>,
     pub zone_type: BlueprintZoneType,
+}
+
+impl diffus::Same for BlueprintZoneConfig {
+    fn same(&self, other: &Self) -> bool {
+        self == other
+    }
 }
 
 impl BlueprintZoneConfig {
@@ -704,6 +717,7 @@ impl From<BlueprintZoneConfig> for OmicronZoneConfig {
     Deserialize,
     Serialize,
     EnumIter,
+    Diffus,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum BlueprintZoneDisposition {
@@ -847,6 +861,7 @@ pub enum BlueprintDatasetFilter {
     Deserialize,
     Serialize,
     EnumIter,
+    Diffus,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum BlueprintPhysicalDiskDisposition {
@@ -878,7 +893,9 @@ impl BlueprintPhysicalDiskDisposition {
 }
 
 /// Information about an Omicron physical disk as recorded in a bluerprint.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Diffus,
+)]
 pub struct BlueprintPhysicalDiskConfig {
     pub disposition: BlueprintPhysicalDiskDisposition,
     pub identity: DiskIdentity,
@@ -889,10 +906,18 @@ pub struct BlueprintPhysicalDiskConfig {
 /// Information about Omicron physical disks as recorded in a blueprint.
 ///
 /// Part of [`Blueprint`].
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Diffus,
+)]
 pub struct BlueprintPhysicalDisksConfig {
     pub generation: Generation,
     pub disks: Vec<BlueprintPhysicalDiskConfig>,
+}
+
+impl diffus::Same for BlueprintPhysicalDiskConfig {
+    fn same(&self, other: &Self) -> bool {
+        self == other
+    }
 }
 
 // Required by RSS
@@ -929,7 +954,9 @@ impl From<BlueprintPhysicalDisksConfig> for OmicronPhysicalDisksConfig {
 }
 
 /// Information about Omicron datasets as recorded in a blueprint.
-#[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+#[derive(
+    Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffus,
+)]
 pub struct BlueprintDatasetsConfig {
     pub generation: Generation,
     pub datasets: BTreeMap<DatasetUuid, BlueprintDatasetConfig>,
@@ -964,6 +991,7 @@ impl From<BlueprintDatasetsConfig> for DatasetsConfig {
     Deserialize,
     Serialize,
     EnumIter,
+    Diffus,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum BlueprintDatasetDisposition {
@@ -1002,6 +1030,7 @@ impl BlueprintDatasetDisposition {
     JsonSchema,
     Deserialize,
     Serialize,
+    Diffus,
 )]
 pub struct BlueprintDatasetConfig {
     // TODO: Display this in diffs - leave for now, for backwards compat

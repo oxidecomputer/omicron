@@ -51,14 +51,14 @@ pub enum TargetCommand {
         image: Option<crate::target::Image>,
 
         /// The kind of machine to build for.
-        #[clap(short, long)]
+        #[clap(short, long, help_heading = "Preset overrides")]
         machine: Option<crate::target::Machine>,
 
         /// The switch to use for the target.
-        #[clap(short, long)]
+        #[clap(short, long, help_heading = "Preset overrides")]
         switch: Option<crate::target::Switch>,
 
-        #[clap(short, long)]
+        #[clap(short, long, help_heading = "Preset overrides")]
         /// Specify whether nexus will run in a single-sled or multi-sled
         /// environment.
         ///
@@ -70,7 +70,7 @@ pub enum TargetCommand {
         /// requirement.
         rack_topology: Option<crate::target::RackTopology>,
 
-        #[clap(short, long)]
+        #[clap(short, long, help_heading = "Preset overrides")]
         // TODO (https://github.com/oxidecomputer/omicron/issues/4148): Remove
         // once single-node functionality is removed.
         /// Specify whether clickhouse will be deployed as a replicated cluster

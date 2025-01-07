@@ -1437,6 +1437,7 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "derive_more",
+ "diffus",
  "expectorate",
  "itertools 0.13.0",
  "omicron-common",
@@ -2391,6 +2392,28 @@ name = "difflib"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6184e33543162437515c2e2b48714794e37845ec9851711914eec9d308f6ebe8"
+
+[[package]]
+name = "diffus"
+version = "0.10.0"
+source = "git+https://github.com/oxidecomputer/diffus?branch=oxide/main#f6abe39bffd875b5fb1ebabf8144da15e3effe16"
+dependencies = [
+ "diffus-derive",
+ "itertools 0.10.5",
+ "newtype-uuid",
+ "oxnet",
+ "uuid",
+]
+
+[[package]]
+name = "diffus-derive"
+version = "0.10.0"
+source = "git+https://github.com/oxidecomputer/diffus?branch=oxide/main#f6abe39bffd875b5fb1ebabf8144da15e3effe16"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
 
 [[package]]
 name = "digest"
@@ -6104,6 +6127,7 @@ dependencies = [
  "chrono",
  "clickhouse-admin-types",
  "debug-ignore",
+ "diffus",
  "expectorate",
  "gateway-client",
  "illumos-utils",
@@ -6206,6 +6230,7 @@ dependencies = [
 name = "nexus-sled-agent-shared"
 version = "0.1.0"
 dependencies = [
+ "diffus",
  "illumos-utils",
  "omicron-common",
  "omicron-passwords",
@@ -6308,6 +6333,7 @@ dependencies = [
  "cookie",
  "derive-where",
  "derive_more",
+ "diffus",
  "dropshot 0.13.0",
  "futures",
  "gateway-client",
@@ -6732,6 +6758,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
+ "diffus",
  "dropshot 0.13.0",
  "expectorate",
  "futures",
@@ -7384,6 +7411,7 @@ dependencies = [
 name = "omicron-uuid-kinds"
 version = "0.1.0"
 dependencies = [
+ "diffus",
  "newtype-uuid",
  "paste",
  "schemars",
@@ -7460,6 +7488,7 @@ dependencies = [
  "managed",
  "memchr",
  "mio",
+ "newtype-uuid",
  "nom",
  "num-bigint-dig",
  "num-integer",
@@ -10409,9 +10438,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.132"
+version = "1.0.133"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d726bfaff4b320266d395898905d0eba0345aae23b54aee3a737e260fd46db03"
+checksum = "c7fceb2473b9166b2294ef05efcb65a3db80803f0b03ef86a5fc88a2b85ee377"
 dependencies = [
  "itoa",
  "memchr",
@@ -13260,7 +13289,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

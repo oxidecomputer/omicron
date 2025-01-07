@@ -457,9 +457,10 @@ async fn main() -> Result<()> {
                     "--preset",
                     target.as_str(),
                 ])
-                // Note: Do not override the preset here! All release targets
-                // must be configured entirely via the `target.preset` table
-                // in `package-manifest.toml`.
+                // Note: Do not override the preset by adding arguments like
+                // `-m`/`--machine` here, or anywhere else in the releng
+                // tooling! All release targets must be configured entirely via
+                // the `target.preset` table in `package-manifest.toml`.
                 .env_remove("CARGO_MANIFEST_DIR"),
         )
         .after("omicron-package");
