@@ -1394,6 +1394,8 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         .await
         .expect("expected to find inventory collection");
 
+        zpools.push(zpool);
+
         // TODO: This is gross. I'd really like to clean this up before merging.
         //
         // - Blueprint tests don't want this, they want to control the generation
@@ -1404,8 +1406,6 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         if !ensure_datasets {
             return;
         }
-
-        zpools.push(zpool);
 
         // Configure the Sled to use all datasets
         let datasets = zpools
