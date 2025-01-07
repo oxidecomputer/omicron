@@ -1191,6 +1191,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                         kind: DatasetKind::Crucible,
                     }],
                     Self::DEFAULT_ZPOOL_SIZE_GIB,
+                    false,
                 )
                 .await;
             }
@@ -1207,6 +1208,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 kind: DatasetKind::Crucible,
             }],
             Self::DEFAULT_ZPOOL_SIZE_GIB,
+            false,
         )
         .await
     }
@@ -1240,6 +1242,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         zpool_id: ZpoolUuid,
         datasets: Vec<TestDataset>,
         gibibytes: u32,
+        ensure_datasets: bool,
     ) {
         let cptestctx = self.cptestctx;
 
@@ -1390,6 +1393,17 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         )
         .await
         .expect("expected to find inventory collection");
+
+        // TODO: This is gross. I'd really like to clean this up before merging.
+        //
+        // - Blueprint tests don't want this, they want to control the generation
+        // number passed to sled agents explicitly.
+        // - The Unauthorized test DOES want it, so that it can create a debug
+        // dataset, that also can get support bundles. But there's got to be a
+        // better way.
+        if !ensure_datasets {
+            return;
+        }
 
         zpools.push(zpool);
 

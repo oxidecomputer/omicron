@@ -77,6 +77,7 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
                 },
             ],
             DiskTest::DEFAULT_ZPOOL_SIZE_GIB,
+            true,
         )
         .await;
 
