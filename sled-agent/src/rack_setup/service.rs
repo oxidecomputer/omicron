@@ -1733,6 +1733,7 @@ impl<'a> OmicronZonesConfigGenerator<'a> {
 mod test {
     use super::*;
     use crate::rack_setup::plan::service::{Plan as ServicePlan, SledInfo};
+    use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
     use nexus_sled_agent_shared::inventory::{
         Baseboard, Inventory, InventoryDisk, OmicronZoneType,
         OmicronZonesConfig, SledRole,
@@ -1931,9 +1932,9 @@ mod test {
     }
 
     #[test]
-    fn only_crucible_datasets_have_addresses() {
+    fn rss_blueprint_is_blippy_clean() {
         let logctx = omicron_test_utils::dev::test_setup_log(
-            "only_crucible_datasets_have_addresses",
+            "rss_blueprint_is_blippy_clean",
         );
 
         let fake_sleds = make_fake_sleds();
@@ -1962,19 +1963,12 @@ mod test {
         )
         .expect("built blueprint");
 
-        for dataset_config in blueprint.blueprint_datasets.into_values() {
-            for dataset in dataset_config.datasets.values() {
-                match dataset.kind {
-                    DatasetKind::Crucible => assert!(
-                        dataset.address.is_some(),
-                        "crucible datasets should have addresses"
-                    ),
-                    _ => assert_eq!(
-                        dataset.address, None,
-                        "non-crucible datasets should not have addresses"
-                    ),
-                }
-            }
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+
+        if !report.notes().is_empty() {
+            eprintln!("{}", report.display());
+            panic!("RSS blueprint should have no blippy notes");
         }
 
         logctx.cleanup_successful();
