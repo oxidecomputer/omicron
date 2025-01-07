@@ -3703,7 +3703,7 @@ impl ServiceManager {
             };
             check_property("zoned", zoned, "on")?;
             check_property("canmount", canmount, "on")?;
-            if dataset.dataset().dataset_should_be_encrypted() {
+            if dataset.kind().dataset_should_be_encrypted() {
                 check_property("encryption", encryption, "aes-256-gcm")?;
             }
 

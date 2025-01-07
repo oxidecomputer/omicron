@@ -119,6 +119,7 @@ guppy.workspace = true
 hex-literal.workspace = true
 http.workspace = true
 hyper.workspace = true
+nexus-reconfigurator-blippy.workspace = true
 omicron-test-utils.workspace = true
 pretty_assertions.workspace = true
 rcgen.workspace = true
