@@ -18,6 +18,7 @@ use anyhow::Context;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
+use diffus::edit::Edit;
 use diffus::{edit, Diffable, Diffus};
 use dropshot::HttpError;
 pub use dropshot::PaginationOrder;
@@ -751,9 +752,22 @@ impl From<ByteCount> for i64 {
     PartialEq,
     PartialOrd,
     Serialize,
-    Diffus,
 )]
 pub struct Generation(u64);
+
+// We have to manually implement `Diffable` because this is newtype with private
+// data, and we want to see the diff on the newtype not the inner data.
+impl<'a> Diffable<'a> for Generation {
+    type Diff = (&'a Generation, &'a Generation);
+
+    fn diff(&'a self, other: &'a Self) -> edit::Edit<'a, Self> {
+        if self == other {
+            edit::Edit::Copy(self)
+        } else {
+            edit::Edit::Change((self, other))
+        }
+    }
+}
 
 impl Generation {
     pub const fn new() -> Generation {
@@ -1934,8 +1948,6 @@ impl JsonSchema for L4PortRange {
     DeserializeFromStr,
     PartialEq,
     Eq,
-    PartialOrd,
-    Ord,
     SerializeDisplay,
     Hash,
 )]
