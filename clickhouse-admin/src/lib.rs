@@ -36,7 +36,6 @@ pub enum StartError {
 /// Start the dropshot server for `clickhouse-admin-server` which
 /// manages clickhouse replica servers.
 pub async fn start_server_admin_server(
-    //  clickward: Clickward,
     binary_path: Utf8PathBuf,
     listen_address: SocketAddrV6,
     server_config: Config,
