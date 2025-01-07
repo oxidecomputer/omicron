@@ -32,6 +32,8 @@ use omicron_uuid_kinds::ZpoolUuid;
 use serde::Serialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use std::io::BufRead;
+use std::io::BufReader;
 use std::io::Write;
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
@@ -442,7 +444,7 @@ impl<'a> BundleCollection<'a> {
             tokio::select! {
                 // Timer fired mid-collection - let's check if we should stop.
                 _ = yield_interval.tick() => {
-                    info!(
+                    trace!(
                         &self.log,
                         "Checking if Bundle Collection cancelled";
                         "bundle" => %self.bundle.id
@@ -697,8 +699,17 @@ fn recursively_add_directory_to_zipfile(
             let src = entry.path();
 
             zip.start_file_from_path(dst, opts)?;
-            let buf = std::fs::read(&src)?;
-            zip.write_all(&buf)?;
+            let mut reader = BufReader::new(std::fs::File::open(&src)?);
+
+            loop {
+                let buf = reader.fill_buf()?;
+                let len = buf.len();
+                if len == 0 {
+                    break;
+                }
+                zip.write_all(&buf)?;
+                reader.consume(len);
+            }
         }
         if file_type.is_dir() {
             let opts = FullFileOptions::default();
