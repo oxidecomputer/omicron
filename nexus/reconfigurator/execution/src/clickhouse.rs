@@ -209,7 +209,7 @@ fn server_configs(
         .flat_map(|zones_config| {
             zones_config
                 .zones
-                .iter()
+                .values()
                 .filter(|zone_config| {
                     clickhouse_cluster_config
                         .servers
@@ -267,7 +267,7 @@ fn keeper_configs(
         .flat_map(|zones_config| {
             zones_config
                 .zones
-                .iter()
+                .values()
                 .filter(|zone_config| {
                     clickhouse_cluster_config
                         .keepers
@@ -351,35 +351,40 @@ mod test {
             let zone_id = OmicronZoneUuid::new_v4();
             let zone_config = BlueprintZonesConfig {
                 generation: Generation::new(),
-                zones: vec![BlueprintZoneConfig {
-                    disposition: BlueprintZoneDisposition::InService,
-                    id: zone_id,
-                    filesystem_pool: None,
-                    zone_type: BlueprintZoneType::ClickhouseKeeper(
-                        blueprint_zone_type::ClickhouseKeeper {
-                            address: SocketAddrV6::new(
-                                Ipv6Addr::new(
+                zones: [(
+                    zone_id,
+                    BlueprintZoneConfig {
+                        disposition: BlueprintZoneDisposition::InService,
+                        id: zone_id,
+                        filesystem_pool: None,
+                        zone_type: BlueprintZoneType::ClickhouseKeeper(
+                            blueprint_zone_type::ClickhouseKeeper {
+                                address: SocketAddrV6::new(
+                                    Ipv6Addr::new(
+                                        0,
+                                        0,
+                                        0,
+                                        0,
+                                        0,
+                                        0,
+                                        0,
+                                        keeper_id as u16,
+                                    ),
                                     0,
                                     0,
                                     0,
-                                    0,
-                                    0,
-                                    0,
-                                    0,
-                                    keeper_id as u16,
                                 ),
-                                0,
-                                0,
-                                0,
-                            ),
-                            dataset: OmicronZoneDataset {
-                                pool_name: ZpoolName::new_external(
-                                    ZpoolUuid::new_v4(),
-                                ),
+                                dataset: OmicronZoneDataset {
+                                    pool_name: ZpoolName::new_external(
+                                        ZpoolUuid::new_v4(),
+                                    ),
+                                },
                             },
-                        },
-                    ),
-                }],
+                        ),
+                    },
+                )]
+                .into_iter()
+                .collect(),
             };
             zones.insert(sled_id, zone_config);
             config.keepers.insert(zone_id, keeper_id.into());
@@ -390,35 +395,40 @@ mod test {
             let zone_id = OmicronZoneUuid::new_v4();
             let zone_config = BlueprintZonesConfig {
                 generation: Generation::new(),
-                zones: vec![BlueprintZoneConfig {
-                    disposition: BlueprintZoneDisposition::InService,
-                    id: zone_id,
-                    filesystem_pool: None,
-                    zone_type: BlueprintZoneType::ClickhouseServer(
-                        blueprint_zone_type::ClickhouseServer {
-                            address: SocketAddrV6::new(
-                                Ipv6Addr::new(
+                zones: [(
+                    zone_id,
+                    BlueprintZoneConfig {
+                        disposition: BlueprintZoneDisposition::InService,
+                        id: zone_id,
+                        filesystem_pool: None,
+                        zone_type: BlueprintZoneType::ClickhouseServer(
+                            blueprint_zone_type::ClickhouseServer {
+                                address: SocketAddrV6::new(
+                                    Ipv6Addr::new(
+                                        0,
+                                        0,
+                                        0,
+                                        0,
+                                        0,
+                                        0,
+                                        0,
+                                        server_id as u16 + 10,
+                                    ),
                                     0,
                                     0,
                                     0,
-                                    0,
-                                    0,
-                                    0,
-                                    0,
-                                    server_id as u16 + 10,
                                 ),
-                                0,
-                                0,
-                                0,
-                            ),
-                            dataset: OmicronZoneDataset {
-                                pool_name: ZpoolName::new_external(
-                                    ZpoolUuid::new_v4(),
-                                ),
+                                dataset: OmicronZoneDataset {
+                                    pool_name: ZpoolName::new_external(
+                                        ZpoolUuid::new_v4(),
+                                    ),
+                                },
                             },
-                        },
-                    ),
-                }],
+                        ),
+                    },
+                )]
+                .into_iter()
+                .collect(),
             };
             zones.insert(sled_id, zone_config);
             config.servers.insert(zone_id, server_id.into());

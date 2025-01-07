@@ -293,33 +293,48 @@ mod tests {
         let crdb_addr1: SocketAddrV6 = "[2001:db8::1]:1111".parse().unwrap();
         let crdb_addr2: SocketAddrV6 = "[2001:db8::2]:1234".parse().unwrap();
         let crdb_addr3: SocketAddrV6 = "[2001:db8::3]:1234".parse().unwrap();
-        bp_zones.zones.push(make_crdb_zone_config(
-            BlueprintZoneDisposition::InService,
+        bp_zones.zones.insert(
             crdb_id1,
-            crdb_addr1,
-        ));
-        bp_zones.zones.push(make_crdb_zone_config(
-            BlueprintZoneDisposition::Expunged,
+            make_crdb_zone_config(
+                BlueprintZoneDisposition::InService,
+                crdb_id1,
+                crdb_addr1,
+            ),
+        );
+        bp_zones.zones.insert(
             crdb_id2,
-            crdb_addr2,
-        ));
-        bp_zones.zones.push(make_crdb_zone_config(
-            BlueprintZoneDisposition::InService,
+            make_crdb_zone_config(
+                BlueprintZoneDisposition::Expunged,
+                crdb_id2,
+                crdb_addr2,
+            ),
+        );
+        bp_zones.zones.insert(
             crdb_id3,
-            crdb_addr3,
-        ));
+            make_crdb_zone_config(
+                BlueprintZoneDisposition::InService,
+                crdb_id3,
+                crdb_addr3,
+            ),
+        );
 
         // Also add a non-CRDB zone to ensure it's filtered out.
-        bp_zones.zones.push(BlueprintZoneConfig {
-            disposition: BlueprintZoneDisposition::InService,
-            id: OmicronZoneUuid::new_v4(),
-            filesystem_pool: Some(ZpoolName::new_external(ZpoolUuid::new_v4())),
-            zone_type: BlueprintZoneType::CruciblePantry(
-                blueprint_zone_type::CruciblePantry {
-                    address: "[::1]:0".parse().unwrap(),
-                },
-            ),
-        });
+        let zone_id = OmicronZoneUuid::new_v4();
+        bp_zones.zones.insert(
+            zone_id,
+            BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id: zone_id,
+                filesystem_pool: Some(ZpoolName::new_external(
+                    ZpoolUuid::new_v4(),
+                )),
+                zone_type: BlueprintZoneType::CruciblePantry(
+                    blueprint_zone_type::CruciblePantry {
+                        address: "[::1]:0".parse().unwrap(),
+                    },
+                ),
+            },
+        );
 
         // We expect to see CRDB zones 1 and 3 with their IPs but the ports
         // changed to `COCKROACH_ADMIN_PORT`.

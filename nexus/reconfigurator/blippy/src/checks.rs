@@ -575,7 +575,7 @@ mod tests {
         // Copy the underlay IP from one Nexus to another.
         let mut nexus_iter = blueprint.blueprint_zones.iter_mut().flat_map(
             |(sled_id, zones_config)| {
-                zones_config.zones.iter_mut().filter_map(move |zone| {
+                zones_config.zones.values_mut().filter_map(move |zone| {
                     if zone.zone_type.is_nexus() {
                         Some((*sled_id, zone))
                     } else {
@@ -613,7 +613,7 @@ mod tests {
                 .get(&nexus1_sled_id)
                 .unwrap()
                 .zones
-                .iter();
+                .values();
             let sled1_zone1 = sled1_zones.next().expect("at least one zone");
             let sled1_zone2 = sled1_zones.next().expect("at least two zones");
             if sled1_zone1.id == nexus1.id {
@@ -680,7 +680,7 @@ mod tests {
             .blueprint_zones
             .iter_mut()
             .flat_map(|(sled_id, zones_config)| {
-                zones_config.zones.iter_mut().filter_map(move |zone| {
+                zones_config.zones.values_mut().filter_map(move |zone| {
                     if zone.zone_type.is_internal_dns() {
                         Some((*sled_id, zone))
                     } else {
@@ -761,7 +761,7 @@ mod tests {
         // Copy the external IP from one Nexus to another.
         let mut nexus_iter = blueprint.blueprint_zones.iter_mut().flat_map(
             |(sled_id, zones_config)| {
-                zones_config.zones.iter_mut().filter_map(move |zone| {
+                zones_config.zones.values_mut().filter_map(move |zone| {
                     if zone.zone_type.is_nexus() {
                         Some((*sled_id, zone))
                     } else {
@@ -831,7 +831,7 @@ mod tests {
         // Copy the external IP from one Nexus to another.
         let mut nexus_iter = blueprint.blueprint_zones.iter_mut().flat_map(
             |(sled_id, zones_config)| {
-                zones_config.zones.iter_mut().filter_map(move |zone| {
+                zones_config.zones.values_mut().filter_map(move |zone| {
                     if zone.zone_type.is_nexus() {
                         Some((*sled_id, zone))
                     } else {
@@ -896,7 +896,7 @@ mod tests {
         // Copy the external IP from one Nexus to another.
         let mut nexus_iter = blueprint.blueprint_zones.iter_mut().flat_map(
             |(sled_id, zones_config)| {
-                zones_config.zones.iter_mut().filter_map(move |zone| {
+                zones_config.zones.values_mut().filter_map(move |zone| {
                     if zone.zone_type.is_nexus() {
                         Some((*sled_id, zone))
                     } else {
@@ -965,7 +965,7 @@ mod tests {
         // Copy the durable zpool from one external DNS to another.
         let mut dns_iter = blueprint.blueprint_zones.iter_mut().flat_map(
             |(sled_id, zones_config)| {
-                zones_config.zones.iter_mut().filter_map(move |zone| {
+                zones_config.zones.values_mut().filter_map(move |zone| {
                     if zone.zone_type.is_external_dns() {
                         Some((*sled_id, zone))
                     } else {
@@ -1045,7 +1045,7 @@ mod tests {
         // Copy the filesystem zpool from one external DNS to another.
         let mut dns_iter = blueprint.blueprint_zones.iter_mut().flat_map(
             |(sled_id, zones_config)| {
-                zones_config.zones.iter_mut().filter_map(move |zone| {
+                zones_config.zones.values_mut().filter_map(move |zone| {
                     if zone.zone_type.is_external_dns() {
                         Some((*sled_id, zone))
                     } else {
@@ -1270,7 +1270,7 @@ mod tests {
         // with a filesystem_pool dataset to remove.
         let mut durable_zone = None;
         let mut root_zone = None;
-        for z in &zones_config.zones {
+        for (_, z) in &zones_config.zones {
             if durable_zone.is_none() {
                 if z.zone_type.durable_zpool().is_some() {
                     durable_zone = Some(z.clone());
@@ -1436,7 +1436,7 @@ mod tests {
             .expect("got zones for sled with datasets");
         let mut durable_zone = None;
         let mut root_zone = None;
-        for z in &zones_config.zones {
+        for (_, z) in &zones_config.zones {
             if durable_zone.is_none() {
                 if z.zone_type.durable_zpool().is_some() {
                     durable_zone = Some(z.clone());
@@ -1452,7 +1452,7 @@ mod tests {
             root_zone.expect("found zone with root dataset to prune");
         zones_config
             .zones
-            .retain(|z| z.id != durable_zone.id && z.id != root_zone.id);
+            .retain(|_, z| z.id != durable_zone.id && z.id != root_zone.id);
 
         let durable_dataset = durable_zone.zone_type.durable_dataset().unwrap();
         let root_dataset = root_zone.filesystem_dataset().unwrap();

@@ -413,7 +413,7 @@ impl<'a> BlueprintBuilder<'a> {
             .map(|sled_id| {
                 let config = BlueprintZonesConfig {
                     generation: Generation::new(),
-                    zones: Vec::new(),
+                    zones: BTreeMap::new(),
                 };
                 (sled_id, config)
             })
@@ -2142,7 +2142,7 @@ pub mod test {
         // We're going under the hood of the blueprint here; a sled can only get
         // to the decommissioned state if all its disks/datasets/zones have been
         // expunged, so do that too.
-        for zone in &mut blueprint1
+        for (_, zone) in &mut blueprint1
             .blueprint_zones
             .get_mut(&decommision_sled_id)
             .expect("has zones")
@@ -2189,7 +2189,7 @@ pub mod test {
         builder.sleds_mut().get_mut(&decommision_sled_id).unwrap().state =
             SledState::Decommissioned;
         let input = builder.build();
-        for z in &mut blueprint2
+        for (_, z) in &mut blueprint2
             .blueprint_zones
             .get_mut(&decommision_sled_id)
             .unwrap()
@@ -2328,7 +2328,7 @@ pub mod test {
         let (_, _, blueprint) = example(&logctx.log, TEST_NAME);
 
         for (_, zone_config) in &blueprint.blueprint_zones {
-            for zone in &zone_config.zones {
+            for (_, zone) in &zone_config.zones {
                 // The pool should only be optional for backwards compatibility.
                 let filesystem_pool = zone
                     .filesystem_pool
@@ -2553,7 +2553,7 @@ pub mod test {
                         .get_mut(sled_id)
                         .expect("missing sled")
                         .zones
-                        .retain(|z| match &z.zone_type {
+                        .retain(|_, z| match &z.zone_type {
                             BlueprintZoneType::Nexus(z) => {
                                 removed_nexus = Some(z.clone());
                                 false

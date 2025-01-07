@@ -236,7 +236,7 @@ impl SledEditor {
                 edited
                     .zones
                     .zones
-                    .iter()
+                    .values()
                     .filter(move |zone| zone.disposition.matches(filter)),
             ),
         }
@@ -319,7 +319,7 @@ impl ActiveSledEditor {
         preexisting_dataset_ids: DatasetIdsBackfillFromDb,
     ) -> Result<Self, SledInputError> {
         Ok(Self {
-            zones: zones.try_into()?,
+            zones: zones.into(),
             disks: disks.try_into()?,
             datasets: DatasetsEditor::new(datasets, preexisting_dataset_ids)?,
         })
