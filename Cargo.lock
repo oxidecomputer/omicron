@@ -10816,12 +10816,8 @@ dependencies = [
 name = "sled-diagnostics"
 version = "0.1.0"
 dependencies = [
- "cfg-if",
- "fs-err",
  "futures",
- "libc",
  "omicron-workspace-hack",
- "slog",
  "thiserror 1.0.69",
  "tokio",
 ]
