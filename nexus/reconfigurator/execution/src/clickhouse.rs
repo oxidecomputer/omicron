@@ -114,7 +114,7 @@ pub(crate) async fn deploy_nodes(
                 })
         }));
     }
-    for config in server_configs {
+    for config in &server_configs {
         let admin_addr = SocketAddr::V6(SocketAddrV6::new(
             config.settings.listen_addr,
             CLICKHOUSE_ADMIN_PORT,
@@ -158,6 +158,38 @@ pub(crate) async fn deploy_nodes(
     info!(
         opctx.log,
         "Successfully deployed all clickhouse server and keeper configs"
+    );
+
+    // We only need to initialise the database schema into one of the ClickHouse replica
+    // servers as they are all part of the same cluster.
+    let Some(first_server_config) = server_configs.first() else {
+        let e = concat!(
+            "Failed to initialise database schema on the replicated ClickHouse cluster:",
+            " no replica server configuration file found");
+        error!(opctx.log, "{e}",);
+        return Err(vec![anyhow!(e)]);
+    };
+
+    let admin_addr = SocketAddr::V6(SocketAddrV6::new(
+        first_server_config.settings.listen_addr,
+        CLICKHOUSE_ADMIN_PORT,
+        0,
+        0,
+    ));
+    let admin_url = format!("http://{admin_addr}");
+    let log = opctx.log.new(slog::o!("admin_url" => admin_url.clone()));
+    let client = ClickhouseSingleClient::new(&admin_url, log.clone());
+    let _ = client.init_db().await.map(|_| ()).map_err(|e| {
+        let err = format!(
+            "Failed to initialize the replicated ClickHouse cluster database: {e}"
+        );
+        error!(opctx.log, "{err}");
+        return vec![anyhow!(err)];
+    });
+
+    info!(
+        opctx.log,
+        "Successfully initialised the replicated ClickHouse cluster database schema"
     );
 
     Ok(())
