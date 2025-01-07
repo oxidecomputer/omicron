@@ -160,6 +160,7 @@ impl OmicronZoneNetworkResources {
     Serialize,
     Deserialize,
 )]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum OmicronZoneExternalIp {
     Floating(OmicronZoneExternalFloatingIp),
     Snat(OmicronZoneExternalSnatIp),
@@ -224,6 +225,7 @@ pub enum OmicronZoneExternalIpKey {
     Deserialize,
     Diffus,
 )]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct OmicronZoneExternalFloatingIp {
     pub id: ExternalIpUuid,
     pub ip: IpAddr,
@@ -243,6 +245,7 @@ pub struct OmicronZoneExternalFloatingIp {
     Deserialize,
     Diffus,
 )]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct OmicronZoneExternalFloatingAddr {
     pub id: ExternalIpUuid,
     pub addr: SocketAddr,
@@ -273,6 +276,7 @@ impl OmicronZoneExternalFloatingAddr {
     Deserialize,
     Diffus,
 )]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct OmicronZoneExternalSnatIp {
     pub id: ExternalIpUuid,
     pub snat_cfg: SourceNatConfig,

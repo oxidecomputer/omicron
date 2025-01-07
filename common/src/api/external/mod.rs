@@ -46,6 +46,9 @@ use std::num::{NonZeroU16, NonZeroU32};
 use std::str::FromStr;
 use uuid::Uuid;
 
+#[cfg(any(test, feature = "testing"))]
+use proptest::{arbitrary::any, strategy::Strategy};
+
 // The type aliases below exist primarily to ensure consistency among return
 // types for functions in the `nexus::Nexus` and `nexus::DataStore`.  The
 // type argument `T` generally implements `Object`.
@@ -213,6 +216,7 @@ impl<'a> TryFrom<&DataPageParams<'a, NameOrId>> for DataPageParams<'a, Uuid> {
 #[display("{0}")]
 #[serde(try_from = "String")]
 #[derive(Diffus)]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct Name(String);
 
 /// `Name::try_from(String)` is the primary method for constructing an Name
@@ -751,9 +755,27 @@ impl From<ByteCount> for i64 {
     PartialEq,
     PartialOrd,
     Serialize,
-    Diffus,
 )]
+#[cfg_attr(feature = "testing", derive(test_strategy::Arbitrary))]
 pub struct Generation(u64);
+
+// We have to manually implement `Diffable` because this is newtype with private
+// data, and we want to see the diff on the newtype not the inner data.
+impl<'a> Diffable<'a> for Generation {
+    type Diff = (&'a Generation, &'a Generation);
+
+    fn diff(&'a self, other: &'a Self) -> edit::Edit<'a, Self> {
+        if self == other {
+            edit::Edit::Copy(self)
+        } else {
+            edit::Edit::Change {
+                before: self,
+                after: other,
+                diff: (self, other),
+            }
+        }
+    }
+}
 
 impl Generation {
     pub const fn new() -> Generation {
@@ -1939,7 +1961,15 @@ impl JsonSchema for L4PortRange {
     SerializeDisplay,
     Hash,
 )]
-pub struct MacAddr(pub macaddr::MacAddr6);
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+pub struct MacAddr(
+    #[cfg_attr(
+        any(test, feature = "testing"),
+        strategy(any::<(u8, u8, u8, u8, u8, u8)>()
+            .prop_map(|(a,b,c,d,e,f)| macaddr::MacAddr6::new(a,b,c,d,e,f))))
+    ]
+    pub macaddr::MacAddr6,
+);
 
 impl<'a> Diffable<'a> for MacAddr {
     type Diff = (&'a Self, &'a Self);
@@ -1947,7 +1977,11 @@ impl<'a> Diffable<'a> for MacAddr {
         if self == other {
             edit::Edit::Copy(self)
         } else {
-            edit::Edit::Change((self, other))
+            edit::Edit::Change {
+                before: self,
+                after: other,
+                diff: (self, other),
+            }
         }
     }
 }
@@ -2117,6 +2151,7 @@ impl JsonSchema for MacAddr {
     JsonSchema,
     Diffus,
 )]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct Vni(u32);
 
 impl Vni {
