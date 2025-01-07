@@ -77,9 +77,9 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
                 },
             ],
             DiskTest::DEFAULT_ZPOOL_SIZE_GIB,
-            true,
         )
         .await;
+    disk_test.propagate_datasets_to_sleds().await;
 
     let client = &cptestctx.external_client;
     let log = &cptestctx.logctx.log;

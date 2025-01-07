@@ -1191,7 +1191,6 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                         kind: DatasetKind::Crucible,
                     }],
                     Self::DEFAULT_ZPOOL_SIZE_GIB,
-                    false,
                 )
                 .await;
             }
@@ -1208,9 +1207,69 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 kind: DatasetKind::Crucible,
             }],
             Self::DEFAULT_ZPOOL_SIZE_GIB,
-            false,
         )
         .await
+    }
+
+    // Propagate the dataset configuration to all Sled Agents.
+    //
+    // # Panics
+    //
+    // This function will panic if any of the Sled Agents have already
+    // applied dataset configuration.
+    //
+    // TODO: Ideally, we should do the following:
+    // 1. Also call a similar method to invoke the "omicron_physical_disks_ensure" API. Right now,
+    //    we aren't calling this at all for the simulated sled agent, which only works because
+    //    the simulated sled agent simply treats this as a stored config, rather than processing it
+    //    to actually provide a different view of storage.
+    // 2. Re-work the DiskTestBuilder API to automatically deploy the "disks + datasets" config
+    //    to sled agents exactly once. Adding new zpools / datasets after the DiskTest has been
+    //    started will need to also make a decision about re-deploying this configuration.
+    pub async fn propagate_datasets_to_sleds(&mut self) {
+        let cptestctx = self.cptestctx;
+
+        for (sled_id, PerSledDiskState { zpools }) in &self.sleds {
+            // Grab the "SledAgent" object -- we'll be contacting it shortly.
+            let sleds = cptestctx.all_sled_agents();
+            let sled_agent = sleds
+                .into_iter()
+                .find_map(|server| {
+                    if server.sled_agent.id == *sled_id {
+                        Some(server.sled_agent.clone())
+                    } else {
+                        None
+                    }
+                })
+                .expect("Cannot find sled");
+
+            // Configure the Sled to use all datasets we created
+            let datasets = zpools
+                .iter()
+                .flat_map(|zpool| zpool.datasets.iter().map(|d| (zpool.id, d)))
+                .map(|(zpool_id, TestDataset { id, kind })| {
+                    (
+                        *id,
+                        DatasetConfig {
+                            id: *id,
+                            name: DatasetName::new(
+                                ZpoolName::new_external(zpool_id),
+                                kind.clone(),
+                            ),
+                            inner: SharedDatasetConfig::default(),
+                        },
+                    )
+                })
+                .collect();
+
+            let generation = Generation::new();
+            let dataset_config = DatasetsConfig { generation, datasets };
+            let res = sled_agent.datasets_ensure(dataset_config).expect(
+                "Should have been able to ensure datasets, but could not.
+                     Did someone else already attempt to ensure datasets?",
+            );
+            assert!(!res.has_error());
+        }
     }
 
     fn get_sled(&self, sled_id: SledUuid) -> Arc<SledAgent> {
@@ -1242,7 +1301,6 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         zpool_id: ZpoolUuid,
         datasets: Vec<TestDataset>,
         gibibytes: u32,
-        ensure_datasets: bool,
     ) {
         let cptestctx = self.cptestctx;
 
@@ -1395,50 +1453,6 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         .expect("expected to find inventory collection");
 
         zpools.push(zpool);
-
-        // TODO: This is gross. I'd really like to clean this up before merging.
-        //
-        // - Blueprint tests don't want this, they want to control the generation
-        // number passed to sled agents explicitly.
-        // - The Unauthorized test DOES want it, so that it can create a debug
-        // dataset, that also can get support bundles. But there's got to be a
-        // better way.
-        if !ensure_datasets {
-            return;
-        }
-
-        // Configure the Sled to use all datasets
-        let datasets = zpools
-            .iter()
-            .flat_map(|zpool| zpool.datasets.iter().map(|d| (zpool.id, d)))
-            .map(|(zpool_id, TestDataset { id, kind })| {
-                (
-                    *id,
-                    DatasetConfig {
-                        id: *id,
-                        name: DatasetName::new(
-                            ZpoolName::new_external(zpool_id),
-                            kind.clone(),
-                        ),
-                        inner: SharedDatasetConfig::default(),
-                    },
-                )
-            })
-            .collect();
-
-        // If there was any prior configuration, bump the generation.
-        // Otherwise, set it for the first time.
-        let generation = {
-            if let Ok(config) = sled_agent.datasets_config_list() {
-                config.generation.next()
-            } else {
-                Generation::new()
-            }
-        };
-
-        let dataset_config = DatasetsConfig { generation, datasets };
-        let res = sled_agent.datasets_ensure(dataset_config).unwrap();
-        assert!(!res.has_error());
     }
 
     pub async fn set_requested_then_created_callback(&self) {
