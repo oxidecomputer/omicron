@@ -6,10 +6,12 @@ use crate::blippy::Blippy;
 use crate::blippy::Severity;
 use crate::blippy::SledKind;
 use nexus_sled_agent_shared::inventory::ZoneKind;
+use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetFilter;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use omicron_common::address::DnsSubnet;
 use omicron_common::address::Ipv6Subnet;
@@ -413,6 +415,10 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
         }
     }
 
+    // In a check below, we want to look up Crucible zones by zpool; build that
+    // map as we perform the next set of checks.
+    let mut crucible_zone_by_zpool = BTreeMap::new();
+
     // There should be a dataset for every dataset referenced by a running zone
     // (filesystem or durable).
     for (sled_id, zone_config) in blippy
@@ -431,7 +437,7 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
             Some(dataset) => {
                 match sled_datasets
                     .get(&dataset.pool().id())
-                    .and_then(|by_zpool| by_zpool.get(dataset.dataset()))
+                    .and_then(|by_zpool| by_zpool.get(dataset.kind()))
                 {
                     Some(dataset) => {
                         expected_datasets.insert(dataset.id);
@@ -469,6 +475,21 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
                             zone: zone_config.clone(),
                         },
                     );
+                }
+            }
+
+            if dataset.kind == DatasetKind::Crucible {
+                match &zone_config.zone_type {
+                    BlueprintZoneType::Crucible(crucible_zone_config) => {
+                        crucible_zone_by_zpool.insert(
+                            dataset.dataset.pool_name.id(),
+                            crucible_zone_config,
+                        );
+                    }
+                    _ => unreachable!(
+                        "zone_type.durable_dataset() returned Crucible for \
+                         non-Crucible zone type"
+                    ),
                 }
             }
         }
@@ -531,6 +552,50 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
                 },
             );
             continue;
+        }
+    }
+
+    // All Crucible datasets should have their address set to the address of the
+    // Crucible zone on their same zpool, and all non-Crucible datasets should
+    // not have addresses.
+    for (sled_id, dataset) in blippy
+        .blueprint()
+        .all_omicron_datasets(BlueprintDatasetFilter::InService)
+    {
+        match dataset.kind {
+            DatasetKind::Crucible => {
+                let Some(blueprint_zone_type::Crucible { address, .. }) =
+                    crucible_zone_by_zpool.get(&dataset.pool.id())
+                else {
+                    // We already checked above that all datasets have
+                    // corresponding zones, so a failure to find the zone for
+                    // this dataset would have already produced a note; just
+                    // skip it.
+                    continue;
+                };
+                if dataset.address != Some(*address) {
+                    blippy.push_sled_note(
+                        sled_id,
+                        Severity::Fatal,
+                        SledKind::CrucibleDatasetWithIncorrectAddress {
+                            dataset: dataset.clone(),
+                            expected_address: *address,
+                        },
+                    );
+                }
+            }
+            _ => {
+                if let Some(address) = dataset.address {
+                    blippy.push_sled_note(
+                        sled_id,
+                        Severity::Fatal,
+                        SledKind::NonCrucibleDatasetWithAddress {
+                            dataset: dataset.clone(),
+                            address,
+                        },
+                    );
+                }
+            }
         }
     }
 }
@@ -1294,7 +1359,7 @@ mod tests {
                     == durable_zone.zone_type.durable_dataset().unwrap().kind);
             let root_dataset = root_zone.filesystem_dataset().unwrap();
             let matches_root = (dataset.pool == *root_dataset.pool())
-                && (dataset.kind == *root_dataset.dataset());
+                && (dataset.kind == *root_dataset.kind());
             !matches_durable && !matches_root
         });
 
@@ -1465,7 +1530,7 @@ mod tests {
                 if (dataset.pool == durable_dataset.dataset.pool_name
                     && dataset.kind == durable_dataset.kind)
                     || (dataset.pool == *root_dataset.pool()
-                        && dataset.kind == *root_dataset.dataset())
+                        && dataset.kind == *root_dataset.kind())
                 {
                     Some(Note {
                         severity: Severity::Fatal,
@@ -1548,6 +1613,110 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert!(!expected_notes.is_empty());
+
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        for note in expected_notes {
+            assert!(
+                report.notes().contains(&note),
+                "did not find expected note {note:?}"
+            );
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_dataset_with_bad_address() {
+        static TEST_NAME: &str = "test_dataset_with_bad_address";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
+
+        let crucible_addr_by_zpool = blueprint
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .filter_map(|(_, z)| match z.zone_type {
+                BlueprintZoneType::Crucible(
+                    blueprint_zone_type::Crucible { address, .. },
+                ) => {
+                    let zpool_id = z
+                        .zone_type
+                        .durable_zpool()
+                        .expect("crucible zone has durable zpool")
+                        .id();
+                    Some((zpool_id, address))
+                }
+                _ => None,
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        // We have three ways a dataset address can be wrong:
+        //
+        // * A Crucible dataset has no address
+        // * A Crucible dataset has an address but it doesn't match its zone
+        // * A non-Crucible dataset has an address
+        //
+        // Make all three kinds of modifications to three different datasets and
+        // ensure we see all three noted.
+        let mut cleared_crucible_addr = false;
+        let mut changed_crucible_addr = false;
+        let mut set_non_crucible_addr = false;
+        let mut expected_notes = Vec::new();
+
+        for (sled_id, datasets_config) in
+            blueprint.blueprint_datasets.iter_mut()
+        {
+            for dataset in datasets_config.datasets.values_mut() {
+                match dataset.kind {
+                    DatasetKind::Crucible => {
+                        let bad_address = if !cleared_crucible_addr {
+                            cleared_crucible_addr = true;
+                            None
+                        } else if !changed_crucible_addr {
+                            changed_crucible_addr = true;
+                            Some("[1234:5678:9abc::]:0".parse().unwrap())
+                        } else {
+                            continue;
+                        };
+
+                        dataset.address = bad_address;
+                        let expected_address = *crucible_addr_by_zpool
+                            .get(&dataset.pool.id())
+                            .expect("found crucible zone for zpool");
+                        expected_notes.push(Note {
+                            severity: Severity::Fatal,
+                            kind: Kind::Sled {
+                                sled_id: *sled_id,
+                                kind: SledKind::CrucibleDatasetWithIncorrectAddress {
+                                    dataset: dataset.clone(),
+                                    expected_address,
+                                },
+                            },
+                        });
+                    }
+                    _ => {
+                        if !set_non_crucible_addr {
+                            set_non_crucible_addr = true;
+                            let address = "[::1]:0".parse().unwrap();
+                            dataset.address = Some(address);
+                            expected_notes.push(Note {
+                            severity: Severity::Fatal,
+                            kind: Kind::Sled {
+                                sled_id: *sled_id,
+                                kind: SledKind::NonCrucibleDatasetWithAddress {
+                                    dataset: dataset.clone(),
+                                    address,
+                                },
+                            },
+                        });
+                        }
+                    }
+                }
+            }
+        }
+
+        // We should have modified 3 datasets.
+        assert_eq!(expected_notes.len(), 3);
 
         let report =
             Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
