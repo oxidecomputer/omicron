@@ -2447,7 +2447,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle (
 -- for allocation changes to allocate more intelligently.
 CREATE UNIQUE INDEX IF NOT EXISTS one_bundle_per_dataset ON omicron.public.support_bundle (
     dataset_id
-);
+) WHERE dataset_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS lookup_bundle_by_nexus ON omicron.public.support_bundle (
     assigned_nexus
@@ -4757,7 +4757,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '118.0.0', NULL)
+    (TRUE, NOW(), NOW(), '119.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

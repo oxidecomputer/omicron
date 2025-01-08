@@ -225,22 +225,7 @@ impl DataStore {
     ) -> Result<SupportBundleExpungementReport, Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
-        // For this blueprint: The set of all expunged Nexus zones
-        let invalid_nexus_zones = blueprint
-            .all_omicron_zones(
-                nexus_types::deployment::BlueprintZoneFilter::Expunged,
-            )
-            .filter_map(|(_sled, zone)| {
-                if matches!(
-                    zone.zone_type,
-                    nexus_types::deployment::BlueprintZoneType::Nexus(_)
-                ) {
-                    Some(zone.id.into_untyped_uuid())
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<Uuid>>();
+        // For this blueprint: The set of all in-service Nexus zones.
         let valid_nexus_zones = blueprint
             .all_omicron_zones(
                 nexus_types::deployment::BlueprintZoneFilter::ShouldBeRunning,
@@ -257,10 +242,10 @@ impl DataStore {
             })
             .collect::<Vec<Uuid>>();
 
-        // For this blueprint: The set of expunged debug datasets
-        let invalid_datasets = blueprint
+        // For this blueprint: The set of in-service debug datasets
+        let valid_datasets = blueprint
             .all_omicron_datasets(
-                nexus_types::deployment::BlueprintDatasetFilter::Expunged,
+                nexus_types::deployment::BlueprintDatasetFilter::InService,
             )
             .filter_map(|(_sled_id, dataset_config)| {
                 if matches!(
@@ -282,15 +267,14 @@ impl DataStore {
             opctx,
             BlueprintUuid::from_untyped_uuid(blueprint.id),
             |conn| {
-                let invalid_nexus_zones = invalid_nexus_zones.clone();
                 let valid_nexus_zones = valid_nexus_zones.clone();
-                let invalid_datasets = invalid_datasets.clone();
+                let valid_datasets = valid_datasets.clone();
                 async move {
                     use db::schema::support_bundle::dsl;
 
                     // Find all bundles without backing storage.
                     let bundles_with_bad_datasets = dsl::support_bundle
-                        .filter(dsl::dataset_id.eq_any(invalid_datasets))
+                        .filter(dsl::dataset_id.ne_all(valid_datasets))
                         .select(SupportBundle::as_select())
                         .load_async(conn)
                         .await?;
@@ -347,7 +331,7 @@ impl DataStore {
 
                     // Find all bundles on nexuses that no longer exist.
                     let bundles_with_bad_nexuses = dsl::support_bundle
-                        .filter(dsl::assigned_nexus.eq_any(invalid_nexus_zones))
+                        .filter(dsl::assigned_nexus.ne_all(valid_nexus_zones))
                         .select(SupportBundle::as_select())
                         .load_async(conn)
                         .await?;
