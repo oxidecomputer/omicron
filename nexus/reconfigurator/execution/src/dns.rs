@@ -637,8 +637,8 @@ mod test {
                     zones: sa.omicron_zones
                         .zones
                         .into_iter()
-                        .map(|config| -> BlueprintZoneConfig {
-                            deprecated_omicron_zone_config_to_blueprint_zone_config(
+                        .map(|config| -> (OmicronZoneUuid, BlueprintZoneConfig) {
+                           (config.id,  deprecated_omicron_zone_config_to_blueprint_zone_config(
                                 config,
                                 BlueprintZoneDisposition::InService,
                                 // We don't get external IP IDs in inventory
@@ -646,7 +646,7 @@ mod test {
                                 // zone that needs one here. This is gross.
                                 Some(ExternalIpUuid::new_v4()),
                             )
-                            .expect("failed to convert zone config")
+                            .expect("failed to convert zone config"))
                         })
                         .collect(),
                 },
@@ -678,7 +678,8 @@ mod test {
         // not currently in service.
         let out_of_service_id = OmicronZoneUuid::new_v4();
         let out_of_service_addr = Ipv6Addr::LOCALHOST;
-        blueprint.blueprint_zones.values_mut().next().unwrap().zones.push(
+        blueprint.blueprint_zones.values_mut().next().unwrap().zones.insert(
+            out_of_service_id,
             BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::Quiesced,
                 id: out_of_service_id,
@@ -1031,7 +1032,7 @@ mod test {
             blueprint.blueprint_zones.iter_mut().next().unwrap();
         let nexus_zone = bp_zones_config
             .zones
-            .iter_mut()
+            .values_mut()
             .find(|z| z.zone_type.is_nexus())
             .unwrap();
         nexus_zone.disposition = BlueprintZoneDisposition::Quiesced;

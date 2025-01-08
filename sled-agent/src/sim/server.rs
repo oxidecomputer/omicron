@@ -15,7 +15,7 @@ use crate::rack_setup::{
     from_ipaddr_to_external_floating_ip,
     from_sockaddr_to_external_floating_addr,
 };
-use anyhow::anyhow;
+use anyhow::{anyhow, Context as _};
 use crucible_agent_client::types::State as RegionState;
 use illumos_utils::zpool::ZpoolName;
 use internal_dns_types::config::DnsConfigBuilder;
@@ -564,11 +564,13 @@ pub async fn run_standalone_server(
         },
     );
 
+    let blueprint = build_initial_blueprint_from_sled_configs(
+        &sled_configs,
+        internal_dns_version,
+    )
+    .context("could not construct initial blueprint")?;
     let rack_init_request = NexusTypes::RackInitializationRequest {
-        blueprint: build_initial_blueprint_from_sled_configs(
-            &sled_configs,
-            internal_dns_version,
-        ),
+        blueprint,
         physical_disks,
         zpools,
         datasets,

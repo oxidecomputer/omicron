@@ -438,11 +438,12 @@ mod test {
         // See `rack_setup::service::ServiceInner::run` for more details.
         fn make_zones() -> BlueprintZonesConfig {
             let zpool = ZpoolName::new_external(ZpoolUuid::new_v4());
+            let zone_id = OmicronZoneUuid::new_v4();
             BlueprintZonesConfig {
                 generation: Generation::new(),
-                zones: vec![BlueprintZoneConfig {
+                zones: [BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
-                    id: OmicronZoneUuid::new_v4(),
+                    id: zone_id,
                     filesystem_pool: Some(zpool.clone()),
                     zone_type: BlueprintZoneType::InternalDns(
                         blueprint_zone_type::InternalDns {
@@ -453,7 +454,10 @@ mod test {
                             http_address: "[::1]:0".parse().unwrap(),
                         },
                     ),
-                }],
+                }]
+                .into_iter()
+                .map(|z| (z.id, z))
+                .collect(),
             }
         }
 
@@ -542,18 +546,22 @@ mod test {
             zones: &mut BlueprintZonesConfig,
             disposition: BlueprintZoneDisposition,
         ) {
-            zones.zones.push(BlueprintZoneConfig {
-                disposition,
-                id: OmicronZoneUuid::new_v4(),
-                filesystem_pool: Some(ZpoolName::new_external(
-                    ZpoolUuid::new_v4(),
-                )),
-                zone_type: BlueprintZoneType::InternalNtp(
-                    blueprint_zone_type::InternalNtp {
-                        address: "[::1]:0".parse().unwrap(),
-                    },
-                ),
-            });
+            let zone_id = OmicronZoneUuid::new_v4();
+            zones.zones.insert(
+                zone_id,
+                BlueprintZoneConfig {
+                    disposition,
+                    id: zone_id,
+                    filesystem_pool: Some(ZpoolName::new_external(
+                        ZpoolUuid::new_v4(),
+                    )),
+                    zone_type: BlueprintZoneType::InternalNtp(
+                        blueprint_zone_type::InternalNtp {
+                            address: "[::1]:0".parse().unwrap(),
+                        },
+                    ),
+                },
+            );
         }
 
         // Both in-service and quiesced zones should be deployed.

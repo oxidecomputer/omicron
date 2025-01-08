@@ -1373,7 +1373,7 @@ mod test {
             SledUuid::from_untyped_uuid(sled1.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
-                zones: vec![
+                zones: [
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: external_dns_id,
@@ -1437,14 +1437,17 @@ mod test {
                             },
                         ),
                     },
-                ],
+                ]
+                .into_iter()
+                .map(|z| (z.id, z))
+                .collect(),
             },
         );
         blueprint_zones.insert(
             SledUuid::from_untyped_uuid(sled2.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
-                zones: vec![
+                zones: [
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: nexus_id,
@@ -1511,14 +1514,17 @@ mod test {
                             },
                         ),
                     },
-                ],
+                ]
+                .into_iter()
+                .map(|z| (z.id, z))
+                .collect(),
             },
         );
         blueprint_zones.insert(
             SledUuid::from_untyped_uuid(sled3.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
-                zones: vec![BlueprintZoneConfig {
+                zones: [BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: ntp3_id,
                     filesystem_pool: Some(random_zpool()),
@@ -1527,12 +1533,12 @@ mod test {
                             address: "[::1]:80".parse().unwrap(),
                         },
                     ),
-                }],
+                }]
+                .into_iter()
+                .map(|z| (z.id, z))
+                .collect(),
             },
         );
-        for zone_config in blueprint_zones.values_mut() {
-            zone_config.sort();
-        }
         let blueprint = Blueprint {
             id: Uuid::new_v4(),
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
@@ -1698,7 +1704,7 @@ mod test {
             SledUuid::from_untyped_uuid(sled.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
-                zones: vec![
+                zones: [
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: nexus_id1,
@@ -1763,7 +1769,10 @@ mod test {
                             },
                         ),
                     },
-                ],
+                ]
+                .into_iter()
+                .map(|z| (z.id, z))
+                .collect(),
             },
         );
 
@@ -1791,9 +1800,6 @@ mod test {
             HashMap::from([("api.sys".to_string(), external_records.clone())]),
         );
 
-        for zone_config in blueprint_zones.values_mut() {
-            zone_config.sort();
-        }
         let blueprint = Blueprint {
             id: Uuid::new_v4(),
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
@@ -1971,7 +1977,7 @@ mod test {
             SledUuid::from_untyped_uuid(sled.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
-                zones: vec![BlueprintZoneConfig {
+                zones: [BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: nexus_id,
                     filesystem_pool: Some(random_zpool()),
@@ -2000,12 +2006,12 @@ mod test {
                             },
                         },
                     ),
-                }],
+                }]
+                .into_iter()
+                .map(|z| (z.id, z))
+                .collect(),
             },
         );
-        for zone_config in blueprint_zones.values_mut() {
-            zone_config.sort();
-        }
         let blueprint = Blueprint {
             id: Uuid::new_v4(),
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
@@ -2080,7 +2086,7 @@ mod test {
             SledUuid::from_untyped_uuid(sled.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
-                zones: vec![
+                zones: [
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: external_dns_id,
@@ -2142,13 +2148,13 @@ mod test {
                             },
                         ),
                     },
-                ],
+                ]
+                .into_iter()
+                .map(|z| (z.id, z))
+                .collect(),
             },
         );
 
-        for zone_config in blueprint_zones.values_mut() {
-            zone_config.sort();
-        }
         let blueprint = Blueprint {
             id: Uuid::new_v4(),
             sled_state: sled_states_active(blueprint_zones.keys().copied()),

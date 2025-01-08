@@ -19,6 +19,7 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
+use std::net::SocketAddrV6;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Note {
@@ -169,6 +170,17 @@ pub enum SledKind {
     OrphanedDataset { dataset: BlueprintDatasetConfig },
     /// A dataset claims to be on a zpool that does not exist.
     DatasetOnNonexistentZpool { dataset: BlueprintDatasetConfig },
+    /// A Crucible dataset does not have its `address` set to its corresponding
+    /// Crucible zone.
+    CrucibleDatasetWithIncorrectAddress {
+        dataset: BlueprintDatasetConfig,
+        expected_address: SocketAddrV6,
+    },
+    /// A non-Crucible dataset has an address.
+    NonCrucibleDatasetWithAddress {
+        dataset: BlueprintDatasetConfig,
+        address: SocketAddrV6,
+    },
 }
 
 impl fmt::Display for SledKind {
@@ -350,6 +362,24 @@ impl fmt::Display for SledKind {
                     f,
                     "in-service dataset ({:?} {}) on non-existent zpool {}",
                     dataset.kind, dataset.id, dataset.pool
+                )
+            }
+            SledKind::CrucibleDatasetWithIncorrectAddress {
+                dataset,
+                expected_address,
+            } => {
+                write!(
+                    f,
+                    "Crucible dataset {} has bad address {:?} (expected {})",
+                    dataset.id, dataset.address, expected_address,
+                )
+            }
+            SledKind::NonCrucibleDatasetWithAddress { dataset, address } => {
+                write!(
+                    f,
+                    "non-Crucible dataset ({:?} {}) has an address: {} \
+                     (only Crucible datasets should have addresses)",
+                    dataset.kind, dataset.id, address,
                 )
             }
         }
