@@ -71,7 +71,7 @@ impl<T: IdMappable> IdMap<T> {
         self.inner.insert(entry.id(), entry)
     }
 
-    pub fn first_value(&self) -> Option<&T> {
+    pub fn first(&self) -> Option<&T> {
         self.inner.first_key_value().map(|(_, val)| val)
     }
 
