@@ -21,6 +21,7 @@ use nexus_inventory::now_db_precision;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::blueprint_zone_type;
+use nexus_types::deployment::id_map::IdMap;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
@@ -413,7 +414,7 @@ impl<'a> BlueprintBuilder<'a> {
             .map(|sled_id| {
                 let config = BlueprintZonesConfig {
                     generation: Generation::new(),
-                    zones: BTreeMap::new(),
+                    zones: IdMap::new(),
                 };
                 (sled_id, config)
             })
@@ -2553,7 +2554,7 @@ pub mod test {
                         .get_mut(sled_id)
                         .expect("missing sled")
                         .zones
-                        .retain(|_, z| match &z.zone_type {
+                        .retain(|z| match &z.zone_type {
                             BlueprintZoneType::Nexus(z) => {
                                 removed_nexus = Some(z.clone());
                                 false

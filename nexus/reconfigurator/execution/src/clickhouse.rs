@@ -381,7 +381,6 @@ mod test {
                     ),
                 }]
                 .into_iter()
-                .map(|z| (z.id, z))
                 .collect(),
             };
             zones.insert(sled_id, zone_config);
@@ -423,7 +422,6 @@ mod test {
                     ),
                 }]
                 .into_iter()
-                .map(|z| (z.id, z))
                 .collect(),
             };
             zones.insert(sled_id, zone_config);

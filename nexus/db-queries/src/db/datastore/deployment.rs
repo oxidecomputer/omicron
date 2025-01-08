@@ -51,6 +51,7 @@ use nexus_db_model::BpSledOmicronPhysicalDisks;
 use nexus_db_model::BpSledOmicronZones;
 use nexus_db_model::BpSledState;
 use nexus_db_model::BpTarget;
+use nexus_types::deployment::id_map::IdMap;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintMetadata;
@@ -587,7 +588,7 @@ impl DataStore {
                         s.sled_id.into(),
                         BlueprintZonesConfig {
                             generation: *s.generation,
-                            zones: BTreeMap::new(),
+                            zones: IdMap::new(),
                         },
                     );
                     bail_unless!(
@@ -794,7 +795,7 @@ impl DataStore {
                                 e.to_string()
                             ))
                         })?;
-                    sled_zones.zones.insert(zone.id, zone);
+                    sled_zones.zones.insert(zone);
                 }
             }
         }
@@ -2840,7 +2841,6 @@ mod tests {
                     ),
                 }]
                 .into_iter()
-                .map(|z| (z.id, z))
                 .collect(),
             },
         );

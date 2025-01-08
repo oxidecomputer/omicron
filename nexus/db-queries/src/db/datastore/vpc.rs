@@ -3148,9 +3148,8 @@ mod tests {
                 db_nic_from_zone(
                     bp1.blueprint_zones[&sled_ids[2]]
                         .zones
-                        .first_key_value()
-                        .unwrap()
-                        .1,
+                        .first_value()
+                        .unwrap(),
                 ),
             )
             .await
@@ -3184,9 +3183,8 @@ mod tests {
                 &opctx,
                 bp1.blueprint_zones[&sled_ids[2]]
                     .zones
-                    .first_key_value()
+                    .first_value()
                     .unwrap()
-                    .1
                     .id
                     .into_untyped_uuid(),
                 bp1_nic.id(),
@@ -3220,9 +3218,8 @@ mod tests {
                     db_nic_from_zone(
                         bp3.blueprint_zones[&sled_id]
                             .zones
-                            .first_key_value()
-                            .unwrap()
-                            .1,
+                            .first_value()
+                            .unwrap(),
                     ),
                 )
                 .await

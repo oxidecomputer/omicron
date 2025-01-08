@@ -4,6 +4,7 @@
 
 use crate::blueprint_builder::EditCounts;
 use nexus_sled_agent_shared::inventory::ZoneKind;
+use nexus_types::deployment::id_map::IdMap;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
@@ -11,8 +12,6 @@ use nexus_types::deployment::BlueprintZonesConfig;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use std::collections::btree_map::Entry;
-use std::collections::BTreeMap;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ZonesEditError {
@@ -38,7 +37,7 @@ pub struct DuplicateZoneId {
 #[derive(Debug)]
 pub(super) struct ZonesEditor {
     generation: Generation,
-    zones: BTreeMap<OmicronZoneUuid, BlueprintZoneConfig>,
+    zones: IdMap<BlueprintZoneConfig>,
     counts: EditCounts,
 }
 
@@ -46,7 +45,7 @@ impl ZonesEditor {
     pub fn empty() -> Self {
         Self {
             generation: Generation::new(),
-            zones: BTreeMap::new(),
+            zones: IdMap::new(),
             counts: EditCounts::zeroes(),
         }
     }
@@ -77,22 +76,18 @@ impl ZonesEditor {
         &mut self,
         zone: BlueprintZoneConfig,
     ) -> Result<(), ZonesEditError> {
-        match self.zones.entry(zone.id) {
-            Entry::Vacant(slot) => {
-                slot.insert(zone);
-                self.counts.added += 1;
-                Ok(())
-            }
-            Entry::Occupied(prev) => {
-                // We shouldn't be trying to add zones that already exist --
-                // something went wrong in the planner logic.
-                Err(ZonesEditError::AddDuplicateZoneId {
-                    id: zone.id,
-                    kind1: zone.zone_type.kind(),
-                    kind2: prev.get().zone_type.kind(),
-                })
-            }
+        if let Some(prev) = self.zones.get(&zone.id) {
+            // We shouldn't be trying to add zones that already exist --
+            // something went wrong in the planner logic.
+            return Err(ZonesEditError::AddDuplicateZoneId {
+                id: zone.id,
+                kind1: zone.zone_type.kind(),
+                kind2: prev.zone_type.kind(),
+            });
         }
+
+        self.zones.insert(zone);
+        Ok(())
     }
 
     /// Expunge a zone, returning `true` if the zone was expunged and `false` if

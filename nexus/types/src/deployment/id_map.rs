@@ -10,6 +10,7 @@ use serde::de::Error as _;
 use serde::de::Visitor;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::btree_map;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::marker::PhantomData;
@@ -38,6 +39,17 @@ type Inner<T> = BTreeMap<<T as IdMappable>::Id, T>;
 /// various serialization-related traits all erase the `IdMap` and behave like
 /// the inner `BTreeMap` would, although deserialzation performs extra checks to
 /// guarantee the key-must-be-its-values-ID property.
+///
+/// Similar to the constraint that a `BTreeMap`'s keys may not be modified in a
+/// way that affects their ordering, the _values_ of an `IdMap` must not be
+/// modified in a way that affects their `id()` (as returned by their
+/// [`IdMappable`] implementation. This is possible via methods like `get_mut()`
+/// but will induce a logic error that may produce panics, invalid
+/// serialization, etc. The type stored in `IdMap` is expected to have a stable,
+/// never-changing identity.
+///
+/// An entry-style API is _not_ provided, as it would be relatively unergonomic
+/// to provide while enforcing the key-must-be-ID invariant.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[derive_where(Default)]
 pub struct IdMap<T: IdMappable> {
@@ -49,8 +61,48 @@ impl<T: IdMappable> IdMap<T> {
         Self::default()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
     pub fn insert(&mut self, entry: T) -> Option<T> {
         self.inner.insert(entry.id(), entry)
+    }
+
+    pub fn first_value(&self) -> Option<&T> {
+        self.inner.first_key_value().map(|(_, val)| val)
+    }
+
+    pub fn get(&self, key: &T::Id) -> Option<&T> {
+        self.inner.get(key)
+    }
+
+    pub fn get_mut(&mut self, key: &T::Id) -> Option<&mut T> {
+        self.inner.get_mut(key)
+    }
+
+    pub fn iter(&self) -> btree_map::Iter<'_, T::Id, T> {
+        self.inner.iter()
+    }
+
+    pub fn values(&self) -> btree_map::Values<'_, T::Id, T> {
+        self.inner.values()
+    }
+
+    pub fn values_mut(&mut self) -> btree_map::ValuesMut<'_, T::Id, T> {
+        self.inner.values_mut()
+    }
+
+    pub fn into_values(self) -> btree_map::IntoValues<T::Id, T> {
+        self.inner.into_values()
+    }
+
+    pub fn clear(&mut self) {
+        self.inner.clear()
+    }
+
+    pub fn retain<F: FnMut(&mut T) -> bool>(&mut self, mut f: F) {
+        self.inner.retain(|_, val| f(val))
     }
 }
 
@@ -58,6 +110,33 @@ impl<T: IdMappable> FromIterator<T> for IdMap<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let inner = iter.into_iter().map(|entry| (entry.id(), entry)).collect();
         Self { inner }
+    }
+}
+
+impl<T: IdMappable> IntoIterator for IdMap<T> {
+    type Item = (T::Id, T);
+    type IntoIter = btree_map::IntoIter<T::Id, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.into_iter()
+    }
+}
+
+impl<'a, T: IdMappable> IntoIterator for &'a IdMap<T> {
+    type Item = (&'a T::Id, &'a T);
+    type IntoIter = btree_map::Iter<'a, T::Id, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.iter()
+    }
+}
+
+impl<'a, T: IdMappable> IntoIterator for &'a mut IdMap<T> {
+    type Item = (&'a T::Id, &'a mut T);
+    type IntoIter = btree_map::IterMut<'a, T::Id, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.iter_mut()
     }
 }
 

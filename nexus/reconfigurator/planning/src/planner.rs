@@ -1252,7 +1252,7 @@ mod test {
         // Remove two of the internal DNS zones; the planner should put new
         // zones back in their places.
         for (_sled_id, zones) in blueprint1.blueprint_zones.iter_mut().take(2) {
-            zones.zones.retain(|_, z| !z.zone_type.is_internal_dns());
+            zones.zones.retain(|z| !z.zone_type.is_internal_dns());
         }
         for (_, dataset_config) in
             blueprint1.blueprint_datasets.iter_mut().take(2)
@@ -2223,7 +2223,7 @@ mod test {
             .unwrap()
             .zones;
 
-        zones.retain(|_, zone| {
+        zones.retain(|zone| {
             if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 internal_address,
                 ..

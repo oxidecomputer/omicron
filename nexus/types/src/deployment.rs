@@ -55,15 +55,13 @@ mod blueprint_diff;
 mod blueprint_display;
 mod clickhouse;
 pub mod execution;
-mod id_map;
+pub mod id_map;
 mod network_resources;
 mod planning_input;
 mod tri_map;
 mod zone_type;
 
 pub use clickhouse::ClickhouseClusterConfig;
-pub use id_map::IdMap;
-pub use id_map::IdMappable;
 pub use network_resources::AddNetworkResourceError;
 pub use network_resources::OmicronZoneExternalFloatingAddr;
 pub use network_resources::OmicronZoneExternalFloatingIp;
@@ -100,6 +98,7 @@ use blueprint_display::{
     BpPhysicalDisksTableSchema, BpTable, BpTableData, BpTableRow,
     KvListWithHeading,
 };
+use id_map::{IdMap, IdMappable};
 
 pub use blueprint_diff::BlueprintDiff;
 
@@ -344,7 +343,7 @@ impl BpTableData for BlueprintZonesConfig {
                 state,
                 vec![
                     zone.kind().report_str().to_string(),
-                    zone.id().to_string(),
+                    ZoneSortKey::id(&zone).to_string(),
                     zone.disposition.to_string(),
                     zone.underlay_ip().to_string(),
                 ],
@@ -559,7 +558,7 @@ pub struct BlueprintZonesConfig {
     pub generation: Generation,
 
     /// The set of running zones.
-    pub zones: BTreeMap<OmicronZoneUuid, BlueprintZoneConfig>,
+    pub zones: IdMap<BlueprintZoneConfig>,
 }
 
 impl From<BlueprintZonesConfig> for OmicronZonesConfig {
@@ -656,6 +655,14 @@ pub struct BlueprintZoneConfig {
     /// zpool used for the zone's (transient) root filesystem
     pub filesystem_pool: Option<ZpoolName>,
     pub zone_type: BlueprintZoneType,
+}
+
+impl IdMappable for BlueprintZoneConfig {
+    type Id = OmicronZoneUuid;
+
+    fn id(&self) -> Self::Id {
+        self.id
+    }
 }
 
 impl diffus::Same for BlueprintZoneConfig {

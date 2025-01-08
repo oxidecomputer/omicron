@@ -1517,7 +1517,7 @@ mod tests {
             root_zone.expect("found zone with root dataset to prune");
         zones_config
             .zones
-            .retain(|_, z| z.id != durable_zone.id && z.id != root_zone.id);
+            .retain(|z| z.id != durable_zone.id && z.id != root_zone.id);
 
         let durable_dataset = durable_zone.zone_type.durable_dataset().unwrap();
         let root_dataset = root_zone.filesystem_dataset().unwrap();
