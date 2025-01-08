@@ -57,7 +57,7 @@ pub(crate) async fn deploy_datasets(
                 &log,
             );
 
-            let config: DatasetsConfig = config.clone().into();
+            let config: DatasetsConfig = config.clone().into_in_service_datasets();
             let result =
                 client.datasets_put(&config).await.with_context(
                     || format!("Failed to put {config:#?} to sled {sled_id}"),
@@ -376,7 +376,7 @@ mod tests {
         // and verify that this output matches the "deploy_datasets" input.
         let observed_config =
             sim_sled_agent.datasets_config_list().await.unwrap();
-        assert_eq!(observed_config, datasets_config.into(),);
+        assert_eq!(observed_config, datasets_config.into_in_service_datasets());
 
         // We expect to see the single in-service dataset we supplied as input.
         assert_eq!(observed_config.datasets.len(), 1,);

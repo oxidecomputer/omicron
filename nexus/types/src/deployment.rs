@@ -957,11 +957,19 @@ pub struct BlueprintDatasetsConfig {
     pub datasets: BTreeMap<DatasetUuid, BlueprintDatasetConfig>,
 }
 
-impl From<BlueprintDatasetsConfig> for DatasetsConfig {
-    fn from(config: BlueprintDatasetsConfig) -> Self {
-        Self {
-            generation: config.generation,
-            datasets: config
+impl BlueprintDatasetsConfig {
+    /// Converts [Self] into [DatasetsConfig].
+    ///
+    /// [DatasetsConfig] is a format of the dataset configuration that can be
+    /// passed to Sled Agents for deployment.
+    ///
+    /// This function is effectively a [std::convert::From] implementation, but
+    /// is named slightly more explicitly, as it filters the blueprint
+    /// configuration to only consider in-service datasets.
+    pub fn into_in_service_datasets(self) -> DatasetsConfig {
+        DatasetsConfig {
+            generation: self.generation,
+            datasets: self
                 .datasets
                 .into_iter()
                 .filter_map(|(id, d)| {
