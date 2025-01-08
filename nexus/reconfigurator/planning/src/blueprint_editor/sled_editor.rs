@@ -5,7 +5,7 @@
 //! Support for editing the blueprint details of a single sled.
 
 use crate::blueprint_builder::SledEditCounts;
-use crate::planner::PlannerRng;
+use crate::planner::SledPlannerRng;
 use illumos_utils::zpool::ZpoolName;
 use itertools::Either;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -256,7 +256,7 @@ impl SledEditor {
     pub fn ensure_disk(
         &mut self,
         disk: BlueprintPhysicalDiskConfig,
-        rng: &mut PlannerRng,
+        rng: &mut SledPlannerRng,
     ) -> Result<(), SledEditError> {
         self.as_active_mut()?.ensure_disk(disk, rng);
         Ok(())
@@ -272,7 +272,7 @@ impl SledEditor {
     pub fn add_zone(
         &mut self,
         zone: BlueprintZoneConfig,
-        rng: &mut PlannerRng,
+        rng: &mut SledPlannerRng,
     ) -> Result<(), SledEditError> {
         self.as_active_mut()?.add_zone(zone, rng)
     }
@@ -289,7 +289,7 @@ impl SledEditor {
     /// datasets for all its zones. This method backfills them.
     pub fn ensure_datasets_for_running_zones(
         &mut self,
-        rng: &mut PlannerRng,
+        rng: &mut SledPlannerRng,
     ) -> Result<(), SledEditError> {
         self.as_active_mut()?.ensure_datasets_for_running_zones(rng)
     }
@@ -395,7 +395,7 @@ impl ActiveSledEditor {
     pub fn ensure_disk(
         &mut self,
         disk: BlueprintPhysicalDiskConfig,
-        rng: &mut PlannerRng,
+        rng: &mut SledPlannerRng,
     ) {
         let zpool = ZpoolName::new_external(disk.pool_id);
 
@@ -427,7 +427,7 @@ impl ActiveSledEditor {
     pub fn add_zone(
         &mut self,
         zone: BlueprintZoneConfig,
-        rng: &mut PlannerRng,
+        rng: &mut SledPlannerRng,
     ) -> Result<(), SledEditError> {
         // Ensure we can construct the configs for the datasets for this zone.
         let datasets = ZoneDatasetConfigs::new(&self.disks, &zone)?;
@@ -475,7 +475,7 @@ impl ActiveSledEditor {
     /// datasets for all its zones. This method backfills them.
     pub fn ensure_datasets_for_running_zones(
         &mut self,
-        rng: &mut PlannerRng,
+        rng: &mut SledPlannerRng,
     ) -> Result<(), SledEditError> {
         for zone in self.zones.zones(BlueprintZoneFilter::ShouldBeRunning) {
             ZoneDatasetConfigs::new(&self.disks, zone)?
@@ -548,7 +548,7 @@ impl ZoneDatasetConfigs {
     fn ensure_in_service(
         self,
         datasets: &mut DatasetsEditor,
-        rng: &mut PlannerRng,
+        rng: &mut SledPlannerRng,
     ) {
         if let Some(dataset) = self.filesystem {
             datasets.ensure_in_service(dataset, rng);

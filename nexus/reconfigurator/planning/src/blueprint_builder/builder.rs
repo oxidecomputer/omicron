@@ -1062,7 +1062,7 @@ impl<'a> BlueprintBuilder<'a> {
                         id: disk_id,
                         pool_id: *zpool,
                     },
-                    &mut self.rng,
+                    self.rng.sled_rng(sled_id),
                 )
                 .map_err(|err| Error::SledEditError { sled_id, err })?;
         }
@@ -1106,7 +1106,7 @@ impl<'a> BlueprintBuilder<'a> {
 
         let initial_counts = editor.edit_counts();
         editor
-            .ensure_datasets_for_running_zones(&mut self.rng)
+            .ensure_datasets_for_running_zones(self.rng.sled_rng(sled_id))
             .map_err(|err| Error::SledEditError { sled_id, err })?;
         let final_counts = editor.edit_counts();
 
@@ -1170,7 +1170,7 @@ impl<'a> BlueprintBuilder<'a> {
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
-            id: self.rng.next_zone(),
+            id: self.rng.sled_rng(sled_id).next_zone(),
             filesystem_pool: Some(zpool),
             zone_type,
         };
@@ -1182,7 +1182,7 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
     ) -> Result<(), Error> {
-        let id = self.rng.next_zone();
+        let id = self.rng.sled_rng(sled_id).next_zone();
         let ExternalNetworkingChoice {
             external_ip,
             nic_ip,
@@ -1190,7 +1190,7 @@ impl<'a> BlueprintBuilder<'a> {
             nic_mac,
         } = self.external_networking()?.for_new_external_dns()?;
         let nic = NetworkInterface {
-            id: self.rng.next_network_interface(),
+            id: self.rng.sled_rng(sled_id).next_network_interface(),
             kind: NetworkInterfaceKind::Service { id: id.into_untyped_uuid() },
             name: format!("external-dns-{id}").parse().unwrap(),
             ip: nic_ip,
@@ -1206,7 +1206,7 @@ impl<'a> BlueprintBuilder<'a> {
         let http_address =
             SocketAddrV6::new(underlay_address, DNS_HTTP_PORT, 0, 0);
         let dns_address = OmicronZoneExternalFloatingAddr {
-            id: self.rng.next_external_ip(),
+            id: self.rng.sled_rng(sled_id).next_external_ip(),
             addr: SocketAddr::new(external_ip, DNS_PORT),
         };
         let pool_name =
@@ -1259,7 +1259,7 @@ impl<'a> BlueprintBuilder<'a> {
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
-            id: self.rng.next_zone(),
+            id: self.rng.sled_rng(sled_id).next_zone(),
             filesystem_pool: Some(filesystem_pool),
             zone_type,
         };
@@ -1319,7 +1319,7 @@ impl<'a> BlueprintBuilder<'a> {
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
-            id: self.rng.next_zone(),
+            id: self.rng.sled_rng(sled_id).next_zone(),
             filesystem_pool: Some(filesystem_pool),
             zone_type,
         };
@@ -1386,7 +1386,7 @@ impl<'a> BlueprintBuilder<'a> {
         external_tls: bool,
         external_dns_servers: Vec<IpAddr>,
     ) -> Result<(), Error> {
-        let nexus_id = self.rng.next_zone();
+        let nexus_id = self.rng.sled_rng(sled_id).next_zone();
         let ExternalNetworkingChoice {
             external_ip,
             nic_ip,
@@ -1394,12 +1394,12 @@ impl<'a> BlueprintBuilder<'a> {
             nic_mac,
         } = self.external_networking()?.for_new_nexus()?;
         let external_ip = OmicronZoneExternalFloatingIp {
-            id: self.rng.next_external_ip(),
+            id: self.rng.sled_rng(sled_id).next_external_ip(),
             ip: external_ip,
         };
 
         let nic = NetworkInterface {
-            id: self.rng.next_network_interface(),
+            id: self.rng.sled_rng(sled_id).next_network_interface(),
             kind: NetworkInterfaceKind::Service {
                 id: nexus_id.into_untyped_uuid(),
             },
@@ -1439,7 +1439,7 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
     ) -> Result<(), Error> {
-        let oximeter_id = self.rng.next_zone();
+        let oximeter_id = self.rng.sled_rng(sled_id).next_zone();
         let ip = self.sled_alloc_ip(sled_id)?;
         let port = omicron_common::address::OXIMETER_PORT;
         let address = SocketAddrV6::new(ip, port, 0, 0);
@@ -1463,7 +1463,7 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
     ) -> Result<(), Error> {
-        let pantry_id = self.rng.next_zone();
+        let pantry_id = self.rng.sled_rng(sled_id).next_zone();
         let ip = self.sled_alloc_ip(sled_id)?;
         let port = omicron_common::address::CRUCIBLE_PANTRY_PORT;
         let address = SocketAddrV6::new(ip, port, 0, 0);
@@ -1493,7 +1493,7 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
     ) -> Result<(), Error> {
-        let zone_id = self.rng.next_zone();
+        let zone_id = self.rng.sled_rng(sled_id).next_zone();
         let underlay_ip = self.sled_alloc_ip(sled_id)?;
         let pool_name =
             self.sled_select_zpool(sled_id, ZoneKind::CockroachDb)?;
@@ -1519,7 +1519,7 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
     ) -> Result<(), Error> {
-        let id = self.rng.next_zone();
+        let id = self.rng.sled_rng(sled_id).next_zone();
         let underlay_address = self.sled_alloc_ip(sled_id)?;
         let address =
             SocketAddrV6::new(underlay_address, CLICKHOUSE_HTTP_PORT, 0, 0);
@@ -1544,7 +1544,7 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
     ) -> Result<(), Error> {
-        let zone_id = self.rng.next_zone();
+        let zone_id = self.rng.sled_rng(sled_id).next_zone();
         let underlay_ip = self.sled_alloc_ip(sled_id)?;
         let pool_name =
             self.sled_select_zpool(sled_id, ZoneKind::ClickhouseServer)?;
@@ -1571,7 +1571,7 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
     ) -> Result<(), Error> {
-        let zone_id = self.rng.next_zone();
+        let zone_id = self.rng.sled_rng(sled_id).next_zone();
         let underlay_ip = self.sled_alloc_ip(sled_id)?;
         let pool_name =
             self.sled_select_zpool(sled_id, ZoneKind::ClickhouseKeeper)?;
@@ -1670,7 +1670,7 @@ impl<'a> BlueprintBuilder<'a> {
         })?;
 
         // Add the new boundary NTP zone.
-        let new_zone_id = self.rng.next_zone();
+        let new_zone_id = self.rng.sled_rng(sled_id).next_zone();
         let ExternalSnatNetworkingChoice {
             snat_cfg,
             nic_ip,
@@ -1678,11 +1678,11 @@ impl<'a> BlueprintBuilder<'a> {
             nic_mac,
         } = self.external_networking()?.for_new_boundary_ntp()?;
         let external_ip = OmicronZoneExternalSnatIp {
-            id: self.rng.next_external_ip(),
+            id: self.rng.sled_rng(sled_id).next_external_ip(),
             snat_cfg,
         };
         let nic = NetworkInterface {
-            id: self.rng.next_network_interface(),
+            id: self.rng.sled_rng(sled_id).next_network_interface(),
             kind: NetworkInterfaceKind::Service {
                 id: new_zone_id.into_untyped_uuid(),
             },
@@ -1751,7 +1751,7 @@ impl<'a> BlueprintBuilder<'a> {
             ))
         })?;
         editor
-            .add_zone(zone, &mut self.rng)
+            .add_zone(zone, self.rng.sled_rng(sled_id))
             .map_err(|err| Error::SledEditError { sled_id, err })
     }
 
