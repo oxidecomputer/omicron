@@ -14,6 +14,8 @@ use std::collections::btree_map;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::marker::PhantomData;
+use std::ops::Deref;
+use std::ops::DerefMut;
 
 pub trait IdMappable:
     JsonSchema + Serialize + for<'de> Deserialize<'de> + for<'a> Diffable<'a>
@@ -77,8 +79,8 @@ impl<T: IdMappable> IdMap<T> {
         self.inner.get(key)
     }
 
-    pub fn get_mut(&mut self, key: &T::Id) -> Option<&mut T> {
-        self.inner.get_mut(key)
+    pub fn get_mut(&mut self, key: &T::Id) -> Option<RefMut<'_, T>> {
+        self.inner.get_mut(key).map(RefMut::new)
     }
 
     pub fn iter(&self) -> btree_map::Iter<'_, T::Id, T> {
@@ -214,6 +216,58 @@ impl<'a, T: IdMappable + 'a> Diffable<'a> for IdMap<T> {
     }
 }
 
+/// Wrapper around a `&'a mut T` that panics when dropped if the borrowed
+/// value's `id()` has changed since the wrapper was created.
+pub struct RefMut<'a, T: IdMappable> {
+    original_id: T::Id,
+    // Always `Some(_)` until the `RefMut` is consumed by `into_ref()`.
+    borrowed: Option<&'a mut T>,
+}
+
+impl<T: IdMappable> Drop for RefMut<'_, T> {
+    fn drop(&mut self) {
+        if let Some(value) = self.borrowed.as_ref() {
+            assert_eq!(
+                self.original_id,
+                value.id(),
+                "IdMap values must not change their ID"
+            );
+        }
+    }
+}
+
+impl<T: IdMappable> Deref for RefMut<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.borrowed.as_ref().unwrap()
+    }
+}
+
+impl<T: IdMappable> DerefMut for RefMut<'_, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.borrowed.as_mut().unwrap()
+    }
+}
+
+impl<'a, T: IdMappable> RefMut<'a, T> {
+    fn new(borrowed: &'a mut T) -> Self {
+        Self { original_id: borrowed.id(), borrowed: Some(borrowed) }
+    }
+
+    pub fn into_ref(mut self) -> &'a T {
+        let value = self.borrowed.take().unwrap();
+        // We stole `value` so `Drop` won't be able to check this invariant;
+        // check it ourselves.
+        assert_eq!(
+            self.original_id,
+            value.id(),
+            "IdMap values must not change their ID"
+        );
+        value
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,5 +357,13 @@ mod tests {
             err.contains("duplicate key 1"),
             "unexpected error message: {err:?}"
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "IdMap values must not change their ID")]
+    fn get_mut_panics_if_id_changes() {
+        let mut map = IdMap::<TestEntry>::new();
+        map.insert(TestEntry { id: 1, val1: 2, val2: 3 });
+        map.get_mut(&1).unwrap().id = 2;
     }
 }

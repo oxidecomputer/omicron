@@ -96,13 +96,13 @@ impl ZonesEditor {
         &mut self,
         zone_id: &OmicronZoneUuid,
     ) -> Result<(bool, &BlueprintZoneConfig), ZonesEditError> {
-        let config = self.zones.get_mut(zone_id).ok_or_else(|| {
+        let mut config = self.zones.get_mut(zone_id).ok_or_else(|| {
             ZonesEditError::ExpungeNonexistentZone { id: *zone_id }
         })?;
 
-        let did_expunge = Self::expunge_impl(config, &mut self.counts);
+        let did_expunge = Self::expunge_impl(&mut config, &mut self.counts);
 
-        Ok((did_expunge, &*config))
+        Ok((did_expunge, config.into_ref()))
     }
 
     fn expunge_impl(
