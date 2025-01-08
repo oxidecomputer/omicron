@@ -27,6 +27,7 @@ members = [
     "cockroach-admin/types",
     "common",
     "dev-tools/cert-dev",
+    "dev-tools/clickana",
     "dev-tools/clickhouse-cluster-dev",
     "dev-tools/ch-dev",
     "dev-tools/crdb-seed",
@@ -78,6 +79,7 @@ members = [
     "nexus/macros-common",
     "nexus/metrics-producer-gc",
     "nexus/networking",
+    "nexus/reconfigurator/blippy",
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
     "nexus/reconfigurator/preparation",
@@ -158,6 +160,7 @@ default-members = [
     "cockroach-admin/types",
     "common",
     "dev-tools/cert-dev",
+    "dev-tools/clickana",
     "dev-tools/clickhouse-cluster-dev",
     "dev-tools/ch-dev",
     "dev-tools/crdb-seed",
@@ -211,6 +214,7 @@ default-members = [
     "nexus/macros-common",
     "nexus/metrics-producer-gc",
     "nexus/networking",
+    "nexus/reconfigurator/blippy",
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
     "nexus/reconfigurator/preparation",
@@ -332,6 +336,7 @@ chrono = { version = "0.4", features = [ "serde" ] }
 chrono-tz = "0.10.0"
 ciborium = "0.2.2"
 clap = { version = "4.5", features = ["cargo", "derive", "env", "wrap_help"] }
+clickana = { path = "dev-tools/clickana" }
 clickhouse-admin-api = { path = "clickhouse-admin/api" }
 clickhouse-admin-keeper-client = { path = "clients/clickhouse-admin-keeper-client" }
 clickhouse-admin-server-client = { path = "clients/clickhouse-admin-server-client" }
@@ -364,6 +369,7 @@ derive-where = "1.2.7"
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
 diesel = { version = "2.2.4", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = "0.4.2"
+diffus = { git = "https://github.com/oxidecomputer/diffus", branch = "oxide/main", features = ["uuid-impl", "derive", "newtype-uuid-impl", "oxnet-impl"] }
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
@@ -465,6 +471,7 @@ nexus-internal-api = { path = "nexus/internal-api" }
 nexus-macros-common = { path = "nexus/macros-common" }
 nexus-metrics-producer-gc = { path = "nexus/metrics-producer-gc" }
 nexus-networking = { path = "nexus/networking" }
+nexus-reconfigurator-blippy = { path = "nexus/reconfigurator/blippy" }
 nexus-reconfigurator-execution = { path = "nexus/reconfigurator/execution" }
 nexus-reconfigurator-planning = { path = "nexus/reconfigurator/planning" }
 nexus-reconfigurator-preparation = { path = "nexus/reconfigurator/preparation" }
@@ -492,7 +499,7 @@ omicron-rpaths = { path = "rpaths" }
 omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
 omicron-workspace-hack = "0.1.0"
-omicron-zone-package = "0.11.1"
+omicron-zone-package = "0.12.0"
 oxide-client = { path = "clients/oxide-client" }
 oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "b56afeeb14e0042cbd7bda85b166ed86ee17820e", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
@@ -541,10 +548,10 @@ prettyplease = { version = "0.2.25", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = "0.8.0"
 progenitor-client = "0.8.0"
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "220a6f367c18f2452dbc4fa9086f3fe73b961739" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "220a6f367c18f2452dbc4fa9086f3fe73b961739" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "220a6f367c18f2452dbc4fa9086f3fe73b961739" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "220a6f367c18f2452dbc4fa9086f3fe73b961739" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "d4529fd8247386b422b78e1203315d5baea5ea8b" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "d4529fd8247386b422b78e1203315d5baea5ea8b" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "d4529fd8247386b422b78e1203315d5baea5ea8b" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "d4529fd8247386b422b78e1203315d5baea5ea8b" }
 proptest = "1.5.0"
 qorb = "0.2.1"
 quote = "1.0"
@@ -576,7 +583,7 @@ secrecy = "0.8.0"
 semver = { version = "1.0.23", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
 serde_human_bytes = { git = "https://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
-serde_json = "1.0.132"
+serde_json = "1.0.133"
 serde_path_to_error = "0.1.16"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"

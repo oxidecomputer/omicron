@@ -166,7 +166,8 @@ source.packages = [
   "internal-dns-cli.tar.gz",
   "omicron-clickhouse-admin.tar.gz",
   "zone-setup.tar.gz",
-  "zone-network-install.tar.gz"
+  "zone-network-install.tar.gz",
+  "clickana.tar.gz"
 ]
 output.type = "zone"
 
@@ -197,7 +198,8 @@ source.packages = [
   "internal-dns-cli.tar.gz",
   "omicron-clickhouse-admin.tar.gz",
   "zone-setup.tar.gz",
-  "zone-network-install.tar.gz"
+  "zone-network-install.tar.gz",
+  "clickana.tar.gz"
 ]
 output.type = "zone"
 
@@ -622,10 +624,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "220a6f367c18f2452dbc4fa9086f3fe73b961739"
+source.commit = "d4529fd8247386b422b78e1203315d5baea5ea8b"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "964bf262677496118f8cea95c257d0a57c76ddca70733217b0666657b53bd6e6"
+source.sha256 = "3e5995281e2b222fbfa3537fcc846e0706361db5ab57de6656811871bcc04cc3"
 output.type = "zone"
 
 [package.mg-ddm-gz]
@@ -795,7 +797,7 @@ output.intermediate_only = true
 
 # To package and install the asic variant of the switch, do:
 #
-# $ cargo run --release --bin omicron-package -- -t default target create -i standard -m gimlet -s asic
+# $ cargo run --release --bin omicron-package -- -t default target create -p dev -m gimlet -s asic
 # $ cargo run --release --bin omicron-package -- package
 # $ pfexec ./target/release/omicron-package install
 [package.switch-asic]
@@ -823,7 +825,7 @@ output.type = "zone"
 
 # To package and install the stub variant of the switch, do the following:
 #
-# $ cargo run --release --bin omicron-package -- -t default target create -i standard -m <gimlet|gimlet-standalone|non-gimlet> -s stub
+# $ cargo run --release --bin omicron-package -- -t default target create -p dev -m <gimlet|gimlet-standalone|non-gimlet> -s stub
 # $ cargo run --release --bin omicron-package -- package
 # $ pfexec ./target/release/omicron-package install
 [package.switch-stub]
@@ -849,7 +851,7 @@ output.type = "zone"
 
 # To package and install the softnpu variant of the switch, do the following:
 #
-# $ cargo run --release --bin omicron-package -- -t default target create -i standard -m <gimlet|gimlet-standalone|non-gimlet> -s softnpu
+# $ cargo run --release --bin omicron-package -- -t default target create -p dev -m <gimlet|gimlet-standalone|non-gimlet>
 # $ cargo run --release --bin omicron-package -- package
 # $ pfexec ./target/release/omicron-package install
 [package.switch-softnpu]
@@ -924,3 +926,54 @@ service_name = "probe"
 source.type = "composite"
 source.packages = ["thundermuffin.tar.gz"]
 output.type = "zone"
+
+[package.clickana]
+service_name = "clickana"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["clickana"]
+source.rust.release = true
+output.type = "zone"
+output.intermediate_only = true
+
+# Target configuration
+# --------------------
+#
+# This section defines "targets" built by Omicron. A target is a map of keys and
+# values that are used to filter out packages (via `only_for_targets`) and for
+# other purposes.
+#
+# For what the individual keys mean, see the definition for `TargetCommand` in
+# `package/src/lib.rs`.
+
+# A preset for the host image built during release.
+[target.preset.host]
+image = "standard"
+machine = "gimlet"
+switch = "asic"
+rack-topology = "multi-sled"
+clickhouse-topology = "single-node"
+
+# A preset for the recovery image built during release.
+[target.preset.recovery]
+image = "trampoline"
+# The trampoline image doesn't execute sled-agent and doesn't contain the switch
+# zone, so neither "machine" nor "switch" are defined.
+rack-topology = "single-sled"
+clickhouse-topology = "single-node"
+
+# A preset for development.
+[target.preset.dev]
+image = "standard"
+machine = "non-gimlet"
+switch = "softnpu"
+rack-topology = "single-sled"
+clickhouse-topology = "single-node"
+
+# A preset for the `a4x2` testbed environment.
+[target.preset.a4x2]
+image = "standard"
+machine = "non-gimlet"
+switch = "softnpu"
+rack-topology = "multi-sled"
+clickhouse-topology = "single-node"

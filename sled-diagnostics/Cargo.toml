@@ -7,7 +7,13 @@ edition = "2021"
 workspace = true
 
 [dependencies]
+cfg-if.workspace = true
+fs-err.workspace = true
 futures.workspace = true
+libc.workspace = true
 omicron-workspace-hack.workspace = true
+schemars.workspace = true
+serde.workspace = true
+slog.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
