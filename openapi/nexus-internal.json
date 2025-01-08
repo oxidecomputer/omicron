@@ -2715,9 +2715,9 @@
             ]
           },
           "zones": {
-            "description": "The list of running zones.",
-            "type": "array",
-            "items": {
+            "description": "The set of running zones.",
+            "type": "object",
+            "additionalProperties": {
               "$ref": "#/components/schemas/BlueprintZoneConfig"
             }
           }

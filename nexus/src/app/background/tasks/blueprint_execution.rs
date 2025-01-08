@@ -402,11 +402,12 @@ mod test {
             disposition: BlueprintZoneDisposition,
         ) -> BlueprintZonesConfig {
             let pool_id = ZpoolUuid::new_v4();
+            let zone_id = OmicronZoneUuid::new_v4();
             BlueprintZonesConfig {
                 generation: Generation::new(),
-                zones: vec![BlueprintZoneConfig {
+                zones: [BlueprintZoneConfig {
                     disposition,
-                    id: OmicronZoneUuid::new_v4(),
+                    id: zone_id,
                     filesystem_pool: Some(ZpoolName::new_external(pool_id)),
                     zone_type: BlueprintZoneType::InternalDns(
                         blueprint_zone_type::InternalDns {
@@ -421,7 +422,10 @@ mod test {
                             http_address: "[::1]:12345".parse().unwrap(),
                         },
                     ),
-                }],
+                }]
+                .into_iter()
+                .map(|z| (z.id, z))
+                .collect(),
             }
         }
 
