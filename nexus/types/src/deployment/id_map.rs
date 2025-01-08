@@ -99,8 +99,11 @@ impl<T: IdMappable> IdMap<T> {
         self.inner.clear()
     }
 
-    pub fn retain<F: FnMut(&mut T) -> bool>(&mut self, mut f: F) {
-        self.inner.retain(|_, val| f(val))
+    pub fn retain<F: for<'a, 'b> FnMut(&'a mut RefMut<'b, T>) -> bool>(
+        &mut self,
+        mut f: F,
+    ) {
+        self.inner.retain(|_, val| f(&mut RefMut::new(val)))
     }
 }
 
@@ -393,5 +396,16 @@ mod tests {
         for mut entry in &mut map {
             entry.id = 2;
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "IdMap values must not change their ID")]
+    fn retain_panics_if_id_changes() {
+        let mut map = IdMap::<TestEntry>::new();
+        map.insert(TestEntry { id: 1, val1: 2, val2: 3 });
+        map.retain(|entry| {
+            entry.id = 2;
+            true
+        });
     }
 }
