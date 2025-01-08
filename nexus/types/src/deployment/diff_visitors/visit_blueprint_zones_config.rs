@@ -25,35 +25,35 @@ pub trait VisitBlueprintZonesConfig<'e> {
     /// A change to `BlueprintZonesConfig::generation`
     fn visit_generation_change(
         &mut self,
-        ctx: &mut BpVisitorContext,
-        change: Change<'e, Generation>,
+        _ctx: &mut BpVisitorContext,
+        _change: Change<'e, Generation>,
     ) {
-        visit_generation_change(self, ctx, change);
+        // Leaf node
     }
 
     /// An insert to `BlueprintZonesConfig::zones`
     fn visit_zones_insert(
         &mut self,
-        ctx: &mut BpVisitorContext,
-        node: &BlueprintZoneConfig,
+        _ctx: &mut BpVisitorContext,
+        _node: &BlueprintZoneConfig,
     ) {
-        visit_zones_insert(self, ctx, node);
+        // Leaf node
     }
 
     /// A removal from `BlueprintZonesConfig::zones`
     fn visit_zones_remove(
         &mut self,
-        ctx: &mut BpVisitorContext,
-        node: &BlueprintZoneConfig,
+        _ctx: &mut BpVisitorContext,
+        _node: &BlueprintZoneConfig,
     ) {
-        visit_zones_remove(self, ctx, node);
+        // Leaf node
     }
 
     // A change in a value in `BlueprintZonesConfig::zones`
     fn visit_zone_change(
         &mut self,
-        ctx: &mut BpVisitorContext,
-        change: Change<'e, BlueprintZoneConfig>,
+        _ctx: &mut BpVisitorContext,
+        _change: Change<'e, BlueprintZoneConfig>,
     ) {
         // TODO: This requires another change to diffus_derive
         //        visit_zone_change(self, ctx, change);
@@ -77,19 +77,19 @@ pub trait VisitBlueprintZonesConfig<'e> {
     /// A change in `BlueprintZoneConfig::disposition`
     fn visit_zone_disposition_change(
         &mut self,
-        ctx: &mut BpVisitorContext,
-        change: Change<'e, BlueprintZoneDisposition>,
+        _ctx: &mut BpVisitorContext,
+        _change: Change<'e, BlueprintZoneDisposition>,
     ) {
-        visit_zone_disposition_change(self, ctx, change);
+        // Leaf node
     }
 
     /// A change in a `BlueprintZoneConfig::filesystem_pool`
     fn visit_zone_filesystem_pool_change(
         &mut self,
-        ctx: &mut BpVisitorContext,
-        change: Change<'e, Option<ZpoolName>>,
+        _ctx: &mut BpVisitorContext,
+        _change: Change<'e, Option<ZpoolName>>,
     ) {
-        visit_zone_filesystem_pool_change(self, ctx, change);
+        // Leaf node
     }
 
     /// A change in a `BlueprintZoneConfig::zone_type`
@@ -98,14 +98,14 @@ pub trait VisitBlueprintZonesConfig<'e> {
     /// first version of this visitor tractable, we just return the a `Change`
     /// rather than a diffus `EditedBlueprintZoneType` that we have to walk.
     /// We'll likely want to add this to get full coverage, but it can come
-    /// later, and should probably live in it's own visitor that we call from
+    /// later, and should probably live in its own visitor that we call from
     /// this point.
     fn visit_zone_zone_type_change(
         &mut self,
-        ctx: &mut BpVisitorContext,
-        node: Change<'e, BlueprintZoneType>,
+        _ctx: &mut BpVisitorContext,
+        _node: Change<'e, BlueprintZoneType>,
     ) {
-        visit_zone_zone_type_change(self, ctx, node);
+        // Leaf node - for now
     }
 }
 
@@ -158,24 +158,3 @@ pub fn visit_zone_edit<'e, V>(
         v.visit_zone_zone_type_change(ctx, zone_type.into());
     }
 }
-
-/// Macro used to implement empty leaf node visitor functions
-macro_rules! empty_leaf {
-    ($name: ident, $t2: ty) => {
-        fn $name<'e, V>(_v: &mut V, _ctx: &mut BpVisitorContext, _node: $t2)
-        where
-            V: VisitBlueprintZonesConfig<'e> + ?Sized,
-        {
-        }
-    };
-}
-
-empty_leaf!(visit_generation_change, Change<'e, Generation>);
-empty_leaf!(
-    visit_zone_disposition_change,
-    Change<'e, BlueprintZoneDisposition>
-);
-empty_leaf!(visit_zone_filesystem_pool_change, Change<'e, Option<ZpoolName>>);
-empty_leaf!(visit_zone_zone_type_change, Change<'e, BlueprintZoneType>);
-empty_leaf!(visit_zones_insert, &BlueprintZoneConfig);
-empty_leaf!(visit_zones_remove, &BlueprintZoneConfig);
