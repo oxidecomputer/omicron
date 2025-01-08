@@ -3146,10 +3146,7 @@ mod tests {
             .service_create_network_interface_raw(
                 &opctx,
                 db_nic_from_zone(
-                    bp1.blueprint_zones[&sled_ids[2]]
-                        .zones
-                        .first()
-                        .unwrap(),
+                    bp1.blueprint_zones[&sled_ids[2]].zones.first().unwrap(),
                 ),
             )
             .await
@@ -3216,10 +3213,7 @@ mod tests {
                 .service_create_network_interface_raw(
                     &opctx,
                     db_nic_from_zone(
-                        bp3.blueprint_zones[&sled_id]
-                            .zones
-                            .first()
-                            .unwrap(),
+                        bp3.blueprint_zones[&sled_id].zones.first().unwrap(),
                     ),
                 )
                 .await
