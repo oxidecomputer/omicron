@@ -10741,6 +10741,7 @@ dependencies = [
  "schemars",
  "serde",
  "sled-agent-types",
+ "sled-diagnostics",
  "sled-hardware-types",
  "uuid",
 ]
@@ -10808,6 +10809,8 @@ dependencies = [
  "futures",
  "libc",
  "omicron-workspace-hack",
+ "schemars",
+ "serde",
  "slog",
  "thiserror 1.0.69",
  "tokio",

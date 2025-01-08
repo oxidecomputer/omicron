@@ -678,10 +678,16 @@
         "operationId": "support_dladm_info",
         "responses": {
           "200": {
-            "description": "",
+            "description": "successful operation",
             "content": {
-              "*/*": {
-                "schema": {}
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_SledDiagnosticsQueryOutput",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SledDiagnosticsQueryOutput"
+                  }
+                }
               }
             }
           },
@@ -699,10 +705,16 @@
         "operationId": "support_ipadm_info",
         "responses": {
           "200": {
-            "description": "",
+            "description": "successful operation",
             "content": {
-              "*/*": {
-                "schema": {}
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_SledDiagnosticsQueryOutput",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SledDiagnosticsQueryOutput"
+                  }
+                }
               }
             }
           },
@@ -720,10 +732,16 @@
         "operationId": "support_pargs_info",
         "responses": {
           "200": {
-            "description": "",
+            "description": "successful operation",
             "content": {
-              "*/*": {
-                "schema": {}
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_SledDiagnosticsQueryOutput",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SledDiagnosticsQueryOutput"
+                  }
+                }
               }
             }
           },
@@ -741,10 +759,16 @@
         "operationId": "support_pstack_info",
         "responses": {
           "200": {
-            "description": "",
+            "description": "successful operation",
             "content": {
-              "*/*": {
-                "schema": {}
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_SledDiagnosticsQueryOutput",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SledDiagnosticsQueryOutput"
+                  }
+                }
               }
             }
           },
@@ -762,10 +786,12 @@
         "operationId": "support_zoneadm_info",
         "responses": {
           "200": {
-            "description": "",
+            "description": "successful operation",
             "content": {
-              "*/*": {
-                "schema": {}
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledDiagnosticsQueryOutput"
+                }
               }
             }
           },
@@ -5568,6 +5594,68 @@
       "SemverVersion": {
         "type": "string",
         "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+      },
+      "SledDiagnosticsQueryOutput": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "success": {
+                "type": "object",
+                "properties": {
+                  "command": {
+                    "description": "The command and its arguments.",
+                    "type": "string"
+                  },
+                  "exit_code": {
+                    "nullable": true,
+                    "description": "The exit code if one was present when the command exited.",
+                    "type": "integer",
+                    "format": "int32"
+                  },
+                  "exit_status": {
+                    "description": "The exit status of the command. This will be the exit code (if any) and exit reason such as from a signal.",
+                    "type": "string"
+                  },
+                  "stdio": {
+                    "description": "Any stdout/stderr produced by the command.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "command",
+                  "exit_status",
+                  "stdio"
+                ]
+              }
+            },
+            "required": [
+              "success"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "failure": {
+                "type": "object",
+                "properties": {
+                  "error": {
+                    "description": "The reason the command failed to execute.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "failure"
+            ],
+            "additionalProperties": false
+          }
+        ]
       },
       "SledIdentifiers": {
         "description": "Identifiers for a single sled.\n\nThis is intended primarily to be used in timeseries, to identify sled from which metric data originates.",

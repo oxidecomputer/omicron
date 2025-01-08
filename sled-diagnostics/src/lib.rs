@@ -19,7 +19,7 @@ cfg_if::cfg_if! {
 mod queries;
 pub use crate::queries::{
     SledDiagnosticsCmdError, SledDiagnosticsCmdOutput,
-    SledDiagnosticsCommandHttpOutput,
+    SledDiagnosticsCommandHttpOutput, SledDiagnosticsQueryOutput,
 };
 use queries::*;
 
