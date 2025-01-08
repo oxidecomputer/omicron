@@ -70,7 +70,7 @@ impl DatasetIdsBackfillFromDb {
         let iter = resources.all_datasets(ZpoolFilter::InService).flat_map(
             |(&zpool_id, configs)| {
                 configs.iter().map(move |config| {
-                    (zpool_id, config.name.dataset().clone(), config.id)
+                    (zpool_id, config.name.kind().clone(), config.id)
                 })
             },
         );
@@ -162,7 +162,7 @@ impl PartialDatasetConfig {
 
     pub fn for_transient_zone(name: DatasetName) -> Self {
         assert!(
-            matches!(name.dataset(), DatasetKind::TransientZone { .. }),
+            matches!(name.kind(), DatasetKind::TransientZone { .. }),
             "for_transient_zone called with incorrect dataset kind: {name:?}"
         );
         Self {

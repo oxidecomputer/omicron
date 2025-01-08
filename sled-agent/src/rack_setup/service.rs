@@ -797,7 +797,8 @@ impl ServiceInner {
         let blueprint = build_initial_blueprint_from_plan(
             &sled_configs_by_id,
             service_plan,
-        );
+        )
+        .map_err(SetupServiceError::ConvertPlanToBlueprint)?;
 
         info!(self.log, "Nexus address: {}", nexus_address.to_string());
 
@@ -834,13 +835,13 @@ impl ServiceInner {
             // to usage by specific zones.
             for dataset in sled_config.datasets.datasets.values() {
                 let duplicate = datasets.insert(
-                    (dataset.name.pool().id(), dataset.name.dataset().clone()),
+                    (dataset.name.pool().id(), dataset.name.kind().clone()),
                     NexusTypes::DatasetCreateRequest {
                         zpool_id: dataset.name.pool().id().into_untyped_uuid(),
                         dataset_id: dataset.id,
                         request: NexusTypes::DatasetPutRequest {
                             address: None,
-                            kind: dataset.name.dataset().clone(),
+                            kind: dataset.name.kind().clone(),
                         },
                     },
                 );
@@ -1287,8 +1288,7 @@ impl ServiceInner {
             config,
             bootstrap_addrs,
             config.trust_quorum_peers.is_some(),
-        )
-        .await;
+        );
         let config = &sled_plan.config;
 
         rss_step.update(RssStep::InitTrustQuorum);
@@ -1520,7 +1520,7 @@ fn build_sled_configs_by_id(
 fn build_initial_blueprint_from_plan(
     sled_configs_by_id: &BTreeMap<SledUuid, SledConfig>,
     service_plan: &ServicePlan,
-) -> Blueprint {
+) -> anyhow::Result<Blueprint> {
     build_initial_blueprint_from_sled_configs(
         sled_configs_by_id,
         service_plan.dns_config.generation,
@@ -1530,7 +1530,7 @@ fn build_initial_blueprint_from_plan(
 pub(crate) fn build_initial_blueprint_from_sled_configs(
     sled_configs_by_id: &BTreeMap<SledUuid, SledConfig>,
     internal_dns_version: Generation,
-) -> Blueprint {
+) -> anyhow::Result<Blueprint> {
     let blueprint_disks: BTreeMap<_, _> = sled_configs_by_id
         .iter()
         .map(|(sled_id, sled_config)| (*sled_id, sled_config.disks.clone()))
@@ -1541,17 +1541,29 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         let mut datasets = BTreeMap::new();
         for d in sled_config.datasets.datasets.values() {
             // Only the "Crucible" dataset needs to know the address
-            let address = sled_config.zones.iter().find_map(|z| {
-                if let BlueprintZoneType::Crucible(
-                    blueprint_zone_type::Crucible { address, dataset },
-                ) = &z.zone_type
-                {
-                    if &dataset.pool_name == d.name.pool() {
-                        return Some(*address);
-                    }
-                };
+            let address = if *d.name.kind() == DatasetKind::Crucible {
+                let address = sled_config.zones.iter().find_map(|z| {
+                    if let BlueprintZoneType::Crucible(
+                        blueprint_zone_type::Crucible { address, dataset },
+                    ) = &z.zone_type
+                    {
+                        if &dataset.pool_name == d.name.pool() {
+                            return Some(*address);
+                        }
+                    };
+                    None
+                });
+                if address.is_some() {
+                    address
+                } else {
+                    bail!(
+                        "could not find Crucible zone for zpool {}",
+                        d.name.pool()
+                    )
+                }
+            } else {
                 None
-            });
+            };
 
             datasets.insert(
                 d.id,
@@ -1559,7 +1571,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
                     disposition: BlueprintDatasetDisposition::InService,
                     id: d.id,
                     pool: d.name.pool().clone(),
-                    kind: d.name.dataset().clone(),
+                    kind: d.name.kind().clone(),
                     address,
                     compression: d.inner.compression,
                     quota: d.inner.quota,
@@ -1599,7 +1611,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         sled_state.insert(*sled_id, SledState::Active);
     }
 
-    Blueprint {
+    Ok(Blueprint {
         id: Uuid::new_v4(),
         blueprint_zones,
         blueprint_disks,
@@ -1621,7 +1633,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         time_created: Utc::now(),
         creator: "RSS".to_string(),
         comment: "initial blueprint from rack setup".to_string(),
-    }
+    })
 }
 
 /// Facilitates creating a sequence of OmicronZonesConfig objects for each sled
@@ -1719,8 +1731,9 @@ impl<'a> OmicronZonesConfigGenerator<'a> {
 
 #[cfg(test)]
 mod test {
-    use super::{Config, OmicronZonesConfigGenerator};
+    use super::*;
     use crate::rack_setup::plan::service::{Plan as ServicePlan, SledInfo};
+    use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
     use nexus_sled_agent_shared::inventory::{
         Baseboard, Inventory, InventoryDisk, OmicronZoneType,
         OmicronZonesConfig, SledRole,
@@ -1778,9 +1791,8 @@ mod test {
         )
     }
 
-    fn make_test_service_plan() -> ServicePlan {
-        let rss_config = Config::test_config();
-        let fake_sleds = vec![
+    fn make_fake_sleds() -> Vec<SledInfo> {
+        vec![
             make_sled_info(
                 SledUuid::new_v4(),
                 Ipv6Subnet::<SLED_PREFIX>::new(
@@ -1795,7 +1807,19 @@ mod test {
                 ),
                 5,
             ),
-        ];
+            make_sled_info(
+                SledUuid::new_v4(),
+                Ipv6Subnet::<SLED_PREFIX>::new(
+                    "fd00:1122:3344:103::1".parse().unwrap(),
+                ),
+                5,
+            ),
+        ]
+    }
+
+    fn make_test_service_plan() -> ServicePlan {
+        let rss_config = Config::test_config();
+        let fake_sleds = make_fake_sleds();
         let service_plan =
             ServicePlan::create_transient(&rss_config, fake_sleds)
                 .expect("failed to create service plan");
@@ -1912,5 +1936,48 @@ mod test {
             );
         }
         assert!(v6_nfound > v5_nfound);
+    }
+
+    #[test]
+    fn rss_blueprint_is_blippy_clean() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "rss_blueprint_is_blippy_clean",
+        );
+
+        let fake_sleds = make_fake_sleds();
+
+        let rss_config = Config::test_config();
+        let use_trust_quorum = false;
+        let sled_plan = SledPlan::create(
+            &logctx.log,
+            &rss_config,
+            fake_sleds
+                .iter()
+                .map(|sled_info| *sled_info.sled_address.ip())
+                .collect(),
+            use_trust_quorum,
+        );
+        let service_plan =
+            ServicePlan::create_transient(&rss_config, fake_sleds)
+                .expect("created service plan");
+
+        let sled_configs_by_id =
+            build_sled_configs_by_id(&sled_plan, &service_plan)
+                .expect("built sled configs");
+        let blueprint = build_initial_blueprint_from_plan(
+            &sled_configs_by_id,
+            &service_plan,
+        )
+        .expect("built blueprint");
+
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+
+        if !report.notes().is_empty() {
+            eprintln!("{}", report.display());
+            panic!("RSS blueprint should have no blippy notes");
+        }
+
+        logctx.cleanup_successful();
     }
 }

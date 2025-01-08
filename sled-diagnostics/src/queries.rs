@@ -4,24 +4,59 @@
 
 //! Wrapper for command execution with timeout.
 
-use std::{process::Command, time::Duration};
+use std::{
+    process::{Command, ExitStatus},
+    time::Duration,
+};
 
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
+
+#[cfg(target_os = "illumos")]
+use crate::contract::ContractError;
+
+#[cfg(not(target_os = "illumos"))]
+use crate::contract_stub::ContractError;
 
 const DLADM: &str = "/usr/sbin/dladm";
 const IPADM: &str = "/usr/sbin/ipadm";
 const PFEXEC: &str = "/usr/bin/pfexec";
+const PSTACK: &str = "/usr/bin/pstack";
+const PARGS: &str = "/usr/bin/pargs";
 const ZONEADM: &str = "/usr/sbin/zoneadm";
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub trait SledDiagnosticsCommandHttpOutput {
-    fn get_output(self) -> String;
+    fn get_output(self) -> SledDiagnosticsQueryOutput;
+}
+
+#[derive(Clone, Debug, JsonSchema, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SledDiagnosticsQueryOutput {
+    Success {
+        /// The command and its arguments.
+        command: String,
+        /// Any stdout/stderr produced by the command.
+        stdio: String,
+        /// The exit status of the command. This will be the exit code (if any)
+        /// and exit reason such as from a signal.
+        exit_status: String,
+        /// The exit code if one was present when the command exited.
+        exit_code: Option<i32>,
+    },
+    Failure {
+        /// The reason the command failed to execute.
+        error: String,
+    },
 }
 
 #[derive(Error, Debug)]
 pub enum SledDiagnosticsCmdError {
+    #[error("libcontract error: {0}")]
+    Contract(#[from] ContractError),
     #[error("Failed to duplicate pipe for command [{command}]: {error}")]
     Dup { command: String, error: std::io::Error },
     #[error("Failed to proccess output for command [{command}]: {error}")]
@@ -44,24 +79,23 @@ pub enum SledDiagnosticsCmdError {
 pub struct SledDiagnosticsCmdOutput {
     pub command: String,
     pub stdio: String,
-    pub exit_status: String,
-}
-
-impl std::fmt::Display for SledDiagnosticsCmdOutput {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Command executed [{}]:", self.command)?;
-        writeln!(f, "    ==== stdio ====\n{}", self.stdio)?;
-        writeln!(f, "    ==== exit status ====\n{}", self.exit_status)
-    }
+    pub exit_status: ExitStatus,
 }
 
 impl SledDiagnosticsCommandHttpOutput
     for Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>
 {
-    fn get_output(self) -> String {
+    fn get_output(self) -> SledDiagnosticsQueryOutput {
         match self {
-            Ok(output) => format!("{output}"),
-            Err(error) => format!("{error}"),
+            Ok(output) => SledDiagnosticsQueryOutput::Success {
+                command: output.command,
+                stdio: output.stdio,
+                exit_status: output.exit_status.to_string(),
+                exit_code: output.exit_status.code(),
+            },
+            Err(error) => {
+                SledDiagnosticsQueryOutput::Failure { error: error.to_string() }
+            }
         }
     }
 }
@@ -124,13 +158,9 @@ async fn execute(
         }
     })?;
 
-    let exit_status =
-        child.wait().await.map(|es| format!("{es}")).map_err(|e| {
-            SledDiagnosticsCmdError::Wait {
-                command: cmd_string.clone(),
-                error: e,
-            }
-        })?;
+    let exit_status = child.wait().await.map_err(|e| {
+        SledDiagnosticsCmdError::Wait { command: cmd_string.clone(), error: e }
+    })?;
 
     Ok(SledDiagnosticsCmdOutput { command: cmd_string, stdio, exit_status })
 }
@@ -205,9 +235,17 @@ pub fn dladm_show_linkprop() -> Command {
     cmd
 }
 
-/*
- * Public API
- */
+pub fn pargs_process(pid: i32) -> Command {
+    let mut cmd = std::process::Command::new(PFEXEC);
+    cmd.env_clear().arg(PARGS).arg("-ae").arg(pid.to_string());
+    cmd
+}
+
+pub fn pstack_process(pid: i32) -> Command {
+    let mut cmd = std::process::Command::new(PFEXEC);
+    cmd.env_clear().arg(PSTACK).arg(pid.to_string());
+    cmd
+}
 
 #[cfg(test)]
 mod test {
