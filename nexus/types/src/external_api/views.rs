@@ -17,7 +17,7 @@ use omicron_common::api::external::{
     IdentityMetadata, InstanceState, Name, ObjectIdentity, RoleName,
     SimpleIdentityOrName,
 };
-use omicron_uuid_kinds::{EventUuid, WebhookUuid};
+use omicron_uuid_kinds::{WebhookEventUuid, WebhookReceiverUuid};
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -1046,7 +1046,7 @@ pub struct EventClass {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Webhook {
     /// The UUID of this webhook receiver.
-    pub id: WebhookUuid,
+    pub id: WebhookReceiverUuid,
     /// The identifier assigned to this webhook receiver upon creation.
     pub name: String,
     /// The URL that webhook notification requests are sent to.
@@ -1083,13 +1083,13 @@ pub struct WebhookDelivery {
     pub id: Uuid,
 
     /// The UUID of the webhook receiver that this event was delivered to.
-    pub webhook_id: WebhookUuid,
+    pub webhook_id: WebhookReceiverUuid,
 
     /// The event class.
     pub event_class: String,
 
     /// The UUID of the event.
-    pub event_id: EventUuid,
+    pub event_id: WebhookEventUuid,
 
     /// The state of the delivery attempt.
     pub state: WebhookDeliveryState,
