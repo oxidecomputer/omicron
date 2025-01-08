@@ -754,6 +754,33 @@
         }
       }
     },
+    "/support/pfiles-info": {
+      "get": {
+        "operationId": "support_pfiles_info",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_SledDiagnosticsQueryOutput",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SledDiagnosticsQueryOutput"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/support/pstack-info": {
       "get": {
         "operationId": "support_pstack_info",

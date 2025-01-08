@@ -664,6 +664,14 @@ pub trait SledAgentApi {
     async fn support_pstack_info(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/pfiles-info",
+    }]
+    async fn support_pfiles_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]

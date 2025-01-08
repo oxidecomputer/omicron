@@ -23,6 +23,7 @@ use crate::contract_stub::ContractError;
 const DLADM: &str = "/usr/sbin/dladm";
 const IPADM: &str = "/usr/sbin/ipadm";
 const PFEXEC: &str = "/usr/bin/pfexec";
+const PFILES: &str = "/usr/bin/pfiles";
 const PSTACK: &str = "/usr/bin/pstack";
 const PARGS: &str = "/usr/bin/pargs";
 const ZONEADM: &str = "/usr/sbin/zoneadm";
@@ -244,6 +245,12 @@ pub fn pargs_process(pid: i32) -> Command {
 pub fn pstack_process(pid: i32) -> Command {
     let mut cmd = std::process::Command::new(PFEXEC);
     cmd.env_clear().arg(PSTACK).arg(pid.to_string());
+    cmd
+}
+
+pub fn pfiles_process(pid: i32) -> Command {
+    let mut cmd = std::process::Command::new(PFEXEC);
+    cmd.env_clear().arg(PFILES).arg(pid.to_string());
     cmd
 }
 

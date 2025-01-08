@@ -1027,4 +1027,18 @@ impl SledAgentApi for SledAgentImpl {
                 .collect::<Vec<_>>(),
         ))
     }
+
+    async fn support_pfiles_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
+        let sa = request_context.context();
+        Ok(HttpResponseOk(
+            sa.support_pfiles_info()
+                .await
+                .into_iter()
+                .map(|cmd| cmd.get_output())
+                .collect::<Vec<_>>(),
+        ))
+    }
 }

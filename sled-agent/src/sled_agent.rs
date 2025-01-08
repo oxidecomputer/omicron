@@ -1400,6 +1400,12 @@ impl SledAgent {
     ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
         sled_diagnostics::pstack_oxide_processes(&self.log).await
     }
+
+    pub(crate) async fn support_pfiles_info(
+        &self,
+    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+        sled_diagnostics::pfiles_oxide_processes(&self.log).await
+    }
 }
 
 #[derive(From, thiserror::Error, Debug)]
