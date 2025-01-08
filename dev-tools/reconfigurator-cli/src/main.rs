@@ -12,6 +12,7 @@ use clap::ValueEnum;
 use clap::{Args, Parser, Subcommand};
 use indent_write::fmt::IndentWriter;
 use internal_dns_types::diff::DnsDiff;
+use log_capture::LogCapture;
 use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
@@ -42,9 +43,12 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::io::BufRead;
+use std::io::IsTerminal;
 use swrite::{swriteln, SWrite};
 use tabled::Tabled;
 use uuid::Uuid;
+
+mod log_capture;
 
 /// REPL state
 #[derive(Debug)]
@@ -157,11 +161,7 @@ struct CmdReconfiguratorSim {
 fn main() -> anyhow::Result<()> {
     let cmd = CmdReconfiguratorSim::parse();
 
-    let log = dropshot::ConfigLogging::StderrTerminal {
-        level: dropshot::ConfigLoggingLevel::Info,
-    }
-    .to_logger("reconfigurator-sim")
-    .context("creating logger")?;
+    let (log_capture, log) = LogCapture::new(std::io::stdout().is_terminal());
 
     let seed_provided = cmd.seed.is_some();
     let mut sim = ReconfiguratorSim::new(log, cmd.seed);
@@ -179,7 +179,7 @@ fn main() -> anyhow::Result<()> {
             let buffer = maybe_buffer
                 .with_context(|| format!("read {:?}", &input_file))?;
             println!("> {}", buffer);
-            match process_entry(&mut sim, buffer) {
+            match process_entry(&mut sim, buffer, &log_capture) {
                 LoopResult::Continue => (),
                 LoopResult::Bail(error) => return Err(error),
             }
@@ -194,7 +194,7 @@ fn main() -> anyhow::Result<()> {
         loop {
             match ed.read_line(&prompt) {
                 Ok(Signal::Success(buffer)) => {
-                    match process_entry(&mut sim, buffer) {
+                    match process_entry(&mut sim, buffer, &log_capture) {
                         LoopResult::Continue => (),
                         LoopResult::Bail(error) => return Err(error),
                     }
@@ -225,7 +225,11 @@ enum LoopResult {
 }
 
 /// Processes one "line" of user input.
-fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
+fn process_entry(
+    sim: &mut ReconfiguratorSim,
+    entry: String,
+    logs: &LogCapture,
+) -> LoopResult {
     // If no input was provided, take another lap (print the prompt and accept
     // another line).  This gets handled specially because otherwise clap would
     // treat this as a usage error and print a help message, which isn't what we
@@ -288,6 +292,10 @@ fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
         Commands::Save(args) => cmd_save(sim, args),
         Commands::Wipe(args) => cmd_wipe(sim, args),
     };
+
+    for line in logs.take_log_lines() {
+        println!("{line}");
+    }
 
     match cmd_result {
         Err(error) => println!("error: {:#}", error),
