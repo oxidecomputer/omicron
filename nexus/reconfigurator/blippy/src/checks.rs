@@ -611,6 +611,7 @@ mod tests {
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintZoneType;
     use omicron_test_utils::dev::test_setup_log;
+    use std::mem;
 
     // The tests below all take the example blueprint, mutate in some invalid
     // way, and confirm that blippy reports the invalidity. This test confirms
@@ -640,7 +641,7 @@ mod tests {
         // Copy the underlay IP from one Nexus to another.
         let mut nexus_iter = blueprint.blueprint_zones.iter_mut().flat_map(
             |(sled_id, zones_config)| {
-                zones_config.zones.values_mut().filter_map(move |zone| {
+                zones_config.zones.iter_mut().filter_map(move |zone| {
                     if zone.zone_type.is_nexus() {
                         Some((*sled_id, zone))
                     } else {
@@ -651,7 +652,7 @@ mod tests {
         );
         let (nexus0_sled_id, nexus0) =
             nexus_iter.next().expect("at least one Nexus zone");
-        let (nexus1_sled_id, nexus1) =
+        let (nexus1_sled_id, mut nexus1) =
             nexus_iter.next().expect("at least two Nexus zones");
         assert_ne!(nexus0_sled_id, nexus1_sled_id);
 
@@ -670,8 +671,8 @@ mod tests {
         // duplicate underlay IP, duplicate sled subnets, and sled1 having mixed
         // underlay subnets (the details of which depend on the ordering of
         // zones, so we'll sort that out here).
-        let nexus0 = nexus0.clone();
-        let nexus1 = nexus1.clone();
+        let nexus0 = nexus0.into_ref().clone();
+        let nexus1 = nexus1.into_ref().clone();
         let (mixed_underlay_zone1, mixed_underlay_zone2) = {
             let mut sled1_zones = blueprint
                 .blueprint_zones
@@ -745,7 +746,7 @@ mod tests {
             .blueprint_zones
             .iter_mut()
             .flat_map(|(sled_id, zones_config)| {
-                zones_config.zones.values_mut().filter_map(move |zone| {
+                zones_config.zones.iter_mut().filter_map(move |zone| {
                     if zone.zone_type.is_internal_dns() {
                         Some((*sled_id, zone))
                     } else {
@@ -755,7 +756,7 @@ mod tests {
             });
         let (dns0_sled_id, dns0) =
             internal_dns_iter.next().expect("at least one internal DNS zone");
-        let (dns1_sled_id, dns1) =
+        let (dns1_sled_id, mut dns1) =
             internal_dns_iter.next().expect("at least two internal DNS zones");
         assert_ne!(dns0_sled_id, dns1_sled_id);
 
@@ -806,6 +807,9 @@ mod tests {
             },
         };
 
+        mem::drop(dns0);
+        mem::drop(dns1);
+
         let report =
             Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
@@ -826,7 +830,7 @@ mod tests {
         // Copy the external IP from one Nexus to another.
         let mut nexus_iter = blueprint.blueprint_zones.iter_mut().flat_map(
             |(sled_id, zones_config)| {
-                zones_config.zones.values_mut().filter_map(move |zone| {
+                zones_config.zones.iter_mut().filter_map(move |zone| {
                     if zone.zone_type.is_nexus() {
                         Some((*sled_id, zone))
                     } else {
@@ -837,7 +841,7 @@ mod tests {
         );
         let (nexus0_sled_id, nexus0) =
             nexus_iter.next().expect("at least one Nexus zone");
-        let (nexus1_sled_id, nexus1) =
+        let (nexus1_sled_id, mut nexus1) =
             nexus_iter.next().expect("at least two Nexus zones");
         assert_ne!(nexus0_sled_id, nexus1_sled_id);
 
@@ -874,6 +878,9 @@ mod tests {
             },
         }];
 
+        mem::drop(nexus0);
+        mem::drop(nexus1);
+
         let report =
             Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
@@ -896,7 +903,7 @@ mod tests {
         // Copy the external IP from one Nexus to another.
         let mut nexus_iter = blueprint.blueprint_zones.iter_mut().flat_map(
             |(sled_id, zones_config)| {
-                zones_config.zones.values_mut().filter_map(move |zone| {
+                zones_config.zones.iter_mut().filter_map(move |zone| {
                     if zone.zone_type.is_nexus() {
                         Some((*sled_id, zone))
                     } else {
@@ -907,7 +914,7 @@ mod tests {
         );
         let (nexus0_sled_id, nexus0) =
             nexus_iter.next().expect("at least one Nexus zone");
-        let (nexus1_sled_id, nexus1) =
+        let (nexus1_sled_id, mut nexus1) =
             nexus_iter.next().expect("at least two Nexus zones");
         assert_ne!(nexus0_sled_id, nexus1_sled_id);
 
@@ -939,6 +946,9 @@ mod tests {
             },
         }];
 
+        mem::drop(nexus0);
+        mem::drop(nexus1);
+
         let report =
             Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
@@ -961,7 +971,7 @@ mod tests {
         // Copy the external IP from one Nexus to another.
         let mut nexus_iter = blueprint.blueprint_zones.iter_mut().flat_map(
             |(sled_id, zones_config)| {
-                zones_config.zones.values_mut().filter_map(move |zone| {
+                zones_config.zones.iter_mut().filter_map(move |zone| {
                     if zone.zone_type.is_nexus() {
                         Some((*sled_id, zone))
                     } else {
@@ -972,7 +982,7 @@ mod tests {
         );
         let (nexus0_sled_id, nexus0) =
             nexus_iter.next().expect("at least one Nexus zone");
-        let (nexus1_sled_id, nexus1) =
+        let (nexus1_sled_id, mut nexus1) =
             nexus_iter.next().expect("at least two Nexus zones");
         assert_ne!(nexus0_sled_id, nexus1_sled_id);
 
@@ -1004,6 +1014,9 @@ mod tests {
             },
         }];
 
+        mem::drop(nexus0);
+        mem::drop(nexus1);
+
         let report =
             Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
@@ -1030,7 +1043,7 @@ mod tests {
         // Copy the durable zpool from one external DNS to another.
         let mut dns_iter = blueprint.blueprint_zones.iter_mut().flat_map(
             |(sled_id, zones_config)| {
-                zones_config.zones.values_mut().filter_map(move |zone| {
+                zones_config.zones.iter_mut().filter_map(move |zone| {
                     if zone.zone_type.is_external_dns() {
                         Some((*sled_id, zone))
                     } else {
@@ -1041,7 +1054,7 @@ mod tests {
         );
         let (dns0_sled_id, dns0) =
             dns_iter.next().expect("at least one external DNS zone");
-        let (dns1_sled_id, dns1) =
+        let (dns1_sled_id, mut dns1) =
             dns_iter.next().expect("at least two external DNS zones");
         assert_ne!(dns0_sled_id, dns1_sled_id);
 
@@ -1058,6 +1071,9 @@ mod tests {
             }
             _ => unreachable!("this is an external DNS zone"),
         };
+
+        let dns0 = dns0.into_ref().clone();
+        let dns1 = dns1.into_ref().clone();
 
         let expected_notes = [
             Note {
@@ -1110,7 +1126,7 @@ mod tests {
         // Copy the filesystem zpool from one external DNS to another.
         let mut dns_iter = blueprint.blueprint_zones.iter_mut().flat_map(
             |(sled_id, zones_config)| {
-                zones_config.zones.values_mut().filter_map(move |zone| {
+                zones_config.zones.iter_mut().filter_map(move |zone| {
                     if zone.zone_type.is_external_dns() {
                         Some((*sled_id, zone))
                     } else {
@@ -1121,7 +1137,7 @@ mod tests {
         );
         let (dns0_sled_id, dns0) =
             dns_iter.next().expect("at least one external DNS zone");
-        let (dns1_sled_id, dns1) =
+        let (dns1_sled_id, mut dns1) =
             dns_iter.next().expect("at least two external DNS zones");
         assert_ne!(dns0_sled_id, dns1_sled_id);
 
@@ -1132,6 +1148,8 @@ mod tests {
             .clone();
         dns1.filesystem_pool = Some(dup_zpool.clone());
 
+        let dns0 = dns0.into_ref().clone();
+        let dns1 = dns1.into_ref().clone();
         let expected_notes = [
             Note {
                 severity: Severity::Fatal,

@@ -3274,7 +3274,7 @@ mod tests {
                 .blueprint_zones
                 .get_mut(&sled_ids[2])
                 .expect("zones for sled");
-            sled2.zones.values_mut().next().unwrap().disposition =
+            sled2.zones.iter_mut().next().unwrap().disposition =
                 BlueprintZoneDisposition::Quiesced;
             sled2.generation = sled2.generation.next();
 
@@ -3283,7 +3283,7 @@ mod tests {
                 .blueprint_zones
                 .get_mut(&sled_ids[3])
                 .expect("zones for sled");
-            sled3.zones.values_mut().next().unwrap().disposition =
+            sled3.zones.iter_mut().next().unwrap().disposition =
                 BlueprintZoneDisposition::Expunged;
             sled3.generation = sled3.generation.next();
 

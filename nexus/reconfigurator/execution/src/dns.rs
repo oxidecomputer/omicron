@@ -370,6 +370,7 @@ mod test {
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
+    use std::mem;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
@@ -1029,12 +1030,13 @@ mod test {
         // back for that sled.
         let (_, bp_zones_config) =
             blueprint.blueprint_zones.iter_mut().next().unwrap();
-        let nexus_zone = bp_zones_config
+        let mut nexus_zone = bp_zones_config
             .zones
-            .values_mut()
+            .iter_mut()
             .find(|z| z.zone_type.is_nexus())
             .unwrap();
         nexus_zone.disposition = BlueprintZoneDisposition::Quiesced;
+        mem::drop(nexus_zone);
 
         // Retrieve the DNS config based on the modified blueprint
         let external_dns_zone = blueprint_external_dns_config(

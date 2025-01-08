@@ -957,7 +957,7 @@ mod test {
 
     fn expunge_nexus_for_bundle(bp: &mut Blueprint, bundle: &SupportBundle) {
         for zones in bp.blueprint_zones.values_mut() {
-            for (_, zone) in &mut zones.zones {
+            for mut zone in &mut zones.zones {
                 if zone.id == bundle.assigned_nexus.unwrap().into() {
                     zone.disposition = BlueprintZoneDisposition::Expunged;
                 }

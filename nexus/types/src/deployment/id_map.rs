@@ -91,8 +91,8 @@ impl<T: IdMappable> IdMap<T> {
         self.inner.values()
     }
 
-    pub fn values_mut(&mut self) -> btree_map::ValuesMut<'_, T::Id, T> {
-        self.inner.values_mut()
+    pub fn iter_mut(&mut self) -> IterMut<'_, T> {
+        IterMut { inner: self.inner.values_mut() }
     }
 
     pub fn into_values(self) -> btree_map::IntoValues<T::Id, T> {
@@ -134,11 +134,11 @@ impl<'a, T: IdMappable> IntoIterator for &'a IdMap<T> {
 }
 
 impl<'a, T: IdMappable> IntoIterator for &'a mut IdMap<T> {
-    type Item = (&'a T::Id, &'a mut T);
-    type IntoIter = btree_map::IterMut<'a, T::Id, T>;
+    type Item = RefMut<'a, T>;
+    type IntoIter = IterMut<'a, T>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.inner.iter_mut()
+        self.iter_mut()
     }
 }
 
@@ -268,6 +268,18 @@ impl<'a, T: IdMappable> RefMut<'a, T> {
     }
 }
 
+pub struct IterMut<'a, T: IdMappable> {
+    inner: btree_map::ValuesMut<'a, T::Id, T>,
+}
+
+impl<'a, T: IdMappable> Iterator for IterMut<'a, T> {
+    type Item = RefMut<'a, T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(RefMut::new)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -365,5 +377,25 @@ mod tests {
         let mut map = IdMap::<TestEntry>::new();
         map.insert(TestEntry { id: 1, val1: 2, val2: 3 });
         map.get_mut(&1).unwrap().id = 2;
+    }
+
+    #[test]
+    #[should_panic(expected = "IdMap values must not change their ID")]
+    fn iter_mut_panics_if_id_changes() {
+        let mut map = IdMap::<TestEntry>::new();
+        map.insert(TestEntry { id: 1, val1: 2, val2: 3 });
+        for mut entry in map.iter_mut() {
+            entry.id = 2;
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "IdMap values must not change their ID")]
+    fn mut_into_iter_panics_if_id_changes() {
+        let mut map = IdMap::<TestEntry>::new();
+        map.insert(TestEntry { id: 1, val1: 2, val2: 3 });
+        for mut entry in &mut map {
+            entry.id = 2;
+        }
     }
 }

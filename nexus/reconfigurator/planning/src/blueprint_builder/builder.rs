@@ -2143,7 +2143,7 @@ pub mod test {
         // We're going under the hood of the blueprint here; a sled can only get
         // to the decommissioned state if all its disks/datasets/zones have been
         // expunged, so do that too.
-        for (_, zone) in &mut blueprint1
+        for mut zone in &mut blueprint1
             .blueprint_zones
             .get_mut(&decommision_sled_id)
             .expect("has zones")
@@ -2190,7 +2190,7 @@ pub mod test {
         builder.sleds_mut().get_mut(&decommision_sled_id).unwrap().state =
             SledState::Decommissioned;
         let input = builder.build();
-        for (_, z) in &mut blueprint2
+        for mut z in &mut blueprint2
             .blueprint_zones
             .get_mut(&decommision_sled_id)
             .unwrap()

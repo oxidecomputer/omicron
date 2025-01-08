@@ -2091,7 +2091,7 @@ mod test {
             // expunged, so lie and pretend like that already happened
             // (otherwise the planner will rightfully fail to generate a new
             // blueprint, because we're feeding it invalid inputs).
-            for (_, zone) in
+            for mut zone in
                 &mut blueprint1.blueprint_zones.get_mut(sled_id).unwrap().zones
             {
                 zone.disposition = BlueprintZoneDisposition::Expunged;
