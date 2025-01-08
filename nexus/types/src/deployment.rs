@@ -53,8 +53,8 @@ use uuid::Uuid;
 
 mod blueprint_diff;
 mod blueprint_display;
-mod blueprint_visitor;
 mod clickhouse;
+mod diff_visitors;
 pub mod execution;
 mod network_resources;
 mod planning_input;
