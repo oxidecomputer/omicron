@@ -4693,18 +4693,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_record_per_volume_resource_usage on omicro
  */
 
 CREATE TABLE IF NOT EXISTS omicron.public.webhook_rx (
+    /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
-    -- A human-readable identifier for this webhook receiver.
     name STRING(63) NOT NULL,
     description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    -- Child resource generation
+    rcgen INT NOT NULL,
     -- URL of the endpoint webhooks are delivered to.
     endpoint STRING(512) NOT NULL,
     -- Whether or not liveness probes are sent to this receiver.
     probes_enabled BOOL NOT NULL,
-    -- TODO(eliza): how do we track which roles are assigned to a webhook?
-    time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ,
-    time_deleted TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.webhook_rx_secret (

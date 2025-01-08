@@ -107,6 +107,7 @@ mod volume;
 mod volume_repair;
 mod vpc;
 mod webhook_event;
+mod webhook_rx;
 mod zpool;
 
 pub use address_lot::AddressLotCreateResult;

@@ -1010,6 +1010,7 @@ pub enum ResourceType {
     FloatingIp,
     Probe,
     ProbeNetworkInterface,
+    WebhookReceiver,
 }
 
 // IDENTITY METADATA
