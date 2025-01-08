@@ -718,7 +718,7 @@ dependencies = [
  "bitflags 2.6.0",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "log",
@@ -1559,6 +1559,22 @@ checksum = "cbf2150cce219b664a8a70df7a1f933836724b503f8a413af9365b4dcc4d90b8"
 dependencies = [
  "lazy_static",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "common"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/lldp#9f96ee79f219224d63d157b177004182960e793d"
+dependencies = [
+ "anyhow",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+ "slog-async",
+ "slog-bunyan",
+ "slog-term",
+ "thiserror",
 ]
 
 [[package]]
@@ -5323,6 +5339,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "lldpd-client"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/lldp#9f96ee79f219224d63d157b177004182960e793d"
+dependencies = [
+ "chrono",
+ "common",
+ "progenitor",
+ "reqwest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7000,6 +7031,7 @@ dependencies = [
  "internal-dns-types",
  "ipnetwork",
  "itertools 0.13.0",
+ "lldpd-client",
  "macaddr",
  "mg-admin-client",
  "nexus-auth",
@@ -7480,7 +7512,6 @@ dependencies = [
  "indicatif",
  "inout",
  "itertools 0.10.5",
- "itertools 0.12.1",
  "lalrpop-util",
  "lazy_static",
  "libc",

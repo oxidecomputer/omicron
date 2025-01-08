@@ -1014,6 +1014,7 @@ pub enum ResourceType {
     FloatingIp,
     Probe,
     ProbeNetworkInterface,
+    LldpLinkConfig,
 }
 
 // IDENTITY METADATA
@@ -2571,6 +2572,40 @@ pub struct LldpLinkConfig {
 
     /// The LLDP management IP TLV.
     pub management_ip: Option<oxnet::IpNet>,
+}
+
+/// Information about LLDP advertisements from other network entities directly
+/// connected to a switch port.  This structure contains both metadata about
+/// when and where the neighbor was seen, as well as the specific information
+/// the neighbor was advertising.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct LldpNeighbor {
+    /// The port on which the neighbor was seen
+    pub local_port: String,
+
+    /// Initial sighting of this LldpNeighbor
+    pub first_seen: DateTime<Utc>,
+
+    /// Most recent sighting of this LldpNeighbor
+    pub last_seen: DateTime<Utc>,
+
+    /// The LLDP link name advertised by the neighbor
+    pub link_name: String,
+
+    /// The LLDP link description advertised by the neighbor
+    pub link_description: Option<String>,
+
+    /// The LLDP chassis identifier advertised by the neighbor
+    pub chassis_id: String,
+
+    /// The LLDP system name advertised by the neighbor
+    pub system_name: Option<String>,
+
+    /// The LLDP system description advertised by the neighbor
+    pub system_description: Option<String>,
+
+    /// The LLDP management IP(s) advertised by the neighbor
+    pub management_ip: Vec<oxnet::IpNet>,
 }
 
 /// Per-port tx-eq overrides.  This can be used to fine-tune the transceiver
