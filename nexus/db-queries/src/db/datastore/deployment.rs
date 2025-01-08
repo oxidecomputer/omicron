@@ -2802,47 +2802,45 @@ mod tests {
             sled_id,
             BlueprintZonesConfig {
                 generation: omicron_common::api::external::Generation::new(),
-                zones: [(
-                    zone_id,
-                    BlueprintZoneConfig {
-                        disposition: BlueprintZoneDisposition::InService,
-                        id: zone_id,
-                        filesystem_pool: None,
-                        zone_type: BlueprintZoneType::Nexus(
-                            blueprint_zone_type::Nexus {
-                                internal_address: SocketAddrV6::new(
-                                    Ipv6Addr::LOCALHOST,
-                                    0,
-                                    0,
-                                    0,
-                                ),
-                                external_ip: OmicronZoneExternalFloatingIp {
-                                    id: ExternalIpUuid::new_v4(),
-                                    ip: "10.0.0.1".parse().unwrap(),
-                                },
-                                nic: NetworkInterface {
-                                    id: Uuid::new_v4(),
-                                    kind: NetworkInterfaceKind::Service {
-                                        id: *zone_id.as_untyped_uuid(),
-                                    },
-                                    name: Name::from_str("mynic").unwrap(),
-                                    ip: "fd77:e9d2:9cd9:2::8".parse().unwrap(),
-                                    mac: MacAddr::random_system(),
-                                    subnet: IpNet::host_net(IpAddr::V6(
-                                        Ipv6Addr::LOCALHOST,
-                                    )),
-                                    vni: Vni::random(),
-                                    primary: true,
-                                    slot: 1,
-                                    transit_ips: vec![],
-                                },
-                                external_tls: false,
-                                external_dns_servers: vec![],
+                zones: [BlueprintZoneConfig {
+                    disposition: BlueprintZoneDisposition::InService,
+                    id: zone_id,
+                    filesystem_pool: None,
+                    zone_type: BlueprintZoneType::Nexus(
+                        blueprint_zone_type::Nexus {
+                            internal_address: SocketAddrV6::new(
+                                Ipv6Addr::LOCALHOST,
+                                0,
+                                0,
+                                0,
+                            ),
+                            external_ip: OmicronZoneExternalFloatingIp {
+                                id: ExternalIpUuid::new_v4(),
+                                ip: "10.0.0.1".parse().unwrap(),
                             },
-                        ),
-                    },
-                )]
+                            nic: NetworkInterface {
+                                id: Uuid::new_v4(),
+                                kind: NetworkInterfaceKind::Service {
+                                    id: *zone_id.as_untyped_uuid(),
+                                },
+                                name: Name::from_str("mynic").unwrap(),
+                                ip: "fd77:e9d2:9cd9:2::8".parse().unwrap(),
+                                mac: MacAddr::random_system(),
+                                subnet: IpNet::host_net(IpAddr::V6(
+                                    Ipv6Addr::LOCALHOST,
+                                )),
+                                vni: Vni::random(),
+                                primary: true,
+                                slot: 1,
+                                transit_ips: vec![],
+                            },
+                            external_tls: false,
+                            external_dns_servers: vec![],
+                        },
+                    ),
+                }]
                 .into_iter()
+                .map(|z| (z.id, z))
                 .collect(),
             },
         );

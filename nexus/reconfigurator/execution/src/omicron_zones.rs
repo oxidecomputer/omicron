@@ -441,26 +441,22 @@ mod test {
             let zone_id = OmicronZoneUuid::new_v4();
             BlueprintZonesConfig {
                 generation: Generation::new(),
-                zones: [(
-                    zone_id,
-                    BlueprintZoneConfig {
-                        disposition: BlueprintZoneDisposition::InService,
-                        id: zone_id,
-                        filesystem_pool: Some(zpool.clone()),
-                        zone_type: BlueprintZoneType::InternalDns(
-                            blueprint_zone_type::InternalDns {
-                                dataset: OmicronZoneDataset {
-                                    pool_name: zpool,
-                                },
-                                dns_address: "[::1]:0".parse().unwrap(),
-                                gz_address: "::1".parse().unwrap(),
-                                gz_address_index: 0,
-                                http_address: "[::1]:0".parse().unwrap(),
-                            },
-                        ),
-                    },
-                )]
+                zones: [BlueprintZoneConfig {
+                    disposition: BlueprintZoneDisposition::InService,
+                    id: zone_id,
+                    filesystem_pool: Some(zpool.clone()),
+                    zone_type: BlueprintZoneType::InternalDns(
+                        blueprint_zone_type::InternalDns {
+                            dataset: OmicronZoneDataset { pool_name: zpool },
+                            dns_address: "[::1]:0".parse().unwrap(),
+                            gz_address: "::1".parse().unwrap(),
+                            gz_address_index: 0,
+                            http_address: "[::1]:0".parse().unwrap(),
+                        },
+                    ),
+                }]
                 .into_iter()
+                .map(|z| (z.id, z))
                 .collect(),
             }
         }

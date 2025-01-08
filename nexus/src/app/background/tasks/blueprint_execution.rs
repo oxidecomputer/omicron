@@ -405,28 +405,26 @@ mod test {
             let zone_id = OmicronZoneUuid::new_v4();
             BlueprintZonesConfig {
                 generation: Generation::new(),
-                zones: [(
-                    zone_id,
-                    BlueprintZoneConfig {
-                        disposition,
-                        id: zone_id,
-                        filesystem_pool: Some(ZpoolName::new_external(pool_id)),
-                        zone_type: BlueprintZoneType::InternalDns(
-                            blueprint_zone_type::InternalDns {
-                                dataset: OmicronZoneDataset {
-                                    pool_name: format!("oxp_{}", pool_id)
-                                        .parse()
-                                        .unwrap(),
-                                },
-                                dns_address: "[::1]:0".parse().unwrap(),
-                                gz_address: "::1".parse().unwrap(),
-                                gz_address_index: 0,
-                                http_address: "[::1]:12345".parse().unwrap(),
+                zones: [BlueprintZoneConfig {
+                    disposition,
+                    id: zone_id,
+                    filesystem_pool: Some(ZpoolName::new_external(pool_id)),
+                    zone_type: BlueprintZoneType::InternalDns(
+                        blueprint_zone_type::InternalDns {
+                            dataset: OmicronZoneDataset {
+                                pool_name: format!("oxp_{}", pool_id)
+                                    .parse()
+                                    .unwrap(),
                             },
-                        ),
-                    },
-                )]
+                            dns_address: "[::1]:0".parse().unwrap(),
+                            gz_address: "::1".parse().unwrap(),
+                            gz_address_index: 0,
+                            http_address: "[::1]:12345".parse().unwrap(),
+                        },
+                    ),
+                }]
                 .into_iter()
+                .map(|z| (z.id, z))
                 .collect(),
             }
         }
