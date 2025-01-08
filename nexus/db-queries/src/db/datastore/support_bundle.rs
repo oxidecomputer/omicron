@@ -939,7 +939,7 @@ mod test {
             .values()
             .flat_map(|zones_config| {
                 let mut nexus_zones = vec![];
-                for zone in &zones_config.zones {
+                for (_, zone) in &zones_config.zones {
                     if matches!(zone.zone_type, BlueprintZoneType::Nexus(_))
                         && zone.disposition.matches(filter)
                     {
@@ -983,7 +983,7 @@ mod test {
 
     fn expunge_nexus_for_bundle(bp: &mut Blueprint, bundle: &SupportBundle) {
         for zones in bp.blueprint_zones.values_mut() {
-            for zone in &mut zones.zones {
+            for (_, zone) in &mut zones.zones {
                 if zone.id == bundle.assigned_nexus.unwrap().into() {
                     zone.disposition = BlueprintZoneDisposition::Expunged;
                 }

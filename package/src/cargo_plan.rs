@@ -4,17 +4,26 @@
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::fmt;
+use std::io::Write;
 
 use anyhow::bail;
 use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
 use cargo_metadata::Metadata;
+use indent_write::io::IndentWriter;
 use omicron_zone_package::config::PackageMap;
+use omicron_zone_package::config::PackageName;
 use omicron_zone_package::package::PackageSource;
 use slog::info;
 use slog::Logger;
 use tokio::process::Command;
+
+use crate::config::cargo_features_for_target;
+use crate::config::BaseConfig;
+use crate::config::Config;
+use crate::config::MultiPresetArg;
 
 /// For a configuration, build a plan: the set of packages, binaries, and
 /// features to operate on in release and debug modes.
@@ -46,9 +55,10 @@ pub fn build_cargo_plan<'a>(
             // Add the package name to the plan
             plan.packages.insert(name);
             // Get the package metadata
-            let metadata = workspace_pkgs.get(name).with_context(|| {
-                format!("package '{name}' is not a workspace package")
-            })?;
+            let metadata =
+                workspace_pkgs.get(name.as_str()).with_context(|| {
+                    format!("package '{name}' is not a workspace package")
+                })?;
             // Add the binaries we want to build to the plan
             let bins = metadata
                 .targets
@@ -80,11 +90,17 @@ pub struct CargoPlan<'a> {
     pub debug: CargoTargets<'a>,
 }
 
-impl CargoPlan<'_> {
+impl<'a> CargoPlan<'a> {
     pub async fn run(&self, command: &str, log: &Logger) -> Result<()> {
         self.release.run(command, log).await?;
         self.debug.run(command, log).await?;
         Ok(())
+    }
+
+    /// Displays a `CargoPlan` in a human-readable format with the provided
+    /// command name.
+    pub fn display_human(&'a self, command: &'a str) -> DisplayCargoPlan<'_> {
+        DisplayCargoPlan { plan: self, command }
     }
 }
 
@@ -92,7 +108,7 @@ impl CargoPlan<'_> {
 #[derive(Debug)]
 pub struct CargoTargets<'a> {
     pub kind: BuildKind,
-    pub packages: BTreeSet<&'a String>,
+    pub packages: BTreeSet<&'a PackageName>,
     pub bins: BTreeSet<&'a String>,
     pub features: BTreeSet<&'a String>,
 }
@@ -120,7 +136,7 @@ impl CargoTargets<'_> {
         // --package, and without any --package options Cargo unifies features
         // across all workspace default members. See rust-lang/cargo#8157.
         for package in &self.packages {
-            cmd.arg("--package").arg(package);
+            cmd.arg("--package").arg(package.as_str());
         }
         for bin in &self.bins {
             cmd.arg("--bin").arg(bin);
@@ -169,4 +185,93 @@ impl CargoTargets<'_> {
 pub enum BuildKind {
     Release,
     Debug,
+}
+
+/// Show the Cargo commands that would be run for a configuration.
+pub fn do_show_cargo_commands_for_config(config: &Config) -> Result<()> {
+    let metadata = cargo_metadata::MetadataCommand::new().no_deps().exec()?;
+    let features = config.cargo_features();
+    let cargo_plan =
+        build_cargo_plan(&metadata, config.packages_to_build(), &features)?;
+    print!("{}", cargo_plan.display_human("build"));
+
+    Ok(())
+}
+
+/// Show the Cargo commands that would be run for a set of presets.
+pub fn do_show_cargo_commands_for_presets(
+    base_config: &BaseConfig,
+    presets: &MultiPresetArg,
+) -> Result<()> {
+    let presets = base_config.get_presets(presets)?;
+    let metadata = cargo_metadata::MetadataCommand::new().no_deps().exec()?;
+
+    for (preset, target) in presets {
+        let target_map = target.clone().into();
+        let features = cargo_features_for_target(&target_map);
+
+        // Build the cargo plan for this preset.
+        let cargo_plan = build_cargo_plan(
+            &metadata,
+            base_config.package_config().packages_to_build(&target_map),
+            &features,
+        )
+        .with_context(|| {
+            format!("failed to build cargo plan for preset '{preset}'")
+        })?;
+
+        // Print out the plan for this preset.
+        println!("for preset '{}':", preset);
+        let mut writer = IndentWriter::new("  * ", std::io::stdout().lock());
+        writeln!(writer, "{}", cargo_plan.display_human("build"))?;
+
+        writer.flush()?;
+    }
+
+    Ok(())
+}
+
+/// A human-readable display of a `CargoPlan`.
+///
+/// Created by calling [`CargoPlan::display_human`].
+pub struct DisplayCargoPlan<'a> {
+    plan: &'a CargoPlan<'a>,
+    command: &'a str,
+}
+
+impl fmt::Display for DisplayCargoPlan<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "release command: ")?;
+        if let Some(command) = &self.plan.release.build_command(self.command) {
+            writeln!(f, "{}", command_to_string(&command))?;
+        } else {
+            writeln!(f, "(none)")?;
+        }
+
+        write!(f, "debug command: ")?;
+        if let Some(command) = &self.plan.debug.build_command(self.command) {
+            writeln!(f, "{}", command_to_string(&command))?;
+        } else {
+            writeln!(f, "(none)")?;
+        }
+
+        Ok(())
+    }
+}
+
+fn command_to_string(command: &Command) -> String {
+    // Use shell-words to join the command and arguments into a single string.
+    let mut v = vec![command
+        .as_std()
+        .get_program()
+        .to_str()
+        .expect("program is valid UTF-8")];
+    v.extend(
+        command
+            .as_std()
+            .get_args()
+            .map(|arg| arg.to_str().expect("argument is valid UTF-8")),
+    );
+
+    shell_words::join(&v)
 }
