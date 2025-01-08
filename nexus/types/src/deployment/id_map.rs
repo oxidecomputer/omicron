@@ -83,11 +83,7 @@ impl<T: IdMappable> IdMap<T> {
         self.inner.get_mut(key).map(RefMut::new)
     }
 
-    pub fn iter(&self) -> btree_map::Iter<'_, T::Id, T> {
-        self.inner.iter()
-    }
-
-    pub fn values(&self) -> btree_map::Values<'_, T::Id, T> {
+    pub fn iter(&self) -> btree_map::Values<'_, T::Id, T> {
         self.inner.values()
     }
 
@@ -95,7 +91,7 @@ impl<T: IdMappable> IdMap<T> {
         IterMut { inner: self.inner.values_mut() }
     }
 
-    pub fn into_values(self) -> btree_map::IntoValues<T::Id, T> {
+    pub fn into_iter(self) -> btree_map::IntoValues<T::Id, T> {
         self.inner.into_values()
     }
 
@@ -116,20 +112,20 @@ impl<T: IdMappable> FromIterator<T> for IdMap<T> {
 }
 
 impl<T: IdMappable> IntoIterator for IdMap<T> {
-    type Item = (T::Id, T);
-    type IntoIter = btree_map::IntoIter<T::Id, T>;
+    type Item = T;
+    type IntoIter = btree_map::IntoValues<T::Id, T>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.inner.into_iter()
+        self.into_iter()
     }
 }
 
 impl<'a, T: IdMappable> IntoIterator for &'a IdMap<T> {
-    type Item = (&'a T::Id, &'a T);
-    type IntoIter = btree_map::Iter<'a, T::Id, T>;
+    type Item = &'a T;
+    type IntoIter = btree_map::Values<'a, T::Id, T>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.inner.iter()
+        self.iter()
     }
 }
 

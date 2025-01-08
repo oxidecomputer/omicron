@@ -240,7 +240,7 @@ impl Blueprint {
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
         zones_by_sled_id.iter().flat_map(move |(sled_id, z)| {
             z.zones
-                .values()
+                .iter()
                 .filter(move |z| z.disposition.matches(filter))
                 .map(|z| (*sled_id, z))
         })
@@ -268,7 +268,7 @@ impl Blueprint {
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
         self.blueprint_zones.iter().flat_map(move |(sled_id, z)| {
             z.zones
-                .values()
+                .iter()
                 .filter(move |z| !z.disposition.matches(filter))
                 .map(|z| (*sled_id, z))
         })
@@ -336,7 +336,7 @@ impl BpTableData for BlueprintZonesConfig {
 
     fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
         // We want to sort by (kind, id)
-        let mut zones: Vec<_> = self.zones.values().cloned().collect();
+        let mut zones: Vec<_> = self.zones.iter().cloned().collect();
         zones.sort_unstable_by_key(zone_sort_key);
         zones.into_iter().map(move |zone| {
             BpTableRow::from_strings(
@@ -565,7 +565,7 @@ impl From<BlueprintZonesConfig> for OmicronZonesConfig {
     fn from(config: BlueprintZonesConfig) -> Self {
         Self {
             generation: config.generation,
-            zones: config.zones.into_values().map(From::from).collect(),
+            zones: config.zones.into_iter().map(From::from).collect(),
         }
     }
 }
@@ -584,7 +584,7 @@ impl BlueprintZonesConfig {
             generation: self.generation,
             zones: self
                 .zones
-                .values()
+                .iter()
                 .filter(|z| z.disposition.matches(filter))
                 .cloned()
                 .map(OmicronZoneConfig::from)
@@ -596,7 +596,7 @@ impl BlueprintZonesConfig {
     /// `Expunged`, false otherwise.
     pub fn are_all_zones_expunged(&self) -> bool {
         self.zones
-            .values()
+            .iter()
             .all(|c| c.disposition == BlueprintZoneDisposition::Expunged)
     }
 }

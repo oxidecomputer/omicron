@@ -68,7 +68,7 @@ impl ZonesEditor {
         filter: BlueprintZoneFilter,
     ) -> impl Iterator<Item = &BlueprintZoneConfig> {
         self.zones
-            .values()
+            .iter()
             .filter(move |config| config.disposition.matches(filter))
     }
 

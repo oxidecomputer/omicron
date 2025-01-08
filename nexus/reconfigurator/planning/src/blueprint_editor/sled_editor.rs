@@ -236,7 +236,7 @@ impl SledEditor {
                 edited
                     .zones
                     .zones
-                    .values()
+                    .iter()
                     .filter(move |zone| zone.disposition.matches(filter)),
             ),
         }

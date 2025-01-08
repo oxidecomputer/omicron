@@ -461,7 +461,7 @@ impl ExampleSystemBuilder {
             let Some(zones) = blueprint.blueprint_zones.get(&sled_id) else {
                 continue;
             };
-            for (_, zone) in zones.zones.iter() {
+            for zone in zones.zones.iter() {
                 let service_id = zone.id;
                 if let Some((external_ip, nic)) =
                     zone.zone_type.external_networking()

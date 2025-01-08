@@ -209,7 +209,7 @@ fn server_configs(
         .flat_map(|zones_config| {
             zones_config
                 .zones
-                .values()
+                .iter()
                 .filter(|zone_config| {
                     clickhouse_cluster_config
                         .servers
@@ -267,7 +267,7 @@ fn keeper_configs(
         .flat_map(|zones_config| {
             zones_config
                 .zones
-                .values()
+                .iter()
                 .filter(|zone_config| {
                     clickhouse_cluster_config
                         .keepers

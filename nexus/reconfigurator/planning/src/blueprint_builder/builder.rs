@@ -2329,7 +2329,7 @@ pub mod test {
         let (_, _, blueprint) = example(&logctx.log, TEST_NAME);
 
         for (_, zone_config) in &blueprint.blueprint_zones {
-            for (_, zone) in &zone_config.zones {
+            for zone in &zone_config.zones {
                 // The pool should only be optional for backwards compatibility.
                 let filesystem_pool = zone
                     .filesystem_pool

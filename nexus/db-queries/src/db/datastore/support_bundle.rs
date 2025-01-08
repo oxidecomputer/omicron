@@ -913,7 +913,7 @@ mod test {
             .values()
             .flat_map(|zones_config| {
                 let mut nexus_zones = vec![];
-                for (_, zone) in &zones_config.zones {
+                for zone in &zones_config.zones {
                     if matches!(zone.zone_type, BlueprintZoneType::Nexus(_))
                         && zone.disposition.matches(filter)
                     {

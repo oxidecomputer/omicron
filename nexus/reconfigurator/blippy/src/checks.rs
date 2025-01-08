@@ -679,7 +679,7 @@ mod tests {
                 .get(&nexus1_sled_id)
                 .unwrap()
                 .zones
-                .values();
+                .iter();
             let sled1_zone1 = sled1_zones.next().expect("at least one zone");
             let sled1_zone2 = sled1_zones.next().expect("at least two zones");
             if sled1_zone1.id == nexus1.id {
@@ -1353,7 +1353,7 @@ mod tests {
         // with a filesystem_pool dataset to remove.
         let mut durable_zone = None;
         let mut root_zone = None;
-        for (_, z) in &zones_config.zones {
+        for z in &zones_config.zones {
             if durable_zone.is_none() {
                 if z.zone_type.durable_zpool().is_some() {
                     durable_zone = Some(z.clone());
@@ -1519,7 +1519,7 @@ mod tests {
             .expect("got zones for sled with datasets");
         let mut durable_zone = None;
         let mut root_zone = None;
-        for (_, z) in &zones_config.zones {
+        for z in &zones_config.zones {
             if durable_zone.is_none() {
                 if z.zone_type.durable_zpool().is_some() {
                     durable_zone = Some(z.clone());

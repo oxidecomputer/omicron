@@ -267,7 +267,7 @@ impl DataStore {
             .blueprint_zones
             .iter()
             .flat_map(|(sled_id, zones_config)| {
-                zones_config.zones.values().map(move |zone| {
+                zones_config.zones.iter().map(move |zone| {
                     BpOmicronZone::new(blueprint_id, *sled_id, zone)
                         .map_err(|e| Error::internal_error(&format!("{:#}", e)))
                 })
@@ -277,7 +277,7 @@ impl DataStore {
             .blueprint_zones
             .values()
             .flat_map(|zones_config| {
-                zones_config.zones.values().filter_map(|zone| {
+                zones_config.zones.iter().filter_map(|zone| {
                     BpOmicronZoneNic::new(blueprint_id, zone)
                         .with_context(|| format!("zone {}", zone.id))
                         .map_err(|e| Error::internal_error(&format!("{:#}", e)))
