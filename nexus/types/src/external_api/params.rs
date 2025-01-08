@@ -2303,8 +2303,8 @@ pub struct EventClassSelector {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookCreate {
-    /// An identifier for this webhook receiver, which must be unique.
-    pub name: String,
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
 
     /// The URL that webhook notification requests should be sent to
     pub endpoint: Url,
@@ -2327,8 +2327,8 @@ pub struct WebhookCreate {
 /// Parameters to update a webhook configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookUpdate {
-    /// An identifier for this webhook receiver, which must be unique.
-    pub name: String,
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
 
     /// The URL that webhook notification requests should be sent to
     pub endpoint: Url,
