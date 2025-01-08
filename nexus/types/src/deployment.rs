@@ -55,12 +55,15 @@ mod blueprint_diff;
 mod blueprint_display;
 mod clickhouse;
 pub mod execution;
+mod id_map;
 mod network_resources;
 mod planning_input;
 mod tri_map;
 mod zone_type;
 
 pub use clickhouse::ClickhouseClusterConfig;
+pub use id_map::IdMap;
+pub use id_map::IdMappable;
 pub use network_resources::AddNetworkResourceError;
 pub use network_resources::OmicronZoneExternalFloatingAddr;
 pub use network_resources::OmicronZoneExternalFloatingIp;
