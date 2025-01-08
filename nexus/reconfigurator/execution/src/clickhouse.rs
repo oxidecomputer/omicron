@@ -209,7 +209,7 @@ fn server_configs(
         .flat_map(|zones_config| {
             zones_config
                 .zones
-                .iter()
+                .values()
                 .filter(|zone_config| {
                     clickhouse_cluster_config
                         .servers
@@ -267,7 +267,7 @@ fn keeper_configs(
         .flat_map(|zones_config| {
             zones_config
                 .zones
-                .iter()
+                .values()
                 .filter(|zone_config| {
                     clickhouse_cluster_config
                         .keepers
@@ -351,7 +351,7 @@ mod test {
             let zone_id = OmicronZoneUuid::new_v4();
             let zone_config = BlueprintZonesConfig {
                 generation: Generation::new(),
-                zones: vec![BlueprintZoneConfig {
+                zones: [BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: zone_id,
                     filesystem_pool: None,
@@ -379,7 +379,10 @@ mod test {
                             },
                         },
                     ),
-                }],
+                }]
+                .into_iter()
+                .map(|z| (z.id, z))
+                .collect(),
             };
             zones.insert(sled_id, zone_config);
             config.keepers.insert(zone_id, keeper_id.into());
@@ -390,7 +393,7 @@ mod test {
             let zone_id = OmicronZoneUuid::new_v4();
             let zone_config = BlueprintZonesConfig {
                 generation: Generation::new(),
-                zones: vec![BlueprintZoneConfig {
+                zones: [BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: zone_id,
                     filesystem_pool: None,
@@ -418,7 +421,10 @@ mod test {
                             },
                         },
                     ),
-                }],
+                }]
+                .into_iter()
+                .map(|z| (z.id, z))
+                .collect(),
             };
             zones.insert(sled_id, zone_config);
             config.servers.insert(zone_id, server_id.into());
