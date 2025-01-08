@@ -10,14 +10,17 @@ use clap::{Parser, Subcommand};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use illumos_utils::{zfs, zone};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use omicron_package::cargo_plan::build_cargo_plan;
-use omicron_package::config::{Config, ConfigArgs};
-use omicron_package::target::{target_command_help, KnownTarget};
-use omicron_package::{parse, BuildCommand, DeployCommand, TargetCommand};
-use omicron_zone_package::config::Config as PackageConfig;
+use omicron_package::cargo_plan::{
+    build_cargo_plan, do_show_cargo_commands_for_config,
+    do_show_cargo_commands_for_presets,
+};
+use omicron_package::config::{BaseConfig, Config, ConfigArgs};
+use omicron_package::target::target_command_help;
+use omicron_package::{BuildCommand, DeployCommand, TargetCommand};
+use omicron_zone_package::config::PackageName;
 use omicron_zone_package::package::{Package, PackageOutput, PackageSource};
 use omicron_zone_package::progress::Progress;
-use omicron_zone_package::target::Target;
+use omicron_zone_package::target::TargetMap;
 use rayon::prelude::*;
 use ring::digest::{Context as DigestContext, Digest, SHA256};
 use sled_hardware::cleanup::cleanup_networking_resources;
@@ -30,7 +33,9 @@ use std::fs::create_dir_all;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::Command;
+
+const OMICRON_SLED_AGENT: PackageName =
+    PackageName::new_const("omicron-sled-agent");
 
 /// All packaging subcommands.
 #[derive(Debug, Subcommand)]
@@ -65,49 +70,6 @@ struct Args {
 
     #[clap(subcommand)]
     subcommand: SubCommand,
-}
-
-async fn do_show_cargo_commands(config: &Config) -> Result<()> {
-    let metadata = cargo_metadata::MetadataCommand::new().no_deps().exec()?;
-    let features = config.cargo_features();
-    let cargo_plan =
-        build_cargo_plan(&metadata, config.packages_to_build(), &features)?;
-
-    let release_command = cargo_plan.release.build_command("build");
-    let debug_command = cargo_plan.debug.build_command("build");
-
-    print!("release command: ");
-    if let Some(command) = release_command {
-        println!("{}", command_to_string(&command));
-    } else {
-        println!("(none)");
-    }
-
-    print!("debug command: ");
-    if let Some(command) = debug_command {
-        println!("{}", command_to_string(&command));
-    } else {
-        println!("(none)");
-    }
-
-    Ok(())
-}
-
-fn command_to_string(command: &Command) -> String {
-    // Use shell-words to join the command and arguments into a single string.
-    let mut v = vec![command
-        .as_std()
-        .get_program()
-        .to_str()
-        .expect("program is valid UTF-8")];
-    v.extend(
-        command
-            .as_std()
-            .get_args()
-            .map(|arg| arg.to_str().expect("argument is valid UTF-8")),
-    );
-
-    shell_words::join(&v)
 }
 
 async fn do_for_all_rust_packages(
@@ -156,6 +118,7 @@ async fn do_list_outputs(
 }
 
 async fn do_target(
+    base_config: &BaseConfig,
     artifact_dir: &Utf8Path,
     name: Option<&str>,
     subcommand: &TargetCommand,
@@ -166,13 +129,15 @@ async fn do_target(
     })?;
     match subcommand {
         TargetCommand::Create {
+            preset,
             image,
             machine,
             switch,
             rack_topology,
             clickhouse_topology,
         } => {
-            let target = KnownTarget::new(
+            let preset_target = base_config.get_preset(preset)?;
+            let target = preset_target.with_overrides(
                 image.clone(),
                 machine.clone(),
                 switch.clone(),
@@ -181,7 +146,7 @@ async fn do_target(
             )?;
 
             let (name, path) = get_required_named_target(&target_dir, name)?;
-            tokio::fs::write(&path, Target::from(target).to_string())
+            tokio::fs::write(&path, TargetMap::from(target).to_string())
                 .await
                 .with_context(|| {
                     format!("failed to write target to {}", path)
@@ -301,7 +266,7 @@ async fn get_sha256_digest(path: &Utf8PathBuf) -> Result<Digest> {
 
 async fn download_prebuilt(
     progress: &PackageProgress,
-    package_name: &str,
+    package_name: &PackageName,
     repo: &str,
     commit: &str,
     expected_digest: &Vec<u8>,
@@ -368,7 +333,7 @@ async fn download_prebuilt(
 async fn ensure_package(
     config: &Config,
     ui: &Arc<ProgressUI>,
-    package_name: &String,
+    package_name: &PackageName,
     package: &Package,
     output_directory: &Utf8Path,
     disable_cache: bool,
@@ -497,7 +462,7 @@ async fn do_package(
 async fn do_stamp(
     config: &Config,
     output_directory: &Utf8Path,
-    package_name: &str,
+    package_name: &PackageName,
     version: &semver::Version,
 ) -> Result<()> {
     // Find the package which should be stamped
@@ -506,7 +471,7 @@ async fn do_stamp(
         .packages_to_deploy(config.target())
         .0
         .into_iter()
-        .find(|(name, _pkg)| name.as_str() == package_name)
+        .find(|(name, _pkg)| *name == package_name)
         .ok_or_else(|| anyhow!("Package {package_name} not found"))?;
 
     // Stamp it
@@ -533,8 +498,7 @@ async fn do_unpack(
         |(package_name, package)| -> Result<()> {
             let tarfile = package.get_output_path(&package_name, artifact_dir);
             let src = tarfile.as_path();
-            let dst =
-                package.get_output_path(&package.service_name, install_dir);
+            let dst = package.get_output_path_for_service(install_dir);
             info!(
                 config.log(),
                 "Installing service";
@@ -566,7 +530,7 @@ async fn do_unpack(
 
     for service_name in global_zone_service_names {
         let tar_path = install_dir.join(format!("{}.tar", service_name));
-        let service_path = install_dir.join(service_name);
+        let service_path = install_dir.join(service_name.as_str());
         info!(
             config.log(),
             "Unpacking service tarball";
@@ -588,10 +552,10 @@ fn do_activate(config: &Config, install_dir: &Utf8Path) -> Result<()> {
     // Install the bootstrap service, which itself extracts and
     // installs other services.
     if let Some(package) =
-        config.package_config().packages.get("omicron-sled-agent")
+        config.package_config().packages.get(&OMICRON_SLED_AGENT)
     {
         let manifest_path = install_dir
-            .join(&package.service_name)
+            .join(package.service_name.as_str())
             .join("pkg")
             .join("manifest.xml");
         info!(
@@ -867,7 +831,9 @@ impl Progress for PackageProgress {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::try_parse()?;
-    let package_config = parse::<_, PackageConfig>(&args.manifest)?;
+    let base_config = BaseConfig::load(&args.manifest).with_context(|| {
+        format!("failed to load base config from {:?}", args.manifest)
+    })?;
 
     let mut open_options = std::fs::OpenOptions::new();
     open_options.write(true).create(true).truncate(true);
@@ -881,9 +847,9 @@ async fn main() -> Result<()> {
     let log = Logger::root(drain, o!());
 
     let get_config = || -> Result<Config> {
-        Config::get_config(
+        Config::load(
             &log,
-            package_config,
+            base_config.package_config(),
             &args.config_args,
             &args.artifact_dir,
         )
@@ -901,6 +867,7 @@ async fn main() -> Result<()> {
     match args.subcommand {
         SubCommand::Build(BuildCommand::Target { subcommand }) => {
             do_target(
+                &base_config,
                 &args.artifact_dir,
                 args.config_args.target.as_deref(),
                 &subcommand,
@@ -928,8 +895,15 @@ async fn main() -> Result<()> {
             )
             .await?;
         }
-        SubCommand::Build(BuildCommand::ShowCargoCommands) => {
-            do_show_cargo_commands(&get_config()?).await?;
+        SubCommand::Build(BuildCommand::ShowCargoCommands { presets }) => {
+            // If presets is empty, show the commands from the
+            // default configuration, otherwise show the commands
+            // for the specified presets.
+            if let Some(presets) = presets {
+                do_show_cargo_commands_for_presets(&base_config, &presets)?;
+            } else {
+                do_show_cargo_commands_for_config(&get_config()?)?;
+            }
         }
         SubCommand::Build(BuildCommand::Check) => {
             do_check(&get_config()?).await?
