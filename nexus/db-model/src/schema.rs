@@ -2115,11 +2115,11 @@ table! {
         name -> Text,
         description -> Text,
         time_created -> Timestamptz,
-        time_modified -> Nullable<Timestamptz>,
+        time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
-        rcgen -> Int8,
         endpoint -> Text,
         probes_enabled -> Bool,
+        rcgen -> Int8,
     }
 }
 

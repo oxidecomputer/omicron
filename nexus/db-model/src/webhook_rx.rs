@@ -29,8 +29,8 @@ use uuid::Uuid;
 pub struct WebhookReceiver {
     #[diesel(embed)]
     pub identity: WebhookReceiverIdentity,
-    pub probes_enabled: bool,
     pub endpoint: String,
+    pub probes_enabled: bool,
 
     /// child resource generation number, per RFD 192
     pub rcgen: Generation,
