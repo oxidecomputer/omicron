@@ -31,6 +31,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use serde::Deserialize;
 use serde::Serialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -60,16 +61,16 @@ struct BundleRequest {
 }
 
 // Describes what happened while attempting to clean up Support Bundles.
-#[derive(Debug, Default, Serialize, Eq, PartialEq)]
-struct CleanupReport {
+#[derive(Debug, Default, Deserialize, Serialize, Eq, PartialEq)]
+pub struct CleanupReport {
     // Responses from Sled Agents
-    sled_bundles_deleted_ok: usize,
-    sled_bundles_deleted_not_found: usize,
-    sled_bundles_delete_failed: usize,
+    pub sled_bundles_deleted_ok: usize,
+    pub sled_bundles_deleted_not_found: usize,
+    pub sled_bundles_delete_failed: usize,
 
     // Results from updating our database records
-    db_destroying_bundles_removed: usize,
-    db_failing_bundles_updated: usize,
+    pub db_destroying_bundles_removed: usize,
+    pub db_failing_bundles_updated: usize,
 }
 
 // Result of asking a sled agent to clean up a bundle
@@ -750,15 +751,15 @@ async fn sha2_hash(file: &mut tokio::fs::File) -> anyhow::Result<ArtifactHash> {
 // Identifies what we could or could not store within this support bundle.
 //
 // This struct will get emitted as part of the background task infrastructure.
-#[derive(Debug, Serialize, PartialEq, Eq)]
-struct CollectionReport {
-    bundle: SupportBundleUuid,
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct CollectionReport {
+    pub bundle: SupportBundleUuid,
 
     // True iff we could list in-service sleds
-    listed_in_service_sleds: bool,
+    pub listed_in_service_sleds: bool,
 
     // True iff the bundle was successfully made 'active' in the database.
-    activated_in_db_ok: bool,
+    pub activated_in_db_ok: bool,
 }
 
 impl CollectionReport {
