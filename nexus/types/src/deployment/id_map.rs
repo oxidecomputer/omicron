@@ -59,9 +59,6 @@ type Inner<T> = BTreeMap<<T as IdMappable>::Id, T>;
 /// [`RefMut`] wrapper returned by `get_mut()` and `iter_mut()`. When the
 /// wrapper is dropped, it will induce a panic if the ID has changed from what
 /// the value had when it was retreived from the map.
-///
-/// An entry-style API is _not_ provided, as it would be relatively unergonomic
-/// to provide while enforcing the key-must-be-ID invariant.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[derive_where(Default)]
 pub struct IdMap<T: IdMappable> {
@@ -114,6 +111,17 @@ impl<T: IdMappable> IdMap<T> {
         mut f: F,
     ) {
         self.inner.retain(|_, val| f(&mut RefMut::new(val)))
+    }
+
+    pub fn entry(&mut self, key: T::Id) -> Entry<'_, T> {
+        match self.inner.entry(key) {
+            btree_map::Entry::Vacant(slot) => {
+                Entry::Vacant(VacantEntry::new(slot))
+            }
+            btree_map::Entry::Occupied(slot) => {
+                Entry::Occupied(OccupiedEntry::new(slot))
+            }
+        }
     }
 }
 
@@ -289,6 +297,79 @@ impl<'a, T: IdMappable> Iterator for IterMut<'a, T> {
     }
 }
 
+pub enum Entry<'a, T: IdMappable> {
+    Vacant(VacantEntry<'a, T>),
+    Occupied(OccupiedEntry<'a, T>),
+}
+
+pub struct VacantEntry<'a, T: IdMappable> {
+    inner: btree_map::VacantEntry<'a, T::Id, T>,
+}
+
+impl<'a, T: IdMappable> VacantEntry<'a, T> {
+    fn new(inner: btree_map::VacantEntry<'a, T::Id, T>) -> Self {
+        Self { inner }
+    }
+
+    /// # Panics
+    ///
+    /// Panics if `value.id()` does not match the ID used to look up the parent
+    /// `Entry`.
+    pub fn insert(self, value: T) -> RefMut<'a, T> {
+        assert_eq!(
+            self.key(),
+            value.id(),
+            "VacantEntry::insert() must insert a value with the same ID \
+             used to create the entry"
+        );
+        RefMut::new(self.inner.insert(value))
+    }
+
+    pub fn key(&self) -> T::Id {
+        *self.inner.key()
+    }
+}
+
+pub struct OccupiedEntry<'a, T: IdMappable> {
+    inner: btree_map::OccupiedEntry<'a, T::Id, T>,
+}
+
+impl<'a, T: IdMappable> OccupiedEntry<'a, T> {
+    fn new(inner: btree_map::OccupiedEntry<'a, T::Id, T>) -> Self {
+        Self { inner }
+    }
+
+    pub fn get(&self) -> &T {
+        self.inner.get()
+    }
+
+    pub fn get_mut(&mut self) -> RefMut<'_, T> {
+        RefMut::new(self.inner.get_mut())
+    }
+
+    pub fn into_mut(self) -> RefMut<'a, T> {
+        RefMut::new(self.inner.into_mut())
+    }
+
+    /// # Panics
+    ///
+    /// Panics if `value.id()` does not match the ID used to look up the parent
+    /// `Entry`.
+    pub fn insert(&mut self, value: T) -> T {
+        assert_eq!(
+            self.get().id(),
+            value.id(),
+            "VacantEntry::insert() must insert a value with the same ID \
+             used to create the entry"
+        );
+        self.inner.insert(value)
+    }
+
+    pub fn remove(self) -> T {
+        self.inner.remove()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -417,5 +498,70 @@ mod tests {
             entry.id = 2;
             true
         });
+    }
+
+    #[test]
+    #[should_panic(expected = "must insert a value with the same ID")]
+    fn vacant_entry_panics_if_id_changes_on_insert() {
+        let mut map = IdMap::<TestEntry>::new();
+        match map.entry(0) {
+            Entry::Vacant(slot) => {
+                slot.insert(TestEntry { id: 1, val1: 2, val2: 3 });
+            }
+            Entry::Occupied(_) => unreachable!(),
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "IdMap values must not change their ID")]
+    fn vacant_entry_panics_if_id_changed_after_insert() {
+        let mut map = IdMap::<TestEntry>::new();
+        match map.entry(1) {
+            Entry::Vacant(slot) => {
+                let mut val =
+                    slot.insert(TestEntry { id: 1, val1: 2, val2: 3 });
+                val.id = 2;
+            }
+            Entry::Occupied(_) => unreachable!(),
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "must insert a value with the same ID")]
+    fn occupied_entry_panics_if_id_changes_on_insert() {
+        let mut map = IdMap::<TestEntry>::new();
+        map.insert(TestEntry { id: 1, val1: 2, val2: 3 });
+        match map.entry(1) {
+            Entry::Vacant(_) => unreachable!(),
+            Entry::Occupied(mut slot) => {
+                slot.insert(TestEntry { id: 2, val1: 2, val2: 3 });
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "IdMap values must not change their ID")]
+    fn occupied_entry_panics_if_id_changed_via_into_mut() {
+        let mut map = IdMap::<TestEntry>::new();
+        map.insert(TestEntry { id: 1, val1: 2, val2: 3 });
+        match map.entry(1) {
+            Entry::Vacant(_) => unreachable!(),
+            Entry::Occupied(slot) => {
+                slot.into_mut().id = 2;
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "IdMap values must not change their ID")]
+    fn occupied_entry_panics_if_id_changed_via_get_mut() {
+        let mut map = IdMap::<TestEntry>::new();
+        map.insert(TestEntry { id: 1, val1: 2, val2: 3 });
+        match map.entry(1) {
+            Entry::Vacant(_) => unreachable!(),
+            Entry::Occupied(mut slot) => {
+                slot.get_mut().id = 2;
+            }
+        }
     }
 }

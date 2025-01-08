@@ -4,6 +4,7 @@
 
 use crate::blueprint_builder::EditCounts;
 use nexus_sled_agent_shared::inventory::ZoneKind;
+use nexus_types::deployment::id_map::Entry;
 use nexus_types::deployment::id_map::IdMap;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -76,18 +77,22 @@ impl ZonesEditor {
         &mut self,
         zone: BlueprintZoneConfig,
     ) -> Result<(), ZonesEditError> {
-        if let Some(prev) = self.zones.get(&zone.id) {
-            // We shouldn't be trying to add zones that already exist --
-            // something went wrong in the planner logic.
-            return Err(ZonesEditError::AddDuplicateZoneId {
-                id: zone.id,
-                kind1: zone.zone_type.kind(),
-                kind2: prev.zone_type.kind(),
-            });
+        match self.zones.entry(zone.id) {
+            Entry::Vacant(slot) => {
+                slot.insert(zone);
+                self.counts.added += 1;
+                Ok(())
+            }
+            Entry::Occupied(prev) => {
+                // We shouldn't be trying to add zones that already exist --
+                // something went wrong in the planner logic.
+                Err(ZonesEditError::AddDuplicateZoneId {
+                    id: zone.id,
+                    kind1: zone.zone_type.kind(),
+                    kind2: prev.get().zone_type.kind(),
+                })
+            }
         }
-
-        self.zones.insert(zone);
-        Ok(())
     }
 
     /// Expunge a zone, returning `true` if the zone was expunged and `false` if
