@@ -42,13 +42,23 @@ type Inner<T> = BTreeMap<<T as IdMappable>::Id, T>;
 /// the inner `BTreeMap` would, although deserialzation performs extra checks to
 /// guarantee the key-must-be-its-values-ID property.
 ///
-/// Similar to the constraint that a `BTreeMap`'s keys may not be modified in a
-/// way that affects their ordering, the _values_ of an `IdMap` must not be
-/// modified in a way that affects their `id()` (as returned by their
-/// [`IdMappable`] implementation. This is possible via methods like `get_mut()`
-/// but will induce a logic error that may produce panics, invalid
-/// serialization, etc. The type stored in `IdMap` is expected to have a stable,
-/// never-changing identity.
+/// `IdMap` has the same constraint as `BTreeMap` regarding mutating keys out
+/// from under it:
+///
+/// > It is a logic error for a key to be modified in such a way that the key’s
+/// > ordering relative to any other key, as determined by the Ord trait,
+/// > changes while it is in the map. This is normally only possible through
+/// > Cell, RefCell, global state, I/O, or unsafe code. The behavior resulting
+/// > from such a logic error is not specified, but will be encapsulated to the
+/// > BTreeMap that observed the logic error and not result in undefined
+/// > behavior. This could include panics, incorrect results, aborts, memory
+/// > leaks, and non-termination.
+///
+/// Additionally, `IdMap` has the requirement that when any _values_ are
+/// mutated, their ID must not change. This is enforced at runtime via the
+/// [`RefMut`] wrapper returned by `get_mut()` and `iter_mut()`. When the
+/// wrapper is dropped, it will induce a panic if the ID has changed from what
+/// the value had when it was retreived from the map.
 ///
 /// An entry-style API is _not_ provided, as it would be relatively unergonomic
 /// to provide while enforcing the key-must-be-ID invariant.
