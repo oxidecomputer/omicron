@@ -12,7 +12,6 @@ use camino_tempfile::tempfile;
 use camino_tempfile::Utf8TempDir;
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use futures::TryStreamExt;
 use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
 use nexus_db_queries::context::OpContext;
@@ -759,22 +758,22 @@ impl CollectionReport {
     }
 }
 
-async fn write_command_result_or_error(
+async fn write_command_result_or_error<D: std::fmt::Debug>(
     path: &Utf8Path,
     command: &str,
     result: Result<
-        sled_agent_client::ResponseValue<sled_agent_client::ByteStream>,
+        sled_agent_client::ResponseValue<D>,
         sled_agent_client::Error<sled_agent_client::types::Error>,
     >,
 ) -> anyhow::Result<()> {
     match result {
         Ok(result) => {
-            let output = result
-                .into_inner_stream()
-                .try_collect::<bytes::BytesMut>()
-                .await?;
-            tokio::fs::write(path.join(format!("{command}.txt")), output)
-                .await?;
+            let output = result.into_inner();
+            tokio::fs::write(
+                path.join(format!("{command}.txt")),
+                format!("{output:?}"),
+            )
+            .await?;
         }
         Err(err) => {
             tokio::fs::write(
