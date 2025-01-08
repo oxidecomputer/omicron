@@ -238,7 +238,7 @@ impl Blueprint {
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
         zones_by_sled_id.iter().flat_map(move |(sled_id, z)| {
             z.zones
-                .iter()
+                .values()
                 .filter(move |z| z.disposition.matches(filter))
                 .map(|z| (*sled_id, z))
         })
@@ -266,7 +266,7 @@ impl Blueprint {
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
         self.blueprint_zones.iter().flat_map(move |(sled_id, z)| {
             z.zones
-                .iter()
+                .values()
                 .filter(move |z| !z.disposition.matches(filter))
                 .map(|z| (*sled_id, z))
         })
@@ -333,7 +333,10 @@ impl BpTableData for BlueprintZonesConfig {
     }
 
     fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
-        self.zones.iter().map(move |zone| {
+        // We want to sort by (kind, id)
+        let mut zones: Vec<_> = self.zones.values().cloned().collect();
+        zones.sort_unstable_by_key(zone_sort_key);
+        zones.into_iter().map(move |zone| {
             BpTableRow::from_strings(
                 state,
                 vec![
@@ -552,28 +555,20 @@ pub struct BlueprintZonesConfig {
     /// [`OmicronZonesConfig::generation`] for more details.
     pub generation: Generation,
 
-    /// The list of running zones.
-    pub zones: Vec<BlueprintZoneConfig>,
+    /// The set of running zones.
+    pub zones: BTreeMap<OmicronZoneUuid, BlueprintZoneConfig>,
 }
 
 impl From<BlueprintZonesConfig> for OmicronZonesConfig {
     fn from(config: BlueprintZonesConfig) -> Self {
         Self {
             generation: config.generation,
-            zones: config.zones.into_iter().map(From::from).collect(),
+            zones: config.zones.into_values().map(From::from).collect(),
         }
     }
 }
 
 impl BlueprintZonesConfig {
-    /// Sorts the list of zones stored in this configuration.
-    ///
-    /// This is not strictly necessary. But for testing (particularly snapshot
-    /// testing), it's helpful for zones to be in sorted order.
-    pub fn sort(&mut self) {
-        self.zones.sort_unstable_by_key(zone_sort_key);
-    }
-
     /// Converts self to an [`OmicronZonesConfig`], applying the provided
     /// [`BlueprintZoneFilter`].
     ///
@@ -587,7 +582,7 @@ impl BlueprintZonesConfig {
             generation: self.generation,
             zones: self
                 .zones
-                .iter()
+                .values()
                 .filter(|z| z.disposition.matches(filter))
                 .cloned()
                 .map(OmicronZoneConfig::from)
@@ -599,7 +594,7 @@ impl BlueprintZonesConfig {
     /// `Expunged`, false otherwise.
     pub fn are_all_zones_expunged(&self) -> bool {
         self.zones
-            .iter()
+            .values()
             .all(|c| c.disposition == BlueprintZoneDisposition::Expunged)
     }
 }

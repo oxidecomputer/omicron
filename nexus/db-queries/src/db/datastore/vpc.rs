@@ -3145,7 +3145,13 @@ mod tests {
         let bp1_nic = datastore
             .service_create_network_interface_raw(
                 &opctx,
-                db_nic_from_zone(&bp1.blueprint_zones[&sled_ids[2]].zones[0]),
+                db_nic_from_zone(
+                    bp1.blueprint_zones[&sled_ids[2]]
+                        .zones
+                        .first_key_value()
+                        .unwrap()
+                        .1,
+                ),
             )
             .await
             .expect("failed to insert service VNIC");
@@ -3176,7 +3182,11 @@ mod tests {
         datastore
             .service_delete_network_interface(
                 &opctx,
-                bp1.blueprint_zones[&sled_ids[2]].zones[0]
+                bp1.blueprint_zones[&sled_ids[2]]
+                    .zones
+                    .first_key_value()
+                    .unwrap()
+                    .1
                     .id
                     .into_untyped_uuid(),
                 bp1_nic.id(),
@@ -3207,7 +3217,13 @@ mod tests {
             datastore
                 .service_create_network_interface_raw(
                     &opctx,
-                    db_nic_from_zone(&bp3.blueprint_zones[&sled_id].zones[0]),
+                    db_nic_from_zone(
+                        bp3.blueprint_zones[&sled_id]
+                            .zones
+                            .first_key_value()
+                            .unwrap()
+                            .1,
+                    ),
                 )
                 .await
                 .expect("failed to insert service VNIC");
@@ -3261,7 +3277,8 @@ mod tests {
                 .blueprint_zones
                 .get_mut(&sled_ids[2])
                 .expect("zones for sled");
-            sled2.zones[0].disposition = BlueprintZoneDisposition::Quiesced;
+            sled2.zones.values_mut().next().unwrap().disposition =
+                BlueprintZoneDisposition::Quiesced;
             sled2.generation = sled2.generation.next();
 
             // Sled index 3's zone is expunged (should be excluded).
@@ -3269,7 +3286,8 @@ mod tests {
                 .blueprint_zones
                 .get_mut(&sled_ids[3])
                 .expect("zones for sled");
-            sled3.zones[0].disposition = BlueprintZoneDisposition::Expunged;
+            sled3.zones.values_mut().next().unwrap().disposition =
+                BlueprintZoneDisposition::Expunged;
             sled3.generation = sled3.generation.next();
 
             bp4

@@ -53,7 +53,9 @@ use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     StorageLimit, ZoneBundleId, ZoneBundleMetadata,
 };
-use sled_diagnostics::SledDiagnosticsCommandHttpOutput;
+use sled_diagnostics::{
+    SledDiagnosticsCommandHttpOutput, SledDiagnosticsQueryOutput,
+};
 use std::collections::BTreeMap;
 
 type SledApiDescription = ApiDescription<SledAgent>;
@@ -964,41 +966,79 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn support_zoneadm_info(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
         let sa = request_context.context();
         let res = sa.support_zoneadm_info().await;
-        Ok(HttpResponseOk(FreeformBody(res.get_output().into())))
+        Ok(HttpResponseOk(res.get_output()))
     }
 
     async fn support_ipadm_info(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
         let sa = request_context.context();
-        let output = sa
-            .support_ipadm_info()
-            .await
-            .into_iter()
-            .map(|cmd| cmd.get_output())
-            .collect::<Vec<_>>()
-            .as_slice()
-            .join("\n\n");
-
-        Ok(HttpResponseOk(FreeformBody(output.into())))
+        Ok(HttpResponseOk(
+            sa.support_ipadm_info()
+                .await
+                .into_iter()
+                .map(|cmd| cmd.get_output())
+                .collect::<Vec<_>>(),
+        ))
     }
 
     async fn support_dladm_info(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
         let sa = request_context.context();
-        let output = sa
-            .support_dladm_info()
-            .await
-            .into_iter()
-            .map(|cmd| cmd.get_output())
-            .collect::<Vec<_>>()
-            .as_slice()
-            .join("\n\n");
+        Ok(HttpResponseOk(
+            sa.support_dladm_info()
+                .await
+                .into_iter()
+                .map(|cmd| cmd.get_output())
+                .collect::<Vec<_>>(),
+        ))
+    }
 
-        Ok(HttpResponseOk(FreeformBody(output.into())))
+    async fn support_pargs_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
+        let sa = request_context.context();
+        Ok(HttpResponseOk(
+            sa.support_pargs_info()
+                .await
+                .into_iter()
+                .map(|cmd| cmd.get_output())
+                .collect::<Vec<_>>(),
+        ))
+    }
+
+    async fn support_pstack_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
+        let sa = request_context.context();
+        Ok(HttpResponseOk(
+            sa.support_pstack_info()
+                .await
+                .into_iter()
+                .map(|cmd| cmd.get_output())
+                .collect::<Vec<_>>(),
+        ))
+    }
+
+    async fn support_pfiles_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
+        let sa = request_context.context();
+        Ok(HttpResponseOk(
+            sa.support_pfiles_info()
+                .await
+                .into_iter()
+                .map(|cmd| cmd.get_output())
+                .collect::<Vec<_>>(),
+        ))
     }
 }

@@ -56,11 +56,7 @@ impl ZonesEditor {
         if self.counts.has_nonzero_counts() {
             generation = generation.next();
         }
-        let mut config = BlueprintZonesConfig {
-            generation,
-            zones: self.zones.into_values().collect(),
-        };
-        config.sort();
+        let config = BlueprintZonesConfig { generation, zones: self.zones };
         (config, self.counts)
     }
 
@@ -153,29 +149,12 @@ impl ZonesEditor {
     }
 }
 
-impl TryFrom<BlueprintZonesConfig> for ZonesEditor {
-    type Error = DuplicateZoneId;
-
-    fn try_from(config: BlueprintZonesConfig) -> Result<Self, Self::Error> {
-        let mut zones = BTreeMap::new();
-        for zone in config.zones {
-            match zones.entry(zone.id) {
-                Entry::Vacant(slot) => {
-                    slot.insert(zone);
-                }
-                Entry::Occupied(prev) => {
-                    return Err(DuplicateZoneId {
-                        id: zone.id,
-                        kind1: zone.zone_type.kind(),
-                        kind2: prev.get().zone_type.kind(),
-                    });
-                }
-            }
-        }
-        Ok(Self {
+impl From<BlueprintZonesConfig> for ZonesEditor {
+    fn from(config: BlueprintZonesConfig) -> Self {
+        Self {
             generation: config.generation,
-            zones,
+            zones: config.zones,
             counts: EditCounts::zeroes(),
-        })
+        }
     }
 }
