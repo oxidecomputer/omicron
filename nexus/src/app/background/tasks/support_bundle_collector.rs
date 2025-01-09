@@ -7,8 +7,8 @@
 use crate::app::background::BackgroundTask;
 use camino::Utf8DirEntry;
 use camino::Utf8Path;
-use camino_tempfile::tempdir;
-use camino_tempfile::tempfile;
+use camino_tempfile::tempdir_in;
+use camino_tempfile::tempfile_in;
 use camino_tempfile::Utf8TempDir;
 use futures::future::BoxFuture;
 use futures::FutureExt;
@@ -40,6 +40,10 @@ use tokio::io::AsyncSeekExt;
 use tokio::io::SeekFrom;
 use zip::write::FullFileOptions;
 use zip::ZipWriter;
+
+// We use "/var/tmp" to use Nexus' filesystem for temporary storage,
+// rather than "/tmp", which would keep this collected data in-memory.
+const TEMPDIR: &str = "/var/tmp";
 
 // Specifies the data to be collected within the Support Bundle.
 #[derive(Default)]
@@ -426,7 +430,7 @@ impl<'a> BundleCollection<'a> {
     ) -> anyhow::Result<CollectionReport> {
         // Create a temporary directory where we'll store the support bundle
         // as it's being collected.
-        let dir = tempdir()?;
+        let dir = tempdir_in(TEMPDIR)?;
 
         let mut collection = Box::pin(self.collect_bundle_as_file(&dir));
 
@@ -666,7 +670,7 @@ impl BackgroundTask for SupportBundleCollector {
 
 // Takes a directory "dir", and zips the contents into a single zipfile.
 fn bundle_to_zipfile(dir: &Utf8TempDir) -> anyhow::Result<std::fs::File> {
-    let tempfile = tempfile()?;
+    let tempfile = tempfile_in(TEMPDIR)?;
     let mut zip = ZipWriter::new(tempfile);
 
     recursively_add_directory_to_zipfile(&mut zip, dir.path(), dir.path())?;
@@ -790,6 +794,7 @@ async fn write_command_result_or_error<D: std::fmt::Debug>(
 mod test {
     use super::*;
 
+    use camino_tempfile::tempdir;
     use nexus_db_model::Dataset;
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
