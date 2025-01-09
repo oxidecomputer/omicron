@@ -2161,13 +2161,25 @@ table! {
     webhook_rx_subscription (rx_id, event_class) {
         rx_id -> Uuid,
         event_class -> Text,
-        similar_to -> Text,
+        glob -> Nullable<Text>,
+        time_created -> Timestamptz,
+    }
+}
+
+table! {
+    webhook_rx_event_glob (rx_id, glob) {
+        rx_id -> Uuid,
+        glob -> Text,
+        regex -> Text,
         time_created -> Timestamptz,
     }
 }
 
 allow_tables_to_appear_in_same_query!(webhook_rx, webhook_rx_subscription);
 joinable!(webhook_rx_subscription -> webhook_rx (rx_id));
+
+allow_tables_to_appear_in_same_query!(webhook_rx, webhook_rx_event_glob);
+joinable!(webhook_rx_event_glob -> webhook_rx (rx_id));
 
 table! {
     webhook_event (id) {
