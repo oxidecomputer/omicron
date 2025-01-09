@@ -2716,10 +2716,11 @@
           },
           "zones": {
             "description": "The set of running zones.",
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/BlueprintZoneConfig"
-            }
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IdMapBlueprintZoneConfig"
+              }
+            ]
           }
         },
         "required": [
@@ -3740,6 +3741,12 @@
         "type": "integer",
         "format": "uint8",
         "minimum": 0
+      },
+      "IdMapBlueprintZoneConfig": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/BlueprintZoneConfig"
+        }
       },
       "ImportExportPolicy": {
         "description": "Define policy relating to the import and export of prefixes from a BGP peer.",

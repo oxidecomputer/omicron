@@ -161,7 +161,7 @@ impl<'a, T: IdMappable> IntoIterator for &'a mut IdMap<T> {
 
 impl<T: IdMappable> JsonSchema for IdMap<T> {
     fn schema_name() -> String {
-        Inner::<T>::schema_name()
+        format!("IdMap{}", T::schema_name())
     }
 
     fn json_schema(
