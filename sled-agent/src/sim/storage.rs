@@ -1313,7 +1313,7 @@ impl StorageInner {
             .collect();
         for dataset in &dataset_names {
             // Datasets delegated to zones manage their own storage.
-            if dataset.dataset().zoned() {
+            if dataset.kind().zoned() {
                 continue;
             }
 
