@@ -485,7 +485,6 @@ mod region_replacement {
                 .activate_background_attachment(
                     region_replacement.volume_id.to_string(),
                 )
-                .await
                 .unwrap();
         }
 
@@ -1816,8 +1815,7 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
         .as_ref()
         .unwrap()
         .pantry
-        .set_auto_activate_volumes()
-        .await;
+        .set_auto_activate_volumes();
 
     // Now, run all replacement tasks to completion
     let internal_client = &cptestctx.internal_client;
@@ -1854,8 +1852,7 @@ async fn test_region_replacement_triple_sanity(
         .as_ref()
         .unwrap()
         .pantry
-        .set_auto_activate_volumes()
-        .await;
+        .set_auto_activate_volumes();
 
     // Create a disk and a snapshot and a disk from that snapshot
     let client = &cptestctx.external_client;
@@ -1966,8 +1963,7 @@ async fn test_region_replacement_triple_sanity_2(
         .as_ref()
         .unwrap()
         .pantry
-        .set_auto_activate_volumes()
-        .await;
+        .set_auto_activate_volumes();
 
     // Create a disk and a snapshot and a disk from that snapshot
     let client = &cptestctx.external_client;

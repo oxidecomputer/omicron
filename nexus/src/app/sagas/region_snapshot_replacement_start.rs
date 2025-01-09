@@ -1411,8 +1411,8 @@ pub(crate) mod test {
         for zpool in test.zpools() {
             for dataset in &zpool.datasets {
                 let crucible_dataset =
-                    sled_agent.get_crucible_dataset(zpool.id, dataset.id).await;
-                for region in crucible_dataset.list().await {
+                    sled_agent.get_crucible_dataset(zpool.id, dataset.id);
+                for region in crucible_dataset.list() {
                     match region.state {
                         crucible_agent_client::types::State::Tombstoned
                         | crucible_agent_client::types::State::Destroyed => {
@@ -1745,8 +1745,7 @@ pub(crate) mod test {
             .as_ref()
             .unwrap()
             .pantry
-            .set_auto_activate_volumes()
-            .await;
+            .set_auto_activate_volumes();
 
         // Create a disk and a snapshot
         let client = &cptestctx.external_client;
@@ -1904,8 +1903,7 @@ pub(crate) mod test {
             .as_ref()
             .unwrap()
             .pantry
-            .set_auto_activate_volumes()
-            .await;
+            .set_auto_activate_volumes();
 
         // Create a disk and a snapshot
         let client = &cptestctx.external_client;
