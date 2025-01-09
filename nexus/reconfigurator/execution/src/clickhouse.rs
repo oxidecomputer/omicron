@@ -209,7 +209,7 @@ fn server_configs(
         .flat_map(|zones_config| {
             zones_config
                 .zones
-                .values()
+                .iter()
                 .filter(|zone_config| {
                     clickhouse_cluster_config
                         .servers
@@ -267,7 +267,7 @@ fn keeper_configs(
         .flat_map(|zones_config| {
             zones_config
                 .zones
-                .values()
+                .iter()
                 .filter(|zone_config| {
                     clickhouse_cluster_config
                         .keepers
@@ -381,7 +381,6 @@ mod test {
                     ),
                 }]
                 .into_iter()
-                .map(|z| (z.id, z))
                 .collect(),
             };
             zones.insert(sled_id, zone_config);
@@ -423,7 +422,6 @@ mod test {
                     ),
                 }]
                 .into_iter()
-                .map(|z| (z.id, z))
                 .collect(),
             };
             zones.insert(sled_id, zone_config);

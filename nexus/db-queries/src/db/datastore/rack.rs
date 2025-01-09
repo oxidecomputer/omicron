@@ -1439,7 +1439,6 @@ mod test {
                     },
                 ]
                 .into_iter()
-                .map(|z| (z.id, z))
                 .collect(),
             },
         );
@@ -1516,7 +1515,6 @@ mod test {
                     },
                 ]
                 .into_iter()
-                .map(|z| (z.id, z))
                 .collect(),
             },
         );
@@ -1535,7 +1533,6 @@ mod test {
                     ),
                 }]
                 .into_iter()
-                .map(|z| (z.id, z))
                 .collect(),
             },
         );
@@ -1771,7 +1768,6 @@ mod test {
                     },
                 ]
                 .into_iter()
-                .map(|z| (z.id, z))
                 .collect(),
             },
         );
@@ -2008,7 +2004,6 @@ mod test {
                     ),
                 }]
                 .into_iter()
-                .map(|z| (z.id, z))
                 .collect(),
             },
         );
@@ -2150,7 +2145,6 @@ mod test {
                     },
                 ]
                 .into_iter()
-                .map(|z| (z.id, z))
                 .collect(),
             },
         );

@@ -3146,11 +3146,7 @@ mod tests {
             .service_create_network_interface_raw(
                 &opctx,
                 db_nic_from_zone(
-                    bp1.blueprint_zones[&sled_ids[2]]
-                        .zones
-                        .first_key_value()
-                        .unwrap()
-                        .1,
+                    bp1.blueprint_zones[&sled_ids[2]].zones.first().unwrap(),
                 ),
             )
             .await
@@ -3184,9 +3180,8 @@ mod tests {
                 &opctx,
                 bp1.blueprint_zones[&sled_ids[2]]
                     .zones
-                    .first_key_value()
+                    .first()
                     .unwrap()
-                    .1
                     .id
                     .into_untyped_uuid(),
                 bp1_nic.id(),
@@ -3218,11 +3213,7 @@ mod tests {
                 .service_create_network_interface_raw(
                     &opctx,
                     db_nic_from_zone(
-                        bp3.blueprint_zones[&sled_id]
-                            .zones
-                            .first_key_value()
-                            .unwrap()
-                            .1,
+                        bp3.blueprint_zones[&sled_id].zones.first().unwrap(),
                     ),
                 )
                 .await
@@ -3277,7 +3268,7 @@ mod tests {
                 .blueprint_zones
                 .get_mut(&sled_ids[2])
                 .expect("zones for sled");
-            sled2.zones.values_mut().next().unwrap().disposition =
+            sled2.zones.iter_mut().next().unwrap().disposition =
                 BlueprintZoneDisposition::Quiesced;
             sled2.generation = sled2.generation.next();
 
@@ -3286,7 +3277,7 @@ mod tests {
                 .blueprint_zones
                 .get_mut(&sled_ids[3])
                 .expect("zones for sled");
-            sled3.zones.values_mut().next().unwrap().disposition =
+            sled3.zones.iter_mut().next().unwrap().disposition =
                 BlueprintZoneDisposition::Expunged;
             sled3.generation = sled3.generation.next();
 
