@@ -162,6 +162,7 @@ mod test {
     use omicron_common::disk::DiskManagementStatus;
     use omicron_common::disk::DisksManagementResult;
     use omicron_common::disk::OmicronPhysicalDisksConfig;
+    use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -178,7 +179,7 @@ mod test {
     fn create_blueprint(
         blueprint_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
     ) -> (BlueprintTarget, Blueprint) {
-        let id = Uuid::new_v4();
+        let id = BlueprintUuid::new_v4();
         (
             BlueprintTarget {
                 target_id: id,

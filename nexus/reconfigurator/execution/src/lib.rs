@@ -18,7 +18,6 @@ use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::SledState;
 use nexus_types::identity::Asset;
 use omicron_physical_disks::DeployDisksDone;
-use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -390,7 +389,6 @@ fn register_dataset_records_step<'a>(
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
 ) {
-    let bp_id = BlueprintUuid::from_untyped_uuid(blueprint.id);
     registrar
         .new_step(
             ExecutionStepId::Ensure,
@@ -399,7 +397,7 @@ fn register_dataset_records_step<'a>(
                 datasets::ensure_dataset_records_exist(
                     &opctx,
                     datastore,
-                    bp_id,
+                    blueprint.id,
                     blueprint
                         .all_omicron_datasets(BlueprintDatasetFilter::All)
                         .map(|(_sled_id, dataset)| dataset),

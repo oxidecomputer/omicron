@@ -608,7 +608,9 @@ mod tests {
         // We need a sled ID to get a sled-specific RNG from `rng`; we're not
         // testing blueprints as a whole here, so steal a blueprint ID and use
         // it as a sled ID to get reproducibility.
-        let sled_id = SledUuid::from_untyped_uuid(rng.next_blueprint());
+        let sled_id = SledUuid::from_untyped_uuid(
+            rng.next_blueprint().into_untyped_uuid(),
+        );
         let rng = rng.sled_rng(sled_id);
 
         // For each originally-in-service dataset:
@@ -705,7 +707,9 @@ mod tests {
         // We need a sled ID to get a sled-specific RNG from `rng`; we're not
         // testing blueprints as a whole here, so steal a blueprint ID and use
         // it as a sled ID to get reproducibility.
-        let sled_id = SledUuid::from_untyped_uuid(rng.next_blueprint());
+        let sled_id = SledUuid::from_untyped_uuid(
+            rng.next_blueprint().into_untyped_uuid(),
+        );
         let rng = rng.sled_rng(sled_id);
 
         // Expunge all datasets on all zpools, by zpool.

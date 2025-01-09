@@ -47,9 +47,9 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::{
-    DatasetKind, ExternalIpKind, ExternalIpUuid, GenericUuid, OmicronZoneKind,
-    OmicronZoneUuid, PhysicalDiskKind, SledKind, SledUuid, ZpoolKind,
-    ZpoolUuid,
+    BlueprintKind, BlueprintUuid, DatasetKind, ExternalIpKind, ExternalIpUuid,
+    GenericUuid, OmicronZoneKind, OmicronZoneUuid, PhysicalDiskKind, SledKind,
+    SledUuid, ZpoolKind, ZpoolUuid,
 };
 use std::net::{IpAddr, SocketAddrV6};
 use uuid::Uuid;
@@ -58,8 +58,8 @@ use uuid::Uuid;
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = blueprint)]
 pub struct Blueprint {
-    pub id: Uuid,
-    pub parent_blueprint_id: Option<Uuid>,
+    pub id: DbTypedUuid<BlueprintKind>,
+    pub parent_blueprint_id: Option<DbTypedUuid<BlueprintKind>>,
     pub internal_dns_version: Generation,
     pub external_dns_version: Generation,
     pub cockroachdb_fingerprint: String,
@@ -72,8 +72,8 @@ pub struct Blueprint {
 impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
     fn from(bp: &'_ nexus_types::deployment::Blueprint) -> Self {
         Self {
-            id: bp.id,
-            parent_blueprint_id: bp.parent_blueprint_id,
+            id: bp.id.into(),
+            parent_blueprint_id: bp.parent_blueprint_id.map(From::from),
             internal_dns_version: Generation(bp.internal_dns_version),
             external_dns_version: Generation(bp.external_dns_version),
             cockroachdb_fingerprint: bp.cockroachdb_fingerprint.clone(),
@@ -90,8 +90,8 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
 impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
     fn from(value: Blueprint) -> Self {
         Self {
-            id: value.id,
-            parent_blueprint_id: value.parent_blueprint_id,
+            id: value.id.into(),
+            parent_blueprint_id: value.parent_blueprint_id.map(From::from),
             internal_dns_version: *value.internal_dns_version,
             external_dns_version: *value.external_dns_version,
             cockroachdb_fingerprint: value.cockroachdb_fingerprint,
@@ -112,7 +112,7 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
 #[diesel(table_name = bp_target)]
 pub struct BpTarget {
     pub version: SqlU32,
-    pub blueprint_id: Uuid,
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
     pub enabled: bool,
     pub time_made_target: DateTime<Utc>,
 }
@@ -121,7 +121,7 @@ impl BpTarget {
     pub fn new(version: u32, target: BlueprintTarget) -> Self {
         Self {
             version: version.into(),
-            blueprint_id: target.target_id,
+            blueprint_id: target.target_id.into(),
             enabled: target.enabled,
             time_made_target: target.time_made_target,
         }
@@ -131,7 +131,7 @@ impl BpTarget {
 impl From<BpTarget> for nexus_types::deployment::BlueprintTarget {
     fn from(value: BpTarget) -> Self {
         Self {
-            target_id: value.blueprint_id,
+            target_id: value.blueprint_id.into(),
             enabled: value.enabled,
             time_made_target: value.time_made_target,
         }
@@ -142,7 +142,7 @@ impl From<BpTarget> for nexus_types::deployment::BlueprintTarget {
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_sled_state)]
 pub struct BpSledState {
-    pub blueprint_id: Uuid,
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
     pub sled_id: DbTypedUuid<SledKind>,
     pub sled_state: SledState,
 }
@@ -199,20 +199,20 @@ impl From<DbBpPhysicalDiskDisposition> for BlueprintPhysicalDiskDisposition {
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_sled_omicron_physical_disks)]
 pub struct BpSledOmicronPhysicalDisks {
-    pub blueprint_id: Uuid,
-    pub sled_id: Uuid,
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
     pub generation: Generation,
 }
 
 impl BpSledOmicronPhysicalDisks {
     pub fn new(
-        blueprint_id: Uuid,
-        sled_id: Uuid,
+        blueprint_id: BlueprintUuid,
+        sled_id: SledUuid,
         disks_config: &BlueprintPhysicalDisksConfig,
     ) -> Self {
         Self {
-            blueprint_id,
-            sled_id,
+            blueprint_id: blueprint_id.into(),
+            sled_id: sled_id.into(),
             generation: Generation(disks_config.generation),
         }
     }
@@ -222,8 +222,8 @@ impl BpSledOmicronPhysicalDisks {
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_omicron_physical_disk)]
 pub struct BpOmicronPhysicalDisk {
-    pub blueprint_id: Uuid,
-    pub sled_id: Uuid,
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
 
     pub vendor: String,
     pub serial: String,
@@ -237,13 +237,13 @@ pub struct BpOmicronPhysicalDisk {
 
 impl BpOmicronPhysicalDisk {
     pub fn new(
-        blueprint_id: Uuid,
-        sled_id: Uuid,
+        blueprint_id: BlueprintUuid,
+        sled_id: SledUuid,
         disk_config: &BlueprintPhysicalDiskConfig,
     ) -> Self {
         Self {
-            blueprint_id,
-            sled_id,
+            blueprint_id: blueprint_id.into(),
+            sled_id: sled_id.into(),
             vendor: disk_config.identity.vendor.clone(),
             serial: disk_config.identity.serial.clone(),
             model: disk_config.identity.model.clone(),
@@ -322,19 +322,19 @@ impl From<DbBpDatasetDisposition> for BlueprintDatasetDisposition {
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_sled_omicron_datasets)]
 pub struct BpSledOmicronDatasets {
-    pub blueprint_id: Uuid,
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
     pub sled_id: DbTypedUuid<SledKind>,
     pub generation: Generation,
 }
 
 impl BpSledOmicronDatasets {
     pub fn new(
-        blueprint_id: Uuid,
+        blueprint_id: BlueprintUuid,
         sled_id: SledUuid,
         datasets_config: &BlueprintDatasetsConfig,
     ) -> Self {
         Self {
-            blueprint_id,
+            blueprint_id: blueprint_id.into(),
             sled_id: sled_id.into(),
             generation: Generation(datasets_config.generation),
         }
@@ -345,7 +345,7 @@ impl BpSledOmicronDatasets {
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_omicron_dataset)]
 pub struct BpOmicronDataset {
-    pub blueprint_id: Uuid,
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
     pub sled_id: DbTypedUuid<SledKind>,
     pub id: DbTypedUuid<DatasetKind>,
 
@@ -364,12 +364,12 @@ pub struct BpOmicronDataset {
 
 impl BpOmicronDataset {
     pub fn new(
-        blueprint_id: Uuid,
+        blueprint_id: BlueprintUuid,
         sled_id: SledUuid,
         dataset_config: &BlueprintDatasetConfig,
     ) -> Self {
         Self {
-            blueprint_id,
+            blueprint_id: blueprint_id.into(),
             sled_id: sled_id.into(),
             id: dataset_config.id.into(),
             disposition: to_db_bp_dataset_disposition(
@@ -423,19 +423,19 @@ impl TryFrom<BpOmicronDataset> for BlueprintDatasetConfig {
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_sled_omicron_zones)]
 pub struct BpSledOmicronZones {
-    pub blueprint_id: Uuid,
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
     pub sled_id: DbTypedUuid<SledKind>,
     pub generation: Generation,
 }
 
 impl BpSledOmicronZones {
     pub fn new(
-        blueprint_id: Uuid,
+        blueprint_id: BlueprintUuid,
         sled_id: SledUuid,
         zones_config: &BlueprintZonesConfig,
     ) -> Self {
         Self {
-            blueprint_id,
+            blueprint_id: blueprint_id.into(),
             sled_id: sled_id.into(),
             generation: Generation(zones_config.generation),
         }
@@ -445,7 +445,7 @@ impl BpSledOmicronZones {
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_omicron_zone)]
 pub struct BpOmicronZone {
-    pub blueprint_id: Uuid,
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
     pub sled_id: DbTypedUuid<SledKind>,
     pub id: DbTypedUuid<OmicronZoneKind>,
     pub zone_type: ZoneType,
@@ -474,7 +474,7 @@ pub struct BpOmicronZone {
 
 impl BpOmicronZone {
     pub fn new(
-        blueprint_id: Uuid,
+        blueprint_id: BlueprintUuid,
         sled_id: SledUuid,
         blueprint_zone: &BlueprintZoneConfig,
     ) -> anyhow::Result<Self> {
@@ -487,7 +487,7 @@ impl BpOmicronZone {
         let mut bp_omicron_zone = BpOmicronZone {
             // Fill in the known fields that don't require inspecting
             // `blueprint_zone.zone_type`
-            blueprint_id,
+            blueprint_id: blueprint_id.into(),
             sled_id: sled_id.into(),
             id: blueprint_zone.id.into(),
             external_ip_id,
@@ -938,7 +938,7 @@ impl From<DbBpZoneDisposition> for BlueprintZoneDisposition {
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_omicron_zone_nic)]
 pub struct BpOmicronZoneNic {
-    blueprint_id: Uuid,
+    blueprint_id: DbTypedUuid<BlueprintKind>,
     pub id: Uuid,
     name: Name,
     ip: IpNetwork,
@@ -951,7 +951,7 @@ pub struct BpOmicronZoneNic {
 
 impl BpOmicronZoneNic {
     pub fn new(
-        blueprint_id: Uuid,
+        blueprint_id: BlueprintUuid,
         zone: &BlueprintZoneConfig,
     ) -> Result<Option<BpOmicronZoneNic>, anyhow::Error> {
         let Some((_, nic)) = zone.zone_type.external_networking() else {
@@ -959,7 +959,7 @@ impl BpOmicronZoneNic {
         };
         let nic = OmicronZoneNic::new(zone.id, nic)?;
         Ok(Some(Self {
-            blueprint_id,
+            blueprint_id: blueprint_id.into(),
             id: nic.id,
             name: nic.name,
             ip: nic.ip,
@@ -998,7 +998,7 @@ impl From<BpOmicronZoneNic> for OmicronZoneNic {
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_clickhouse_cluster_config)]
 pub struct BpClickhouseClusterConfig {
-    pub blueprint_id: Uuid,
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
     pub generation: Generation,
     pub max_used_server_id: i64,
     pub max_used_keeper_id: i64,
@@ -1009,11 +1009,11 @@ pub struct BpClickhouseClusterConfig {
 
 impl BpClickhouseClusterConfig {
     pub fn new(
-        blueprint_id: Uuid,
+        blueprint_id: BlueprintUuid,
         config: &ClickhouseClusterConfig,
     ) -> anyhow::Result<BpClickhouseClusterConfig> {
         Ok(BpClickhouseClusterConfig {
-            blueprint_id,
+            blueprint_id: blueprint_id.into(),
             generation: Generation(config.generation),
             max_used_server_id: config
                 .max_used_server_id
@@ -1040,19 +1040,19 @@ impl BpClickhouseClusterConfig {
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_clickhouse_keeper_zone_id_to_node_id)]
 pub struct BpClickhouseKeeperZoneIdToNodeId {
-    pub blueprint_id: Uuid,
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
     pub omicron_zone_id: DbTypedUuid<OmicronZoneKind>,
     pub keeper_id: i64,
 }
 
 impl BpClickhouseKeeperZoneIdToNodeId {
     pub fn new(
-        blueprint_id: Uuid,
+        blueprint_id: BlueprintUuid,
         omicron_zone_id: OmicronZoneUuid,
         keeper_id: KeeperId,
     ) -> anyhow::Result<BpClickhouseKeeperZoneIdToNodeId> {
         Ok(BpClickhouseKeeperZoneIdToNodeId {
-            blueprint_id,
+            blueprint_id: blueprint_id.into(),
             omicron_zone_id: omicron_zone_id.into(),
             keeper_id: keeper_id
                 .0
@@ -1065,19 +1065,19 @@ impl BpClickhouseKeeperZoneIdToNodeId {
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_clickhouse_server_zone_id_to_node_id)]
 pub struct BpClickhouseServerZoneIdToNodeId {
-    pub blueprint_id: Uuid,
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
     pub omicron_zone_id: DbTypedUuid<OmicronZoneKind>,
     pub server_id: i64,
 }
 
 impl BpClickhouseServerZoneIdToNodeId {
     pub fn new(
-        blueprint_id: Uuid,
+        blueprint_id: BlueprintUuid,
         omicron_zone_id: OmicronZoneUuid,
         server_id: ServerId,
     ) -> anyhow::Result<BpClickhouseServerZoneIdToNodeId> {
         Ok(BpClickhouseServerZoneIdToNodeId {
-            blueprint_id,
+            blueprint_id: blueprint_id.into(),
             omicron_zone_id: omicron_zone_id.into(),
             server_id: server_id
                 .0

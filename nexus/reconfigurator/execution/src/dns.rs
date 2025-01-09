@@ -364,6 +364,7 @@ mod test {
     use omicron_common::policy::OXIMETER_REDUNDANCY;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::ZpoolUuid;
@@ -375,7 +376,6 @@ mod test {
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
     use std::sync::Arc;
-    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -657,7 +657,7 @@ mod test {
         let dns_empty = dns_config_empty();
         let initial_dns_generation = dns_empty.generation;
         let mut blueprint = Blueprint {
-            id: Uuid::new_v4(),
+            id: BlueprintUuid::new_v4(),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
             blueprint_datasets: BTreeMap::new(),

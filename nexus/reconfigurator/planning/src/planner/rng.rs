@@ -5,6 +5,8 @@
 //! RNG for blueprint planning to allow reproducibility (particularly for
 //! tests).
 
+use omicron_uuid_kinds::BlueprintKind;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ExternalIpKind;
@@ -29,7 +31,7 @@ pub struct PlannerRng {
     //
     // In the future, when we switch to typed UUIDs, each of these will be
     // associated with a specific `TypedUuidKind`.
-    blueprint_rng: UuidRng,
+    blueprint_rng: TypedUuidRng<BlueprintKind>,
     // Each sled gets its own set of RNGs to avoid test changes to one sled
     // (e.g., adding an extra zone) perturbing all subsequent zone/dataset/etc.
     // IDs on other sleds.
@@ -50,7 +52,8 @@ impl PlannerRng {
     }
 
     pub fn new_from_parent(mut parent: StdRng) -> Self {
-        let blueprint_rng = UuidRng::from_parent_rng(&mut parent, "blueprint");
+        let blueprint_rng =
+            TypedUuidRng::from_parent_rng(&mut parent, "blueprint");
         let clickhouse_rng =
             UuidRng::from_parent_rng(&mut parent, "clickhouse");
 
@@ -68,7 +71,7 @@ impl PlannerRng {
             .or_insert_with(|| SledPlannerRng::new(sled_id, &mut self.parent))
     }
 
-    pub fn next_blueprint(&mut self) -> Uuid {
+    pub fn next_blueprint(&mut self) -> BlueprintUuid {
         self.blueprint_rng.next()
     }
 

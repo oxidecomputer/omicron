@@ -8,6 +8,7 @@ use internal_dns_types::names::ServiceName;
 use nexus_client::Client as NexusClient;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use omicron_test_utils::dev::test_setup_log;
+use omicron_uuid_kinds::GenericUuid;
 use slog::{debug, info};
 use slog_error_chain::InlineErrorChain;
 use std::time::Duration;
@@ -68,7 +69,7 @@ async fn new_blueprint_noop() {
 
     // Fetch its parent.
     let parent_blueprint = nexus_client
-        .blueprint_view(&parent_blueprint_id)
+        .blueprint_view(parent_blueprint_id.as_untyped_uuid())
         .await
         .expect("failed to fetch parent blueprint")
         .into_inner();

@@ -22,6 +22,7 @@ use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
 use omicron_test_utils::dev::test_cmds::Redactor;
 use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::debug;
 use std::io::BufReader;
@@ -270,7 +271,7 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to import new blueprint");
 
     let found_blueprint = nexus_client
-        .blueprint_view(&new_blueprint.id)
+        .blueprint_view(new_blueprint.id.as_untyped_uuid())
         .await
         .expect("failed to find imported blueprint in Nexus")
         .into_inner();

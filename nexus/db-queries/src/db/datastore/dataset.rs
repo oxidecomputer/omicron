@@ -361,6 +361,7 @@ mod test {
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use omicron_common::api::internal::shared::DatasetKind as ApiDatasetKind;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
@@ -553,14 +554,14 @@ mod test {
 
         let bp1 = {
             let mut bp1 = bp0.clone();
-            bp1.id = Uuid::new_v4();
+            bp1.id = BlueprintUuid::new_v4();
             bp1.parent_blueprint_id = Some(bp0.id);
             bp1
         };
         bp_insert_and_make_target(&opctx, &datastore, &bp1).await;
 
-        let old_blueprint_id = BlueprintUuid::from_untyped_uuid(bp0.id);
-        let current_blueprint_id = BlueprintUuid::from_untyped_uuid(bp1.id);
+        let old_blueprint_id = bp0.id;
+        let current_blueprint_id = bp1.id;
 
         // Upsert referencing old blueprint: Error
         datastore
