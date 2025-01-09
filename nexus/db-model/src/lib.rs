@@ -50,7 +50,6 @@ mod migration;
 mod migration_state;
 mod name;
 mod network_interface;
-mod optional_time_delta;
 mod oximeter_info;
 mod physical_disk;
 mod physical_disk_kind;

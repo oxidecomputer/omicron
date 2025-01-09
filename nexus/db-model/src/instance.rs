@@ -3,9 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{
-    optional_time_delta::optional_time_delta, ByteCount, Disk, ExternalIp,
-    Generation, InstanceAutoRestartPolicy, InstanceCpuCount, InstanceState,
-    Vmm, VmmState,
+    ByteCount, Disk, ExternalIp, Generation, InstanceAutoRestartPolicy,
+    InstanceCpuCount, InstanceState, Vmm, VmmState,
 };
 use crate::collection::DatastoreAttachTargetConfig;
 use crate::schema::{disk, external_ip, instance};
@@ -16,6 +15,7 @@ use diesel::pg;
 use diesel::prelude::*;
 use diesel::sql_types::{Bool, Nullable};
 use nexus_types::external_api::params;
+use omicron_common::api::external::optional_time_delta;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
 use serde::Serialize;
