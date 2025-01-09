@@ -2884,9 +2884,12 @@ dependencies = [
  "hickory-resolver",
  "http",
  "humantime",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "internet-checksum",
  "ispf",
  "macaddr",
+ "nexus-client",
  "omicron-sled-agent",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -2898,7 +2901,10 @@ dependencies = [
  "serde",
  "serde_json",
  "sled-agent-types",
+ "slog",
+ "slog-error-chain",
  "socket2",
+ "thiserror 1.0.69",
  "tokio",
  "toml 0.8.19",
  "uuid",
@@ -9450,6 +9456,7 @@ dependencies = [
  "humantime",
  "indent_write",
  "internal-dns-types",
+ "itertools 0.13.0",
  "nexus-client",
  "nexus-db-queries",
  "nexus-inventory",
@@ -13301,7 +13308,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
