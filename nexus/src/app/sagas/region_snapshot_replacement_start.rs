@@ -64,7 +64,6 @@ use crate::app::RegionAllocationStrategy;
 use crate::app::{authn, db};
 use nexus_db_queries::db::datastore::NewRegionVolumeId;
 use nexus_db_queries::db::datastore::OldSnapshotVolumeId;
-use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::DatasetUuid;
@@ -443,7 +442,8 @@ struct AllocRegionParams {
     block_size: u64,
     blocks_per_extent: u64,
     extent_count: u64,
-    current_allocated_regions: Vec<(db::model::Dataset, db::model::Region)>,
+    current_allocated_regions:
+        Vec<(db::model::CrucibleDataset, db::model::Region)>,
     snapshot_id: Uuid,
     snapshot_volume_id: VolumeUuid,
 }
@@ -500,7 +500,7 @@ async fn rsrss_get_alloc_region_params(
 
 async fn rsrss_alloc_new_region(
     sagactx: NexusActionContext,
-) -> Result<Vec<(db::model::Dataset, db::model::Region)>, ActionError> {
+) -> Result<Vec<(db::model::CrucibleDataset, db::model::Region)>, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
@@ -549,9 +549,10 @@ async fn rsrss_alloc_new_region_undo(
     let maybe_dataset_and_region = find_only_new_region(
         log,
         alloc_region_params.current_allocated_regions,
-        sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
-            "new_datasets_and_regions",
-        )?,
+        sagactx
+            .lookup::<Vec<(db::model::CrucibleDataset, db::model::Region)>>(
+                "new_datasets_and_regions",
+            )?,
     );
 
     // It should be guaranteed that if rsrss_alloc_new_region succeeded then it
@@ -572,7 +573,7 @@ async fn rsrss_alloc_new_region_undo(
 
 async fn rsrss_find_new_region(
     sagactx: NexusActionContext,
-) -> Result<(db::model::Dataset, db::model::Region), ActionError> {
+) -> Result<(db::model::CrucibleDataset, db::model::Region), ActionError> {
     let osagactx = sagactx.user_data();
     let log = osagactx.log();
 
@@ -582,9 +583,10 @@ async fn rsrss_find_new_region(
     let maybe_dataset_and_region = find_only_new_region(
         log,
         alloc_region_params.current_allocated_regions,
-        sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
-            "new_datasets_and_regions",
-        )?,
+        sagactx
+            .lookup::<Vec<(db::model::CrucibleDataset, db::model::Region)>>(
+                "new_datasets_and_regions",
+            )?,
     );
 
     let Some(dataset_and_region) = maybe_dataset_and_region else {
@@ -606,7 +608,7 @@ async fn rsrss_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
 async fn rsrss_new_region_ensure(
     sagactx: NexusActionContext,
 ) -> Result<
-    (nexus_db_model::Dataset, crucible_agent_client::types::Region),
+    (nexus_db_model::CrucibleDataset, crucible_agent_client::types::Region),
     ActionError,
 > {
     let params = sagactx.saga_params::<Params>()?;
@@ -614,7 +616,7 @@ async fn rsrss_new_region_ensure(
     let log = osagactx.log();
 
     let new_dataset_and_region = sagactx
-        .lookup::<(db::model::Dataset, db::model::Region)>(
+        .lookup::<(db::model::CrucibleDataset, db::model::Region)>(
             "new_dataset_and_region",
         )?;
 
@@ -702,7 +704,7 @@ async fn rsrss_new_region_ensure_undo(
     warn!(log, "rsrss_new_region_ensure_undo: Deleting crucible regions");
 
     let new_dataset_and_region = sagactx
-        .lookup::<(db::model::Dataset, db::model::Region)>(
+        .lookup::<(db::model::CrucibleDataset, db::model::Region)>(
             "new_dataset_and_region",
         )?;
 
@@ -722,20 +724,13 @@ async fn rsrss_new_region_volume_create(
     let new_region_volume_id =
         sagactx.lookup::<VolumeUuid>("new_region_volume_id")?;
 
-    let (new_dataset, ensured_region) = sagactx.lookup::<(
-        db::model::Dataset,
-        crucible_agent_client::types::Region,
-    )>(
-        "ensured_dataset_and_region",
-    )?;
+    let (new_dataset, ensured_region) =
+        sagactx.lookup::<(
+            db::model::CrucibleDataset,
+            crucible_agent_client::types::Region,
+        )>("ensured_dataset_and_region")?;
 
-    let Some(new_dataset_address) = new_dataset.address() else {
-        return Err(ActionError::action_failed(format!(
-            "dataset {} does not have an address!",
-            new_dataset.id(),
-        )));
-    };
-
+    let new_dataset_address = new_dataset.address();
     let new_region_address = SocketAddr::V6(SocketAddrV6::new(
         *new_dataset_address.ip(),
         ensured_region.port_number,
@@ -953,20 +948,13 @@ async fn get_replace_params(
             }
         };
 
-    let (new_dataset, ensured_region) = sagactx.lookup::<(
-        db::model::Dataset,
-        crucible_agent_client::types::Region,
-    )>(
-        "ensured_dataset_and_region",
-    )?;
+    let (new_dataset, ensured_region) =
+        sagactx.lookup::<(
+            db::model::CrucibleDataset,
+            crucible_agent_client::types::Region,
+        )>("ensured_dataset_and_region")?;
 
-    let Some(new_dataset_address) = new_dataset.address() else {
-        return Err(ActionError::action_failed(format!(
-            "dataset {} does not have an address!",
-            new_dataset.id(),
-        )));
-    };
-
+    let new_dataset_address = new_dataset.address();
     let new_region_address = SocketAddrV6::new(
         *new_dataset_address.ip(),
         ensured_region.port_number,
@@ -1102,7 +1090,7 @@ async fn rsrss_update_request_record(
 
     let saga_id = sagactx.lookup::<Uuid>("saga_id")?;
     let new_dataset_and_region = sagactx
-        .lookup::<(db::model::Dataset, db::model::Region)>(
+        .lookup::<(db::model::CrucibleDataset, db::model::Region)>(
             "new_dataset_and_region",
         )?;
 

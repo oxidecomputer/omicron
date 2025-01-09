@@ -69,45 +69,6 @@ impl CrucibleDataset {
     }
 }
 
-/*
- * TODO-john
-impl From<BlueprintDatasetConfig> for CrucibleDataset {
-    fn from(bp: BlueprintDatasetConfig) -> Self {
-        let kind = DatasetKind::from(&bp.kind);
-        let zone_name = bp.kind.zone_name().map(|s| s.to_string());
-        // Only Crucible uses this "size_used" field.
-        let size_used = match bp.kind {
-            ApiDatasetKind::Crucible => Some(0),
-            ApiDatasetKind::Cockroach
-            | ApiDatasetKind::Clickhouse
-            | ApiDatasetKind::ClickhouseKeeper
-            | ApiDatasetKind::ClickhouseServer
-            | ApiDatasetKind::ExternalDns
-            | ApiDatasetKind::InternalDns
-            | ApiDatasetKind::TransientZone { .. }
-            | ApiDatasetKind::TransientZoneRoot
-            | ApiDatasetKind::Debug
-            | ApiDatasetKind::Update => None,
-        };
-        let addr = bp.address;
-        Self {
-            identity: DatasetIdentity::new(bp.id),
-            time_deleted: None,
-            rcgen: Generation::new(),
-            pool_id: bp.pool.id().into_untyped_uuid(),
-            kind,
-            ip: addr.map(|addr| addr.ip().into()),
-            port: addr.map(|addr| addr.port().into()),
-            size_used,
-            zone_name,
-            quota: bp.quota.map(ByteCount::from),
-            reservation: bp.reservation.map(ByteCount::from),
-            compression: Some(bp.compression.to_string()),
-        }
-    }
-}
-*/
-
 // Datasets contain regions
 impl DatastoreCollectionConfig<Region> for CrucibleDataset {
     type CollectionId = Uuid;

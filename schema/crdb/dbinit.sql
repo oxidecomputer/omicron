@@ -579,7 +579,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.crucible_dataset (
     port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
 
     /* An upper bound on the amount of space that might be in-use */
-    size_used INT NOT NULL,
+    size_used INT NOT NULL
 );
 
 /* Create an index on the size usage for any Crucible dataset */

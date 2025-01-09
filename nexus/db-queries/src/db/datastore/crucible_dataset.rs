@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! [`DataStore`] methods on [`Dataset`]s.
+//! [`DataStore`] methods on [`CrucibleDataset`]s.
 
 use super::DataStore;
 use super::SQL_BATCH_SIZE;
@@ -16,7 +16,7 @@ use crate::db::error::retryable;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
 use crate::db::model::to_db_typed_uuid;
-use crate::db::model::Dataset;
+use crate::db::model::CrucibleDataset;
 use crate::db::model::PhysicalDisk;
 use crate::db::model::PhysicalDiskPolicy;
 use crate::db::model::Zpool;
@@ -28,7 +28,6 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
 use futures::FutureExt;
-use nexus_db_model::DatasetKind;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -42,17 +41,18 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use uuid::Uuid;
 
+// TODO-john rename all these to crucible_*?
 impl DataStore {
     pub async fn dataset_get(
         &self,
         dataset_id: DatasetUuid,
-    ) -> LookupResult<Dataset> {
-        use db::schema::dataset::dsl;
+    ) -> LookupResult<CrucibleDataset> {
+        use db::schema::crucible_dataset::dsl;
 
-        dsl::dataset
+        dsl::crucible_dataset
             .filter(dsl::id.eq(to_db_typed_uuid(dataset_id)))
-            .select(Dataset::as_select())
-            .first_async::<Dataset>(
+            .select(CrucibleDataset::as_select())
+            .first_async::<CrucibleDataset>(
                 &*self.pool_connection_unauthorized().await?,
             )
             .await
@@ -62,8 +62,8 @@ impl DataStore {
     /// Stores a new dataset in the database.
     pub async fn dataset_upsert(
         &self,
-        dataset: Dataset,
-    ) -> CreateResult<Dataset> {
+        dataset: CrucibleDataset,
+    ) -> CreateResult<CrucibleDataset> {
         let conn = &*self.pool_connection_unauthorized().await?;
         Self::dataset_upsert_on_connection(&conn, dataset).await.map_err(|e| {
             match e {
@@ -79,8 +79,8 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         bp_id: BlueprintUuid,
-        dataset: Dataset,
-    ) -> CreateResult<Dataset> {
+        dataset: CrucibleDataset,
+    ) -> CreateResult<CrucibleDataset> {
         let conn = self.pool_connection_unauthorized().await?;
 
         self.transaction_if_current_blueprint_is(
@@ -101,15 +101,15 @@ impl DataStore {
 
     async fn dataset_upsert_on_connection(
         conn: &async_bb8_diesel::Connection<db::DbConnection>,
-        dataset: Dataset,
-    ) -> Result<Dataset, TransactionError<Error>> {
-        use db::schema::dataset::dsl;
+        dataset: CrucibleDataset,
+    ) -> Result<CrucibleDataset, TransactionError<Error>> {
+        use db::schema::crucible_dataset::dsl;
 
         let dataset_id = dataset.id();
         let zpool_id = dataset.pool_id;
         Zpool::insert_resource(
             zpool_id,
-            diesel::insert_into(dsl::dataset)
+            diesel::insert_into(dsl::crucible_dataset)
                 .values(dataset)
                 .on_conflict(dsl::id)
                 .do_update()
@@ -118,11 +118,6 @@ impl DataStore {
                     dsl::pool_id.eq(excluded(dsl::pool_id)),
                     dsl::ip.eq(excluded(dsl::ip)),
                     dsl::port.eq(excluded(dsl::port)),
-                    dsl::kind.eq(excluded(dsl::kind)),
-                    dsl::zone_name.eq(excluded(dsl::zone_name)),
-                    dsl::quota.eq(excluded(dsl::quota)),
-                    dsl::reservation.eq(excluded(dsl::reservation)),
-                    dsl::compression.eq(excluded(dsl::compression)),
                 )),
         )
         .insert_and_get_result_async(conn)
@@ -156,14 +151,14 @@ impl DataStore {
     /// exists, returns `Ok(None)`.
     pub async fn dataset_insert_if_not_exists(
         &self,
-        dataset: Dataset,
-    ) -> CreateResult<Option<Dataset>> {
-        use db::schema::dataset::dsl;
+        dataset: CrucibleDataset,
+    ) -> CreateResult<Option<CrucibleDataset>> {
+        use db::schema::crucible_dataset::dsl;
 
         let zpool_id = dataset.pool_id;
         Zpool::insert_resource(
             zpool_id,
-            diesel::insert_into(dsl::dataset)
+            diesel::insert_into(dsl::crucible_dataset)
                 .values(dataset)
                 .on_conflict(dsl::id)
                 .do_nothing(),
@@ -184,28 +179,17 @@ impl DataStore {
     }
 
     /// List one page of datasets
-    ///
-    /// If `filter_kind` is `Some(value)`, only datasets with a `kind` matching
-    /// `value` will be returned. If `filter_kind` is `None`, all datasets will
-    /// be returned.
     async fn dataset_list(
         &self,
         opctx: &OpContext,
-        filter_kind: Option<DatasetKind>,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<Dataset> {
+    ) -> ListResultVec<CrucibleDataset> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        use db::schema::dataset::dsl;
+        use db::schema::crucible_dataset::dsl;
 
-        let mut query = paginated(dsl::dataset, dsl::id, pagparams)
-            .filter(dsl::time_deleted.is_null());
-
-        if let Some(kind) = filter_kind {
-            query = query.filter(dsl::kind.eq(kind));
-        }
-
-        query
-            .select(Dataset::as_select())
+        paginated(dsl::crucible_dataset, dsl::id, pagparams)
+            .filter(dsl::time_deleted.is_null())
+            .select(CrucibleDataset::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -213,31 +197,27 @@ impl DataStore {
 
     /// List all datasets, making as many queries as needed to get them all
     ///
-    /// If `filter_kind` is `Some(value)`, only datasets with a `kind` matching
-    /// `value` will be returned. If `filter_kind` is `None`, all datasets will
-    /// be returned.
-    ///
     /// This should generally not be used in API handlers or other
     /// latency-sensitive contexts, but it can make sense in saga actions or
     /// background tasks.
     pub async fn dataset_list_all_batched(
         &self,
         opctx: &OpContext,
-        filter_kind: Option<DatasetKind>,
-    ) -> ListResultVec<Dataset> {
+    ) -> ListResultVec<CrucibleDataset> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         opctx.check_complex_operations_allowed()?;
 
         let mut all_datasets = Vec::new();
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         while let Some(p) = paginator.next() {
-            let batch = self
-                .dataset_list(opctx, filter_kind, &p.current_pagparams())
-                .await?;
-            paginator = p
-                .found_batch(&batch, &|d: &nexus_db_model::Dataset| {
+            let batch =
+                self.dataset_list(opctx, &p.current_pagparams()).await?;
+            paginator = p.found_batch(
+                &batch,
+                &|d: &nexus_db_model::CrucibleDataset| {
                     d.id().into_untyped_uuid()
-                });
+                },
+            );
             all_datasets.extend(batch);
         }
 
@@ -285,10 +265,10 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<db::DbConnection>,
         id: DatasetUuid,
     ) -> Result<(), TransactionError<Error>> {
-        use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::crucible_dataset::dsl as dataset_dsl;
         let now = Utc::now();
 
-        diesel::update(dataset_dsl::dataset)
+        diesel::update(dataset_dsl::crucible_dataset)
             .filter(dataset_dsl::time_deleted.is_null())
             .filter(dataset_dsl::id.eq(to_db_typed_uuid(id)))
             .set(dataset_dsl::time_deleted.eq(now))
@@ -307,12 +287,12 @@ impl DataStore {
         let conn = self.pool_connection_unauthorized().await?;
 
         let dataset = {
-            use db::schema::dataset::dsl;
+            use db::schema::crucible_dataset::dsl;
 
-            dsl::dataset
+            dsl::crucible_dataset
                 .filter(dsl::id.eq(to_db_typed_uuid(dataset_id)))
-                .select(Dataset::as_select())
-                .first_async::<Dataset>(&*conn)
+                .select(CrucibleDataset::as_select())
+                .first_async::<CrucibleDataset>(&*conn)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
@@ -359,7 +339,6 @@ mod test {
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
-    use omicron_common::api::internal::shared::DatasetKind as ApiDatasetKind;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::DatasetUuid;
@@ -415,7 +394,7 @@ mod test {
 
         // There should be no datasets initially.
         assert_eq!(
-            datastore.dataset_list_all_batched(opctx, None).await.unwrap(),
+            datastore.dataset_list_all_batched(opctx).await.unwrap(),
             []
         );
 
@@ -424,98 +403,70 @@ mod test {
 
         // Inserting a new dataset should succeed.
         let dataset1 = datastore
-            .dataset_insert_if_not_exists(Dataset::new(
+            .dataset_insert_if_not_exists(CrucibleDataset::new(
                 DatasetUuid::new_v4(),
                 *zpool_id.as_untyped_uuid(),
-                Some("[::1]:0".parse().unwrap()),
-                ApiDatasetKind::Crucible,
+                "[::1]:0".parse().unwrap(),
             ))
             .await
             .expect("failed to insert dataset")
             .expect("insert found unexpected existing dataset");
         let mut expected_datasets = vec![dataset1.clone()];
         assert_eq!(
-            datastore.dataset_list_all_batched(opctx, None).await.unwrap(),
+            datastore.dataset_list_all_batched(opctx).await.unwrap(),
             expected_datasets,
         );
         assert_eq!(
-            datastore
-                .dataset_list_all_batched(opctx, Some(DatasetKind::Crucible))
-                .await
-                .unwrap(),
+            datastore.dataset_list_all_batched(opctx).await.unwrap(),
             expected_datasets,
-        );
-        assert_eq!(
-            datastore
-                .dataset_list_all_batched(opctx, Some(DatasetKind::Cockroach))
-                .await
-                .unwrap(),
-            [],
         );
 
         // Attempting to insert another dataset with the same ID should succeed
         // without updating the existing record. We'll check this by passing a
-        // different socket address and kind.
+        // different socket address.
         let insert_again_result = datastore
-            .dataset_insert_if_not_exists(Dataset::new(
+            .dataset_insert_if_not_exists(CrucibleDataset::new(
                 dataset1.id(),
                 *zpool_id.as_untyped_uuid(),
-                Some("[::1]:12345".parse().unwrap()),
-                ApiDatasetKind::Cockroach,
+                "[::1]:12345".parse().unwrap(),
             ))
             .await
             .expect("failed to do-nothing insert dataset");
         assert_eq!(insert_again_result, None);
         assert_eq!(
-            datastore.dataset_list_all_batched(opctx, None).await.unwrap(),
+            datastore.dataset_list_all_batched(opctx).await.unwrap(),
             expected_datasets,
         );
 
         // We can can also upsert a different dataset...
         let dataset2 = datastore
-            .dataset_upsert(Dataset::new(
+            .dataset_upsert(CrucibleDataset::new(
                 DatasetUuid::new_v4(),
                 *zpool_id.as_untyped_uuid(),
-                Some("[::1]:0".parse().unwrap()),
-                ApiDatasetKind::Cockroach,
+                "[::1]:0".parse().unwrap(),
             ))
             .await
             .expect("failed to upsert dataset");
         expected_datasets.push(dataset2.clone());
         expected_datasets.sort_by_key(|d| d.id());
         assert_eq!(
-            datastore.dataset_list_all_batched(opctx, None).await.unwrap(),
+            datastore.dataset_list_all_batched(opctx).await.unwrap(),
             expected_datasets,
-        );
-        assert_eq!(
-            datastore
-                .dataset_list_all_batched(opctx, Some(DatasetKind::Crucible))
-                .await
-                .unwrap(),
-            [dataset1.clone()],
-        );
-        assert_eq!(
-            datastore
-                .dataset_list_all_batched(opctx, Some(DatasetKind::Cockroach))
-                .await
-                .unwrap(),
-            [dataset2.clone()],
         );
 
         // ... and trying to `insert_if_not_exists` should similarly return
         // `None`.
         let insert_again_result = datastore
-            .dataset_insert_if_not_exists(Dataset::new(
+            .dataset_insert_if_not_exists(CrucibleDataset::new(
                 dataset1.id(),
                 *zpool_id.as_untyped_uuid(),
-                Some("[::1]:12345".parse().unwrap()),
-                ApiDatasetKind::Cockroach,
+                "[::1]:12345".parse().unwrap(),
             ))
             .await
             .expect("failed to do-nothing insert dataset");
         assert_eq!(insert_again_result, None);
         assert_eq!(
-            datastore.dataset_list_all_batched(opctx, None).await.unwrap(),
+            datastore.dataset_list_all_batched(opctx).await.unwrap(),
             expected_datasets,
         );
 
@@ -523,12 +474,11 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    fn new_dataset_on(zpool_id: ZpoolUuid) -> Dataset {
-        Dataset::new(
+    fn new_dataset_on(zpool_id: ZpoolUuid) -> CrucibleDataset {
+        CrucibleDataset::new(
             DatasetUuid::new_v4(),
             *zpool_id.as_untyped_uuid(),
-            Some("[::1]:0".parse().unwrap()),
-            ApiDatasetKind::Cockroach,
+            "[::1]:0".parse().unwrap(),
         )
     }
 

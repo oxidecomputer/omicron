@@ -72,18 +72,12 @@ fn into_external_error(
 impl super::Nexus {
     fn crucible_agent_client_for_dataset(
         &self,
-        dataset: &db::model::Dataset,
-    ) -> Result<CrucibleAgentClient, Error> {
-        let Some(addr) = dataset.address() else {
-            return Err(Error::internal_error(
-                "Missing crucible dataset address",
-            ));
-        };
-
-        Ok(CrucibleAgentClient::new_with_client(
-            &format!("http://{}", addr),
+        dataset: &db::model::CrucibleDataset,
+    ) -> CrucibleAgentClient {
+        CrucibleAgentClient::new_with_client(
+            &format!("http://{}", dataset.address()),
             self.reqwest_client.clone(),
-        ))
+        )
     }
 
     /// Return if the Crucible agent is expected to be there and answer Nexus:
@@ -155,11 +149,11 @@ impl super::Nexus {
     pub async fn ensure_region_in_dataset(
         &self,
         log: &Logger,
-        dataset: &db::model::Dataset,
+        dataset: &db::model::CrucibleDataset,
         region: &db::model::Region,
         source: Option<String>,
     ) -> Result<Region, Error> {
-        let client = self.crucible_agent_client_for_dataset(dataset)?;
+        let client = self.crucible_agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
         let Ok(extent_count) = u32::try_from(region.extent_count()) else {
@@ -270,7 +264,7 @@ impl super::Nexus {
     async fn ensure_crucible_running_snapshot_impl(
         &self,
         log: &Logger,
-        dataset: &db::model::Dataset,
+        dataset: &db::model::CrucibleDataset,
         region_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(Region, Snapshot, RunningSnapshot), Error> {
@@ -358,7 +352,7 @@ impl super::Nexus {
             }
         };
 
-        let client = self.crucible_agent_client_for_dataset(dataset)?;
+        let client = self.crucible_agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
         // Request the running snapshot start, polling until the state
@@ -457,10 +451,10 @@ impl super::Nexus {
     async fn maybe_get_crucible_region(
         &self,
         log: &Logger,
-        dataset: &db::model::Dataset,
+        dataset: &db::model::CrucibleDataset,
         region_id: Uuid,
     ) -> Result<Option<Region>, Error> {
-        let client = self.crucible_agent_client_for_dataset(dataset)?;
+        let client = self.crucible_agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
         let result = ProgenitorOperationRetry::new(
@@ -501,11 +495,11 @@ impl super::Nexus {
     async fn maybe_get_crucible_snapshot(
         &self,
         log: &Logger,
-        dataset: &db::model::Dataset,
+        dataset: &db::model::CrucibleDataset,
         region_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<Option<Snapshot>, Error> {
-        let client = self.crucible_agent_client_for_dataset(dataset)?;
+        let client = self.crucible_agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
         let result = ProgenitorOperationRetry::new(
@@ -550,10 +544,10 @@ impl super::Nexus {
     async fn get_crucible_region_snapshots(
         &self,
         log: &Logger,
-        dataset: &db::model::Dataset,
+        dataset: &db::model::CrucibleDataset,
         region_id: Uuid,
     ) -> Result<GetSnapshotResponse, Error> {
-        let client = self.crucible_agent_client_for_dataset(dataset)?;
+        let client = self.crucible_agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
         let result = ProgenitorOperationRetry::new(
@@ -590,10 +584,10 @@ impl super::Nexus {
     async fn request_crucible_region_delete(
         &self,
         log: &Logger,
-        dataset: &db::model::Dataset,
+        dataset: &db::model::CrucibleDataset,
         region_id: Uuid,
     ) -> Result<(), Error> {
-        let client = self.crucible_agent_client_for_dataset(dataset)?;
+        let client = self.crucible_agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
         let result = ProgenitorOperationRetry::new(
@@ -632,11 +626,11 @@ impl super::Nexus {
     async fn request_crucible_running_snapshot_delete(
         &self,
         log: &Logger,
-        dataset: &db::model::Dataset,
+        dataset: &db::model::CrucibleDataset,
         region_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
-        let client = self.crucible_agent_client_for_dataset(dataset)?;
+        let client = self.crucible_agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
         let result = ProgenitorOperationRetry::new(
@@ -681,11 +675,11 @@ impl super::Nexus {
     async fn request_crucible_snapshot_delete(
         &self,
         log: &Logger,
-        dataset: &db::model::Dataset,
+        dataset: &db::model::CrucibleDataset,
         region_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
-        let client = self.crucible_agent_client_for_dataset(dataset)?;
+        let client = self.crucible_agent_client_for_dataset(dataset);
         let dataset_id = dataset.id();
 
         let result = ProgenitorOperationRetry::new(
@@ -730,7 +724,7 @@ impl super::Nexus {
     async fn delete_crucible_region(
         &self,
         log: &Logger,
-        dataset: &db::model::Dataset,
+        dataset: &db::model::CrucibleDataset,
         region_id: Uuid,
     ) -> Result<(), Error> {
         // If the region never existed, then a `GET` will return 404, and so
@@ -851,7 +845,7 @@ impl super::Nexus {
     async fn delete_crucible_running_snapshot_impl(
         &self,
         log: &Logger,
-        dataset: &db::model::Dataset,
+        dataset: &db::model::CrucibleDataset,
         region_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
@@ -970,7 +964,7 @@ impl super::Nexus {
     pub async fn delete_crucible_snapshot(
         &self,
         log: &Logger,
-        dataset: &db::model::Dataset,
+        dataset: &db::model::CrucibleDataset,
         region_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
@@ -981,7 +975,7 @@ impl super::Nexus {
     async fn delete_crucible_snapshot_impl(
         &self,
         log: &Logger,
-        dataset: &db::model::Dataset,
+        dataset: &db::model::CrucibleDataset,
         region_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
@@ -1095,8 +1089,11 @@ impl super::Nexus {
     pub async fn ensure_all_datasets_and_regions(
         &self,
         log: &Logger,
-        datasets_and_regions: Vec<(db::model::Dataset, db::model::Region)>,
-    ) -> Result<Vec<(db::model::Dataset, Region)>, Error> {
+        datasets_and_regions: Vec<(
+            db::model::CrucibleDataset,
+            db::model::Region,
+        )>,
+    ) -> Result<Vec<(db::model::CrucibleDataset, Region)>, Error> {
         let request_count = datasets_and_regions.len();
         if request_count == 0 {
             return Ok(vec![]);
@@ -1104,7 +1101,7 @@ impl super::Nexus {
 
         // Allocate regions, and additionally return the dataset that the region
         // was allocated in.
-        let datasets_and_regions: Vec<(db::model::Dataset, Region)> =
+        let datasets_and_regions: Vec<(db::model::CrucibleDataset, Region)> =
             futures::stream::iter(datasets_and_regions)
                 .map(|(dataset, region)| async move {
                     match self
@@ -1120,10 +1117,10 @@ impl super::Nexus {
                     request_count,
                     MAX_CONCURRENT_REGION_REQUESTS,
                 ))
-                .collect::<Vec<Result<(db::model::Dataset, Region), Error>>>()
+                .collect::<Vec<Result<(db::model::CrucibleDataset, Region), Error>>>()
                 .await
                 .into_iter()
-                .collect::<Result<Vec<(db::model::Dataset, Region)>, Error>>(
+                .collect::<Result<Vec<(db::model::CrucibleDataset, Region)>, Error>>(
                 )?;
 
         // Assert each region has the same block size, otherwise Volume creation
@@ -1146,7 +1143,10 @@ impl super::Nexus {
     pub async fn delete_crucible_regions(
         &self,
         log: &Logger,
-        datasets_and_regions: Vec<(db::model::Dataset, db::model::Region)>,
+        datasets_and_regions: Vec<(
+            db::model::CrucibleDataset,
+            db::model::Region,
+        )>,
     ) -> Result<(), Error> {
         let request_count = datasets_and_regions.len();
         if request_count == 0 {
@@ -1174,7 +1174,7 @@ impl super::Nexus {
     pub async fn delete_crucible_running_snapshot(
         &self,
         log: &Logger,
-        dataset: &db::model::Dataset,
+        dataset: &db::model::CrucibleDataset,
         region_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
@@ -1194,7 +1194,7 @@ impl super::Nexus {
         &self,
         log: &Logger,
         datasets_and_snapshots: Vec<(
-            db::model::Dataset,
+            db::model::CrucibleDataset,
             db::model::RegionSnapshot,
         )>,
     ) -> Result<(), Error> {
@@ -1232,7 +1232,7 @@ impl super::Nexus {
         &self,
         log: &Logger,
         datasets_and_snapshots: Vec<(
-            db::model::Dataset,
+            db::model::CrucibleDataset,
             db::model::RegionSnapshot,
         )>,
     ) -> Result<(), Error> {
@@ -1268,7 +1268,7 @@ impl super::Nexus {
     pub async fn ensure_crucible_running_snapshot(
         &self,
         log: &Logger,
-        dataset: &db::model::Dataset,
+        dataset: &db::model::CrucibleDataset,
         region_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(Region, Snapshot, RunningSnapshot), Error> {
@@ -1288,7 +1288,7 @@ impl super::Nexus {
         &self,
         log: &Logger,
         datasets_and_snapshots: Vec<(
-            db::model::Dataset,
+            db::model::CrucibleDataset,
             db::model::RegionSnapshot,
         )>,
     ) -> Result<Vec<(Region, Snapshot, RunningSnapshot)>, Error> {

@@ -55,7 +55,7 @@ use ipnetwork::IpNetwork;
 use itertools::Itertools;
 use nexus_config::PostgresConfigWithUrl;
 use nexus_db_model::to_db_typed_uuid;
-use nexus_db_model::Dataset;
+use nexus_db_model::CrucibleDataset;
 use nexus_db_model::Disk;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::DnsName;
@@ -1689,16 +1689,16 @@ async fn cmd_db_disk_physical(
         // zpool has the sled id, record that so we can find the serial number.
         sled_ids.insert(zp.sled_id);
 
-        // Next, we find all the datasets that are on our zpool.
-        use db::schema::dataset::dsl as dataset_dsl;
-        let mut query = dataset_dsl::dataset.into_boxed();
+        // Next, we find all the Crucible datasets that are on our zpool.
+        use db::schema::crucible_dataset::dsl as dataset_dsl;
+        let mut query = dataset_dsl::crucible_dataset.into_boxed();
         if !fetch_opts.include_deleted {
             query = query.filter(dataset_dsl::time_deleted.is_null());
         }
 
         let datasets = query
             .filter(dataset_dsl::pool_id.eq(zp.id()))
-            .select(Dataset::as_select())
+            .select(CrucibleDataset::as_select())
             .load_async(&*conn)
             .await
             .context("loading dataset")?;
@@ -1724,7 +1724,7 @@ async fn cmd_db_disk_physical(
             my_sled.serial_number()
         );
     }
-    println!("DATASETS: {:?}", dataset_ids);
+    println!("CRUCIBLE DATASETS: {:?}", dataset_ids);
 
     let mut volume_ids = HashSet::new();
     // Now, take the list of datasets we found and search all the regions
@@ -4592,22 +4592,22 @@ async fn cmd_db_validate_regions(
     // the destroyed state) before hard-deleting the records in the database.
 
     // First, get all region records (with their corresponding dataset)
-    let datasets_and_regions: Vec<(Dataset, Region)> = datastore
+    let datasets_and_regions: Vec<(CrucibleDataset, Region)> = datastore
         .pool_connection_for_tests()
         .await?
         .transaction_async(|conn| async move {
             // Selecting all datasets and regions requires a full table scan
             conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
-            use db::schema::dataset::dsl as dataset_dsl;
+            use db::schema::crucible_dataset::dsl as dataset_dsl;
             use db::schema::region::dsl;
 
             dsl::region
                 .inner_join(
-                    dataset_dsl::dataset
+                    dataset_dsl::crucible_dataset
                         .on(dsl::dataset_id.eq(dataset_dsl::id)),
                 )
-                .select((Dataset::as_select(), Region::as_select()))
+                .select((CrucibleDataset::as_select(), Region::as_select()))
                 .get_results_async(&conn)
                 .await
         })
@@ -4644,11 +4644,7 @@ async fn cmd_db_validate_regions(
         use crucible_agent_client::types::State;
         use crucible_agent_client::Client as CrucibleAgentClient;
 
-        let Some(dataset_addr) = dataset.address() else {
-            eprintln!("Dataset {} missing an IP address", dataset.id());
-            continue;
-        };
-
+        let dataset_addr = dataset.address();
         let url = format!("http://{}", dataset_addr);
         let client = CrucibleAgentClient::new(&url);
 
@@ -4730,18 +4726,17 @@ async fn cmd_db_validate_regions(
         datasets_and_regions.iter().map(|(_, r)| r.id()).collect();
 
     // Find all the Crucible datasets
-    let datasets: Vec<Dataset> = datastore
+    let datasets: Vec<CrucibleDataset> = datastore
         .pool_connection_for_tests()
         .await?
         .transaction_async(|conn| async move {
             // Selecting all datasets and regions requires a full table scan
             conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
-            use db::schema::dataset::dsl;
+            use db::schema::crucible_dataset::dsl;
 
-            dsl::dataset
-                .filter(dsl::kind.eq(nexus_db_model::DatasetKind::Crucible))
-                .select(Dataset::as_select())
+            dsl::crucible_dataset
+                .select(CrucibleDataset::as_select())
                 .get_results_async(&conn)
                 .await
         })
@@ -4765,11 +4760,7 @@ async fn cmd_db_validate_regions(
         use crucible_agent_client::types::State;
         use crucible_agent_client::Client as CrucibleAgentClient;
 
-        let Some(dataset_addr) = dataset.address() else {
-            eprintln!("Dataset {} missing an IP address", dataset.id());
-            continue;
-        };
-
+        let dataset_addr = dataset.address();
         let url = format!("http://{}", dataset_addr);
         let client = CrucibleAgentClient::new(&url);
 
@@ -4856,25 +4847,26 @@ async fn cmd_db_validate_region_snapshots(
         BTreeMap::default();
 
     // First, get all region snapshot records (with their corresponding dataset)
-    let datasets_and_region_snapshots: Vec<(Dataset, RegionSnapshot)> = {
-        let datasets_region_snapshots: Vec<(Dataset, RegionSnapshot)> =
+    let datasets_and_region_snapshots: Vec<(CrucibleDataset, RegionSnapshot)> = {
+        let datasets_region_snapshots: Vec<(CrucibleDataset, RegionSnapshot)> =
             datastore
                 .pool_connection_for_tests()
                 .await?
                 .transaction_async(|conn| async move {
-                    // Selecting all datasets and region snapshots requires a full table scan
+                    // Selecting all datasets and region snapshots requires a
+                    // full table scan
                     conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
-                    use db::schema::dataset::dsl as dataset_dsl;
+                    use db::schema::crucible_dataset::dsl as dataset_dsl;
                     use db::schema::region_snapshot::dsl;
 
                     dsl::region_snapshot
                         .inner_join(
-                            dataset_dsl::dataset
+                            dataset_dsl::crucible_dataset
                                 .on(dsl::dataset_id.eq(dataset_dsl::id)),
                         )
                         .select((
-                            Dataset::as_select(),
+                            CrucibleDataset::as_select(),
                             RegionSnapshot::as_select(),
                         ))
                         .get_results_async(&conn)
@@ -4917,11 +4909,7 @@ async fn cmd_db_validate_region_snapshots(
         use crucible_agent_client::types::State;
         use crucible_agent_client::Client as CrucibleAgentClient;
 
-        let Some(dataset_addr) = dataset.address() else {
-            eprintln!("Dataset {} missing an IP address", dataset.id());
-            continue;
-        };
-
+        let dataset_addr = dataset.address();
         let url = format!("http://{}", dataset_addr);
         let client = CrucibleAgentClient::new(&url);
 
@@ -5055,23 +5043,23 @@ async fn cmd_db_validate_region_snapshots(
     }
 
     // Second, get all regions
-    let datasets_and_regions: Vec<(Dataset, Region)> = {
-        let datasets_and_regions: Vec<(Dataset, Region)> = datastore
+    let datasets_and_regions: Vec<(CrucibleDataset, Region)> = {
+        let datasets_and_regions: Vec<(CrucibleDataset, Region)> = datastore
             .pool_connection_for_tests()
             .await?
             .transaction_async(|conn| async move {
                 // Selecting all datasets and regions requires a full table scan
                 conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
-                use db::schema::dataset::dsl as dataset_dsl;
+                use db::schema::crucible_dataset::dsl as dataset_dsl;
                 use db::schema::region::dsl;
 
                 dsl::region
                     .inner_join(
-                        dataset_dsl::dataset
+                        dataset_dsl::crucible_dataset
                             .on(dsl::dataset_id.eq(dataset_dsl::id)),
                     )
-                    .select((Dataset::as_select(), Region::as_select()))
+                    .select((CrucibleDataset::as_select(), Region::as_select()))
                     .get_results_async(&conn)
                     .await
             })
@@ -5096,11 +5084,7 @@ async fn cmd_db_validate_region_snapshots(
         use crucible_agent_client::types::State;
         use crucible_agent_client::Client as CrucibleAgentClient;
 
-        let Some(dataset_addr) = dataset.address() else {
-            eprintln!("Dataset {} missing an IP address", dataset.id());
-            continue;
-        };
-
+        let dataset_addr = dataset.address();
         let url = format!("http://{}", dataset_addr);
         let client = CrucibleAgentClient::new(&url);
 

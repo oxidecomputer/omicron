@@ -23,7 +23,6 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_common::api::internal::shared::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -335,22 +334,21 @@ impl super::Nexus {
 
     // Datasets (contained within zpools)
 
-    /// Upserts a dataset into the database, updating it if it already exists.
-    pub(crate) async fn upsert_dataset(
+    /// Upserts a Crucible dataset into the database, updating it if it already
+    /// exists.
+    pub(crate) async fn upsert_crucible_dataset(
         &self,
         id: DatasetUuid,
         zpool_id: Uuid,
-        kind: DatasetKind,
-        address: Option<SocketAddrV6>,
+        address: SocketAddrV6,
     ) -> Result<(), Error> {
         info!(
             self.log,
-            "upserting dataset";
+            "upserting Crucible dataset";
             "zpool_id" => zpool_id.to_string(),
             "dataset_id" => id.to_string(),
-            "kind" => kind.to_string(),
         );
-        let dataset = db::model::Dataset::new(id, zpool_id, address, kind);
+        let dataset = db::model::CrucibleDataset::new(id, zpool_id, address);
         self.db_datastore.dataset_upsert(dataset).await?;
         Ok(())
     }

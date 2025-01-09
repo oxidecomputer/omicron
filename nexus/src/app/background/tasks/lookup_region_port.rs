@@ -90,15 +90,7 @@ impl BackgroundTask for LookupRegionPort {
                     }
                 };
 
-                let Some(dataset_addr) = dataset.address() else {
-                    let s = format!(
-                        "Missing dataset address for dataset: {dataset_id}"
-                    );
-                    error!(log, "{s}");
-                    status.errors.push(s);
-                    continue;
-                };
-
+                let dataset_addr = dataset.address();
                 let returned_region =
                     match get_region_from_agent(&dataset_addr, region.id())
                         .await

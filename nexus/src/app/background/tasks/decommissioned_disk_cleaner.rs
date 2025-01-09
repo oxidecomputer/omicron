@@ -178,14 +178,13 @@ mod tests {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::ExpressionMethods;
     use diesel::QueryDsl;
-    use nexus_db_model::Dataset;
+    use nexus_db_model::CrucibleDataset;
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::PhysicalDiskPolicy;
     use nexus_db_model::Region;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
-    use omicron_common::api::internal::shared::DatasetKind;
     use omicron_uuid_kinds::{
         DatasetUuid, PhysicalDiskUuid, RegionUuid, SledUuid, VolumeUuid,
     };
@@ -232,16 +231,15 @@ mod tests {
             .unwrap();
 
         let dataset = datastore
-            .dataset_upsert(Dataset::new(
+            .dataset_upsert(CrucibleDataset::new(
                 DatasetUuid::new_v4(),
                 zpool.id(),
-                Some(std::net::SocketAddrV6::new(
+                std::net::SocketAddrV6::new(
                     std::net::Ipv6Addr::LOCALHOST,
                     0,
                     0,
                     0,
-                )),
-                DatasetKind::Crucible,
+                ),
             ))
             .await
             .unwrap();
@@ -337,11 +335,11 @@ mod tests {
                 .optional()
                 .expect("Zpool query should succeed");
 
-            use nexus_db_queries::db::schema::dataset::dsl as dataset_dsl;
-            let fetched_dataset = dataset_dsl::dataset
+            use nexus_db_queries::db::schema::crucible_dataset::dsl as dataset_dsl;
+            let fetched_dataset = dataset_dsl::crucible_dataset
                 .filter(dataset_dsl::id.eq(self.dataset_id.into_untyped_uuid()))
                 .filter(dataset_dsl::time_deleted.is_null())
-                .select(Dataset::as_select())
+                .select(CrucibleDataset::as_select())
                 .first_async(&*conn)
                 .await
                 .optional()

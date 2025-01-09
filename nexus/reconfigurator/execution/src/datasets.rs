@@ -7,17 +7,18 @@
 use crate::Sled;
 
 use anyhow::anyhow;
+use anyhow::bail;
 use anyhow::Context;
 use futures::stream;
 use futures::StreamExt;
-use nexus_db_model::Dataset;
+use nexus_db_model::CrucibleDataset;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::identity::Asset;
-use omicron_common::disk::DatasetConfig;
+use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetsConfig;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
@@ -137,7 +138,7 @@ pub(crate) async fn ensure_dataset_records_exist(
     // be correct. However, that would issue far more queries than necessary in
     // the very common case of "we don't need to do anything at all".
     let mut existing_datasets = datastore
-        .dataset_list_all_batched(opctx, None)
+        .dataset_list_all_batched(opctx)
         .await
         .context("failed to list all datasets")?
         .into_iter()
@@ -145,7 +146,6 @@ pub(crate) async fn ensure_dataset_records_exist(
         .collect::<BTreeMap<DatasetUuid, _>>();
 
     let mut num_inserted = 0;
-    let mut num_updated = 0;
     let mut num_unchanged = 0;
     let mut num_removed = 0;
 
@@ -159,24 +159,30 @@ pub(crate) async fn ensure_dataset_records_exist(
         let id = bp_dataset.id;
         let kind = &bp_dataset.kind;
 
-        // If this dataset already exists, only update it if it appears different from what exists
-        // in the database already.
-        let action = if let Some(db_dataset) = existing_datasets.remove(&id) {
-            let db_config: DatasetConfig = db_dataset.try_into()?;
-            let bp_config: DatasetConfig = bp_dataset.clone().try_into()?;
-
-            if db_config == bp_config {
-                num_unchanged += 1;
-                continue;
+        // Only act on Crucible datasets.
+        let dataset = match (&bp_dataset.kind, bp_dataset.address) {
+            (DatasetKind::Crucible, Some(addr)) => CrucibleDataset::new(
+                id,
+                bp_dataset.pool.id().into_untyped_uuid(),
+                addr,
+            ),
+            (DatasetKind::Crucible, None) => {
+                // This should be impossible! Ideally we'd prevent it
+                // statically, but for now just fail at runtime.
+                bail!(
+                    "invalid blueprint dataset: \
+                     {id} has kind Crucible but no address"
+                );
             }
-            num_updated += 1;
-            "update"
-        } else {
-            num_inserted += 1;
-            "insert"
+            _ => continue,
         };
 
-        let dataset = Dataset::from(bp_dataset.clone());
+        // If this dataset already exists, do nothing.
+        if existing_datasets.contains_key(&id) {
+            num_unchanged += 1;
+            continue;
+        }
+
         datastore
             .dataset_upsert_if_blueprint_is_current_target(
                 &opctx, bp_id, dataset,
@@ -185,11 +191,12 @@ pub(crate) async fn ensure_dataset_records_exist(
             .with_context(|| {
                 format!("failed to upsert dataset record for dataset {id}")
             })?;
+        num_inserted += 1;
 
         info!(
             opctx.log,
             "ensuring dataset record in database";
-            "action" => action,
+            "action" => "insert",
             "id" => %id,
             "kind" => ?kind,
         );
@@ -238,14 +245,13 @@ pub(crate) async fn ensure_dataset_records_exist(
         opctx.log,
         "ensured all Omicron datasets have database records";
         "num_inserted" => num_inserted,
-        "num_updated" => num_updated,
         "num_unchanged" => num_unchanged,
         "num_removed" => num_removed,
     );
 
     Ok(EnsureDatasetsResult {
         inserted: num_inserted,
-        updated: num_updated,
+        updated: 0,
         removed: num_removed,
     })
 }
@@ -258,7 +264,6 @@ mod tests {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintZoneFilter;
-    use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::CompressionAlgorithm;
     use omicron_common::zpool_name::ZpoolName;
@@ -321,11 +326,7 @@ mod tests {
 
         // Prior to ensuring datasets exist, there should be none.
         assert_eq!(
-            datastore
-                .dataset_list_all_batched(opctx, None)
-                .await
-                .unwrap()
-                .len(),
+            datastore.dataset_list_all_batched(opctx).await.unwrap().len(),
             0
         );
 
@@ -355,11 +356,7 @@ mod tests {
         assert_eq!(updated, 0);
         assert_eq!(removed, 0);
         assert_eq!(
-            datastore
-                .dataset_list_all_batched(opctx, None)
-                .await
-                .unwrap()
-                .len(),
+            datastore.dataset_list_all_batched(opctx).await.unwrap().len(),
             nzones_with_durable_datasets,
         );
 
@@ -377,11 +374,7 @@ mod tests {
         assert_eq!(updated, 0);
         assert_eq!(removed, 0);
         assert_eq!(
-            datastore
-                .dataset_list_all_batched(opctx, None)
-                .await
-                .unwrap()
-                .len(),
+            datastore.dataset_list_all_batched(opctx).await.unwrap().len(),
             nzones_with_durable_datasets,
         );
 
@@ -439,11 +432,7 @@ mod tests {
         assert_eq!(updated, 0);
         assert_eq!(removed, 0);
         assert_eq!(
-            datastore
-                .dataset_list_all_batched(opctx, None)
-                .await
-                .unwrap()
-                .len(),
+            datastore.dataset_list_all_batched(opctx).await.unwrap().len(),
             nzones_with_durable_datasets + 2,
         );
     }
@@ -474,94 +463,6 @@ mod tests {
             )
             .await
             .unwrap();
-    }
-
-    #[nexus_test]
-    async fn test_dataset_records_update(cptestctx: &ControlPlaneTestContext) {
-        const TEST_NAME: &str = "test_dataset_records_update";
-
-        // Set up.
-        let nexus = &cptestctx.server.server_context().nexus;
-        let datastore = nexus.datastore();
-        let opctx = OpContext::for_tests(
-            cptestctx.logctx.log.clone(),
-            datastore.clone(),
-        );
-        let opctx = &opctx;
-
-        // Use the standard example system.
-        let (_example, mut blueprint) =
-            ExampleSystemBuilder::new(&opctx.log, TEST_NAME).nsleds(5).build();
-
-        // Set the target so our database-modifying operations know they
-        // can safely act on the current target blueprint.
-        update_blueprint_target(&datastore, &opctx, &mut blueprint).await;
-
-        // Record the sleds and zpools.
-        crate::tests::insert_sled_records(datastore, &blueprint).await;
-        crate::tests::create_disks_for_zones_using_datasets(
-            datastore, opctx, &blueprint,
-        )
-        .await;
-
-        let mut all_datasets = get_all_datasets_from_zones(&blueprint);
-        let EnsureDatasetsResult { inserted, updated, removed } =
-            ensure_dataset_records_exist(
-                opctx,
-                datastore,
-                blueprint.id,
-                all_datasets.iter(),
-            )
-            .await
-            .expect("failed to ensure datasets");
-        assert_eq!(inserted, all_datasets.len());
-        assert_eq!(updated, 0);
-        assert_eq!(removed, 0);
-
-        // These values don't *really* matter, we just want to make sure we can
-        // change them and see the update.
-        let first_dataset = &mut all_datasets[0];
-        assert_eq!(first_dataset.quota, None);
-        assert_eq!(first_dataset.reservation, None);
-        assert_eq!(first_dataset.compression, CompressionAlgorithm::Off);
-
-        first_dataset.quota = Some(ByteCount::from_kibibytes_u32(1));
-        first_dataset.reservation = Some(ByteCount::from_kibibytes_u32(2));
-        first_dataset.compression = CompressionAlgorithm::Lz4;
-
-        // Update the datastore
-        let EnsureDatasetsResult { inserted, updated, removed } =
-            ensure_dataset_records_exist(
-                opctx,
-                datastore,
-                blueprint.id,
-                all_datasets.iter(),
-            )
-            .await
-            .expect("failed to ensure datasets");
-        assert_eq!(inserted, 0);
-        assert_eq!(updated, 1);
-        assert_eq!(removed, 0);
-
-        // Observe that the update stuck
-        let observed_datasets =
-            datastore.dataset_list_all_batched(opctx, None).await.unwrap();
-        let first_dataset = &mut all_datasets[0];
-        let observed_dataset = observed_datasets
-            .into_iter()
-            .find(|dataset| dataset.id() == first_dataset.id)
-            .expect("Couldn't find dataset we tried to update?");
-        let observed_dataset: DatasetConfig =
-            observed_dataset.try_into().unwrap();
-        assert_eq!(observed_dataset.inner.quota, first_dataset.quota);
-        assert_eq!(
-            observed_dataset.inner.reservation,
-            first_dataset.reservation
-        );
-        assert_eq!(
-            observed_dataset.inner.compression,
-            first_dataset.compression
-        );
     }
 
     #[nexus_test]
@@ -666,7 +567,7 @@ mod tests {
         // dataset got deleted.
 
         let observed_datasets =
-            datastore.dataset_list_all_batched(opctx, None).await.unwrap();
+            datastore.dataset_list_all_batched(opctx).await.unwrap();
         assert!(observed_datasets
             .iter()
             .any(|d| d.id() == crucible_dataset_id));
@@ -759,7 +660,7 @@ mod tests {
         // Make sure the dataset still exists, even if it isn't tracked by our
         // "blueprint".
         let observed_datasets =
-            datastore.dataset_list_all_batched(opctx, None).await.unwrap();
+            datastore.dataset_list_all_batched(opctx).await.unwrap();
         assert!(observed_datasets.iter().any(|d| d.id() == dataset_id));
     }
 }
