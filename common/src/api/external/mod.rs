@@ -979,6 +979,7 @@ pub enum ResourceType {
     Instance,
     LoopbackAddress,
     SwitchPortSettings,
+    SupportBundle,
     IpPool,
     IpPoolResource,
     InstanceNetworkInterface,

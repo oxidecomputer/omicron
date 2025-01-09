@@ -118,6 +118,10 @@ impl SupportBundle {
             assigned_nexus: Some(nexus_id.into()),
         }
     }
+
+    pub fn id(&self) -> SupportBundleUuid {
+        self.id.into()
+    }
 }
 
 impl From<SupportBundle> for SupportBundleView {

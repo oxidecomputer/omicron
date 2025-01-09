@@ -417,7 +417,9 @@ mod test {
     }
 }
 
-#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, JsonSchema, Serialize, Deserialize, Eq, PartialEq,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SupportBundleState {
     /// Support Bundle still actively being collected.

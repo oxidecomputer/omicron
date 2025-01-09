@@ -43,6 +43,7 @@ mod snapshots;
 mod sp_updater;
 mod ssh_keys;
 mod subnet_allocation;
+mod support_bundles;
 mod switch_port;
 mod unauthorized;
 mod unauthorized_coverage;
