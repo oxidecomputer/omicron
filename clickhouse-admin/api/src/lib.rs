@@ -132,6 +132,15 @@ pub trait ClickhouseAdminServerApi {
         path_params: Path<MetricInfoPath>,
         query_params: Query<TimeSeriesSettingsQuery>,
     ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError>;
+
+    /// Idempotently initialize a replicated ClickHouse cluster database.
+    #[endpoint {
+        method = PUT,
+        path = "/init"
+    }]
+    async fn init_db(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 }
 
 /// API interface for our clickhouse-admin-single server

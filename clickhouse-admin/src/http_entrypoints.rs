@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::context::{ServerContext, SingleServerContext};
+use crate::context::{KeeperServerContext, ServerContext};
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::{
     ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
@@ -24,13 +24,13 @@ pub fn clickhouse_admin_server_api() -> ApiDescription<Arc<ServerContext>> {
         .expect("registered entrypoints")
 }
 
-pub fn clickhouse_admin_keeper_api() -> ApiDescription<Arc<ServerContext>> {
+pub fn clickhouse_admin_keeper_api() -> ApiDescription<Arc<KeeperServerContext>>
+{
     clickhouse_admin_keeper_api_mod::api_description::<ClickhouseAdminKeeperImpl>()
         .expect("registered entrypoints")
 }
 
-pub fn clickhouse_admin_single_api() -> ApiDescription<Arc<SingleServerContext>>
-{
+pub fn clickhouse_admin_single_api() -> ApiDescription<Arc<ServerContext>> {
     clickhouse_admin_single_api_mod::api_description::<ClickhouseAdminSingleImpl>()
         .expect("registered entrypoints")
 }
@@ -78,12 +78,55 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
             ctx.clickhouse_cli().system_timeseries_avg(settings).await?;
         Ok(HttpResponseOk(output))
     }
+
+    async fn init_db(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let ctx = rqctx.context();
+        let log = ctx.log();
+
+        // Database initialization is idempotent, but not concurrency-safe.
+        // Use a mutex to serialize requests.
+        let lock = ctx.initialization_lock();
+        let _guard = lock.lock().await;
+
+        // Initialize the database only if it was not previously initialized.
+        // TODO: Migrate schema to newer version without wiping data.
+        let client = ctx.oximeter_client();
+        let version = client.read_latest_version().await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "can't read ClickHouse version: {e}",
+            ))
+        })?;
+        if version == 0 {
+            info!(
+                log,
+                "initializing replicated ClickHouse cluster to version {OXIMETER_VERSION}"
+            );
+            ctx.oximeter_client()
+                .initialize_db_with_version(true, OXIMETER_VERSION)
+                .await
+                .map_err(|e| {
+                    HttpError::for_internal_error(format!(
+                        "can't initialize replicated ClickHouse cluster \
+                         to version {OXIMETER_VERSION}: {e}",
+                    ))
+                })?;
+        } else {
+            info!(
+                log,
+                "skipping initialization of replicated ClickHouse cluster at version {version}"
+            );
+        }
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
 }
 
 enum ClickhouseAdminKeeperImpl {}
 
 impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
-    type Context = Arc<ServerContext>;
+    type Context = Arc<KeeperServerContext>;
 
     async fn generate_config_and_enable_svc(
         rqctx: RequestContext<Self::Context>,
@@ -137,13 +180,13 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
 enum ClickhouseAdminSingleImpl {}
 
 impl ClickhouseAdminSingleApi for ClickhouseAdminSingleImpl {
-    type Context = Arc<SingleServerContext>;
+    type Context = Arc<ServerContext>;
 
     async fn init_db(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let log = &rqctx.log;
         let ctx = rqctx.context();
+        let log = ctx.log();
 
         // Database initialization is idempotent, but not concurrency-safe.
         // Use a mutex to serialize requests.
