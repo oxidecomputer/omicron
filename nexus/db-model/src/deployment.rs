@@ -1148,6 +1148,68 @@ mod diesel_blueprint_zone_filter {
 
 pub use diesel_blueprint_zone_filter::ApplyBlueprintZoneFilterExt;
 
+mod diesel_blueprint_dataset_filter {
+    use crate::{
+        schema::bp_omicron_dataset::disposition, to_db_bp_dataset_disposition,
+        DbBpDatasetDisposition,
+    };
+    use diesel::{
+        helper_types::EqAny, prelude::*, query_dsl::methods::FilterDsl,
+    };
+    use nexus_types::deployment::{
+        BlueprintDatasetDisposition, BlueprintDatasetFilter,
+    };
+
+    /// An extension trait to apply a [`BlueprintDatasetFilter`] to a Diesel
+    /// expression.
+    ///
+    /// This is applicable to any Diesel expression which includes the
+    /// `bp_omicron_dataset` table.
+    ///
+    /// This needs to live here, rather than in `nexus-db-queries`, because it
+    /// names the `DbBpDatasetDisposition` type which is private to this crate.
+    pub trait ApplyBlueprintDatasetFilterExt {
+        type Output;
+
+        /// Applies a [`BlueprintDatasetFilter`] to a Diesel expression.
+        fn blueprint_dataset_filter(
+            self,
+            filter: BlueprintDatasetFilter,
+        ) -> Self::Output;
+    }
+
+    impl<E> ApplyBlueprintDatasetFilterExt for E
+    where
+        E: FilterDsl<BlueprintDatasetFilterQuery>,
+    {
+        type Output = E::Output;
+
+        fn blueprint_dataset_filter(
+            self,
+            filter: BlueprintDatasetFilter,
+        ) -> Self::Output {
+            // This is only boxed for ease of reference above.
+            let all_matching_dispositions: BoxedIterator<
+                DbBpDatasetDisposition,
+            > = Box::new(
+                BlueprintDatasetDisposition::all_matching(filter)
+                    .map(to_db_bp_dataset_disposition),
+            );
+
+            FilterDsl::filter(
+                self,
+                disposition.eq_any(all_matching_dispositions),
+            )
+        }
+    }
+
+    type BoxedIterator<T> = Box<dyn Iterator<Item = T>>;
+    type BlueprintDatasetFilterQuery =
+        EqAny<disposition, BoxedIterator<DbBpDatasetDisposition>>;
+}
+
+pub use diesel_blueprint_dataset_filter::ApplyBlueprintDatasetFilterExt;
+
 mod diesel_is_current_target_blueprint {
     use crate::schema;
     use crate::schema::bp_target;

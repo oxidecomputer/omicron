@@ -1012,6 +1012,13 @@ impl BlueprintDatasetDisposition {
             },
         }
     }
+
+    /// Returns all dataset dispositions that match the given filter.
+    pub fn all_matching(
+        filter: BlueprintDatasetFilter,
+    ) -> impl Iterator<Item = Self> {
+        BlueprintDatasetDisposition::iter().filter(move |&d| d.matches(filter))
+    }
 }
 
 /// Information about a dataset as recorded in a blueprint
