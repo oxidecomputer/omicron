@@ -10,7 +10,6 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::model::Dataset;
 use crate::db::model::DatasetKind;
 use crate::db::model::SupportBundle;
 use crate::db::model::SupportBundleState;
@@ -20,7 +19,10 @@ use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use futures::FutureExt;
-use nexus_types::identity::Asset;
+use nexus_db_model::ApplyBlueprintDatasetFilterExt;
+use nexus_db_model::BpOmicronDataset;
+use nexus_db_model::ExprIsCurrentTargetBlueprintExt;
+use nexus_types::deployment::BlueprintDatasetFilter;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -31,7 +33,6 @@ use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
-use omicron_uuid_kinds::ZpoolUuid;
 use uuid::Uuid;
 
 const CANNOT_ALLOCATE_ERR_MSG: &'static str =
@@ -93,21 +94,28 @@ impl DataStore {
                 let err = err.clone();
 
                 async move {
-                    use db::schema::dataset::dsl as dataset_dsl;
+                    use db::schema::bp_omicron_dataset::dsl as dataset_dsl;
                     use db::schema::support_bundle::dsl as support_bundle_dsl;
 
-                    // Observe all "non-deleted, debug datasets".
+                    // Observe all in-service `Debug` dataset in the current
+                    // target blueprint.
                     //
                     // Return the first one we find that doesn't already
                     // have a support bundle allocated to it.
-                    let free_dataset = dataset_dsl::dataset
-                        .filter(dataset_dsl::time_deleted.is_null())
+                    let free_dataset = dataset_dsl::bp_omicron_dataset
+                        .filter(
+                            db::schema::bp_omicron_dataset::blueprint_id
+                                .is_current_target_blueprint(),
+                        )
+                        .blueprint_dataset_filter(
+                            BlueprintDatasetFilter::InService,
+                        )
                         .filter(dataset_dsl::kind.eq(DatasetKind::Debug))
                         .left_join(support_bundle_dsl::support_bundle.on(
                             dataset_dsl::id.eq(support_bundle_dsl::dataset_id),
                         ))
                         .filter(support_bundle_dsl::dataset_id.is_null())
-                        .select(Dataset::as_select())
+                        .select(BpOmicronDataset::as_select())
                         .first_async(&conn)
                         .await
                         .optional()?;
@@ -129,8 +137,8 @@ impl DataStore {
 
                     let bundle = SupportBundle::new(
                         reason_for_creation,
-                        ZpoolUuid::from_untyped_uuid(dataset.pool_id),
-                        dataset.id(),
+                        dataset.pool_id.into(),
+                        dataset.id.into(),
                         this_nexus_id,
                     );
 
@@ -259,9 +267,7 @@ impl DataStore {
 
         // For this blueprint: The set of expunged debug datasets
         let invalid_datasets = blueprint
-            .all_omicron_datasets(
-                nexus_types::deployment::BlueprintDatasetFilter::Expunged,
-            )
+            .all_omicron_datasets(BlueprintDatasetFilter::Expunged)
             .filter_map(|(_sled_id, dataset_config)| {
                 if matches!(
                     dataset_config.kind,
@@ -486,6 +492,7 @@ mod test {
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
     use rand::Rng;
 
     // Pool/Dataset pairs, for debug datasets only.
@@ -501,18 +508,6 @@ mod test {
     }
 
     impl TestSled {
-        fn new_with_pool_count(pool_count: usize) -> Self {
-            Self {
-                sled: SledUuid::new_v4(),
-                pools: (0..pool_count)
-                    .map(|_| TestPool {
-                        pool: ZpoolUuid::new_v4(),
-                        dataset: DatasetUuid::new_v4(),
-                    })
-                    .collect(),
-            }
-        }
-
         fn new_from_blueprint(blueprint: &Blueprint) -> Vec<Self> {
             let mut sleds = vec![];
             for (sled, datasets) in &blueprint.blueprint_datasets {
@@ -579,17 +574,6 @@ mod test {
                     .zpool_insert(opctx, zpool)
                     .await
                     .expect("failed to upsert zpool");
-
-                let dataset = Dataset::new(
-                    pool.dataset,
-                    pool.pool.into_untyped_uuid(),
-                    None,
-                    DebugDatasetKind,
-                );
-                datastore
-                    .dataset_upsert(dataset)
-                    .await
-                    .expect("failed to upsert dataset");
             }
         }
     }
@@ -601,8 +585,42 @@ mod test {
         opctx: &OpContext,
         pool_count: usize,
     ) -> TestSled {
-        let sled = TestSled::new_with_pool_count(pool_count);
-        sled.create_database_records(&datastore, &opctx).await;
+        let mut rng = SimRngState::from_seed(&format!(
+            "create_sled_and_zpools-{pool_count}"
+        ));
+        let (example, bp1) = ExampleSystemBuilder::new_with_rng(
+            &opctx.log,
+            rng.next_system_rng(),
+        )
+        .nsleds(1)
+        .create_zones(false)
+        .ndisks_per_sled(
+            pool_count.try_into().expect("reasonable number of pools"),
+        )
+        .build();
+
+        bp_insert_and_make_target(opctx, datastore, &example.initial_blueprint)
+            .await;
+        bp_insert_and_make_target(opctx, datastore, &bp1).await;
+
+        // Flatten the blueprint down to just a `TestSled` with its Debug
+        // datasets.
+        assert_eq!(bp1.blueprint_datasets.len(), 1);
+        let (&sled, datasets_config) = bp1
+            .blueprint_datasets
+            .first_key_value()
+            .expect("blueprint has 1 sled");
+
+        let pools = datasets_config
+            .datasets
+            .values()
+            .filter(|d| d.kind == DebugDatasetKind)
+            .map(|d| TestPool { pool: d.pool.id(), dataset: d.id })
+            .collect::<Vec<_>>();
+        assert_eq!(pools.len(), pool_count);
+
+        let sled = TestSled { sled, pools };
+        sled.create_database_records(datastore, opctx).await;
         sled
     }
 
@@ -973,22 +991,21 @@ mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let mut rng = SimRngState::from_seed(TEST_NAME);
-        let (_example, mut bp1) = ExampleSystemBuilder::new_with_rng(
+        let (example, bp1) = ExampleSystemBuilder::new_with_rng(
             &logctx.log,
             rng.next_system_rng(),
         )
         .build();
 
-        // Weirdly, the "ExampleSystemBuilder" blueprint has a parent blueprint,
-        // but which isn't exposed through the API. Since we're only able to see
-        // the blueprint it emits, that means we can't actually make it the
-        // target because "the parent blueprint is not the current target".
-        //
-        // Instead of dealing with that, we lie: claim this is the primordial
-        // blueprint, with no parent.
-        //
-        // Regardless, make this starter blueprint our target.
-        bp1.parent_blueprint_id = None;
+        // Insert both the primordial blueprint created by
+        // `ExampleSystemBuilder` and the useful blueprint (its child), making
+        // the latter the target for the rest of the test.
+        bp_insert_and_make_target(
+            &opctx,
+            &datastore,
+            &example.initial_blueprint,
+        )
+        .await;
         bp_insert_and_make_target(&opctx, &datastore, &bp1).await;
 
         // Manually perform the equivalent of blueprint execution to populate
@@ -1080,22 +1097,21 @@ mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let mut rng = SimRngState::from_seed(TEST_NAME);
-        let (_example, mut bp1) = ExampleSystemBuilder::new_with_rng(
+        let (example, bp1) = ExampleSystemBuilder::new_with_rng(
             &logctx.log,
             rng.next_system_rng(),
         )
         .build();
 
-        // Weirdly, the "ExampleSystemBuilder" blueprint has a parent blueprint,
-        // but which isn't exposed through the API. Since we're only able to see
-        // the blueprint it emits, that means we can't actually make it the
-        // target because "the parent blueprint is not the current target".
-        //
-        // Instead of dealing with that, we lie: claim this is the primordial
-        // blueprint, with no parent.
-        //
-        // Regardless, make this starter blueprint our target.
-        bp1.parent_blueprint_id = None;
+        // Insert both the primordial blueprint created by
+        // `ExampleSystemBuilder` and the useful blueprint (its child), making
+        // the latter the target for the rest of the test.
+        bp_insert_and_make_target(
+            &opctx,
+            &datastore,
+            &example.initial_blueprint,
+        )
+        .await;
         bp_insert_and_make_target(&opctx, &datastore, &bp1).await;
 
         // Manually perform the equivalent of blueprint execution to populate
