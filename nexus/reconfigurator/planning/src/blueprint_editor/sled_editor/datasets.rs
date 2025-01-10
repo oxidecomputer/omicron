@@ -3,11 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::blueprint_builder::EditCounts;
-use crate::planner::PlannerRng;
+use crate::planner::SledPlannerRng;
 use illumos_utils::zpool::ZpoolName;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
-use nexus_types::deployment::BlueprintDatasetFilter;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolFilter;
@@ -23,6 +22,9 @@ use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
+
+#[cfg(test)]
+use nexus_types::deployment::BlueprintDatasetFilter;
 
 #[derive(Debug, thiserror::Error)]
 #[error(
@@ -68,7 +70,7 @@ impl DatasetIdsBackfillFromDb {
         let iter = resources.all_datasets(ZpoolFilter::InService).flat_map(
             |(&zpool_id, configs)| {
                 configs.iter().map(move |config| {
-                    (zpool_id, config.name.dataset().clone(), config.id)
+                    (zpool_id, config.name.kind().clone(), config.id)
                 })
             },
         );
@@ -160,7 +162,7 @@ impl PartialDatasetConfig {
 
     pub fn for_transient_zone(name: DatasetName) -> Self {
         assert!(
-            matches!(name.dataset(), DatasetKind::TransientZone { .. }),
+            matches!(name.kind(), DatasetKind::TransientZone { .. }),
             "for_transient_zone called with incorrect dataset kind: {name:?}"
         );
         Self {
@@ -269,7 +271,7 @@ impl DatasetsEditor {
         self.counts
     }
 
-    #[allow(dead_code)] // currently only used by tests; this will change soon
+    #[cfg(test)]
     pub fn datasets(
         &self,
         filter: BlueprintDatasetFilter,
@@ -338,7 +340,7 @@ impl DatasetsEditor {
     pub fn ensure_in_service(
         &mut self,
         dataset: PartialDatasetConfig,
-        rng: &mut PlannerRng,
+        rng: &mut SledPlannerRng,
     ) -> &BlueprintDatasetConfig {
         // Convert the partial config into a full config by finding or
         // generating its ID.
@@ -427,8 +429,10 @@ impl DatasetsEditor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::planner::PlannerRng;
     use nexus_types::deployment::BlueprintDatasetFilter;
     use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::SledUuid;
     use proptest::prelude::*;
     use std::collections::BTreeSet;
     use test_strategy::proptest;
@@ -601,6 +605,12 @@ mod tests {
             "proptest_add_same_kind_after_expunging",
         ));
 
+        // We need a sled ID to get a sled-specific RNG from `rng`; we're not
+        // testing blueprints as a whole here, so steal a blueprint ID and use
+        // it as a sled ID to get reproducibility.
+        let sled_id = SledUuid::from_untyped_uuid(rng.next_blueprint());
+        let rng = rng.sled_rng(sled_id);
+
         // For each originally-in-service dataset:
         //
         // 1. Expunge that dataset
@@ -623,7 +633,7 @@ mod tests {
                 reservation: dataset.reservation,
                 compression: dataset.compression,
             };
-            let new_dataset = editor.ensure_in_service(new_dataset, &mut rng);
+            let new_dataset = editor.ensure_in_service(new_dataset, rng);
             assert_ne!(dataset.id, new_dataset.id);
         }
 
@@ -665,7 +675,7 @@ mod tests {
                 reservation: dataset.reservation,
                 compression: dataset.compression,
             };
-            let new_dataset = editor.ensure_in_service(new_dataset, &mut rng);
+            let new_dataset = editor.ensure_in_service(new_dataset, rng);
             assert_ne!(dataset.id, new_dataset.id);
         }
     }
@@ -691,6 +701,12 @@ mod tests {
             rng_seed,
             "proptest_add_same_kind_after_expunging",
         ));
+
+        // We need a sled ID to get a sled-specific RNG from `rng`; we're not
+        // testing blueprints as a whole here, so steal a blueprint ID and use
+        // it as a sled ID to get reproducibility.
+        let sled_id = SledUuid::from_untyped_uuid(rng.next_blueprint());
+        let rng = rng.sled_rng(sled_id);
 
         // Expunge all datasets on all zpools, by zpool.
         for zpool_id in &all_zpools {
@@ -721,7 +737,7 @@ mod tests {
                 reservation: dataset.reservation,
                 compression: dataset.compression,
             };
-            let new_dataset = editor.ensure_in_service(new_dataset, &mut rng);
+            let new_dataset = editor.ensure_in_service(new_dataset, rng);
             assert_ne!(dataset.id, new_dataset.id);
         }
 
@@ -769,7 +785,7 @@ mod tests {
                 reservation: dataset.reservation,
                 compression: dataset.compression,
             };
-            let new_dataset = editor.ensure_in_service(new_dataset, &mut rng);
+            let new_dataset = editor.ensure_in_service(new_dataset, rng);
             assert_ne!(dataset.id, new_dataset.id);
         }
     }

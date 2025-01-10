@@ -18,6 +18,7 @@ use anyhow::Context;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
+use diffus::{edit, Diffable, Diffus};
 use dropshot::HttpError;
 pub use dropshot::PaginationOrder;
 pub use error::*;
@@ -211,6 +212,7 @@ impl<'a> TryFrom<&DataPageParams<'a, NameOrId>> for DataPageParams<'a, Uuid> {
 )]
 #[display("{0}")]
 #[serde(try_from = "String")]
+#[derive(Diffus)]
 pub struct Name(String);
 
 /// `Name::try_from(String)` is the primary method for constructing an Name
@@ -614,6 +616,7 @@ impl JsonSchema for RoleName {
     Eq,
     PartialOrd,
     Ord,
+    Diffus,
 )]
 pub struct ByteCount(u64);
 
@@ -748,6 +751,7 @@ impl From<ByteCount> for i64 {
     PartialEq,
     PartialOrd,
     Serialize,
+    Diffus,
 )]
 pub struct Generation(u64);
 
@@ -1930,10 +1934,23 @@ impl JsonSchema for L4PortRange {
     DeserializeFromStr,
     PartialEq,
     Eq,
+    PartialOrd,
+    Ord,
     SerializeDisplay,
     Hash,
 )]
 pub struct MacAddr(pub macaddr::MacAddr6);
+
+impl<'a> Diffable<'a> for MacAddr {
+    type Diff = (&'a Self, &'a Self);
+    fn diff(&'a self, other: &'a Self) -> edit::Edit<'a, Self> {
+        if self == other {
+            edit::Edit::Copy(self)
+        } else {
+            edit::Edit::Change((self, other))
+        }
+    }
+}
 
 impl MacAddr {
     // Guest MAC addresses begin with the Oxide OUI A8:40:25. Further, guest
@@ -2098,6 +2115,7 @@ impl JsonSchema for MacAddr {
     Deserialize,
     Serialize,
     JsonSchema,
+    Diffus,
 )]
 pub struct Vni(u32);
 

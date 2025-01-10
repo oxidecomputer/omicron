@@ -35,7 +35,7 @@ diesel_db$target:::query-done
     query[this->conn_id] = NULL;
 }
 
-tick-5s
+tick-10s
 {
     printf("\n%Y\n", walltimestamp);
     trunc(@, 5);

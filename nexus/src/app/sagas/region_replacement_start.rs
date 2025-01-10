@@ -58,8 +58,8 @@ use nexus_db_queries::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use omicron_common::api::external::Error;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::CrucibleOpts;
-use sled_agent_client::types::VolumeConstructionRequest;
+use sled_agent_client::CrucibleOpts;
+use sled_agent_client::VolumeConstructionRequest;
 use std::net::SocketAddrV6;
 use steno::ActionError;
 use steno::Node;
@@ -491,7 +491,7 @@ async fn srrs_get_old_region_address(
 
 async fn srrs_replace_region_in_volume(
     sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
+) -> Result<VolumeReplaceResult, ActionError> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
@@ -555,8 +555,6 @@ async fn srrs_replace_region_in_volume(
         .await
         .map_err(ActionError::action_failed)?;
 
-    debug!(log, "replacement returned {:?}", volume_replace_region_result);
-
     match volume_replace_region_result {
         VolumeReplaceResult::AlreadyHappened | VolumeReplaceResult::Done => {
             // The replacement was done either by this run of this saga node, or
@@ -565,10 +563,11 @@ async fn srrs_replace_region_in_volume(
             // with the rest of the saga (to properly clean up allocated
             // resources).
 
-            Ok(())
+            Ok(volume_replace_region_result)
         }
 
-        VolumeReplaceResult::ExistingVolumeDeleted => {
+        VolumeReplaceResult::ExistingVolumeSoftDeleted
+        | VolumeReplaceResult::ExistingVolumeHardDeleted => {
             // Unwind the saga here to clean up the resources allocated during
             // this saga. The associated background task will transition this
             // request's state to Completed.
@@ -689,7 +688,7 @@ async fn srrs_create_fake_volume(
             gen: 0,
             opts: CrucibleOpts {
                 id: new_volume_id,
-                target: vec![old_region_address.to_string()],
+                target: vec![old_region_address.into()],
                 lossy: false,
                 flush_timeout: None,
                 key: None,
@@ -794,7 +793,7 @@ pub(crate) mod test {
     use nexus_types::identity::Asset;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_uuid_kinds::DatasetUuid;
-    use sled_agent_client::types::VolumeConstructionRequest;
+    use sled_agent_client::VolumeConstructionRequest;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =

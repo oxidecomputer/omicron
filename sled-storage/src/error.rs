@@ -24,7 +24,7 @@ pub enum Error {
     ZfsListDataset(#[from] illumos_utils::zfs::ListDatasetsError),
 
     #[error(transparent)]
-    ZfsEnsureFilesystem(#[from] illumos_utils::zfs::EnsureFilesystemError),
+    ZfsEnsureDataset(#[from] illumos_utils::zfs::EnsureDatasetError),
 
     #[error(transparent)]
     ZfsSetValue(#[from] illumos_utils::zfs::SetValueError),
@@ -76,6 +76,9 @@ pub enum Error {
 
     #[error("Not ready to manage U.2s (key manager is not ready)")]
     KeyManagerNotReady,
+
+    #[error("Physical disk configuration changed for the same generation number: {generation}")]
+    PhysicalDiskConfigurationChanged { generation: Generation },
 
     #[error("Physical disk configuration out-of-date (asked for {requested}, but latest is {current})")]
     PhysicalDiskConfigurationOutdated {

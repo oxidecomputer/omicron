@@ -157,7 +157,7 @@ async fn check_execution_environment(
     // The only real requirement for these tests is that they're run from a
     // place with connectivity to the underlay network of a deployed control
     // plane.  The easiest way to tell is to look up something in internal DNS.
-    resolver.lookup_ip(ServiceName::InternalDns).await.map_err(|e| {
+    resolver.lookup_srv(ServiceName::InternalDns).await.map_err(|e| {
         let text = format!(
             "check_execution_environment(): failed to look up internal DNS \
                  in the internal DNS servers.\n\n \

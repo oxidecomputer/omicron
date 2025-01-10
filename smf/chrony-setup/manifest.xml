@@ -14,7 +14,7 @@
   <exec_method type='method' name='start'
     exec='/opt/oxide/zone-setup-cli/bin/zone-setup chrony-setup -b %{config/boundary} -p %{config/boundary_pool} -s %{config/server} -a %{config/allow}'
     timeout_seconds='0'>
-  <method_context security_flags="aslr">
+  <method_context security_flags="aslr" working_directory="/">
   <method_credential user="root" group="root"
     privileges="basic,file_chown" />
   </method_context>
