@@ -45,7 +45,6 @@ pub enum Cmd {
     // presses to something we can serialize/deserialize once we decide to use
     // it.
     // Raw(KeyEvent),
-
     /// Display details for the given selection
     /// This can be used to do things like open a scrollable popup for a given
     /// `Control`.
