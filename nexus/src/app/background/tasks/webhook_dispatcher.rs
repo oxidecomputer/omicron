@@ -4,6 +4,7 @@
 
 //! Background task that dispatches queued webhook events to receivers.
 
+use crate::app::background::Activator;
 use crate::app::background::BackgroundTask;
 use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
@@ -16,6 +17,7 @@ use std::sync::Arc;
 
 pub struct WebhookDispatcher {
     datastore: Arc<DataStore>,
+    deliverator: Activator,
 }
 
 impl BackgroundTask for WebhookDispatcher {
@@ -28,11 +30,24 @@ impl BackgroundTask for WebhookDispatcher {
             let error =
                 match self.actually_activate(&opctx, &mut dispatched).await {
                     Ok(_) => {
-                        slog::info!(
-                            &opctx.log,
+                        const MSG: &str =
                             "webhook dispatching completed successfully";
-                            "events_dispatched" => dispatched.len(),
-                        );
+                        if !dispatched.is_empty() {
+                            slog::info!(
+                                &opctx.log,
+                                "{MSG}";
+                                "events_dispatched" => dispatched.len(),
+                            );
+                        } else {
+                            // no sense cluttering up the logs if we didn't do
+                            // anyuthing interesting today`s`
+                            slog::trace!(
+                                &opctx.log,
+                                "{MSG}";
+                                "events_dispatched" => dispatched.len(),
+                            );
+                        };
+
                         None
                     }
                     Err(error) => {
@@ -45,16 +60,20 @@ impl BackgroundTask for WebhookDispatcher {
                         Some(error.to_string())
                     }
                 };
-            // TODO(eliza): if anything was dispatched successfully, we'll want
-            // to activate the delivery task, once that exists!
+
+            // If any new deliveries were dispatched, call the deliverator!
+            if !dispatched.is_empty() {
+                self.deliverator.activate();
+            }
+
             serde_json::json!(WebhookDispatcherStatus { dispatched, error })
         })
     }
 }
 
 impl WebhookDispatcher {
-    pub fn new(datastore: Arc<DataStore>) -> Self {
-        Self { datastore }
+    pub fn new(datastore: Arc<DataStore>, deliverator: Activator) -> Self {
+        Self { datastore, deliverator }
     }
 
     async fn actually_activate(

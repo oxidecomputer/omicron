@@ -39,4 +39,5 @@ pub mod sync_switch_configuration;
 pub mod tuf_artifact_replication;
 pub mod v2p_mappings;
 pub mod vpc_routes;
+pub mod webhook_deliverator;
 pub mod webhook_dispatcher;
