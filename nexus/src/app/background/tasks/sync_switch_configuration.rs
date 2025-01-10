@@ -182,7 +182,7 @@ impl SwitchPortSettingsManager {
             changes.push((
                 location,
                 port,
-                PortSettingsChange::Apply(Box::new(settings)),
+                PortSettingsChange::Apply(Box::new(settings.0)),
             ));
         }
         Ok(changes)
