@@ -522,7 +522,7 @@ async fn main() -> Result<()> {
             .arg("-F") // pass extra image builder features
             .arg(format!("optever={}", opte_version.trim()))
             .arg("-F") // lock packages to versions expected for the release
-            .arg("extra_packages+=/consolidation/oxide/omicron-release-incorporation@12.0.0.1")
+            .arg("extra_packages+=/consolidation/oxide/omicron-release-incorporation@12.0.0.2")
             .arg("-P") // include all files from extra proto area
             .arg(proto_dir.join("root"))
             .arg("-N") // image name
