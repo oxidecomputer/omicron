@@ -419,6 +419,8 @@ pub struct BackgroundTaskConfig {
         RegionSnapshotReplacementFinishConfig,
     /// configuration for TUF artifact replication task
     pub tuf_artifact_replication: TufArtifactReplicationConfig,
+    /// configuration for webhook dispatcher task
+    pub webhook_dispatcher: WebhookDispatcherConfig,
 }
 
 #[serde_as]
@@ -735,6 +737,14 @@ pub struct TufArtifactReplicationConfig {
     pub min_sled_replication: usize,
 }
 
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct WebhookDispatcherConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PackageConfig {
@@ -993,6 +1003,7 @@ mod test {
             region_snapshot_replacement_finish.period_secs = 30
             tuf_artifact_replication.period_secs = 300
             tuf_artifact_replication.min_sled_replication = 3
+            webhook_dispatcher.period_secs = 42
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1194,6 +1205,9 @@ mod test {
                                 period_secs: Duration::from_secs(300),
                                 min_sled_replication: 3,
                             },
+                        webhook_dispatcher: WebhookDispatcherConfig {
+                            period_secs: Duration::from_secs(42),
+                        }
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -1279,6 +1293,7 @@ mod test {
             region_snapshot_replacement_finish.period_secs = 30
             tuf_artifact_replication.period_secs = 300
             tuf_artifact_replication.min_sled_replication = 3
+            webhook_dispatcher.period_secs = 42
             [default_region_allocation_strategy]
             type = "random"
             "##,

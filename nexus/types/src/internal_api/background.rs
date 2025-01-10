@@ -9,6 +9,7 @@ use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
+use omicron_uuid_kinds::WebhookEventUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -448,4 +449,21 @@ impl slog::KV for DebugDatasetsRendezvousStats {
         )?;
         Ok(())
     }
+}
+
+/// The status of a `webhook_dispatcher` background task activation.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WebhookDispatcherStatus {
+    /// The webhook events dispatched on this activation.
+    pub dispatched: Vec<WebhookDispatched>,
+
+    /// Any error that occurred during activation.
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WebhookDispatched {
+    pub event_id: WebhookEventUuid,
+    pub dispatched: usize,
+    pub receivers_gone: usize,
 }

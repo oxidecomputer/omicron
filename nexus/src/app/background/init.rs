@@ -122,6 +122,7 @@ use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
 use super::tasks::tuf_artifact_replication;
 use super::tasks::v2p_mappings::V2PManager;
 use super::tasks::vpc_routes;
+use super::tasks::webhook_dispatcher::WebhookDispatcher;
 use super::Activator;
 use super::Driver;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
@@ -180,6 +181,7 @@ pub struct BackgroundTasks {
     pub task_region_snapshot_replacement_step: Activator,
     pub task_region_snapshot_replacement_finish: Activator,
     pub task_tuf_artifact_replication: Activator,
+    pub task_webhook_dispatcher: Activator,
 
     // Handles to activate background tasks that do not get used by Nexus
     // at-large.  These background tasks are implementation details as far as
@@ -273,6 +275,7 @@ impl BackgroundTasksInitializer {
 
             task_internal_dns_propagation: Activator::new(),
             task_external_dns_propagation: Activator::new(),
+            task_webhook_dispatcher: Activator::new(),
 
             external_endpoints: external_endpoints_rx,
         };
@@ -339,6 +342,7 @@ impl BackgroundTasksInitializer {
             task_region_snapshot_replacement_step,
             task_region_snapshot_replacement_finish,
             task_tuf_artifact_replication,
+            task_webhook_dispatcher,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -885,7 +889,6 @@ impl BackgroundTasksInitializer {
         driver.register(TaskDefinition {
             name: "tuf_artifact_replication",
             description: "replicate update repo artifacts across sleds",
-            period: config.tuf_artifact_replication.period_secs,
             task_impl: Box::new(
                 tuf_artifact_replication::ArtifactReplication::new(
                     datastore.clone(),
@@ -898,7 +901,13 @@ impl BackgroundTasksInitializer {
             activator: task_tuf_artifact_replication,
         });
 
-        driver
+        driver.register(TaskDefinition {
+            description: "dispatches queued webhook events to receivers",
+            task_impl: Box::new(WebhookDispatcher::new(datastore)),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_webhook_dispatcher,
+        });
     }
 }
 

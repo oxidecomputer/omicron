@@ -7,9 +7,11 @@ use crate::schema::{webhook_delivery, webhook_delivery_attempt};
 use crate::serde_time_delta::optional_time_delta;
 use crate::typed_uuid::DbTypedUuid;
 use crate::SqlU8;
+use crate::WebhookEvent;
 use chrono::{DateTime, TimeDelta, Utc};
 use omicron_uuid_kinds::{
-    WebhookDeliveryKind, WebhookEventKind, WebhookReceiverKind,
+    WebhookDeliveryKind, WebhookDeliveryUuid, WebhookEventKind,
+    WebhookReceiverKind, WebhookReceiverUuid,
 };
 use serde::Deserialize;
 use serde::Serialize;
@@ -58,7 +60,7 @@ pub struct WebhookDelivery {
     /// `webhook_event`).
     pub event_id: DbTypedUuid<WebhookEventKind>,
 
-    /// ID of the receiver to whcih this event is dispatched (foreign key into
+    /// ID of the receiver to which this event is dispatched (foreign key into
     /// `webhook_rx`).
     pub rx_id: DbTypedUuid<WebhookReceiverKind>,
 
@@ -74,6 +76,21 @@ pub struct WebhookDelivery {
     /// The time at which the webhook message was either delivered successfully
     /// or permanently failed.
     pub time_completed: Option<DateTime<Utc>>,
+}
+
+impl WebhookDelivery {
+    pub fn new(event: &WebhookEvent, rx_id: &WebhookReceiverUuid) -> Self {
+        Self {
+            // N.B.: perhaps we ought to use timestamp-based UUIDs for these?
+            id: WebhookDeliveryUuid::new_v4().into(),
+            event_id: event.id,
+            rx_id: (*rx_id).into(),
+            payload: event.event.clone(),
+            attempts: SqlU8::new(0),
+            time_created: Utc::now(),
+            time_completed: None,
+        }
+    }
 }
 
 /// An individual delivery attempt for a [`WebhookDelivery`].

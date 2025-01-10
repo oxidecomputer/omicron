@@ -29,10 +29,8 @@ use diesel::prelude::*;
 use nexus_types::external_api::params;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
 use omicron_uuid_kinds::{GenericUuid, WebhookReceiverUuid};
-use uuid::Uuid;
 
 impl DataStore {
     pub async fn webhook_rx_create(
@@ -70,7 +68,7 @@ impl DataStore {
                 let id = WebhookReceiverUuid::new_v4();
                 let receiver = WebhookReceiver {
                     identity: WebhookReceiverIdentity::new(
-                        id.into_untyped_uuid(),
+                        id,
                         identity.clone(),
                     ),
                     endpoint: endpoint.to_string(),
@@ -88,9 +86,7 @@ impl DataStore {
                     for subscription in subscriptions {
                         self.add_subscription_on_conn(
                             opctx,
-                            WebhookReceiverUuid::from_untyped_uuid(
-                                rx.identity.id,
-                            ),
+                            rx.identity.id.into(),
                             subscription,
                             event_classes,
                             &conn,
@@ -174,10 +170,9 @@ impl DataStore {
                 .map(|_| 1),
             WebhookSubscriptionKind::Glob(glob) => {
                 let glob = WebhookRxEventGlob::new(rx_id, glob);
-                let rx_id = rx_id.into_untyped_uuid();
                 let glob: WebhookRxEventGlob =
                     WebhookReceiver::insert_resource(
-                        rx_id,
+                        rx_id.into_untyped_uuid(),
                         diesel::insert_into(glob_dsl::webhook_rx_event_glob)
                             .values(glob)
                             .on_conflict((glob_dsl::rx_id, glob_dsl::glob))
@@ -198,10 +193,10 @@ impl DataStore {
         subscription: WebhookRxSubscription,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<WebhookRxSubscription, TransactionError<Error>> {
-        let rx_id = subscription.rx_id.into_untyped_uuid();
+        let rx_id = WebhookReceiverUuid::from(subscription.rx_id);
         let subscription: WebhookRxSubscription =
             WebhookReceiver::insert_resource(
-                rx_id,
+                rx_id.into_untyped_uuid(),
                 diesel::insert_into(subscription_dsl::webhook_rx_subscription)
                     .values(subscription)
                     .on_conflict((
@@ -284,19 +279,19 @@ impl DataStore {
 
     /// List all webhook receivers whose event class subscription globs match
     /// the provided `event_class`.
-    // TODO(eliza): probably paginate this...
-    pub async fn webhook_rx_list_subscribed_to_event(
+    pub(crate) async fn webhook_rx_list_subscribed_to_event_on_conn(
         &self,
-        opctx: &OpContext,
         event_class: impl ToString,
-    ) -> ListResultVec<(WebhookReceiver, WebhookRxSubscription)> {
-        let conn = self.pool_connection_authorized(opctx).await?;
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<
+        Vec<(WebhookReceiver, WebhookRxSubscription)>,
+        diesel::result::Error,
+    > {
         let class = event_class.to_string();
 
         Self::rx_list_subscribed_query(class)
             .load_async::<(WebhookReceiver, WebhookRxSubscription)>(&*conn)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     fn rx_list_subscribed_query(
@@ -329,12 +324,15 @@ impl DataStore {
 }
 
 fn async_insert_error_to_txn(
-    rx_id: Uuid,
+    rx_id: WebhookReceiverUuid,
 ) -> impl FnOnce(AsyncInsertError) -> TransactionError<Error> {
     move |e| match e {
-        AsyncInsertError::CollectionNotFound => TransactionError::CustomError(
-            Error::not_found_by_id(ResourceType::WebhookReceiver, &rx_id),
-        ),
+        AsyncInsertError::CollectionNotFound => {
+            TransactionError::CustomError(Error::not_found_by_id(
+                ResourceType::WebhookReceiver,
+                &rx_id.into_untyped_uuid(),
+            ))
+        }
         AsyncInsertError::DatabaseError(e) => TransactionError::Database(e),
     }
 }
@@ -456,21 +454,26 @@ mod test {
 
         async fn check_event(
             datastore: &DataStore,
-            opctx: &OpContext,
             // logctx: &LogContext,
             event_class: &str,
             matches: &[&WebhookReceiver],
             not_matches: &[&WebhookReceiver],
         ) {
             let subscribed = datastore
-                .webhook_rx_list_subscribed_to_event(opctx, event_class)
+                .webhook_rx_list_subscribed_to_event_on_conn(
+                    event_class,
+                    &datastore
+                        .pool_connection_for_tests()
+                        .await
+                        .expect("can't get ye pool connection for tests!"),
+                )
                 .await
                 .unwrap()
                 .into_iter()
                 .map(|(rx, subscription)| {
                     eprintln!(
                         "receiver is subscribed to event {event_class:?}:\n\t\
-                            rx: {} ({})\n\tsubscription: {subscription:#?}",
+                            rx: {} ({})\n\tsubscription: {subscription:?}",
                         rx.identity.name, rx.identity.id,
                     );
                     rx.identity
@@ -494,7 +497,6 @@ mod test {
 
         check_event(
             datastore,
-            opctx,
             "notfoo",
             &[],
             &[
@@ -509,7 +511,6 @@ mod test {
 
         check_event(
             datastore,
-            opctx,
             "foo.bar",
             &[&foo_star, &foo_starstar, &foo_bar, &starstar_bar],
             &[&foo_starstar_bar],
@@ -518,7 +519,6 @@ mod test {
 
         check_event(
             datastore,
-            opctx,
             "foo.baz",
             &[&foo_star, &foo_starstar],
             &[&foo_bar, &foo_starstar_bar, &starstar_bar],
@@ -527,7 +527,6 @@ mod test {
 
         check_event(
             datastore,
-            opctx,
             "foo.bar.baz",
             &[&foo_starstar],
             &[&foo_bar, &foo_star, &foo_starstar_bar, &starstar_bar],
@@ -536,7 +535,6 @@ mod test {
 
         check_event(
             datastore,
-            opctx,
             "foo.baz.bar",
             &[&foo_starstar, &foo_starstar_bar, &starstar_bar],
             &[&foo_bar, &foo_star],
@@ -545,7 +543,6 @@ mod test {
 
         check_event(
             datastore,
-            opctx,
             "foo.baz.quux.bar",
             &[&foo_starstar, &foo_starstar_bar, &starstar_bar],
             &[&foo_bar, &foo_star],
@@ -554,7 +551,6 @@ mod test {
 
         check_event(
             datastore,
-            opctx,
             "baz.quux.bar",
             &[&starstar_bar],
             &[&foo_bar, &foo_star, &foo_starstar, &foo_starstar_bar],
