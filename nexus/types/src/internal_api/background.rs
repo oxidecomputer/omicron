@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use omicron_uuid_kinds::WebhookEventUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -190,4 +191,21 @@ impl std::fmt::Display for ReincarnatableInstance {
         let Self { instance_id, reason } = self;
         write!(f, "{instance_id} ({reason})")
     }
+}
+
+/// The status of a `webhook_dispatcher` background task activation.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WebhookDispatcherStatus {
+    /// The webhook events dispatched on this activation.
+    pub dispatched: Vec<WebhookDispatched>,
+
+    /// Any error that occurred during activation.
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WebhookDispatched {
+    pub event_id: WebhookEventUuid,
+    pub dispatched: usize,
+    pub receivers_gone: usize,
 }

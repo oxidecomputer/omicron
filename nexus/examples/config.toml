@@ -131,6 +131,9 @@ region_snapshot_replacement_start.period_secs = 30
 region_snapshot_replacement_garbage_collection.period_secs = 30
 region_snapshot_replacement_step.period_secs = 30
 region_snapshot_replacement_finish.period_secs = 30
+# In general, the webhook dispatcher will be activated when events are queued,
+# so we don't need to periodically activate it *that* frequently.
+webhook_dispatcher.period_secs = 60
 
 [default_region_allocation_strategy]
 # allocate region on 3 random distinct zpools, on 3 random distinct sleds.

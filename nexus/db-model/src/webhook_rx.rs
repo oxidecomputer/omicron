@@ -4,11 +4,12 @@
 
 use crate::collection::DatastoreCollectionConfig;
 use crate::schema::{
-    webhook_rx, webhook_rx_event_glob, webhook_rx_secret,
+    webhook_delivery, webhook_rx, webhook_rx_event_glob, webhook_rx_secret,
     webhook_rx_subscription,
 };
 use crate::typed_uuid::DbTypedUuid;
 use crate::Generation;
+use crate::WebhookDelivery;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use omicron_common::api::external::Error;
@@ -28,6 +29,7 @@ use uuid::Uuid;
     Serialize,
     Deserialize,
 )]
+#[resource(uuid_kind = WebhookReceiverKind)]
 #[diesel(table_name = webhook_rx)]
 pub struct WebhookReceiver {
     #[diesel(embed)]
@@ -58,6 +60,13 @@ impl DatastoreCollectionConfig<WebhookRxEventGlob> for WebhookReceiver {
     type GenerationNumberColumn = webhook_rx::dsl::rcgen;
     type CollectionTimeDeletedColumn = webhook_rx::dsl::time_deleted;
     type CollectionIdColumn = webhook_rx_event_glob::dsl::rx_id;
+}
+
+impl DatastoreCollectionConfig<WebhookDelivery> for WebhookReceiver {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = webhook_rx::dsl::rcgen;
+    type CollectionTimeDeletedColumn = webhook_rx::dsl::time_deleted;
+    type CollectionIdColumn = webhook_delivery::dsl::rx_id;
 }
 
 // TODO(eliza): should deliveries/delivery attempts also be treated as children
