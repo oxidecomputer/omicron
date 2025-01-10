@@ -18,7 +18,6 @@ use anyhow::Context;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
-use diffus::edit::Edit;
 use diffus::{edit, Diffable, Diffus};
 use dropshot::HttpError;
 pub use dropshot::PaginationOrder;
@@ -46,6 +45,9 @@ use std::net::Ipv4Addr;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::str::FromStr;
 use uuid::Uuid;
+
+#[cfg(any(test, feature = "testing"))]
+use proptest::{arbitrary::any, strategy::Strategy};
 
 // The type aliases below exist primarily to ensure consistency among return
 // types for functions in the `nexus::Nexus` and `nexus::DataStore`.  The
@@ -214,6 +216,7 @@ impl<'a> TryFrom<&DataPageParams<'a, NameOrId>> for DataPageParams<'a, Uuid> {
 #[display("{0}")]
 #[serde(try_from = "String")]
 #[derive(Diffus)]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct Name(String);
 
 /// `Name::try_from(String)` is the primary method for constructing an Name
@@ -753,6 +756,7 @@ impl From<ByteCount> for i64 {
     PartialOrd,
     Serialize,
 )]
+#[cfg_attr(feature = "testing", derive(test_strategy::Arbitrary))]
 pub struct Generation(u64);
 
 // We have to manually implement `Diffable` because this is newtype with private
@@ -1953,7 +1957,11 @@ impl JsonSchema for L4PortRange {
     SerializeDisplay,
     Hash,
 )]
-pub struct MacAddr(pub macaddr::MacAddr6);
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+pub struct MacAddr(
+    #[cfg_attr(any(test, feature = "testing"), strategy(any::<(u8, u8, u8, u8, u8, u8)>().prop_map(|(a,b,c,d,e,f)| macaddr::MacAddr6::new(a,b,c,d,e,f))))]
+    pub macaddr::MacAddr6,
+);
 
 impl<'a> Diffable<'a> for MacAddr {
     type Diff = (&'a Self, &'a Self);
@@ -2131,6 +2139,7 @@ impl JsonSchema for MacAddr {
     JsonSchema,
     Diffus,
 )]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct Vni(u32);
 
 impl Vni {

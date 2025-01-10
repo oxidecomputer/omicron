@@ -549,6 +549,7 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
 #[derive(
     Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffus,
 )]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct BlueprintZonesConfig {
     /// Generation number of this configuration.
     ///
@@ -646,6 +647,7 @@ fn zone_sort_key<T: ZoneSortKey>(z: &T) -> impl Ord {
     Serialize,
     Diffus,
 )]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct BlueprintZoneConfig {
     /// The disposition (desired state) of this zone recorded in the blueprint.
     pub disposition: BlueprintZoneDisposition,
@@ -715,6 +717,7 @@ impl From<BlueprintZoneConfig> for OmicronZoneConfig {
     EnumIter,
     Diffus,
 )]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 #[serde(rename_all = "snake_case")]
 pub enum BlueprintZoneDisposition {
     /// The zone is in-service.

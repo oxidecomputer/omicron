@@ -158,3 +158,14 @@ pub fn visit_zone_edit<'e, V>(
         v.visit_zone_zone_type_change(ctx, zone_type.into());
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test_strategy::proptest;
+
+    #[proptest]
+    fn diff(before: BlueprintZonesConfig, after: BlueprintZonesConfig) {
+        println!("before = {:#?}", before);
+    }
+}
