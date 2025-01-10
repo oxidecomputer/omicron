@@ -1087,7 +1087,7 @@ impl BpClickhouseServerZoneIdToNodeId {
     }
 }
 
-mod diesel_util {
+mod diesel_blueprint_zone_filter {
     use crate::{
         schema::bp_omicron_zone::disposition, to_db_bp_zone_disposition,
         DbBpZoneDisposition,
@@ -1146,4 +1146,71 @@ mod diesel_util {
         EqAny<disposition, BoxedIterator<DbBpZoneDisposition>>;
 }
 
-pub use diesel_util::ApplyBlueprintZoneFilterExt;
+pub use diesel_blueprint_zone_filter::ApplyBlueprintZoneFilterExt;
+
+mod diesel_is_current_target_blueprint {
+    use crate::schema;
+    use crate::schema::bp_target;
+    use diesel::dsl::Desc;
+    use diesel::dsl::EqAny;
+    use diesel::dsl::Limit;
+    use diesel::dsl::OrderBy;
+    use diesel::dsl::Select;
+    use diesel::prelude::*;
+    use diesel::sql_types;
+
+    // Writing the return type of diesel queries is not awesome. Build up the
+    // actual return type via a sequence of type aliases that correspond to each
+    // of the steps of the query implementation below.
+    type SelectBlueprintId = Select<bp_target::table, bp_target::blueprint_id>;
+    type OrderByVersion = OrderBy<SelectBlueprintId, Desc<bp_target::version>>;
+    type IsCurrentTargetBlueprintExpr<T> = EqAny<T, Limit<OrderByVersion>>;
+
+    /// An extension trait to check that a `Uuid` expression is equal
+    /// to the current target blueprint.
+    ///
+    /// The typical use of this will be to search one of the various blueprint
+    /// tables, restricted to only rows from the current target blueprint.
+    ///
+    /// `diesel` does not know about our strongly-typed UUID wrappers, so
+    /// technically this trait could apply to any expression that evaluates to a
+    /// `sql_types::Uuid`. To restrict this to only blueprint IDs, we also
+    /// restrict this via a `Sealed` trait to only specific columns known to
+    /// hold blueprint IDs. This list may need to be expanded if we write new
+    /// blueprint ID expression sources or need to query against an expression
+    /// more complex than a column.
+    pub trait ExprIsCurrentTargetBlueprintExt:
+        Expression<SqlType = sql_types::Uuid> + Sized + Sealed
+    {
+        fn is_current_target_blueprint(
+            self,
+        ) -> IsCurrentTargetBlueprintExpr<Self>;
+    }
+
+    impl<E> ExprIsCurrentTargetBlueprintExt for E
+    where
+        E: Expression<SqlType = sql_types::Uuid> + Sized + Sealed,
+    {
+        fn is_current_target_blueprint(
+            self,
+        ) -> IsCurrentTargetBlueprintExpr<Self> {
+            use bp_target::dsl;
+
+            self.eq_any(
+                dsl::bp_target
+                    .select(dsl::blueprint_id)
+                    .order_by(dsl::version.desc())
+                    .limit(1),
+            )
+        }
+    }
+
+    // The specific list of columns for which `ExprIsCurrentTargetBlueprintExt`
+    // exists.
+    pub trait Sealed {}
+    impl Sealed for schema::bp_omicron_dataset::blueprint_id {}
+    impl Sealed for schema::bp_omicron_physical_disk::blueprint_id {}
+    impl Sealed for schema::bp_omicron_zone::blueprint_id {}
+}
+
+pub use diesel_is_current_target_blueprint::ExprIsCurrentTargetBlueprintExt;

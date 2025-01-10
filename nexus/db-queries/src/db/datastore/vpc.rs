@@ -18,6 +18,7 @@ use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
 use crate::db::model::ApplyBlueprintZoneFilterExt;
 use crate::db::model::ApplySledFilterExt;
+use crate::db::model::ExprIsCurrentTargetBlueprintExt;
 use crate::db::model::IncompleteVpc;
 use crate::db::model::InstanceNetworkInterface;
 use crate::db::model::Name;
@@ -745,15 +746,9 @@ impl DataStore {
         // Resolve each VNIC in the VPC to the Sled it's on, so we know which
         // Sleds to notify when firewall rules change.
         use db::schema::{
-            bp_omicron_zone, bp_target, instance, instance_network_interface,
+            bp_omicron_zone, instance, instance_network_interface,
             service_network_interface, sled, vmm,
         };
-        // Diesel requires us to use aliases in order to refer to the
-        // `bp_target` table twice in the same query.
-        let (bp_target1, bp_target2) = diesel::alias!(
-            db::schema::bp_target as bp_target1,
-            db::schema::bp_target as bp_target2
-        );
 
         let instance_query = instance_network_interface::table
             .inner_join(instance::table)
@@ -772,27 +767,8 @@ impl DataStore {
             .inner_join(bp_omicron_zone::table.on(
                 bp_omicron_zone::id.eq(service_network_interface::service_id),
             ))
-            .inner_join(
-                bp_target1.on(bp_omicron_zone::blueprint_id
-                    .eq(bp_target1.field(bp_target::blueprint_id))),
-            )
             .inner_join(sled::table.on(sled::id.eq(bp_omicron_zone::sled_id)))
-            .filter(
-                // This filters us down to the one current target blueprint (if
-                // it exists); i.e., the target with the maximal version. We
-                // could also check that the current target is `enabled`, but
-                // that could very easily be incorrect: if the current target
-                // or any of its blueprint ancestors were _ever_ enabled, it's
-                // possible the current target blueprint describes running
-                // services that were added after RSS and therefore wouldn't be
-                // seen in `rss_service_query`.
-                bp_target1.field(bp_target::version).eq_any(
-                    bp_target2
-                        .select(bp_target2.field(bp_target::version))
-                        .order_by(bp_target2.field(bp_target::version).desc())
-                        .limit(1),
-                ),
-            )
+            .filter(bp_omicron_zone::blueprint_id.is_current_target_blueprint())
             // Filter out services that are expunged and shouldn't be resolved
             // here.
             .blueprint_zone_filter(
