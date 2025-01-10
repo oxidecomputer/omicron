@@ -290,7 +290,7 @@ impl DataStore {
         let class = event_class.to_string();
 
         Self::rx_list_subscribed_query(class)
-            .load_async::<(WebhookReceiver, WebhookRxSubscription)>(&*conn)
+            .load_async::<(WebhookReceiver, WebhookRxSubscription)>(conn)
             .await
     }
 
