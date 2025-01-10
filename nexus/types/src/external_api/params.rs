@@ -1671,6 +1671,8 @@ pub struct SwitchPortSettingsCreate {
     pub bgp_peers: HashMap<String, BgpPeerConfig>,
     /// Addresses indexed by interface name.
     pub addresses: HashMap<String, AddressConfig>,
+    /// Optional checksum to provide for detecting conflicting concurrent updates
+    pub precondition: Option<String>,
 }
 
 impl SwitchPortSettingsCreate {
@@ -1686,6 +1688,7 @@ impl SwitchPortSettingsCreate {
             routes: HashMap::new(),
             bgp_peers: HashMap::new(),
             addresses: HashMap::new(),
+            precondition: None,
         }
     }
 }
@@ -2006,8 +2009,24 @@ pub struct SwitchPortPageSelector {
 /// Parameters for applying settings to switch ports.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct SwitchPortApplySettings {
-    /// A name or id to use when applying switch port settings.
+    pub precondition: Option<SwitchPortApplySettingsChecksums>,
+
+    /// Name or ID of the desired configuration
     pub port_settings: NameOrId,
+}
+
+/// Parameters for applying a precondition to SwitchPortApplySettings
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SwitchPortApplySettingsChecksums {
+    /// md5 checksum of current SwitchPortApplySettings body
+    /// This field protects against concurrent modification of `SwitchPortApplySettings`
+    /// Set to `None` if you expect there to not be any settings currently applied.
+    pub current_settings_checksum: Option<String>,
+
+    /// md5 checksum of the desired configuration body
+    /// This field ensures that the port settings you are applying have not been modified
+    /// since you last viewed them
+    pub new_settings_checksum: String,
 }
 
 // IMAGES

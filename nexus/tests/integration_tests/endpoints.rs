@@ -578,6 +578,7 @@ pub static DEMO_SWITCH_PORT_SETTINGS_APPLY_URL: Lazy<String> = Lazy::new(
 );
 pub static DEMO_SWITCH_PORT_SETTINGS: Lazy<params::SwitchPortApplySettings> =
     Lazy::new(|| params::SwitchPortApplySettings {
+        precondition: None,
         port_settings: NameOrId::Name("portofino".parse().unwrap()),
     });
 /* TODO requires dpd access
