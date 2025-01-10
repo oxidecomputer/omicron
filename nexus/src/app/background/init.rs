@@ -119,6 +119,7 @@ use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
 use super::tasks::v2p_mappings::V2PManager;
 use super::tasks::vpc_routes;
+use super::tasks::webhook_deliverator::WebhookDeliverator;
 use super::tasks::webhook_dispatcher::WebhookDispatcher;
 use super::Activator;
 use super::Driver;
@@ -174,6 +175,7 @@ pub struct BackgroundTasks {
     pub task_region_snapshot_replacement_step: Activator,
     pub task_region_snapshot_replacement_finish: Activator,
     pub task_webhook_dispatcher: Activator,
+    pub task_webhook_deliverator: Activator,
 
     // Handles to activate background tasks that do not get used by Nexus
     // at-large.  These background tasks are implementation details as far as
@@ -261,10 +263,11 @@ impl BackgroundTasksInitializer {
             ),
             task_region_snapshot_replacement_step: Activator::new(),
             task_region_snapshot_replacement_finish: Activator::new(),
+            task_webhook_dispatcher: Activator::new(),
+            task_webhook_deliverator: Activator::new(),
 
             task_internal_dns_propagation: Activator::new(),
             task_external_dns_propagation: Activator::new(),
-            task_webhook_dispatcher: Activator::new(),
 
             external_endpoints: external_endpoints_rx,
         };
@@ -329,6 +332,7 @@ impl BackgroundTasksInitializer {
             task_region_snapshot_replacement_step,
             task_region_snapshot_replacement_finish,
             task_webhook_dispatcher,
+            task_webhook_deliverator,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -840,10 +844,23 @@ impl BackgroundTasksInitializer {
             name: "webhook_dispatcher",
             description: "dispatches queued webhook events to receivers",
             period: config.webhook_dispatcher.period_secs,
-            task_impl: Box::new(WebhookDispatcher::new(datastore)),
+            task_impl: Box::new(WebhookDispatcher::new(
+                datastore.clone(),
+                task_webhook_deliverator.clone(),
+            )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_webhook_dispatcher,
+        });
+
+        driver.register(TaskDefinition {
+            name: "webhook_deliverator",
+            description: "sends webhook delivery requests",
+            period: config.webhook_deliverator.period_secs,
+            task_impl: Box::new(WebhookDeliverator::new(datastore)),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_webhook_deliverator,
         });
 
         driver

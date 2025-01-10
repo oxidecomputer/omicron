@@ -417,6 +417,8 @@ pub struct BackgroundTaskConfig {
         RegionSnapshotReplacementFinishConfig,
     /// configuration for webhook dispatcher task
     pub webhook_dispatcher: WebhookDispatcherConfig,
+    /// configuration for webhook deliverator task
+    pub webhook_deliverator: WebhookDeliveratorConfig,
 }
 
 #[serde_as]
@@ -705,6 +707,14 @@ pub struct RegionSnapshotReplacementFinishConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct WebhookDispatcherConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct WebhookDeliveratorConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
