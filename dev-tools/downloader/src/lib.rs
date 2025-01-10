@@ -458,7 +458,7 @@ async fn download_file_and_verify(
     Ok(())
 }
 
-impl<'a> Downloader<'a> {
+impl Downloader<'_> {
     async fn download_cargo_hack(&self) -> Result<()> {
         let os = os_name()?;
         let arch = arch()?;

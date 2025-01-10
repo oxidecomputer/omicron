@@ -601,7 +601,7 @@ pub struct DerEncodedKeyPair {
 
 struct X509CertVisitor;
 
-impl<'de> Visitor<'de> for X509CertVisitor {
+impl Visitor<'_> for X509CertVisitor {
     type Value = String;
 
     fn expecting(
@@ -646,7 +646,7 @@ where
 
 struct KeyVisitor;
 
-impl<'de> Visitor<'de> for KeyVisitor {
+impl Visitor<'_> for KeyVisitor {
     type Value = String;
 
     fn expecting(
