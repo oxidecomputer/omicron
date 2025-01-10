@@ -353,10 +353,14 @@ cookie = "0.18"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crossterm = { version = "0.28.1", features = ["event-stream"] }
+# NOTE: if you change the pinned revision of the `crucible` dependencies, you
+# must also update the references in package-manifest.toml to match the new
+# revision.
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "c9d31d2f84ff5b59dfb1cf5358d8af657ab9b5e9" }
 crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "c9d31d2f84ff5b59dfb1cf5358d8af657ab9b5e9" }
 crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "c9d31d2f84ff5b59dfb1cf5358d8af657ab9b5e9" }
 crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "c9d31d2f84ff5b59dfb1cf5358d8af657ab9b5e9" }
+# NOTE: See above!
 csv = "1.3.0"
 curve25519-dalek = "4"
 datatest-stable = "0.2.9"
@@ -548,10 +552,14 @@ prettyplease = { version = "0.2.25", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = "0.9.1"
 progenitor-client = "0.9.1"
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "188fabe15db3e8db8095db55388f47f9c696f3c6" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "188fabe15db3e8db8095db55388f47f9c696f3c6" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "188fabe15db3e8db8095db55388f47f9c696f3c6" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "188fabe15db3e8db8095db55388f47f9c696f3c6" }
+# NOTE: if you change the pinned revision of the `bhyve_api` and propolis
+# dependencies, you must also update the references in package-manifest.toml to
+# match the new revision.
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "f30ff7a830da26874a00307a3c6d6e1035eec818" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "f30ff7a830da26874a00307a3c6d6e1035eec818" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "f30ff7a830da26874a00307a3c6d6e1035eec818" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "f30ff7a830da26874a00307a3c6d6e1035eec818" }
+# NOTE: see above!
 proptest = "1.5.0"
 qorb = "0.2.1"
 quote = "1.0"

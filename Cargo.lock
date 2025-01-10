@@ -693,7 +693,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=188fabe15db3e8db8095db55388f47f9c696f3c6#188fabe15db3e8db8095db55388f47f9c696f3c6"
+source = "git+https://github.com/oxidecomputer/propolis?rev=f30ff7a830da26874a00307a3c6d6e1035eec818#f30ff7a830da26874a00307a3c6d6e1035eec818"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -703,7 +703,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=188fabe15db3e8db8095db55388f47f9c696f3c6#188fabe15db3e8db8095db55388f47f9c696f3c6"
+source = "git+https://github.com/oxidecomputer/propolis?rev=f30ff7a830da26874a00307a3c6d6e1035eec818#f30ff7a830da26874a00307a3c6d6e1035eec818"
 dependencies = [
  "libc",
  "strum",
@@ -1865,7 +1865,7 @@ dependencies = [
 [[package]]
 name = "crucible-client-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=5a41b826171c7d2a8412fa833377ab1df25ee8ec#5a41b826171c7d2a8412fa833377ab1df25ee8ec"
+source = "git+https://github.com/oxidecomputer/crucible?rev=c9d31d2f84ff5b59dfb1cf5358d8af657ab9b5e9#c9d31d2f84ff5b59dfb1cf5358d8af657ab9b5e9"
 dependencies = [
  "base64 0.22.1",
  "crucible-workspace-hack",
@@ -7056,7 +7056,7 @@ dependencies = [
  "pq-sys",
  "pretty_assertions",
  "progenitor-client 0.9.1",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=188fabe15db3e8db8095db55388f47f9c696f3c6)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=f30ff7a830da26874a00307a3c6d6e1035eec818)",
  "qorb",
  "rand",
  "rcgen",
@@ -7324,7 +7324,7 @@ dependencies = [
  "oximeter-producer",
  "oxnet",
  "pretty_assertions",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=188fabe15db3e8db8095db55388f47f9c696f3c6)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=f30ff7a830da26874a00307a3c6d6e1035eec818)",
  "propolis-mock-server",
  "propolis_api_types",
  "rand",
@@ -9108,7 +9108,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=188fabe15db3e8db8095db55388f47f9c696f3c6#188fabe15db3e8db8095db55388f47f9c696f3c6"
+source = "git+https://github.com/oxidecomputer/propolis?rev=f30ff7a830da26874a00307a3c6d6e1035eec818#f30ff7a830da26874a00307a3c6d6e1035eec818"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -9153,7 +9153,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=188fabe15db3e8db8095db55388f47f9c696f3c6#188fabe15db3e8db8095db55388f47f9c696f3c6"
+source = "git+https://github.com/oxidecomputer/propolis?rev=f30ff7a830da26874a00307a3c6d6e1035eec818#f30ff7a830da26874a00307a3c6d6e1035eec818"
 dependencies = [
  "anyhow",
  "atty",
@@ -9195,7 +9195,7 @@ dependencies = [
 [[package]]
 name = "propolis_api_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=188fabe15db3e8db8095db55388f47f9c696f3c6#188fabe15db3e8db8095db55388f47f9c696f3c6"
+source = "git+https://github.com/oxidecomputer/propolis?rev=f30ff7a830da26874a00307a3c6d6e1035eec818#f30ff7a830da26874a00307a3c6d6e1035eec818"
 dependencies = [
  "crucible-client-types",
  "propolis_types",
@@ -9209,7 +9209,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=188fabe15db3e8db8095db55388f47f9c696f3c6#188fabe15db3e8db8095db55388f47f9c696f3c6"
+source = "git+https://github.com/oxidecomputer/propolis?rev=f30ff7a830da26874a00307a3c6d6e1035eec818#f30ff7a830da26874a00307a3c6d6e1035eec818"
 dependencies = [
  "schemars",
  "serde",
@@ -10835,7 +10835,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor 0.9.1",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=188fabe15db3e8db8095db55388f47f9c696f3c6)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=f30ff7a830da26874a00307a3c6d6e1035eec818)",
  "regress 0.9.1",
  "reqwest",
  "schemars",
@@ -10861,7 +10861,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=188fabe15db3e8db8095db55388f47f9c696f3c6)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=f30ff7a830da26874a00307a3c6d6e1035eec818)",
  "rcgen",
  "schemars",
  "serde",
