@@ -162,10 +162,80 @@ pub fn visit_zone_edit<'e, V>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use diffus::Diffable;
+    use std::collections::BTreeSet;
     use test_strategy::proptest;
+
+    struct TestVisitor<'a> {
+        before: &'a BlueprintZonesConfig,
+        after: &'a BlueprintZonesConfig,
+        total_inserts: usize,
+        total_removes: usize,
+    }
+
+    impl<'a> TestVisitor<'a> {
+        pub fn new(
+            before: &'a BlueprintZonesConfig,
+            after: &'a BlueprintZonesConfig,
+        ) -> Self {
+            TestVisitor { before, after, total_inserts: 0, total_removes: 0 }
+        }
+    }
+
+    impl<'e> VisitBlueprintZonesConfig<'e> for TestVisitor<'e> {
+        fn visit_generation_change(
+            &mut self,
+            _ctx: &mut BpVisitorContext,
+            change: Change<'e, Generation>,
+        ) {
+            assert_eq!(change.before, &self.before.generation);
+            assert_eq!(change.after, &self.after.generation);
+            assert_ne!(self.before.generation, self.after.generation);
+        }
+
+        fn visit_zones_insert(
+            &mut self,
+            _ctx: &mut BpVisitorContext,
+            node: &BlueprintZoneConfig,
+        ) {
+            let before: BTreeSet<_> = self.before.zones.keys().collect();
+            let after: BTreeSet<_> = self.after.zones.keys().collect();
+            assert!(!before.contains(&node.id));
+            assert!(after.contains(&node.id));
+
+            // The inserted node is the same as what's in `after`
+            assert_eq!(node, self.after.zones.get(&node.id).unwrap());
+
+            self.total_inserts += 1;
+        }
+
+        fn visit_zones_remove(
+            &mut self,
+            _ctx: &mut BpVisitorContext,
+            node: &BlueprintZoneConfig,
+        ) {
+            let before: BTreeSet<_> = self.before.zones.keys().collect();
+            let after: BTreeSet<_> = self.after.zones.keys().collect();
+            assert!(before.contains(&node.id));
+            assert!(!after.contains(&node.id));
+
+            // The removed node is the same as what's in `before`
+            assert_eq!(node, self.before.zones.get(&node.id).unwrap());
+
+            self.total_removes += 1;
+        }
+    }
 
     #[proptest]
     fn diff(before: BlueprintZonesConfig, after: BlueprintZonesConfig) {
-        println!("before = {:#?}", before);
+        let mut ctx = BpVisitorContext::default();
+        let mut visitor = TestVisitor::new(&before, &after);
+        let diff = before.diff(&after);
+        visitor.visit_root(&mut ctx, diff);
+
+        assert_eq!(
+            visitor.total_inserts.wrapping_sub(visitor.total_removes),
+            after.zones.len().wrapping_sub(before.zones.len())
+        );
     }
 }

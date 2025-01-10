@@ -18,6 +18,7 @@ use super::{
 };
 
 /// A context for blueprint related visitors
+#[derive(Debug, Clone, Default)]
 pub struct BpVisitorContext {
     pub sled_id: Option<SledUuid>,
     pub zone_id: Option<OmicronZoneUuid>,
