@@ -768,7 +768,11 @@ impl<'a> Diffable<'a> for Generation {
         if self == other {
             edit::Edit::Copy(self)
         } else {
-            edit::Edit::Change((self, other))
+            edit::Edit::Change {
+                before: self,
+                after: other,
+                diff: (self, other),
+            }
         }
     }
 }
@@ -1969,7 +1973,11 @@ impl<'a> Diffable<'a> for MacAddr {
         if self == other {
             edit::Edit::Copy(self)
         } else {
-            edit::Edit::Change((self, other))
+            edit::Edit::Change {
+                before: self,
+                after: other,
+                diff: (self, other),
+            }
         }
     }
 }
