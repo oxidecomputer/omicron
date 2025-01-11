@@ -6,7 +6,7 @@
 //!
 //! Modelled after [`syn::visit`](https://docs.rs/syn/1/syn/visit).
 
-mod visit_blueprint_zones_config;
+pub mod visit_blueprint_zones_config;
 
 use diffus::edit::enm;
 use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
@@ -14,7 +14,6 @@ use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
 use super::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
     BlueprintZonesConfig, EditedBlueprintZoneConfig,
-    EditedBlueprintZonesConfig,
 };
 
 /// A context for blueprint related visitors

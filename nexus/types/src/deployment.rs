@@ -57,7 +57,7 @@ use proptest::{arbitrary::any, strategy::Strategy};
 mod blueprint_diff;
 mod blueprint_display;
 mod clickhouse;
-mod diff_visitors;
+pub mod diff_visitors;
 pub mod execution;
 mod network_resources;
 mod planning_input;
@@ -65,6 +65,7 @@ mod tri_map;
 mod zone_type;
 
 pub use clickhouse::ClickhouseClusterConfig;
+pub use diff_visitors::BpVisitorContext;
 pub use network_resources::AddNetworkResourceError;
 pub use network_resources::OmicronZoneExternalFloatingAddr;
 pub use network_resources::OmicronZoneExternalFloatingIp;

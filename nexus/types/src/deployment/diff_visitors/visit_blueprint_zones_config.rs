@@ -52,8 +52,8 @@ pub trait VisitBlueprintZonesConfig<'e> {
     // A change in a value in `BlueprintZonesConfig::zones`
     fn visit_zone_change(
         &mut self,
-        ctx: &mut BpVisitorContext,
-        change: Change<'e, BlueprintZoneConfig>,
+        _ctx: &mut BpVisitorContext,
+        _change: Change<'e, BlueprintZoneConfig>,
     ) {
         // Leaf node
     }
@@ -102,7 +102,7 @@ pub trait VisitBlueprintZonesConfig<'e> {
     fn visit_zone_zone_type_change(
         &mut self,
         _ctx: &mut BpVisitorContext,
-        _node: Change<'e, BlueprintZoneType>,
+        _change: Change<'e, BlueprintZoneType>,
     ) {
         // Leaf node - for now
     }
@@ -142,6 +142,8 @@ pub fn visit_root<'e, V>(
                     }
                 }
             }
+            // Reset the context
+            ctx.zone_id = None;
         }
     }
 }
@@ -190,17 +192,20 @@ mod tests {
     impl<'e> VisitBlueprintZonesConfig<'e> for TestVisitor<'e> {
         fn visit_generation_change(
             &mut self,
-            _ctx: &mut BpVisitorContext,
+            ctx: &mut BpVisitorContext,
             change: Change<'e, Generation>,
         ) {
             assert_eq!(change.before, &self.before.generation);
             assert_eq!(change.after, &self.after.generation);
             assert_ne!(self.before.generation, self.after.generation);
+
+            // We aren't operating on a particular zone
+            assert!(ctx.zone_id.is_none());
         }
 
         fn visit_zones_insert(
             &mut self,
-            _ctx: &mut BpVisitorContext,
+            ctx: &mut BpVisitorContext,
             node: &BlueprintZoneConfig,
         ) {
             let before: BTreeSet<_> = self.before.zones.keys().collect();
@@ -211,12 +216,15 @@ mod tests {
             // The inserted node is the same as what's in `after`
             assert_eq!(node, self.after.zones.get(&node.id).unwrap());
 
+            // The key for the current zone id was filled in
+            assert_eq!(ctx.zone_id, Some(node.id));
+
             self.total_inserts += 1;
         }
 
         fn visit_zones_remove(
             &mut self,
-            _ctx: &mut BpVisitorContext,
+            ctx: &mut BpVisitorContext,
             node: &BlueprintZoneConfig,
         ) {
             let before: BTreeSet<_> = self.before.zones.keys().collect();
@@ -227,7 +235,95 @@ mod tests {
             // The removed node is the same as what's in `before`
             assert_eq!(node, self.before.zones.get(&node.id).unwrap());
 
+            // The key for the current zone id was filled in
+            assert_eq!(ctx.zone_id, Some(node.id));
+
             self.total_removes += 1;
+        }
+
+        fn visit_zone_change(
+            &mut self,
+            ctx: &mut BpVisitorContext,
+            change: Change<'e, BlueprintZoneConfig>,
+        ) {
+            // The key for the current zone id was filled in and
+            // the zone with the same id was changed
+            assert_eq!(ctx.zone_id, Some(change.before.id));
+            assert_eq!(ctx.zone_id, Some(change.after.id));
+
+            // The change is actually correct
+            assert_eq!(
+                self.before.zones.get(&ctx.zone_id.unwrap()),
+                Some(change.before)
+            );
+            assert_eq!(
+                self.after.zones.get(&ctx.zone_id.unwrap()),
+                Some(change.after)
+            );
+        }
+
+        fn visit_zone_disposition_change(
+            &mut self,
+            ctx: &mut BpVisitorContext,
+            change: Change<'e, BlueprintZoneDisposition>,
+        ) {
+            assert_ne!(change.before, change.after);
+            assert_eq!(
+                self.before
+                    .zones
+                    .get(&ctx.zone_id.unwrap())
+                    .unwrap()
+                    .disposition,
+                *change.before
+            );
+            assert_eq!(
+                self.after
+                    .zones
+                    .get(&ctx.zone_id.unwrap())
+                    .unwrap()
+                    .disposition,
+                *change.after
+            );
+        }
+
+        fn visit_zone_filesystem_pool_change(
+            &mut self,
+            ctx: &mut BpVisitorContext,
+            change: Change<'e, Option<ZpoolName>>,
+        ) {
+            assert_ne!(change.before, change.after);
+            assert_eq!(
+                self.before
+                    .zones
+                    .get(&ctx.zone_id.unwrap())
+                    .unwrap()
+                    .filesystem_pool,
+                *change.before
+            );
+            assert_eq!(
+                self.after
+                    .zones
+                    .get(&ctx.zone_id.unwrap())
+                    .unwrap()
+                    .filesystem_pool,
+                *change.after
+            );
+        }
+
+        fn visit_zone_zone_type_change(
+            &mut self,
+            ctx: &mut BpVisitorContext,
+            change: Change<'e, BlueprintZoneType>,
+        ) {
+            assert_ne!(change.before, change.after);
+            assert_eq!(
+                self.before.zones.get(&ctx.zone_id.unwrap()).unwrap().zone_type,
+                *change.before
+            );
+            assert_eq!(
+                self.after.zones.get(&ctx.zone_id.unwrap()).unwrap().zone_type,
+                *change.after
+            );
         }
     }
 
