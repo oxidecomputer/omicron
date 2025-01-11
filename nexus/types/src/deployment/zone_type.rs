@@ -35,6 +35,7 @@ use std::net::SocketAddrV6;
     Diffus,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum BlueprintZoneType {
     BoundaryNtp(blueprint_zone_type::BoundaryNtp),
     Clickhouse(blueprint_zone_type::Clickhouse),
@@ -359,6 +360,10 @@ pub mod blueprint_zone_type {
         Serialize,
         Diffus,
     )]
+    #[cfg_attr(
+        any(test, feature = "testing"),
+        derive(test_strategy::Arbitrary)
+    )]
     pub struct BoundaryNtp {
         pub address: SocketAddrV6,
         pub ntp_servers: Vec<String>,
@@ -382,6 +387,10 @@ pub mod blueprint_zone_type {
         Serialize,
         Diffus,
     )]
+    #[cfg_attr(
+        any(test, feature = "testing"),
+        derive(test_strategy::Arbitrary)
+    )]
     pub struct Clickhouse {
         pub address: SocketAddrV6,
         pub dataset: OmicronZoneDataset,
@@ -398,6 +407,10 @@ pub mod blueprint_zone_type {
         Deserialize,
         Serialize,
         Diffus,
+    )]
+    #[cfg_attr(
+        any(test, feature = "testing"),
+        derive(test_strategy::Arbitrary)
     )]
     pub struct ClickhouseKeeper {
         pub address: SocketAddrV6,
@@ -417,6 +430,10 @@ pub mod blueprint_zone_type {
         Serialize,
         Diffus,
     )]
+    #[cfg_attr(
+        any(test, feature = "testing"),
+        derive(test_strategy::Arbitrary)
+    )]
     pub struct ClickhouseServer {
         pub address: SocketAddrV6,
         pub dataset: OmicronZoneDataset,
@@ -433,6 +450,10 @@ pub mod blueprint_zone_type {
         Deserialize,
         Serialize,
         Diffus,
+    )]
+    #[cfg_attr(
+        any(test, feature = "testing"),
+        derive(test_strategy::Arbitrary)
     )]
     pub struct CockroachDb {
         pub address: SocketAddrV6,
@@ -451,6 +472,10 @@ pub mod blueprint_zone_type {
         Serialize,
         Diffus,
     )]
+    #[cfg_attr(
+        any(test, feature = "testing"),
+        derive(test_strategy::Arbitrary)
+    )]
     pub struct Crucible {
         pub address: SocketAddrV6,
         pub dataset: OmicronZoneDataset,
@@ -468,6 +493,10 @@ pub mod blueprint_zone_type {
         Serialize,
         Diffus,
     )]
+    #[cfg_attr(
+        any(test, feature = "testing"),
+        derive(test_strategy::Arbitrary)
+    )]
     pub struct CruciblePantry {
         pub address: SocketAddrV6,
     }
@@ -483,6 +512,10 @@ pub mod blueprint_zone_type {
         Deserialize,
         Serialize,
         Diffus,
+    )]
+    #[cfg_attr(
+        any(test, feature = "testing"),
+        derive(test_strategy::Arbitrary)
     )]
     pub struct ExternalDns {
         pub dataset: OmicronZoneDataset,
@@ -505,6 +538,10 @@ pub mod blueprint_zone_type {
         Deserialize,
         Serialize,
         Diffus,
+    )]
+    #[cfg_attr(
+        any(test, feature = "testing"),
+        derive(test_strategy::Arbitrary)
     )]
     pub struct InternalDns {
         pub dataset: OmicronZoneDataset,
@@ -535,6 +572,10 @@ pub mod blueprint_zone_type {
         Serialize,
         Diffus,
     )]
+    #[cfg_attr(
+        any(test, feature = "testing"),
+        derive(test_strategy::Arbitrary)
+    )]
     pub struct InternalNtp {
         pub address: SocketAddrV6,
     }
@@ -550,6 +591,10 @@ pub mod blueprint_zone_type {
         Deserialize,
         Serialize,
         Diffus,
+    )]
+    #[cfg_attr(
+        any(test, feature = "testing"),
+        derive(test_strategy::Arbitrary)
     )]
     pub struct Nexus {
         /// The address at which the internal nexus server is reachable.
@@ -575,6 +620,10 @@ pub mod blueprint_zone_type {
         Deserialize,
         Serialize,
         Diffus,
+    )]
+    #[cfg_attr(
+        any(test, feature = "testing"),
+        derive(test_strategy::Arbitrary)
     )]
     pub struct Oximeter {
         pub address: SocketAddrV6,

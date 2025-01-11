@@ -19,6 +19,7 @@ pub const ZPOOL_INTERNAL_PREFIX: &str = "oxi_";
     Copy, Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, JsonSchema, Diffus,
 )]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "testing", derive(test_strategy::Arbitrary))]
 pub enum ZpoolKind {
     // This zpool is used for external storage (u.2)
     External,
@@ -31,6 +32,7 @@ pub enum ZpoolKind {
 /// This expects that the format will be: `ox{i,p}_<UUID>` - we parse the prefix
 /// when reading the structure, and validate that the UUID can be utilized.
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Diffus)]
+#[cfg_attr(feature = "testing", derive(test_strategy::Arbitrary))]
 pub struct ZpoolName {
     id: ZpoolUuid,
     kind: ZpoolKind,

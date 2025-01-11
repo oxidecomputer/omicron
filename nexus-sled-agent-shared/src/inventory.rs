@@ -186,6 +186,7 @@ impl OmicronZoneConfig {
     Hash,
     Diffus,
 )]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct OmicronZoneDataset {
     pub pool_name: ZpoolName,
 }
