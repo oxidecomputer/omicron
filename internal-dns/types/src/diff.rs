@@ -136,7 +136,7 @@ impl<'a> DnsDiff<'a> {
     }
 }
 
-impl<'a> std::fmt::Display for DnsDiff<'a> {
+impl std::fmt::Display for DnsDiff<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let names_changed = !self.is_empty();
         let zone_name = &self.zone_name;

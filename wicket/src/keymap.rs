@@ -34,18 +34,17 @@ pub enum Cmd {
     /// Collapse the current tree context
     Collapse,
 
-    /// Raw mode directly passes key presses through to the underlying
-    /// [`crate::Control`]s where the user needs to directly input text.
-    ///
-    /// When a user `Select`s  a user input an [`crate::Action`]  will be
-    /// returned that establishes Raw mode. When the context is exited, `Raw`
-    /// mode will be disabled.
-    ///
-    /// TODO: This is currently commented out because we need to translate key
-    /// presses to something we can serialize/deserialize once we decide to use
-    /// it.
-    /// Raw(KeyEvent),
-
+    // /// Raw mode directly passes key presses through to the underlying
+    // /// [`crate::Control`]s where the user needs to directly input text.
+    // ///
+    // /// When a user `Select`s  a user input an [`crate::Action`]  will be
+    // /// returned that establishes Raw mode. When the context is exited, `Raw`
+    // /// mode will be disabled.
+    //
+    // TODO: This is currently commented out because we need to translate key
+    // presses to something we can serialize/deserialize once we decide to use
+    // it.
+    // Raw(KeyEvent),
     /// Display details for the given selection
     /// This can be used to do things like open a scrollable popup for a given
     /// `Control`.

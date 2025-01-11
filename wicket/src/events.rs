@@ -75,8 +75,6 @@ impl Event {
     }
 }
 
-/// An event that can be recorded.
-
 /// Instructions for the [`crate::Runner`]
 ///
 /// Event's fed through the [`crate::Control::on`] methods return an [`Action`]

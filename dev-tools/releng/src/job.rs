@@ -164,7 +164,7 @@ impl Job {
     }
 }
 
-impl<'a> Selector<'a> {
+impl Selector<'_> {
     #[track_caller]
     pub(crate) fn after(self, other: impl AsRef<str>) -> Self {
         let (sender, receiver) = oneshot::channel();

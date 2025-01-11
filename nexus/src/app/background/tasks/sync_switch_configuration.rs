@@ -85,8 +85,8 @@ impl SwitchPortSettingsManager {
         Self { datastore, resolver }
     }
 
-    async fn switch_ports<'a>(
-        &'a mut self,
+    async fn switch_ports(
+        &mut self,
         opctx: &OpContext,
         log: &slog::Logger,
     ) -> Result<Vec<nexus_db_model::SwitchPort>, serde_json::Value> {
@@ -115,8 +115,8 @@ impl SwitchPortSettingsManager {
         Ok(port_list)
     }
 
-    async fn changes<'a>(
-        &'a mut self,
+    async fn changes(
+        &mut self,
         port_list: Vec<nexus_db_model::SwitchPort>,
         opctx: &OpContext,
         log: &slog::Logger,
@@ -188,8 +188,8 @@ impl SwitchPortSettingsManager {
         Ok(changes)
     }
 
-    async fn db_loopback_addresses<'a>(
-        &'a mut self,
+    async fn db_loopback_addresses(
+        &mut self,
         opctx: &OpContext,
         log: &slog::Logger,
     ) -> Result<
@@ -224,8 +224,8 @@ impl SwitchPortSettingsManager {
         Ok(set)
     }
 
-    async fn bfd_peer_configs_from_db<'a>(
-        &'a mut self,
+    async fn bfd_peer_configs_from_db(
+        &mut self,
         opctx: &OpContext,
     ) -> Result<
         Vec<sled_agent_client::types::BfdPeerConfig>,
@@ -299,7 +299,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
             let racks = match self.datastore.rack_list_initialized(opctx, &DataPageParams::max_page()).await {
                 Ok(racks) => racks,
                 Err(e) => {
-                    error!(log, "failed to retrieve racks from database"; 
+                    error!(log, "failed to retrieve racks from database";
                         "error" => %DisplayErrorChain::new(&e)
                     );
                     return json!({
@@ -329,7 +329,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 {
                     Ok(addrs) => addrs,
                     Err(e) => {
-                        error!(log, "failed to resolve addresses for Dendrite services"; 
+                        error!(log, "failed to resolve addresses for Dendrite services";
                             "error" => %DisplayErrorChain::new(&e));
                         continue;
                     },
@@ -935,7 +935,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         },
                     };
 
-		    // TODO https://github.com/oxidecomputer/omicron/issues/3062 
+		    // TODO https://github.com/oxidecomputer/omicron/issues/3062
 		    let tx_eq = if let Some(Some(c)) = info.tx_eq.get(0) {
 			Some(TxEqConfig {
 			    pre1: c.pre1.map(Into::into),
@@ -1844,7 +1844,7 @@ async fn apply_switch_port_changes(
     }
 }
 
-async fn static_routes_on_switch<'a>(
+async fn static_routes_on_switch(
     mgd_clients: &HashMap<SwitchLocation, mg_admin_client::Client>,
     log: &slog::Logger,
 ) -> HashMap<SwitchLocation, SwitchStaticRoutes> {
@@ -1935,7 +1935,7 @@ async fn delete_static_routes(
     }
 }
 
-async fn add_static_routes<'a>(
+async fn add_static_routes(
     mgd_clients: &HashMap<SwitchLocation, mg_admin_client::Client>,
     routes_to_add: HashMap<SwitchLocation, AddStaticRoute4Request>,
     log: &slog::Logger,

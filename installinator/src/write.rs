@@ -352,7 +352,7 @@ struct SlotWriteContext<'a> {
     progress: DriveWriteProgress,
 }
 
-impl<'a> SlotWriteContext<'a> {
+impl SlotWriteContext<'_> {
     fn register_steps<'b>(
         &'b self,
         engine: &UpdateEngine<'b, WriteSpec>,
@@ -518,12 +518,12 @@ struct ArtifactsToWrite<'a> {
 
 impl ArtifactsToWrite<'_> {
     /// Attempt to write the host phase 2 image.
-    async fn write_host_phase_2<'b, WT: WriteTransport>(
+    async fn write_host_phase_2<WT: WriteTransport>(
         &self,
         log: &Logger,
         slot: M2Slot,
         destinations: &ArtifactDestination,
-        transport: &'b mut WT,
+        transport: &mut WT,
         cx: &StepContext<WriteSpec>,
     ) -> Result<StepResult<Option<usize>, WriteSpec>, WriteError> {
         let block_size = write_artifact_impl(

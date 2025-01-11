@@ -99,7 +99,7 @@ impl<'a> CargoPlan<'a> {
 
     /// Displays a `CargoPlan` in a human-readable format with the provided
     /// command name.
-    pub fn display_human(&'a self, command: &'a str) -> DisplayCargoPlan<'_> {
+    pub fn display_human(&'a self, command: &'a str) -> DisplayCargoPlan<'a> {
         DisplayCargoPlan { plan: self, command }
     }
 }

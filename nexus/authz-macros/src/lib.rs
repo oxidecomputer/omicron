@@ -12,6 +12,10 @@ use quote::{format_ident, quote};
 use serde_tokenstream::ParseWrapper;
 use syn::parse_quote;
 
+// Allow private intra-doc links.  This is useful because the `Input` struct
+// cannot be exported (since we're a proc macro crate, and we can't expose
+// a struct), but its documentation is very useful.
+#[allow(rustdoc::private_intra_doc_links)]
 /// Defines a structure and helpers for describing an API resource for authz
 ///
 /// For context, see the module-level documentation for `omicron-nexus::authz`.
@@ -141,11 +145,6 @@ use syn::parse_quote;
 ///     polar_snippet = FleetChild,
 /// }
 /// ```
-
-// Allow private intra-doc links.  This is useful because the `Input` struct
-// cannot be exported (since we're a proc macro crate, and we can't expose
-// a struct), but its documentation is very useful.
-#[allow(rustdoc::private_intra_doc_links)]
 #[proc_macro]
 pub fn authz_resource(
     input: proc_macro::TokenStream,

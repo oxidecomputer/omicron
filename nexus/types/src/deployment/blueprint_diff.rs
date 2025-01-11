@@ -1594,7 +1594,7 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
     }
 }
 
-impl<'diff> fmt::Display for BlueprintDiffDisplay<'diff> {
+impl fmt::Display for BlueprintDiffDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let diff = self.diff;
 

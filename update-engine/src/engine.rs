@@ -437,7 +437,7 @@ pub struct ExecutionHandle<'a, S: StepSpec> {
     abort_handle: AbortHandle,
 }
 
-impl<'a, S: StepSpec> ExecutionHandle<'a, S> {
+impl<S: StepSpec> ExecutionHandle<'_, S> {
     /// Aborts this engine execution with a message.
     ///
     /// This sends the message immediately, and returns a future that can be
@@ -463,7 +463,7 @@ impl<'a, S: StepSpec> ExecutionHandle<'a, S> {
     }
 }
 
-impl<'a, S: StepSpec> Future for ExecutionHandle<'a, S> {
+impl<S: StepSpec> Future for ExecutionHandle<'_, S> {
     type Output = Result<CompletionContext<S>, ExecutionError<S>>;
 
     fn poll(
@@ -620,7 +620,7 @@ pub struct NewStep<'engine, 'a, S: StepSpec, T> {
     metadata_fn: Option<DebugIgnore<StepMetadataFn<'a, S>>>,
 }
 
-impl<'engine, 'a, S: StepSpec, T> NewStep<'engine, 'a, S, T> {
+impl<'a, S: StepSpec, T> NewStep<'_, 'a, S, T> {
     /// Adds a metadata-generating function to the step.
     ///
     /// This function is expected to produce
@@ -854,7 +854,7 @@ struct StepMetadataGen<'a, S: StepSpec> {
     metadata_fn: Option<DebugIgnore<StepMetadataFn<'a, S>>>,
 }
 
-impl<'a, S: StepSpec> StepMetadataGen<'a, S> {
+impl<S: StepSpec> StepMetadataGen<'_, S> {
     fn to_step_info(
         &self,
         index: usize,
@@ -895,7 +895,7 @@ struct StepExec<'a, S: StepSpec> {
     exec_fn: DebugIgnore<StepExecFn<'a, S>>,
 }
 
-impl<'a, S: StepSpec> StepExec<'a, S> {
+impl<S: StepSpec> StepExec<'_, S> {
     async fn execute<F: FnMut() -> usize>(
         self,
         log: &slog::Logger,

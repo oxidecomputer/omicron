@@ -1619,6 +1619,10 @@ async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
     let test_silo2 =
         TestSilo { silo: &silo2, expected_users: silo2_expected_users };
 
+    // Strip the identifier out of error messages because the uuid changes each
+    // time.
+    let id_re = regex::Regex::new("\".*?\"").unwrap();
+
     let mut output = String::new();
     for test_silo in [test_silo1, test_silo2] {
         let silo_name = &test_silo.silo.identity().name;
@@ -1696,10 +1700,7 @@ async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
                     let error = test_response
                         .parsed_body::<dropshot::HttpErrorResponseBody>()
                         .unwrap();
-                    // Strip the identifier out of the error message because the
-                    // uuid changes each time.
-                    let pattern = regex::Regex::new("\".*?\"").unwrap();
-                    let message = pattern.replace_all(&error.message, "...");
+                    let message = id_re.replace_all(&error.message, "...");
                     write!(&mut output, " (message = {:?})", message).unwrap();
                 }
 

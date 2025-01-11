@@ -197,7 +197,7 @@ fn show_sp_ids(sp_ids: &[SpIdentifier]) -> Result<(), anyhow::Error> {
         slot: u32,
     }
 
-    impl<'a> From<&'a SpIdentifier> for SpIdRow {
+    impl From<&SpIdentifier> for SpIdRow {
         fn from(id: &SpIdentifier) -> Self {
             SpIdRow { type_: sp_type_to_str(&id.type_), slot: id.slot }
         }
@@ -224,7 +224,7 @@ fn show_sps_from_ignition(
         system_type: String,
     }
 
-    impl<'a> From<&'a SpIgnitionInfo> for IgnitionRow {
+    impl From<&SpIgnitionInfo> for IgnitionRow {
         fn from(value: &SpIgnitionInfo) -> Self {
             IgnitionRow {
                 type_: sp_type_to_str(&value.id.type_),

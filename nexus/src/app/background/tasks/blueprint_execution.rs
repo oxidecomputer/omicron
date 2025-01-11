@@ -62,10 +62,7 @@ impl BlueprintExecutor {
     /// The presence of `boxed()` in `BackgroundTask::activate` has caused some
     /// confusion with compilation errors in the past. So separate this method
     /// out.
-    async fn activate_impl<'a>(
-        &mut self,
-        opctx: &OpContext,
-    ) -> serde_json::Value {
+    async fn activate_impl(&mut self, opctx: &OpContext) -> serde_json::Value {
         // Get the latest blueprint, cloning to prevent holding a read lock
         // on the watch.
         let update = self.rx_blueprint.borrow_and_update().clone();

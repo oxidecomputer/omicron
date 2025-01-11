@@ -706,7 +706,7 @@ pub trait DataStoreDnsTest: Send + Sync {
         opctx: &'a OpContext,
         dns_group: DnsGroup,
         version: omicron_common::api::external::Generation,
-    ) -> BoxFuture<'_, Result<DnsConfigParams, Error>>;
+    ) -> BoxFuture<'a, Result<DnsConfigParams, Error>>;
 }
 
 impl DataStoreDnsTest for DataStore {
@@ -715,7 +715,7 @@ impl DataStoreDnsTest for DataStore {
         opctx: &'a OpContext,
         dns_group: DnsGroup,
         version: omicron_common::api::external::Generation,
-    ) -> BoxFuture<'_, Result<DnsConfigParams, Error>> {
+    ) -> BoxFuture<'a, Result<DnsConfigParams, Error>> {
         async move {
             use db::schema::dns_version::dsl;
             let dns_version = dsl::dns_version

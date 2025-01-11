@@ -318,7 +318,7 @@ struct PlanBuilder<'a> {
 
 impl<'a> PlanBuilder<'a> {
     /// Begin building a `Plan`
-    fn new(log: &'a slog::Logger) -> PlanBuilder {
+    fn new(log: &'a slog::Logger) -> Self {
         PlanBuilder {
             log,
             needs_recovery: BTreeMap::new(),

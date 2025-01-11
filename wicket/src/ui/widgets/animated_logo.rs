@@ -34,7 +34,7 @@ pub struct Logo<'a> {
 
 // Styling is mandatory!
 impl<'a> Logo<'a> {
-    pub fn new(state: &'a LogoState) -> Logo {
+    pub fn new(state: &'a LogoState) -> Self {
         Logo {
             state,
             stale_style: Style::default(),
@@ -58,7 +58,7 @@ impl<'a> Logo<'a> {
     }
 }
 
-impl<'a> Widget for Logo<'a> {
+impl Widget for Logo<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // Delay painting for 8 frames
         let paint_point =

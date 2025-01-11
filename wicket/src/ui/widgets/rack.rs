@@ -35,7 +35,7 @@ pub struct Rack<'a> {
     pub border_selected_style: Style,
 }
 
-impl<'a> Rack<'a> {
+impl Rack<'_> {
     fn draw_sled(&self, buf: &mut Buffer, sled: Rect, i: u8) {
         let component_id = ComponentId::Sled(i);
         let presence =
@@ -214,7 +214,7 @@ fn borders(height: u16) -> Borders {
     }
 }
 
-impl<'a> Widget for Rack<'a> {
+impl Widget for Rack<'_> {
     fn render(self, rect: Rect, buf: &mut Buffer) {
         match resize(rect) {
             ComponentRects::Displayed { rects_map, .. } => {

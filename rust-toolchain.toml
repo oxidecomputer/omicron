@@ -1,11 +1,6 @@
 [toolchain]
 # We choose a specific toolchain (rather than "stable") for repeatability.  The
 # intent is to keep this up-to-date with recently-released stable Rust.
-#
-# NOTE: Rust 1.82 has a large compile time regression in Diesel-generated
-# code: https://github.com/rust-lang/rust/issues/132064. Before moving to a
-# newer Rust, ensure that the regression is addressed and that nexus-db-queries
-# and omicron-nexus don't take much longer to compile!
 
-channel = "1.81.0"
+channel = "1.84.0"
 profile = "default"
