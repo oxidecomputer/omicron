@@ -39,15 +39,15 @@ pub(crate) fn list_impl(
             writeln!(
                 &mut out,
                 "{count:count_width$}) {}",
-                api.latest_file_name().style(styles.bold),
+                api.file_stem().style(styles.bold),
             )?;
 
             writeln!(
                 &mut out,
-                "{initial_indent} {}: {} v{}",
+                "{initial_indent} {}: {} ({})",
                 "title".style(styles.header),
                 api.title,
-                api.latest_version(),
+                if api.is_versioned() { "versioned" } else { "unversioned" },
             )?;
 
             write!(
@@ -68,41 +68,49 @@ pub(crate) fn list_impl(
                 api.boundary,
             )?;
 
-            match api.to_openapi_doc() {
-                Ok(openapi) => {
-                    let num_paths = openapi.paths.paths.len();
-                    let num_schemas = openapi.components.map_or_else(
-                        || "(data missing)".to_owned(),
-                        |c| c.schemas.len().to_string(),
-                    );
-                    writeln!(
-                        &mut out,
-                        "{initial_indent} {}: {} paths, {} schemas",
-                        "details".style(styles.header),
-                        num_paths.style(styles.bold),
-                        num_schemas.style(styles.bold),
-                    )?;
-                }
-                Err(error) => {
-                    write!(
-                        &mut out,
-                        "{initial_indent} {}: ",
-                        "error".style(styles.failure),
-                    )?;
-                    let display = display_error(&error, styles.failure);
-                    write!(
-                        IndentWriter::new_skip_initial(
-                            &continued_indent,
-                            std::io::stderr(),
-                        ),
-                        "{}",
-                        display,
-                    )?;
-                }
-            };
+            writeln!(
+                &mut out,
+                "{initial_indent} {}:",
+                "spec details".style(styles.header),
+            )?;
 
-            if ix + 1 < total {
-                writeln!(&mut out)?;
+            for v in api.versions() {
+                match v.to_openapi_doc() {
+                    Ok(openapi) => {
+                        let num_paths = openapi.paths.paths.len();
+                        let num_schemas = openapi.components.map_or_else(
+                            || "(data missing)".to_owned(),
+                            |c| c.schemas.len().to_string(),
+                        );
+                        writeln!(
+                            &mut out,
+                            "{continued_indent} {}: {} paths, {} schemas",
+                            format!("v{}", v.version).style(styles.header),
+                            num_paths.style(styles.bold),
+                            num_schemas.style(styles.bold),
+                        )?;
+                    }
+                    Err(error) => {
+                        write!(
+                            &mut out,
+                            "{initial_indent} {}: ",
+                            "error".style(styles.failure),
+                        )?;
+                        let display = display_error(&error, styles.failure);
+                        write!(
+                            IndentWriter::new_skip_initial(
+                                &continued_indent,
+                                std::io::stderr(),
+                            ),
+                            "{}",
+                            display,
+                        )?;
+                    }
+                };
+
+                if ix + 1 < total {
+                    writeln!(&mut out)?;
+                }
             }
         }
     } else {

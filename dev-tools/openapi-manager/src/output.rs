@@ -115,12 +115,25 @@ where
 }
 
 pub(crate) fn display_api_spec(spec: &ApiSpec, styles: &Styles) -> String {
-    format!(
-        "{} ({} v{})",
-        spec.latest_file_name().style(styles.filename),
-        spec.title,
-        spec.latest_version(),
-    )
+    let versions: Vec<_> = spec.versions().collect();
+    let latest_version =
+        versions.last().as_ref().expect("must be at least one version").version;
+    if spec.is_versioned() {
+        format!(
+            "{} ({}, versioned ({} supported), latest = {})",
+            spec.file_stem().style(styles.filename),
+            spec.title,
+            versions.len(),
+            latest_version,
+        )
+    } else {
+        format!(
+            "{} ({}, unversioned, v{})",
+            spec.file_stem().style(styles.filename),
+            spec.title,
+            latest_version,
+        )
+    }
 }
 
 pub(crate) fn display_api_spec_file(

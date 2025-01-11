@@ -9,6 +9,7 @@ use atomicwrites::AtomicFile;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::{ApiDescription, ApiDescriptionBuildErrors, StubContext};
 use fs_err as fs;
+use itertools::Either;
 use openapi_manager_types::{ValidationBackend, ValidationContext};
 use openapiv3::OpenAPI;
 
@@ -83,7 +84,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
         },
         ApiSpec {
             title: "Internal DNS",
-            versions: Versions::versioned(dns_server_api::VERSIONS_SUPPORTED),
+            versions: Versions::for_versioned(dns_server_api::VERSIONS_SUPPORTED),
             description: "API for the internal DNS server",
             boundary: ApiBoundary::Internal,
             api_description:
@@ -220,6 +221,7 @@ impl ApiSpec {
         })
     }
 
+    // XXX-dap replace with one from a specific version
     pub(crate) fn check(&self, env: &Environment) -> Result<SpecCheckStatus> {
         let contents = self.to_json_bytes()?;
         let (summary, validation_result) = self
@@ -246,44 +248,25 @@ impl ApiSpec {
         })
     }
 
-    pub(crate) fn to_openapi_doc(&self) -> Result<OpenAPI> {
-        // It's a bit weird to first convert to bytes and then back to OpenAPI,
-        // but this is the easiest way to do so (currently, Dropshot doesn't
-        // return the OpenAPI type directly). It is also consistent with the
-        // other code paths.
-        let contents = self.to_json_bytes()?;
-        contents_to_openapi(&contents)
-    }
-
+    // XXX-dap rip out?
     pub(crate) fn latest_version(&self) -> &semver::Version {
         self.versions.latest()
     }
 
+    // XXX-dap rip out?
     pub(crate) fn latest_file_name(&self) -> String {
         // XXX-dap more complicated for non-Lockstep
         format!("{}.json", &self.file_stem)
     }
 
-    fn to_json_bytes(&self) -> Result<Vec<u8>> {
-        let description = (self.api_description)().map_err(|error| {
-            // ApiDescriptionBuildError is actually a list of errors so it
-            // doesn't implement std::error::Error itself. Its Display
-            // impl formats the errors appropriately.
-            anyhow::anyhow!("{}", error)
-        })?;
-        let mut openapi_def =
-            description.openapi(&self.title, self.latest_version().clone());
-        openapi_def
-            .description(&self.description)
-            .contact_url("https://oxide.computer")
-            .contact_email("api@oxide.computer");
+    pub(crate) fn file_stem(&self) -> &str {
+        &self.file_stem
+    }
 
-        // Use write because it's the most reliable way to get the canonical
-        // JSON order. The `json` method returns a serde_json::Value which may
-        // or may not have preserve_order enabled.
-        let mut contents = Vec::new();
-        openapi_def.write(&mut contents)?;
-        Ok(contents)
+    // XXX-dap rip out
+    fn to_json_bytes(&self) -> Result<Vec<u8>> {
+        ApiSpecVersion { spec: self, version: self.latest_version() }
+            .to_json_bytes()
     }
 
     fn validate_json(
@@ -335,6 +318,55 @@ impl ApiSpec {
             ValidationResult { extra_files },
         ))
     }
+
+    pub fn is_versioned(&self) -> bool {
+        self.versions.is_versioned()
+    }
+
+    pub fn versions(&self) -> impl Iterator<Item = ApiSpecVersion<'_>> {
+        self.versions
+            .versions()
+            .map(|v| ApiSpecVersion { spec: self, version: v })
+    }
+}
+
+pub struct ApiSpecVersion<'a> {
+    pub spec: &'a ApiSpec,
+    pub version: &'a semver::Version,
+}
+
+impl<'a> ApiSpecVersion<'a> {
+    pub(crate) fn to_openapi_doc(&self) -> Result<OpenAPI> {
+        // It's a bit weird to first convert to bytes and then back to OpenAPI,
+        // but this is the easiest way to do so (currently, Dropshot doesn't
+        // return the OpenAPI type directly). It is also consistent with the
+        // other code paths.
+        let contents = self.to_json_bytes()?;
+        contents_to_openapi(&contents)
+    }
+
+    pub(crate) fn to_json_bytes(&self) -> Result<Vec<u8>> {
+        let spec = self.spec;
+        let description = (spec.api_description)().map_err(|error| {
+            // ApiDescriptionBuildError is actually a list of errors so it
+            // doesn't implement std::error::Error itself. Its Display
+            // impl formats the errors appropriately.
+            anyhow::anyhow!("{}", error)
+        })?;
+        let mut openapi_def =
+            description.openapi(&spec.title, self.version.clone());
+        openapi_def
+            .description(&spec.description)
+            .contact_url("https://oxide.computer")
+            .contact_email("api@oxide.computer");
+
+        // Use write because it's the most reliable way to get the canonical
+        // JSON order. The `json` method returns a serde_json::Value which may
+        // or may not have preserve_order enabled.
+        let mut contents = Vec::new();
+        openapi_def.write(&mut contents)?;
+        Ok(contents)
+    }
 }
 
 pub enum Versions {
@@ -343,7 +375,7 @@ pub enum Versions {
 }
 
 impl Versions {
-    pub fn versioned(supported_versions: &[&semver::Version]) -> Versions {
+    pub fn for_versioned(supported_versions: &[&semver::Version]) -> Versions {
         assert!(!supported_versions.is_empty());
         // XXX-dap this is unstable
         // assert!(
@@ -356,6 +388,24 @@ impl Versions {
                 .cloned()
                 .cloned()
                 .collect(),
+        }
+    }
+
+    fn is_versioned(&self) -> bool {
+        match self {
+            Versions::Lockstep { .. } => false,
+            Versions::Versioned { .. } => true,
+        }
+    }
+
+    fn versions(&self) -> impl Iterator<Item = &semver::Version> + '_ {
+        match self {
+            Versions::Lockstep { version } => {
+                Either::Left(std::iter::once(version))
+            }
+            Versions::Versioned { supported_versions } => {
+                Either::Right(supported_versions.iter())
+            }
         }
     }
 
