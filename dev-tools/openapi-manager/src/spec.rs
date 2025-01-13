@@ -404,18 +404,6 @@ impl Versions {
             }
         }
     }
-
-    // XXX-dap remove?
-    pub fn latest(&self) -> &semver::Version {
-        match self {
-            Versions::Lockstep { version } => version,
-            // unwrap: we verified in the constructor that there is at least one
-            // item here.
-            Versions::Versioned { supported_versions } => {
-                supported_versions.last().unwrap()
-            }
-        }
-    }
 }
 
 struct ValidationContextImpl {
