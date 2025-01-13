@@ -3,9 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use omicron_common::api::external::{Generation, Name};
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use thiserror::Error;
-use uuid::Uuid;
 
 /// The caller attempted to insert a duplicate key.
 #[derive(Clone, Debug, Error)]
@@ -23,7 +23,7 @@ impl DuplicateError {
         Self { id: ObjectId::Collection(id) }
     }
 
-    pub(crate) fn blueprint(id: Uuid) -> Self {
+    pub(crate) fn blueprint(id: BlueprintUuid) -> Self {
         Self { id: ObjectId::Blueprint(id) }
     }
 
@@ -43,7 +43,7 @@ impl DuplicateError {
 #[derive(Clone, Debug)]
 pub enum ObjectId {
     Collection(CollectionUuid),
-    Blueprint(Uuid),
+    Blueprint(BlueprintUuid),
     InternalDns(Generation),
     ExternalDns(Generation),
     SiloName(Name),
@@ -87,7 +87,7 @@ impl KeyError {
         Self { id: ObjectId::Collection(id) }
     }
 
-    pub(crate) fn blueprint(id: Uuid) -> Self {
+    pub(crate) fn blueprint(id: BlueprintUuid) -> Self {
         Self { id: ObjectId::Blueprint(id) }
     }
 
