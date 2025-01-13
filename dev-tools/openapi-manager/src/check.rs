@@ -11,8 +11,9 @@ use similar::TextDiff;
 
 use crate::{
     output::{
-        display_api_spec, display_api_spec_file, display_error,
-        display_summary, headers::*, plural, write_diff, OutputOpts, Styles,
+        display_api_spec, display_api_spec_file, display_api_spec_version,
+        display_error, display_summary, headers::*, plural, write_diff,
+        OutputOpts, Styles,
     },
     spec::{all_apis, CheckStale, Environment},
     FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
@@ -45,7 +46,9 @@ pub(crate) fn check_impl(
     }
 
     let all_apis = all_apis();
-    let total = all_apis.len();
+    let all_api_specs: Vec<_> =
+        all_apis.iter().flat_map(|a| a.versions()).collect();
+    let total = all_api_specs.len();
     let count_width = total.to_string().len();
     let count_section_indent = count_section_indent(count_width);
     let continued_indent = continued_indent(count_width);
@@ -62,10 +65,10 @@ pub(crate) fn check_impl(
     let mut num_stale = 0;
     let mut num_failed = 0;
 
-    for (ix, spec) in all_apis.iter().enumerate() {
+    for (ix, spec_version) in all_api_specs.iter().enumerate() {
         let count = ix + 1;
 
-        match spec.check(env) {
+        match spec_version.check(env) {
             Ok(status) => {
                 let total_errors = status.total_errors();
                 let total_errors_width = total_errors.to_string().len();
@@ -82,10 +85,11 @@ pub(crate) fn check_impl(
                     };
 
                     eprintln!(
-                        "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}: \
+                        "{:>HEADER_WIDTH$} \
+                         [{count:>count_width$}/{total}] {}: \
                          {}{extra}",
                         FRESH.style(styles.success_header),
-                        display_api_spec(spec, &styles),
+                        display_api_spec_version(spec_version, &styles),
                         display_summary(&status.summary, &styles),
                     );
 
@@ -97,7 +101,7 @@ pub(crate) fn check_impl(
                 eprintln!(
                     "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}",
                     STALE.style(styles.warning_header),
-                    display_api_spec(spec, &styles),
+                    display_api_spec_version(spec_version, &styles),
                 );
                 num_stale += 1;
 
@@ -111,8 +115,12 @@ pub(crate) fn check_impl(
                             "{:>HEADER_WIDTH$}{count_section_indent}\
                              ({error_count:>total_errors_width$}/\
                              {total_errors}) {}",
-                             heading.style(styles.warning_header),
-                            display_api_spec_file(spec, spec_file, &styles),
+                            heading.style(styles.warning_header),
+                            display_api_spec_file(
+                                spec_version,
+                                spec_file,
+                                &styles
+                            ),
                         );
                     };
 
@@ -148,7 +156,7 @@ pub(crate) fn check_impl(
                 eprint!(
                     "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}",
                     FAILURE.style(styles.failure_header),
-                    display_api_spec(spec, &styles),
+                    display_api_spec_version(spec_version, &styles),
                 );
                 let display = display_error(&error, styles.failure);
                 write!(
@@ -159,7 +167,7 @@ pub(crate) fn check_impl(
 
                 num_failed += 1;
             }
-        };
+        }
     }
 
     eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);

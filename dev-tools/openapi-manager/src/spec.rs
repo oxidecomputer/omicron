@@ -195,40 +195,73 @@ impl ApiSpec {
         &self,
         env: &Environment,
     ) -> Result<SpecOverwriteStatus> {
-        let contents = self.to_json_bytes()?;
+        todo!(); // XXX-dap
+                 // let contents = self.to_json_bytes()?;
 
-        let (summary, validation_result) = self
-            .validate_json(&contents)
-            .context("OpenAPI document validation failed")?;
+        // let (summary, validation_result) = self
+        //     .validate_json(&contents)
+        //     .context("OpenAPI document validation failed")?;
 
-        let full_path = env.openapi_dir.join(self.latest_file_name());
-        let openapi_doc_status = overwrite_file(&full_path, &contents)?;
+        // let full_path = env.openapi_dir.join(self.latest_file_name());
+        // let openapi_doc_status = overwrite_file(&full_path, &contents)?;
 
-        let extra_files = validation_result
-            .extra_files
-            .into_iter()
-            .map(|(path, contents)| {
-                let full_path = env.workspace_root.join(&path);
-                let status = overwrite_file(&full_path, &contents)?;
-                Ok((path, status))
-            })
-            .collect::<Result<_>>()?;
+        // let extra_files = validation_result
+        //     .extra_files
+        //     .into_iter()
+        //     .map(|(path, contents)| {
+        //         let full_path = env.workspace_root.join(&path);
+        //         let status = overwrite_file(&full_path, &contents)?;
+        //         Ok((path, status))
+        //     })
+        //     .collect::<Result<_>>()?;
 
-        Ok(SpecOverwriteStatus {
-            summary,
-            openapi_doc: openapi_doc_status,
-            extra_files,
-        })
+        // Ok(SpecOverwriteStatus {
+        //     summary,
+        //     openapi_doc: openapi_doc_status,
+        //     extra_files,
+        // })
     }
 
-    // XXX-dap replace with one from a specific version
+    pub(crate) fn file_stem(&self) -> &str {
+        &self.file_stem
+    }
+
+    pub fn is_versioned(&self) -> bool {
+        self.versions.is_versioned()
+    }
+
+    pub fn versions(&self) -> impl Iterator<Item = ApiSpecVersion<'_>> {
+        self.versions
+            .versions()
+            .map(|v| ApiSpecVersion { spec: self, version: v })
+    }
+}
+
+pub struct ApiSpecVersion<'a> {
+    pub spec: &'a ApiSpec,
+    pub version: &'a semver::Version,
+}
+
+impl<'a> ApiSpecVersion<'a> {
+    pub(crate) fn file_name(&self, contents: &[u8]) -> String {
+        let sum = "dummy-checksum"; // XXX-dap replace with shasum
+        match self.spec.versions {
+            Versions::Lockstep { .. } => {
+                format!("{}.json", &self.spec.file_stem)
+            }
+            Versions::Versioned { .. } => {
+                format!("{}-{}.json", &self.spec.file_stem, sum)
+            }
+        }
+    }
+
     pub(crate) fn check(&self, env: &Environment) -> Result<SpecCheckStatus> {
         let contents = self.to_json_bytes()?;
         let (summary, validation_result) = self
             .validate_json(&contents)
             .context("OpenAPI document validation failed")?;
 
-        let full_path = env.openapi_dir.join(self.latest_file_name());
+        let full_path = env.openapi_dir.join(self.file_name(&contents));
         let openapi_doc_status = check_file(full_path, contents)?;
 
         let extra_files = validation_result
@@ -248,27 +281,6 @@ impl ApiSpec {
         })
     }
 
-    // XXX-dap rip out?
-    pub(crate) fn latest_version(&self) -> &semver::Version {
-        self.versions.latest()
-    }
-
-    // XXX-dap rip out?
-    pub(crate) fn latest_file_name(&self) -> String {
-        // XXX-dap more complicated for non-Lockstep
-        format!("{}.json", &self.file_stem)
-    }
-
-    pub(crate) fn file_stem(&self) -> &str {
-        &self.file_stem
-    }
-
-    // XXX-dap rip out
-    fn to_json_bytes(&self) -> Result<Vec<u8>> {
-        ApiSpecVersion { spec: self, version: self.latest_version() }
-            .to_json_bytes()
-    }
-
     fn validate_json(
         &self,
         contents: &[u8],
@@ -277,7 +289,7 @@ impl ApiSpec {
             .context("JSON returned by ApiDescription is not valid OpenAPI")?;
 
         // Check for lint errors.
-        let errors = match self.boundary {
+        let errors = match self.spec.boundary {
             ApiBoundary::Internal => openapi_lint::validate(&openapi_doc),
             ApiBoundary::External => {
                 openapi_lint::validate_external(&openapi_doc)
@@ -287,7 +299,8 @@ impl ApiSpec {
             return Err(anyhow::anyhow!("{}", errors.join("\n\n")));
         }
 
-        let extra_files = if let Some(extra_validation) = self.extra_validation
+        let extra_files = if let Some(extra_validation) =
+            self.spec.extra_validation
         {
             let mut validation_context =
                 ValidationContextImpl { errors: Vec::new(), files: Vec::new() };
@@ -319,23 +332,6 @@ impl ApiSpec {
         ))
     }
 
-    pub fn is_versioned(&self) -> bool {
-        self.versions.is_versioned()
-    }
-
-    pub fn versions(&self) -> impl Iterator<Item = ApiSpecVersion<'_>> {
-        self.versions
-            .versions()
-            .map(|v| ApiSpecVersion { spec: self, version: v })
-    }
-}
-
-pub struct ApiSpecVersion<'a> {
-    pub spec: &'a ApiSpec,
-    pub version: &'a semver::Version,
-}
-
-impl<'a> ApiSpecVersion<'a> {
     pub(crate) fn to_openapi_doc(&self) -> Result<OpenAPI> {
         // It's a bit weird to first convert to bytes and then back to OpenAPI,
         // but this is the easiest way to do so (currently, Dropshot doesn't
@@ -409,6 +405,7 @@ impl Versions {
         }
     }
 
+    // XXX-dap remove?
     pub fn latest(&self) -> &semver::Version {
         match self {
             Versions::Lockstep { version } => version,
