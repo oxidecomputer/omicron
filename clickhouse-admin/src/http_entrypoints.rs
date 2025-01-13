@@ -103,8 +103,9 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
                 log,
                 "initializing replicated ClickHouse cluster to version {OXIMETER_VERSION}"
             );
+            let replicated = true;
             ctx.oximeter_client()
-                .initialize_db_with_version(true, OXIMETER_VERSION)
+                .initialize_db_with_version(replicated, OXIMETER_VERSION)
                 .await
                 .map_err(|e| {
                     HttpError::for_internal_error(format!(
