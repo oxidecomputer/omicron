@@ -140,23 +140,23 @@ pub(crate) async fn deploy_nodes(
                         admin_url,
                         e
                     )
-                }){
+                }) {
                     return Err(e);
-                };
+            };
 
-                client
-                .init_db()
-                .await
-                .map(|_| ())
-                .map_err(|e| {
-                    anyhow!(
-                        concat!(
-                        "failed to initialize the replicated ClickHouse cluster database:",
-                        "error = {}"
-                    ),
-                        e
-                    )
-                })
+            client
+            .init_db()
+            .await
+            .map(|_| ())
+            .map_err(|e| {
+                anyhow!(
+                    concat!(
+                    "failed to initialize the replicated ClickHouse cluster database:",
+                    "error = {}"
+                ),
+                    e
+                )
+            })
         }));
     }
 
