@@ -49,6 +49,7 @@ use nexus_types::{
     },
 };
 use omicron_common::api::external::http_pagination::data_page_params_for;
+use omicron_common::api::external::http_pagination::marker_for_id;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
 use omicron_common::api::external::http_pagination::name_or_id_pagination;
@@ -3076,25 +3077,36 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_switch_port_lldp_neighbors(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SwitchPortPathSelector>,
-        query_params: Query<params::SwitchPortSelector>,
-    ) -> Result<HttpResponseOk<Vec<LldpNeighbor>>, HttpError> {
+        query_params: Query<PaginatedById<params::LldpNeighborsPageSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<LldpNeighbor>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
-            let nexus = &apictx.context.nexus;
             let query = query_params.into_inner();
             let path = path_params.into_inner();
+            let scan_params = ScanById::from_query(&query)?;
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let limit = pag_params.limit.into();
+            let prev = pag_params.marker.cloned();
+
+            let nexus = &apictx.context.nexus;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            Ok(HttpResponseOk(
-                nexus
-                    .lldp_neighbors_get(
-                        &opctx,
-                        query.rack_id,
-                        query.switch_location,
-                        path.port,
-                    )
-                    .await?,
-            ))
+            let neighbors = nexus
+                .lldp_neighbors_get(
+                    &opctx,
+                    &prev,
+                    limit,
+                    scan_params.selector.rack_id,
+                    &scan_params.selector.switch_location,
+                    &path.port,
+                )
+                .await?;
+
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                neighbors,
+                &marker_for_id,
+            )?))
         };
         apictx
             .context

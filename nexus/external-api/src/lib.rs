@@ -1512,8 +1512,8 @@ pub trait NexusExternalApi {
     async fn networking_switch_port_lldp_neighbors(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SwitchPortPathSelector>,
-        query_params: Query<params::SwitchPortSelector>,
-    ) -> Result<HttpResponseOk<Vec<LldpNeighbor>>, HttpError>;
+        query_params: Query<PaginatedById<params::LldpNeighborsPageSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<LldpNeighbor>>, HttpError>;
 
     /// Create new BGP configuration
     #[endpoint {

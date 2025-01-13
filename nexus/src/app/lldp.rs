@@ -1,5 +1,13 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! LLDP
+
 use crate::app::authz;
+use futures::stream::TryStreamExt;
 use lldpd_client::types::ChassisId;
+use lldpd_client::types::Neighbor;
 use lldpd_client::types::PortId;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::Error;
@@ -54,9 +62,11 @@ impl super::Nexus {
     pub async fn lldp_neighbors_get(
         &self,
         opctx: &OpContext,
+        previous: &Option<Uuid>,
+        limit: u32,
         rack_id: Uuid,
-        switch_location: Name,
-        port: Name,
+        switch_location: &Name,
+        port: &Name,
     ) -> Result<Vec<LldpNeighbor>, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
@@ -76,15 +86,28 @@ impl super::Nexus {
                 "no lldpd client for rack: {rack_id} switch {switch_location}"
             )))?;
 
-        let neighbors = lldpd
-            .get_neighbors()
+        let mut neighbors: Vec<Neighbor> = lldpd
+            .get_neighbors_stream(&format!("{port}/0"), None)
+            .try_collect()
             .await
             .map_err(|e| {
                 Error::internal_error(&format!(
                     "failed to get neighbor list for {loc}/{port}: {e}"
                 ))
-            })?
-            .into_inner();
+            })?;
+
+        // Strip out any neighbors seen on previous pages prior to sorting the
+        // remaining neighbors by their id.
+        if let Some(p) = previous {
+            neighbors = neighbors.into_iter().filter(|n| n.id > *p).collect()
+        };
+        neighbors.sort_by_key(|n| n.id);
+
+        let mut limit = usize::try_from(limit)
+            .expect("u32 to usize should succeed on any machine running nexus");
+        if limit > 4 {
+            limit = 4;
+        }
 
         // The RFC defines several possible data classes for the port_id and
         // chassis_id TLVs.  There is no real semantic meaning associated with
@@ -94,8 +117,10 @@ impl super::Nexus {
         // passing that complexity on to consumers of our API, we flatten these
         // fields into strings.
         Ok(neighbors
-            .iter()
+            .into_iter()
+            .take(limit)
             .map(|n| LldpNeighbor {
+                id: n.id,
                 local_port: n.port.to_string(),
                 first_seen: n.first_seen,
                 last_seen: n.last_seen,

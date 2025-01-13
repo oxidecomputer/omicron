@@ -2010,6 +2010,16 @@ pub struct SwitchPortApplySettings {
     pub port_settings: NameOrId,
 }
 
+/// Pagination token for LLDP neighbors
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct LldpNeighborsPageSelector {
+    /// A rack id to use when selecting switch ports.
+    pub rack_id: Uuid,
+
+    /// A switch location to use when selecting switch ports.
+    pub switch_location: Name,
+}
+
 // IMAGES
 
 /// The source of the underlying image.

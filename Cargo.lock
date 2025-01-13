@@ -1537,7 +1537,7 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/lldp#9f96ee79f219224d63d157b177004182960e793d"
+source = "git+https://github.com/oxidecomputer/lldp?branch=paginate#70913f8871fa1395fbc2f64aac3163b91475445b"
 dependencies = [
  "anyhow",
  "schemars",
@@ -5291,16 +5291,18 @@ dependencies = [
 [[package]]
 name = "lldpd-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/lldp#9f96ee79f219224d63d157b177004182960e793d"
+source = "git+https://github.com/oxidecomputer/lldp?branch=paginate#70913f8871fa1395fbc2f64aac3163b91475445b"
 dependencies = [
  "chrono",
  "common",
+ "futures",
  "progenitor",
  "reqwest",
  "schemars",
  "serde",
  "serde_json",
  "slog",
+ "uuid",
 ]
 
 [[package]]

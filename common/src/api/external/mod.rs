@@ -76,13 +76,25 @@ pub trait ObjectIdentity {
 }
 
 /// Exists for types that don't properly implement `ObjectIdentity` but
-/// still need to be paginated by name or id.
+/// still need to be paginated by id.
 pub trait SimpleIdentity {
+    fn id(&self) -> Uuid;
+}
+
+impl<T: ObjectIdentity> SimpleIdentity for T {
+    fn id(&self) -> Uuid {
+        self.identity().id
+    }
+}
+
+/// Exists for types that don't properly implement `ObjectIdentity` but
+/// still need to be paginated by name or id.
+pub trait SimpleIdentityOrName {
     fn id(&self) -> Uuid;
     fn name(&self) -> &Name;
 }
 
-impl<T: ObjectIdentity> SimpleIdentity for T {
+impl<T: ObjectIdentity> SimpleIdentityOrName for T {
     fn id(&self) -> Uuid {
         self.identity().id
     }
@@ -2562,6 +2574,10 @@ pub struct LldpLinkConfig {
 /// the neighbor was advertising.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct LldpNeighbor {
+    // Unique ID assigned to this neighbor - only used for pagination
+    #[serde(skip)]
+    pub id: Uuid,
+
     /// The port on which the neighbor was seen
     pub local_port: String,
 
@@ -2588,6 +2604,12 @@ pub struct LldpNeighbor {
 
     /// The LLDP management IP(s) advertised by the neighbor
     pub management_ip: Vec<oxnet::IpNet>,
+}
+
+impl SimpleIdentity for LldpNeighbor {
+    fn id(&self) -> Uuid {
+        self.id
+    }
 }
 
 /// Per-port tx-eq overrides.  This can be used to fine-tune the transceiver

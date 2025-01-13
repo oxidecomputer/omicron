@@ -5484,9 +5484,28 @@
           },
           {
             "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "rack_id",
             "description": "A rack id to use when selecting switch ports.",
-            "required": true,
             "schema": {
               "type": "string",
               "format": "uuid"
@@ -5494,9 +5513,15 @@
           },
           {
             "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          },
+          {
+            "in": "query",
             "name": "switch_location",
             "description": "A switch location to use when selecting switch ports.",
-            "required": true,
             "schema": {
               "$ref": "#/components/schemas/Name"
             }
@@ -5508,11 +5533,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_LldpNeighbor",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/LldpNeighbor"
-                  }
+                  "$ref": "#/components/schemas/LldpNeighborResultsPage"
                 }
               }
             }
@@ -5523,6 +5544,12 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
+        },
+        "x-dropshot-pagination": {
+          "required": [
+            "rack_id",
+            "switch_location"
+          ]
         }
       }
     },
@@ -17656,6 +17683,27 @@
           "link_name",
           "local_port",
           "management_ip"
+        ]
+      },
+      "LldpNeighborResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LldpNeighbor"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "LoopbackAddress": {
