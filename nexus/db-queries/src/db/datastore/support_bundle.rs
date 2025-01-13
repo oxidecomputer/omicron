@@ -28,7 +28,6 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
@@ -275,7 +274,7 @@ impl DataStore {
             &conn,
             "support_bundle_fail_expunged",
             opctx,
-            BlueprintUuid::from_untyped_uuid(blueprint.id),
+            blueprint.id,
             |conn| {
                 let invalid_nexus_zones = invalid_nexus_zones.clone();
                 let valid_nexus_zones = valid_nexus_zones.clone();
@@ -496,6 +495,7 @@ mod test {
     use omicron_common::api::external::LookupType;
     use omicron_common::api::internal::shared::DatasetKind::Debug as DebugDatasetKind;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
@@ -1061,7 +1061,7 @@ mod test {
         // Expunge the bundle's dataset (manually)
         let bp2 = {
             let mut bp2 = bp1.clone();
-            bp2.id = Uuid::new_v4();
+            bp2.id = BlueprintUuid::new_v4();
             bp2.parent_blueprint_id = Some(bp1.id);
             expunge_dataset_for_bundle(&mut bp2, &bundle);
             bp2
@@ -1179,7 +1179,7 @@ mod test {
         // Expunge the bundle's dataset (manually)
         let bp2 = {
             let mut bp2 = bp1.clone();
-            bp2.id = Uuid::new_v4();
+            bp2.id = BlueprintUuid::new_v4();
             bp2.parent_blueprint_id = Some(bp1.id);
             expunge_dataset_for_bundle(&mut bp2, &bundle);
             bp2
@@ -1268,7 +1268,7 @@ mod test {
         // is a prerequisite for the bundle not later being re-assigned.
         let bp2 = {
             let mut bp2 = bp1.clone();
-            bp2.id = Uuid::new_v4();
+            bp2.id = BlueprintUuid::new_v4();
             bp2.parent_blueprint_id = Some(bp1.id);
             expunge_dataset_for_bundle(&mut bp2, &bundle);
             bp2
@@ -1300,7 +1300,7 @@ mod test {
         // Expunge the bundle's Nexus
         let bp3 = {
             let mut bp3 = bp2.clone();
-            bp3.id = Uuid::new_v4();
+            bp3.id = BlueprintUuid::new_v4();
             bp3.parent_blueprint_id = Some(bp2.id);
             expunge_nexus_for_bundle(&mut bp3, &bundle);
             bp3
@@ -1404,7 +1404,7 @@ mod test {
         // Expunge the bundle's Nexus (manually)
         let bp2 = {
             let mut bp2 = bp1.clone();
-            bp2.id = Uuid::new_v4();
+            bp2.id = BlueprintUuid::new_v4();
             bp2.parent_blueprint_id = Some(bp1.id);
             expunge_nexus_for_bundle(&mut bp2, &bundle);
             bp2

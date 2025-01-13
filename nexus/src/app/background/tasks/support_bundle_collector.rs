@@ -34,8 +34,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use std::io::BufRead;
-use std::io::BufReader;
 use std::io::Write;
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
@@ -715,17 +713,8 @@ fn recursively_add_directory_to_zipfile(
             let src = entry.path();
 
             zip.start_file_from_path(dst, opts)?;
-            let mut reader = BufReader::new(std::fs::File::open(&src)?);
-
-            loop {
-                let buf = reader.fill_buf()?;
-                let len = buf.len();
-                if len == 0 {
-                    break;
-                }
-                zip.write_all(&buf)?;
-                reader.consume(len);
-            }
+            let mut file = std::fs::File::open(&src)?;
+            std::io::copy(&mut file, zip)?;
         }
         if file_type.is_dir() {
             let opts = FullFileOptions::default();
