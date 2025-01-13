@@ -82,7 +82,8 @@ pub(crate) fn check_impl(
                     };
 
                     eprintln!(
-                        "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}: {}{extra}",
+                        "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}: \
+                         {}{extra}",
                         FRESH.style(styles.success_header),
                         display_api_spec(spec, &styles),
                         display_summary(&status.summary, &styles),
@@ -108,7 +109,8 @@ pub(crate) fn check_impl(
                     let display_heading = |heading: &str| {
                         eprintln!(
                             "{:>HEADER_WIDTH$}{count_section_indent}\
-                             ({error_count:>total_errors_width$}/{total_errors}) {}",
+                             ({error_count:>total_errors_width$}/\
+                             {total_errors}) {}",
                              heading.style(styles.warning_header),
                             display_api_spec_file(spec, spec_file, &styles),
                         );
@@ -128,7 +130,8 @@ pub(crate) fn check_impl(
                                 &diff,
                                 &full_path,
                                 &styles,
-                                // Add an indent to align diff with the status message.
+                                // Add an indent to align diff with the status
+                                // message.
                                 &mut IndentWriter::new(
                                     &continued_indent,
                                     std::io::stderr(),
