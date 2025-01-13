@@ -7049,6 +7049,7 @@ dependencies = [
  "nexus-reconfigurator-execution",
  "nexus-reconfigurator-planning",
  "nexus-reconfigurator-preparation",
+ "nexus-reconfigurator-rendezvous",
  "nexus-saga-recovery",
  "nexus-sled-agent-shared",
  "nexus-test-interface",
