@@ -1,8 +1,8 @@
 format_version = 1
 
 [target]
-name = "tfport_data_link"
-description = "A network data link on a tfport interface"
+name = "tfportd_link_data"
+description = "Network data for each link type related to a tfport interface"
 authz_scope = "fleet"
 
 versions = [
