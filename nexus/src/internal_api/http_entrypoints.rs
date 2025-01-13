@@ -701,7 +701,9 @@ impl NexusInternalApi for NexusInternalApiImpl {
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 blueprints,
-                &|_, blueprint: &BlueprintMetadata| blueprint.id,
+                &|_, blueprint: &BlueprintMetadata| {
+                    blueprint.id.into_untyped_uuid()
+                },
             )?))
         };
 
