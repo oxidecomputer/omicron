@@ -335,15 +335,6 @@ impl DataStore {
                             .execute_async(conn)
                             .await?;
 
-                    let Some(arbitrary_valid_nexus) =
-                        valid_nexus_zones.get(0).cloned()
-                    else {
-                        return Err(external::Error::internal_error(
-                            "No valid Nexuses, we cannot re-assign this support bundle",
-                        )
-                        .into());
-                    };
-
                     // Find all bundles on nexuses that no longer exist.
                     let bundles_with_bad_nexuses = dsl::support_bundle
                         .filter(dsl::assigned_nexus.eq_any(invalid_nexus_zones))
@@ -362,7 +353,7 @@ impl DataStore {
                             }
                         }).collect::<Vec<_>>();
 
-                    // Mark these support bundles as failing, and assign then
+                    // Mark these support bundles as failing, and assign them
                     // to a nexus that should still exist.
                     //
                     // This should lead to their storage being freed, if it
@@ -377,18 +368,41 @@ impl DataStore {
                         ))
                         .execute_async(conn)
                         .await?;
-                    let bundles_reassigned = diesel::update(dsl::support_bundle)
+
+                    let mut report = SupportBundleExpungementReport {
+                        bundles_failed_missing_datasets,
+                        bundles_deleted_missing_datasets,
+                        bundles_failing_missing_nexus,
+                        bundles_reassigned: 0,
+                    };
+
+                    // Exit a little early if there are no bundles to re-assign.
+                    //
+                    // This is a tiny optimization, but really, it means that
+                    // tests without Nexuses in their blueprints can succeed if
+                    // they also have no support bundles. In practice, this is
+                    // rare, but in our existing test framework, it's fairly
+                    // common.
+                    if bundles_to_reassign.is_empty() {
+                        return Ok(report);
+                    }
+
+                    let Some(arbitrary_valid_nexus) =
+                        valid_nexus_zones.get(0).cloned()
+                    else {
+                        return Err(external::Error::internal_error(
+                            "No valid Nexuses, we cannot re-assign this support bundle",
+                        )
+                        .into());
+                    };
+
+                    report.bundles_reassigned = diesel::update(dsl::support_bundle)
                         .filter(dsl::id.eq_any(bundles_to_reassign))
                         .set(dsl::assigned_nexus.eq(arbitrary_valid_nexus))
                         .execute_async(conn)
                         .await?;
 
-                    Ok(SupportBundleExpungementReport {
-                        bundles_failed_missing_datasets,
-                        bundles_deleted_missing_datasets,
-                        bundles_failing_missing_nexus,
-                        bundles_reassigned,
-                    })
+                    Ok(report)
                 }
                 .boxed()
             },
