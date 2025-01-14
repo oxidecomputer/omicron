@@ -9,8 +9,11 @@ use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 
 use crate::{
-    check::check_impl, generate::generate_impl, list::list_impl,
-    output::OutputOpts, spec::Environment,
+    cmd::{
+        check::check_impl, generate::generate_impl, list::list_impl,
+        output::OutputOpts,
+    },
+    spec::Environment,
 };
 
 /// Manage OpenAPI specifications.

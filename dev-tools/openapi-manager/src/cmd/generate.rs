@@ -9,7 +9,7 @@ use indent_write::io::IndentWriter;
 use owo_colors::OwoColorize;
 
 use crate::{
-    output::{
+    cmd::output::{
         display_api_spec, display_error, display_summary, headers::*, plural,
         OutputOpts, Styles,
     },

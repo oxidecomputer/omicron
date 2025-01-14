@@ -10,7 +10,7 @@ use owo_colors::OwoColorize;
 use similar::TextDiff;
 
 use crate::{
-    output::{
+    cmd::output::{
         display_api_spec, display_api_spec_file, display_api_spec_version,
         display_error, display_summary, headers::*, plural, write_diff,
         OutputOpts, Styles,
