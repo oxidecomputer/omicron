@@ -11,7 +11,14 @@
 //! This is meant to be invoked as `cargo xtask openapi`, but is a separate
 //! binary to avoid compiling a bunch of extra code when running `cargo xtask`.
 
+// XXX-dap new stuff
+mod apis;
 mod cmd;
+mod spec_files;
+
 mod spec;
+
+#[macro_use]
+extern crate newtype_derive;
 
 pub use cmd::dispatch::*;

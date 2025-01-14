@@ -2,8 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{fmt, io::Write};
+use std::io::Write;
 
+use crate::apis::{ApiBoundary, Versions};
 use anyhow::{Context, Result};
 use atomicwrites::AtomicFile;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -84,7 +85,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
         },
         ApiSpec {
             title: "Internal DNS",
-            versions: Versions::for_versioned(dns_server_api::VERSIONS_SUPPORTED),
+            versions: Versions::new_versioned(dns_server_api::VERSIONS_SUPPORTED),
             description: "API for the internal DNS server",
             boundary: ApiBoundary::Internal,
             api_description:
@@ -170,7 +171,7 @@ pub struct ApiSpec {
     pub title: &'static str,
 
     /// Supported version(s) of this API
-    versions: Versions,
+    pub(crate) versions: Versions,
 
     /// The description string.
     pub description: &'static str,
@@ -184,7 +185,7 @@ pub struct ApiSpec {
         fn() -> Result<ApiDescription<StubContext>, ApiDescriptionBuildErrors>,
 
     /// The spec-specific part of the filename for API descriptions
-    file_stem: &'static str,
+    pub(crate) file_stem: &'static str,
 
     /// Extra validation to perform on the OpenAPI spec, if any.
     pub extra_validation: Option<fn(&OpenAPI, ValidationContext<'_>)>,
@@ -232,7 +233,7 @@ impl ApiSpec {
 
     pub fn versions(&self) -> impl Iterator<Item = ApiSpecVersion<'_>> {
         self.versions
-            .versions()
+            .iter_versions()
             .map(|v| ApiSpecVersion { spec: self, version: v })
     }
 }
@@ -365,47 +366,6 @@ impl<'a> ApiSpecVersion<'a> {
     }
 }
 
-pub enum Versions {
-    Lockstep { version: semver::Version },
-    Versioned { supported_versions: Vec<semver::Version> },
-}
-
-impl Versions {
-    pub fn for_versioned(supported_versions: &[&semver::Version]) -> Versions {
-        assert!(!supported_versions.is_empty());
-        // XXX-dap this is unstable
-        // assert!(
-        //     supported_versions.is_sorted(),
-        //     "array of supported API versions is not sorted"
-        // );
-        Versions::Versioned {
-            supported_versions: supported_versions
-                .into_iter()
-                .cloned()
-                .cloned()
-                .collect(),
-        }
-    }
-
-    fn is_versioned(&self) -> bool {
-        match self {
-            Versions::Lockstep { .. } => false,
-            Versions::Versioned { .. } => true,
-        }
-    }
-
-    fn versions(&self) -> impl Iterator<Item = &semver::Version> + '_ {
-        match self {
-            Versions::Lockstep { version } => {
-                Either::Left(std::iter::once(version))
-            }
-            Versions::Versioned { supported_versions } => {
-                Either::Right(supported_versions.iter())
-            }
-        }
-    }
-}
-
 struct ValidationContextImpl {
     errors: Vec<anyhow::Error>,
     files: Vec<(Utf8PathBuf, Vec<u8>)>,
@@ -424,22 +384,6 @@ impl ValidationBackend for ValidationContextImpl {
 fn contents_to_openapi(contents: &[u8]) -> Result<OpenAPI> {
     serde_json::from_slice(&contents)
         .context("JSON returned by ApiDescription is not valid OpenAPI")
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ApiBoundary {
-    Internal,
-    #[allow(dead_code)] // Remove this when we start managing an external API.
-    External,
-}
-
-impl fmt::Display for ApiBoundary {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ApiBoundary::Internal => write!(f, "internal"),
-            ApiBoundary::External => write!(f, "external"),
-        }
-    }
 }
 
 #[derive(Debug)]

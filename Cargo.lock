@@ -7638,6 +7638,7 @@ dependencies = [
  "indent_write",
  "installinator-api",
  "itertools 0.13.0",
+ "newtype_derive",
  "nexus-external-api",
  "nexus-internal-api",
  "omicron-workspace-hack",
