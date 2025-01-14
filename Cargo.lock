@@ -6933,6 +6933,7 @@ dependencies = [
  "ipnetwork",
  "itertools 0.13.0",
  "macaddr",
+ "maplit",
  "mg-admin-client",
  "nexus-auth",
  "nexus-client",

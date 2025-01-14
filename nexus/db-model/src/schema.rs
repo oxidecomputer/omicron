@@ -2179,6 +2179,8 @@ table! {
         attempts -> Int2,
         time_created -> Timestamptz,
         time_completed -> Nullable<Timestamptz>,
+        deliverator_id -> Nullable<Uuid>,
+        time_delivery_started -> Nullable<Timestamptz>
     }
 }
 

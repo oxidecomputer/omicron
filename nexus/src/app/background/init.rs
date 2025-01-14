@@ -853,14 +853,28 @@ impl BackgroundTasksInitializer {
             activator: task_webhook_dispatcher,
         });
 
-        driver.register(TaskDefinition {
-            name: "webhook_deliverator",
-            description: "sends webhook delivery requests",
-            period: config.webhook_deliverator.period_secs,
-            task_impl: Box::new(WebhookDeliverator::new(datastore)),
-            opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![],
-            activator: task_webhook_deliverator,
+        driver.register({
+            let lease_timeout_secs =
+                config.webhook_deliverator.lease_timeout_secs;
+            let lease_timeout = chrono::TimeDelta::seconds(
+                i64::try_from(lease_timeout_secs).expect(
+                    "webhook_deliverator.lease_timeout_secs must be less \
+                     than i64::MAX",
+                ),
+            );
+            TaskDefinition {
+                name: "webhook_deliverator",
+                description: "sends webhook delivery requests",
+                period: config.webhook_deliverator.period_secs,
+                task_impl: Box::new(WebhookDeliverator::new(
+                    datastore,
+                    lease_timeout,
+                    nexus_id,
+                )),
+                opctx: opctx.child(BTreeMap::new()),
+                watchers: vec![],
+                activator: task_webhook_deliverator,
+            }
         });
 
         driver

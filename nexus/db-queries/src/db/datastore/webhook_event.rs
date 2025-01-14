@@ -39,10 +39,10 @@ impl DataStore {
                 // yet been dispatched to receivers and which is not actively being
                 // dispatched in another transaction.
                 // NOTE: it would be kinda nice if this query could also select the
-                // webhook receivers subscribed to this event, but I am not totally sure
-                // what the CRDB semantics of joining on another table in a `SELECT ... FOR
-                // UPDATE SKIP LOCKED` query are. We don't want to inadvertantly also lock
-                // the webhook receivers...
+                // webhook receivers subscribed to this event, but this requires
+                // a `FOR UPDATE OF webhook_event` clause to indicate that we only wish
+                // to lock the `webhook_event` row and not the receiver.
+                // Unfortunately, I don't believe Diesel supports this at present.
                 let Some(event) = event_dsl::webhook_event
                     .filter(event_dsl::time_dispatched.is_null())
                     .order_by(event_dsl::time_created.asc())
