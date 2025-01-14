@@ -18,8 +18,7 @@ use nexus_types::{
     inventory::Collection,
 };
 use omicron_common::{address::IpRange, api::external::Generation};
-use omicron_uuid_kinds::{CollectionUuid, SledUuid};
-use uuid::Uuid;
+use omicron_uuid_kinds::{BlueprintUuid, CollectionUuid, SledUuid};
 
 use crate::{
     errors::{DuplicateError, KeyError, NonEmptySystemError},
@@ -76,7 +75,7 @@ pub struct SimSystem {
     /// Blueprints created by the user.
     ///
     /// Stored with `Arc` to allow cheap cloning.
-    blueprints: IndexMap<Uuid, Arc<Blueprint>>,
+    blueprints: IndexMap<BlueprintUuid, Arc<Blueprint>>,
 
     /// Internal DNS configurations.
     ///
@@ -129,7 +128,10 @@ impl SimSystem {
         self.collections.values().map(|c| &**c)
     }
 
-    pub fn get_blueprint(&self, id: Uuid) -> Result<&Blueprint, KeyError> {
+    pub fn get_blueprint(
+        &self,
+        id: BlueprintUuid,
+    ) -> Result<&Blueprint, KeyError> {
         match self.blueprints.get(&id) {
             Some(b) => Ok(&**b),
             None => Err(KeyError::blueprint(id)),
@@ -226,7 +228,10 @@ impl SimSystemBuilder {
     }
 
     #[inline]
-    pub fn get_blueprint(&self, id: Uuid) -> Result<&Blueprint, KeyError> {
+    pub fn get_blueprint(
+        &self,
+        id: BlueprintUuid,
+    ) -> Result<&Blueprint, KeyError> {
         self.inner.system.get_blueprint(id)
     }
 
@@ -384,13 +389,13 @@ impl SimSystemBuilder {
 pub enum SimSystemLogEntry {
     LoadExample {
         collection_id: CollectionUuid,
-        blueprint_id: Uuid,
+        blueprint_id: BlueprintUuid,
         internal_dns_version: Generation,
         external_dns_version: Generation,
     },
     LoadSerialized(LoadSerializedSystemResult),
     AddCollection(CollectionUuid),
-    AddBlueprint(Uuid),
+    AddBlueprint(BlueprintUuid),
     AddInternalDns(Generation),
     AddExternalDns(Generation),
     Wipe,
@@ -413,7 +418,7 @@ pub struct LoadSerializedSystemResult {
     pub collection_ids: Vec<CollectionUuid>,
 
     /// The blueprint IDs successfully loaded.
-    pub blueprint_ids: Vec<Uuid>,
+    pub blueprint_ids: Vec<BlueprintUuid>,
 
     /// The service IP pool ranges.
     pub service_ip_pool_ranges: Vec<IpRange>,

@@ -33,6 +33,7 @@ use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
 use omicron_common::policy::NEXUS_REDUNDANCY;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -47,7 +48,6 @@ use std::io::BufRead;
 use std::io::IsTerminal;
 use swrite::{swriteln, SWrite};
 use tabled::Tabled;
-use uuid::Uuid;
 
 mod log_capture;
 
@@ -403,7 +403,7 @@ struct InventoryArgs {
 #[derive(Debug, Args)]
 struct BlueprintPlanArgs {
     /// id of the blueprint on which this one will be based
-    parent_blueprint_id: Uuid,
+    parent_blueprint_id: BlueprintUuid,
     /// id of the inventory collection to use in planning
     ///
     /// Must be provided unless there is only one collection in the loaded
@@ -414,7 +414,7 @@ struct BlueprintPlanArgs {
 #[derive(Debug, Args)]
 struct BlueprintEditArgs {
     /// id of the blueprint to edit
-    blueprint_id: Uuid,
+    blueprint_id: BlueprintUuid,
     /// "creator" field for the new blueprint
     #[arg(long)]
     creator: Option<String>,
@@ -441,7 +441,7 @@ enum BlueprintEditCommands {
 #[derive(Debug, Args)]
 struct BlueprintArgs {
     /// id of the blueprint
-    blueprint_id: Uuid,
+    blueprint_id: BlueprintUuid,
 }
 
 #[derive(Debug, Args)]
@@ -451,7 +451,7 @@ struct BlueprintDiffDnsArgs {
     /// DNS version to diff against
     dns_version: u32,
     /// id of the blueprint
-    blueprint_id: Uuid,
+    blueprint_id: BlueprintUuid,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -465,13 +465,13 @@ struct BlueprintDiffInventoryArgs {
     /// id of the inventory collection
     collection_id: CollectionUuid,
     /// id of the blueprint
-    blueprint_id: Uuid,
+    blueprint_id: BlueprintUuid,
 }
 
 #[derive(Debug, Args)]
 struct BlueprintSaveArgs {
     /// id of the blueprint
-    blueprint_id: Uuid,
+    blueprint_id: BlueprintUuid,
     /// output file
     filename: Utf8PathBuf,
 }
@@ -479,9 +479,9 @@ struct BlueprintSaveArgs {
 #[derive(Debug, Args)]
 struct BlueprintDiffArgs {
     /// id of the first blueprint
-    blueprint1_id: Uuid,
+    blueprint1_id: BlueprintUuid,
     /// id of the second blueprint
-    blueprint2_id: Uuid,
+    blueprint2_id: BlueprintUuid,
 }
 
 #[derive(Debug, Subcommand)]
@@ -728,7 +728,7 @@ fn cmd_blueprint_list(
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct BlueprintRow {
-        id: Uuid,
+        id: BlueprintUuid,
         parent: Cow<'static, str>,
         time_created: String,
     }

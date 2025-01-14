@@ -108,6 +108,7 @@ use omicron_common::disk::{
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -135,7 +136,6 @@ use std::net::SocketAddrV6;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::watch;
-use uuid::Uuid;
 
 /// For tracking the current RSS step and sending notifications about it.
 pub struct RssProgress {
@@ -1604,12 +1604,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
             // value, we will need to revisit storing this in the serialized
             // RSS plan.
             generation: DeployStepVersion::V5_EVERYTHING,
-            zones: sled_config
-                .zones
-                .iter()
-                .cloned()
-                .map(|z| (z.id, z))
-                .collect(),
+            zones: sled_config.zones.iter().cloned().collect(),
         };
 
         blueprint_zones.insert(*sled_id, zones_config);
@@ -1617,7 +1612,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
     }
 
     Ok(Blueprint {
-        id: Uuid::new_v4(),
+        id: BlueprintUuid::new_v4(),
         blueprint_zones,
         blueprint_disks,
         blueprint_datasets,

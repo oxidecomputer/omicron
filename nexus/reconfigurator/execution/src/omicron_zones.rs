@@ -359,6 +359,7 @@ mod test {
     };
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
+    use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
@@ -372,7 +373,7 @@ mod test {
     fn create_blueprint(
         blueprint_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
     ) -> (BlueprintTarget, Blueprint) {
-        let id = Uuid::new_v4();
+        let id = BlueprintUuid::new_v4();
         (
             BlueprintTarget {
                 target_id: id,
@@ -456,7 +457,6 @@ mod test {
                     ),
                 }]
                 .into_iter()
-                .map(|z| (z.id, z))
                 .collect(),
             }
         }
@@ -546,22 +546,18 @@ mod test {
             zones: &mut BlueprintZonesConfig,
             disposition: BlueprintZoneDisposition,
         ) {
-            let zone_id = OmicronZoneUuid::new_v4();
-            zones.zones.insert(
-                zone_id,
-                BlueprintZoneConfig {
-                    disposition,
-                    id: zone_id,
-                    filesystem_pool: Some(ZpoolName::new_external(
-                        ZpoolUuid::new_v4(),
-                    )),
-                    zone_type: BlueprintZoneType::InternalNtp(
-                        blueprint_zone_type::InternalNtp {
-                            address: "[::1]:0".parse().unwrap(),
-                        },
-                    ),
-                },
-            );
+            zones.zones.insert(BlueprintZoneConfig {
+                disposition,
+                id: OmicronZoneUuid::new_v4(),
+                filesystem_pool: Some(ZpoolName::new_external(
+                    ZpoolUuid::new_v4(),
+                )),
+                zone_type: BlueprintZoneType::InternalNtp(
+                    blueprint_zone_type::InternalNtp {
+                        address: "[::1]:0".parse().unwrap(),
+                    },
+                ),
+            });
         }
 
         // Both in-service and quiesced zones should be deployed.

@@ -364,18 +364,19 @@ mod test {
     use omicron_common::policy::OXIMETER_REDUNDANCY;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
+    use std::mem;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
     use std::sync::Arc;
-    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -637,8 +638,8 @@ mod test {
                     zones: sa.omicron_zones
                         .zones
                         .into_iter()
-                        .map(|config| -> (OmicronZoneUuid, BlueprintZoneConfig) {
-                           (config.id,  deprecated_omicron_zone_config_to_blueprint_zone_config(
+                        .map(|config| -> BlueprintZoneConfig {
+                           deprecated_omicron_zone_config_to_blueprint_zone_config(
                                 config,
                                 BlueprintZoneDisposition::InService,
                                 // We don't get external IP IDs in inventory
@@ -646,7 +647,7 @@ mod test {
                                 // zone that needs one here. This is gross.
                                 Some(ExternalIpUuid::new_v4()),
                             )
-                            .expect("failed to convert zone config"))
+                            .expect("failed to convert zone config")
                         })
                         .collect(),
                 },
@@ -657,7 +658,7 @@ mod test {
         let dns_empty = dns_config_empty();
         let initial_dns_generation = dns_empty.generation;
         let mut blueprint = Blueprint {
-            id: Uuid::new_v4(),
+            id: BlueprintUuid::new_v4(),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
             blueprint_datasets: BTreeMap::new(),
@@ -679,7 +680,6 @@ mod test {
         let out_of_service_id = OmicronZoneUuid::new_v4();
         let out_of_service_addr = Ipv6Addr::LOCALHOST;
         blueprint.blueprint_zones.values_mut().next().unwrap().zones.insert(
-            out_of_service_id,
             BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::Quiesced,
                 id: out_of_service_id,
@@ -1030,12 +1030,13 @@ mod test {
         // back for that sled.
         let (_, bp_zones_config) =
             blueprint.blueprint_zones.iter_mut().next().unwrap();
-        let nexus_zone = bp_zones_config
+        let mut nexus_zone = bp_zones_config
             .zones
-            .values_mut()
+            .iter_mut()
             .find(|z| z.zone_type.is_nexus())
             .unwrap();
         nexus_zone.disposition = BlueprintZoneDisposition::Quiesced;
+        mem::drop(nexus_zone);
 
         // Retrieve the DNS config based on the modified blueprint
         let external_dns_zone = blueprint_external_dns_config(

@@ -170,8 +170,7 @@ impl DataStore {
         let size = size.to_bytes();
 
         // allocate enough extents to fit all the disk blocks, rounding up.
-        let extent_count = size / Self::EXTENT_SIZE
-            + (size % Self::EXTENT_SIZE).div_ceil(Self::EXTENT_SIZE);
+        let extent_count = size.div_ceil(Self::EXTENT_SIZE);
 
         (blocks_per_extent, extent_count)
     }

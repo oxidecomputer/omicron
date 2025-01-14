@@ -212,15 +212,11 @@ impl BpDiffZones {
                 let before_by_id: BTreeMap<_, BlueprintZoneConfig> =
                     before_zones
                         .zones
-                        .into_values()
+                        .into_iter()
                         .map(|z| (z.id(), z))
                         .collect();
                 let mut after_by_id: BTreeMap<_, BlueprintZoneConfig> =
-                    after_zones
-                        .zones
-                        .into_values()
-                        .map(|z| (z.id, z))
-                        .collect();
+                    after_zones.zones.into_iter().map(|z| (z.id, z)).collect();
 
                 for (zone_id, zone_before) in before_by_id {
                     if let Some(zone_after) = after_by_id.remove(&zone_id) {
@@ -307,7 +303,7 @@ impl BpDiffZones {
             } else {
                 // No `after_zones` for this `sled_id`, so `before_zones` are removed
                 assert!(removed.is_empty());
-                for (_, zone) in before_zones.zones {
+                for zone in before_zones.zones {
                     removed.push(zone);
                 }
 
@@ -334,7 +330,7 @@ impl BpDiffZones {
                     BpDiffZoneDetails {
                         generation_before: None,
                         generation_after: Some(after_zones.generation),
-                        zones: after_zones.zones.into_values().collect(),
+                        zones: after_zones.zones.into_iter().collect(),
                     },
                 );
             }
