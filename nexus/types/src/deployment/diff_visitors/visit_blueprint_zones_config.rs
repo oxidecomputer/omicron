@@ -169,15 +169,18 @@ pub fn visit_zone_edit<'e, V>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::deployment::blueprint_zone_type;
     use diffus::Diffable;
+    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
+    use omicron_uuid_kinds::{OmicronZoneUuid, ZpoolUuid};
     use std::collections::BTreeSet;
-    use test_strategy::proptest;
 
     struct TestVisitor<'a> {
         before: &'a BlueprintZonesConfig,
         after: &'a BlueprintZonesConfig,
         total_inserts: usize,
         total_removes: usize,
+        change_callbacks_fired: usize,
     }
 
     impl<'a> TestVisitor<'a> {
@@ -185,7 +188,13 @@ mod tests {
             before: &'a BlueprintZonesConfig,
             after: &'a BlueprintZonesConfig,
         ) -> Self {
-            TestVisitor { before, after, total_inserts: 0, total_removes: 0 }
+            TestVisitor {
+                before,
+                after,
+                total_inserts: 0,
+                total_removes: 0,
+                change_callbacks_fired: 0,
+            }
         }
     }
 
@@ -201,6 +210,8 @@ mod tests {
 
             // We aren't operating on a particular zone
             assert!(ctx.zone_id.is_none());
+
+            self.change_callbacks_fired += 1;
         }
 
         fn visit_zones_insert(
@@ -220,6 +231,7 @@ mod tests {
             assert_eq!(ctx.zone_id, Some(node.id));
 
             self.total_inserts += 1;
+            self.change_callbacks_fired += 1;
         }
 
         fn visit_zones_remove(
@@ -239,6 +251,7 @@ mod tests {
             assert_eq!(ctx.zone_id, Some(node.id));
 
             self.total_removes += 1;
+            self.change_callbacks_fired += 1;
         }
 
         fn visit_zone_change(
@@ -260,6 +273,7 @@ mod tests {
                 self.after.zones.get(&ctx.zone_id.unwrap()),
                 Some(change.after)
             );
+            self.change_callbacks_fired += 1;
         }
 
         fn visit_zone_disposition_change(
@@ -284,6 +298,7 @@ mod tests {
                     .disposition,
                 *change.after
             );
+            self.change_callbacks_fired += 1;
         }
 
         fn visit_zone_filesystem_pool_change(
@@ -308,6 +323,7 @@ mod tests {
                     .filesystem_pool,
                 *change.after
             );
+            self.change_callbacks_fired += 1;
         }
 
         fn visit_zone_zone_type_change(
@@ -324,21 +340,145 @@ mod tests {
                 self.after.zones.get(&ctx.zone_id.unwrap()).unwrap().zone_type,
                 *change.after
             );
+            self.change_callbacks_fired += 1;
         }
     }
 
-    /*
-    #[proptest]
-    fn diff(before: BlueprintZonesConfig, after: BlueprintZonesConfig) {
+    #[test]
+    fn diff_same_blueprint() {
+        let before = BlueprintZonesConfig {
+            generation: Generation::new(),
+            zones: [BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id: OmicronZoneUuid::new_v4(),
+                filesystem_pool: None,
+                zone_type: BlueprintZoneType::Crucible(
+                    blueprint_zone_type::Crucible {
+                        address: "[2001:db8::1]:8080".parse().unwrap(),
+                        dataset: OmicronZoneDataset {
+                            pool_name: ZpoolName::new_external(
+                                ZpoolUuid::new_v4(),
+                            ),
+                        },
+                    },
+                ),
+            }]
+            .into_iter()
+            .map(|z| (z.id, z))
+            .collect(),
+        };
+        let after = before.clone();
+
         let mut ctx = BpVisitorContext::default();
         let mut visitor = TestVisitor::new(&before, &after);
         let diff = before.diff(&after);
         visitor.visit_root(&mut ctx, diff);
 
-        assert_eq!(
-            visitor.total_inserts.wrapping_sub(visitor.total_removes),
-            after.zones.len().wrapping_sub(before.zones.len())
-        );
+        // No change callbacks should fire
+        assert_eq!(0, visitor.change_callbacks_fired);
     }
-    */
+
+    #[test]
+    fn diff_field_changes() {
+        let before = BlueprintZonesConfig {
+            generation: Generation::new(),
+            zones: [BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id: OmicronZoneUuid::new_v4(),
+                filesystem_pool: None,
+                zone_type: BlueprintZoneType::Crucible(
+                    blueprint_zone_type::Crucible {
+                        address: "[2001:db8::1]:8080".parse().unwrap(),
+                        dataset: OmicronZoneDataset {
+                            pool_name: ZpoolName::new_external(
+                                ZpoolUuid::new_v4(),
+                            ),
+                        },
+                    },
+                ),
+            }]
+            .into_iter()
+            .map(|z| (z.id, z))
+            .collect(),
+        };
+        let mut after = before.clone();
+        after.generation = after.generation.next();
+        let zone = after.zones.iter_mut().next().unwrap().1;
+        zone.disposition = BlueprintZoneDisposition::Expunged;
+        zone.filesystem_pool =
+            Some(ZpoolName::new_external(ZpoolUuid::new_v4()));
+        zone.zone_type =
+            BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
+                address: "[2001:db8::2]:8080".parse().unwrap(),
+                dataset: OmicronZoneDataset {
+                    pool_name: ZpoolName::new_external(ZpoolUuid::new_v4()),
+                },
+            });
+
+        let mut ctx = BpVisitorContext::default();
+        let mut visitor = TestVisitor::new(&before, &after);
+        let diff = before.diff(&after);
+        visitor.visit_root(&mut ctx, diff);
+
+        // A bunch of callbacks fire due to our diffs
+        assert_eq!(5, visitor.change_callbacks_fired);
+    }
+
+    #[test]
+    fn test_insert_delete_zones() {
+        let before = BlueprintZonesConfig {
+            generation: Generation::new(),
+            zones: [BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id: OmicronZoneUuid::new_v4(),
+                filesystem_pool: None,
+                zone_type: BlueprintZoneType::Crucible(
+                    blueprint_zone_type::Crucible {
+                        address: "[2001:db8::1]:8080".parse().unwrap(),
+                        dataset: OmicronZoneDataset {
+                            pool_name: ZpoolName::new_external(
+                                ZpoolUuid::new_v4(),
+                            ),
+                        },
+                    },
+                ),
+            }]
+            .into_iter()
+            .map(|z| (z.id, z))
+            .collect(),
+        };
+
+        // Using a different `id` means this zone will count as an inserted one,
+        // and the original zone will be counted as removed.
+
+        let after = BlueprintZonesConfig {
+            generation: Generation::new(),
+            zones: [BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id: OmicronZoneUuid::new_v4(),
+                filesystem_pool: None,
+                zone_type: BlueprintZoneType::Crucible(
+                    blueprint_zone_type::Crucible {
+                        address: "[2001:db8::1]:8080".parse().unwrap(),
+                        dataset: OmicronZoneDataset {
+                            pool_name: ZpoolName::new_external(
+                                ZpoolUuid::new_v4(),
+                            ),
+                        },
+                    },
+                ),
+            }]
+            .into_iter()
+            .map(|z| (z.id, z))
+            .collect(),
+        };
+
+        let mut ctx = BpVisitorContext::default();
+        let mut visitor = TestVisitor::new(&before, &after);
+        let diff = before.diff(&after);
+        visitor.visit_root(&mut ctx, diff);
+
+        assert_eq!(visitor.total_inserts, 1);
+        assert_eq!(visitor.total_removes, 1);
+    }
 }
