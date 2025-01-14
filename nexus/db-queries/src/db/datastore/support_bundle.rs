@@ -27,7 +27,6 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
@@ -280,7 +279,7 @@ impl DataStore {
             &conn,
             "support_bundle_fail_expunged",
             opctx,
-            BlueprintUuid::from_untyped_uuid(blueprint.id),
+            blueprint.id,
             |conn| {
                 let invalid_nexus_zones = invalid_nexus_zones.clone();
                 let valid_nexus_zones = valid_nexus_zones.clone();
@@ -336,15 +335,6 @@ impl DataStore {
                             .execute_async(conn)
                             .await?;
 
-                    let Some(arbitrary_valid_nexus) =
-                        valid_nexus_zones.get(0).cloned()
-                    else {
-                        return Err(external::Error::internal_error(
-                            "No valid Nexuses, we cannot re-assign this support bundle",
-                        )
-                        .into());
-                    };
-
                     // Find all bundles on nexuses that no longer exist.
                     let bundles_with_bad_nexuses = dsl::support_bundle
                         .filter(dsl::assigned_nexus.eq_any(invalid_nexus_zones))
@@ -363,7 +353,7 @@ impl DataStore {
                             }
                         }).collect::<Vec<_>>();
 
-                    // Mark these support bundles as failing, and assign then
+                    // Mark these support bundles as failing, and assign them
                     // to a nexus that should still exist.
                     //
                     // This should lead to their storage being freed, if it
@@ -378,18 +368,41 @@ impl DataStore {
                         ))
                         .execute_async(conn)
                         .await?;
-                    let bundles_reassigned = diesel::update(dsl::support_bundle)
+
+                    let mut report = SupportBundleExpungementReport {
+                        bundles_failed_missing_datasets,
+                        bundles_deleted_missing_datasets,
+                        bundles_failing_missing_nexus,
+                        bundles_reassigned: 0,
+                    };
+
+                    // Exit a little early if there are no bundles to re-assign.
+                    //
+                    // This is a tiny optimization, but really, it means that
+                    // tests without Nexuses in their blueprints can succeed if
+                    // they also have no support bundles. In practice, this is
+                    // rare, but in our existing test framework, it's fairly
+                    // common.
+                    if bundles_to_reassign.is_empty() {
+                        return Ok(report);
+                    }
+
+                    let Some(arbitrary_valid_nexus) =
+                        valid_nexus_zones.get(0).cloned()
+                    else {
+                        return Err(external::Error::internal_error(
+                            "No valid Nexuses, we cannot re-assign this support bundle",
+                        )
+                        .into());
+                    };
+
+                    report.bundles_reassigned = diesel::update(dsl::support_bundle)
                         .filter(dsl::id.eq_any(bundles_to_reassign))
                         .set(dsl::assigned_nexus.eq(arbitrary_valid_nexus))
                         .execute_async(conn)
                         .await?;
 
-                    Ok(SupportBundleExpungementReport {
-                        bundles_failed_missing_datasets,
-                        bundles_deleted_missing_datasets,
-                        bundles_failing_missing_nexus,
-                        bundles_reassigned,
-                    })
+                    Ok(report)
                 }
                 .boxed()
             },
@@ -483,6 +496,7 @@ mod test {
     use nexus_types::deployment::BlueprintZoneType;
     use omicron_common::api::internal::shared::DatasetKind::Debug as DebugDatasetKind;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
@@ -1035,7 +1049,7 @@ mod test {
         // Expunge the bundle's dataset (manually)
         let bp2 = {
             let mut bp2 = bp1.clone();
-            bp2.id = Uuid::new_v4();
+            bp2.id = BlueprintUuid::new_v4();
             bp2.parent_blueprint_id = Some(bp1.id);
             expunge_dataset_for_bundle(&mut bp2, &bundle);
             bp2
@@ -1152,7 +1166,7 @@ mod test {
         // Expunge the bundle's dataset (manually)
         let bp2 = {
             let mut bp2 = bp1.clone();
-            bp2.id = Uuid::new_v4();
+            bp2.id = BlueprintUuid::new_v4();
             bp2.parent_blueprint_id = Some(bp1.id);
             expunge_dataset_for_bundle(&mut bp2, &bundle);
             bp2
@@ -1241,7 +1255,7 @@ mod test {
         // is a prerequisite for the bundle not later being re-assigned.
         let bp2 = {
             let mut bp2 = bp1.clone();
-            bp2.id = Uuid::new_v4();
+            bp2.id = BlueprintUuid::new_v4();
             bp2.parent_blueprint_id = Some(bp1.id);
             expunge_dataset_for_bundle(&mut bp2, &bundle);
             bp2
@@ -1273,7 +1287,7 @@ mod test {
         // Expunge the bundle's Nexus
         let bp3 = {
             let mut bp3 = bp2.clone();
-            bp3.id = Uuid::new_v4();
+            bp3.id = BlueprintUuid::new_v4();
             bp3.parent_blueprint_id = Some(bp2.id);
             expunge_nexus_for_bundle(&mut bp3, &bundle);
             bp3
@@ -1375,7 +1389,7 @@ mod test {
         // Expunge the bundle's Nexus (manually)
         let bp2 = {
             let mut bp2 = bp1.clone();
-            bp2.id = Uuid::new_v4();
+            bp2.id = BlueprintUuid::new_v4();
             bp2.parent_blueprint_id = Some(bp1.id);
             expunge_nexus_for_bundle(&mut bp2, &bundle);
             bp2

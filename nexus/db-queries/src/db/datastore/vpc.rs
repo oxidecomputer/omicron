@@ -2777,6 +2777,7 @@ mod tests {
     use omicron_common::api::external;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
     use omicron_uuid_kinds::SledUuid;
@@ -3162,7 +3163,7 @@ mod tests {
         // the target.
         let bp2 = {
             let mut bp2 = bp1.clone();
-            bp2.id = Uuid::new_v4();
+            bp2.id = BlueprintUuid::new_v4();
             bp2.parent_blueprint_id = Some(bp1.id);
             let sled2_zones = bp2
                 .blueprint_zones
@@ -3269,7 +3270,7 @@ mod tests {
         // (But other services are still running.)
         let bp4 = {
             let mut bp4 = bp3.clone();
-            bp4.id = Uuid::new_v4();
+            bp4.id = BlueprintUuid::new_v4();
             bp4.parent_blueprint_id = Some(bp3.id);
 
             // Sled index 2's Nexus is quiesced (should be included).

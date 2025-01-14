@@ -33,6 +33,7 @@ use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_common::disk::SharedDatasetConfig;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -49,7 +50,6 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use strum::EnumIter;
 use strum::IntoEnumIterator;
-use uuid::Uuid;
 
 mod blueprint_diff;
 mod blueprint_display;
@@ -143,7 +143,7 @@ pub use blueprint_diff::BlueprintDiff;
 )]
 pub struct Blueprint {
     /// unique identifier for this blueprint
-    pub id: Uuid,
+    pub id: BlueprintUuid,
 
     /// A map of sled id -> desired state of the sled.
     ///
@@ -167,7 +167,7 @@ pub struct Blueprint {
     pub blueprint_datasets: BTreeMap<SledUuid, BlueprintDatasetsConfig>,
 
     /// which blueprint this blueprint is based on
-    pub parent_blueprint_id: Option<Uuid>,
+    pub parent_blueprint_id: Option<BlueprintUuid>,
 
     /// internal DNS version when this blueprint was created
     // See blueprint execution for more on this.
@@ -1077,10 +1077,10 @@ impl BlueprintDatasetConfig {
 #[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Serialize)]
 pub struct BlueprintMetadata {
     /// unique identifier for this blueprint
-    pub id: Uuid,
+    pub id: BlueprintUuid,
 
     /// which blueprint this blueprint is based on
-    pub parent_blueprint_id: Option<Uuid>,
+    pub parent_blueprint_id: Option<BlueprintUuid>,
     /// internal DNS version when this blueprint was created
     pub internal_dns_version: Generation,
     /// external DNS version when this blueprint was created
@@ -1112,7 +1112,7 @@ impl BlueprintMetadata {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct BlueprintTarget {
     /// id of the blueprint that the system is trying to make real
-    pub target_id: Uuid,
+    pub target_id: BlueprintUuid,
     /// policy: should the system actively work towards this blueprint
     ///
     /// This should generally be left enabled.
@@ -1124,7 +1124,7 @@ pub struct BlueprintTarget {
 /// Specifies what blueprint, if any, the system should be working toward
 #[derive(Deserialize, JsonSchema)]
 pub struct BlueprintTargetSet {
-    pub target_id: Uuid,
+    pub target_id: BlueprintUuid,
     pub enabled: bool,
 }
 

@@ -20,6 +20,7 @@ internal-dns-types.workspace = true
 nexus-client.workspace = true
 omicron-sled-agent.workspace = true
 omicron-test-utils.workspace = true
+omicron-uuid-kinds.workspace = true
 oxide-client.workspace = true
 rand.workspace = true
 reqwest = { workspace = true, features = ["cookies"] }
