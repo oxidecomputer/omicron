@@ -52,6 +52,7 @@ use nexus_db_model::BpSledOmicronPhysicalDisks;
 use nexus_db_model::BpSledOmicronZones;
 use nexus_db_model::BpSledState;
 use nexus_db_model::BpTarget;
+use nexus_types::deployment::id_map::IdMap;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintMetadata;
@@ -261,7 +262,7 @@ impl DataStore {
             .blueprint_zones
             .iter()
             .flat_map(|(sled_id, zones_config)| {
-                zones_config.zones.values().map(move |zone| {
+                zones_config.zones.iter().map(move |zone| {
                     BpOmicronZone::new(blueprint_id, *sled_id, zone)
                         .map_err(|e| Error::internal_error(&format!("{:#}", e)))
                 })
@@ -271,7 +272,7 @@ impl DataStore {
             .blueprint_zones
             .values()
             .flat_map(|zones_config| {
-                zones_config.zones.values().filter_map(|zone| {
+                zones_config.zones.iter().filter_map(|zone| {
                     BpOmicronZoneNic::new(blueprint_id, zone)
                         .with_context(|| format!("zone {}", zone.id))
                         .map_err(|e| Error::internal_error(&format!("{:#}", e)))
@@ -583,7 +584,7 @@ impl DataStore {
                         s.sled_id.into(),
                         BlueprintZonesConfig {
                             generation: *s.generation,
-                            zones: BTreeMap::new(),
+                            zones: IdMap::new(),
                         },
                     );
                     bail_unless!(
@@ -790,7 +791,7 @@ impl DataStore {
                                 e.to_string()
                             ))
                         })?;
-                    sled_zones.zones.insert(zone.id, zone);
+                    sled_zones.zones.insert(zone);
                 }
             }
         }
@@ -2862,7 +2863,6 @@ mod tests {
                     ),
                 }]
                 .into_iter()
-                .map(|z| (z.id, z))
                 .collect(),
             },
         );
