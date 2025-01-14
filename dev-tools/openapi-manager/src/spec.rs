@@ -10,7 +10,6 @@ use atomicwrites::AtomicFile;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::{ApiDescription, ApiDescriptionBuildErrors, StubContext};
 use fs_err as fs;
-use itertools::Either;
 use openapi_manager_types::{ValidationBackend, ValidationContext};
 use openapiv3::OpenAPI;
 

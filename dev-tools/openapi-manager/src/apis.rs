@@ -2,11 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use anyhow::bail;
 use dropshot::{ApiDescription, ApiDescriptionBuildErrors, StubContext};
 use itertools::Either;
 use openapi_manager_types::ValidationContext;
 use openapiv3::OpenAPI;
-use std::fmt;
+use std::{collections::BTreeMap, fmt};
 
 /// Describes an API managed by the openapi-manager crate and CLI tool
 ///
@@ -64,7 +65,7 @@ pub struct ManagedApi {
     /// The API-specific part of the filename that's used for API descriptions
     ///
     /// This string is sometimes used as an identifier for developers.
-    ident: &'static str,
+    ident: ApiIdent,
 
     /// how this API is versioned
     versions: Versions,
@@ -95,7 +96,7 @@ pub struct ManagedApi {
 impl From<ManagedApiConfig> for ManagedApi {
     fn from(value: ManagedApiConfig) -> Self {
         ManagedApi {
-            ident: value.ident,
+            ident: ApiIdent::from(value.ident.to_owned()),
             versions: value.versions,
             title: value.title,
             description: value.description,
@@ -105,6 +106,42 @@ impl From<ManagedApiConfig> for ManagedApi {
         }
     }
 }
+
+/// Describes the Rust-defined configuration for all of the APIs managed by this
+/// tool
+pub struct ManagedApis {
+    // XXX-dap use IdMap?
+    apis: BTreeMap<ApiIdent, ManagedApi>,
+}
+
+impl ManagedApis {
+    fn new(api_list: Vec<ManagedApi>) -> anyhow::Result<ManagedApis> {
+        let mut apis = BTreeMap::new();
+        for api in api_list {
+            if let Some(old) = apis.insert(api.ident.clone(), api) {
+                bail!("API is defined twice: {:?}", &old.ident);
+            }
+        }
+
+        Ok(ManagedApis { apis })
+    }
+}
+
+/// Newtype for API identifiers
+
+#[derive(Clone, Ord, PartialOrd, Eq, PartialEq)]
+pub struct ApiIdent(String);
+NewtypeDebug! { () pub struct ApiIdent(String); }
+NewtypeDeref! { () pub struct ApiIdent(String); }
+NewtypeDerefMut! { () pub struct ApiIdent(String); }
+NewtypeDisplay! { () pub struct ApiIdent(String); }
+NewtypeFrom! { () pub struct ApiIdent(String); }
+// XXX-dap do I need this
+// impl Borrow<str> for ApiIdent {
+//     fn borrow(&self) -> &str {
+//         self.0.as_str()
+//     }
+// }
 
 /// Whether an API is exposed externally from the Oxide system
 ///

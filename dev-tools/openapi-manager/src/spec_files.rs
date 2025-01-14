@@ -7,22 +7,7 @@
 use camino::Utf8Path;
 use openapiv3::OpenAPI;
 use std::collections::BTreeMap;
-
-/// Newtype for API identifiers
-
-#[derive(Clone, Ord, PartialOrd, Eq, PartialEq)]
-pub struct ApiIdent(String);
-NewtypeDebug! { () pub struct ApiIdent(String); }
-NewtypeDeref! { () pub struct ApiIdent(String); }
-NewtypeDerefMut! { () pub struct ApiIdent(String); }
-NewtypeDisplay! { () pub struct ApiIdent(String); }
-NewtypeFrom! { () pub struct ApiIdent(String); }
-// XXX-dap do I need this
-// impl Borrow<str> for ApiIdent {
-//     fn borrow(&self) -> &str {
-//         self.0.as_str()
-//     }
-// }
+use crate::apis::{ApiIdent, ManagedApis};
 
 /// Container for all the OpenAPI spec files found
 ///
@@ -35,6 +20,7 @@ struct AllApiSpecFiles {
 impl AllApiSpecFiles {
     pub fn load_from_directory(
         dir: &Utf8Path,
+        apis: &ManagedApis,
     ) -> anyhow::Result<AllApiSpecFiles> {
         // XXX-dap
         // - walk the directory tree, which is expected to look in a particular
