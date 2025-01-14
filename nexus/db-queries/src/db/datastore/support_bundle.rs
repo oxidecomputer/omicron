@@ -224,22 +224,7 @@ impl DataStore {
     ) -> Result<SupportBundleExpungementReport, Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
-        // For this blueprint: The set of all expunged Nexus zones
-        let invalid_nexus_zones = blueprint
-            .all_omicron_zones(
-                nexus_types::deployment::BlueprintZoneFilter::Expunged,
-            )
-            .filter_map(|(_sled, zone)| {
-                if matches!(
-                    zone.zone_type,
-                    nexus_types::deployment::BlueprintZoneType::Nexus(_)
-                ) {
-                    Some(zone.id.into_untyped_uuid())
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<Uuid>>();
+        // For this blueprint: The set of all in-service Nexus zones.
         let valid_nexus_zones = blueprint
             .all_omicron_zones(
                 nexus_types::deployment::BlueprintZoneFilter::ShouldBeRunning,
@@ -256,10 +241,10 @@ impl DataStore {
             })
             .collect::<Vec<Uuid>>();
 
-        // For this blueprint: The set of expunged debug datasets
-        let invalid_datasets = blueprint
+        // For this blueprint: The set of in-service debug datasets
+        let valid_datasets = blueprint
             .all_omicron_datasets(
-                nexus_types::deployment::BlueprintDatasetFilter::Expunged,
+                nexus_types::deployment::BlueprintDatasetFilter::InService,
             )
             .filter_map(|(_sled_id, dataset_config)| {
                 if matches!(
@@ -281,15 +266,14 @@ impl DataStore {
             opctx,
             blueprint.id,
             |conn| {
-                let invalid_nexus_zones = invalid_nexus_zones.clone();
                 let valid_nexus_zones = valid_nexus_zones.clone();
-                let invalid_datasets = invalid_datasets.clone();
+                let valid_datasets = valid_datasets.clone();
                 async move {
                     use db::schema::support_bundle::dsl;
 
                     // Find all bundles without backing storage.
                     let bundles_with_bad_datasets = dsl::support_bundle
-                        .filter(dsl::dataset_id.eq_any(invalid_datasets))
+                        .filter(dsl::dataset_id.ne_all(valid_datasets))
                         .select(SupportBundle::as_select())
                         .load_async(conn)
                         .await?;
@@ -337,7 +321,7 @@ impl DataStore {
 
                     // Find all bundles on nexuses that no longer exist.
                     let bundles_with_bad_nexuses = dsl::support_bundle
-                        .filter(dsl::assigned_nexus.eq_any(invalid_nexus_zones))
+                        .filter(dsl::assigned_nexus.ne_all(valid_nexus_zones))
                         .select(SupportBundle::as_select())
                         .load_async(conn)
                         .await?;
@@ -969,6 +953,15 @@ mod test {
         }
     }
 
+    fn delete_dataset_for_bundle(bp: &mut Blueprint, bundle: &SupportBundle) {
+        for datasets in bp.blueprint_datasets.values_mut() {
+            let bundle_dataset_id: DatasetUuid = bundle.dataset_id.into();
+            if datasets.datasets.remove(&bundle_dataset_id).is_some() {
+                datasets.generation = datasets.generation.next();
+            }
+        }
+    }
+
     fn expunge_nexus_for_bundle(bp: &mut Blueprint, bundle: &SupportBundle) {
         for zones in bp.blueprint_zones.values_mut() {
             for (_, zone) in &mut zones.zones {
@@ -1196,6 +1189,116 @@ mod test {
             .await
             .expect("Should be able to query when no bundles exist");
         assert!(observed_bundles.is_empty());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // This test is identical to "test_bundle_failed_from_expunged_dataset", but
+    // it fully deletes the dataset rather than marking it expunged in the
+    // blueprint.
+    #[tokio::test]
+    async fn test_bundle_failed_from_pruned_dataset() {
+        static TEST_NAME: &str = "test_bundle_failed_from_pruned_dataset";
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+        let (_example, mut bp1) = ExampleSystemBuilder::new_with_rng(
+            &logctx.log,
+            rng.next_system_rng(),
+        )
+        .build();
+
+        // Weirdly, the "ExampleSystemBuilder" blueprint has a parent blueprint,
+        // but which isn't exposed through the API. Since we're only able to see
+        // the blueprint it emits, that means we can't actually make it the
+        // target because "the parent blueprint is not the current target".
+        //
+        // Instead of dealing with that, we lie: claim this is the primordial
+        // blueprint, with no parent.
+        //
+        // Regardless, make this starter blueprint our target.
+        bp1.parent_blueprint_id = None;
+        bp_insert_and_make_target(&opctx, &datastore, &bp1).await;
+
+        // Manually perform the equivalent of blueprint execution to populate
+        // database records.
+        let sleds = TestSled::new_from_blueprint(&bp1);
+        for sled in &sleds {
+            sled.create_database_records(&datastore, &opctx).await;
+        }
+
+        // Extract Nexus and Dataset information from the generated blueprint.
+        let this_nexus_id = get_nexuses_from_blueprint(
+            &bp1,
+            BlueprintZoneFilter::ShouldBeRunning,
+        )
+        .get(0)
+        .map(|id| *id)
+        .expect("There should be a Nexus in the example blueprint");
+        let debug_datasets = get_debug_datasets_from_blueprint(
+            &bp1,
+            BlueprintDatasetFilter::InService,
+        );
+        assert!(!debug_datasets.is_empty());
+
+        // When we create a bundle, it should exist on a dataset provisioned by
+        // the blueprint.
+        let bundle = datastore
+            .support_bundle_create(&opctx, "for the test", this_nexus_id)
+            .await
+            .expect("Should be able to create bundle");
+        assert_eq!(bundle.assigned_nexus, Some(this_nexus_id.into()));
+        assert!(
+            debug_datasets.contains(&DatasetUuid::from(bundle.dataset_id)),
+            "Bundle should have been allocated from a blueprint dataset"
+        );
+
+        // If we try to "fail support bundles" from expunged datasets/nexuses,
+        // we should see a no-op. Nothing has been expunged yet!
+        let report =
+            datastore.support_bundle_fail_expunged(&opctx, &bp1).await.expect(
+                "Should have been able to perform no-op support bundle failure",
+            );
+        assert_eq!(SupportBundleExpungementReport::default(), report);
+
+        // Fully remove the bundle's dataset (manually)
+        let bp2 = {
+            let mut bp2 = bp1.clone();
+            bp2.id = Uuid::new_v4();
+            bp2.parent_blueprint_id = Some(bp1.id);
+            delete_dataset_for_bundle(&mut bp2, &bundle);
+            bp2
+        };
+        bp_insert_and_make_target(&opctx, &datastore, &bp2).await;
+
+        datastore
+            .support_bundle_fail_expunged(&opctx, &bp1)
+            .await
+            .expect_err("bp1 is no longer the target; this should fail");
+        let report = datastore
+            .support_bundle_fail_expunged(&opctx, &bp2)
+            .await
+            .expect("Should have been able to mark bundle state as failed");
+        assert_eq!(
+            SupportBundleExpungementReport {
+                bundles_failed_missing_datasets: 1,
+                ..Default::default()
+            },
+            report
+        );
+
+        let observed_bundle = datastore
+            .support_bundle_get(&opctx, bundle.id.into())
+            .await
+            .expect("Should be able to get bundle we just failed");
+        assert_eq!(SupportBundleState::Failed, observed_bundle.state);
+        assert!(observed_bundle
+            .reason_for_failure
+            .unwrap()
+            .contains(FAILURE_REASON_NO_DATASET));
 
         db.terminate().await;
         logctx.cleanup_successful();
