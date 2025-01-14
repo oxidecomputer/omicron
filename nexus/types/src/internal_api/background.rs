@@ -3,7 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::external_api::views::WebhookDelivery;
-use omicron_uuid_kinds::{WebhookEventUuid, WebhookReceiverUuid};
+use omicron_uuid_kinds::{
+    WebhookDeliveryUuid, WebhookEventUuid, WebhookReceiverUuid,
+};
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -211,15 +213,13 @@ pub struct WebhookDispatched {
     pub receivers_gone: usize,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebhookDeliveratorStatus {
     pub by_rx: BTreeMap<WebhookReceiverUuid, WebhookRxDeliveryStatus>,
     pub error: Option<String>,
 }
 
-#[derive(
-    Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Default,
-)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct WebhookRxDeliveryStatus {
     pub ready: usize,
     pub delivered_ok: usize,
