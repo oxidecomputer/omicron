@@ -14,6 +14,7 @@
 // XXX-dap new stuff
 mod apis;
 mod cmd;
+mod omicron_config;
 mod spec_files;
 
 mod spec;
