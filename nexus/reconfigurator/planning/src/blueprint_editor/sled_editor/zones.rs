@@ -4,6 +4,8 @@
 
 use crate::blueprint_builder::EditCounts;
 use nexus_sled_agent_shared::inventory::ZoneKind;
+use nexus_types::deployment::id_map::Entry;
+use nexus_types::deployment::id_map::IdMap;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
@@ -11,8 +13,6 @@ use nexus_types::deployment::BlueprintZonesConfig;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use std::collections::btree_map::Entry;
-use std::collections::BTreeMap;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ZonesEditError {
@@ -38,7 +38,7 @@ pub struct DuplicateZoneId {
 #[derive(Debug)]
 pub(super) struct ZonesEditor {
     generation: Generation,
-    zones: BTreeMap<OmicronZoneUuid, BlueprintZoneConfig>,
+    zones: IdMap<BlueprintZoneConfig>,
     counts: EditCounts,
 }
 
@@ -46,7 +46,7 @@ impl ZonesEditor {
     pub fn empty() -> Self {
         Self {
             generation: Generation::new(),
-            zones: BTreeMap::new(),
+            zones: IdMap::new(),
             counts: EditCounts::zeroes(),
         }
     }
@@ -69,7 +69,7 @@ impl ZonesEditor {
         filter: BlueprintZoneFilter,
     ) -> impl Iterator<Item = &BlueprintZoneConfig> {
         self.zones
-            .values()
+            .iter()
             .filter(move |config| config.disposition.matches(filter))
     }
 
@@ -101,13 +101,13 @@ impl ZonesEditor {
         &mut self,
         zone_id: &OmicronZoneUuid,
     ) -> Result<(bool, &BlueprintZoneConfig), ZonesEditError> {
-        let config = self.zones.get_mut(zone_id).ok_or_else(|| {
+        let mut config = self.zones.get_mut(zone_id).ok_or_else(|| {
             ZonesEditError::ExpungeNonexistentZone { id: *zone_id }
         })?;
 
-        let did_expunge = Self::expunge_impl(config, &mut self.counts);
+        let did_expunge = Self::expunge_impl(&mut config, &mut self.counts);
 
-        Ok((did_expunge, &*config))
+        Ok((did_expunge, config.into_ref()))
     }
 
     fn expunge_impl(
@@ -129,7 +129,7 @@ impl ZonesEditor {
     }
 
     pub fn expunge_all_on_zpool(&mut self, zpool: &ZpoolUuid) {
-        for config in self.zones.values_mut() {
+        for mut config in self.zones.iter_mut() {
             // Expunge this zone if its filesystem or durable dataset are on
             // this zpool. (If it has both, they should be on the _same_ zpool,
             // but that's not strictly required by this method - we'll expunge a
@@ -143,7 +143,7 @@ impl ZonesEditor {
                 .durable_zpool()
                 .map_or(false, |pool| pool.id() == *zpool);
             if fs_is_on_zpool || dd_is_on_zpool {
-                Self::expunge_impl(config, &mut self.counts);
+                Self::expunge_impl(&mut config, &mut self.counts);
             }
         }
     }

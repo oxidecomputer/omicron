@@ -1104,7 +1104,7 @@ resource: TufRepo id "3c52d72f-cbf7-4951-a62f-a4154e74da87"
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: TufArtifact id "a v1.0.0 (b)"
+resource: TufArtifact id "6827813e-bfaa-4205-9b9f-9f7901e4aab1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
