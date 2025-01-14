@@ -51,9 +51,6 @@ use strum::EnumIter;
 use strum::IntoEnumIterator;
 use uuid::Uuid;
 
-#[cfg(any(test, feature = "testing"))]
-use proptest::{arbitrary::any, strategy::Strategy};
-
 mod blueprint_diff;
 mod blueprint_display;
 mod clickhouse;
@@ -553,7 +550,6 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
 #[derive(
     Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffus,
 )]
-#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct BlueprintZonesConfig {
     /// Generation number of this configuration.
     ///
@@ -562,13 +558,6 @@ pub struct BlueprintZonesConfig {
     pub generation: Generation,
 
     /// The set of running zones.
-    // For test generation the key IDs must match the value IDs.
-    #[cfg_attr(
-        any(test, feature = "testing"),
-        strategy(any::<Vec<BlueprintZoneConfig>>()
-            .prop_map(|configs| configs.into_iter()
-                .map(|c| (c.id, c)).collect())))
-    ]
     pub zones: BTreeMap<OmicronZoneUuid, BlueprintZoneConfig>,
 }
 
@@ -658,7 +647,6 @@ fn zone_sort_key<T: ZoneSortKey>(z: &T) -> impl Ord {
     Serialize,
     Diffus,
 )]
-#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct BlueprintZoneConfig {
     /// The disposition (desired state) of this zone recorded in the blueprint.
     pub disposition: BlueprintZoneDisposition,
@@ -728,7 +716,6 @@ impl From<BlueprintZoneConfig> for OmicronZoneConfig {
     EnumIter,
     Diffus,
 )]
-#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 #[serde(rename_all = "snake_case")]
 pub enum BlueprintZoneDisposition {
     /// The zone is in-service.

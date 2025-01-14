@@ -6242,13 +6242,11 @@ dependencies = [
  "omicron-passwords",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "proptest",
  "schemars",
  "serde",
  "serde_json",
  "sled-hardware-types",
  "strum",
- "test-strategy",
  "thiserror 1.0.69",
  "uuid",
 ]

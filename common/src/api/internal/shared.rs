@@ -22,8 +22,6 @@ use strum::EnumCount;
 use uuid::Uuid;
 
 use super::nexus::HostIdentifier;
-#[cfg(any(test, feature = "testing"))]
-use proptest::{arbitrary::any, strategy::Strategy};
 
 /// The type of network interface
 #[derive(
@@ -41,32 +39,13 @@ use proptest::{arbitrary::any, strategy::Strategy};
     Diffus,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
-#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum NetworkInterfaceKind {
     /// A vNIC attached to a guest instance
-    Instance {
-        #[cfg_attr(
-            any(test, feature = "testing"),
-            strategy(any::<u128>().prop_map(Uuid::from_u128)))
-        ]
-        id: Uuid,
-    },
+    Instance { id: Uuid },
     /// A vNIC associated with an internal service
-    Service {
-        #[cfg_attr(
-            any(test, feature = "testing"),
-            strategy(any::<u128>().prop_map(Uuid::from_u128)))
-        ]
-        id: Uuid,
-    },
+    Service { id: Uuid },
     /// A vNIC associated with a probe
-    Probe {
-        #[cfg_attr(
-            any(test, feature = "testing"),
-            strategy(any::<u128>().prop_map(Uuid::from_u128)))
-        ]
-        id: Uuid,
-    },
+    Probe { id: Uuid },
 }
 
 /// Information required to construct a virtual network interface
@@ -83,34 +62,17 @@ pub enum NetworkInterfaceKind {
     Hash,
     Diffus,
 )]
-#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct NetworkInterface {
-    #[cfg_attr(
-        any(test, feature = "testing"),
-        strategy(any::<u128>().prop_map(Uuid::from_u128)))
-    ]
     pub id: Uuid,
     pub kind: NetworkInterfaceKind,
     pub name: Name,
     pub ip: IpAddr,
     pub mac: external::MacAddr,
-    #[cfg_attr(
-        any(test, feature = "testing"),
-        strategy(any::<(IpAddr, u8)>()
-            .prop_map(|(addr, prefix)| IpNet::new_unchecked(addr, prefix))))
-    ]
     pub subnet: IpNet,
     pub vni: Vni,
     pub primary: bool,
     pub slot: u8,
     #[serde(default)]
-    #[cfg_attr(
-        any(test, feature = "testing"),
-        strategy(any::<Vec<(IpAddr, u8)>>()
-            .prop_map(|v| v.into_iter()
-                .map(|(addr, prefix)|
-                    IpNet::new_unchecked(addr, prefix)).collect())))
-    ]
     pub transit_ips: Vec<IpNet>,
 }
 
@@ -131,7 +93,6 @@ pub struct NetworkInterface {
     Hash,
     Diffus,
 )]
-#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub struct SourceNatConfig {
     /// The external address provided to the instance or service.
     pub ip: IpAddr,
@@ -937,7 +898,7 @@ pub struct ExternalIpGatewayMap {
 #[derive(
     Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, EnumCount, Diffus,
 )]
-#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
+#[cfg_attr(feature = "testing", derive(test_strategy::Arbitrary))]
 pub enum DatasetKind {
     // Durable datasets for zones
     Cockroach,
