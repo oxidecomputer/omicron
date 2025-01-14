@@ -103,6 +103,13 @@ pub async fn realize_blueprint_with_overrides(
         blueprint,
     );
 
+    register_support_bundle_failure_step(
+        &engine.for_component(ExecutionComponent::SupportBundles),
+        &opctx,
+        datastore,
+        blueprint,
+    );
+
     let sled_list = register_sled_list_step(
         &engine.for_component(ExecutionComponent::SledList),
         &opctx,
@@ -232,6 +239,30 @@ fn register_zone_external_networking_step<'a>(
             move |_cx| async move {
                 datastore
                     .blueprint_ensure_external_networking_resources(
+                        &opctx, blueprint,
+                    )
+                    .await
+                    .map_err(|err| anyhow!(err))?;
+
+                StepSuccess::new(()).into()
+            },
+        )
+        .register();
+}
+
+fn register_support_bundle_failure_step<'a>(
+    registrar: &ComponentRegistrar<'_, 'a>,
+    opctx: &'a OpContext,
+    datastore: &'a DataStore,
+    blueprint: &'a Blueprint,
+) {
+    registrar
+        .new_step(
+            ExecutionStepId::Ensure,
+            "Mark support bundles as failed if they rely on an expunged disk or sled",
+            move |_cx| async move {
+                datastore
+                    .support_bundle_fail_expunged(
                         &opctx, blueprint,
                     )
                     .await
