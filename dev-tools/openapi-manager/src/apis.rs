@@ -107,6 +107,16 @@ impl From<ManagedApiConfig> for ManagedApi {
     }
 }
 
+impl ManagedApi {
+    pub fn is_lockstep(&self) -> bool {
+        self.versions.is_lockstep()
+    }
+
+    pub fn is_versioned(&self) -> bool {
+        self.versions.is_versioned()
+    }
+}
+
 /// Describes the Rust-defined configuration for all of the APIs managed by this
 /// tool
 pub struct ManagedApis {
@@ -125,6 +135,10 @@ impl ManagedApis {
 
         Ok(ManagedApis { apis })
     }
+
+    pub fn api(&self, ident: &ApiIdent) -> Option<&ManagedApi> {
+        self.apis.get(ident)
+    }
 }
 
 /// Newtype for API identifiers
@@ -137,7 +151,7 @@ NewtypeDerefMut! { () pub struct ApiIdent(String); }
 NewtypeDisplay! { () pub struct ApiIdent(String); }
 NewtypeFrom! { () pub struct ApiIdent(String); }
 // XXX-dap do I need this
-// impl Borrow<str> for ApiIdent {
+// impl std::borrow::Borrow<str> for ApiIdent {
 //     fn borrow(&self) -> &str {
 //         self.0.as_str()
 //     }
@@ -214,6 +228,14 @@ impl Versions {
         match self {
             Versions::Lockstep { .. } => false,
             Versions::Versioned { .. } => true,
+        }
+    }
+
+    /// Returns whether this API is lockstep (as opposed to versioned)
+    pub fn is_lockstep(&self) -> bool {
+        match self {
+            Versions::Lockstep { .. } => true,
+            Versions::Versioned { .. } => false,
         }
     }
 
