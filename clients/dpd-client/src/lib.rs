@@ -9,6 +9,8 @@
 // That test passes for code that lives in omicron, but fails for code imported
 // by omicron.
 #![allow(rustdoc::broken_intra_doc_links)]
+// Temporary workaround while Rust is being updated to 1.84.
+#![allow(unknown_lints)]
 
 use std::net::IpAddr;
 

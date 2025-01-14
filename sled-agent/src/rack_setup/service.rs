@@ -1604,12 +1604,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
             // value, we will need to revisit storing this in the serialized
             // RSS plan.
             generation: DeployStepVersion::V5_EVERYTHING,
-            zones: sled_config
-                .zones
-                .iter()
-                .cloned()
-                .map(|z| (z.id, z))
-                .collect(),
+            zones: sled_config.zones.iter().cloned().collect(),
         };
 
         blueprint_zones.insert(*sled_id, zones_config);
