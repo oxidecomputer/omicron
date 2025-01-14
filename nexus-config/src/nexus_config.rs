@@ -1183,7 +1183,7 @@ mod test {
                             },
                         webhook_dispatcher: WebhookDispatcherConfig {
                             period_secs: Duration::from_secs(42),
-                        }
+                        },
                         webhook_deliverator: WebhookDeliveratorConfig {
                             period_secs: Duration::from_secs(43),
                             lease_timeout_secs: TimeDelta::from_secs(44)
