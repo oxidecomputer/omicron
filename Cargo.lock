@@ -7039,6 +7039,7 @@ dependencies = [
  "itertools 0.13.0",
  "lldpd-client",
  "macaddr",
+ "maplit",
  "mg-admin-client",
  "nexus-auth",
  "nexus-client",

@@ -50,6 +50,7 @@ ipnetwork.workspace = true
 itertools.workspace = true
 lldpd-client.workspace = true
 macaddr.workspace = true
+maplit.workspace = true
 # Not under "dev-dependencies"; these also need to be implemented for
 # integration tests.
 nexus-config.workspace = true

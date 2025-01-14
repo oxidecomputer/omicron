@@ -9,6 +9,7 @@ use crate::typed_uuid::DbTypedUuid;
 use crate::SqlU8;
 use crate::WebhookEvent;
 use chrono::{DateTime, TimeDelta, Utc};
+use nexus_types::external_api::views;
 use omicron_uuid_kinds::{
     WebhookDeliveryKind, WebhookDeliveryUuid, WebhookEventKind,
     WebhookReceiverKind, WebhookReceiverUuid,
@@ -120,4 +121,23 @@ pub struct WebhookDeliveryAttempt {
     pub response_duration: Option<TimeDelta>,
 
     pub time_created: DateTime<Utc>,
+}
+
+impl From<WebhookDeliveryResult> for views::WebhookDeliveryState {
+    fn from(result: WebhookDeliveryResult) -> Self {
+        match result {
+            WebhookDeliveryResult::FailedHttpError => {
+                views::WebhookDeliveryState::FailedHttpError
+            }
+            WebhookDeliveryResult::FailedTimeoutError => {
+                views::WebhookDeliveryState::FailedTimeout
+            }
+            WebhookDeliveryResult::FailedUnreachable => {
+                views::WebhookDeliveryState::FailedUnreachable
+            }
+            WebhookDeliveryResult::Succeeded => {
+                views::WebhookDeliveryState::Delivered
+            }
+        }
+    }
 }

@@ -16,11 +16,13 @@ use crate::db::model::Generation;
 use crate::db::model::WebhookReceiver;
 use crate::db::model::WebhookReceiverIdentity;
 use crate::db::model::WebhookRxEventGlob;
+use crate::db::model::WebhookRxSecret;
 use crate::db::model::WebhookRxSubscription;
 use crate::db::model::WebhookSubscriptionKind;
 use crate::db::pool::DbConnection;
 use crate::db::schema::webhook_rx::dsl as rx_dsl;
 use crate::db::schema::webhook_rx_event_glob::dsl as glob_dsl;
+use crate::db::schema::webhook_rx_secret::dsl as secret_dsl;
 use crate::db::schema::webhook_rx_subscription::dsl as subscription_dsl;
 use crate::db::TransactionError;
 use crate::transaction_retry::OptionalError;
@@ -29,6 +31,7 @@ use diesel::prelude::*;
 use nexus_types::external_api::params;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
 use omicron_uuid_kinds::{GenericUuid, WebhookReceiverUuid};
 
@@ -97,7 +100,7 @@ impl DataStore {
                             TransactionError::Database(e) => e,
                         })?;
                     }
-                    // TODO(eliza): secrets go here...
+                    // TODO(eliza): secrets?
                     Ok(rx)
                 }
             })
@@ -117,7 +120,13 @@ impl DataStore {
         Ok(rx)
     }
 
-    pub async fn webhook_rx_add_subscription(
+    // pub async fn webhook_rx_fetch_all(&self, opctx: &OpContext, authz_rx: &authz::WebhookReceiver) -> Fet
+
+    //
+    // Subscriptions
+    //
+
+    pub async fn webhook_rx_subscription_add(
         &self,
         opctx: &OpContext,
         authz_rx: &authz::WebhookReceiver,
@@ -309,18 +318,61 @@ impl DataStore {
                 WebhookRxSubscription::as_select(),
             ))
     }
-    // pub async fn webhook_rx_list(
-    //     &self,
-    //     opctx: &OpContext,
-    // ) -> ListResultVec<WebhookReceiver> {
-    //     let conn = self.pool_connection_authorized(opctx).await?;
-    //     rx_dsl::webhook_rx
-    //         .filter(rx_dsl::time_deleted.is_null())
-    //         .select(WebhookReceiver::as_select())
-    //         .load_async::<WebhookReceiver>(&*conn)
-    //         .await
-    //         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    // }
+
+    //
+    // Secrets
+    //
+
+    pub async fn webhook_rx_secret_list(
+        &self,
+        opctx: &OpContext,
+        authz_rx: &authz::WebhookReceiver,
+    ) -> ListResultVec<WebhookRxSecret> {
+        opctx.authorize(authz::Action::ListChildren, authz_rx).await?;
+        let conn = self.pool_connection_authorized(&opctx).await?;
+        secret_dsl::webhook_rx_secret
+            .filter(secret_dsl::rx_id.eq(authz_rx.id().into_untyped_uuid()))
+            .filter(secret_dsl::time_deleted.is_null())
+            .select(WebhookRxSecret::as_select())
+            .load_async(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_rx),
+                )
+            })
+    }
+
+    async fn add_secret_on_conn(
+        &self,
+        secret: WebhookRxSecret,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<WebhookRxSecret, TransactionError<Error>> {
+        let rx_id = secret.rx_id;
+        let secret: WebhookRxSecret = WebhookReceiver::insert_resource(
+            rx_id.into_untyped_uuid(),
+            diesel::insert_into(secret_dsl::webhook_rx_secret).values(secret),
+        )
+        .insert_and_get_result_async(conn)
+        .await
+        .map_err(async_insert_error_to_txn(rx_id.into()))?;
+        Ok(secret)
+    }
+
+    pub async fn webhook_rx_list(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<WebhookReceiver> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        rx_dsl::webhook_rx
+            .filter(rx_dsl::time_deleted.is_null())
+            .select(WebhookReceiver::as_select())
+            .load_async::<WebhookReceiver>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
 }
 
 fn async_insert_error_to_txn(

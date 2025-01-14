@@ -753,6 +753,14 @@ pub struct WebhookDeliveratorConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
+
+    /// duration after which another Nexus' lease on a delivery attempt is
+    /// considered expired.
+    ///
+    /// this is tuneable to allow testing lease expiration without having to
+    /// wait a long time.
+    #[serde(default = "WebhookDeliveratorConfig::default_lease_timeout_secs")]
+    pub lease_timeout_secs: u64,
 }
 
 /// Configuration for a nexus server
@@ -823,6 +831,12 @@ impl std::fmt::Display for SchemeName {
             SchemeName::SessionCookie => "session_cookie",
             SchemeName::AccessToken => "access_token",
         })
+    }
+}
+
+impl WebhookDeliveratorConfig {
+    const fn default_lease_timeout_secs() -> u64 {
+        60 // one minute
     }
 }
 
@@ -1015,6 +1029,7 @@ mod test {
             tuf_artifact_replication.min_sled_replication = 3
             webhook_dispatcher.period_secs = 42
             webhook_deliverator.period_secs = 43
+            webhook_deliverator.lease_timeout_secs = 44
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1221,6 +1236,7 @@ mod test {
                         }
                         webhook_deliverator: WebhookDeliveratorConfig {
                             period_secs: Duration::from_secs(43),
+                            lease_timeout_secs: TimeDelta::from_secs(44)
                         }
                     },
                     default_region_allocation_strategy:

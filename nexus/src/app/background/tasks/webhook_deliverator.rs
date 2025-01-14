@@ -3,9 +3,24 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 use crate::app::background::BackgroundTask;
 use futures::future::BoxFuture;
+use http::HeaderName;
+use http::HeaderValue;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::model::{
+    WebhookDelivery, WebhookDeliveryAttempt, WebhookDeliveryResult,
+    WebhookReceiver,
+};
+use nexus_db_queries::db::webhook_delivery::DeliveryAttemptState;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::DbConnection;
+use nexus_types::internal_api::background::{
+    WebhookDeliveratorStatus, WebhookRxDeliveryStatus,
+};
+use omicron_uuid_kinds::OmicronZoneUuid;
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::task::JoinSet;
 
 // The Deliverator belongs to an elite order, a hallowed sub-category. He's got
 // esprit up to here. Right now he is preparing to carry out his third mission
@@ -54,8 +69,12 @@ use std::sync::Arc;
 // model.
 //
 // --- Neal Stephenson, _Snow Crash_
+#[derive(Clone, Debug)]
 pub struct WebhookDeliverator {
     datastore: Arc<DataStore>,
+    nexus_id: OmicronZoneUuid,
+    lease_timeout: TimeDelta,
+    client: reqwest::Client,
 }
 
 impl BackgroundTask for WebhookDeliverator {
@@ -63,14 +82,354 @@ impl BackgroundTask for WebhookDeliverator {
         &'a mut self,
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
-        Box::pin(
-            async move { todo!("eliza: draw the rest of the deliverator") },
-        )
+        Box::pin(async move {
+            let mut status = WebhookDeliveratorStatus {
+                by_rx: Default::default(),
+                error: None,
+            };
+            if let Err(e) = self.actually_activate(opctx, &mut status).await {
+                slog::error!(&opctx.log, "webhook delivery failed"; "error" => %e);
+                status.error = Some(e.to_string());
+            }
+
+            serde_json::json!(status)
+        })
     }
 }
 
 impl WebhookDeliverator {
-    pub fn new(datastore: Arc<DataStore>) -> Self {
-        Self { datastore }
+    pub fn new(
+        datastore: Arc<DataStore>,
+        lease_timeout: TimeDelta,
+        nexus_id: OmicronZoneUuid,
+    ) -> Self {
+        let client = reqwest::Client::builder()
+            // Per [RFD 538 § 4.3.1][1], webhook delivery does *not* follow
+            // redirects.
+            //
+            // [1]: https://rfd.shared.oxide.computer/rfd/538#_success
+            .redirect(reqwest::redirect::Policy::none())
+            // Per [RFD 538 § 4.3.2][1], the client must be able to connect to a
+            // webhook receiver endpoint within 10 seconds, or the delivery is
+            // considered failed.
+            //
+            // [1]: https://rfd.shared.oxide.computer/rfd/538#delivery-failure
+            .connect_timeout(CONNECT_TIMEOUT)
+            .build()
+            .expect("failed to configure webhook deliverator client!");
+        Self { datastore, nexus_id, lease_timeout, client }
     }
+
+    async fn actually_activate(
+        &mut self,
+        opctx: &OpContext,
+        status: &mut WebhookDeliveratorStatus,
+    ) -> Result<(), Error> {
+        let rxs = self.datastore.webhook_rx_list(&opctx).await?;
+        let mut tasks = JoinSet::new();
+        for rx in rxs {
+            let datastore = self.datastore.clone();
+            let opctx = opctx.child(maplit::btreemap! {
+                "receiver_id".to_string() => rx.id().to_string(),
+                "receiver_name".to_string() => rx.name().to_string(),
+            });
+            let deliverator = self.clone();
+            tasks.spawn(async move {
+                let rx_id = rx.id();
+                let status = deliverator.rx_deliver(&opctx, rx).await;
+                (rx_id, status)
+            });
+        }
+
+        while let Some(result) = tasks.join_next().await {
+            let (rx_id, rx_status) = result.expect(
+                "delivery tasks should not be canceled, and nexus is compiled \
+                with `panic=\"abort\"`, so they will not have panicked",
+            );
+            status.by_rx.insert(rx_id, rx_status);
+        }
+
+        Ok(())
+    }
+
+    async fn rx_deliver(
+        &self,
+        opctx: &OpContext,
+        rx: WebhookReceiver,
+    ) -> WebhookRxDeliveryStatus {
+        let deliveries = match self
+            .datastore
+            .webhook_delivery_list_ready(&opctx, rx.id(), self.lease_timeout)
+            .await
+        {
+            Err(e) => {
+                const MSG: &str = "failed to list ready deliveries";
+                slog::error!(
+                    &opctx.log,
+                    "{MSG}";
+                    "error" => %e,
+                );
+                return WebhookRxDeliveryStatus {
+                    error: Some(format!("{MSG}: {e}")),
+                    ..Default::default()
+                };
+            }
+            Ok(deliveries) => deliveries,
+        };
+        let mut delivery_status = WebhooKRxDeliveryStatus {
+            ready: delivery.len(),
+            ..Default::default()
+        };
+        let hdr_rx_id = HeaderValue::try_from(rx.id().to_string())
+            .expect("UUIDs should always be a valid header value");
+        for delivery in deliveries {
+            let attempt = delivery.attempts + 1;
+            match self
+                .datastore
+                .webhook_delivery_start_attempt(
+                    opctx,
+                    &delivery,
+                    self.nexus_id,
+                    self.lease_timeout,
+                )
+                .await
+            {
+                Ok(DeliveryAttemptState::Started) => {
+                    slog::trace!(&opctx.log,
+                        "webhook event delivery attempt started";
+                        "event_id" => delivery.event_id,
+                        "event_class" => delivery.event_class,
+                        "delivery_id" => delivery_id,
+                        "attempt" => attempt,
+                    );
+                }
+                Ok(DeliveryAttemptState::AlreadyCompleted(time)) => {
+                    slog::debug!(
+                        &opctx.log,
+                        "delivery of this webhookevent was already completed at {time:?}";
+                        "event_id" => delivery.event_id,
+                        "event_class" => delivery.event_class,
+                        "delivery_id" => delivery_id,
+                        "time_completed" => ?time,
+                    );
+                    delivery_status.already_delivered += 1;
+                    continue;
+                }
+                Ok(DeliveryAttemptState::InProgress {
+                    nexus_id,
+                    time_started,
+                }) => {
+                    slog::debug!(
+                        &opctx.log,
+                        "delivery of this webhook event is in progress by another Nexus";
+                        "event_id" => delivery.event_id,
+                        "event_class" => delivery.event_class,
+                        "delivery_id" => delivery_id,
+                        "nexus_id" => nexus_id,
+                        "time_started" => ?time_started,
+                    );
+                    delivery_status.in_progress += 1;
+                    continue;
+                }
+                Err(error) => {
+                    slog::error!(
+                        &opctx.log,
+                        "unexpected database error error starting webhook delivery attempt";
+                        "event_id" => delivery.event_id,
+                        "event_class" => delivery.event_class,
+                        "delivery_id" => delivery_id,
+                        "error" => %error,
+                    );
+                    delivery_status
+                        .delivery_errors
+                        .insert(delivery_id, error.to_string());
+                    continue;
+                }
+            }
+
+            // okay, actually do the thing...
+            let time_attempted = Utc::now();
+            let sent_at = time_attempted.to_rfc3339();
+            let payload = Payload {
+                event_class: delivery.event_class,
+                event_id: delivery.event_id.into(),
+                data: &delivery.payload,
+                delivery: DeliveryMetadata {
+                    id: delivery.id.into(),
+                    webhook_id: rx.id(),
+                    sent_at: &sent_at,
+                },
+            };
+            let body = match serde_json::to_vec(&payload) {
+                Ok(body) => body,
+                Err(e) => {
+                    const MSG: &str =
+                        "failed to serialize webhook event payload";
+                    slog::error!(
+                        &opctx.log,
+                        "{MSG}";
+                        "event_id" => delivery.event_id,
+                        "event_class" => delivery.event_class,
+                        "delivery_id" => delivery_id,
+                        "error" => %error,
+                        "payload" => ?payload,
+                    );
+                    delivery_status
+                        .delivery_errors
+                        .insert(delivery.id, format!("{MSG}: {error}"));
+                    continue;
+                }
+            };
+            // TODO(eliza): signatures!
+            let request = self
+                .client
+                .post(&rx.endpoint)
+                .header(HDR_RX_ID, hdr_rx_id)
+                .header(HDR_DELIVERY_ID, delivery_id.to_string())
+                .header(HDR_EVENT_ID, delivery.event_id.to_string())
+                .header(HDR_EVENT_CLASS, delivery.event_class)
+                .body(body)
+                // Per [RFD 538 § 4.3.2][1], a 30-second timeout is applied to
+                // each webhook delivery request.
+                //
+                // [1]: https://rfd.shared.oxide.computer/rfd/538#delivery-failure
+                .timeout(Duration::from_secs(30));
+            let t0 = Instant::now();
+            let result = request.send().await;
+            let duration = t0.elapsed();
+            let (delivery_result, status) = match result {
+                // Builder errors are our fault, that's weird!
+                Err(e) if e.is_builder() => {
+                    const MSG: &str =
+                        "internal error constructing webhook delivery request";
+                    slog::error!(
+                        &opctx.log,
+                        "{MSG}";
+                        "event_id" => delivery.event_id,
+                        "event_class" => delivery.event_class,
+                        "delivery_id" => delivery_id,
+                        "error" => %error,
+                    );
+                    delivery_status
+                        .delivery_errors
+                        .insert(delivery.id, format!("{MSG}: {error}"));
+                    continue;
+                }
+                Err(e) => {
+                    if let Some(status) = e.status() {
+                        slog::warn!(
+                            &opctx.log,
+                            "webhook receiver endpoint returned an HTTP error";
+                            "event_id" => delivery.event_id,
+                            "event_class" => delivery.event_class,
+                            "delivery_id" => delivery_id,
+                            "response_status" => ?status,
+                            "response_duration" => ?duration,
+                        );
+                        (WebhookDeliveryResult::FailedHttpError, status)
+                    } else {
+                        let result = if e.is_connect() {
+                            WebhookDeliveryResult::FailedUnreachable
+                        } else if e.is_timeout() {
+                            WebhookDeliveryResult::FailedTimeout
+                        } else if e.is_redirect() {
+                            WebhookDeliveryResult::FailedHttpError
+                        } else {
+                            WebhookDeliveryResult::FailedUnreachable
+                        };
+                        slog::warn!(
+                            &opctx.log,
+                            "webhook delivery request failed";
+                            "event_id" => delivery.event_id,
+                            "event_class" => delivery.event_class,
+                            "delivery_id" => delivery_id,
+                            "error" => %error,
+                        );
+                    }
+                }
+                Ok(rsp) => {
+                    let status = rsp.status();
+                    slog::debug!(
+                        &opctx.log,
+                        "webhook event delivered successfully";
+                        "event_id" => delivery.event_id,
+                        "event_class" => delivery.event_class,
+                        "delivery_id" => delivery_id,
+                        "response_status" => ?status,
+                        "response_duration" => ?duration,
+                    );
+                    (WebhookDeliveryResult::Succeeded, Some(status))
+                }
+            };
+            // only include a response duration if we actually got a response back
+            let response_duration = status.map(|_| {
+                TimeDelta::from_std(duration).expect(
+                    "because we set a 30-second response timeout, there is no \
+                    way a response duration could ever exceed the max \
+                    representable TimeDelta of `i64::MAX` milliseconds",
+                )
+            });
+            let delivery_attempt = WebhookDeliveryAttempt {
+                delivery_id: delivery_id.into(),
+                attempt,
+                result,
+                response_status: status.map(|s| s.as_u16() as i16),
+                response_duration,
+                time_created: chrono::Utc::now(),
+            };
+
+            match self
+                .datastore
+                .webhook_delivery_finish_attempt(
+                    opctx,
+                    &delivery,
+                    self.nexus_id,
+                    &delivery_attempt,
+                )
+                .await
+            {
+                Err(e) => {
+                    const MSG: &str =
+                        "failed to mark webhook delivery as finished";
+                    slog::error!(
+                        &opctx.log,
+                        "{MSG}";
+                        "event_id" => delivery.event_id,
+                        "event_class" => delivery.event_class,
+                        "delivery_id" => delivery_id,
+                        "error" => %e,
+                    );
+                    delivery_status
+                        .delivery_errors
+                        .insert(delivery_id, format!("{MSG}: {e}"));
+                }
+                Ok(_) => {
+                    delivery_status.delivered_ok += 1;
+                }
+            }
+        }
+    }
+}
+
+const HDR_DELIVERY_ID: HeaderName =
+    HeaderName::from_static("x-oxide-delivery-id");
+const HDR_RX_ID: HeaderName = HeaderName::from_static("x-oxide-webhook-id");
+const HDR_EVENT_ID: HeaderName = HeaderName::from_static("x-oxide-event-id");
+const HDR_EVENT_CLASS: HeaderName =
+    HeaderName::from_static("x-oxide-event-class");
+const HDR_SIG: HeaderName = HeaderName::from_static("x-oxide-signature");
+
+#[derive(Serialize, Debug)]
+struct Payload<'a> {
+    event_class: &'a str,
+    event_id: WebhookEventUuid,
+    data: &'a serde_json::Value,
+    delivery: DeliveryMetadata,
+}
+
+#[derive(Serialize, Debug)]
+struct DeliveryMetadata {
+    id: WebhookDeliveryUuid,
+    webhook_id: WebhookReceiverUuid,
+    sent_at: &'a str,
 }

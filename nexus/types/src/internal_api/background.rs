@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::external_api::views::WebhookDelivery;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::update::ArtifactHash;
@@ -10,6 +11,7 @@ use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::WebhookEventUuid;
+use omicron_uuid_kinds::{WebhookEventUuid, WebhookReceiverUuid};
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -466,4 +468,23 @@ pub struct WebhookDispatched {
     pub event_id: WebhookEventUuid,
     pub dispatched: usize,
     pub receivers_gone: usize,
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WebhookDeliveratorStatus {
+    pub by_rx: BTreeMap<WebhookReceiverUuid, WebhookRxDeliveryStatus>,
+    pub error: Option<String>,
+}
+
+#[derive(
+    Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Default,
+)]
+pub struct WebhookRxDeliveryStatus {
+    pub ready: usize,
+    pub delivered_ok: usize,
+    pub already_delivered: usize,
+    pub in_progress: usize,
+    pub failed_deliveries: Vec<WebhookDelivery>,
+    pub delivery_errors: BTreeMap<WebhookDeliveryUuid, String>,
+    pub error: Option<String>,
 }
