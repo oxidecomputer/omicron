@@ -354,7 +354,7 @@ impl DataStore {
                         .collect::<Vec<_>>();
 
                     // Mark these support bundles as failing, and assign them
-                    // to a nexus that should still exist.
+                    // to a new Nexus (ourselves).
                     //
                     // This should lead to their storage being freed, if it
                     // exists.
@@ -389,6 +389,9 @@ impl DataStore {
                         return Ok(report);
                     }
 
+                    // Reassign bundles that haven't been marked "fully failed"
+                    // to ourselves, so we can free their storage if they have
+                    // been provisioned on a sled.
                     report.bundles_reassigned =
                         diesel::update(dsl::support_bundle)
                             .filter(dsl::id.eq_any(bundles_to_reassign))
