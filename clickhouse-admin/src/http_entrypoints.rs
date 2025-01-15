@@ -15,6 +15,7 @@ use dropshot::{
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
 };
 use illumos_utils::svcadm::Svcadm;
+use omicron_common::api::external::Generation;
 use oximeter_db::OXIMETER_VERSION;
 use slog::info;
 use std::sync::Arc;
@@ -46,14 +47,30 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
     ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError> {
         let ctx = rqctx.context();
         let replica_server = body.into_inner();
-        let output =
-            ctx.clickward().generate_server_config(replica_server.settings)?;
+        // TODO: check that new generation number is equal to or more than current generation number.
+        // Do not generate otherwise
+        let output = ctx.clickward().generate_server_config(replica_server)?;
 
         // Once we have generated the client we can safely enable the clickhouse_server service
         let fmri = "svc:/oxide/clickhouse_server:default".to_string();
         Svcadm::enable_service(fmri)?;
 
         Ok(HttpResponseCreated(output))
+    }
+
+    async fn generation(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Generation>, HttpError> {
+        let ctx = rqctx.context();
+        let gen = match ctx.generation() {
+            Some(g) => g,
+            None => {
+                return Err(HttpError::for_internal_error(
+                    "no generation number found".to_string(),
+                ))
+            }
+        };
+        Ok(HttpResponseOk(gen))
     }
 
     async fn distributed_ddl_queue(

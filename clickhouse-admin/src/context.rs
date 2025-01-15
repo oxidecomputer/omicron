@@ -4,6 +4,7 @@
 
 use crate::{ClickhouseCli, Clickward};
 use omicron_common::address::CLICKHOUSE_TCP_PORT;
+use omicron_common::api::external::Generation;
 use oximeter_db::Client as OximeterClient;
 use slog::Logger;
 use std::net::SocketAddrV6;
@@ -44,6 +45,7 @@ pub struct ServerContext {
     oximeter_client: OximeterClient,
     initialization_lock: Arc<Mutex<()>>,
     log: Logger,
+    generation: Option<Generation>,
 }
 
 impl ServerContext {
@@ -55,12 +57,15 @@ impl ServerContext {
         let clickward = Clickward::new();
         let log =
             clickhouse_cli.log.new(slog::o!("component" => "ServerContext"));
+        // TODO: Retrieve the generation number from somewhere? Is this possible?
+        let generation = None;
         Self {
             clickhouse_cli,
             clickward,
             oximeter_client,
             initialization_lock: Arc::new(Mutex::new(())),
             log,
+            generation,
         }
     }
 
@@ -82,5 +87,14 @@ impl ServerContext {
 
     pub fn log(&self) -> &Logger {
         &self.log
+    }
+
+    pub fn generation(&self) -> Option<Generation> {
+        self.generation
+    }
+
+    // TODO: actually make this work
+    pub fn update_generation(mut self, new_generation: Generation) {
+        self.generation = Some(new_generation)
     }
 }

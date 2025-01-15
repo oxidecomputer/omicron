@@ -91,6 +91,57 @@ pub struct ServerConfigurableSettings {
     pub settings: ServerSettings,
 }
 
+impl ServerConfigurableSettings {
+    /// Generate a configuration file for a replica server node
+    pub fn generate_xml_file(&self) -> Result<ReplicaConfig> {
+        let logger = LogConfig::new(
+            self.settings.datastore_path.clone(),
+            NodeType::Server,
+        );
+        let macros = Macros::new(self.settings.id);
+
+        let keepers: Vec<KeeperNodeConfig> = self
+            .settings
+            .keepers
+            .iter()
+            .map(|host| KeeperNodeConfig::new(host.clone()))
+            .collect();
+
+        let servers: Vec<ServerNodeConfig> = self
+            .settings
+            .remote_servers
+            .iter()
+            .map(|host| ServerNodeConfig::new(host.clone()))
+            .collect();
+
+        let config = ReplicaConfig::new(
+            logger,
+            macros,
+            self.settings.listen_addr,
+            servers.clone(),
+            keepers.clone(),
+            self.settings.datastore_path.clone(),
+            self.generation,
+        );
+
+        match create_dir(self.settings.config_dir.clone()) {
+            Ok(_) => (),
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => (),
+            Err(e) => return Err(e.into()),
+        };
+
+        let path = self.settings.config_dir.join("replica-server-config.xml");
+        AtomicFile::new(
+            path.clone(),
+            atomicwrites::OverwriteBehavior::AllowOverwrite,
+        )
+        .write(|f| f.write_all(config.to_xml().as_bytes()))
+        .with_context(|| format!("failed to write to `{}`", path))?;
+
+        Ok(config)
+    }
+}
+
 /// The top most type for configuring clickhouse-servers via
 /// clickhouse-admin-keeper-api
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -138,50 +189,6 @@ impl ServerSettings {
             keepers,
             remote_servers,
         }
-    }
-
-    /// Generate a configuration file for a replica server node
-    pub fn generate_xml_file(&self) -> Result<ReplicaConfig> {
-        let logger =
-            LogConfig::new(self.datastore_path.clone(), NodeType::Server);
-        let macros = Macros::new(self.id);
-
-        let keepers: Vec<KeeperNodeConfig> = self
-            .keepers
-            .iter()
-            .map(|host| KeeperNodeConfig::new(host.clone()))
-            .collect();
-
-        let servers: Vec<ServerNodeConfig> = self
-            .remote_servers
-            .iter()
-            .map(|host| ServerNodeConfig::new(host.clone()))
-            .collect();
-
-        let config = ReplicaConfig::new(
-            logger,
-            macros,
-            self.listen_addr,
-            servers.clone(),
-            keepers.clone(),
-            self.datastore_path.clone(),
-        );
-
-        match create_dir(self.config_dir.clone()) {
-            Ok(_) => (),
-            Err(e) if e.kind() == ErrorKind::AlreadyExists => (),
-            Err(e) => return Err(e.into()),
-        };
-
-        let path = self.config_dir.join("replica-server-config.xml");
-        AtomicFile::new(
-            path.clone(),
-            atomicwrites::OverwriteBehavior::AllowOverwrite,
-        )
-        .write(|f| f.write_all(config.to_xml().as_bytes()))
-        .with_context(|| format!("failed to write to `{}`", path))?;
-
-        Ok(config)
     }
 }
 
@@ -1240,6 +1247,7 @@ mod tests {
     use camino::Utf8PathBuf;
     use camino_tempfile::Builder;
     use chrono::{DateTime, Utc};
+    use omicron_common::api::external::Generation;
     use slog::{o, Drain};
     use slog_term::{FullFormat, PlainDecorator, TestStdoutWriter};
     use std::collections::BTreeMap;
@@ -1249,8 +1257,8 @@ mod tests {
     use crate::{
         ClickhouseHost, DistributedDdlQueue, KeeperConf, KeeperId,
         KeeperServerInfo, KeeperServerType, KeeperSettings, Lgif, LogLevel,
-        RaftConfig, RaftServerSettings, ServerId, ServerSettings,
-        SystemTimeSeries,
+        RaftConfig, RaftServerSettings, ServerConfigurableSettings, ServerId,
+        ServerSettings, SystemTimeSeries,
     };
 
     fn log() -> slog::Logger {
@@ -1327,7 +1335,7 @@ mod tests {
             ClickhouseHost::DomainName("ohai.com".to_string()),
         ];
 
-        let config = ServerSettings::new(
+        let settings = ServerSettings::new(
             Utf8PathBuf::from(config_dir.path()),
             ServerId(1),
             Utf8PathBuf::from_str("./").unwrap(),
@@ -1336,6 +1344,10 @@ mod tests {
             servers,
         );
 
+        let config = ServerConfigurableSettings {
+            settings,
+            generation: Generation::new(),
+        };
         config.generate_xml_file().unwrap();
 
         let expected_file = Utf8PathBuf::from_str("./testutils")
