@@ -152,6 +152,50 @@ pub struct KeeperConfigurableSettings {
     pub settings: KeeperSettings,
 }
 
+impl KeeperConfigurableSettings {
+    /// Generate a configuration file for a keeper node
+    pub fn generate_xml_file(&self) -> Result<KeeperConfig> {
+        let logger = LogConfig::new(
+            self.settings.datastore_path.clone(),
+            NodeType::Keeper,
+        );
+
+        let raft_servers = self
+            .settings
+            .raft_servers
+            .iter()
+            .map(|settings| RaftServerConfig::new(settings.clone()))
+            .collect();
+        let raft_config = RaftServers::new(raft_servers);
+
+        let config = KeeperConfig::new(
+            logger,
+            // TODO: make this nicer
+            self.settings.listen_addr,
+            self.settings.id,
+            self.settings.datastore_path.clone(),
+            raft_config,
+            self.generation,
+        );
+
+        match create_dir(self.settings.config_dir.clone()) {
+            Ok(_) => (),
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => (),
+            Err(e) => return Err(e.into()),
+        };
+
+        let path = self.settings.config_dir.join("keeper_config.xml");
+        AtomicFile::new(
+            path.clone(),
+            atomicwrites::OverwriteBehavior::AllowOverwrite,
+        )
+        .write(|f| f.write_all(config.to_xml().as_bytes()))
+        .with_context(|| format!("failed to write to `{}`", path))?;
+
+        Ok(config)
+    }
+}
+
 /// Configurable settings for a ClickHouse replica server node.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -219,43 +263,6 @@ impl KeeperSettings {
         listen_addr: Ipv6Addr,
     ) -> Self {
         Self { config_dir, id, raft_servers, datastore_path, listen_addr }
-    }
-
-    /// Generate a configuration file for a keeper node
-    pub fn generate_xml_file(&self) -> Result<KeeperConfig> {
-        let logger =
-            LogConfig::new(self.datastore_path.clone(), NodeType::Keeper);
-
-        let raft_servers = self
-            .raft_servers
-            .iter()
-            .map(|settings| RaftServerConfig::new(settings.clone()))
-            .collect();
-        let raft_config = RaftServers::new(raft_servers);
-
-        let config = KeeperConfig::new(
-            logger,
-            self.listen_addr,
-            self.id,
-            self.datastore_path.clone(),
-            raft_config,
-        );
-
-        match create_dir(self.config_dir.clone()) {
-            Ok(_) => (),
-            Err(e) if e.kind() == ErrorKind::AlreadyExists => (),
-            Err(e) => return Err(e.into()),
-        };
-
-        let path = self.config_dir.join("keeper_config.xml");
-        AtomicFile::new(
-            path.clone(),
-            atomicwrites::OverwriteBehavior::AllowOverwrite,
-        )
-        .write(|f| f.write_all(config.to_xml().as_bytes()))
-        .with_context(|| format!("failed to write to `{}`", path))?;
-
-        Ok(config)
     }
 }
 
@@ -1255,9 +1262,10 @@ mod tests {
     use std::str::FromStr;
 
     use crate::{
-        ClickhouseHost, DistributedDdlQueue, KeeperConf, KeeperId,
-        KeeperServerInfo, KeeperServerType, KeeperSettings, Lgif, LogLevel,
-        RaftConfig, RaftServerSettings, ServerConfigurableSettings, ServerId,
+        ClickhouseHost, DistributedDdlQueue, KeeperConf,
+        KeeperConfigurableSettings, KeeperId, KeeperServerInfo,
+        KeeperServerType, KeeperSettings, Lgif, LogLevel, RaftConfig,
+        RaftServerSettings, ServerConfigurableSettings, ServerId,
         ServerSettings, SystemTimeSeries,
     };
 
@@ -1295,13 +1303,18 @@ mod tests {
             },
         ];
 
-        let config = KeeperSettings::new(
+        let settings = KeeperSettings::new(
             Utf8PathBuf::from(config_dir.path()),
             KeeperId(1),
             keepers,
             Utf8PathBuf::from_str("./").unwrap(),
             Ipv6Addr::from_str("ff::08").unwrap(),
         );
+
+        let config = KeeperConfigurableSettings {
+            generation: Generation::new(),
+            settings,
+        };
 
         config.generate_xml_file().unwrap();
 

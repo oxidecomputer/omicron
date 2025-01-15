@@ -152,13 +152,30 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
     ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError> {
         let ctx = rqctx.context();
         let keeper = body.into_inner();
-        let output = ctx.clickward().generate_keeper_config(keeper.settings)?;
+        // TODO: check that new generation number is equal to or more than current generation number.
+        // Do not generate otherwise
+        let output = ctx.clickward().generate_keeper_config(keeper)?;
 
         // Once we have generated the client we can safely enable the clickhouse_keeper service
         let fmri = "svc:/oxide/clickhouse_keeper:default".to_string();
         Svcadm::enable_service(fmri)?;
 
         Ok(HttpResponseCreated(output))
+    }
+
+    async fn generation(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Generation>, HttpError> {
+        let ctx = rqctx.context();
+        let gen = match ctx.generation() {
+            Some(g) => g,
+            None => {
+                return Err(HttpError::for_internal_error(
+                    "no generation number found".to_string(),
+                ))
+            }
+        };
+        Ok(HttpResponseOk(gen))
     }
 
     async fn lgif(

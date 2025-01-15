@@ -118,6 +118,30 @@
         }
       }
     },
+    "/generation": {
+      "get": {
+        "summary": "Retrieve the generation number of a configuration",
+        "operationId": "generation",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Generation"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/raft-config": {
       "get": {
         "summary": "Retrieve information from ClickHouse virtual node /keeper/config which",
@@ -500,6 +524,14 @@
             "type": "string",
             "format": "Utf8PathBuf"
           },
+          "generation": {
+            "description": "A unique identifier for the configuration generation.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
           "listen_host": {
             "description": "Address the keeper is listening on",
             "type": "string",
@@ -549,6 +581,7 @@
         "required": [
           "coordination_settings",
           "datastore_path",
+          "generation",
           "listen_host",
           "log_storage_path",
           "logger",

@@ -15,6 +15,7 @@ pub struct KeeperServerContext {
     clickward: Clickward,
     clickhouse_cli: ClickhouseCli,
     log: Logger,
+    generation: Option<Generation>,
 }
 
 impl KeeperServerContext {
@@ -23,7 +24,10 @@ impl KeeperServerContext {
             .log
             .new(slog::o!("component" => "KeeperServerContext"));
         let clickward = Clickward::new();
-        Self { clickward, clickhouse_cli, log }
+        // TODO: Read configuration file to retrieve generation
+        // number if it already exists.
+        let generation = None;
+        Self { clickward, clickhouse_cli, log, generation }
     }
 
     pub fn clickward(&self) -> &Clickward {
@@ -36,6 +40,15 @@ impl KeeperServerContext {
 
     pub fn log(&self) -> &Logger {
         &self.log
+    }
+
+    pub fn generation(&self) -> Option<Generation> {
+        self.generation
+    }
+
+    // TODO: actually make this work
+    pub fn update_generation(mut self, new_generation: Generation) {
+        self.generation = Some(new_generation)
     }
 }
 
@@ -57,7 +70,8 @@ impl ServerContext {
         let clickward = Clickward::new();
         let log =
             clickhouse_cli.log.new(slog::o!("component" => "ServerContext"));
-        // TODO: Retrieve the generation number from somewhere? Is this possible?
+        // TODO: Read configuration file to retrieve generation
+        // number if it already exists.
         let generation = None;
         Self {
             clickhouse_cli,

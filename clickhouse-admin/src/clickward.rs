@@ -3,7 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use clickhouse_admin_types::{
-    KeeperConfig, KeeperSettings, ReplicaConfig, ServerConfigurableSettings,
+    KeeperConfig, KeeperConfigurableSettings, ReplicaConfig,
+    ServerConfigurableSettings,
 };
 use dropshot::HttpError;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
@@ -54,7 +55,7 @@ impl Clickward {
 
     pub fn generate_keeper_config(
         &self,
-        settings: KeeperSettings,
+        settings: KeeperConfigurableSettings,
     ) -> Result<KeeperConfig, ClickwardError> {
         let keeper_config = settings
             .generate_xml_file()

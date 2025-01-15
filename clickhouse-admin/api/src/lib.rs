@@ -43,6 +43,15 @@ pub trait ClickhouseAdminKeeperApi {
         body: TypedBody<KeeperConfigurableSettings>,
     ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError>;
 
+    /// Retrieve the generation number of a configuration
+    #[endpoint {
+        method = GET,
+        path = "/generation",
+    }]
+    async fn generation(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Generation>, HttpError>;
+
     /// Retrieve a logically grouped information file from a keeper node.
     /// This information is used internally by ZooKeeper to manage snapshots
     /// and logs for consistency and recovery.
