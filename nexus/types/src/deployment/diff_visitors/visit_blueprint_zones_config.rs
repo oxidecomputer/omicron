@@ -364,7 +364,6 @@ mod tests {
                 ),
             }]
             .into_iter()
-            .map(|z| (z.id, z))
             .collect(),
         };
         let after = before.clone();
@@ -398,22 +397,23 @@ mod tests {
                 ),
             }]
             .into_iter()
-            .map(|z| (z.id, z))
             .collect(),
         };
         let mut after = before.clone();
         after.generation = after.generation.next();
-        let zone = after.zones.iter_mut().next().unwrap().1;
-        zone.disposition = BlueprintZoneDisposition::Expunged;
-        zone.filesystem_pool =
-            Some(ZpoolName::new_external(ZpoolUuid::new_v4()));
-        zone.zone_type =
-            BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
-                address: "[2001:db8::2]:8080".parse().unwrap(),
-                dataset: OmicronZoneDataset {
-                    pool_name: ZpoolName::new_external(ZpoolUuid::new_v4()),
-                },
-            });
+        {
+            let mut zone = after.zones.iter_mut().next().unwrap();
+            zone.disposition = BlueprintZoneDisposition::Expunged;
+            zone.filesystem_pool =
+                Some(ZpoolName::new_external(ZpoolUuid::new_v4()));
+            zone.zone_type =
+                BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
+                    address: "[2001:db8::2]:8080".parse().unwrap(),
+                    dataset: OmicronZoneDataset {
+                        pool_name: ZpoolName::new_external(ZpoolUuid::new_v4()),
+                    },
+                });
+        }
 
         let mut ctx = BpVisitorContext::default();
         let mut visitor = TestVisitor::new(&before, &after);
@@ -444,7 +444,6 @@ mod tests {
                 ),
             }]
             .into_iter()
-            .map(|z| (z.id, z))
             .collect(),
         };
 
@@ -469,7 +468,6 @@ mod tests {
                 ),
             }]
             .into_iter()
-            .map(|z| (z.id, z))
             .collect(),
         };
 

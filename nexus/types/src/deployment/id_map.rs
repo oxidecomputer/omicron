@@ -90,6 +90,10 @@ impl<T: IdMappable> IdMap<T> {
         self.inner.get_mut(key).map(RefMut::new)
     }
 
+    pub fn keys(&self) -> btree_map::Keys<'_, T::Id, T> {
+        self.inner.keys()
+    }
+
     pub fn iter(&self) -> btree_map::Values<'_, T::Id, T> {
         self.inner.values()
     }
@@ -228,7 +232,9 @@ impl<'a, T: IdMappable + 'a> Diffable<'a> for IdMap<T> {
     fn diff(&'a self, other: &'a Self) -> Edit<'a, Self> {
         match self.inner.diff(&other.inner) {
             Edit::Copy(_) => Edit::Copy(self),
-            Edit::Change(change) => Edit::Change(change),
+            Edit::Change { diff, .. } => {
+                Edit::Change { before: self, after: other, diff }
+            }
         }
     }
 }

@@ -2396,7 +2396,7 @@ checksum = "6184e33543162437515c2e2b48714794e37845ec9851711914eec9d308f6ebe8"
 [[package]]
 name = "diffus"
 version = "0.10.0"
-source = "git+https://github.com/oxidecomputer/diffus?branch=oxide/main#e3cfd506a8be97e9740e94bc72e39b3b9c6bf3c2"
+source = "git+https://github.com/oxidecomputer/diffus?branch=oxide%2Fmain#e3cfd506a8be97e9740e94bc72e39b3b9c6bf3c2"
 dependencies = [
  "diffus-derive",
  "itertools 0.10.5",
@@ -2408,7 +2408,7 @@ dependencies = [
 [[package]]
 name = "diffus-derive"
 version = "0.10.0"
-source = "git+https://github.com/oxidecomputer/diffus?branch=oxide/main#e3cfd506a8be97e9740e94bc72e39b3b9c6bf3c2"
+source = "git+https://github.com/oxidecomputer/diffus?branch=oxide%2Fmain#e3cfd506a8be97e9740e94bc72e39b3b9c6bf3c2"
 dependencies = [
  "proc-macro2",
  "quote",
