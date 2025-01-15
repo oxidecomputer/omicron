@@ -14,7 +14,6 @@ use super::{
     },
 };
 use crate::{context::ApiContext, external_api::shared};
-use dropshot::Body;
 use dropshot::EmptyScanParams;
 use dropshot::HttpError;
 use dropshot::HttpResponseDeleted;
@@ -29,6 +28,7 @@ use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use dropshot::WhichPage;
 use dropshot::{ApiDescription, StreamingBody};
+use dropshot::{Body, FreeformBody};
 use dropshot::{HttpResponseAccepted, HttpResponseFound, HttpResponseSeeOther};
 use dropshot::{HttpResponseCreated, HttpResponseHeaders};
 use dropshot::{WebsocketChannelResult, WebsocketConnection};
@@ -6099,7 +6099,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
         _path_params: Path<params::SupportBundlePath>,
-    ) -> Result<Response<Body>, HttpError> {
+    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -6122,7 +6122,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn support_bundle_download_file(
         rqctx: RequestContext<Self::Context>,
         _path_params: Path<params::SupportBundleFilePath>,
-    ) -> Result<Response<Body>, HttpError> {
+    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
