@@ -433,7 +433,7 @@ impl<'a> BlueprintBuilder<'a> {
             .map(|sled_id| {
                 let config = BlueprintDatasetsConfig {
                     generation: Generation::new(),
-                    datasets: BTreeMap::new(),
+                    datasets: IdMap::new(),
                 };
                 (sled_id, config)
             })
@@ -549,7 +549,7 @@ impl<'a> BlueprintBuilder<'a> {
                 .cloned()
                 .unwrap_or_else(|| BlueprintDatasetsConfig {
                     generation: Generation::new(),
-                    datasets: BTreeMap::new(),
+                    datasets: IdMap::new(),
                 });
             let editor = SledEditor::for_existing(
                 state,
@@ -2427,7 +2427,7 @@ pub mod test {
             .get(&sled_id)
             .unwrap()
             .datasets
-            .values()
+            .iter()
             .filter_map(|dataset_config| {
                 if dataset_config.disposition
                     == BlueprintDatasetDisposition::Expunged
@@ -2834,12 +2834,12 @@ pub mod test {
         let mut output_dataset_ids = BTreeMap::new();
         let mut output_ndatasets = 0;
         for datasets in output.blueprint_datasets.values() {
-            for (id, dataset) in &datasets.datasets {
+            for dataset in &datasets.datasets {
                 let zpool_id = dataset.pool.id();
                 let kind = dataset.kind.clone();
                 let by_kind: &mut BTreeMap<_, _> =
                     output_dataset_ids.entry(zpool_id).or_default();
-                let prev = by_kind.insert(kind, *id);
+                let prev = by_kind.insert(kind, dataset.id);
                 output_ndatasets += 1;
                 assert!(prev.is_none());
             }

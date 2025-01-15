@@ -245,7 +245,7 @@ impl DataStore {
             .blueprint_datasets
             .iter()
             .flat_map(|(sled_id, datasets_config)| {
-                datasets_config.datasets.values().map(move |dataset| {
+                datasets_config.datasets.iter().map(move |dataset| {
                     BpOmicronDataset::new(blueprint_id, *sled_id, dataset)
                 })
             })
@@ -669,7 +669,7 @@ impl DataStore {
                         s.sled_id.into(),
                         BlueprintDatasetsConfig {
                             generation: *s.generation,
-                            datasets: BTreeMap::new(),
+                            datasets: IdMap::new(),
                         },
                     );
                     bail_unless!(
@@ -880,15 +880,14 @@ impl DataStore {
                         })?;
 
                     let dataset_id = d.id;
-                    sled_datasets.datasets.insert(
-                        dataset_id.into(),
-                        d.try_into().map_err(|e| {
+                    sled_datasets.datasets.insert(d.try_into().map_err(
+                        |e| {
                             Error::internal_error(&format!(
                                 "Cannot parse dataset {}: {e}",
                                 dataset_id
                             ))
-                        })?,
-                    );
+                        },
+                    )?);
                 }
             }
         }
