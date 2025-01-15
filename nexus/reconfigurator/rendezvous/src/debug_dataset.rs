@@ -14,6 +14,7 @@ use omicron_common::api::internal::shared::DatasetKind;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use slog::info;
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 pub(crate) async fn reconcile_debug_datasets(
@@ -25,32 +26,29 @@ pub(crate) async fn reconcile_debug_datasets(
 ) -> anyhow::Result<()> {
     // We expect basically all executions of this task to do nothing: we're
     // activated periodically, and only do work when a dataset has been
-    // newly-added or newly-expunged. For the newly-added case, we can first
-    // fetch all the existing datasets and then avoid trying to spuriously
-    // insert them again.
+    // newly-added or newly-expunged.
     //
-    // This is a minor performance optimization. If we removed this fetch, the
-    // code below would still be correct, but it would issue a bunch of
-    // do-nothing inserts for already-existing datasets.
-    let existing_datasets = datastore
+    // This is a performance optimization. If we removed this fetch, the code
+    // below would still be correct, but it would issue a bunch of do-nothing
+    // queries for every individual dataset in `blueprint_datasets`.
+    let existing_db_datasets = datastore
         .debug_dataset_list_all_batched(opctx)
         .await
         .context("failed to list all debug datasets")?
         .into_iter()
-        .map(|d| d.id())
-        .collect::<BTreeSet<_>>();
-
-    // We want to insert any in-service datasets (according to the blueprint)
-    // that are also present in `inventory_datasets` but that are not already
-    // present in the database (described by `existing_datasets`).
-    let datasets_to_insert = inventory_datasets
-        .difference(&existing_datasets)
-        .collect::<BTreeSet<_>>();
+        .map(|d| (d.id(), d))
+        .collect::<BTreeMap<_, _>>();
 
     for dataset in blueprint_datasets.filter(|d| d.kind == DatasetKind::Debug) {
         match dataset.disposition {
             BlueprintDatasetDisposition::InService => {
-                if datasets_to_insert.contains(&dataset.id) {
+                // Only attempt to insert this dataset if it has shown up in
+                // inventory (required for correctness) and isn't already
+                // present in the db (performance optimization only). Inserting
+                // an already-present row is a no-op, so it's safe to skip.
+                if inventory_datasets.contains(&dataset.id)
+                    && !existing_db_datasets.contains_key(&dataset.id)
+                {
                     let db_dataset = RendezvousDebugDataset::new(
                         dataset.id,
                         dataset.pool.id(),
@@ -65,25 +63,44 @@ pub(crate) async fn reconcile_debug_datasets(
                 }
             }
             BlueprintDatasetDisposition::Expunged => {
-                // We don't have a way to short-circuit tombstoning, assuming we
-                // don't want to query the db for "all tombstoned datasets"
-                // first.
+                // Only attempt to tombstone this dataset if it isn't already
+                // marked as tombstoned in the database.
                 //
-                // We could do that or we could add a
-                // `debug_dataset_tombstone_batched` that takes the entire set
-                // of expunged datasets? Or we could just no-op tombstone every
-                // expunged dataset on every execution like this.
-                if datastore
-                    .debug_dataset_tombstone(opctx, dataset.id)
-                    .await
-                    .with_context(|| {
-                        format!("failed to tombstone dataset {}", dataset.id)
-                    })?
-                {
-                    info!(
-                        opctx.log, "tombstoned expunged dataset";
-                        "dataset_id" => %dataset.id,
-                    );
+                // The `.unwrap_or(false)` means we'll attempt to tombstone a
+                // row even if it wasn't present in the db at all when we
+                // queried it above. This is _probably_ unnecessary (tombstoning
+                // a nonexistent row is a no-op), but I'm not positive there
+                // isn't a case where we might be operating on a blueprint
+                // simultaneously to some other Nexus operating on an older
+                // blueprint/inventory where it might insert this row after we
+                // queried above and before we tombstone below. It seems safer
+                // to issue a probably-do-nothing query than to _not_ issue a
+                // probably-do-nothing-but-might-do-something-if-I'm-wrong
+                // query.
+                let already_tombstoned = existing_db_datasets
+                    .get(&dataset.id)
+                    .map(|d| d.is_tombstoned())
+                    .unwrap_or(false);
+                if !already_tombstoned {
+                    if datastore
+                        .debug_dataset_tombstone(
+                            opctx,
+                            dataset.id,
+                            blueprint_id,
+                        )
+                        .await
+                        .with_context(|| {
+                            format!(
+                                "failed to tombstone dataset {}",
+                                dataset.id
+                            )
+                        })?
+                    {
+                        info!(
+                            opctx.log, "tombstoned expunged dataset";
+                            "dataset_id" => %dataset.id,
+                        );
+                    }
                 }
             }
         }
@@ -105,7 +122,6 @@ mod tests {
     use omicron_uuid_kinds::{GenericUuid, TypedUuid, TypedUuidKind};
     use proptest::prelude::*;
     use proptest::proptest;
-    use std::collections::BTreeMap;
     use test_strategy::Arbitrary;
     use uuid::Uuid;
 
