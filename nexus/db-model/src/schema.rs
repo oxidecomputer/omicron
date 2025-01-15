@@ -1370,6 +1370,15 @@ joinable!(tuf_repo_artifact -> tuf_repo (tuf_repo_id));
 joinable!(tuf_repo_artifact -> tuf_artifact (tuf_artifact_id));
 
 table! {
+    target_release (generation) {
+        generation -> Int8,
+        time_requested -> Timestamptz,
+        release_source -> crate::TargetReleaseSourceEnum,
+        system_version -> Nullable<Text>,
+    }
+}
+
+table! {
     support_bundle {
         id -> Uuid,
         time_created -> Timestamptz,
