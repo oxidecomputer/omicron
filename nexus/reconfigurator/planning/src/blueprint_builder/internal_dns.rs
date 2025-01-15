@@ -134,7 +134,7 @@ pub mod test {
         for (_, dataset_config) in
             blueprint1.blueprint_datasets.iter_mut().skip(1)
         {
-            dataset_config.datasets.retain(|_id, dataset| {
+            dataset_config.datasets.retain(|dataset| {
                 // This is gross; once zone configs know explicit dataset IDs,
                 // we should retain by ID instead.
                 match &dataset.kind {

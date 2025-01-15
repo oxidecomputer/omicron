@@ -1257,7 +1257,7 @@ mod test {
         for (_, dataset_config) in
             blueprint1.blueprint_datasets.iter_mut().take(2)
         {
-            dataset_config.datasets.retain(|_id, dataset| {
+            dataset_config.datasets.retain(|dataset| {
                 // This is gross; once zone configs know explicit dataset IDs,
                 // we should retain by ID instead.
                 match &dataset.kind {
@@ -1715,22 +1715,27 @@ mod test {
         builder.policy_mut().target_internal_dns_zone_count = 1;
 
         // Manually update the blueprint to report an abnormal "Debug dataset"
-        let (_sled_id, datasets_config) =
-            blueprint1.blueprint_datasets.iter_mut().next().unwrap();
-        let (_dataset_id, dataset_config) = datasets_config
-            .datasets
-            .iter_mut()
-            .find(|(_, config)| {
-                matches!(config.kind, omicron_common::disk::DatasetKind::Debug)
-            })
-            .expect("No debug dataset found");
+        {
+            let (_sled_id, datasets_config) =
+                blueprint1.blueprint_datasets.iter_mut().next().unwrap();
+            let mut dataset_config = datasets_config
+                .datasets
+                .iter_mut()
+                .find(|config| {
+                    matches!(
+                        config.kind,
+                        omicron_common::disk::DatasetKind::Debug
+                    )
+                })
+                .expect("No debug dataset found");
 
-        // These values are out-of-sync with what the blueprint will typically
-        // enforce.
-        dataset_config.quota = None;
-        dataset_config.reservation = Some(
-            omicron_common::api::external::ByteCount::from_gibibytes_u32(1),
-        );
+            // These values are out-of-sync with what the blueprint will typically
+            // enforce.
+            dataset_config.quota = None;
+            dataset_config.reservation = Some(
+                omicron_common::api::external::ByteCount::from_gibibytes_u32(1),
+            );
+        }
 
         let input = builder.build();
 

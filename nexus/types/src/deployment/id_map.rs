@@ -74,8 +74,16 @@ impl<T: IdMappable> IdMap<T> {
         self.inner.is_empty()
     }
 
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
     pub fn insert(&mut self, entry: T) -> Option<T> {
         self.inner.insert(entry.id(), entry)
+    }
+
+    pub fn remove(&mut self, key: &T::Id) -> Option<T> {
+        self.inner.remove(key)
     }
 
     pub fn first(&self) -> Option<&T> {

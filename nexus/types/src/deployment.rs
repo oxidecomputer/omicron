@@ -256,7 +256,7 @@ impl Blueprint {
         self.blueprint_datasets
             .iter()
             .flat_map(move |(sled_id, datasets)| {
-                datasets.datasets.values().map(|dataset| (*sled_id, dataset))
+                datasets.datasets.iter().map(|dataset| (*sled_id, dataset))
             })
             .filter(move |(_, d)| d.disposition.matches(filter))
     }
@@ -918,7 +918,15 @@ pub struct BlueprintPhysicalDiskConfig {
 )]
 pub struct BlueprintPhysicalDisksConfig {
     pub generation: Generation,
-    pub disks: Vec<BlueprintPhysicalDiskConfig>,
+    pub disks: IdMap<BlueprintPhysicalDiskConfig>,
+}
+
+impl IdMappable for BlueprintPhysicalDiskConfig {
+    type Id = PhysicalDiskUuid;
+
+    fn id(&self) -> Self::Id {
+        self.id
+    }
 }
 
 impl diffus::Same for BlueprintPhysicalDiskConfig {
@@ -932,7 +940,7 @@ impl Default for BlueprintPhysicalDisksConfig {
     fn default() -> Self {
         BlueprintPhysicalDisksConfig {
             generation: Generation::new(),
-            disks: vec![],
+            disks: IdMap::new(),
         }
     }
 }
@@ -966,7 +974,7 @@ impl From<BlueprintPhysicalDisksConfig> for OmicronPhysicalDisksConfig {
 )]
 pub struct BlueprintDatasetsConfig {
     pub generation: Generation,
-    pub datasets: BTreeMap<DatasetUuid, BlueprintDatasetConfig>,
+    pub datasets: IdMap<BlueprintDatasetConfig>,
 }
 
 impl From<BlueprintDatasetsConfig> for DatasetsConfig {
@@ -976,9 +984,17 @@ impl From<BlueprintDatasetsConfig> for DatasetsConfig {
             datasets: config
                 .datasets
                 .into_iter()
-                .map(|(id, d)| (id, d.into()))
+                .map(|d| (d.id, d.into()))
                 .collect(),
         }
+    }
+}
+
+impl IdMappable for BlueprintDatasetConfig {
+    type Id = DatasetUuid;
+
+    fn id(&self) -> Self::Id {
+        self.id
     }
 }
 

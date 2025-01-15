@@ -532,7 +532,7 @@ mod test {
             for (sled, datasets) in &blueprint.blueprint_datasets {
                 let pools = datasets
                     .datasets
-                    .values()
+                    .iter()
                     .filter_map(|dataset| {
                         if !matches!(dataset.kind, DebugDatasetKind)
                             || !dataset
@@ -947,7 +947,7 @@ mod test {
             .values()
             .flat_map(|datasets_config| {
                 let mut debug_datasets = vec![];
-                for dataset in datasets_config.datasets.values() {
+                for dataset in datasets_config.datasets.iter() {
                     if matches!(dataset.kind, DebugDatasetKind)
                         && dataset.disposition.matches(filter)
                     {
@@ -961,7 +961,7 @@ mod test {
 
     fn expunge_dataset_for_bundle(bp: &mut Blueprint, bundle: &SupportBundle) {
         for datasets in bp.blueprint_datasets.values_mut() {
-            for dataset in datasets.datasets.values_mut() {
+            for mut dataset in datasets.datasets.iter_mut() {
                 if dataset.id == bundle.dataset_id.into() {
                     dataset.disposition = BlueprintDatasetDisposition::Expunged;
                 }
