@@ -10,7 +10,6 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::WebhookDelivery;
 use crate::db::model::WebhookDeliveryAttempt;
-use crate::db::model::WebhookEvent;
 use crate::db::schema::webhook_delivery::dsl;
 use crate::db::schema::webhook_event::dsl as event_dsl;
 use crate::db::update_and_check::UpdateAndCheck;
@@ -36,7 +35,7 @@ impl DataStore {
         opctx: &OpContext,
         rx_id: &WebhookReceiverUuid,
         lease_timeout: TimeDelta,
-    ) -> ListResultVec<(WebhookDelivery, WebhookEvent)> {
+    ) -> ListResultVec<(WebhookDelivery, String)> {
         let conn = self.pool_connection_authorized(opctx).await?;
         let now =
             diesel::dsl::now.into_sql::<diesel::pg::sql_types::Timestamptz>();
@@ -58,7 +57,7 @@ impl DataStore {
             .inner_join(
                 event_dsl::webhook_event.on(event_dsl::id.eq(dsl::event_id)),
             )
-            .select((WebhookDelivery::as_select(), WebhookEvent::as_select()))
+            .select((WebhookDelivery::as_select(), event_dsl::event_class))
             .load_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
