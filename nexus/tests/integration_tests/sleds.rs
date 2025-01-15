@@ -20,6 +20,7 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::views::SledInstance;
 use nexus_types::external_api::views::{PhysicalDisk, Sled};
 use omicron_sled_agent::sim;
+use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -29,7 +30,10 @@ use uuid::Uuid;
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
-async fn sleds_list(client: &ClientTestContext, sleds_url: &str) -> Vec<Sled> {
+pub(crate) async fn sleds_list(
+    client: &ClientTestContext,
+    sleds_url: &str,
+) -> Vec<Sled> {
     objects_list_page_authz::<Sled>(client, sleds_url).await.items
 }
 
@@ -47,7 +51,7 @@ async fn sled_instance_list(
     objects_list_page_authz::<SledInstance>(client, url).await.items
 }
 
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 1)]
 async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
@@ -93,7 +97,7 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
     }
 }
 
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 1)]
 async fn test_physical_disk_create_list_delete(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -152,7 +156,7 @@ async fn test_physical_disk_create_list_delete(
     assert_eq!(list, disks_initial, "{:#?}", list,);
 }
 
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 1)]
 async fn test_sled_instance_list(cptestctx: &ControlPlaneTestContext) {
     let external_client = &cptestctx.external_client;
 
@@ -174,11 +178,27 @@ async fn test_sled_instance_list(cptestctx: &ControlPlaneTestContext) {
         create_instance(&external_client, "test-project", "test-instance")
             .await;
 
-    let sled_instances =
-        sled_instance_list(&external_client, &instances_url).await;
+    // Ensure 1 instance was created on a sled
+    let sled_instances = wait_for_condition(
+        || {
+            let instances_url = instances_url.clone();
 
-    // Ensure 1 instance was created on the sled
-    assert_eq!(sled_instances.len(), 1);
+            async move {
+                let sled_instances =
+                    sled_instance_list(&external_client, &instances_url).await;
+
+                if sled_instances.len() == 1 {
+                    Ok(sled_instances)
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            }
+        },
+        &std::time::Duration::from_millis(500),
+        &std::time::Duration::from_secs(60),
+    )
+    .await
+    .expect("one sled instance");
 
     assert_eq!(project.identity.name, sled_instances[0].project_name);
     assert_eq!(instance.identity.name, sled_instances[0].name);

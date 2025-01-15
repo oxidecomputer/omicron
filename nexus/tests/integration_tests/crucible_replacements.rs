@@ -98,7 +98,7 @@ async fn test_region_replacement_does_not_create_freed_region(
 
     // Create four zpools, each with one dataset. This is required for region
     // and region snapshot replacement to have somewhere to move the data.
-    let sled_id = cptestctx.first_sled();
+    let sled_id = cptestctx.first_sled_id();
     let disk_test = DiskTestBuilder::new(&cptestctx)
         .on_specific_sled(sled_id)
         .with_zpool_count(4)
@@ -186,7 +186,7 @@ mod region_replacement {
             // region and region snapshot replacement to have somewhere to move
             // the data.
             let disk_test = DiskTestBuilder::new(&cptestctx)
-                .on_specific_sled(cptestctx.first_sled())
+                .on_specific_sled(cptestctx.first_sled_id())
                 .with_zpool_count(4)
                 .build()
                 .await;
@@ -465,7 +465,7 @@ mod region_replacement {
             cptestctx: &'a ControlPlaneTestContext,
         ) {
             let pantry = cptestctx
-                .sled_agent
+                .first_sim_server()
                 .pantry_server
                 .as_ref()
                 .unwrap()
@@ -612,7 +612,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
 
     // Create four zpools, each with one dataset. This is required for region
     // and region snapshot replacement to have somewhere to move the data.
-    let sled_id = cptestctx.first_sled();
+    let sled_id = cptestctx.first_sled_id();
     let mut disk_test = DiskTestBuilder::new(&cptestctx)
         .on_specific_sled(sled_id)
         .with_zpool_count(4)
@@ -1163,7 +1163,7 @@ mod region_snapshot_replacement {
             // region and region snapshot replacement to have somewhere to move
             // the data.
             let disk_test = DiskTestBuilder::new(&cptestctx)
-                .on_specific_sled(cptestctx.first_sled())
+                .on_specific_sled(cptestctx.first_sled_id())
                 .with_zpool_count(4)
                 .build()
                 .await;
@@ -1750,7 +1750,7 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
 
     // Create four zpools, each with one dataset. This is required for region
     // and region snapshot replacement to have somewhere to move the data.
-    let sled_id = cptestctx.first_sled();
+    let sled_id = cptestctx.first_sled_id();
 
     let disk_test = DiskTestBuilder::new(&cptestctx)
         .on_specific_sled(sled_id)
@@ -1811,7 +1811,7 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
     // for this test
 
     cptestctx
-        .sled_agent
+        .first_sim_server()
         .pantry_server
         .as_ref()
         .unwrap()
@@ -1837,7 +1837,7 @@ async fn test_region_replacement_triple_sanity(
     // Create five zpools, each with one dataset. This is required for region
     // and region snapshot replacement to have somewhere to move the data, and
     // for this test we're doing two expungements.
-    let sled_id = cptestctx.first_sled();
+    let sled_id = cptestctx.first_sled_id();
 
     let disk_test = DiskTestBuilder::new(&cptestctx)
         .on_specific_sled(sled_id)
@@ -1849,7 +1849,7 @@ async fn test_region_replacement_triple_sanity(
     // for this test
 
     cptestctx
-        .sled_agent
+        .first_sim_server()
         .pantry_server
         .as_ref()
         .unwrap()
@@ -1949,7 +1949,7 @@ async fn test_region_replacement_triple_sanity_2(
     // Create five zpools, each with one dataset. This is required for region
     // and region snapshot replacement to have somewhere to move the data, and
     // for this test we're doing two expungements.
-    let sled_id = cptestctx.first_sled();
+    let sled_id = cptestctx.first_sled_id();
 
     let disk_test = DiskTestBuilder::new(&cptestctx)
         .on_specific_sled(sled_id)
@@ -1961,7 +1961,7 @@ async fn test_region_replacement_triple_sanity_2(
     // for this test
 
     cptestctx
-        .sled_agent
+        .first_sim_server()
         .pantry_server
         .as_ref()
         .unwrap()

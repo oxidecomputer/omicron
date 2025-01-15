@@ -1054,7 +1054,7 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
         test: &DiskTest<'_>,
     ) {
-        let sled_agent = &cptestctx.sled_agent.sled_agent;
+        let sled_agent = cptestctx.first_sled_agent();
         let datastore = cptestctx.server.server_context().nexus.datastore();
 
         crate::app::sagas::test_helpers::assert_no_failed_undo_steps(

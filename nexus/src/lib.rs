@@ -30,7 +30,6 @@ use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
-use nexus_types::external_api::views::SledProvisionPolicy;
 use nexus_types::internal_api::params::{
     PhysicalDiskPutRequest, ZpoolPutRequest,
 };
@@ -49,7 +48,6 @@ use slog::Logger;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
-use uuid::Uuid;
 
 #[macro_use]
 extern crate slog;
@@ -257,7 +255,6 @@ impl nexus_test_interface::NexusServer for Server {
         external_dns_zone_name: &str,
         recovery_silo: nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
         certs: Vec<omicron_common::api::internal::nexus::Certificate>,
-        disable_sled_id: Uuid,
     ) -> Self {
         // Perform the "handoff from RSS".
         //
@@ -332,25 +329,7 @@ impl nexus_test_interface::NexusServer for Server {
             .expect("Could not initialize rack");
 
         // Start the Nexus external API.
-        let rv = Server::start(internal_server).await.unwrap();
-
-        // Historically, tests have assumed that there's only one provisionable
-        // sled, and that's convenient for a lot of purposes.  Mark our second
-        // sled non-provisionable.
-        let nexus = &rv.server_context().nexus;
-        nexus
-            .sled_set_provision_policy(
-                &opctx,
-                &nexus_db_queries::db::lookup::LookupPath::new(
-                    &opctx,
-                    nexus.datastore(),
-                )
-                .sled_id(disable_sled_id),
-                SledProvisionPolicy::NonProvisionable,
-            )
-            .await
-            .unwrap();
-        rv
+        Server::start(internal_server).await.unwrap()
     }
 
     async fn get_http_server_external_address(&self) -> SocketAddr {

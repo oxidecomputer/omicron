@@ -977,8 +977,7 @@ async fn test_snapshot_unwind(cptestctx: &ControlPlaneTestContext) {
     let zpool = disk_test.zpools().nth(2).expect("Not enough zpools");
     let dataset = &zpool.datasets[0];
     cptestctx
-        .sled_agent
-        .sled_agent
+        .first_sled_agent()
         .get_crucible_dataset(zpool.id, dataset.id)
         .await
         .set_creating_a_running_snapshot_should_fail()
@@ -1465,9 +1464,9 @@ async fn test_region_allocation_for_snapshot(
     //
     // We add one more than the "three" default to avoid failing
     // with "not enough storage".
-    let sled_id = cptestctx.first_sled();
+    let sled_id = cptestctx.first_sled_id();
     let mut disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(sled_id)
         .with_zpool_count(4)
         .build()
         .await;

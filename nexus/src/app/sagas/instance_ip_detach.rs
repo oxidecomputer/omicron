@@ -372,7 +372,7 @@ pub(crate) mod test {
         let client = &cptestctx.external_client;
         let apictx = &cptestctx.server.server_context();
         let nexus = &apictx.nexus;
-        let sled_agent = &cptestctx.sled_agent.sled_agent;
+        let sled_agent = cptestctx.first_sled_agent();
 
         let opctx = test_helpers::test_opctx(cptestctx);
         let datastore = &nexus.db_datastore;
@@ -425,7 +425,7 @@ pub(crate) mod test {
         use nexus_db_queries::db::schema::external_ip::dsl;
 
         let opctx = test_helpers::test_opctx(cptestctx);
-        let sled_agent = &cptestctx.sled_agent.sled_agent;
+        let sled_agent = cptestctx.first_sled_agent();
         let datastore = cptestctx.server.server_context().nexus.datastore();
 
         let conn = datastore.pool_connection_for_tests().await.unwrap();

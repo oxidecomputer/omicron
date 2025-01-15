@@ -55,6 +55,7 @@ async fn test_update_uninitialized() -> Result<()> {
         &mut config,
         sim::SimMode::Explicit,
         None,
+        0,
     )
     .await;
     let client = &cptestctx.external_client;
@@ -120,6 +121,7 @@ async fn test_update_end_to_end() -> Result<()> {
         &mut config,
         sim::SimMode::Explicit,
         None,
+        0,
     )
     .await;
     let client = &cptestctx.external_client;
@@ -365,7 +367,7 @@ fn assert_error_message_contains(
 #[tokio::test]
 async fn test_download_with_dots_fails() {
     let cptestctx =
-        test_setup::<omicron_nexus::Server>("test_download_with_dots_fails")
+        test_setup::<omicron_nexus::Server>("test_download_with_dots_fails", 0)
             .await;
     let client = &cptestctx.internal_client;
 

@@ -1244,7 +1244,7 @@ mod test {
     //
     // - If we subsequently create a new Silo, the new Silo's DNS record
     //   reflects the Nexus zone that was added.
-    #[nexus_test]
+    #[nexus_test(extra_sled_agents = 1)]
     async fn test_silos_external_dns_end_to_end(
         cptestctx: &ControlPlaneTestContext,
     ) {
