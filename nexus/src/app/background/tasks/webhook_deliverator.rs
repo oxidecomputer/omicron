@@ -187,10 +187,10 @@ impl WebhookDeliverator {
         };
         let hdr_rx_id = HeaderValue::try_from(rx.id().to_string())
             .expect("UUIDs should always be a valid header value");
-        for (delivery, event) in deliveries {
+        for (delivery, event_class) in deliveries {
             let attempt = (*delivery.attempts) + 1;
             let delivery_id = WebhookDeliveryUuid::from(delivery.id);
-            let event_class = &event.event_class;
+            let event_class = &event_class;
             match self
                 .datastore
                 .webhook_delivery_start_attempt(
