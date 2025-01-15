@@ -108,6 +108,7 @@ pub async fn realize_blueprint_with_overrides(
         &opctx,
         datastore,
         blueprint,
+        nexus_id,
     );
 
     let sled_list = register_sled_list_step(
@@ -255,6 +256,7 @@ fn register_support_bundle_failure_step<'a>(
     opctx: &'a OpContext,
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
+    nexus_id: OmicronZoneUuid,
 ) {
     registrar
         .new_step(
@@ -263,7 +265,7 @@ fn register_support_bundle_failure_step<'a>(
             move |_cx| async move {
                 datastore
                     .support_bundle_fail_expunged(
-                        &opctx, blueprint,
+                        &opctx, blueprint, nexus_id
                     )
                     .await
                     .map_err(|err| anyhow!(err))?;
