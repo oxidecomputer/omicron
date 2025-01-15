@@ -115,6 +115,14 @@ impl ManagedApi {
     pub fn is_versioned(&self) -> bool {
         self.versions.is_versioned()
     }
+
+    pub fn iter_versions(&self) -> impl Iterator<Item = &semver::Version> + '_ {
+        self.versions.iter_versions()
+    }
+
+    pub fn has_version(&self, version: &semver::Version) -> bool {
+        self.iter_versions().any(|v| v == version)
+    }
 }
 
 /// Describes the Rust-defined configuration for all of the APIs managed by this
@@ -138,6 +146,10 @@ impl ManagedApis {
 
     pub fn api(&self, ident: &ApiIdent) -> Option<&ManagedApi> {
         self.apis.get(ident)
+    }
+
+    pub fn into_map(self) -> BTreeMap<ApiIdent, ManagedApi> {
+        self.apis
     }
 }
 

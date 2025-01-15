@@ -14,7 +14,7 @@ use std::{collections::BTreeMap, ops::Deref};
 /// Container for all the OpenAPI spec files found
 ///
 /// Most validation is not done at this point.
-struct AllApiSpecFiles {
+pub struct AllApiSpecFiles {
     api_files: BTreeMap<ApiIdent, Vec<ApiSpecFile>>,
     warnings: Vec<anyhow::Error>,
 }
@@ -127,6 +127,10 @@ impl AllApiSpecFiles {
         Ok(rv)
     }
 
+    pub fn into_map(self) -> BTreeMap<ApiIdent, Vec<ApiSpecFile>> {
+        self.api_files
+    }
+
     pub fn apis(&self) -> impl Iterator<Item = &ApiIdent> + '_ {
         self.api_files.keys()
     }
@@ -141,7 +145,7 @@ impl AllApiSpecFiles {
 
 /// Describes the path to an OpenAPI document file
 // XXX-dap spec -> document?
-#[derive(Debug)]
+#[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
 pub struct ApiSpecFileName {
     ident: ApiIdent,
     kind: ApiSpecFileNameKind,
@@ -251,7 +255,7 @@ impl ApiSpecFileName {
 }
 
 /// Describes how this API's specification file is named
-#[derive(Debug)]
+#[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
 enum ApiSpecFileNameKind {
     Lockstep,
     Versioned { version: semver::Version, sum: String },
@@ -261,6 +265,7 @@ enum ApiSpecFileNameKind {
 pub struct ApiSpecFile {
     name: ApiSpecFileName,
     contents: OpenAPI,
+    version: semver::Version,
 }
 
 impl ApiSpecFile {
@@ -272,6 +277,10 @@ impl ApiSpecFile {
             .with_context(|| format!("read file {:?}", path))?;
         let contents: OpenAPI = serde_json::from_str(&contents_str)
             .with_context(|| format!("parse file {:?}", path))?;
+        let version: semver::Version =
+            contents.info.version.parse().with_context(|| {
+                format!("version in {:?} was not a semver", path)
+            })?;
 
         if let ApiSpecFileNameKind::Versioned { version, sum: _ } = &name.kind {
             // XXX-dap verify checksum
@@ -285,6 +294,14 @@ impl ApiSpecFile {
             }
         }
 
-        Ok(ApiSpecFile { name, contents })
+        Ok(ApiSpecFile { name, contents, version })
+    }
+
+    pub fn spec_file_name(&self) -> &ApiSpecFileName {
+        &self.name
+    }
+
+    pub fn version(&self) -> &semver::Version {
+        &self.version
     }
 }
