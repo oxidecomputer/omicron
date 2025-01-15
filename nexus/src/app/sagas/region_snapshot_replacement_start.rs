@@ -68,8 +68,9 @@ use omicron_common::api::external::Error;
 use omicron_uuid_kinds::DatasetUuid;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::CrucibleOpts;
-use sled_agent_client::types::VolumeConstructionRequest;
+use sled_agent_client::CrucibleOpts;
+use sled_agent_client::VolumeConstructionRequest;
+use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use steno::ActionError;
 use steno::Node;
@@ -731,12 +732,12 @@ async fn rsrss_new_region_volume_create(
         )));
     };
 
-    let new_region_address = SocketAddrV6::new(
+    let new_region_address = SocketAddr::V6(SocketAddrV6::new(
         *new_dataset_address.ip(),
         ensured_region.port_number,
         0,
         0,
-    );
+    ));
 
     // Create a volume to inflate the reference count of the newly created
     // read-only region. If this is not done it's possible that a user could
@@ -753,7 +754,7 @@ async fn rsrss_new_region_volume_create(
             gen: 0,
             opts: CrucibleOpts {
                 id: new_region_volume_id,
-                target: vec![new_region_address.to_string()],
+                target: vec![new_region_address],
                 lossy: false,
                 flush_timeout: None,
                 key: None,
@@ -1149,7 +1150,7 @@ pub(crate) mod test {
     use nexus_types::external_api::views;
     use nexus_types::identity::Asset;
     use omicron_uuid_kinds::GenericUuid;
-    use sled_agent_client::types::VolumeConstructionRequest;
+    use sled_agent_client::VolumeConstructionRequest;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -1410,8 +1411,8 @@ pub(crate) mod test {
         for zpool in test.zpools() {
             for dataset in &zpool.datasets {
                 let crucible_dataset =
-                    sled_agent.get_crucible_dataset(zpool.id, dataset.id).await;
-                for region in crucible_dataset.list().await {
+                    sled_agent.get_crucible_dataset(zpool.id, dataset.id);
+                for region in crucible_dataset.list() {
                     match region.state {
                         crucible_agent_client::types::State::Tombstoned
                         | crucible_agent_client::types::State::Destroyed => {
@@ -1744,8 +1745,7 @@ pub(crate) mod test {
             .as_ref()
             .unwrap()
             .pantry
-            .set_auto_activate_volumes()
-            .await;
+            .set_auto_activate_volumes();
 
         // Create a disk and a snapshot
         let client = &cptestctx.external_client;
@@ -1903,8 +1903,7 @@ pub(crate) mod test {
             .as_ref()
             .unwrap()
             .pantry
-            .set_auto_activate_volumes()
-            .await;
+            .set_auto_activate_volumes();
 
         // Create a disk and a snapshot
         let client = &cptestctx.external_client;

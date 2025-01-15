@@ -75,7 +75,7 @@ where
     D: serde::Deserializer<'de>,
 {
     struct CockroachTimestampVisitor;
-    impl<'de> de::Visitor<'de> for CockroachTimestampVisitor {
+    impl de::Visitor<'_> for CockroachTimestampVisitor {
         type Value = DateTime<Utc>;
 
         fn expecting(
@@ -185,7 +185,7 @@ where
 {
     struct CockroachNodeMembershipVisitor;
 
-    impl<'de> de::Visitor<'de> for CockroachNodeMembershipVisitor {
+    impl de::Visitor<'_> for CockroachNodeMembershipVisitor {
         type Value = NodeMembership;
 
         fn expecting(

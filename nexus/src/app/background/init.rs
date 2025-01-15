@@ -115,6 +115,7 @@ use super::tasks::region_snapshot_replacement_start::*;
 use super::tasks::region_snapshot_replacement_step::*;
 use super::tasks::saga_recovery;
 use super::tasks::service_firewall_rules;
+use super::tasks::support_bundle_collector;
 use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
 use super::tasks::v2p_mappings::V2PManager;
@@ -149,6 +150,7 @@ pub struct BackgroundTasks {
     pub task_nat_cleanup: Activator,
     pub task_bfd_manager: Activator,
     pub task_inventory_collection: Activator,
+    pub task_support_bundle_collector: Activator,
     pub task_physical_disk_adoption: Activator,
     pub task_decommissioned_disk_cleaner: Activator,
     pub task_phantom_disks: Activator,
@@ -235,6 +237,7 @@ impl BackgroundTasksInitializer {
             task_nat_cleanup: Activator::new(),
             task_bfd_manager: Activator::new(),
             task_inventory_collection: Activator::new(),
+            task_support_bundle_collector: Activator::new(),
             task_physical_disk_adoption: Activator::new(),
             task_decommissioned_disk_cleaner: Activator::new(),
             task_phantom_disks: Activator::new(),
@@ -302,6 +305,7 @@ impl BackgroundTasksInitializer {
             task_nat_cleanup,
             task_bfd_manager,
             task_inventory_collection,
+            task_support_bundle_collector,
             task_physical_disk_adoption,
             task_decommissioned_disk_cleaner,
             task_phantom_disks,
@@ -517,12 +521,33 @@ impl BackgroundTasksInitializer {
                 period: config.inventory.period_secs,
                 task_impl: Box::new(collector),
                 opctx: opctx.child(BTreeMap::new()),
-                watchers: vec![Box::new(rx_blueprint_exec)],
+                watchers: vec![Box::new(rx_blueprint_exec.clone())],
                 activator: task_inventory_collection,
             });
 
             inventory_watcher
         };
+
+        // Cleans up and collects support bundles.
+        //
+        // This task is triggered by blueprint execution, since blueprint
+        // execution may cause bundles to start failing and need garbage
+        // collection.
+        driver.register(TaskDefinition {
+            name: "support_bundle_collector",
+            description: "Manage support bundle collection and cleanup",
+            period: config.support_bundle_collector.period_secs,
+            task_impl: Box::new(
+                support_bundle_collector::SupportBundleCollector::new(
+                    datastore.clone(),
+                    config.support_bundle_collector.disable,
+                    nexus_id,
+                ),
+            ),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![Box::new(rx_blueprint_exec)],
+            activator: task_support_bundle_collector,
+        });
 
         driver.register(TaskDefinition {
             name: "physical_disk_adoption",

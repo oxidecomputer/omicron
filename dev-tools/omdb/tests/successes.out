@@ -381,6 +381,10 @@ task: "service_zone_nat_tracker"
     ensures service zone nat records are recorded in NAT RPW table
 
 
+task: "support_bundle_collector"
+    Manage support bundle collection and cleanup
+
+
 task: "switch_port_config_manager"
     manages switch port settings for rack switches
 
@@ -693,6 +697,13 @@ task: "service_zone_nat_tracker"
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: inventory collection is None
+
+task: "support_bundle_collector"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: task disabled
 
 task: "switch_port_config_manager"
   configured period: every <REDACTED_DURATION>s
@@ -1138,6 +1149,13 @@ task: "service_zone_nat_tracker"
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: inventory collection is None
+
+task: "support_bundle_collector"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: task disabled
 
 task: "switch_port_config_manager"
   configured period: every <REDACTED_DURATION>s

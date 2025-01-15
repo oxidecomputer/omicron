@@ -1339,9 +1339,7 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
     cptestctx
         .first_sled_agent()
         .get_crucible_dataset(zpool.id, dataset.id)
-        .await
-        .set_region_deletion_error(true)
-        .await;
+        .set_region_deletion_error(true);
 
     // Delete the disk - expect this to fail
     NexusRequest::new(
@@ -1376,9 +1374,7 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
     cptestctx
         .first_sled_agent()
         .get_crucible_dataset(zpool.id, dataset.id)
-        .await
-        .set_region_deletion_error(false)
-        .await;
+        .set_region_deletion_error(false);
 
     // Request disk delete again
     NexusRequest::new(
@@ -2476,7 +2472,7 @@ async fn test_no_halt_disk_delete_one_region_on_expunged_agent(
     let zpool = disk_test.zpools().next().expect("Expected at least one zpool");
     let dataset = &zpool.datasets[0];
 
-    cptestctx.first_sled_agent().drop_dataset(zpool.id, dataset.id).await;
+    cptestctx.first_sled_agent().drop_dataset(zpool.id, dataset.id);
 
     // Spawn a task that tries to delete the disk
     let disk_url = get_disk_url(DISK_NAME);

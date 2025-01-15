@@ -15,8 +15,12 @@ bytes.workspace = true
 chrono.workspace = true
 http.workspace = true
 futures.workspace = true
+internal-dns-resolver.workspace = true
+internal-dns-types.workspace = true
+nexus-client.workspace = true
 omicron-sled-agent.workspace = true
 omicron-test-utils.workspace = true
+omicron-uuid-kinds.workspace = true
 oxide-client.workspace = true
 rand.workspace = true
 reqwest = { workspace = true, features = ["cookies"] }
@@ -25,6 +29,9 @@ russh-keys = "0.45.0"
 serde.workspace = true
 serde_json.workspace = true
 sled-agent-types.workspace = true
+slog.workspace = true
+slog-error-chain.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 toml.workspace = true
 hickory-resolver.workspace = true

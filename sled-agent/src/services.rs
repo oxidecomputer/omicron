@@ -3692,7 +3692,7 @@ impl ServiceManager {
             };
             check_property("zoned", zoned, "on")?;
             check_property("canmount", canmount, "on")?;
-            if dataset.dataset().dataset_should_be_encrypted() {
+            if dataset.kind().dataset_should_be_encrypted() {
                 check_property("encryption", encryption, "aes-256-gcm")?;
             }
 
@@ -5066,10 +5066,7 @@ mod illumos_tests {
     }
 
     impl<'a> LedgerTestHelper<'a> {
-        async fn new(
-            log: slog::Logger,
-            test_config: &'a TestConfig,
-        ) -> LedgerTestHelper {
+        async fn new(log: slog::Logger, test_config: &'a TestConfig) -> Self {
             let ddmd_client = DdmAdminClient::localhost(&log).unwrap();
             let storage_test_harness = setup_storage(&log).await;
             let zone_bundler = ZoneBundler::new(

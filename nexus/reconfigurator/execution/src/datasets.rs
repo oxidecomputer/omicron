@@ -339,12 +339,11 @@ mod tests {
         let nzones_with_durable_datasets = all_datasets.len();
         assert!(nzones_with_durable_datasets > 0);
 
-        let bp_id = BlueprintUuid::from_untyped_uuid(blueprint.id);
         let EnsureDatasetsResult { inserted, updated, removed } =
             ensure_dataset_records_exist(
                 opctx,
                 datastore,
-                bp_id,
+                blueprint.id,
                 all_datasets.iter(),
             )
             .await
@@ -369,7 +368,7 @@ mod tests {
             ensure_dataset_records_exist(
                 opctx,
                 datastore,
-                bp_id,
+                blueprint.id,
                 all_datasets.iter(),
             )
             .await
@@ -431,7 +430,7 @@ mod tests {
             ensure_dataset_records_exist(
                 opctx,
                 datastore,
-                bp_id,
+                blueprint.id,
                 all_datasets.iter().chain(&new_zones),
             )
             .await
@@ -506,12 +505,11 @@ mod tests {
         .await;
 
         let mut all_datasets = get_all_datasets_from_zones(&blueprint);
-        let bp_id = BlueprintUuid::from_untyped_uuid(blueprint.id);
         let EnsureDatasetsResult { inserted, updated, removed } =
             ensure_dataset_records_exist(
                 opctx,
                 datastore,
-                bp_id,
+                blueprint.id,
                 all_datasets.iter(),
             )
             .await
@@ -536,7 +534,7 @@ mod tests {
             ensure_dataset_records_exist(
                 opctx,
                 datastore,
-                bp_id,
+                blueprint.id,
                 all_datasets.iter(),
             )
             .await
@@ -607,12 +605,11 @@ mod tests {
             reservation: None,
             compression: CompressionAlgorithm::Off,
         });
-        let bp_id = BlueprintUuid::from_untyped_uuid(blueprint.id);
         let EnsureDatasetsResult { inserted, updated, removed } =
             ensure_dataset_records_exist(
                 opctx,
                 datastore,
-                bp_id,
+                blueprint.id,
                 all_datasets.iter(),
             )
             .await
@@ -656,7 +653,7 @@ mod tests {
             ensure_dataset_records_exist(
                 opctx,
                 datastore,
-                bp_id,
+                blueprint.id,
                 all_datasets.iter(),
             )
             .await
@@ -724,12 +721,11 @@ mod tests {
             compression: CompressionAlgorithm::Off,
         });
 
-        let bp_id = BlueprintUuid::from_untyped_uuid(blueprint.id);
         let EnsureDatasetsResult { inserted, updated, removed } =
             ensure_dataset_records_exist(
                 opctx,
                 datastore,
-                bp_id,
+                blueprint.id,
                 all_datasets.iter(),
             )
             .await
@@ -751,7 +747,7 @@ mod tests {
             ensure_dataset_records_exist(
                 opctx,
                 datastore,
-                bp_id,
+                blueprint.id,
                 all_datasets.iter(),
             )
             .await

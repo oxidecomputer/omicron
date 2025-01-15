@@ -9,6 +9,7 @@ use nexus_client::types::BlueprintTargetSet;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_types::deployment::{Blueprint, PlanningInput};
 use nexus_types::inventory::Collection;
+use omicron_uuid_kinds::GenericUuid;
 use slog::{debug, info};
 
 /// Modify the system by editing the current target blueprint
@@ -57,7 +58,7 @@ pub async fn blueprint_edit_current_target(
 
     // Fetch the actual blueprint.
     let blueprint1 = nexus
-        .blueprint_view(&target_blueprint.target_id)
+        .blueprint_view(target_blueprint.target_id.as_untyped_uuid())
         .await
         .context("fetch current target blueprint")?
         .into_inner();

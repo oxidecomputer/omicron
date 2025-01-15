@@ -58,8 +58,8 @@ use nexus_db_queries::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use omicron_common::api::external::Error;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::CrucibleOpts;
-use sled_agent_client::types::VolumeConstructionRequest;
+use sled_agent_client::CrucibleOpts;
+use sled_agent_client::VolumeConstructionRequest;
 use std::net::SocketAddrV6;
 use steno::ActionError;
 use steno::Node;
@@ -688,7 +688,7 @@ async fn srrs_create_fake_volume(
             gen: 0,
             opts: CrucibleOpts {
                 id: new_volume_id,
-                target: vec![old_region_address.to_string()],
+                target: vec![old_region_address.into()],
                 lossy: false,
                 flush_timeout: None,
                 key: None,
@@ -793,7 +793,7 @@ pub(crate) mod test {
     use nexus_types::identity::Asset;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_uuid_kinds::DatasetUuid;
-    use sled_agent_client::types::VolumeConstructionRequest;
+    use sled_agent_client::VolumeConstructionRequest;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =

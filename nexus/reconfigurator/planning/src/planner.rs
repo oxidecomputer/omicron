@@ -37,6 +37,7 @@ pub(crate) use self::omicron_zone_placement::DiscretionaryOmicronZone;
 use self::omicron_zone_placement::OmicronZonePlacement;
 use self::omicron_zone_placement::OmicronZonePlacementSledState;
 pub use self::rng::PlannerRng;
+pub use self::rng::SledPlannerRng;
 
 mod omicron_zone_placement;
 pub(crate) mod rng;
@@ -1253,6 +1254,21 @@ mod test {
         for (_sled_id, zones) in blueprint1.blueprint_zones.iter_mut().take(2) {
             zones.zones.retain(|z| !z.zone_type.is_internal_dns());
         }
+        for (_, dataset_config) in
+            blueprint1.blueprint_datasets.iter_mut().take(2)
+        {
+            dataset_config.datasets.retain(|_id, dataset| {
+                // This is gross; once zone configs know explicit dataset IDs,
+                // we should retain by ID instead.
+                match &dataset.kind {
+                    DatasetKind::InternalDns => false,
+                    DatasetKind::TransientZone { name } => {
+                        !name.starts_with("oxz_internal_dns")
+                    }
+                    _ => true,
+                }
+            });
+        }
 
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
@@ -1386,7 +1402,7 @@ mod test {
         let new_zone = blueprint3
             .blueprint_zones
             .values()
-            .flat_map(|c| &c.zones)
+            .flat_map(|c| c.zones.iter())
             .find(|zone| {
                 zone.disposition == BlueprintZoneDisposition::InService
                     && zone
@@ -2075,7 +2091,7 @@ mod test {
             // expunged, so lie and pretend like that already happened
             // (otherwise the planner will rightfully fail to generate a new
             // blueprint, because we're feeding it invalid inputs).
-            for zone in
+            for mut zone in
                 &mut blueprint1.blueprint_zones.get_mut(sled_id).unwrap().zones
             {
                 zone.disposition = BlueprintZoneDisposition::Expunged;
@@ -2207,7 +2223,7 @@ mod test {
             .unwrap()
             .zones;
 
-        zones.retain_mut(|zone| {
+        zones.retain(|zone| {
             if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 internal_address,
                 ..

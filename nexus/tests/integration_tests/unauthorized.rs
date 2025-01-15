@@ -159,7 +159,6 @@ G GET  PUT  POST DEL  TRCE G  URL
 /// associated to the results of the setup request with any `{id}` params in the
 /// URL replaced with the result's URL. This is used to later verify ID
 /// endpoints without first having to know the ID.
-
 enum SetupReq {
     Get {
         url: &'static str,

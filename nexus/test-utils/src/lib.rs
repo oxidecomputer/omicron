@@ -37,6 +37,7 @@ use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::blueprint_zone_type;
+use nexus_types::deployment::id_map::IdMap;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
@@ -74,6 +75,7 @@ use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -171,7 +173,7 @@ pub struct ControlPlaneTestContext<N> {
     pub external_dns_zone_name: String,
     pub external_dns: dns_server::TransientServer,
     pub internal_dns: dns_server::TransientServer,
-    pub initial_blueprint_id: Uuid,
+    pub initial_blueprint_id: BlueprintUuid,
     pub silo_name: Name,
     pub user_name: UserId,
 }
@@ -371,7 +373,7 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
     pub external_dns: Option<dns_server::TransientServer>,
     pub internal_dns: Option<dns_server::TransientServer>,
     dns_config: Option<DnsConfigParams>,
-    initial_blueprint_id: Option<Uuid>,
+    initial_blueprint_id: Option<BlueprintUuid>,
     blueprint_zones: Vec<BlueprintZoneConfig>,
 
     pub silo_name: Option<Name>,
@@ -878,7 +880,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         sled_id,
                         BlueprintZonesConfig {
                             generation: Generation::new().next(),
-                            zones: zones.clone(),
+                            zones: zones.iter().cloned().collect(),
                         },
                     );
 
@@ -925,7 +927,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         sled_id,
                         BlueprintZonesConfig {
                             generation: Generation::new().next(),
-                            zones: vec![],
+                            zones: IdMap::new(),
                         },
                     );
                 }
@@ -966,7 +968,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             }
 
             Blueprint {
-                id: Uuid::new_v4(),
+                id: BlueprintUuid::new_v4(),
                 blueprint_zones,
                 blueprint_disks,
                 blueprint_datasets,

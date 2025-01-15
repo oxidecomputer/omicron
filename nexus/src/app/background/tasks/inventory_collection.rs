@@ -215,7 +215,7 @@ struct DbSledAgentEnumerator<'a> {
     datastore: &'a DataStore,
 }
 
-impl<'a> nexus_inventory::SledAgentEnumerator for DbSledAgentEnumerator<'a> {
+impl nexus_inventory::SledAgentEnumerator for DbSledAgentEnumerator<'_> {
     fn list_sled_agents(
         &self,
     ) -> BoxFuture<'_, Result<Vec<String>, InventoryError>> {

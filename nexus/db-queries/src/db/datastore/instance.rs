@@ -1560,7 +1560,6 @@ impl DataStore {
     /// using [`DataStore::instance_updater_unlock`], or use
     /// [`DataStore::instance_commit_update`] to release the lock and write back
     /// a new [`InstanceRuntimeState`] in a single atomic query.
-
     ///
     /// This method is idempotent: if the instance is already locked by the same
     /// saga, it will succeed, as though the lock was acquired.
