@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::anyhow;
-use dropshot::Body;
+use dropshot::{Body, FreeformBody};
 use dropshot::{
     EmptyScanParams, EndpointTagPolicy, HttpError, HttpResponseAccepted,
     HttpResponseCreated, HttpResponseDeleted, HttpResponseFound,
@@ -2824,7 +2824,7 @@ pub trait NexusExternalApi {
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SupportBundlePath>,
-    ) -> Result<Response<Body>, HttpError>;
+    ) -> Result<HttpResponseOk<FreeformBody>, HttpError>;
 
     /// Download a file within a support bundle
     #[endpoint {
@@ -2835,7 +2835,7 @@ pub trait NexusExternalApi {
     async fn support_bundle_download_file(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SupportBundleFilePath>,
-    ) -> Result<Response<Body>, HttpError>;
+    ) -> Result<HttpResponseOk<FreeformBody>, HttpError>;
 
     /// Download the metadata of a support bundle
     #[endpoint {
