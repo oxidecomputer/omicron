@@ -918,9 +918,16 @@ pub struct BlueprintPhysicalDiskConfig {
 )]
 pub struct BlueprintPhysicalDisksConfig {
     pub generation: Generation,
-    pub disks: Vec<BlueprintPhysicalDiskConfig>,
+    pub disks: IdMap<BlueprintPhysicalDiskConfig>,
 }
 
+impl IdMappable for BlueprintPhysicalDiskConfig {
+    type Id = PhysicalDiskUuid;
+
+    fn id(&self) -> Self::Id {
+        self.id
+    }
+}
 impl diffus::Same for BlueprintPhysicalDiskConfig {
     fn same(&self, other: &Self) -> bool {
         self == other
@@ -932,7 +939,7 @@ impl Default for BlueprintPhysicalDisksConfig {
     fn default() -> Self {
         BlueprintPhysicalDisksConfig {
             generation: Generation::new(),
-            disks: vec![],
+            disks: IdMap::new(),
         }
     }
 }

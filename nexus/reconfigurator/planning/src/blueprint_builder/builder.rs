@@ -423,10 +423,7 @@ impl<'a> BlueprintBuilder<'a> {
             .keys()
             .copied()
             .map(|sled_id| {
-                let config = BlueprintPhysicalDisksConfig {
-                    generation: Generation::new(),
-                    disks: Vec::new(),
-                };
+                let config = BlueprintPhysicalDisksConfig::default();
                 (sled_id, config)
             })
             .collect();
@@ -545,10 +542,7 @@ impl<'a> BlueprintBuilder<'a> {
                 .blueprint_disks
                 .get(sled_id)
                 .cloned()
-                .unwrap_or_else(|| BlueprintPhysicalDisksConfig {
-                    generation: Generation::new(),
-                    disks: Vec::new(),
-                });
+                .unwrap_or_else(|| BlueprintPhysicalDisksConfig::default());
             let datasets = parent_blueprint
                 .blueprint_datasets
                 .get(sled_id)

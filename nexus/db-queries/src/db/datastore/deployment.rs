@@ -626,10 +626,7 @@ impl DataStore {
                 for s in batch {
                     let old = blueprint_physical_disks.insert(
                         s.sled_id.into(),
-                        BlueprintPhysicalDisksConfig {
-                            generation: *s.generation,
-                            disks: Vec::new(),
-                        },
+                        BlueprintPhysicalDisksConfig::default(),
                     );
                     bail_unless!(
                         old.is_none(),
@@ -839,7 +836,7 @@ impl DataStore {
                                 d.id, d.sled_id
                             ))
                         })?;
-                    sled_disks.disks.push(d.into());
+                    sled_disks.disks.insert(d.into());
                 }
             }
         }
@@ -894,11 +891,6 @@ impl DataStore {
                     );
                 }
             }
-        }
-
-        // Sort all disks to match what blueprint builders do.
-        for (_, disks_config) in blueprint_disks.iter_mut() {
-            disks_config.disks.sort_unstable_by_key(|d| d.id);
         }
 
         // Load our `ClickhouseClusterConfig` if it exists

@@ -1591,7 +1591,8 @@ mod tests {
             .iter_mut()
             .next()
             .expect("at least one sled");
-        let removed_disk = disks_config.disks.remove(0);
+        let first = disks_config.disks.first().unwrap().id;
+        let removed_disk = disks_config.disks.remove(&first).unwrap();
         eprintln!("removed disk {removed_disk:?}");
 
         let expected_notes = blueprint
