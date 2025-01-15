@@ -216,7 +216,7 @@ enum InvalidPath<'a> {
     InvalidComponent(Utf8Component<'a>),
 }
 
-impl<'a> fmt::Display for InvalidPath<'a> {
+impl fmt::Display for InvalidPath<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             InvalidPath::AbsolutePath => {

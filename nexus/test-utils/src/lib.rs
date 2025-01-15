@@ -825,11 +825,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         sled_id,
                         BlueprintZonesConfig {
                             generation: Generation::new().next(),
-                            zones: zones
-                                .iter()
-                                .cloned()
-                                .map(|z| (z.id, z))
-                                .collect(),
+                            zones: zones.iter().cloned().collect(),
                         },
                     );
                     sled_state.insert(sled_id, SledState::Active);

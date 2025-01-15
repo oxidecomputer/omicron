@@ -60,7 +60,7 @@ pub struct PopupBuilder<'a> {
     pub buttons: Vec<ButtonText<'a>>,
 }
 
-impl<'a> PopupBuilder<'a> {
+impl PopupBuilder<'_> {
     /// Builds a non-scrollable popup.
     pub fn build(&self, full_screen: Rect) -> Popup<'_, NonScrollable> {
         Popup::new(
@@ -297,7 +297,7 @@ impl<'a, S: PopupScrollability> Popup<'a, S> {
     }
 }
 
-impl<'a> Popup<'a, Scrollable> {
+impl Popup<'_, Scrollable> {
     /// Returns the effective, or actual, scroll offset after the text is laid
     /// out, in the form of a `PopupScrollOffset`.
     ///
@@ -388,7 +388,7 @@ pub struct PopupData<'a> {
     buttons: Vec<ButtonText<'a>>,
 }
 
-impl<'a> PopupData<'a> {
+impl PopupData<'_> {
     pub fn height(&self) -> u16 {
         let button_height: u16 =
             if self.buttons.is_empty() { 0 } else { BUTTON_HEIGHT };

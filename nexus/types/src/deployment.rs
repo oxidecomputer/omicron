@@ -55,6 +55,7 @@ mod blueprint_diff;
 mod blueprint_display;
 mod clickhouse;
 pub mod execution;
+pub mod id_map;
 mod network_resources;
 mod planning_input;
 mod tri_map;
@@ -97,6 +98,7 @@ use blueprint_display::{
     BpPhysicalDisksTableSchema, BpTable, BpTableData, BpTableRow,
     KvListWithHeading,
 };
+use id_map::{IdMap, IdMappable};
 
 pub use blueprint_diff::BlueprintDiff;
 
@@ -238,7 +240,7 @@ impl Blueprint {
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
         zones_by_sled_id.iter().flat_map(move |(sled_id, z)| {
             z.zones
-                .values()
+                .iter()
                 .filter(move |z| z.disposition.matches(filter))
                 .map(|z| (*sled_id, z))
         })
@@ -266,7 +268,7 @@ impl Blueprint {
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
         self.blueprint_zones.iter().flat_map(move |(sled_id, z)| {
             z.zones
-                .values()
+                .iter()
                 .filter(move |z| !z.disposition.matches(filter))
                 .map(|z| (*sled_id, z))
         })
@@ -334,14 +336,14 @@ impl BpTableData for BlueprintZonesConfig {
 
     fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
         // We want to sort by (kind, id)
-        let mut zones: Vec<_> = self.zones.values().cloned().collect();
+        let mut zones: Vec<_> = self.zones.iter().cloned().collect();
         zones.sort_unstable_by_key(zone_sort_key);
         zones.into_iter().map(move |zone| {
             BpTableRow::from_strings(
                 state,
                 vec![
                     zone.kind().report_str().to_string(),
-                    zone.id().to_string(),
+                    ZoneSortKey::id(&zone).to_string(),
                     zone.disposition.to_string(),
                     zone.underlay_ip().to_string(),
                 ],
@@ -381,7 +383,7 @@ pub struct BlueprintDisplay<'a> {
     // TODO: add colorization with a stylesheet
 }
 
-impl<'a> BlueprintDisplay<'a> {
+impl BlueprintDisplay<'_> {
     fn make_cockroachdb_table(&self) -> KvListWithHeading {
         let fingerprint = if self.blueprint.cockroachdb_fingerprint.is_empty() {
             NONE_PARENS.to_string()
@@ -450,7 +452,7 @@ impl<'a> BlueprintDisplay<'a> {
     }
 }
 
-impl<'a> fmt::Display for BlueprintDisplay<'a> {
+impl fmt::Display for BlueprintDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let b = self.blueprint;
         writeln!(f, "blueprint  {}", b.id)?;
@@ -556,14 +558,14 @@ pub struct BlueprintZonesConfig {
     pub generation: Generation,
 
     /// The set of running zones.
-    pub zones: BTreeMap<OmicronZoneUuid, BlueprintZoneConfig>,
+    pub zones: IdMap<BlueprintZoneConfig>,
 }
 
 impl From<BlueprintZonesConfig> for OmicronZonesConfig {
     fn from(config: BlueprintZonesConfig) -> Self {
         Self {
             generation: config.generation,
-            zones: config.zones.into_values().map(From::from).collect(),
+            zones: config.zones.into_iter().map(From::from).collect(),
         }
     }
 }
@@ -582,7 +584,7 @@ impl BlueprintZonesConfig {
             generation: self.generation,
             zones: self
                 .zones
-                .values()
+                .iter()
                 .filter(|z| z.disposition.matches(filter))
                 .cloned()
                 .map(OmicronZoneConfig::from)
@@ -594,7 +596,7 @@ impl BlueprintZonesConfig {
     /// `Expunged`, false otherwise.
     pub fn are_all_zones_expunged(&self) -> bool {
         self.zones
-            .values()
+            .iter()
             .all(|c| c.disposition == BlueprintZoneDisposition::Expunged)
     }
 }
@@ -653,6 +655,14 @@ pub struct BlueprintZoneConfig {
     /// zpool used for the zone's (transient) root filesystem
     pub filesystem_pool: Option<ZpoolName>,
     pub zone_type: BlueprintZoneType,
+}
+
+impl IdMappable for BlueprintZoneConfig {
+    type Id = OmicronZoneUuid;
+
+    fn id(&self) -> Self::Id {
+        self.id
+    }
 }
 
 impl diffus::Same for BlueprintZoneConfig {
