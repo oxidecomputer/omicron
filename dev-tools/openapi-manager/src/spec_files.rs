@@ -8,6 +8,7 @@ use crate::apis::{ApiIdent, ManagedApis};
 use anyhow::{anyhow, bail, Context};
 use camino::{Utf8Path, Utf8PathBuf};
 use openapiv3::OpenAPI;
+use std::fmt::Display;
 use std::{collections::BTreeMap, ops::Deref};
 
 /// Container for all the OpenAPI spec files found
@@ -140,9 +141,16 @@ impl AllApiSpecFiles {
 
 /// Describes the path to an OpenAPI document file
 // XXX-dap spec -> document?
-struct ApiSpecFileName {
+#[derive(Debug)]
+pub struct ApiSpecFileName {
     ident: ApiIdent,
     kind: ApiSpecFileNameKind,
+}
+
+impl Display for ApiSpecFileName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.path().as_str())
+    }
 }
 
 impl ApiSpecFileName {
@@ -243,13 +251,14 @@ impl ApiSpecFileName {
 }
 
 /// Describes how this API's specification file is named
+#[derive(Debug)]
 enum ApiSpecFileNameKind {
     Lockstep,
     Versioned { version: semver::Version, sum: String },
 }
 
 /// Describes an OpenAPI document found on disk
-struct ApiSpecFile {
+pub struct ApiSpecFile {
     name: ApiSpecFileName,
     contents: OpenAPI,
 }
@@ -259,7 +268,23 @@ impl ApiSpecFile {
         name: ApiSpecFileName,
         path: &Utf8Path,
     ) -> anyhow::Result<ApiSpecFile> {
-        let contents = todo!(); // XXX-dap read file and parse it
+        let contents_str = std::fs::read_to_string(path)
+            .with_context(|| format!("read file {:?}", path))?;
+        let contents: OpenAPI = serde_json::from_str(&contents_str)
+            .with_context(|| format!("parse file {:?}", path))?;
+
+        if let ApiSpecFileNameKind::Versioned { version, sum: _ } = &name.kind {
+            // XXX-dap verify checksum
+            if version.to_string() != contents.info.version {
+                bail!(
+                    "file {:?}: version in the file ({:?}) differs from \
+                     the one in the filename",
+                    path,
+                    contents.info.version
+                );
+            }
+        }
+
         Ok(ApiSpecFile { name, contents })
     }
 }

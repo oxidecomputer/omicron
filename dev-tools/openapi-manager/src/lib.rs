@@ -14,6 +14,7 @@
 // XXX-dap new stuff
 mod apis;
 mod cmd;
+mod combined;
 mod spec_files;
 
 mod spec;

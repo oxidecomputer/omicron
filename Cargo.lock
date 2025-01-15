@@ -7653,6 +7653,7 @@ dependencies = [
  "similar",
  "sled-agent-api",
  "supports-color",
+ "thiserror 1.0.69",
  "wicketd-api",
 ]
 
