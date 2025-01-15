@@ -22,6 +22,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::TufArtifactKind;
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
@@ -389,6 +390,11 @@ impl<'a> LookupPath<'a> {
     /// Select a resource of type PhysicalDisk, identified by its id
     pub fn physical_disk(self, id: PhysicalDiskUuid) -> PhysicalDisk<'a> {
         PhysicalDisk::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type SupportBundle, identified by its id
+    pub fn support_bundle(self, id: SupportBundleUuid) -> SupportBundle<'a> {
+        SupportBundle::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     pub fn silo_image_id(self, id: Uuid) -> SiloImage<'a> {
@@ -870,6 +876,15 @@ lookup_resource! {
     lookup_by_name = false,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", uuid_kind = PhysicalDiskKind } ]
+}
+
+lookup_resource! {
+    name = "SupportBundle",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [ { column_name = "id", uuid_kind = SupportBundleKind } ]
 }
 
 lookup_resource! {

@@ -10,6 +10,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::lookup::LookupPath;
 use crate::db::model::Dataset;
 use crate::db::model::DatasetKind;
 use crate::db::model::SupportBundle;
@@ -163,16 +164,10 @@ impl DataStore {
         opctx: &OpContext,
         id: SupportBundleUuid,
     ) -> LookupResult<SupportBundle> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        use db::schema::support_bundle::dsl;
+        let (.., db_bundle) =
+            LookupPath::new(opctx, self).support_bundle(id).fetch().await?;
 
-        let conn = self.pool_connection_authorized(opctx).await?;
-        dsl::support_bundle
-            .filter(dsl::id.eq(id.into_untyped_uuid()))
-            .select(SupportBundle::as_select())
-            .first_async::<SupportBundle>(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        Ok(db_bundle)
     }
 
     /// Lists one page of support bundles
@@ -419,18 +414,20 @@ impl DataStore {
     pub async fn support_bundle_update(
         &self,
         opctx: &OpContext,
-        id: SupportBundleUuid,
+        authz_bundle: &authz::SupportBundle,
         state: SupportBundleState,
     ) -> Result<(), Error> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::Modify, authz_bundle).await?;
 
         use db::schema::support_bundle::dsl;
+
+        let id = authz_bundle.id().into_untyped_uuid();
         let conn = self.pool_connection_authorized(opctx).await?;
         let result = diesel::update(dsl::support_bundle)
-            .filter(dsl::id.eq(id.into_untyped_uuid()))
+            .filter(dsl::id.eq(id))
             .filter(dsl::state.eq_any(state.valid_old_states()))
             .set(dsl::state.eq(state))
-            .check_if_exists::<SupportBundle>(id.into_untyped_uuid())
+            .check_if_exists::<SupportBundle>(id)
             .execute_and_check(&conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -453,12 +450,13 @@ impl DataStore {
     pub async fn support_bundle_delete(
         &self,
         opctx: &OpContext,
-        id: SupportBundleUuid,
+        authz_bundle: &authz::SupportBundle,
     ) -> Result<(), Error> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::Delete, authz_bundle).await?;
 
         use db::schema::support_bundle::dsl;
 
+        let id = authz_bundle.id().into_untyped_uuid();
         let conn = self.pool_connection_authorized(opctx).await?;
         diesel::delete(dsl::support_bundle)
             .filter(
@@ -466,7 +464,7 @@ impl DataStore {
                     .eq(SupportBundleState::Destroying)
                     .or(dsl::state.eq(SupportBundleState::Failed)),
             )
-            .filter(dsl::id.eq(id.into_untyped_uuid()))
+            .filter(dsl::id.eq(id))
             .execute_async(&*conn)
             .await
             .map(|_rows_modified| ())
@@ -494,6 +492,7 @@ mod test {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::BlueprintZoneType;
+    use omicron_common::api::external::LookupType;
     use omicron_common::api::internal::shared::DatasetKind::Debug as DebugDatasetKind;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
@@ -501,6 +500,16 @@ mod test {
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use rand::Rng;
+
+    fn authz_support_bundle_from_id(
+        id: SupportBundleUuid,
+    ) -> authz::SupportBundle {
+        authz::SupportBundle::new(
+            authz::FLEET,
+            id,
+            LookupType::ById(id.into_untyped_uuid()),
+        )
+    }
 
     // Pool/Dataset pairs, for debug datasets only.
     struct TestPool {
@@ -715,10 +724,11 @@ mod test {
 
         // When we update the state of the bundles, the list results
         // should also be filtered.
+        let authz_bundle = authz_support_bundle_from_id(bundle_a1.id.into());
         datastore
             .support_bundle_update(
                 &opctx,
-                bundle_a1.id.into(),
+                &authz_bundle,
                 SupportBundleState::Active,
             )
             .await
@@ -816,11 +826,11 @@ mod test {
         // database.
         //
         // We should still expect to hit capacity limits.
-
+        let authz_bundle = authz_support_bundle_from_id(bundles[0].id.into());
         datastore
             .support_bundle_update(
                 &opctx,
-                bundles[0].id.into(),
+                &authz_bundle,
                 SupportBundleState::Destroying,
             )
             .await
@@ -835,8 +845,9 @@ mod test {
         // If we delete a bundle, it should be gone. This means we can
         // re-allocate from that dataset which was just freed up.
 
+        let authz_bundle = authz_support_bundle_from_id(bundles[0].id.into());
         datastore
-            .support_bundle_delete(&opctx, bundles[0].id.into())
+            .support_bundle_delete(&opctx, &authz_bundle)
             .await
             .expect("Should be able to destroy this bundle");
         datastore
@@ -888,11 +899,11 @@ mod test {
         assert_eq!(bundle, observed_bundles[0]);
 
         // Destroy the bundle, observe the new state
-
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         datastore
             .support_bundle_update(
                 &opctx,
-                bundle.id.into(),
+                &authz_bundle,
                 SupportBundleState::Destroying,
             )
             .await
@@ -905,8 +916,9 @@ mod test {
 
         // Delete the bundle, observe that it's gone
 
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         datastore
-            .support_bundle_delete(&opctx, bundle.id.into())
+            .support_bundle_delete(&opctx, &authz_bundle)
             .await
             .expect("Should be able to destroy our bundle");
         let observed_bundles = datastore
@@ -1146,10 +1158,11 @@ mod test {
         );
 
         // Start the deletion of this bundle
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         datastore
             .support_bundle_update(
                 &opctx,
-                bundle.id.into(),
+                &authz_bundle,
                 SupportBundleState::Destroying,
             )
             .await
@@ -1314,8 +1327,9 @@ mod test {
             .unwrap()
             .contains(FAILURE_REASON_NO_DATASET));
 
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         datastore
-            .support_bundle_delete(&opctx, bundle.id.into())
+            .support_bundle_delete(&opctx, &authz_bundle)
             .await
             .expect("Should have been able to delete support bundle");
 
@@ -1377,10 +1391,11 @@ mod test {
         //
         // This is what we would do when we finish collecting, and
         // provisioned storage on a sled.
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         datastore
             .support_bundle_update(
                 &opctx,
-                bundle.id.into(),
+                &authz_bundle,
                 SupportBundleState::Active,
             )
             .await
