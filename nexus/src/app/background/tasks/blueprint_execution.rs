@@ -62,10 +62,7 @@ impl BlueprintExecutor {
     /// The presence of `boxed()` in `BackgroundTask::activate` has caused some
     /// confusion with compilation errors in the past. So separate this method
     /// out.
-    async fn activate_impl<'a>(
-        &mut self,
-        opctx: &OpContext,
-    ) -> serde_json::Value {
+    async fn activate_impl(&mut self, opctx: &OpContext) -> serde_json::Value {
         // Get the latest blueprint, cloning to prevent holding a read lock
         // on the watch.
         let update = self.rx_blueprint.borrow_and_update().clone();
@@ -193,6 +190,7 @@ mod test {
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
+    use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -218,7 +216,7 @@ mod test {
         blueprint_datasets: BTreeMap<SledUuid, BlueprintDatasetsConfig>,
         dns_version: Generation,
     ) -> (BlueprintTarget, Blueprint) {
-        let id = Uuid::new_v4();
+        let id = BlueprintUuid::new_v4();
         // Assume all sleds are active.
         let sled_state = blueprint_zones
             .keys()
@@ -424,7 +422,6 @@ mod test {
                     ),
                 }]
                 .into_iter()
-                .map(|z| (z.id, z))
                 .collect(),
             }
         }

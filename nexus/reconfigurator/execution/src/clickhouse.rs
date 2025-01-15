@@ -114,7 +114,7 @@ pub(crate) async fn deploy_nodes(
                 })
         }));
     }
-    for config in server_configs {
+    for config in &server_configs {
         let admin_addr = SocketAddr::V6(SocketAddrV6::new(
             config.settings.listen_addr,
             CLICKHOUSE_ADMIN_PORT,
@@ -125,7 +125,7 @@ pub(crate) async fn deploy_nodes(
         let log = opctx.log.new(slog::o!("admin_url" => admin_url.clone()));
         futs.push(Either::Right(async move {
             let client = ClickhouseServerClient::new(&admin_url, log.clone());
-            client
+            if let Err(e) = client
                 .generate_config_and_enable_svc(&config)
                 .await
                 .map(|_| ())
@@ -140,7 +140,23 @@ pub(crate) async fn deploy_nodes(
                         admin_url,
                         e
                     )
-                })
+                }) {
+                    return Err(e);
+            };
+
+            client
+            .init_db()
+            .await
+            .map(|_| ())
+            .map_err(|e| {
+                anyhow!(
+                    concat!(
+                    "failed to initialize the replicated ClickHouse cluster database:",
+                    "error = {}"
+                ),
+                    e
+                )
+            })
         }));
     }
 
@@ -157,7 +173,7 @@ pub(crate) async fn deploy_nodes(
 
     info!(
         opctx.log,
-        "Successfully deployed all clickhouse server and keeper configs"
+        "Successfully deployed all clickhouse server and keeper configs, and initialised database schema."
     );
 
     Ok(())
@@ -209,7 +225,7 @@ fn server_configs(
         .flat_map(|zones_config| {
             zones_config
                 .zones
-                .values()
+                .iter()
                 .filter(|zone_config| {
                     clickhouse_cluster_config
                         .servers
@@ -267,7 +283,7 @@ fn keeper_configs(
         .flat_map(|zones_config| {
             zones_config
                 .zones
-                .values()
+                .iter()
                 .filter(|zone_config| {
                     clickhouse_cluster_config
                         .keepers
@@ -381,7 +397,6 @@ mod test {
                     ),
                 }]
                 .into_iter()
-                .map(|z| (z.id, z))
                 .collect(),
             };
             zones.insert(sled_id, zone_config);
@@ -423,7 +438,6 @@ mod test {
                     ),
                 }]
                 .into_iter()
-                .map(|z| (z.id, z))
                 .collect(),
             };
             zones.insert(sled_id, zone_config);

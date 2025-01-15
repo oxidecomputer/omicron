@@ -353,10 +353,14 @@ cookie = "0.18"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crossterm = { version = "0.28.1", features = ["event-stream"] }
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "5a41b826171c7d2a8412fa833377ab1df25ee8ec" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "5a41b826171c7d2a8412fa833377ab1df25ee8ec" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "5a41b826171c7d2a8412fa833377ab1df25ee8ec" }
-crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "5a41b826171c7d2a8412fa833377ab1df25ee8ec" }
+# NOTE: if you change the pinned revision of the `crucible` dependencies, you
+# must also update the references in package-manifest.toml to match the new
+# revision.
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "c9d31d2f84ff5b59dfb1cf5358d8af657ab9b5e9" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "c9d31d2f84ff5b59dfb1cf5358d8af657ab9b5e9" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "c9d31d2f84ff5b59dfb1cf5358d8af657ab9b5e9" }
+crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "c9d31d2f84ff5b59dfb1cf5358d8af657ab9b5e9" }
+# NOTE: See above!
 csv = "1.3.0"
 curve25519-dalek = "4"
 datatest-stable = "0.2.9"
@@ -546,12 +550,16 @@ pretty_assertions = "1.4.1"
 pretty-hex = "0.4.1"
 prettyplease = { version = "0.2.25", features = ["verbatim"] }
 proc-macro2 = "1.0"
-progenitor = "0.8.0"
-progenitor-client = "0.8.0"
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "d4529fd8247386b422b78e1203315d5baea5ea8b" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "d4529fd8247386b422b78e1203315d5baea5ea8b" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "d4529fd8247386b422b78e1203315d5baea5ea8b" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "d4529fd8247386b422b78e1203315d5baea5ea8b" }
+progenitor = "0.9.1"
+progenitor-client = "0.9.1"
+# NOTE: if you change the pinned revision of the `bhyve_api` and propolis
+# dependencies, you must also update the references in package-manifest.toml to
+# match the new revision.
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "f30ff7a830da26874a00307a3c6d6e1035eec818" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "f30ff7a830da26874a00307a3c6d6e1035eec818" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "f30ff7a830da26874a00307a3c6d6e1035eec818" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "f30ff7a830da26874a00307a3c6d6e1035eec818" }
+# NOTE: see above!
 proptest = "1.5.0"
 qorb = "0.2.1"
 quote = "1.0"
@@ -840,32 +848,30 @@ opt-level = 3
 # It's common during development to use a local copy of various complex
 # dependencies.  If you want to use those, uncomment one of these blocks.
 #
-#[patch."crates-io"]
-#dropshot = { path = "../dropshot/dropshot" }
-#[patch.crates-io]
-#steno = { path = "../steno" }
-# [patch."https://github.com/oxidecomputer/propolis"]
-# propolis-client = { path = "../propolis/lib/propolis-client" }
-# propolis-mock-server = { path = "../propolis/bin/mock-server" }
+# [patch.crates-io]
+# diesel = { path = "../../diesel/diesel" }
+# dropshot = { path = "../dropshot/dropshot" }
+# progenitor = { path = "../progenitor/progenitor" }
+# progenitor-client = { path = "../progenitor/progenitor-client" }
+# steno = { path = "../steno" }
+
 # [patch."https://github.com/oxidecomputer/crucible"]
 # crucible-agent-client = { path = "../crucible/agent-client" }
 # crucible-pantry-client = { path = "../crucible/pantry-client" }
 # crucible-smf = { path = "../crucible/smf" }
-#[patch.crates-io]
-#diesel = { path = "../../diesel/diesel" }
-#[patch."https://github.com/oxidecomputer/diesel-dtrace"]
-#diesel-dtrace = { path = "../diesel-dtrace" }
+
+# [patch."https://github.com/oxidecomputer/diesel-dtrace"]
+# diesel-dtrace = { path = "../diesel-dtrace" }
+
 # [patch."https://github.com/oxidecomputer/falcon"]
 # libfalcon = { path = "../falcon/lib" }
 
-#
-# Local client generation during development.
-#
-#[patch."https://github.com/oxidecomputer/progenitor"]
-#progenitor = { path = "../progenitor/progenitor" }
-#progenitor-client = { path = "../progenitor/progenitor-client" }
-#[patch."https://github.com/oxidecomputer/typify"]
-#typify = { path = "../typify/typify" }
+# [patch."https://github.com/oxidecomputer/propolis"]
+# propolis-client = { path = "../propolis/lib/propolis-client" }
+# propolis-mock-server = { path = "../propolis/bin/mock-server" }
+
+# [patch."https://github.com/oxidecomputer/typify"]
+# typify = { path = "../typify/typify" }
 
 #
 # We maintain a fork of pq-sys to address upstream issues.  See the

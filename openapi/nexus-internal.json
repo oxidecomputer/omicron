@@ -1967,8 +1967,11 @@
           },
           "id": {
             "description": "unique identifier for this blueprint",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+              }
+            ]
           },
           "internal_dns_version": {
             "description": "internal DNS version when this blueprint was created",
@@ -1981,8 +1984,11 @@
           "parent_blueprint_id": {
             "nullable": true,
             "description": "which blueprint this blueprint is based on",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+              }
+            ]
           },
           "sled_state": {
             "description": "A map of sled id -> desired state of the sled.\n\nA sled is considered part of the control plane cluster iff it has an entry in this map.",
@@ -2133,8 +2139,11 @@
           },
           "id": {
             "description": "unique identifier for this blueprint",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+              }
+            ]
           },
           "internal_dns_version": {
             "description": "internal DNS version when this blueprint was created",
@@ -2147,8 +2156,11 @@
           "parent_blueprint_id": {
             "nullable": true,
             "description": "which blueprint this blueprint is based on",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+              }
+            ]
           },
           "time_created": {
             "description": "when this blueprint was generated (for debugging)",
@@ -2259,8 +2271,11 @@
           },
           "target_id": {
             "description": "id of the blueprint that the system is trying to make real",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+              }
+            ]
           },
           "time_made_target": {
             "description": "when this blueprint was made the target",
@@ -2282,8 +2297,7 @@
             "type": "boolean"
           },
           "target_id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
           }
         },
         "required": [
@@ -2716,10 +2730,11 @@
           },
           "zones": {
             "description": "The set of running zones.",
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/BlueprintZoneConfig"
-            }
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IdMapBlueprintZoneConfig"
+              }
+            ]
           }
         },
         "required": [
@@ -3740,6 +3755,12 @@
         "type": "integer",
         "format": "uint8",
         "minimum": 0
+      },
+      "IdMapBlueprintZoneConfig": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/BlueprintZoneConfig"
+        }
       },
       "ImportExportPolicy": {
         "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
@@ -5807,6 +5828,10 @@
             "format": "int32"
           }
         }
+      },
+      "TypedUuidForBlueprintKind": {
+        "type": "string",
+        "format": "uuid"
       },
       "TypedUuidForDatasetKind": {
         "type": "string",

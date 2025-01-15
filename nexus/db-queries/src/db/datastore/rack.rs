@@ -1038,7 +1038,7 @@ mod test {
     use omicron_common::api::internal::shared::SourceNatConfig;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::{ExternalIpUuid, OmicronZoneUuid};
+    use omicron_uuid_kinds::{BlueprintUuid, ExternalIpUuid, OmicronZoneUuid};
     use omicron_uuid_kinds::{GenericUuid, ZpoolUuid};
     use omicron_uuid_kinds::{SledUuid, TypedUuid};
     use oxnet::IpNet;
@@ -1054,7 +1054,7 @@ mod test {
                 rack_id: Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap(),
                 rack_subnet: nexus_test_utils::RACK_SUBNET.parse().unwrap(),
                 blueprint: Blueprint {
-                    id: Uuid::new_v4(),
+                    id: BlueprintUuid::new_v4(),
                     blueprint_zones: BTreeMap::new(),
                     blueprint_disks: BTreeMap::new(),
                     blueprint_datasets: BTreeMap::new(),
@@ -1439,7 +1439,6 @@ mod test {
                     },
                 ]
                 .into_iter()
-                .map(|z| (z.id, z))
                 .collect(),
             },
         );
@@ -1516,7 +1515,6 @@ mod test {
                     },
                 ]
                 .into_iter()
-                .map(|z| (z.id, z))
                 .collect(),
             },
         );
@@ -1535,12 +1533,11 @@ mod test {
                     ),
                 }]
                 .into_iter()
-                .map(|z| (z.id, z))
                 .collect(),
             },
         );
         let blueprint = Blueprint {
-            id: Uuid::new_v4(),
+            id: BlueprintUuid::new_v4(),
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
@@ -1771,7 +1768,6 @@ mod test {
                     },
                 ]
                 .into_iter()
-                .map(|z| (z.id, z))
                 .collect(),
             },
         );
@@ -1801,7 +1797,7 @@ mod test {
         );
 
         let blueprint = Blueprint {
-            id: Uuid::new_v4(),
+            id: BlueprintUuid::new_v4(),
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
@@ -2008,12 +2004,11 @@ mod test {
                     ),
                 }]
                 .into_iter()
-                .map(|z| (z.id, z))
                 .collect(),
             },
         );
         let blueprint = Blueprint {
-            id: Uuid::new_v4(),
+            id: BlueprintUuid::new_v4(),
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
@@ -2150,13 +2145,12 @@ mod test {
                     },
                 ]
                 .into_iter()
-                .map(|z| (z.id, z))
                 .collect(),
             },
         );
 
         let blueprint = Blueprint {
-            id: Uuid::new_v4(),
+            id: BlueprintUuid::new_v4(),
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),

@@ -25,9 +25,15 @@ mod inner {
     // properties to not exist when the command returns.
     //
     // We workaround this by querying for these properties in a loop.
-    pub async fn wait_for_service<'a, 'b>(
+    //
+    // TODO: remove this when clippy no longer flags
+    // https://github.com/rust-lang/rust-clippy/issues/13923 (ideally we'd have
+    // used `expect` but on 1.84, it says that it's unfulfilled even though it
+    // is fulfilled?)
+    #[allow(clippy::needless_lifetimes)]
+    pub async fn wait_for_service<'a>(
         zone: Option<&'a str>,
-        fmri: &'b str,
+        fmri: &str,
         log: Logger,
     ) -> Result<(), Error> {
         let name = smf::PropertyName::new("restarter", "state").unwrap();

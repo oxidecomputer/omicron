@@ -50,6 +50,7 @@ progenitor::generate_api!(
         OmicronPhysicalDisksConfig = omicron_common::disk::OmicronPhysicalDisksConfig,
         RecoverySiloConfig = nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
         Srv = nexus_types::internal_api::params::Srv,
+        TypedUuidForBlueprintKind = omicron_uuid_kinds::BlueprintUuid,
         TypedUuidForCollectionKind = omicron_uuid_kinds::CollectionUuid,
         TypedUuidForDatasetKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::DatasetKind>,
         TypedUuidForDemoSagaKind = omicron_uuid_kinds::DemoSagaUuid,
