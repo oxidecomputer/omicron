@@ -626,7 +626,10 @@ impl DataStore {
                 for s in batch {
                     let old = blueprint_physical_disks.insert(
                         s.sled_id.into(),
-                        BlueprintPhysicalDisksConfig::default(),
+                        BlueprintPhysicalDisksConfig {
+                            generation: *s.generation,
+                            disks: IdMap::new(),
+                        },
                     );
                     bail_unless!(
                         old.is_none(),
