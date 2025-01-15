@@ -41,15 +41,14 @@ impl BlueprintRendezvous {
     /// The presence of `boxed()` in `BackgroundTask::activate` has caused some
     /// confusion with compilation errors in the past. So separate this method
     /// out.
-    async fn activate_impl<'a>(
+    async fn activate_impl(
         &mut self,
         opctx: &OpContext,
     ) -> serde_json::Value {
         // Get the latest blueprint, cloning to prevent holding a read lock
         // on the watch.
         let update = self.rx_blueprint.borrow_and_update().clone();
-
-        let Some(update) = update else {
+        let Some((_, blueprint)) = update.as_deref() else {
             warn!(
                 &opctx.log, "Blueprint rendezvous: skipped";
                 "reason" => "no blueprint",
@@ -86,7 +85,6 @@ impl BlueprintRendezvous {
         };
 
         // Actually perform rendezvous table reconciliation
-        let (_, blueprint) = &*update;
         let result = reconcile_blueprint_rendezvous_tables(
             opctx,
             &self.datastore,
