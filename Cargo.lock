@@ -2396,10 +2396,11 @@ checksum = "6184e33543162437515c2e2b48714794e37845ec9851711914eec9d308f6ebe8"
 [[package]]
 name = "diffus"
 version = "0.10.0"
+source = "git+https://github.com/oxidecomputer/diffus?branch=oxide/main#e3cfd506a8be97e9740e94bc72e39b3b9c6bf3c2"
 dependencies = [
  "diffus-derive",
  "itertools 0.10.5",
- "newtype-uuid 1.1.3",
+ "newtype-uuid",
  "oxnet",
  "uuid",
 ]
@@ -2407,6 +2408,7 @@ dependencies = [
 [[package]]
 name = "diffus-derive"
 version = "0.10.0"
+source = "git+https://github.com/oxidecomputer/diffus?branch=oxide/main#e3cfd506a8be97e9740e94bc72e39b3b9c6bf3c2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5151,7 +5153,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -5682,20 +5684,13 @@ dependencies = [
 
 [[package]]
 name = "newtype-uuid"
-version = "1.1.3"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee3224f0e8be7c2a1ebc77ef9c3eecb90f55c6594399ee825de964526b3c9056"
 dependencies = [
  "proptest",
  "schemars",
  "serde",
- "uuid",
-]
-
-[[package]]
-name = "newtype-uuid"
-version = "1.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c8781e2ef64806278a55ad223f0bc875772fd40e1fe6e73e8adbf027817229d"
-dependencies = [
  "uuid",
 ]
 
@@ -6096,7 +6091,7 @@ dependencies = [
  "internal-dns-resolver",
  "internal-dns-types",
  "ipnet",
- "newtype-uuid 1.1.3",
+ "newtype-uuid",
  "nexus-config",
  "nexus-db-model",
  "nexus-db-queries",
@@ -6348,7 +6343,7 @@ dependencies = [
  "illumos-utils",
  "internal-dns-types",
  "ipnetwork",
- "newtype-uuid 1.1.3",
+ "newtype-uuid",
  "newtype_derive",
  "nexus-sled-agent-shared",
  "omicron-common",
@@ -7419,7 +7414,7 @@ name = "omicron-uuid-kinds"
 version = "0.1.0"
 dependencies = [
  "diffus",
- "newtype-uuid 1.1.3",
+ "newtype-uuid",
  "paste",
  "proptest",
  "schemars",
@@ -7496,7 +7491,7 @@ dependencies = [
  "managed",
  "memchr",
  "mio",
- "newtype-uuid 1.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "newtype-uuid",
  "nom",
  "num-bigint-dig",
  "num-integer",
@@ -12434,7 +12429,7 @@ checksum = "82205ffd44a9697e34fc145491aa47310f9871540bb7909eaa9365e0a9a46607"
 name = "typed-rng"
 version = "0.1.0"
 dependencies = [
- "newtype-uuid 1.1.3",
+ "newtype-uuid",
  "omicron-workspace-hack",
  "rand",
  "rand_core",
@@ -13305,7 +13300,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

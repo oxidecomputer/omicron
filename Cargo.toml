@@ -369,8 +369,7 @@ derive-where = "1.2.7"
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
 diesel = { version = "2.2.4", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = "0.4.2"
-#diffus = { git = "https://github.com/oxidecomputer/diffus", branch = "oxide/main", features = ["uuid-impl", "derive", "newtype-uuid-impl", "oxnet-impl"] }
-diffus = { path = "../diffus/diffus", features = ["uuid-impl", "derive", "newtype-uuid-impl", "oxnet-impl"] }
+diffus = { git = "https://github.com/oxidecomputer/diffus", branch = "oxide/main", features = ["uuid-impl", "derive", "newtype-uuid-impl", "oxnet-impl"] }
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
@@ -680,8 +679,7 @@ zone = { version = "0.3", default-features = false, features = ["async"] }
 # the kinds). However, uses of omicron-uuid-kinds _within omicron_ will have
 # std and the other features enabled because they'll refer to it via
 # omicron-uuid-kinds.workspace = true.
-#newtype-uuid = { version = "1.1.3", default-features = false }
-newtype-uuid = { path = "../newtype-uuid/crates/newtype-uuid", default-features = false }
+newtype-uuid = { version = "1.2.1", default-features = false }
 omicron-uuid-kinds = { path = "uuid-kinds", features = ["serde", "schemars08", "uuid-v4"] }
 
 # NOTE: The test profile inherits from the dev profile, so settings under
