@@ -74,6 +74,7 @@ use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -140,7 +141,7 @@ pub struct ControlPlaneTestContext<N> {
     pub external_dns_zone_name: String,
     pub external_dns: dns_server::TransientServer,
     pub internal_dns: dns_server::TransientServer,
-    pub initial_blueprint_id: Uuid,
+    pub initial_blueprint_id: BlueprintUuid,
     pub silo_name: Name,
     pub user_name: UserId,
 }
@@ -328,7 +329,7 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
     pub external_dns: Option<dns_server::TransientServer>,
     pub internal_dns: Option<dns_server::TransientServer>,
     dns_config: Option<DnsConfigParams>,
-    initial_blueprint_id: Option<Uuid>,
+    initial_blueprint_id: Option<BlueprintUuid>,
     blueprint_zones: Vec<BlueprintZoneConfig>,
     blueprint_zones2: Vec<BlueprintZoneConfig>,
 
@@ -824,7 +825,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         sled_id,
                         BlueprintZonesConfig {
                             generation: Generation::new().next(),
-                            zones: zones.clone(),
+                            zones: zones.iter().cloned().collect(),
                         },
                     );
                     sled_state.insert(sled_id, SledState::Active);
@@ -905,7 +906,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 }
             }
             Blueprint {
-                id: Uuid::new_v4(),
+                id: BlueprintUuid::new_v4(),
                 blueprint_zones,
                 blueprint_disks,
                 blueprint_datasets,

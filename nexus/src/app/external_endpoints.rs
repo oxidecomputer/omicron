@@ -33,15 +33,17 @@ use anyhow::Context;
 use nexus_db_model::AuthenticationMode;
 use nexus_db_model::Certificate;
 use nexus_db_model::DnsGroup;
+use nexus_db_model::DnsZone;
+use nexus_db_model::Silo;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::model::ServiceKind;
+use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
 use nexus_types::silo::silo_dns_name;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::bail_unless;
 use openssl::pkey::PKey;
@@ -488,69 +490,61 @@ pub(crate) async fn read_all_endpoints(
     datastore: &DataStore,
     opctx: &OpContext,
 ) -> Result<ExternalEndpoints, Error> {
-    // We will not look for more than this number of external DNS zones, Silos,
-    // or certificates.  We do not expect very many of any of these objects.
-    const MAX: u32 = 200;
-    let pagparams_id = DataPageParams {
-        marker: None,
-        limit: NonZeroU32::new(MAX).unwrap(),
-        direction: dropshot::PaginationOrder::Ascending,
-    };
-    let pagbyid = PaginatedBy::Id(pagparams_id);
-    let pagparams_name = DataPageParams {
-        marker: None,
-        limit: NonZeroU32::new(MAX).unwrap(),
-        direction: dropshot::PaginationOrder::Ascending,
-    };
+    // The batch size here is pretty arbitrary.  On the vast majority of
+    // systems, there will only ever be a handful of any of these objects.  Some
+    // systems are known to have a few dozen silos and a few hundred TLS
+    // certificates.  This code path is not particularly latency-sensitive.  Our
+    // purpose in limiting the batch size is just to avoid unbounded-size
+    // database transactions.
+    //
+    // unwrap(): safe because 200 is non-zero.
+    let batch_size = NonZeroU32::new(200).unwrap();
 
-    let silos =
-        datastore.silos_list(opctx, &pagbyid, Discoverability::All).await?;
-    let external_dns_zones = datastore
-        .dns_zones_list(opctx, DnsGroup::External, &pagparams_name)
-        .await?;
+    // Fetch all silos.
+    let mut silos = Vec::new();
+    let mut paginator = Paginator::new(batch_size);
+    while let Some(p) = paginator.next() {
+        let batch = datastore
+            .silos_list(
+                opctx,
+                &PaginatedBy::Id(p.current_pagparams()),
+                Discoverability::All,
+            )
+            .await?;
+        paginator = p.found_batch(&batch, &|s: &Silo| s.id());
+        silos.extend(batch.into_iter());
+    }
+
+    // Fetch all external DNS zones.  We should really only ever have one, but
+    // we may as well paginate this.
+    let mut external_dns_zones = Vec::new();
+    let mut paginator = Paginator::new(batch_size);
+    while let Some(p) = paginator.next() {
+        let batch = datastore
+            .dns_zones_list(opctx, DnsGroup::External, &p.current_pagparams())
+            .await?;
+        paginator = p.found_batch(&batch, &|z: &DnsZone| z.zone_name.clone());
+        external_dns_zones.extend(batch.into_iter());
+    }
     bail_unless!(
         !external_dns_zones.is_empty(),
         "expected at least one external DNS zone"
     );
-    let certs = datastore
-        .certificate_list_for(opctx, Some(ServiceKind::Nexus), &pagbyid, false)
-        .await?;
 
-    // If we found too many of any of these things, complain as loudly as we
-    // can.  Our results will be wrong.  But we still don't want to fail if we
-    // can avoid it because we want to be able to serve as many endpoints as we
-    // can.
-    // TODO-reliability we should prevent people from creating more than this
-    // maximum number of Silos and certificates.
-    let max = usize::try_from(MAX).unwrap();
-    if silos.len() >= max {
-        error!(
-            &opctx.log,
-            "reading endpoints: expected at most {} silos, but found at \
-            least {}.  TLS may not work on some Silos' external endpoints.",
-            MAX,
-            silos.len(),
-        );
-    }
-    if external_dns_zones.len() >= max {
-        error!(
-            &opctx.log,
-            "reading endpoints: expected at most {} external DNS zones, but \
-            found at least {}.  TLS may not work on some Silos' external \
-            endpoints.",
-            MAX,
-            external_dns_zones.len(),
-        );
-    }
-    if certs.len() >= max {
-        error!(
-            &opctx.log,
-            "reading endpoints: expected at most {} certificates, but \
-            found at least {}.  TLS may not work on some Silos' external \
-            endpoints.",
-            MAX,
-            certs.len(),
-        );
+    // Fetch all TLS certificates.
+    let mut certs = Vec::new();
+    let mut paginator = Paginator::new(batch_size);
+    while let Some(p) = paginator.next() {
+        let batch = datastore
+            .certificate_list_for(
+                opctx,
+                Some(ServiceKind::Nexus),
+                &PaginatedBy::Id(p.current_pagparams()),
+                false,
+            )
+            .await?;
+        paginator = p.found_batch(&batch, &|s: &Certificate| s.id());
+        certs.extend(batch);
     }
 
     Ok(ExternalEndpoints::new(silos, certs, external_dns_zones))

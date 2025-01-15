@@ -23,7 +23,8 @@
 
 use camino::Utf8PathBuf;
 use illumos_utils::zfs::{
-    EnsureFilesystemError, GetValueError, Mountpoint, SizeDetails, Zfs,
+    DatasetEnsureArgs, EnsureDatasetError, GetValueError, Mountpoint,
+    SizeDetails, Zfs,
 };
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::CompressionAlgorithm;
@@ -38,7 +39,7 @@ pub enum BackingFsError {
     DatasetProperty(#[from] GetValueError),
 
     #[error("Error initializing dataset: {0}")]
-    Mount(#[from] EnsureFilesystemError),
+    Mount(#[from] EnsureDatasetError),
 
     #[error("Failed to ensure subdirectory {0}")]
     EnsureSubdir(#[from] io::Error),
@@ -143,16 +144,15 @@ pub(crate) fn ensure_backing_fs(
             compression: bfs.compression,
         });
 
-        Zfs::ensure_filesystem(
-            &dataset,
-            mountpoint.clone(),
-            false, // zoned
-            true,  // do_format
-            None,  // encryption_details,
+        Zfs::ensure_dataset(DatasetEnsureArgs {
+            name: &dataset,
+            mountpoint: mountpoint.clone(),
+            zoned: false,
+            encryption_details: None,
             size_details,
-            None,
-            Some(vec!["canmount=noauto".to_string()]), // options
-        )?;
+            id: None,
+            additional_options: Some(vec!["canmount=noauto".to_string()]),
+        })?;
 
         // Check if a ZFS filesystem is already mounted on bfs.mountpoint by
         // retrieving the ZFS `mountpoint` property and comparing it. This

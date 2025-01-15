@@ -2352,6 +2352,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo (
 -- In the future, this may also be used to describe artifacts that are fetched
 -- from a remote TUF repo, but that requires some additional design work.
 CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
+    id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
     version STRING(63) NOT NULL,
     -- This used to be an enum but is now a string, because it can represent
@@ -2368,29 +2369,76 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
     -- The length of the artifact, in bytes.
     artifact_size INT8 NOT NULL,
 
-    PRIMARY KEY (name, version, kind)
+    CONSTRAINT unique_name_version_kind UNIQUE (name, version, kind)
 );
 
 -- Reflects that a particular artifact was provided by a particular TUF repo.
 -- This is a many-many mapping.
 CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo_artifact (
     tuf_repo_id UUID NOT NULL,
-    tuf_artifact_name STRING(63) NOT NULL,
-    tuf_artifact_version STRING(63) NOT NULL,
-    tuf_artifact_kind STRING(63) NOT NULL,
+    tuf_artifact_id UUID NOT NULL,
 
-    /*
-    For the primary key, this definition uses the natural key rather than a
-    smaller surrogate key (UUID). That's because with CockroachDB the most
-    important factor in selecting a primary key is the ability to distribute
-    well. In this case, the first element of the primary key is the tuf_repo_id,
-    which is a random UUID.
+    PRIMARY KEY (tuf_repo_id, tuf_artifact_id)
+);
 
-    For more, see https://www.cockroachlabs.com/blog/how-to-choose-a-primary-key/.
-    */
-    PRIMARY KEY (
-        tuf_repo_id, tuf_artifact_name, tuf_artifact_version, tuf_artifact_kind
-    )
+/*******************************************************************/
+
+/*
+ * Support Bundles
+ */
+
+
+CREATE TYPE IF NOT EXISTS omicron.public.support_bundle_state AS ENUM (
+  -- The bundle is currently being created.
+  --
+  -- It might have storage that is partially allocated on a sled.
+  'collecting',
+
+  -- The bundle has been collected successfully, and has storage on
+  -- a particular sled.
+  'active',
+
+  -- The user has explicitly requested that a bundle be destroyed.
+  -- We must ensure that storage backing that bundle is gone before
+  -- it is automatically deleted.
+  'destroying',
+
+  -- The support bundle is failing.
+  -- This happens when Nexus is expunged partway through collection.
+  --
+  -- A different Nexus must ensure that storage is gone before the
+  -- bundle can be marked "failed".
+  'failing',
+
+  -- The bundle has finished failing.
+  --
+  -- The only action that can be taken on this bundle is to delete it.
+  'failed'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.support_bundle (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    reason_for_creation TEXT NOT NULL,
+    reason_for_failure TEXT,
+    state omicron.public.support_bundle_state NOT NULL,
+    zpool_id UUID NOT NULL,
+    dataset_id UUID NOT NULL,
+
+    -- The Nexus which is in charge of collecting the support bundle,
+    -- and later managing its storage.
+    assigned_nexus UUID
+);
+
+-- The "UNIQUE" part of this index helps enforce that we allow one support bundle
+-- per debug dataset. This constraint can be removed, if the query responsible
+-- for allocation changes to allocate more intelligently.
+CREATE UNIQUE INDEX IF NOT EXISTS one_bundle_per_dataset ON omicron.public.support_bundle (
+    dataset_id
+);
+
+CREATE INDEX IF NOT EXISTS lookup_bundle_by_nexus ON omicron.public.support_bundle (
+    assigned_nexus
 );
 
 /*******************************************************************/
@@ -4427,7 +4475,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.region_snapshot_replacement_state AS EN
   'replacement_done',
   'deleting_old_volume',
   'running',
-  'complete'
+  'complete',
+  'completing'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.region_snapshot_replacement (
@@ -4445,7 +4494,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.region_snapshot_replacement (
 
     replacement_state omicron.public.region_snapshot_replacement_state NOT NULL,
 
-    operating_saga_id UUID
+    operating_saga_id UUID,
+
+    new_region_volume_id UUID
 );
 
 CREATE INDEX IF NOT EXISTS lookup_region_snapshot_replacement_by_state on omicron.public.region_snapshot_replacement (replacement_state);
@@ -4694,7 +4745,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '116.0.0', NULL)
+    (TRUE, NOW(), NOW(), '119.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

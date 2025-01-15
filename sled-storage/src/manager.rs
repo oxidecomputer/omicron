@@ -16,7 +16,9 @@ use debug_ignore::DebugIgnore;
 use futures::future::FutureExt;
 use futures::Stream;
 use futures::StreamExt;
-use illumos_utils::zfs::{DatasetProperties, Mountpoint, WhichDatasets, Zfs};
+use illumos_utils::zfs::{
+    DatasetEnsureArgs, DatasetProperties, Mountpoint, WhichDatasets, Zfs,
+};
 use illumos_utils::zpool::{ZpoolName, ZPOOL_MOUNTPOINT_ROOT};
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::{
@@ -33,7 +35,6 @@ use std::collections::HashSet;
 use std::future::Future;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{interval, Duration, MissedTickBehavior};
-use uuid::Uuid;
 
 // The size of the mpsc bounded channel used to communicate
 // between the `StorageHandle` and `StorageManager`.
@@ -98,7 +99,7 @@ enum StorageManagerState {
 
 #[derive(Debug)]
 pub(crate) struct NewFilesystemRequest {
-    dataset_id: Uuid,
+    dataset_id: Option<DatasetUuid>,
     dataset_name: DatasetName,
     responder: DebugIgnore<oneshot::Sender<Result<(), Error>>>,
 }
@@ -524,7 +525,7 @@ impl StorageHandle {
     // and ask for the set of all datasets from Nexus.
     pub async fn upsert_filesystem(
         &self,
-        dataset_id: Uuid,
+        dataset_id: Option<DatasetUuid>,
         dataset_name: DatasetName,
     ) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
@@ -1053,7 +1054,7 @@ impl StorageManager {
         let mountpoint_root = &self.resources.disks().mount_config().root;
         let mountpoint_path = config.name.mountpoint(mountpoint_root);
         let details = DatasetCreationDetails {
-            zoned: config.name.dataset().zoned(),
+            zoned: config.name.kind().zoned(),
             mountpoint: Mountpoint::Path(mountpoint_path),
             full_name: config.name.full_name(),
         };
@@ -1448,7 +1449,6 @@ impl StorageManager {
         }
 
         let DatasetCreationDetails { zoned, mountpoint, full_name } = details;
-        let do_format = true;
         // The "crypt" dataset needs these details, but should already exist
         // by the time we're creating datasets inside.
         let encryption_details = None;
@@ -1457,16 +1457,15 @@ impl StorageManager {
             reservation: config.reservation,
             compression: config.compression,
         });
-        Zfs::ensure_filesystem(
-            &full_name,
-            mountpoint.clone(),
-            *zoned,
-            do_format,
+        Zfs::ensure_dataset(DatasetEnsureArgs {
+            name: &full_name,
+            mountpoint: mountpoint.clone(),
+            zoned: *zoned,
             encryption_details,
             size_details,
-            dataset_id,
-            None,
-        )?;
+            id: dataset_id,
+            additional_options: None,
+        })?;
 
         Ok(())
     }
@@ -1491,37 +1490,17 @@ impl StorageManager {
 
         let zoned = true;
         let fs_name = &request.dataset_name.full_name();
-        let do_format = true;
         let encryption_details = None;
         let size_details = None;
-        Zfs::ensure_filesystem(
-            fs_name,
-            Mountpoint::Path(Utf8PathBuf::from("/data")),
+        Zfs::ensure_dataset(DatasetEnsureArgs {
+            name: fs_name,
+            mountpoint: Mountpoint::Path(Utf8PathBuf::from("/data")),
             zoned,
-            do_format,
             encryption_details,
             size_details,
-            Some(DatasetUuid::from_untyped_uuid(request.dataset_id)),
-            None,
-        )?;
-        // Ensure the dataset has a usable UUID.
-        if let Ok(id_str) = Zfs::get_oxide_value(&fs_name, "uuid") {
-            if let Ok(id) = id_str.parse::<Uuid>() {
-                if id != request.dataset_id {
-                    return Err(Error::UuidMismatch {
-                        name: request.dataset_name.full_name(),
-                        old: id,
-                        new: request.dataset_id,
-                    });
-                }
-                return Ok(());
-            }
-        }
-        Zfs::set_oxide_value(
-            &fs_name,
-            "uuid",
-            &request.dataset_id.to_string(),
-        )?;
+            id: request.dataset_id,
+            additional_options: None,
+        })?;
 
         Ok(())
     }
@@ -1546,7 +1525,6 @@ mod tests {
     use std::collections::BTreeMap;
     use std::str::FromStr;
     use std::sync::atomic::Ordering;
-    use uuid::Uuid;
 
     // A helper struct to advance time.
     struct TimeTravel {}
@@ -2007,16 +1985,92 @@ mod tests {
             .expect("Ensuring disks should work after key manager is ready");
         assert!(!result.has_error(), "{:?}", result);
 
-        // Create a filesystem on the newly formatted U.2
-        let dataset_id = Uuid::new_v4();
+        // Create a filesystem on the newly formatted U.2.
+        //
+        // We can call "upsert_filesystem" both with and without a UUID.
+        let dataset_id = DatasetUuid::new_v4();
         let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
         let dataset_name =
             DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
         harness
             .handle()
-            .upsert_filesystem(dataset_id, dataset_name)
+            .upsert_filesystem(Some(dataset_id), dataset_name.clone())
             .await
             .unwrap();
+        // Observe the dataset exists, and the UUID is set.
+        let observed_dataset = &Zfs::get_dataset_properties(
+            &[dataset_name.full_name()],
+            WhichDatasets::SelfOnly,
+        )
+        .unwrap()[0];
+        assert_eq!(observed_dataset.id, Some(dataset_id));
+
+        harness
+            .handle()
+            .upsert_filesystem(None, dataset_name.clone())
+            .await
+            .unwrap();
+        // Observe the dataset still exists, and the UUID is still set,
+        // even though we did not ask for a new value explicitly.
+        let observed_dataset = &Zfs::get_dataset_properties(
+            &[dataset_name.full_name()],
+            WhichDatasets::SelfOnly,
+        )
+        .unwrap()[0];
+        assert_eq!(observed_dataset.id, Some(dataset_id));
+
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn upsert_filesystem_no_uuid() {
+        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
+        let logctx = test_setup_log("upsert_filesystem");
+        let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
+
+        // Test setup: Add a U.2 and M.2, adopt them into the "control plane"
+        // for usage.
+        harness.handle().key_manager_ready().await;
+        let raw_disks =
+            harness.add_vdevs(&["u2_under_test.vdev", "m2_helping.vdev"]).await;
+        let config = harness.make_config(1, &raw_disks);
+        let result = harness
+            .handle()
+            .omicron_physical_disks_ensure(config.clone())
+            .await
+            .expect("Ensuring disks should work after key manager is ready");
+        assert!(!result.has_error(), "{:?}", result);
+
+        // Create a filesystem on the newly formatted U.2, without a UUID
+        let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
+        let dataset_name =
+            DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
+        harness
+            .handle()
+            .upsert_filesystem(None, dataset_name.clone())
+            .await
+            .unwrap();
+        let observed_dataset = &Zfs::get_dataset_properties(
+            &[dataset_name.full_name()],
+            WhichDatasets::SelfOnly,
+        )
+        .unwrap()[0];
+        assert_eq!(observed_dataset.id, None);
+
+        // Later, we can set the UUID to a specific value
+        let dataset_id = DatasetUuid::new_v4();
+        harness
+            .handle()
+            .upsert_filesystem(Some(dataset_id), dataset_name.clone())
+            .await
+            .unwrap();
+        let observed_dataset = &Zfs::get_dataset_properties(
+            &[dataset_name.full_name()],
+            WhichDatasets::SelfOnly,
+        )
+        .unwrap()[0];
+        assert_eq!(observed_dataset.id, Some(dataset_id));
 
         harness.cleanup().await;
         logctx.cleanup_successful();

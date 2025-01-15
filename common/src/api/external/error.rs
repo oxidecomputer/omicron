@@ -147,7 +147,7 @@ impl MessagePair {
 
 struct MessagePairDisplayInternal<'a>(&'a MessagePair);
 
-impl<'a> Display for MessagePairDisplayInternal<'a> {
+impl Display for MessagePairDisplayInternal<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0.external_message)?;
         if !self.0.internal_context.is_empty() {
@@ -559,7 +559,8 @@ impl<T: ClientError> From<progenitor_client::Error<T>> for Error {
             | progenitor_client::Error::UnexpectedResponse(_)
             | progenitor_client::Error::InvalidUpgrade(_)
             | progenitor_client::Error::ResponseBodyError(_)
-            | progenitor_client::Error::PreHookError(_) => {
+            | progenitor_client::Error::PreHookError(_)
+            | progenitor_client::Error::PostHookError(_) => {
                 Error::internal_error(&e.to_string())
             }
             // This error represents an expected error from the remote service.

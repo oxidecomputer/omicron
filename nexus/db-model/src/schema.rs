@@ -1336,7 +1336,8 @@ table! {
 }
 
 table! {
-    tuf_artifact (name, version, kind) {
+    tuf_artifact (id) {
+        id -> Uuid,
         name -> Text,
         version -> Text,
         kind -> Text,
@@ -1347,11 +1348,9 @@ table! {
 }
 
 table! {
-    tuf_repo_artifact (tuf_repo_id, tuf_artifact_name, tuf_artifact_version, tuf_artifact_kind) {
+    tuf_repo_artifact (tuf_repo_id, tuf_artifact_id) {
         tuf_repo_id -> Uuid,
-        tuf_artifact_name -> Text,
-        tuf_artifact_version -> Text,
-        tuf_artifact_kind -> Text,
+        tuf_artifact_id -> Uuid,
     }
 }
 
@@ -1361,8 +1360,21 @@ allow_tables_to_appear_in_same_query!(
     tuf_artifact
 );
 joinable!(tuf_repo_artifact -> tuf_repo (tuf_repo_id));
-// Can't specify joinable for a composite primary key (tuf_repo_artifact ->
-// tuf_artifact).
+joinable!(tuf_repo_artifact -> tuf_artifact (tuf_artifact_id));
+
+table! {
+    support_bundle {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        reason_for_creation -> Text,
+        reason_for_failure -> Nullable<Text>,
+        state -> crate::SupportBundleStateEnum,
+        zpool_id -> Uuid,
+        dataset_id -> Uuid,
+
+        assigned_nexus -> Nullable<Uuid>,
+    }
+}
 
 /* hardware inventory */
 
@@ -1932,6 +1944,7 @@ table! {
         new_region_id -> Nullable<Uuid>,
         replacement_state -> crate::RegionSnapshotReplacementStateEnum,
         operating_saga_id -> Nullable<Uuid>,
+        new_region_volume_id -> Nullable<Uuid>,
     }
 }
 
@@ -2033,6 +2046,7 @@ allow_tables_to_appear_in_same_query!(
     console_session,
     sled,
     sled_resource,
+    support_bundle,
     router_route,
     vmm,
     volume,

@@ -769,10 +769,9 @@ async fn test_disk_region_creation_failure(
     .await
     .unwrap();
 
-    // After the failed allocation, the disk should be Faulted
+    // After the failed allocation, the disk creation should have unwound
     let disks = disks_list(&client, &disks_url).await;
-    assert_eq!(disks.len(), 1);
-    assert_eq!(disks[0].state, DiskState::Faulted);
+    assert_eq!(disks.len(), 0);
 }
 
 // Tests that invalid block sizes are rejected
@@ -1341,9 +1340,7 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
         .sled_agent
         .sled_agent
         .get_crucible_dataset(zpool.id, dataset.id)
-        .await
-        .set_region_deletion_error(true)
-        .await;
+        .set_region_deletion_error(true);
 
     // Delete the disk - expect this to fail
     NexusRequest::new(
@@ -1379,9 +1376,7 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
         .sled_agent
         .sled_agent
         .get_crucible_dataset(zpool.id, dataset.id)
-        .await
-        .set_region_deletion_error(false)
-        .await;
+        .set_region_deletion_error(false);
 
     // Request disk delete again
     NexusRequest::new(
@@ -2479,7 +2474,7 @@ async fn test_no_halt_disk_delete_one_region_on_expunged_agent(
     let zpool = disk_test.zpools().next().expect("Expected at least one zpool");
     let dataset = &zpool.datasets[0];
 
-    cptestctx.sled_agent.sled_agent.drop_dataset(zpool.id, dataset.id).await;
+    cptestctx.sled_agent.sled_agent.drop_dataset(zpool.id, dataset.id);
 
     // Spawn a task that tries to delete the disk
     let disk_url = get_disk_url(DISK_NAME);
@@ -2578,7 +2573,7 @@ async fn test_disk_expunge(cptestctx: &ControlPlaneTestContext) {
 
     // All three regions should be returned
     let expunged_regions = datastore
-        .find_regions_on_expunged_physical_disks(&opctx)
+        .find_read_write_regions_on_expunged_physical_disks(&opctx)
         .await
         .unwrap();
 

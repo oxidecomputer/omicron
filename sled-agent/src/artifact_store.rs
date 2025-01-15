@@ -452,7 +452,7 @@ pub(crate) fn filter_dataset_mountpoints(
     config
         .datasets
         .into_values()
-        .filter(|dataset| *dataset.name.dataset() == DatasetKind::Update)
+        .filter(|dataset| *dataset.name.kind() == DatasetKind::Update)
         .map(|dataset| dataset.name.mountpoint(root))
 }
 
