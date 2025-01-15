@@ -11,7 +11,7 @@ use clap::{Args, Parser, Subcommand};
 use crate::{
     cmd::{
         check::check_impl, generate::generate_impl, list::list_impl,
-        output::OutputOpts,
+        new_check::new_check_impl, output::OutputOpts,
     },
     spec::Environment,
 };
@@ -34,6 +34,7 @@ impl App {
             Command::List(args) => args.exec(&self.output_opts),
             Command::Generate(args) => args.exec(&self.output_opts),
             Command::Check(args) => args.exec(&self.output_opts),
+            Command::NewCheck(args) => args.exec(&self.output_opts),
         }
     }
 }
@@ -51,6 +52,9 @@ pub enum Command {
 
     /// Check that APIs are up-to-date.
     Check(CheckArgs),
+
+    /// Check that APIs are up-to-date.
+    NewCheck(NewCheckArgs),
 }
 
 #[derive(Debug, Args)]
@@ -92,6 +96,20 @@ impl CheckArgs {
     fn exec(self, output: &OutputOpts) -> anyhow::Result<ExitCode> {
         let env = Environment::new(self.dir)?;
         Ok(check_impl(&env, output)?.to_exit_code())
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct NewCheckArgs {
+    /// The directory to read generated APIs from.
+    #[clap(long)]
+    dir: Option<Utf8PathBuf>,
+}
+
+impl NewCheckArgs {
+    fn exec(self, output: &OutputOpts) -> anyhow::Result<ExitCode> {
+        let env = Environment::new(self.dir)?;
+        Ok(new_check_impl(&env, output)?.to_exit_code())
     }
 }
 

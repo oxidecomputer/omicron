@@ -7631,6 +7631,7 @@ dependencies = [
  "clap",
  "clickhouse-admin-api",
  "cockroach-admin-api",
+ "debug-ignore",
  "dns-server-api",
  "dropshot 0.13.0",
  "fs-err",

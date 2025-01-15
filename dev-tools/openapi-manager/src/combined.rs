@@ -7,6 +7,7 @@
 
 use crate::apis::{ApiIdent, ManagedApi, ManagedApis};
 use crate::spec_files::{AllApiSpecFiles, ApiSpecFile, ApiSpecFileName};
+use camino::Utf8Path;
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use thiserror::Error;
@@ -19,6 +20,15 @@ pub struct CombinedApis {
 }
 
 impl CombinedApis {
+    pub fn load(
+        dir: &Utf8Path,
+    ) -> anyhow::Result<(CombinedApis, Vec<anyhow::Error>)> {
+        let managed_apis = ManagedApis::all()?;
+        let (all_spec_files, warnings) =
+            AllApiSpecFiles::load_from_directory(dir, &managed_apis)?;
+        Ok((CombinedApis::new(managed_apis, all_spec_files), warnings))
+    }
+
     pub fn new(
         api_list: ManagedApis,
         all_spec_files: AllApiSpecFiles,
@@ -94,7 +104,7 @@ impl CombinedApis {
         for (api_ident, managed_api) in &apis {
             let api_versions = versions.get(api_ident);
             for api_version in managed_api.iter_versions() {
-                if api_versions.and_then(|vs| vs.get(api_version)).is_some() {
+                if api_versions.and_then(|vs| vs.get(api_version)).is_none() {
                     problems.push(Problem::MissingSpecFile {
                         api_ident: api_ident.clone(),
                         version: api_version.clone(),
@@ -104,6 +114,10 @@ impl CombinedApis {
         }
 
         CombinedApis { apis, versions, loaded_spec_files, problems }
+    }
+
+    pub fn problems(&self) -> &[Problem] {
+        self.problems.as_slice()
     }
 }
 

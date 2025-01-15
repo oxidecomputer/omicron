@@ -61,6 +61,7 @@ impl From<crate::spec::ApiSpec> for ManagedApiConfig {
 }
 
 /// Used internally to describe an API managed by this tool
+#[derive(Debug)]
 pub struct ManagedApi {
     /// The API-specific part of the filename that's used for API descriptions
     ///
@@ -127,13 +128,24 @@ impl ManagedApi {
 
 /// Describes the Rust-defined configuration for all of the APIs managed by this
 /// tool
+#[derive(Debug)]
 pub struct ManagedApis {
     // XXX-dap use IdMap?
     apis: BTreeMap<ApiIdent, ManagedApi>,
 }
 
 impl ManagedApis {
-    fn new(api_list: Vec<ManagedApi>) -> anyhow::Result<ManagedApis> {
+    pub fn all() -> anyhow::Result<ManagedApis> {
+        ManagedApis::new(
+            crate::spec::all_apis()
+                .into_iter()
+                .map(ManagedApiConfig::from)
+                .map(ManagedApi::from)
+                .collect(),
+        )
+    }
+
+    pub fn new(api_list: Vec<ManagedApi>) -> anyhow::Result<ManagedApis> {
         let mut apis = BTreeMap::new();
         for api in api_list {
             if let Some(old) = apis.insert(api.ident.clone(), api) {
@@ -188,6 +200,7 @@ impl fmt::Display for ApiBoundary {
 }
 
 /// Describes how an API is versioned
+#[derive(Debug)]
 pub enum Versions {
     /// There is only ever one version of this API
     ///

@@ -7,6 +7,7 @@
 use crate::apis::{ApiIdent, ManagedApis};
 use anyhow::{anyhow, bail, Context};
 use camino::{Utf8Path, Utf8PathBuf};
+use debug_ignore::DebugIgnore;
 use openapiv3::OpenAPI;
 use std::fmt::Display;
 use std::{collections::BTreeMap, ops::Deref};
@@ -14,16 +15,16 @@ use std::{collections::BTreeMap, ops::Deref};
 /// Container for all the OpenAPI spec files found
 ///
 /// Most validation is not done at this point.
+#[derive(Debug)]
 pub struct AllApiSpecFiles {
     api_files: BTreeMap<ApiIdent, Vec<ApiSpecFile>>,
-    warnings: Vec<anyhow::Error>,
 }
 
 impl AllApiSpecFiles {
     pub fn load_from_directory(
         dir: &Utf8Path,
         apis: &ManagedApis,
-    ) -> anyhow::Result<AllApiSpecFiles> {
+    ) -> anyhow::Result<(AllApiSpecFiles, Vec<anyhow::Error>)> {
         let mut api_files = BTreeMap::new();
         let mut warnings = Vec::new();
         let entry_iter = dir
@@ -72,7 +73,7 @@ impl AllApiSpecFiles {
             };
         }
 
-        Ok(AllApiSpecFiles { api_files, warnings })
+        Ok((AllApiSpecFiles { api_files }, warnings))
     }
 
     fn load_lockstep_file(
@@ -121,7 +122,7 @@ impl AllApiSpecFiles {
             let file_name = entry.file_name();
             let file_name = ApiSpecFileName::new_versioned(basename, file_name)
                 .with_context(|| format!("path {:?}", entry.path()))?;
-            rv.push(ApiSpecFile::load(file_name, path)?);
+            rv.push(ApiSpecFile::load(file_name, entry.path())?);
         }
 
         Ok(rv)
@@ -169,12 +170,13 @@ impl ApiSpecFileName {
         basename: &str,
     ) -> anyhow::Result<ApiSpecFileName> {
         let expected_prefix = format!("{}-", ident);
-        let suffix = basename.strip_prefix(ident).ok_or_else(|| {
-            anyhow!(
-                "versioned API document filename did not start with {:?}",
-                expected_prefix
-            )
-        })?;
+        let suffix =
+            basename.strip_prefix(&expected_prefix).ok_or_else(|| {
+                anyhow!(
+                    "versioned API document filename did not start with {:?}",
+                    expected_prefix
+                )
+            })?;
 
         let middle = suffix.strip_suffix(".json").ok_or_else(|| {
             anyhow!("versioned API document filename did not end in .json")
@@ -262,9 +264,10 @@ enum ApiSpecFileNameKind {
 }
 
 /// Describes an OpenAPI document found on disk
+#[derive(Debug)]
 pub struct ApiSpecFile {
     name: ApiSpecFileName,
-    contents: OpenAPI,
+    contents: DebugIgnore<OpenAPI>,
     version: semver::Version,
 }
 
@@ -277,24 +280,28 @@ impl ApiSpecFile {
             .with_context(|| format!("read file {:?}", path))?;
         let contents: OpenAPI = serde_json::from_str(&contents_str)
             .with_context(|| format!("parse file {:?}", path))?;
-        let version: semver::Version =
+        let parsed_version: semver::Version =
             contents.info.version.parse().with_context(|| {
                 format!("version in {:?} was not a semver", path)
             })?;
 
         if let ApiSpecFileNameKind::Versioned { version, sum: _ } = &name.kind {
             // XXX-dap verify checksum
-            if version.to_string() != contents.info.version {
+            if *version != parsed_version {
                 bail!(
                     "file {:?}: version in the file ({:?}) differs from \
                      the one in the filename",
                     path,
-                    contents.info.version
+                    parsed_version
                 );
             }
         }
 
-        Ok(ApiSpecFile { name, contents, version })
+        Ok(ApiSpecFile {
+            name,
+            contents: DebugIgnore(contents),
+            version: parsed_version,
+        })
     }
 
     pub fn spec_file_name(&self) -> &ApiSpecFileName {
