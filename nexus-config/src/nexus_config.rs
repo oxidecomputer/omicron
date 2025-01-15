@@ -1236,7 +1236,7 @@ mod test {
                         },
                         webhook_deliverator: WebhookDeliveratorConfig {
                             period_secs: Duration::from_secs(43),
-                            lease_timeout_secs: TimeDelta::from_secs(44)
+                            lease_timeout_secs: 44,
                         }
                     },
                     default_region_allocation_strategy:

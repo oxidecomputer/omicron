@@ -2,24 +2,26 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 use crate::app::background::BackgroundTask;
+use chrono::{TimeDelta, Utc};
 use futures::future::BoxFuture;
 use http::HeaderName;
 use http::HeaderValue;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::webhook_delivery::DeliveryAttemptState;
 use nexus_db_queries::db::model::{
-    WebhookDelivery, WebhookDeliveryAttempt, WebhookDeliveryResult,
-    WebhookReceiver,
+    SqlU8, WebhookDeliveryAttempt, WebhookDeliveryResult, WebhookReceiver,
 };
-use nexus_db_queries::db::webhook_delivery::DeliveryAttemptState;
 use nexus_db_queries::db::DataStore;
-use nexus_db_queries::db::DbConnection;
+use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::{
     WebhookDeliveratorStatus, WebhookRxDeliveryStatus,
 };
-use omicron_uuid_kinds::OmicronZoneUuid;
-use std::collections::HashMap;
+use omicron_common::api::external::Error;
+use omicron_uuid_kinds::{
+    OmicronZoneUuid, WebhookDeliveryUuid, WebhookEventUuid, WebhookReceiverUuid,
+};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::task::JoinSet;
 
 // The Deliverator belongs to an elite order, a hallowed sub-category. He's got
@@ -69,7 +71,7 @@ use tokio::task::JoinSet;
 // model.
 //
 // --- Neal Stephenson, _Snow Crash_
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct WebhookDeliverator {
     datastore: Arc<DataStore>,
     nexus_id: OmicronZoneUuid,
@@ -114,7 +116,7 @@ impl WebhookDeliverator {
             // considered failed.
             //
             // [1]: https://rfd.shared.oxide.computer/rfd/538#delivery-failure
-            .connect_timeout(CONNECT_TIMEOUT)
+            .connect_timeout(Duration::from_secs(10))
             .build()
             .expect("failed to configure webhook deliverator client!");
         Self { datastore, nexus_id, lease_timeout, client }
@@ -128,7 +130,6 @@ impl WebhookDeliverator {
         let rxs = self.datastore.webhook_rx_list(&opctx).await?;
         let mut tasks = JoinSet::new();
         for rx in rxs {
-            let datastore = self.datastore.clone();
             let opctx = opctx.child(maplit::btreemap! {
                 "receiver_id".to_string() => rx.id().to_string(),
                 "receiver_name".to_string() => rx.name().to_string(),
@@ -159,7 +160,11 @@ impl WebhookDeliverator {
     ) -> WebhookRxDeliveryStatus {
         let deliveries = match self
             .datastore
-            .webhook_delivery_list_ready(&opctx, rx.id(), self.lease_timeout)
+            .webhook_rx_delivery_list_ready(
+                &opctx,
+                &rx.id(),
+                self.lease_timeout,
+            )
             .await
         {
             Err(e) => {
@@ -176,20 +181,22 @@ impl WebhookDeliverator {
             }
             Ok(deliveries) => deliveries,
         };
-        let mut delivery_status = WebhooKRxDeliveryStatus {
-            ready: delivery.len(),
+        let mut delivery_status = WebhookRxDeliveryStatus {
+            ready: deliveries.len(),
             ..Default::default()
         };
         let hdr_rx_id = HeaderValue::try_from(rx.id().to_string())
             .expect("UUIDs should always be a valid header value");
-        for delivery in deliveries {
-            let attempt = delivery.attempts + 1;
+        for (delivery, event) in deliveries {
+            let attempt = (*delivery.attempts) + 1;
+            let delivery_id = WebhookDeliveryUuid::from(delivery.id);
+            let event_class = &event.event_class;
             match self
                 .datastore
                 .webhook_delivery_start_attempt(
                     opctx,
                     &delivery,
-                    self.nexus_id,
+                    &self.nexus_id,
                     self.lease_timeout,
                 )
                 .await
@@ -197,36 +204,33 @@ impl WebhookDeliverator {
                 Ok(DeliveryAttemptState::Started) => {
                     slog::trace!(&opctx.log,
                         "webhook event delivery attempt started";
-                        "event_id" => delivery.event_id,
-                        "event_class" => delivery.event_class,
-                        "delivery_id" => delivery_id,
+                        "event_id" => %delivery.event_id,
+                        "event_class" => event_class,
+                        "delivery_id" => %delivery_id,
                         "attempt" => attempt,
                     );
                 }
                 Ok(DeliveryAttemptState::AlreadyCompleted(time)) => {
                     slog::debug!(
                         &opctx.log,
-                        "delivery of this webhookevent was already completed at {time:?}";
-                        "event_id" => delivery.event_id,
-                        "event_class" => delivery.event_class,
-                        "delivery_id" => delivery_id,
+                        "delivery of this webhook event was already completed at {time:?}";
+                        "event_id" => %delivery.event_id,
+                        "event_class" => event_class,
+                        "delivery_id" => %delivery_id,
                         "time_completed" => ?time,
                     );
                     delivery_status.already_delivered += 1;
                     continue;
                 }
-                Ok(DeliveryAttemptState::InProgress {
-                    nexus_id,
-                    time_started,
-                }) => {
+                Ok(DeliveryAttemptState::InProgress { nexus_id, started }) => {
                     slog::debug!(
                         &opctx.log,
                         "delivery of this webhook event is in progress by another Nexus";
-                        "event_id" => delivery.event_id,
-                        "event_class" => delivery.event_class,
-                        "delivery_id" => delivery_id,
-                        "nexus_id" => nexus_id,
-                        "time_started" => ?time_started,
+                        "event_id" => %delivery.event_id,
+                        "event_class" => event_class,
+                        "delivery_id" => %delivery_id,
+                        "nexus_id" => %nexus_id,
+                        "time_started" => ?started,
                     );
                     delivery_status.in_progress += 1;
                     continue;
@@ -235,9 +239,9 @@ impl WebhookDeliverator {
                     slog::error!(
                         &opctx.log,
                         "unexpected database error error starting webhook delivery attempt";
-                        "event_id" => delivery.event_id,
-                        "event_class" => delivery.event_class,
-                        "delivery_id" => delivery_id,
+                        "event_id" => %delivery.event_id,
+                        "event_class" => event_class,
+                        "delivery_id" => %delivery_id,
                         "error" => %error,
                     );
                     delivery_status
@@ -251,7 +255,7 @@ impl WebhookDeliverator {
             let time_attempted = Utc::now();
             let sent_at = time_attempted.to_rfc3339();
             let payload = Payload {
-                event_class: delivery.event_class,
+                event_class: event_class.as_ref(),
                 event_id: delivery.event_id.into(),
                 data: &delivery.payload,
                 delivery: DeliveryMetadata {
@@ -268,15 +272,15 @@ impl WebhookDeliverator {
                     slog::error!(
                         &opctx.log,
                         "{MSG}";
-                        "event_id" => delivery.event_id,
-                        "event_class" => delivery.event_class,
-                        "delivery_id" => delivery_id,
-                        "error" => %error,
+                        "event_id" => %delivery.event_id,
+                        "event_class" => event_class,
+                        "delivery_id" => %delivery_id,
+                        "error" => %e,
                         "payload" => ?payload,
                     );
                     delivery_status
                         .delivery_errors
-                        .insert(delivery.id, format!("{MSG}: {error}"));
+                        .insert(delivery_id, format!("{MSG}: {e}"));
                     continue;
                 }
             };
@@ -284,10 +288,10 @@ impl WebhookDeliverator {
             let request = self
                 .client
                 .post(&rx.endpoint)
-                .header(HDR_RX_ID, hdr_rx_id)
+                .header(HDR_RX_ID, hdr_rx_id.clone())
                 .header(HDR_DELIVERY_ID, delivery_id.to_string())
                 .header(HDR_EVENT_ID, delivery.event_id.to_string())
-                .header(HDR_EVENT_CLASS, delivery.event_class)
+                .header(HDR_EVENT_CLASS, event_class)
                 .body(body)
                 // Per [RFD 538 § 4.3.2][1], a 30-second timeout is applied to
                 // each webhook delivery request.
@@ -305,14 +309,14 @@ impl WebhookDeliverator {
                     slog::error!(
                         &opctx.log,
                         "{MSG}";
-                        "event_id" => delivery.event_id,
-                        "event_class" => delivery.event_class,
-                        "delivery_id" => delivery_id,
-                        "error" => %error,
+                        "event_id" => %delivery.event_id,
+                        "event_class" => event_class,
+                        "delivery_id" => %delivery_id,
+                        "error" => %e,
                     );
                     delivery_status
                         .delivery_errors
-                        .insert(delivery.id, format!("{MSG}: {error}"));
+                        .insert(delivery_id, format!("{MSG}: {e}"));
                     continue;
                 }
                 Err(e) => {
@@ -320,13 +324,13 @@ impl WebhookDeliverator {
                         slog::warn!(
                             &opctx.log,
                             "webhook receiver endpoint returned an HTTP error";
-                            "event_id" => delivery.event_id,
-                            "event_class" => delivery.event_class,
-                            "delivery_id" => delivery_id,
+                            "event_id" => %delivery.event_id,
+                            "event_class" => event_class,
+                            "delivery_id" => %delivery_id,
                             "response_status" => ?status,
                             "response_duration" => ?duration,
                         );
-                        (WebhookDeliveryResult::FailedHttpError, status)
+                        (WebhookDeliveryResult::FailedHttpError, Some(status))
                     } else {
                         let result = if e.is_connect() {
                             WebhookDeliveryResult::FailedUnreachable
@@ -340,11 +344,12 @@ impl WebhookDeliverator {
                         slog::warn!(
                             &opctx.log,
                             "webhook delivery request failed";
-                            "event_id" => delivery.event_id,
-                            "event_class" => delivery.event_class,
-                            "delivery_id" => delivery_id,
-                            "error" => %error,
+                            "event_id" => %delivery.event_id,
+                            "event_class" => event_class,
+                            "delivery_id" => %delivery_id,
+                            "error" => %e,
                         );
+                        (result, None)
                     }
                 }
                 Ok(rsp) => {
@@ -352,9 +357,9 @@ impl WebhookDeliverator {
                     slog::debug!(
                         &opctx.log,
                         "webhook event delivered successfully";
-                        "event_id" => delivery.event_id,
-                        "event_class" => delivery.event_class,
-                        "delivery_id" => delivery_id,
+                        "event_id" => %delivery.event_id,
+                        "event_class" => event_class,
+                        "delivery_id" => %delivery_id,
                         "response_status" => ?status,
                         "response_duration" => ?duration,
                     );
@@ -370,9 +375,9 @@ impl WebhookDeliverator {
                 )
             });
             let delivery_attempt = WebhookDeliveryAttempt {
-                delivery_id: delivery_id.into(),
-                attempt,
-                result,
+                delivery_id: delivery.id,
+                attempt: SqlU8::new(attempt),
+                result: delivery_result,
                 response_status: status.map(|s| s.as_u16() as i16),
                 response_duration,
                 time_created: chrono::Utc::now(),
@@ -383,7 +388,7 @@ impl WebhookDeliverator {
                 .webhook_delivery_finish_attempt(
                     opctx,
                     &delivery,
-                    self.nexus_id,
+                    &self.nexus_id,
                     &delivery_attempt,
                 )
                 .await
@@ -394,9 +399,9 @@ impl WebhookDeliverator {
                     slog::error!(
                         &opctx.log,
                         "{MSG}";
-                        "event_id" => delivery.event_id,
-                        "event_class" => delivery.event_class,
-                        "delivery_id" => delivery_id,
+                        "event_id" => %delivery.event_id,
+                        "event_class" => event_class,
+                        "delivery_id" => %delivery_id,
                         "error" => %e,
                     );
                     delivery_status
@@ -408,6 +413,10 @@ impl WebhookDeliverator {
                 }
             }
         }
+
+        // TODO(eliza): if no events were sent, do a probe...
+
+        delivery_status
     }
 }
 
@@ -419,16 +428,16 @@ const HDR_EVENT_CLASS: HeaderName =
     HeaderName::from_static("x-oxide-event-class");
 const HDR_SIG: HeaderName = HeaderName::from_static("x-oxide-signature");
 
-#[derive(Serialize, Debug)]
+#[derive(serde::Serialize, Debug)]
 struct Payload<'a> {
     event_class: &'a str,
     event_id: WebhookEventUuid,
     data: &'a serde_json::Value,
-    delivery: DeliveryMetadata,
+    delivery: DeliveryMetadata<'a>,
 }
 
-#[derive(Serialize, Debug)]
-struct DeliveryMetadata {
+#[derive(serde::Serialize, Debug)]
+struct DeliveryMetadata<'a> {
     id: WebhookDeliveryUuid,
     webhook_id: WebhookReceiverUuid,
     sent_at: &'a str,

@@ -11,8 +11,8 @@ use crate::WebhookEvent;
 use chrono::{DateTime, TimeDelta, Utc};
 use nexus_types::external_api::views;
 use omicron_uuid_kinds::{
-    WebhookDeliveryKind, WebhookDeliveryUuid, WebhookEventKind,
-    WebhookReceiverKind, WebhookReceiverUuid,
+    OmicronZoneKind, WebhookDeliveryKind, WebhookDeliveryUuid,
+    WebhookEventKind, WebhookReceiverKind, WebhookReceiverUuid,
 };
 use serde::Deserialize;
 use serde::Serialize;
@@ -77,6 +77,9 @@ pub struct WebhookDelivery {
     /// The time at which the webhook message was either delivered successfully
     /// or permanently failed.
     pub time_completed: Option<DateTime<Utc>>,
+
+    pub deliverator_id: Option<DbTypedUuid<OmicronZoneKind>>,
+    pub time_delivery_started: Option<DateTime<Utc>>,
 }
 
 impl WebhookDelivery {
@@ -90,6 +93,8 @@ impl WebhookDelivery {
             attempts: SqlU8::new(0),
             time_created: Utc::now(),
             time_completed: None,
+            deliverator_id: None,
+            time_delivery_started: None,
         }
     }
 }
