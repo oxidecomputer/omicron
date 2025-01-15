@@ -1060,6 +1060,17 @@ table! {
 allow_tables_to_appear_in_same_query!(zpool, dataset);
 
 table! {
+    rendezvous_debug_dataset (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_tombstoned -> Nullable<Timestamptz>,
+        pool_id -> Uuid,
+        blueprint_id_when_created -> Uuid,
+        blueprint_id_when_tombstoned -> Nullable<Uuid>,
+    }
+}
+
+table! {
     region (id) {
         id -> Uuid,
         time_created -> Timestamptz,

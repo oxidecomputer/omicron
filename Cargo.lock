@@ -6185,6 +6185,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-reconfigurator-rendezvous"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-bb8-diesel",
+ "diesel",
+ "nexus-db-model",
+ "nexus-db-queries",
+ "nexus-types",
+ "omicron-common",
+ "omicron-rpaths",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "pq-sys",
+ "proptest",
+ "slog",
+ "test-strategy",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-reconfigurator-simulation"
 version = "0.1.0"
 dependencies = [

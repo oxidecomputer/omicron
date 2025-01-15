@@ -83,6 +83,7 @@ members = [
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
     "nexus/reconfigurator/preparation",
+    "nexus/reconfigurator/rendezvous",
     "nexus/reconfigurator/simulation",
     "nexus/saga-recovery",
     "nexus/test-interface",
@@ -218,6 +219,7 @@ default-members = [
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
     "nexus/reconfigurator/preparation",
+    "nexus/reconfigurator/rendezvous",
     "nexus/reconfigurator/simulation",
     "nexus/saga-recovery",
     "nexus/test-interface",
@@ -479,6 +481,7 @@ nexus-reconfigurator-blippy = { path = "nexus/reconfigurator/blippy" }
 nexus-reconfigurator-execution = { path = "nexus/reconfigurator/execution" }
 nexus-reconfigurator-planning = { path = "nexus/reconfigurator/planning" }
 nexus-reconfigurator-preparation = { path = "nexus/reconfigurator/preparation" }
+nexus-reconfigurator-rendezvous = { path = "nexus/reconfigurator/rendezvous" }
 nexus-reconfigurator-simulation = { path = "nexus/reconfigurator/simulation" }
 nexus-saga-recovery = { path = "nexus/saga-recovery" }
 nexus-sled-agent-shared = { path = "nexus-sled-agent-shared" }
