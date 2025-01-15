@@ -109,6 +109,10 @@ impl From<ManagedApiConfig> for ManagedApi {
 }
 
 impl ManagedApi {
+    pub fn ident(&self) -> &ApiIdent {
+        &self.ident
+    }
+
     pub fn is_lockstep(&self) -> bool {
         self.versions.is_lockstep()
     }
@@ -123,6 +127,45 @@ impl ManagedApi {
 
     pub fn has_version(&self, version: &semver::Version) -> bool {
         self.iter_versions().any(|v| v == version)
+    }
+
+    pub fn generate_spec_bytes(
+        &self,
+        version: &semver::Version,
+    ) -> anyhow::Result<Vec<u8>> {
+        // XXX-dap this was the old to_json_bytes()
+        let description = (self.api_description)().map_err(|error| {
+            // ApiDescriptionBuildError is actually a list of errors so it
+            // doesn't implement std::error::Error itself. Its Display
+            // impl formats the errors appropriately.
+            anyhow::anyhow!("{}", error)
+        })?;
+        let mut openapi_def = description.openapi(&self.title, version.clone());
+        openapi_def
+            .description(&self.description)
+            .contact_url("https://oxide.computer")
+            .contact_email("api@oxide.computer");
+
+        // Use write because it's the most reliable way to get the canonical
+        // JSON order. The `json` method returns a serde_json::Value which may
+        // or may not have preserve_order enabled.
+        let mut contents = Vec::new();
+        openapi_def.write(&mut contents)?;
+        Ok(contents)
+    }
+
+    pub fn boundary(&self) -> ApiBoundary {
+        self.boundary
+    }
+
+    pub fn extra_validation<'a>(
+        &self,
+        openapi: &OpenAPI,
+        validation_context: ValidationContext<'a>,
+    ) {
+        if let Some(extra_validation) = self.extra_validation {
+            extra_validation(openapi, validation_context);
+        }
     }
 }
 

@@ -10,7 +10,7 @@ use indent_write::fmt::IndentWriter;
 use owo_colors::{OwoColorize, Style};
 use similar::{ChangeTag, DiffableStr, TextDiff};
 
-use crate::spec::{ApiSpec, ApiSpecFile, ApiSpecVersion, DocumentSummary};
+use crate::spec::{ApiSpec, ApiSpecFileWhich, ApiSpecVersion, DocumentSummary};
 
 #[derive(Debug, Args)]
 #[clap(next_help_heading = "Global options")]
@@ -150,18 +150,18 @@ pub(crate) fn display_api_spec_version(
 
 pub(crate) fn display_api_spec_file(
     spec_version: &ApiSpecVersion,
-    spec_file: ApiSpecFile<'_>,
+    spec_file: ApiSpecFileWhich<'_>,
     styles: &Styles,
 ) -> String {
     match spec_file {
-        ApiSpecFile::Openapi => {
+        ApiSpecFileWhich::Openapi => {
             let contents = &[]; // XXX-dap
             format!(
                 "OpenAPI document {}",
                 spec_version.file_name(contents).style(styles.filename)
             )
         }
-        ApiSpecFile::Extra(path) => {
+        ApiSpecFileWhich::Extra(path) => {
             format!("Extra file {}", path.style(styles.filename))
         }
     }

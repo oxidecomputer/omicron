@@ -3,11 +3,13 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    cmd::output::{OutputOpts, Styles},
+    cmd::output::{headers, OutputOpts, Styles},
+    combined::{ApiSpecFileWhich, CheckStale, CheckStatus, SpecCheckStatus},
     spec::Environment,
     FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
+use owo_colors::OwoColorize;
 use std::process::ExitCode;
 
 #[derive(Clone, Copy, Debug)]
@@ -47,9 +49,55 @@ pub(crate) fn new_check_impl(
         for p in combined.problems() {
             eprintln!("problem: {}", p);
         }
-        Ok(NewCheckResult::Failures)
     } else {
         eprintln!("no immediate problems found");
+    }
+
+    let mut nstale = 0;
+    for api in combined.apis() {
+        let api_ident = api.api().ident();
+
+        for api_version in api.versions() {
+            let check = api_version.check(env).with_context(|| {
+                format!(
+                    "checking API {} version {}",
+                    api_ident,
+                    api_version.version()
+                )
+            })?;
+
+            // XXX-dap
+            print!("API {} version {}: ", api_ident, api_version.version(),);
+
+            if check.total_errors() == 0 {
+                println!("{}", headers::FRESH.style(styles.success_header));
+                continue;
+            }
+
+            println!("{}", headers::STALE.style(styles.failure_header));
+            for (which, check_stale) in check.iter_errors() {
+                println!(
+                    "    {} {}",
+                    match which {
+                        ApiSpecFileWhich::Openapi => "openapi document",
+                        ApiSpecFileWhich::Extra(path) => path.as_str(),
+                    },
+                    match check_stale {
+                        CheckStale::New =>
+                            headers::NEW.style(styles.failure_header),
+                        CheckStale::Modified { .. } =>
+                            headers::MODIFIED.style(styles.failure_header),
+                    }
+                );
+            }
+        }
+    }
+
+    if !problems.is_empty() {
+        Ok(NewCheckResult::Failures)
+    } else if nstale > 0 {
+        Ok(NewCheckResult::NeedsUpdate)
+    } else {
         Ok(NewCheckResult::Success)
     }
 }

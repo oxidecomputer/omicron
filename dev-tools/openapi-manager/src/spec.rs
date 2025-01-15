@@ -5,12 +5,16 @@
 use std::io::Write;
 
 use crate::apis::{ApiBoundary, Versions};
+use crate::combined::{check_file, read_opt, CheckStatus, SpecCheckStatus};
+pub(crate) use crate::combined::{ApiSpecFileWhich, CheckStale};
+pub(crate) use crate::validation::DocumentSummary;
+use crate::validation::{ValidationContextImpl, ValidationResult};
 use anyhow::{Context, Result};
 use atomicwrites::AtomicFile;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::{ApiDescription, ApiDescriptionBuildErrors, StubContext};
 use fs_err as fs;
-use openapi_manager_types::{ValidationBackend, ValidationContext};
+use openapi_manager_types::ValidationContext;
 use openapiv3::OpenAPI;
 
 /// All APIs managed by openapi-manager.
@@ -365,21 +369,6 @@ impl<'a> ApiSpecVersion<'a> {
     }
 }
 
-struct ValidationContextImpl {
-    errors: Vec<anyhow::Error>,
-    files: Vec<(Utf8PathBuf, Vec<u8>)>,
-}
-
-impl ValidationBackend for ValidationContextImpl {
-    fn report_error(&mut self, error: anyhow::Error) {
-        self.errors.push(error);
-    }
-
-    fn record_file_contents(&mut self, path: Utf8PathBuf, contents: Vec<u8>) {
-        self.files.push((path, contents));
-    }
-}
-
 fn contents_to_openapi(contents: &[u8]) -> Result<OpenAPI> {
     serde_json::from_slice(&contents)
         .context("JSON returned by ApiDescription is not valid OpenAPI")
@@ -402,10 +391,10 @@ impl SpecOverwriteStatus {
 
     fn iter(
         &self,
-    ) -> impl Iterator<Item = (ApiSpecFile<'_>, &OverwriteStatus)> {
-        std::iter::once((ApiSpecFile::Openapi, &self.openapi_doc)).chain(
+    ) -> impl Iterator<Item = (ApiSpecFileWhich<'_>, &OverwriteStatus)> {
+        std::iter::once((ApiSpecFileWhich::Openapi, &self.openapi_doc)).chain(
             self.extra_files.iter().map(|(file_name, status)| {
-                (ApiSpecFile::Extra(file_name), status)
+                (ApiSpecFileWhich::Extra(file_name), status)
             }),
         )
     }
@@ -416,87 +405,6 @@ impl SpecOverwriteStatus {
 pub(crate) enum OverwriteStatus {
     Updated,
     Unchanged,
-}
-
-#[derive(Debug)]
-#[must_use]
-pub(crate) struct SpecCheckStatus {
-    pub(crate) summary: DocumentSummary,
-    pub(crate) openapi_doc: CheckStatus,
-    pub(crate) extra_files: Vec<(Utf8PathBuf, CheckStatus)>,
-}
-
-impl SpecCheckStatus {
-    pub(crate) fn total_errors(&self) -> usize {
-        self.iter_errors().count()
-    }
-
-    pub(crate) fn extra_files_len(&self) -> usize {
-        self.extra_files.len()
-    }
-
-    pub(crate) fn iter_errors(
-        &self,
-    ) -> impl Iterator<Item = (ApiSpecFile<'_>, &CheckStale)> {
-        std::iter::once((ApiSpecFile::Openapi, &self.openapi_doc))
-            .chain(self.extra_files.iter().map(|(file_name, status)| {
-                (ApiSpecFile::Extra(file_name), status)
-            }))
-            .filter_map(|(spec_file, status)| {
-                if let CheckStatus::Stale(e) = status {
-                    Some((spec_file, e))
-                } else {
-                    None
-                }
-            })
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum ApiSpecFile<'a> {
-    Openapi,
-    Extra(&'a Utf8Path),
-}
-
-#[derive(Debug)]
-#[must_use]
-pub(crate) enum CheckStatus {
-    Fresh,
-    Stale(CheckStale),
-}
-
-#[derive(Debug)]
-#[must_use]
-pub(crate) enum CheckStale {
-    Modified { full_path: Utf8PathBuf, actual: Vec<u8>, expected: Vec<u8> },
-    New,
-}
-
-#[derive(Debug)]
-#[must_use]
-pub(crate) struct DocumentSummary {
-    pub(crate) path_count: usize,
-    // None if data is missing.
-    pub(crate) schema_count: Option<usize>,
-}
-
-impl DocumentSummary {
-    fn new(doc: &OpenAPI) -> Self {
-        Self {
-            path_count: doc.paths.paths.len(),
-            schema_count: doc
-                .components
-                .as_ref()
-                .map_or(None, |c| Some(c.schemas.len())),
-        }
-    }
-}
-
-#[derive(Debug)]
-#[must_use]
-struct ValidationResult {
-    // Extra files recorded by the validation context.
-    extra_files: Vec<(Utf8PathBuf, Vec<u8>)>,
 }
 
 pub(crate) struct Environment {
@@ -553,35 +461,4 @@ fn overwrite_file(path: &Utf8Path, contents: &[u8]) -> Result<OverwriteStatus> {
         .with_context(|| format!("failed to write to `{}`", path))?;
 
     Ok(OverwriteStatus::Updated)
-}
-
-/// Check a file against expected contents.
-fn check_file(
-    full_path: Utf8PathBuf,
-    contents: Vec<u8>,
-) -> Result<CheckStatus> {
-    let existing_contents =
-        read_opt(&full_path).context("failed to read contents on disk")?;
-
-    match existing_contents {
-        Some(existing_contents) if existing_contents == contents => {
-            Ok(CheckStatus::Fresh)
-        }
-        Some(existing_contents) => {
-            Ok(CheckStatus::Stale(CheckStale::Modified {
-                full_path,
-                actual: existing_contents,
-                expected: contents,
-            }))
-        }
-        None => Ok(CheckStatus::Stale(CheckStale::New)),
-    }
-}
-
-fn read_opt(path: &Utf8Path) -> std::io::Result<Option<Vec<u8>>> {
-    match fs::read(path) {
-        Ok(contents) => Ok(Some(contents)),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(err) => return Err(err),
-    }
 }

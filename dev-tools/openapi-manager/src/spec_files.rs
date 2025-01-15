@@ -4,7 +4,7 @@
 
 //! Working with OpenAPI specification files in the repository
 
-use crate::apis::{ApiIdent, ManagedApis};
+use crate::apis::{ApiIdent, ManagedApi, ManagedApis};
 use anyhow::{anyhow, bail, Context};
 use camino::{Utf8Path, Utf8PathBuf};
 use debug_ignore::DebugIgnore;
@@ -233,7 +233,7 @@ impl ApiSpecFileName {
     }
 
     /// Returns the path of this file relative to the root of the OpenAPI specs
-    fn path(&self) -> Utf8PathBuf {
+    pub fn path(&self) -> Utf8PathBuf {
         match &self.kind {
             ApiSpecFileNameKind::Lockstep => {
                 Utf8PathBuf::from_iter([self.basename()])
@@ -268,6 +268,8 @@ enum ApiSpecFileNameKind {
 pub struct ApiSpecFile {
     name: ApiSpecFileName,
     contents: DebugIgnore<OpenAPI>,
+    // XXX-dap do we have to store two whole copies of this?
+    contents_buf: DebugIgnore<Vec<u8>>,
     version: semver::Version,
 }
 
@@ -276,9 +278,9 @@ impl ApiSpecFile {
         name: ApiSpecFileName,
         path: &Utf8Path,
     ) -> anyhow::Result<ApiSpecFile> {
-        let contents_str = std::fs::read_to_string(path)
+        let contents_buf = fs_err::read(path)
             .with_context(|| format!("read file {:?}", path))?;
-        let contents: OpenAPI = serde_json::from_str(&contents_str)
+        let contents: OpenAPI = serde_json::from_slice(&contents_buf)
             .with_context(|| format!("parse file {:?}", path))?;
         let parsed_version: semver::Version =
             contents.info.version.parse().with_context(|| {
@@ -300,8 +302,34 @@ impl ApiSpecFile {
         Ok(ApiSpecFile {
             name,
             contents: DebugIgnore(contents),
+            contents_buf: DebugIgnore(contents_buf),
             version: parsed_version,
         })
+    }
+
+    pub fn for_contents(
+        api: &ManagedApi,
+        version: &semver::Version,
+        openapi: OpenAPI,
+        contents_buf: Vec<u8>,
+    ) -> ApiSpecFile {
+        let ident = api.ident();
+        let kind = if api.is_versioned() {
+            ApiSpecFileNameKind::Versioned {
+                version: version.clone(),
+                sum: "bogus".to_owned(), // XXX-dap
+            }
+        } else {
+            ApiSpecFileNameKind::Lockstep
+        };
+
+        let name = ApiSpecFileName { ident: api.ident().clone(), kind };
+        ApiSpecFile {
+            name,
+            contents: DebugIgnore(openapi),
+            contents_buf: DebugIgnore(contents_buf),
+            version: version.clone(),
+        }
     }
 
     pub fn spec_file_name(&self) -> &ApiSpecFileName {
@@ -310,5 +338,9 @@ impl ApiSpecFile {
 
     pub fn version(&self) -> &semver::Version {
         &self.version
+    }
+
+    pub fn contents(&self) -> &[u8] {
+        &self.contents_buf
     }
 }

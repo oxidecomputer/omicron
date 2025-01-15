@@ -6,8 +6,11 @@
 //! configuration and the OpenAPI documents present
 
 use crate::apis::{ApiIdent, ManagedApi, ManagedApis};
+use crate::spec::Environment;
 use crate::spec_files::{AllApiSpecFiles, ApiSpecFile, ApiSpecFileName};
-use camino::Utf8Path;
+use crate::validation::{validate_generated_openapi_document, DocumentSummary};
+use anyhow::Context;
+use camino::{Utf8Path, Utf8PathBuf};
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use thiserror::Error;
@@ -119,6 +122,21 @@ impl CombinedApis {
     pub fn problems(&self) -> &[Problem] {
         self.problems.as_slice()
     }
+
+    pub fn apis(&self) -> impl Iterator<Item = CombinedApi<'_>> + '_ {
+        self.apis.iter().map(|(ident, managed_api)| {
+            // unwrap(): we verified this during construction.
+            // XXX-dap this and other unwraps are not necessarily safe if we
+            // encountered Problems during constructor.  May want to make these
+            // errors per-API and do something different here?
+            let versions = self.versions.get(ident).unwrap();
+            CombinedApi {
+                managed_api,
+                versions,
+                spec_files: &self.loaded_spec_files,
+            }
+        })
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -170,4 +188,178 @@ pub enum Problem {
         version: semver::Version,
         spec_file_names: DisplayableVec<ApiSpecFileName>,
     },
+}
+
+pub struct CombinedApi<'a> {
+    managed_api: &'a ManagedApi,
+    versions: &'a BTreeMap<semver::Version, ApiSpecFileName>,
+    spec_files: &'a BTreeMap<ApiSpecFileName, ApiSpecFile>,
+}
+
+impl<'a> CombinedApi<'a> {
+    pub fn api(&self) -> &ManagedApi {
+        self.managed_api
+    }
+
+    pub fn versions(&self) -> impl Iterator<Item = CombinedApiVersion> + '_ {
+        self.versions.iter().map(|(version, spec_file_name)| {
+            // unwrap(): we verified during construction that we have all these
+            // files.
+            let spec_file = self.spec_files.get(spec_file_name).unwrap();
+            CombinedApiVersion {
+                managed_api: self.managed_api,
+                version,
+                spec_file_name,
+                spec_file,
+            }
+        })
+    }
+}
+
+pub struct CombinedApiVersion<'a> {
+    managed_api: &'a ManagedApi,
+    version: &'a semver::Version,
+    spec_file_name: &'a ApiSpecFileName,
+    spec_file: &'a ApiSpecFile,
+}
+
+impl<'a> CombinedApiVersion<'a> {
+    pub fn version(&self) -> &semver::Version {
+        self.version
+    }
+
+    pub fn check(&self, env: &Environment) -> anyhow::Result<SpecCheckStatus> {
+        let freshly_generated =
+            self.managed_api.generate_spec_bytes(self.version)?;
+        let (openapi, validation_result) = validate_generated_openapi_document(
+            self.managed_api,
+            &freshly_generated,
+        )?;
+        // XXX-dap where should DocumentSummary live
+        let summary = DocumentSummary::new(&openapi);
+
+        let api_spec = ApiSpecFile::for_contents(
+            self.managed_api,
+            self.version,
+            openapi,
+            freshly_generated,
+        );
+
+        // XXX-dap
+        // What we want to do here is check:
+        // (1) the OpenAPI doc against what we loaded earlier
+        // (2) each "extra file" against what's on disk (may not be present)
+        // and generate a CheckStatus for each one
+        let openapi_doc = if api_spec.contents() == self.spec_file.contents() {
+            CheckStatus::Fresh
+        } else if self.managed_api.is_versioned() {
+            CheckStatus::Stale(CheckStale::New)
+        } else {
+            CheckStatus::Stale(CheckStale::Modified {
+                full_path: self.spec_file_name.path(),
+                actual: api_spec.contents().to_vec(),
+                expected: self.spec_file.contents().to_vec(),
+            })
+        };
+
+        let extra_files = validation_result
+            .extra_files
+            .into_iter()
+            .map(|(path, contents)| {
+                let full_path = env.workspace_root.join(&path);
+                let status = check_file(full_path, contents)?;
+                Ok((path, status))
+            })
+            .collect::<anyhow::Result<_>>()?;
+
+        Ok(SpecCheckStatus { summary, openapi_doc, extra_files })
+    }
+}
+
+/// Check a file against expected contents.
+// XXX-dap non-pub
+pub(crate) fn check_file(
+    full_path: Utf8PathBuf,
+    contents: Vec<u8>,
+) -> anyhow::Result<CheckStatus> {
+    let existing_contents =
+        read_opt(&full_path).context("failed to read contents on disk")?;
+
+    match existing_contents {
+        Some(existing_contents) if existing_contents == contents => {
+            Ok(CheckStatus::Fresh)
+        }
+        Some(existing_contents) => {
+            Ok(CheckStatus::Stale(CheckStale::Modified {
+                full_path,
+                actual: existing_contents,
+                expected: contents,
+            }))
+        }
+        None => Ok(CheckStatus::Stale(CheckStale::New)),
+    }
+}
+
+// XXX-dap non-pub
+pub(crate) fn read_opt(path: &Utf8Path) -> std::io::Result<Option<Vec<u8>>> {
+    match fs_err::read(path) {
+        Ok(contents) => Ok(Some(contents)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => return Err(err),
+    }
+}
+
+// XXX-dap move this to validation.rs and call that check.rs?
+#[derive(Debug)]
+#[must_use]
+pub(crate) struct SpecCheckStatus {
+    pub(crate) summary: DocumentSummary,
+    pub(crate) openapi_doc: CheckStatus,
+    pub(crate) extra_files: Vec<(Utf8PathBuf, CheckStatus)>,
+}
+
+impl SpecCheckStatus {
+    pub(crate) fn total_errors(&self) -> usize {
+        self.iter_errors().count()
+    }
+
+    pub(crate) fn extra_files_len(&self) -> usize {
+        self.extra_files.len()
+    }
+
+    pub(crate) fn iter_errors(
+        &self,
+    ) -> impl Iterator<Item = (ApiSpecFileWhich<'_>, &CheckStale)> {
+        std::iter::once((ApiSpecFileWhich::Openapi, &self.openapi_doc))
+            .chain(self.extra_files.iter().map(|(file_name, status)| {
+                (ApiSpecFileWhich::Extra(file_name), status)
+            }))
+            .filter_map(|(spec_file, status)| {
+                if let CheckStatus::Stale(e) = status {
+                    Some((spec_file, e))
+                } else {
+                    None
+                }
+            })
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ApiSpecFileWhich<'a> {
+    Openapi,
+    Extra(&'a Utf8Path),
+}
+
+#[derive(Debug)]
+#[must_use]
+pub(crate) enum CheckStatus {
+    Fresh,
+    Stale(CheckStale),
+}
+
+#[derive(Debug)]
+#[must_use]
+pub(crate) enum CheckStale {
+    Modified { full_path: Utf8PathBuf, actual: Vec<u8>, expected: Vec<u8> },
+    New,
 }
