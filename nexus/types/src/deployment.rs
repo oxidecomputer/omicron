@@ -383,7 +383,7 @@ pub struct BlueprintDisplay<'a> {
     // TODO: add colorization with a stylesheet
 }
 
-impl<'a> BlueprintDisplay<'a> {
+impl BlueprintDisplay<'_> {
     fn make_cockroachdb_table(&self) -> KvListWithHeading {
         let fingerprint = if self.blueprint.cockroachdb_fingerprint.is_empty() {
             NONE_PARENS.to_string()
@@ -452,7 +452,7 @@ impl<'a> BlueprintDisplay<'a> {
     }
 }
 
-impl<'a> fmt::Display for BlueprintDisplay<'a> {
+impl fmt::Display for BlueprintDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let b = self.blueprint;
         writeln!(f, "blueprint  {}", b.id)?;

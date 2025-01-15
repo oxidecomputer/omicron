@@ -147,7 +147,7 @@ impl MessagePair {
 
 struct MessagePairDisplayInternal<'a>(&'a MessagePair);
 
-impl<'a> Display for MessagePairDisplayInternal<'a> {
+impl Display for MessagePairDisplayInternal<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0.external_message)?;
         if !self.0.internal_context.is_empty() {

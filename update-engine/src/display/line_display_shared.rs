@@ -62,7 +62,7 @@ pub(super) struct LineDisplaySharedContext<'a> {
     formatter: &'a LineDisplayFormatter,
 }
 
-impl<'a> LineDisplaySharedContext<'a> {
+impl LineDisplaySharedContext<'_> {
     /// Produces a generic line from the prefix and message.
     ///
     /// This line does not have a trailing newline; adding one is the caller's

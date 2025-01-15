@@ -421,7 +421,7 @@ struct BundleCollection<'a> {
     bundle: &'a SupportBundle,
 }
 
-impl<'a> BundleCollection<'a> {
+impl BundleCollection<'_> {
     // Collect the bundle within Nexus, and store it on a target sled.
     async fn collect_bundle_and_store_on_sled(
         &self,
