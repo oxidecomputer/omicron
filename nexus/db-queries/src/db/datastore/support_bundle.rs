@@ -269,7 +269,6 @@ impl DataStore {
             |conn| {
                 let invalid_nexus_zones = invalid_nexus_zones.clone();
                 let invalid_datasets = invalid_datasets.clone();
-                let our_nexus_id = our_nexus_id.clone();
                 async move {
                     use db::schema::support_bundle::dsl;
 
