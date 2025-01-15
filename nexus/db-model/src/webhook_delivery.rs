@@ -129,7 +129,7 @@ impl From<WebhookDeliveryResult> for views::WebhookDeliveryState {
             WebhookDeliveryResult::FailedHttpError => {
                 views::WebhookDeliveryState::FailedHttpError
             }
-            WebhookDeliveryResult::FailedTimeoutError => {
+            WebhookDeliveryResult::FailedTimeout => {
                 views::WebhookDeliveryState::FailedTimeout
             }
             WebhookDeliveryResult::FailedUnreachable => {
