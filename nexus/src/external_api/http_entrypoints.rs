@@ -13,7 +13,10 @@ use super::{
         Utilization, Vpc, VpcRouter, VpcSubnet,
     },
 };
-use crate::{context::ApiContext, external_api::shared};
+use crate::{
+    app::support_bundles::SupportBundleQueryType, context::ApiContext,
+    external_api::shared,
+};
 use dropshot::Body;
 use dropshot::EmptyScanParams;
 use dropshot::HttpError;
@@ -94,11 +97,13 @@ use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SupportBundleUuid;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::{
     CloseFrame, Role as WebSocketRole,
 };
 use propolis_client::support::WebSocketStream;
+use range_requests::RequestContextEx;
 use ref_cast::RefCast;
 
 type NexusApiDescription = ApiDescription<ApiContext>;
@@ -5956,6 +5961,33 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn timeseries_query(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<params::ProjectSelector>,
+        body: TypedBody<params::TimeseriesQuery>,
+    ) -> Result<HttpResponseOk<views::OxqlQueryResult>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let project_selector = query_params.into_inner();
+            let query = body.into_inner().query;
+            let project_lookup =
+                nexus.project_lookup(&opctx, project_selector)?;
+            nexus
+                .timeseries_query_project(&opctx, &project_lookup, &query)
+                .await
+                .map(|tables| HttpResponseOk(views::OxqlQueryResult { tables }))
+                .map_err(HttpError::from)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     // Updates
 
     async fn system_update_put_repository(
@@ -6402,6 +6434,282 @@ impl NexusExternalApi for NexusExternalApiImpl {
             nexus
                 .ssh_key_delete(&opctx, actor.actor_id(), &ssh_key_lookup)
                 .await?;
+            Ok(HttpResponseDeleted())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn support_bundle_list(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<shared::SupportBundleInfo>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let query = query_params.into_inner();
+            let pagparams = data_page_params_for(&rqctx, &query)?;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let bundles = nexus
+                .support_bundle_list(&opctx, &pagparams)
+                .await?
+                .into_iter()
+                .map(|p| p.into())
+                .collect();
+
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                bundles,
+                &|_, bundle: &shared::SupportBundleInfo| {
+                    bundle.id.into_untyped_uuid()
+                },
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn support_bundle_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+    ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let bundle = nexus
+                .support_bundle_view(
+                    &opctx,
+                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                )
+                .await?;
+
+            Ok(HttpResponseOk(bundle.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn support_bundle_index(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let head = false;
+            let range = rqctx.range();
+
+            let body = nexus
+                .support_bundle_download(
+                    &opctx,
+                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleQueryType::Index,
+                    head,
+                    range,
+                )
+                .await?;
+            Ok(body)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn support_bundle_download(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let head = false;
+            let range = rqctx.range();
+
+            let body = nexus
+                .support_bundle_download(
+                    &opctx,
+                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleQueryType::Whole,
+                    head,
+                    range,
+                )
+                .await?;
+            Ok(body)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn support_bundle_download_file(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundleFilePath>,
+    ) -> Result<Response<Body>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let head = false;
+            let range = rqctx.range();
+
+            let body = nexus
+                .support_bundle_download(
+                    &opctx,
+                    SupportBundleUuid::from_untyped_uuid(
+                        path.bundle.support_bundle,
+                    ),
+                    SupportBundleQueryType::Path { file_path: path.file },
+                    head,
+                    range,
+                )
+                .await?;
+            Ok(body)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn support_bundle_head(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let head = true;
+            let range = rqctx.range();
+
+            let body = nexus
+                .support_bundle_download(
+                    &opctx,
+                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleQueryType::Whole,
+                    head,
+                    range,
+                )
+                .await?;
+            Ok(body)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn support_bundle_head_file(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundleFilePath>,
+    ) -> Result<Response<Body>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let head = true;
+            let range = rqctx.range();
+
+            let body = nexus
+                .support_bundle_download(
+                    &opctx,
+                    SupportBundleUuid::from_untyped_uuid(
+                        path.bundle.support_bundle,
+                    ),
+                    SupportBundleQueryType::Path { file_path: path.file },
+                    head,
+                    range,
+                )
+                .await?;
+            Ok(body)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn support_bundle_create(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseCreated<shared::SupportBundleInfo>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let bundle = nexus
+                .support_bundle_create(&opctx, "Created by external API")
+                .await?;
+            Ok(HttpResponseCreated(bundle.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn support_bundle_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            nexus
+                .support_bundle_delete(
+                    &opctx,
+                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                )
+                .await?;
+
             Ok(HttpResponseDeleted())
         };
         apictx

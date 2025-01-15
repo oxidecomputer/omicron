@@ -2,22 +2,21 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::context::{ServerContext, SingleServerContext};
+use crate::context::{KeeperServerContext, ServerContext};
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::{
     ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
-    KeeperConfig, KeeperConfigurableSettings, Lgif, RaftConfig, ReplicaConfig,
-    ServerConfigurableSettings,
+    KeeperConfig, KeeperConfigurableSettings, Lgif, MetricInfoPath, RaftConfig,
+    ReplicaConfig, ServerConfigurableSettings, SystemTimeSeries,
+    SystemTimeSeriesSettings, TimeSeriesSettingsQuery,
 };
 use dropshot::{
     ApiDescription, HttpError, HttpResponseCreated, HttpResponseOk,
-    HttpResponseUpdatedNoContent, RequestContext, TypedBody,
+    HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
 };
 use illumos_utils::svcadm::Svcadm;
-use omicron_common::address::CLICKHOUSE_TCP_PORT;
-use oximeter_db::{Client as OximeterClient, OXIMETER_VERSION};
-use slog::debug;
-use std::net::SocketAddrV6;
+use oximeter_db::OXIMETER_VERSION;
+use slog::info;
 use std::sync::Arc;
 
 pub fn clickhouse_admin_server_api() -> ApiDescription<Arc<ServerContext>> {
@@ -25,13 +24,13 @@ pub fn clickhouse_admin_server_api() -> ApiDescription<Arc<ServerContext>> {
         .expect("registered entrypoints")
 }
 
-pub fn clickhouse_admin_keeper_api() -> ApiDescription<Arc<ServerContext>> {
+pub fn clickhouse_admin_keeper_api() -> ApiDescription<Arc<KeeperServerContext>>
+{
     clickhouse_admin_keeper_api_mod::api_description::<ClickhouseAdminKeeperImpl>()
         .expect("registered entrypoints")
 }
 
-pub fn clickhouse_admin_single_api() -> ApiDescription<Arc<SingleServerContext>>
-{
+pub fn clickhouse_admin_single_api() -> ApiDescription<Arc<ServerContext>> {
     clickhouse_admin_single_api_mod::api_description::<ClickhouseAdminSingleImpl>()
         .expect("registered entrypoints")
 }
@@ -64,12 +63,71 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         let output = ctx.clickhouse_cli().distributed_ddl_queue().await?;
         Ok(HttpResponseOk(output))
     }
+
+    async fn system_timeseries_avg(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<MetricInfoPath>,
+        query_params: Query<TimeSeriesSettingsQuery>,
+    ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError> {
+        let ctx = rqctx.context();
+        let retrieval_settings = query_params.into_inner();
+        let metric_info = path_params.into_inner();
+        let settings =
+            SystemTimeSeriesSettings { retrieval_settings, metric_info };
+        let output =
+            ctx.clickhouse_cli().system_timeseries_avg(settings).await?;
+        Ok(HttpResponseOk(output))
+    }
+
+    async fn init_db(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let ctx = rqctx.context();
+        let log = ctx.log();
+
+        // Database initialization is idempotent, but not concurrency-safe.
+        // Use a mutex to serialize requests.
+        let lock = ctx.initialization_lock();
+        let _guard = lock.lock().await;
+
+        // Initialize the database only if it was not previously initialized.
+        // TODO: Migrate schema to newer version without wiping data.
+        let client = ctx.oximeter_client();
+        let version = client.read_latest_version().await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "can't read ClickHouse version: {e}",
+            ))
+        })?;
+        if version == 0 {
+            info!(
+                log,
+                "initializing replicated ClickHouse cluster to version {OXIMETER_VERSION}"
+            );
+            let replicated = true;
+            ctx.oximeter_client()
+                .initialize_db_with_version(replicated, OXIMETER_VERSION)
+                .await
+                .map_err(|e| {
+                    HttpError::for_internal_error(format!(
+                        "can't initialize replicated ClickHouse cluster \
+                         to version {OXIMETER_VERSION}: {e}",
+                    ))
+                })?;
+        } else {
+            info!(
+                log,
+                "skipping initialization of replicated ClickHouse cluster at version {version}"
+            );
+        }
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
 }
 
 enum ClickhouseAdminKeeperImpl {}
 
 impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
-    type Context = Arc<ServerContext>;
+    type Context = Arc<KeeperServerContext>;
 
     async fn generate_config_and_enable_svc(
         rqctx: RequestContext<Self::Context>,
@@ -123,36 +181,63 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
 enum ClickhouseAdminSingleImpl {}
 
 impl ClickhouseAdminSingleApi for ClickhouseAdminSingleImpl {
-    type Context = Arc<SingleServerContext>;
+    type Context = Arc<ServerContext>;
 
     async fn init_db(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let log = &rqctx.log;
         let ctx = rqctx.context();
-        let ip = ctx.clickhouse_cli().listen_address.ip();
-        let address = SocketAddrV6::new(*ip, CLICKHOUSE_TCP_PORT, 0, 0);
-        let client = OximeterClient::new(address.into(), log);
-        debug!(
-            log,
-            "initializing single-node ClickHouse \
-             at {address} to version {OXIMETER_VERSION}"
-        );
+        let log = ctx.log();
 
         // Database initialization is idempotent, but not concurrency-safe.
         // Use a mutex to serialize requests.
         let lock = ctx.initialization_lock();
         let _guard = lock.lock().await;
-        client
-            .initialize_db_with_version(false, OXIMETER_VERSION)
-            .await
-            .map_err(|e| {
-                HttpError::for_internal_error(format!(
-                    "can't initialize single-node ClickHouse \
-                     at {address} to version {OXIMETER_VERSION}: {e}",
-                ))
-            })?;
+
+        // Initialize the database only if it was not previously initialized.
+        // TODO: Migrate schema to newer version without wiping data.
+        let client = ctx.oximeter_client();
+        let version = client.read_latest_version().await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "can't read ClickHouse version: {e}",
+            ))
+        })?;
+        if version == 0 {
+            info!(
+                log,
+                "initializing single-node ClickHouse to version {OXIMETER_VERSION}"
+            );
+            ctx.oximeter_client()
+                .initialize_db_with_version(false, OXIMETER_VERSION)
+                .await
+                .map_err(|e| {
+                    HttpError::for_internal_error(format!(
+                        "can't initialize single-node ClickHouse \
+                         to version {OXIMETER_VERSION}: {e}",
+                    ))
+                })?;
+        } else {
+            info!(
+                log,
+                "skipping initialization of single-node ClickHouse at version {version}"
+            );
+        }
 
         Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn system_timeseries_avg(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<MetricInfoPath>,
+        query_params: Query<TimeSeriesSettingsQuery>,
+    ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError> {
+        let ctx = rqctx.context();
+        let retrieval_settings = query_params.into_inner();
+        let metric_info = path_params.into_inner();
+        let settings =
+            SystemTimeSeriesSettings { retrieval_settings, metric_info };
+        let output =
+            ctx.clickhouse_cli().system_timeseries_avg(settings).await?;
+        Ok(HttpResponseOk(output))
     }
 }

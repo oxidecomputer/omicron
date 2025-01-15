@@ -201,9 +201,9 @@ mod tests {
         i: usize,
         sled_id: SledUuid,
     ) -> PhysicalDiskUuid {
-        let id = PhysicalDiskUuid::from_untyped_uuid(Uuid::new_v4());
+        let id = PhysicalDiskUuid::new_v4();
         let physical_disk = PhysicalDisk::new(
-            id.into_untyped_uuid(),
+            id,
             "v".into(),
             format!("s-{i})"),
             "m".into(),
@@ -226,11 +226,7 @@ mod tests {
         let zpool = datastore
             .zpool_insert(
                 opctx,
-                Zpool::new(
-                    Uuid::new_v4(),
-                    sled_id.into_untyped_uuid(),
-                    id.into_untyped_uuid(),
-                ),
+                Zpool::new(Uuid::new_v4(), sled_id.into_untyped_uuid(), id),
             )
             .await
             .unwrap();
@@ -301,7 +297,7 @@ mod tests {
             datastore
                 .physical_disk_update_policy(
                     &opctx,
-                    disk_id.into_untyped_uuid(),
+                    disk_id,
                     PhysicalDiskPolicy::Expunged,
                 )
                 .await

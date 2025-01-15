@@ -8,6 +8,7 @@
 use crate::api_metadata::AllApiMetadata;
 use crate::api_metadata::ApiMetadata;
 use crate::api_metadata::Evaluation;
+use crate::api_metadata::VersionedHow;
 use crate::cargo::DepPath;
 use crate::parse_toml_file;
 use crate::workspaces::Workspaces;
@@ -16,11 +17,13 @@ use crate::DeploymentUnitName;
 use crate::LoadArgs;
 use crate::ServerComponentName;
 use crate::ServerPackageName;
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::Result;
+use anyhow::{anyhow, bail, Context};
 use camino::Utf8PathBuf;
 use cargo_metadata::Package;
 use parse_display::{Display, FromStr};
 use petgraph::dot::Dot;
+use petgraph::graph::NodeIndex;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
@@ -369,12 +372,27 @@ impl SystemApis {
         &self,
         filter: ApiDependencyFilter,
     ) -> Result<String> {
+        let (graph, _nodes) = self.make_component_graph(filter, false)?;
+        Ok(Dot::new(&graph).to_string())
+    }
+
+    // The complex type below is only used in this one place: the return value
+    // of an internal helper function.  A type alias doesn't seem better.
+    #[allow(clippy::type_complexity)]
+    fn make_component_graph(
+        &self,
+        dependency_filter: ApiDependencyFilter,
+        versioned_on_server_only: bool,
+    ) -> Result<(
+        petgraph::graph::Graph<&ServerComponentName, &ClientPackageName>,
+        BTreeMap<&ServerComponentName, NodeIndex>,
+    )> {
         let mut graph = petgraph::graph::Graph::new();
         let nodes: BTreeMap<_, _> = self
             .server_component_units
             .keys()
             .map(|server_component| {
-                (server_component.clone(), graph.add_node(server_component))
+                (server_component, graph.add_node(server_component))
             })
             .collect();
 
@@ -383,16 +401,350 @@ impl SystemApis {
         for server_component in self.apis_consumed.keys() {
             // unwrap(): we created a node for each server component above.
             let my_node = nodes.get(server_component).unwrap();
-            let consumed_apis =
-                self.component_apis_consumed(server_component, filter)?;
+            let consumed_apis = self
+                .component_apis_consumed(server_component, dependency_filter)?;
             for (client_pkg, _) in consumed_apis {
+                if versioned_on_server_only {
+                    let api = self
+                        .api_metadata
+                        .client_pkgname_lookup(client_pkg)
+                        .unwrap();
+                    if api.versioned_how != VersionedHow::Server {
+                        continue;
+                    }
+                }
+
                 let other_component = self.api_producer(client_pkg).unwrap();
                 let other_node = nodes.get(other_component).unwrap();
-                graph.add_edge(*my_node, *other_node, client_pkg.clone());
+                graph.add_edge(*my_node, *other_node, client_pkg);
             }
         }
 
-        Ok(Dot::new(&graph).to_string())
+        Ok((graph, nodes))
+    }
+
+    /// Verifies various important properties about the assignment of which APIs
+    /// are server-managed vs. client-managed.
+    ///
+    /// Returns a structure with proposals for how to assign APIs that are
+    /// currently unassigned.
+    pub fn dag_check(&self) -> Result<DagCheck<'_>> {
+        // In this function, we'll use the following ApiDependencyFilter a bunch
+        // when walking the component dependency graph.  "Default" is the
+        // correct filter to use here.  This excludes relationships that are
+        // totally bogus, only affect components that are never actually
+        // deployed, or are part of an edge that we've already determined will
+        // be "non-DAG".
+        //
+        // This last case might be a little confusing.  The whole point of this
+        // function is to help developers figure out which edges should be part
+        // of the DAG or not.  Why would we ignore edges based on whether
+        // they're already in the DAG or not?
+        //
+        // Recall that there are two ways that the metadata can specify that a
+        // particular API is "not part of the update DAG" (which is equivalent
+        // to client-side-managed):
+        //
+        // - a specific class of Cargo dependencies can be marked "non-DAG" via
+        //   a dependency filter rule.  The only case of this today is where we
+        //   say that Cargo dependencies from "oximeter-producer" to
+        //   "nexus-client" are "non-DAG".  This means we promise to make the
+        //   Nexus internal API client-managed (i.e., not part of the update
+        //   DAG).  We verify this promise below.
+        // - a specific API can be marked as server-managed (meaning it's part
+        //   of the update DAG) or not.  That's most of what this function deals
+        //   with and proposes changes to.
+        //
+        // In the long term, it might be nice to combine these.  But that's more
+        // work than it sounds like: we'd probably want to convert everything
+        // to filter rules, but that requires (tediously) writing out every
+        // single edge that we care about.  An alternative would be to eliminate
+        // the non-DAG dependency filter rules and only use the property at the
+        // API level.  However right now it seems quite possible that we do want
+        // this on a per-edge basis, rather than a per-API basis (i.e., there
+        // are some client-side-versioned APIs that have consumers that could
+        // treat them as server-side-versioned).
+        //
+        // Anyway, what we're talking about here is ignoring the first category
+        // of information and looking only at the second.  This is *safe* (i.e.,
+        // correct) because we verify below that the second category (the
+        // API-level `versioned_for` property) contains the same information
+        // provided by the first category (the non-DAG dependency filter rules).
+        // We *choose* to do this because it makes the heuristics below more
+        // useful.  For example, excluding the non-DAG edges makes it easy for
+        // the heuristic below to tell that crucible-pantry ought to be
+        // server-side-managed because it has no (other) dependencies and so
+        // can't be part of a cycle.
+        let filter = ApiDependencyFilter::Default;
+
+        // Construct a graph where:
+        //
+        // - nodes are all the API producer and consumer components
+        // - we only include edges *to* components that produce server-managed
+        //   APIs
+        //
+        // Check if this DAG is cyclic.  This can't be made to work.
+        let (graph, nodes) = self.make_component_graph(filter, true)?;
+        let reverse_nodes: BTreeMap<_, _> =
+            nodes.iter().map(|(s_c, node)| (node, s_c)).collect();
+        if let Err(error) = petgraph::algo::toposort(&graph, None) {
+            bail!(
+                "graph of server-managed components has a cycle (includes \
+                 node: {:?})",
+                reverse_nodes.get(&error.node_id()).unwrap()
+            );
+        }
+
+        // Verify that the targets of any "non-dag" dependency filter rules are
+        // indeed not part of the server-side-versioned DAG.
+        for api in self.api_metadata.non_dag_apis() {
+            if !matches!(api.versioned_how, VersionedHow::Client(..)) {
+                bail!(
+                    "API identified by client package {:?} ({}) is the \
+                     \"client\" in a \"non-dag\" dependency rule, but its \
+                     \"versioned_how\" is not \"client\"",
+                    api.client_package_name,
+                    api.label,
+                );
+            }
+        }
+
+        // Use some heuristics to propose next steps.
+        //
+        // We're only looking for possible next steps here -- we don't have to
+        // programmatically figure out the whole graph.
+
+        let mut dag_check = DagCheck::new();
+
+        for api in self.api_metadata.apis() {
+            if !api.deployed() {
+                if api.versioned_how == VersionedHow::Unknown {
+                    dag_check.propose_server(
+                        &api.client_package_name,
+                        String::from("not produced by a deployed component"),
+                    );
+                }
+                continue;
+            }
+            let producer = self.api_producer(&api.client_package_name).unwrap();
+            let apis_consumed: BTreeSet<_> = self
+                .component_apis_consumed(producer, filter)?
+                .map(|(client_pkgname, _dep_path)| client_pkgname)
+                .collect();
+            let dependents: BTreeSet<_> = self
+                .api_consumers(&api.client_package_name, filter)
+                .unwrap()
+                .map(|(dependent, _dep_path)| dependent)
+                .collect();
+
+            if api.versioned_how == VersionedHow::Unknown {
+                // If we haven't determined how to manage versioning on this
+                // API, and it has no dependencies on "unknown" or
+                // client-managed APIs, then it can be made server-managed.
+                if !apis_consumed.iter().any(|client_pkgname| {
+                    let api = self
+                        .api_metadata
+                        .client_pkgname_lookup(*client_pkgname)
+                        .unwrap();
+                    api.versioned_how != VersionedHow::Server
+                }) {
+                    dag_check.propose_server(
+                        &api.client_package_name,
+                        String::from(
+                            "has no unknown or client-managed dependencies",
+                        ),
+                    );
+                } else if apis_consumed.contains(&api.client_package_name) {
+                    // If this thing depends on itself, it must be
+                    // client-managed.
+                    dag_check.propose_client(
+                        &api.client_package_name,
+                        String::from("depends on itself"),
+                    );
+                } else if dependents.is_empty() {
+                    // If something has no consumers in deployed components, it
+                    // can be server-managed.  (These are generally debug APIs.)
+                    dag_check.propose_server(
+                        &api.client_package_name,
+                        String::from(
+                            "has no consumers among deployed components",
+                        ),
+                    );
+                }
+
+                continue;
+            }
+
+            let dependencies: BTreeMap<_, _> = apis_consumed
+                .iter()
+                .map(|dependency_clientpkg| {
+                    (
+                        self.api_producer(dependency_clientpkg).unwrap(),
+                        *dependency_clientpkg,
+                    )
+                })
+                .collect();
+
+            // Look for one-step circular dependencies (i.e., API API A1 is
+            // produced by component C1, which uses API A2 produced by C2, which
+            // also uses A1).  In such cases, either A1 or A2 must be
+            // client-managed (or both).
+            for other_pkgname in dependents {
+                if let Some(dependency_clientpkg) =
+                    dependencies.get(other_pkgname)
+                {
+                    let dependency_api = self
+                        .api_metadata
+                        .client_pkgname_lookup(*dependency_clientpkg)
+                        .unwrap();
+
+                    // If we're looking at a server-managed dependency and the
+                    // other is unknown, then that one should be client-managed.
+                    //
+                    // Without loss of generality, we can ignore the reverse
+                    // case (because we will catch that case when we're
+                    // iterating over the dependency API).
+                    if api.versioned_how == VersionedHow::Server
+                        && dependency_api.versioned_how == VersionedHow::Unknown
+                    {
+                        dag_check.propose_client(
+                            dependency_clientpkg,
+                            format!(
+                                "has cyclic dependency on {:?}, which is \
+                                 server-managed",
+                                api.client_package_name,
+                            ),
+                        )
+                    }
+
+                    // If both are Unknown, tell the user to pick one.
+                    if api.versioned_how == VersionedHow::Unknown
+                        && dependency_api.versioned_how == VersionedHow::Unknown
+                    {
+                        dag_check.propose_upick(
+                            &api.client_package_name,
+                            dependency_clientpkg,
+                        );
+                    }
+                }
+            }
+        }
+
+        Ok(dag_check)
+    }
+}
+
+/// Describes proposals for assigning how APIs should be versioned, based on
+/// heuristics applied while checking the DAG
+pub struct DagCheck<'a> {
+    /// set of APIs (identified by client package name) that we propose should
+    /// be server-managed, along with a list of reasons why we think so
+    proposed_server_managed: BTreeMap<&'a ClientPackageName, Vec<String>>,
+    /// set of APIs (identified by client package name) that we propose should
+    /// be client-managed, along with a list of reasons why we think so
+    proposed_client_managed: BTreeMap<&'a ClientPackageName, Vec<String>>,
+    /// set of pairs of APIs where we propose that the user must pick one
+    /// package in each pair to be client-managed (because the two packages have
+    /// a mutual dependency)
+    ///
+    /// The ordering in these pairs is not semantically significant.  The
+    /// implementation will ensure that each pair of packages is represented at
+    /// most once in this structure.
+    proposed_upick:
+        BTreeMap<&'a ClientPackageName, BTreeSet<&'a ClientPackageName>>,
+}
+
+impl<'a> DagCheck<'a> {
+    fn new() -> DagCheck<'a> {
+        DagCheck {
+            proposed_server_managed: BTreeMap::new(),
+            proposed_client_managed: BTreeMap::new(),
+            proposed_upick: BTreeMap::new(),
+        }
+    }
+
+    fn propose_client(
+        &mut self,
+        client_pkgname: &'a ClientPackageName,
+        reason: String,
+    ) {
+        self.proposed_client_managed
+            .entry(client_pkgname)
+            .or_insert_with(Vec::new)
+            .push(reason);
+    }
+
+    fn propose_server(
+        &mut self,
+        client_pkgname: &'a ClientPackageName,
+        reason: String,
+    ) {
+        self.proposed_server_managed
+            .entry(client_pkgname)
+            .or_insert_with(Vec::new)
+            .push(reason);
+    }
+
+    /// Propose that one of these two packages should be client-managed (because
+    /// they depend on each other, so they can't both be server-managed).
+    fn propose_upick(
+        &mut self,
+        client_pkgname1: &'a ClientPackageName,
+        client_pkgname2: &'a ClientPackageName,
+    ) {
+        // A "upick" is a situation where you (the person running the tool)
+        // should choose either of `pkg1` or `pkg2` to be client-managed.  The
+        // caller will identify this situation twice: once when looking at
+        // `pkg1` and once when looking at `pkg2`.  But we only want to report
+        // it once.  So we'll ignore duplicates here because it's easier here
+        // than in the caller.
+        //
+        // To do that, first check whether the caller has already proposed this
+        // "upick" with the packages in the other order.  If so, do nothing.
+        if let Some(other_pkg_upicks) = self.proposed_upick.get(client_pkgname2)
+        {
+            if other_pkg_upicks.contains(client_pkgname1) {
+                return;
+            }
+        }
+
+        // Now go ahead and insert the pair in this order.  This construction
+        // will also do nothing if this same pair has already been inserted in
+        // this order.
+        self.proposed_upick
+            .entry(client_pkgname1)
+            .or_insert_with(BTreeSet::new)
+            .insert(client_pkgname2);
+    }
+
+    /// Returns a list of APIs (identified by client package name) that look
+    /// like they could use server-side versioning, along with reasons
+    pub fn proposed_server_managed(
+        &self,
+    ) -> impl Iterator<Item = (&'_ ClientPackageName, &Vec<String>)> {
+        self.proposed_server_managed.iter().map(|(c, r)| (*c, r))
+    }
+
+    /// Returns a list of APIs (identified by client package name) that look
+    /// like they should use client-side versioning, along with reasons
+    pub fn proposed_client_managed(
+        &self,
+    ) -> impl Iterator<Item = (&'_ ClientPackageName, &Vec<String>)> {
+        self.proposed_client_managed.iter().map(|(c, r)| (*c, r))
+    }
+
+    /// Returns a list of pairs of APIs (identified by client package names) for
+    /// which we have not yet picked client-side or server-side versioning and
+    /// where there is a direct mutual dependency
+    ///
+    /// At least one of these APIs will need to be marked client-managed.
+    pub fn proposed_upick(
+        &self,
+    ) -> impl Iterator<Item = (&'_ ClientPackageName, &'_ ClientPackageName)>
+    {
+        self.proposed_upick
+            .iter()
+            .flat_map(|(c, others)| others.iter().map(|o| (*c, *o)))
     }
 }
 

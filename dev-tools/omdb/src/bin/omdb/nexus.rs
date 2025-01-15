@@ -52,9 +52,11 @@ use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageColle
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
 use nexus_types::inventory::BaseboardId;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DemoSagaUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::ParseError;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use reedline::DefaultPrompt;
@@ -186,11 +188,11 @@ enum BlueprintsCommands {
 #[derive(Debug, Clone, Copy)]
 enum BlueprintIdOrCurrentTarget {
     CurrentTarget,
-    BlueprintId(Uuid),
+    BlueprintId(BlueprintUuid),
 }
 
 impl FromStr for BlueprintIdOrCurrentTarget {
-    type Err = uuid::Error;
+    type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if matches!(s, "current-target" | "current" | "target") {
@@ -206,7 +208,7 @@ impl BlueprintIdOrCurrentTarget {
     async fn resolve_to_id(
         &self,
         client: &nexus_client::Client,
-    ) -> anyhow::Result<Uuid> {
+    ) -> anyhow::Result<BlueprintUuid> {
         match self {
             Self::CurrentTarget => {
                 let target = client
@@ -224,15 +226,18 @@ impl BlueprintIdOrCurrentTarget {
         client: &nexus_client::Client,
     ) -> anyhow::Result<Blueprint> {
         let id = self.resolve_to_id(client).await?;
-        let response = client.blueprint_view(&id).await.with_context(|| {
-            let suffix = match self {
-                BlueprintIdOrCurrentTarget::CurrentTarget => {
-                    " (current target)"
-                }
-                BlueprintIdOrCurrentTarget::BlueprintId(_) => "",
-            };
-            format!("fetching blueprint {id}{suffix}")
-        })?;
+        let response = client
+            .blueprint_view(id.as_untyped_uuid())
+            .await
+            .with_context(|| {
+                let suffix = match self {
+                    BlueprintIdOrCurrentTarget::CurrentTarget => {
+                        " (current target)"
+                    }
+                    BlueprintIdOrCurrentTarget::BlueprintId(_) => "",
+                };
+                format!("fetching blueprint {id}{suffix}")
+            })?;
         Ok(response.into_inner())
     }
 }
@@ -282,7 +287,7 @@ enum BlueprintTargetCommands {
 #[derive(Debug, Args)]
 struct BlueprintTargetSetArgs {
     /// id of blueprint to make target
-    blueprint_id: Uuid,
+    blueprint_id: BlueprintUuid,
     /// whether this blueprint should be enabled
     enabled: BlueprintTargetSetEnabled,
     /// if specified, diff against the current target and wait for confirmation
@@ -1655,6 +1660,14 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                     println!("    > {line}");
                 }
 
+                println!(
+                    "    total requests completed ok: {}",
+                    status.requests_completed_ok.len(),
+                );
+                for line in &status.requests_completed_ok {
+                    println!("    > {line}");
+                }
+
                 println!("    errors: {}", status.errors.len());
                 for line in &status.errors {
                     println!("    > {line}");
@@ -1717,6 +1730,14 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                     status.step_invoked_ok.len(),
                 );
                 for line in &status.step_invoked_ok {
+                    println!("    > {line}");
+                }
+
+                println!(
+                    "    total steps set to volume_deleted ok: {}",
+                    status.step_set_volume_deleted_ok.len(),
+                );
+                for line in &status.step_set_volume_deleted_ok {
                     println!("    > {line}");
                 }
 
@@ -1831,10 +1852,11 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
 
             Ok(status) => {
                 println!(
-                    "    total records transitioned to done: {}",
-                    status.records_set_to_done.len(),
+                    "    region snapshot replacement finish sagas started \
+                    ok: {}",
+                    status.finish_invoked_ok.len()
                 );
-                for line in &status.records_set_to_done {
+                for line in &status.finish_invoked_ok {
                     println!("    > {line}");
                 }
 
@@ -2294,7 +2316,7 @@ async fn cmd_nexus_blueprints_delete(
 ) -> Result<(), anyhow::Error> {
     let blueprint_id = args.blueprint_id.resolve_to_id(client).await?;
     let _ = client
-        .blueprint_delete(&blueprint_id)
+        .blueprint_delete(blueprint_id.as_untyped_uuid())
         .await
         .with_context(|| format!("deleting blueprint {blueprint_id}"))?;
     println!("blueprint {blueprint_id} deleted");
@@ -2333,14 +2355,16 @@ async fn cmd_nexus_blueprints_target_set(
     if args.diff {
         let current_target = get_current_target().await?;
         let blueprint1 = client
-            .blueprint_view(&current_target.target_id)
+            .blueprint_view(current_target.target_id.as_untyped_uuid())
             .await
             .context("failed to fetch target blueprint")?
             .into_inner();
-        let blueprint2 =
-            client.blueprint_view(&args.blueprint_id).await.with_context(
-                || format!("fetching blueprint {}", args.blueprint_id),
-            )?;
+        let blueprint2 = client
+            .blueprint_view(args.blueprint_id.as_untyped_uuid())
+            .await
+            .with_context(|| {
+                format!("fetching blueprint {}", args.blueprint_id)
+            })?;
         let diff = blueprint2.diff_since_blueprint(&blueprint1);
         println!("{}", diff.display());
         println!(
@@ -2852,7 +2876,7 @@ async fn cmd_nexus_sled_expunge_disk_with_datastore(
     // First, we need to look up the disk so we can lookup identity information.
     let (_authz_physical_disk, physical_disk) =
         LookupPath::new(opctx, &datastore)
-            .physical_disk(args.physical_disk_id.into_untyped_uuid())
+            .physical_disk(args.physical_disk_id)
             .fetch()
             .await
             .with_context(|| {

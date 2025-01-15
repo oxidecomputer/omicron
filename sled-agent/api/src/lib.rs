@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use camino::Utf8PathBuf;
 use dropshot::{
-    FreeformBody, HttpError, HttpResponseAccepted, HttpResponseCreated,
+    Body, FreeformBody, HttpError, HttpResponseAccepted, HttpResponseCreated,
     HttpResponseDeleted, HttpResponseHeaders, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, StreamingBody,
     TypedBody,
@@ -29,7 +29,9 @@ use omicron_common::{
     },
     update::ArtifactHash,
 };
-use omicron_uuid_kinds::{PropolisUuid, ZpoolUuid};
+use omicron_uuid_kinds::{
+    DatasetUuid, PropolisUuid, SupportBundleUuid, ZpoolUuid,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::{
@@ -52,6 +54,7 @@ use sled_agent_types::{
         ZoneBundleId, ZoneBundleMetadata,
     },
 };
+use sled_diagnostics::SledDiagnosticsQueryOutput;
 use uuid::Uuid;
 
 #[dropshot::api_description]
@@ -156,6 +159,98 @@ pub trait SledAgentApi {
     async fn zones_list(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError>;
+
+    /// List all support bundles within a particular dataset
+    #[endpoint {
+        method = GET,
+        path = "/support-bundles/{zpool_id}/{dataset_id}"
+    }]
+    async fn support_bundle_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundleListPathParam>,
+    ) -> Result<HttpResponseOk<Vec<SupportBundleMetadata>>, HttpError>;
+
+    /// Create a support bundle within a particular dataset
+    #[endpoint {
+        method = POST,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}"
+    }]
+    async fn support_bundle_create(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        query_params: Query<SupportBundleCreateQueryParams>,
+        body: StreamingBody,
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError>;
+
+    /// Fetch a support bundle from a particular dataset
+    #[endpoint {
+        method = GET,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/download"
+    }]
+    async fn support_bundle_download(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<http::Response<Body>, HttpError>;
+
+    /// Fetch a file within a support bundle from a particular dataset
+    #[endpoint {
+        method = GET,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/download/{file}"
+    }]
+    async fn support_bundle_download_file(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundleFilePathParam>,
+    ) -> Result<http::Response<Body>, HttpError>;
+
+    /// Fetch the index (list of files within a support bundle)
+    #[endpoint {
+        method = GET,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/index"
+    }]
+    async fn support_bundle_index(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<http::Response<Body>, HttpError>;
+
+    /// Fetch metadata about a support bundle from a particular dataset
+    #[endpoint {
+        method = HEAD,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/download"
+    }]
+    async fn support_bundle_head(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<http::Response<Body>, HttpError>;
+
+    /// Fetch metadata about a file within a support bundle from a particular dataset
+    #[endpoint {
+        method = HEAD,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/download/{file}"
+    }]
+    async fn support_bundle_head_file(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundleFilePathParam>,
+    ) -> Result<http::Response<Body>, HttpError>;
+
+    /// Fetch metadata about the list of files within a support bundle
+    #[endpoint {
+        method = HEAD,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/index"
+    }]
+    async fn support_bundle_head_index(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<http::Response<Body>, HttpError>;
+
+    /// Delete a support bundle from a particular dataset
+    #[endpoint {
+        method = DELETE,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}"
+    }]
+    async fn support_bundle_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
 
     #[endpoint {
         method = PUT,
@@ -536,7 +631,7 @@ pub trait SledAgentApi {
     }]
     async fn support_zoneadm_info(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<FreeformBody>, HttpError>;
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError>;
 
     #[endpoint {
         method = GET,
@@ -544,7 +639,7 @@ pub trait SledAgentApi {
     }]
     async fn support_ipadm_info(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<FreeformBody>, HttpError>;
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
 
     #[endpoint {
         method = GET,
@@ -552,7 +647,31 @@ pub trait SledAgentApi {
     }]
     async fn support_dladm_info(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<FreeformBody>, HttpError>;
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/pargs-info",
+    }]
+    async fn support_pargs_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/pstack-info",
+    }]
+    async fn support_pstack_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/pfiles-info",
+    }]
+    async fn support_pfiles_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -603,6 +722,64 @@ impl From<DiskVariant> for DiskType {
 #[derive(Deserialize, JsonSchema)]
 pub struct VmmPathParam {
     pub propolis_id: PropolisUuid,
+}
+
+/// Path parameters for Support Bundle requests (sled agent API)
+#[derive(Deserialize, JsonSchema)]
+pub struct SupportBundleListPathParam {
+    /// The zpool on which this support bundle was provisioned
+    pub zpool_id: ZpoolUuid,
+
+    /// The dataset on which this support bundle was provisioned
+    pub dataset_id: DatasetUuid,
+}
+
+/// Path parameters for Support Bundle requests (sled agent API)
+#[derive(Deserialize, JsonSchema)]
+pub struct SupportBundlePathParam {
+    /// The zpool on which this support bundle was provisioned
+    pub zpool_id: ZpoolUuid,
+
+    /// The dataset on which this support bundle was provisioned
+    pub dataset_id: DatasetUuid,
+
+    /// The ID of the support bundle itself
+    pub support_bundle_id: SupportBundleUuid,
+}
+
+/// Path parameters for Support Bundle requests (sled agent API)
+#[derive(Deserialize, JsonSchema)]
+pub struct SupportBundleFilePathParam {
+    #[serde(flatten)]
+    pub parent: SupportBundlePathParam,
+
+    /// The path of the file within the support bundle to query
+    pub file: String,
+}
+
+/// Metadata about a support bundle
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct SupportBundleCreateQueryParams {
+    pub hash: ArtifactHash,
+}
+
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct SupportBundleGetHeaders {
+    range: String,
+}
+
+#[derive(Deserialize, Debug, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum SupportBundleState {
+    Complete,
+    Incomplete,
+}
+
+/// Metadata about a support bundle
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SupportBundleMetadata {
+    pub support_bundle_id: SupportBundleUuid,
+    pub state: SupportBundleState,
 }
 
 /// Path parameters for Disk requests (sled agent API)

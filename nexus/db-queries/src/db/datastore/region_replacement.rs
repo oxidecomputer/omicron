@@ -21,7 +21,7 @@ use crate::db::pagination::Paginator;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use crate::db::TransactionError;
-use async_bb8_diesel::AsyncConnection;
+use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use omicron_common::api::external::Error;
@@ -37,6 +37,13 @@ impl DataStore {
         opctx: &OpContext,
         region: &Region,
     ) -> Result<Uuid, Error> {
+        if region.read_only() {
+            return Err(Error::invalid_request(format!(
+                "region {} is read-only",
+                region.id(),
+            )));
+        }
+
         let request = RegionReplacement::for_region(region);
         let request_id = request.id;
 
@@ -52,24 +59,40 @@ impl DataStore {
         opctx: &OpContext,
         request: RegionReplacement,
     ) -> Result<(), Error> {
-        self.pool_connection_authorized(opctx)
-            .await?
-            .transaction_async(|conn| async move {
-                use db::schema::region_replacement::dsl;
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
 
-                Self::volume_repair_insert_query(request.volume_id, request.id)
-                    .execute_async(&conn)
+        self.transaction_retry_wrapper("insert_region_replacement_request")
+            .transaction(&conn, |conn| {
+                let request = request.clone();
+                let err = err.clone();
+                async move {
+                    use db::schema::region_replacement::dsl;
+
+                    Self::volume_repair_insert_in_txn(
+                        &conn,
+                        err,
+                        request.volume_id,
+                        request.id,
+                    )
                     .await?;
 
-                diesel::insert_into(dsl::region_replacement)
-                    .values(request)
-                    .execute_async(&conn)
-                    .await?;
+                    diesel::insert_into(dsl::region_replacement)
+                        .values(request)
+                        .execute_async(&conn)
+                        .await?;
 
-                Ok(())
+                    Ok(())
+                }
             })
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    err
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
     }
 
     pub async fn get_region_replacement_request_by_id(
@@ -666,60 +689,62 @@ impl DataStore {
     ) -> Result<(), Error> {
         type TxnError = TransactionError<Error>;
 
-        self.pool_connection_authorized(opctx)
-            .await?
-            .transaction_async(|conn| async move {
-                Self::volume_repair_delete_query(
-                    request.volume_id,
-                    request.id,
-                )
-                .execute_async(&conn)
-                .await?;
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
 
-                use db::schema::region_replacement::dsl;
-
-                let result = diesel::update(dsl::region_replacement)
-                    .filter(dsl::id.eq(request.id))
-                    .filter(
-                        dsl::replacement_state.eq(RegionReplacementState::Completing),
+        self.transaction_retry_wrapper("set_region_replacement_complete")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    Self::volume_repair_delete_query(
+                        request.volume_id,
+                        request.id,
                     )
-                    .filter(dsl::operating_saga_id.eq(operating_saga_id))
-                    .set((
-                        dsl::replacement_state.eq(RegionReplacementState::Complete),
-                        dsl::operating_saga_id.eq(Option::<Uuid>::None),
-                    ))
-                    .check_if_exists::<RegionReplacement>(request.id)
-                    .execute_and_check(&conn)
+                    .execute_async(&conn)
                     .await?;
 
-                match result.status {
-                    UpdateStatus::Updated => Ok(()),
-                    UpdateStatus::NotUpdatedButExists => {
-                        let record = result.found;
+                    use db::schema::region_replacement::dsl;
 
-                        if record.operating_saga_id == None
-                            && record.replacement_state
-                                == RegionReplacementState::Complete
-                        {
-                            Ok(())
-                        } else {
-                            Err(TxnError::CustomError(Error::conflict(format!(
-                                "region replacement {} set to {:?} (operating saga id {:?})",
-                                request.id,
-                                record.replacement_state,
-                                record.operating_saga_id,
-                            ))))
+                    let result = diesel::update(dsl::region_replacement)
+                        .filter(dsl::id.eq(request.id))
+                        .filter(
+                            dsl::replacement_state.eq(RegionReplacementState::Completing),
+                        )
+                        .filter(dsl::operating_saga_id.eq(operating_saga_id))
+                        .set((
+                            dsl::replacement_state.eq(RegionReplacementState::Complete),
+                            dsl::operating_saga_id.eq(Option::<Uuid>::None),
+                        ))
+                        .check_if_exists::<RegionReplacement>(request.id)
+                        .execute_and_check(&conn)
+                        .await?;
+
+                    match result.status {
+                        UpdateStatus::Updated => Ok(()),
+                        UpdateStatus::NotUpdatedButExists => {
+                            let record = result.found;
+
+                            if record.operating_saga_id == None
+                                && record.replacement_state
+                                    == RegionReplacementState::Complete
+                            {
+                                Ok(())
+                            } else {
+                                Err(err.bail(TxnError::from(Error::conflict(format!(
+                                    "region replacement {} set to {:?} (operating saga id {:?})",
+                                    request.id,
+                                    record.replacement_state,
+                                    record.operating_saga_id,
+                                )))))
+                            }
                         }
                     }
                 }
             })
             .await
-            .map_err(|e| match e {
-                TxnError::CustomError(error) => error,
-
-                TxnError::Database(error) => {
-                    public_error_from_diesel(error, ErrorHandler::Server)
-                }
+            .map_err(|e| match err.take() {
+                Some(err) => err.into(),
+                None => public_error_from_diesel(e, ErrorHandler::Server),
             })
     }
 
@@ -738,57 +763,59 @@ impl DataStore {
             RegionReplacementState::Requested,
         );
 
-        self.pool_connection_authorized(opctx)
-            .await?
-            .transaction_async(|conn| async move {
-                Self::volume_repair_delete_query(
-                    request.volume_id,
-                    request.id,
-                )
-                .execute_async(&conn)
-                .await?;
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
 
-                use db::schema::region_replacement::dsl;
-
-                let result = diesel::update(dsl::region_replacement)
-                    .filter(dsl::id.eq(request.id))
-                    .filter(
-                        dsl::replacement_state.eq(RegionReplacementState::Requested),
+        self.transaction_retry_wrapper("set_region_replacement_complete_from_requested")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    Self::volume_repair_delete_query(
+                        request.volume_id,
+                        request.id,
                     )
-                    .filter(dsl::operating_saga_id.is_null())
-                    .set((
-                        dsl::replacement_state.eq(RegionReplacementState::Complete),
-                    ))
-                    .check_if_exists::<RegionReplacement>(request.id)
-                    .execute_and_check(&conn)
+                    .execute_async(&conn)
                     .await?;
 
-                match result.status {
-                    UpdateStatus::Updated => Ok(()),
+                    use db::schema::region_replacement::dsl;
 
-                    UpdateStatus::NotUpdatedButExists => {
-                        let record = result.found;
+                    let result = diesel::update(dsl::region_replacement)
+                        .filter(dsl::id.eq(request.id))
+                        .filter(
+                            dsl::replacement_state.eq(RegionReplacementState::Requested),
+                        )
+                        .filter(dsl::operating_saga_id.is_null())
+                        .set((
+                            dsl::replacement_state.eq(RegionReplacementState::Complete),
+                        ))
+                        .check_if_exists::<RegionReplacement>(request.id)
+                        .execute_and_check(&conn)
+                        .await?;
 
-                        if record.replacement_state == RegionReplacementState::Complete {
-                            Ok(())
-                        } else {
-                            Err(TxnError::CustomError(Error::conflict(format!(
-                                "region replacement {} set to {:?} (operating saga id {:?})",
-                                request.id,
-                                record.replacement_state,
-                                record.operating_saga_id,
-                            ))))
+                    match result.status {
+                        UpdateStatus::Updated => Ok(()),
+
+                        UpdateStatus::NotUpdatedButExists => {
+                            let record = result.found;
+
+                            if record.replacement_state == RegionReplacementState::Complete {
+                                Ok(())
+                            } else {
+                                Err(err.bail(TxnError::from(Error::conflict(format!(
+                                    "region replacement {} set to {:?} (operating saga id {:?})",
+                                    request.id,
+                                    record.replacement_state,
+                                    record.operating_saga_id,
+                                )))))
+                            }
                         }
                     }
                 }
             })
             .await
-            .map_err(|e| match e {
-                TxnError::CustomError(error) => error,
-
-                TxnError::Database(error) => {
-                    public_error_from_diesel(error, ErrorHandler::Server)
-                }
+            .map_err(|e| match err.take() {
+                Some(err) => err.into(),
+                None => public_error_from_diesel(e, ErrorHandler::Server),
             })
     }
 
@@ -897,6 +924,7 @@ mod test {
 
     use crate::db::pub_test_utils::TestDatabase;
     use omicron_test_utils::dev;
+    use sled_agent_client::VolumeConstructionRequest;
 
     #[tokio::test]
     async fn test_one_replacement_per_volume() {
@@ -907,6 +935,20 @@ mod test {
         let region_1_id = Uuid::new_v4();
         let region_2_id = Uuid::new_v4();
         let volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: volume_id,
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
 
         let request_1 = RegionReplacement::new(region_1_id, volume_id);
         let request_2 = RegionReplacement::new(region_2_id, volume_id);
@@ -938,6 +980,20 @@ mod test {
 
         let region_id = Uuid::new_v4();
         let volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: volume_id,
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
 
         let request = {
             let mut request = RegionReplacement::new(region_id, volume_id);
@@ -1030,6 +1086,20 @@ mod test {
 
         let region_id = Uuid::new_v4();
         let volume_id = Uuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: volume_id,
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
 
         let request = {
             let mut request = RegionReplacement::new(region_id, volume_id);

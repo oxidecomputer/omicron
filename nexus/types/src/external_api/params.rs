@@ -93,6 +93,7 @@ path_param!(AddressLotPath, address_lot, "address lot");
 path_param!(ProbePath, probe, "probe");
 path_param!(CertificatePath, certificate, "certificate");
 
+id_path_param!(SupportBundlePath, support_bundle, "support bundle");
 id_path_param!(GroupPath, group_id, "group");
 
 // TODO: The hardware resources should be represented by its UUID or a hardware
@@ -143,6 +144,15 @@ impl From<Name> for SiloSelector {
     fn from(name: Name) -> Self {
         SiloSelector { silo: name.into() }
     }
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SupportBundleFilePath {
+    #[serde(flatten)]
+    pub bundle: SupportBundlePath,
+
+    /// The file within the bundle to download
+    pub file: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -594,7 +604,7 @@ pub struct DerEncodedKeyPair {
 
 struct X509CertVisitor;
 
-impl<'de> Visitor<'de> for X509CertVisitor {
+impl Visitor<'_> for X509CertVisitor {
     type Value = String;
 
     fn expecting(
@@ -639,7 +649,7 @@ where
 
 struct KeyVisitor;
 
-impl<'de> Visitor<'de> for KeyVisitor {
+impl Visitor<'_> for KeyVisitor {
     type Value = String;
 
     fn expecting(

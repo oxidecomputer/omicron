@@ -85,6 +85,7 @@ mod region;
 mod region_replacement;
 mod region_snapshot;
 pub mod region_snapshot_replacement;
+mod rendezvous_debug_dataset;
 mod role;
 mod saga;
 mod silo;
@@ -94,6 +95,7 @@ mod sled;
 mod sled_instance;
 mod snapshot;
 mod ssh_key;
+mod support_bundle;
 mod switch;
 mod switch_interface;
 mod switch_port;
@@ -123,19 +125,11 @@ pub use region::RegionAllocationParameters;
 pub use silo::Discoverability;
 pub use sled::SledTransition;
 pub use sled::TransitionError;
+pub use support_bundle::SupportBundleExpungementReport;
 pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use virtual_provisioning_collection::StorageType;
 pub use vmm::VmmStateUpdateResult;
-pub use volume::read_only_resources_associated_with_volume;
-pub use volume::CrucibleResources;
-pub use volume::CrucibleTargets;
-pub use volume::ExistingTarget;
-pub use volume::ReplacementTarget;
-pub use volume::VolumeCheckoutReason;
-pub use volume::VolumeReplaceResult;
-pub use volume::VolumeReplacementParams;
-pub use volume::VolumeToDelete;
-pub use volume::VolumeWithTarget;
+pub use volume::*;
 
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.
@@ -321,6 +315,14 @@ impl DataStore {
         )
     }
 
+    /// Constructs a non-retryable transaction helper
+    pub fn transaction_non_retry_wrapper(
+        &self,
+        name: &'static str,
+    ) -> crate::transaction_retry::NonRetryHelper {
+        crate::transaction_retry::NonRetryHelper::new(&self.log, name)
+    }
+
     #[cfg(test)]
     pub(crate) fn transaction_retry_producer(
         &self,
@@ -466,6 +468,8 @@ mod test {
     use nexus_db_fixed_data::silo::DEFAULT_SILO;
     use nexus_db_model::IpAttachState;
     use nexus_db_model::{to_db_typed_uuid, Generation};
+    use nexus_types::deployment::Blueprint;
+    use nexus_types::deployment::BlueprintTarget;
     use nexus_types::external_api::params;
     use nexus_types::silo::DEFAULT_SILO_ID;
     use omicron_common::api::external::{
@@ -476,6 +480,7 @@ mod test {
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use std::collections::HashMap;
     use std::collections::HashSet;
@@ -503,6 +508,33 @@ mod test {
             reservoir_size: crate::db::model::ByteCount::try_from(1 << 39)
                 .unwrap(),
         }
+    }
+
+    /// Inserts a blueprint in the DB and forcibly makes it the target
+    ///
+    /// WARNING: This makes no attempts to validate the blueprint relative to
+    /// parents -- this is just a test-only helper to make testing
+    /// blueprint-specific checks easier.
+    pub async fn bp_insert_and_make_target(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        bp: &Blueprint,
+    ) {
+        datastore
+            .blueprint_insert(opctx, bp)
+            .await
+            .expect("inserted blueprint");
+        datastore
+            .blueprint_target_set_current(
+                opctx,
+                BlueprintTarget {
+                    target_id: bp.id,
+                    enabled: true,
+                    time_made_target: Utc::now(),
+                },
+            )
+            .await
+            .expect("made blueprint the target");
     }
 
     #[tokio::test]
@@ -717,9 +749,9 @@ mod test {
         sled_id: SledUuid,
         kind: PhysicalDiskKind,
         serial: String,
-    ) -> Uuid {
+    ) -> PhysicalDiskUuid {
         let physical_disk = PhysicalDisk::new(
-            Uuid::new_v4(),
+            PhysicalDiskUuid::new_v4(),
             TEST_VENDOR.into(),
             serial,
             TEST_MODEL.into(),
@@ -738,7 +770,7 @@ mod test {
         datastore: &DataStore,
         opctx: &OpContext,
         sled_id: SledUuid,
-        physical_disk_id: Uuid,
+        physical_disk_id: PhysicalDiskUuid,
     ) -> Uuid {
         let zpool_id = create_test_zpool_not_in_inventory(
             datastore,
@@ -760,7 +792,7 @@ mod test {
         datastore: &DataStore,
         opctx: &OpContext,
         sled_id: SledUuid,
-        physical_disk_id: Uuid,
+        physical_disk_id: PhysicalDiskUuid,
     ) -> Uuid {
         let zpool_id = Uuid::new_v4();
         let zpool =
@@ -904,7 +936,7 @@ mod test {
 
             struct PhysicalDisk {
                 sled_id: SledUuid,
-                disk_id: Uuid,
+                disk_id: PhysicalDiskUuid,
             }
 
             // create 9 disks on each sled

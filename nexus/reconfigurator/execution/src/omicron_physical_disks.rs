@@ -47,10 +47,12 @@ pub(crate) async fn deploy_disks(
                 db_sled.sled_agent_address(),
                 &log,
             );
-            let result =
-                client.omicron_physical_disks_put(&config).await.with_context(
-                    || format!("Failed to put {config:#?} to sled {sled_id}"),
-                );
+            let result = client
+                .omicron_physical_disks_put(&config.clone().into())
+                .await
+                .with_context(|| {
+                    format!("Failed to put {config:#?} to sled {sled_id}")
+                });
             match result {
                 Err(error) => {
                     warn!(log, "{error:#}");
@@ -146,6 +148,7 @@ mod test {
     use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
     use nexus_types::deployment::{
         Blueprint, BlueprintPhysicalDiskConfig, BlueprintPhysicalDisksConfig,
         BlueprintTarget, CockroachDbPreserveDowngrade, DiskFilter,
@@ -155,6 +158,11 @@ mod test {
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::DiskIdentity;
+    use omicron_common::disk::DiskManagementError;
+    use omicron_common::disk::DiskManagementStatus;
+    use omicron_common::disk::DisksManagementResult;
+    use omicron_common::disk::OmicronPhysicalDisksConfig;
+    use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -171,7 +179,7 @@ mod test {
     fn create_blueprint(
         blueprint_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
     ) -> (BlueprintTarget, Blueprint) {
-        let id = Uuid::new_v4();
+        let id = BlueprintUuid::new_v4();
         (
             BlueprintTarget {
                 target_id: id,
@@ -241,16 +249,19 @@ mod test {
         // See `rack_setup::service::ServiceInner::run` for more details.
         fn make_disks() -> BlueprintPhysicalDisksConfig {
             BlueprintPhysicalDisksConfig {
-                generation: Generation::new(),
-                disks: vec![BlueprintPhysicalDiskConfig {
+                generation: Generation::new().next(),
+                disks: [BlueprintPhysicalDiskConfig {
+                    disposition: BlueprintPhysicalDiskDisposition::InService,
                     identity: DiskIdentity {
                         vendor: "test-vendor".to_string(),
                         serial: "test-serial".to_string(),
                         model: "test-model".to_string(),
                     },
-                    id: Uuid::new_v4(),
+                    id: PhysicalDiskUuid::new_v4(),
                     pool_id: ZpoolUuid::new_v4(),
-                }],
+                }]
+                .into_iter()
+                .collect(),
             }
         }
 
@@ -270,18 +281,16 @@ mod test {
             s.expect(
                 Expectation::matching(all_of![
                     request::method_path("PUT", "/omicron-physical-disks",),
-                    // Our generation number should be 1 and there should
+                    // Our generation number should be 2 and there should
                     // be only a single disk.
                     request::body(json_decoded(
-                        |c: &BlueprintPhysicalDisksConfig| {
-                            c.generation == 1u32.into() && c.disks.len() == 1
+                        |c: &OmicronPhysicalDisksConfig| {
+                            c.generation == 2u32.into() && c.disks.len() == 1
                         }
                     ))
                 ])
                 .respond_with(json_encoded(
-                    sled_agent_client::types::DisksManagementResult {
-                        status: vec![],
-                    },
+                    DisksManagementResult { status: vec![] },
                 )),
             );
         }
@@ -303,9 +312,7 @@ mod test {
                     "/omicron-physical-disks",
                 ))
                 .respond_with(json_encoded(
-                    sled_agent_client::types::DisksManagementResult {
-                        status: vec![],
-                    },
+                    DisksManagementResult { status: vec![] },
                 )),
             );
         }
@@ -323,11 +330,9 @@ mod test {
                 "PUT",
                 "/omicron-physical-disks",
             ))
-            .respond_with(json_encoded(
-                sled_agent_client::types::DisksManagementResult {
-                    status: vec![],
-                },
-            )),
+            .respond_with(json_encoded(DisksManagementResult {
+                status: vec![],
+            })),
         );
         s2.expect(
             Expectation::matching(request::method_path(
@@ -346,7 +351,7 @@ mod test {
         assert_eq!(errors.len(), 1);
         assert!(errors[0]
             .to_string()
-            .starts_with("Failed to put OmicronPhysicalDisksConfig"));
+            .starts_with("Failed to put BlueprintPhysicalDisksConfig"));
         s1.verify_and_clear();
         s2.verify_and_clear();
 
@@ -358,30 +363,26 @@ mod test {
                 "PUT",
                 "/omicron-physical-disks",
             ))
-            .respond_with(json_encoded(
-                sled_agent_client::types::DisksManagementResult {
-                    status: vec![],
-                },
-            )),
+            .respond_with(json_encoded(DisksManagementResult {
+                status: vec![],
+            })),
         );
         s2.expect(
             Expectation::matching(request::method_path(
                 "PUT",
                 "/omicron-physical-disks",
             ))
-            .respond_with(json_encoded(sled_agent_client::types::DisksManagementResult {
-                status: vec![
-                    sled_agent_client::types::DiskManagementStatus {
-                        identity: omicron_common::disk::DiskIdentity {
-                            vendor: "v".to_string(),
-                            serial: "s".to_string(),
-                            model: "m".to_string(),
-                        },
+            .respond_with(json_encoded(DisksManagementResult {
+                status: vec![DiskManagementStatus {
+                    identity: omicron_common::disk::DiskIdentity {
+                        vendor: "v".to_string(),
+                        serial: "s".to_string(),
+                        model: "m".to_string(),
+                    },
 
-                        // This error could occur if a disk is removed
-                        err: Some(sled_agent_client::types::DiskManagementError::NotFound),
-                    }
-                ]
+                    // This error could occur if a disk is removed
+                    err: Some(DiskManagementError::NotFound),
+                }],
             })),
         );
 
@@ -407,9 +408,9 @@ mod test {
         i: usize,
         sled_id: SledUuid,
     ) -> PhysicalDiskUuid {
-        let id = PhysicalDiskUuid::from_untyped_uuid(Uuid::new_v4());
+        let id = PhysicalDiskUuid::new_v4();
         let physical_disk = PhysicalDisk::new(
-            id.into_untyped_uuid(),
+            id,
             "v".into(),
             format!("s-{i})"),
             "m".into(),
@@ -432,11 +433,7 @@ mod test {
         let zpool = datastore
             .zpool_insert(
                 opctx,
-                Zpool::new(
-                    Uuid::new_v4(),
-                    sled_id.into_untyped_uuid(),
-                    id.into_untyped_uuid(),
-                ),
+                Zpool::new(Uuid::new_v4(), sled_id.into_untyped_uuid(), id),
             )
             .await
             .unwrap();
@@ -559,7 +556,7 @@ mod test {
         datastore
             .physical_disk_update_policy(
                 &opctx,
-                disk_to_decommission.into_untyped_uuid(),
+                disk_to_decommission,
                 PhysicalDiskPolicy::Expunged,
             )
             .await
@@ -577,10 +574,10 @@ mod test {
             .into_iter()
             .map(|disk| (disk.id(), disk))
             .collect::<BTreeMap<_, _>>();
-        let d = &all_disks[&disk_to_decommission.into_untyped_uuid()];
+        let d = &all_disks[&disk_to_decommission];
         assert_eq!(d.disk_state, PhysicalDiskState::Active);
         assert_eq!(d.disk_policy, PhysicalDiskPolicy::Expunged);
-        let d = &all_disks[&other_disk.into_untyped_uuid()];
+        let d = &all_disks[&other_disk];
         assert_eq!(d.disk_state, PhysicalDiskState::Active);
         assert_eq!(d.disk_policy, PhysicalDiskPolicy::InService);
 
@@ -607,10 +604,10 @@ mod test {
             .into_iter()
             .map(|disk| (disk.id(), disk))
             .collect::<BTreeMap<_, _>>();
-        let d = &all_disks[&disk_to_decommission.into_untyped_uuid()];
+        let d = &all_disks[&disk_to_decommission];
         assert_eq!(d.disk_state, PhysicalDiskState::Decommissioned);
         assert_eq!(d.disk_policy, PhysicalDiskPolicy::Expunged);
-        let d = &all_disks[&other_disk.into_untyped_uuid()];
+        let d = &all_disks[&other_disk];
         assert_eq!(d.disk_state, PhysicalDiskState::Active);
         assert_eq!(d.disk_policy, PhysicalDiskPolicy::InService);
 

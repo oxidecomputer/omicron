@@ -76,6 +76,7 @@ use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
 use omicron_common::address::{
     get_internal_dns_server_addresses, CLICKHOUSE_ADMIN_PORT,
+    CLICKHOUSE_TCP_PORT,
 };
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::address::{BOOTSTRAP_ARTIFACT_PORT, COCKROACH_ADMIN_PORT};
@@ -1239,7 +1240,6 @@ impl ServiceManager {
                 floating_ips,
                 firewall_rules: &[],
                 dhcp_config: DhcpCfg::default(),
-                is_service: true,
             })
             .map_err(|err| Error::ServicePortCreation {
                 service: zone_kind,
@@ -1598,13 +1598,20 @@ impl ServiceManager {
                     addr.to_string()
                 };
 
+                // The ClickHouse client connects via the TCP port
+                let ch_address = {
+                    let mut addr = *address;
+                    addr.set_port(CLICKHOUSE_TCP_PORT);
+                    addr.to_string()
+                };
+
                 let clickhouse_admin_config =
                     PropertyGroupBuilder::new("config")
                         .add_property("http_address", "astring", admin_address)
                         .add_property(
                             "ch_address",
                             "astring",
-                            address.to_string(),
+                            ch_address.to_string(),
                         )
                         .add_property(
                             "ch_binary",
@@ -1669,13 +1676,20 @@ impl ServiceManager {
                     addr.to_string()
                 };
 
+                // The ClickHouse client connects via the TCP port
+                let ch_address = {
+                    let mut addr = *address;
+                    addr.set_port(CLICKHOUSE_TCP_PORT);
+                    addr.to_string()
+                };
+
                 let clickhouse_admin_config =
                     PropertyGroupBuilder::new("config")
                         .add_property("http_address", "astring", admin_address)
                         .add_property(
                             "ch_address",
                             "astring",
-                            address.to_string(),
+                            ch_address.to_string(),
                         )
                         .add_property(
                             "ch_binary",
@@ -3678,7 +3692,7 @@ impl ServiceManager {
             };
             check_property("zoned", zoned, "on")?;
             check_property("canmount", canmount, "on")?;
-            if dataset.dataset().dataset_should_be_encrypted() {
+            if dataset.kind().dataset_should_be_encrypted() {
                 check_property("encryption", encryption, "aes-256-gcm")?;
             }
 
@@ -5052,10 +5066,7 @@ mod illumos_tests {
     }
 
     impl<'a> LedgerTestHelper<'a> {
-        async fn new(
-            log: slog::Logger,
-            test_config: &'a TestConfig,
-        ) -> LedgerTestHelper {
+        async fn new(log: slog::Logger, test_config: &'a TestConfig) -> Self {
             let ddmd_client = DdmAdminClient::localhost(&log).unwrap();
             let storage_test_harness = setup_storage(&log).await;
             let zone_bundler = ZoneBundler::new(

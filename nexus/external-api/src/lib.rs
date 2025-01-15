@@ -2711,6 +2711,26 @@ pub trait NexusExternalApi {
         body: TypedBody<params::TimeseriesQuery>,
     ) -> Result<HttpResponseOk<views::OxqlQueryResult>, HttpError>;
 
+    // TODO: list endpoint for project-scoped schemas is blocked on
+    // https://github.com/oxidecomputer/omicron/issues/5942: the authz scope for
+    // each schema is not stored in Clickhouse yet.
+
+    /// Run project-scoped timeseries query
+    ///
+    /// Queries are written in OxQL. Project must be specified by name or ID in
+    /// URL query parameter. The OxQL query will only return timeseries data
+    /// from the specified project.
+    #[endpoint {
+        method = POST,
+        path = "/v1/timeseries/query",
+        tags = ["hidden"],
+    }]
+    async fn timeseries_query(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        body: TypedBody<params::TimeseriesQuery>,
+    ) -> Result<HttpResponseOk<views::OxqlQueryResult>, HttpError>;
+
     // Updates
 
     /// Upload TUF repository
@@ -2902,6 +2922,109 @@ pub trait NexusExternalApi {
     async fn current_user_ssh_key_delete(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SshKeyPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    // Support bundles (experimental)
+
+    /// List all support bundles
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/system/support-bundles",
+        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+    }]
+    async fn support_bundle_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<shared::SupportBundleInfo>>, HttpError>;
+
+    /// View a support bundle
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/system/support-bundles/{support_bundle}",
+        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+    }]
+    async fn support_bundle_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+    ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError>;
+
+    /// Download the index of a support bundle
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/system/support-bundles/{support_bundle}/index",
+        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+    }]
+    async fn support_bundle_index(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Download the contents of a support bundle
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/system/support-bundles/{support_bundle}/download",
+        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+    }]
+    async fn support_bundle_download(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Download a file within a support bundle
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/system/support-bundles/{support_bundle}/download/{file}",
+        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+    }]
+    async fn support_bundle_download_file(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundleFilePath>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Download the metadata of a support bundle
+    #[endpoint {
+        method = HEAD,
+        path = "/experimental/v1/system/support-bundles/{support_bundle}/download",
+        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+    }]
+    async fn support_bundle_head(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Download the metadata of a file within the support bundle
+    #[endpoint {
+        method = HEAD,
+        path = "/experimental/v1/system/support-bundles/{support_bundle}/download/{file}",
+        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+    }]
+    async fn support_bundle_head_file(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundleFilePath>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Create a new support bundle
+    #[endpoint {
+        method = POST,
+        path = "/experimental/v1/system/support-bundles",
+        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+    }]
+    async fn support_bundle_create(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseCreated<shared::SupportBundleInfo>, HttpError>;
+
+    /// Delete an existing support bundle
+    ///
+    /// May also be used to cancel a support bundle which is currently being
+    /// collected, or to remove metadata for a support bundle that has failed.
+    #[endpoint {
+        method = DELETE,
+        path = "/experimental/v1/system/support-bundles/{support_bundle}",
+        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+    }]
+    async fn support_bundle_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
     // Probes (experimental)

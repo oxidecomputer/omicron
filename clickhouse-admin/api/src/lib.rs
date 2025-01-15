@@ -4,12 +4,13 @@
 
 use clickhouse_admin_types::{
     ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
-    KeeperConfig, KeeperConfigurableSettings, Lgif, RaftConfig, ReplicaConfig,
-    ServerConfigurableSettings,
+    KeeperConfig, KeeperConfigurableSettings, Lgif, MetricInfoPath, RaftConfig,
+    ReplicaConfig, ServerConfigurableSettings, SystemTimeSeries,
+    TimeSeriesSettingsQuery,
 };
 use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk,
-    HttpResponseUpdatedNoContent, RequestContext, TypedBody,
+    HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
 };
 
 /// API interface for our clickhouse-admin-keeper server
@@ -116,6 +117,30 @@ pub trait ClickhouseAdminServerApi {
     async fn distributed_ddl_queue(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<DistributedDdlQueue>>, HttpError>;
+
+    /// Retrieve time series from the system database.
+    ///
+    /// The value of each data point is the average of all stored data points
+    /// within the interval.
+    /// These are internal ClickHouse metrics.
+    #[endpoint {
+        method = GET,
+        path = "/timeseries/{table}/{metric}/avg"
+    }]
+    async fn system_timeseries_avg(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<MetricInfoPath>,
+        query_params: Query<TimeSeriesSettingsQuery>,
+    ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError>;
+
+    /// Idempotently initialize a replicated ClickHouse cluster database.
+    #[endpoint {
+        method = PUT,
+        path = "/init"
+    }]
+    async fn init_db(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 }
 
 /// API interface for our clickhouse-admin-single server
@@ -136,4 +161,19 @@ pub trait ClickhouseAdminSingleApi {
     async fn init_db(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Retrieve time series from the system database.
+    ///
+    /// The value of each data point is the average of all stored data points
+    /// within the interval.
+    /// These are internal ClickHouse metrics.
+    #[endpoint {
+        method = GET,
+        path = "/timeseries/{table}/{metric}/avg"
+    }]
+    async fn system_timeseries_avg(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<MetricInfoPath>,
+        query_params: Query<TimeSeriesSettingsQuery>,
+    ) -> Result<HttpResponseOk<Vec<SystemTimeSeries>>, HttpError>;
 }

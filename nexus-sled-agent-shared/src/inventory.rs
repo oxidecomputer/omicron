@@ -6,6 +6,7 @@
 
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 
+use diffus::Diffus;
 use omicron_common::{
     api::{
         external::{ByteCount, Generation},
@@ -103,6 +104,7 @@ pub struct Inventory {
     pub disks: Vec<InventoryDisk>,
     pub zpools: Vec<InventoryZpool>,
     pub datasets: Vec<InventoryDataset>,
+    pub omicron_physical_disks_generation: Generation,
 }
 
 /// Describes the role of the sled within the rack.
@@ -172,7 +174,17 @@ impl OmicronZoneConfig {
 
 /// Describes a persistent ZFS dataset associated with an Omicron zone
 #[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Diffus,
 )]
 pub struct OmicronZoneDataset {
     pub pool_name: ZpoolName,

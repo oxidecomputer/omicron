@@ -352,17 +352,18 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::db::datastore::test::bp_insert_and_make_target;
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::Generation;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
-    use nexus_types::deployment::Blueprint;
-    use nexus_types::deployment::BlueprintTarget;
     use omicron_common::api::internal::shared::DatasetKind as ApiDatasetKind;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::DatasetUuid;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
 
@@ -396,7 +397,7 @@ mod test {
         let zpool = Zpool::new(
             *zpool_id.as_untyped_uuid(),
             *sled_id.as_untyped_uuid(),
-            Uuid::new_v4(),
+            PhysicalDiskUuid::new_v4(),
         );
         datastore
             .zpool_insert(opctx, zpool)
@@ -522,28 +523,6 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    async fn bp_insert_and_make_target(
-        opctx: &OpContext,
-        datastore: &DataStore,
-        bp: &Blueprint,
-    ) {
-        datastore
-            .blueprint_insert(opctx, bp)
-            .await
-            .expect("inserted blueprint");
-        datastore
-            .blueprint_target_set_current(
-                opctx,
-                BlueprintTarget {
-                    target_id: bp.id,
-                    enabled: true,
-                    time_made_target: Utc::now(),
-                },
-            )
-            .await
-            .expect("made blueprint the target");
-    }
-
     fn new_dataset_on(zpool_id: ZpoolUuid) -> Dataset {
         Dataset::new(
             DatasetUuid::new_v4(),
@@ -575,14 +554,14 @@ mod test {
 
         let bp1 = {
             let mut bp1 = bp0.clone();
-            bp1.id = Uuid::new_v4();
+            bp1.id = BlueprintUuid::new_v4();
             bp1.parent_blueprint_id = Some(bp0.id);
             bp1
         };
         bp_insert_and_make_target(&opctx, &datastore, &bp1).await;
 
-        let old_blueprint_id = BlueprintUuid::from_untyped_uuid(bp0.id);
-        let current_blueprint_id = BlueprintUuid::from_untyped_uuid(bp1.id);
+        let old_blueprint_id = bp0.id;
+        let current_blueprint_id = bp1.id;
 
         // Upsert referencing old blueprint: Error
         datastore

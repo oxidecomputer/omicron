@@ -10,4 +10,10 @@ disallowed-methods = [
     # `IncompleteOnConflictExt::as_partial_index` in `nexus-db-queries`.
     # See the documentation of that method for more.
     "diesel::upsert::DecoratableTarget::filter_target",
+
+    # This form of transaction is susceptible to serialization failures,
+    # and can fail spuriously.
+    # Instead, the "transaction_retry_wrapper" should be preferred, as it
+    # automatically retries transactions experiencing contention.
+    { path = "async_bb8_diesel::AsyncConnection::transaction_async", reason = "Prefer to use transaction_retry_wrapper, if possible. For tests and nested transactions, use transaction_non_retry_wrapper to at least get dtrace probes" },
 ]

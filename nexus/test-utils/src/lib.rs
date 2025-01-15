@@ -37,10 +37,13 @@ use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::blueprint_zone_type;
+use nexus_types::deployment::id_map::IdMap;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintDatasetsConfig;
+use nexus_types::deployment::BlueprintPhysicalDiskConfig;
+use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -68,14 +71,16 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::disk::CompressionAlgorithm;
-use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
+use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oximeter_collector::Oximeter;
@@ -137,7 +142,7 @@ pub struct ControlPlaneTestContext<N> {
     pub external_dns_zone_name: String,
     pub external_dns: dns_server::TransientServer,
     pub internal_dns: dns_server::TransientServer,
-    pub initial_blueprint_id: Uuid,
+    pub initial_blueprint_id: BlueprintUuid,
     pub silo_name: Name,
     pub user_name: UserId,
 }
@@ -325,7 +330,7 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
     pub external_dns: Option<dns_server::TransientServer>,
     pub internal_dns: Option<dns_server::TransientServer>,
     dns_config: Option<DnsConfigParams>,
-    initial_blueprint_id: Option<Uuid>,
+    initial_blueprint_id: Option<BlueprintUuid>,
     blueprint_zones: Vec<BlueprintZoneConfig>,
     blueprint_zones2: Vec<BlueprintZoneConfig>,
 
@@ -821,16 +826,18 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         sled_id,
                         BlueprintZonesConfig {
                             generation: Generation::new().next(),
-                            zones: zones.clone(),
+                            zones: zones.iter().cloned().collect(),
                         },
                     );
                     sled_state.insert(sled_id, SledState::Active);
 
-                    let mut disks = Vec::new();
-                    let mut datasets = BTreeMap::new();
+                    let mut disks = IdMap::new();
+                    let mut datasets = IdMap::new();
                     for zone in zones {
                         if let Some(zpool) = &zone.filesystem_pool {
-                            disks.push(OmicronPhysicalDiskConfig {
+                            disks.insert(BlueprintPhysicalDiskConfig {
+                                disposition:
+                                    BlueprintPhysicalDiskDisposition::InService,
                                 identity: omicron_common::disk::DiskIdentity {
                                     vendor: "nexus-tests".to_string(),
                                     model: "nexus-test-model".to_string(),
@@ -838,36 +845,35 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                                         "nexus-test-disk-{disk_index}"
                                     ),
                                 },
-                                id: Uuid::new_v4(),
+                                id: PhysicalDiskUuid::new_v4(),
                                 pool_id: zpool.id(),
                             });
                             disk_index += 1;
                             let id = DatasetUuid::new_v4();
-                            datasets.insert(
+                            datasets.insert(BlueprintDatasetConfig {
+                                disposition:
+                                    BlueprintDatasetDisposition::InService,
                                 id,
-                                BlueprintDatasetConfig {
-                                    disposition:
-                                        BlueprintDatasetDisposition::InService,
-                                    id,
-                                    pool: zpool.clone(),
-                                    kind: DatasetKind::TransientZone {
-                                        name: illumos_utils::zone::zone_name(
-                                            zone.zone_type.kind().zone_prefix(),
-                                            Some(zone.id),
-                                        ),
-                                    },
-                                    address: None,
-                                    quota: None,
-                                    reservation: None,
-                                    compression: CompressionAlgorithm::Off,
+                                pool: zpool.clone(),
+                                kind: DatasetKind::TransientZone {
+                                    name: illumos_utils::zone::zone_name(
+                                        zone.zone_type.kind().zone_prefix(),
+                                        Some(zone.id),
+                                    ),
                                 },
-                            );
+                                address: None,
+                                quota: None,
+                                reservation: None,
+                                compression: CompressionAlgorithm::Off,
+                            });
                         }
                     }
                     // Populate extra fake disks, giving each sled 10 total.
                     if disks.len() < 10 {
                         for _ in disks.len()..10 {
-                            disks.push(OmicronPhysicalDiskConfig {
+                            disks.insert(BlueprintPhysicalDiskConfig {
+                                disposition:
+                                    BlueprintPhysicalDiskDisposition::InService,
                                 identity: omicron_common::disk::DiskIdentity {
                                     vendor: "nexus-tests".to_string(),
                                     model: "nexus-test-model".to_string(),
@@ -875,7 +881,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                                         "nexus-test-disk-{disk_index}"
                                     ),
                                 },
-                                id: Uuid::new_v4(),
+                                id: PhysicalDiskUuid::new_v4(),
                                 pool_id: ZpoolUuid::new_v4(),
                             });
                             disk_index += 1;
@@ -898,7 +904,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 }
             }
             Blueprint {
-                id: Uuid::new_v4(),
+                id: BlueprintUuid::new_v4(),
                 blueprint_zones,
                 blueprint_disks,
                 blueprint_datasets,
@@ -1709,4 +1715,41 @@ pub async fn start_dns_server(
     let resolver = TokioAsyncResolver::tokio(resolver_config, resolver_opts);
 
     Ok((dns_server, http_server, resolver))
+}
+
+/// Wait until a producer is registered with Oximeter.
+///
+/// This blocks until the producer is registered, for up to 60s. It panics if
+/// the retry loop hits a permanent error.
+pub async fn wait_for_producer<G: GenericUuid>(
+    oximeter: &oximeter_collector::Oximeter,
+    producer_id: G,
+) {
+    wait_for_producer_impl(oximeter, producer_id.into_untyped_uuid()).await;
+}
+
+// This function is outlined from wait_for_producer to avoid unnecessary
+// monomorphization.
+async fn wait_for_producer_impl(
+    oximeter: &oximeter_collector::Oximeter,
+    producer_id: Uuid,
+) {
+    wait_for_condition(
+        || async {
+            if oximeter
+                .list_producers(None, usize::MAX)
+                .await
+                .iter()
+                .any(|p| p.id == producer_id)
+            {
+                Ok(())
+            } else {
+                Err(CondCheckError::<()>::NotYet)
+            }
+        },
+        &Duration::from_secs(1),
+        &Duration::from_secs(60),
+    )
+    .await
+    .expect("Failed to find producer within time limit");
 }

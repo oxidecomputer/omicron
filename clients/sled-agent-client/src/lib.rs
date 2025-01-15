@@ -12,6 +12,8 @@ use serde::Serialize;
 use std::convert::TryFrom;
 use uuid::Uuid;
 
+pub use propolis_client::{CrucibleOpts, VolumeConstructionRequest};
+
 progenitor::generate_api!(
     spec = "../../openapi/sled-agent.json",
     derives = [schemars::JsonSchema, PartialEq],
@@ -47,6 +49,9 @@ progenitor::generate_api!(
         DatasetsConfig = omicron_common::disk::DatasetsConfig,
         DatasetKind = omicron_common::api::internal::shared::DatasetKind,
         DiskIdentity = omicron_common::disk::DiskIdentity,
+        DisksManagementResult = omicron_common::disk::DisksManagementResult,
+        DiskManagementStatus = omicron_common::disk::DiskManagementStatus,
+        DiskManagementError = omicron_common::disk::DiskManagementError,
         DiskVariant = omicron_common::disk::DiskVariant,
         ExternalIpGatewayMap = omicron_common::api::internal::shared::ExternalIpGatewayMap,
         Generation = omicron_common::api::external::Generation,
@@ -78,6 +83,7 @@ progenitor::generate_api!(
         TypedUuidForOmicronZoneKind = omicron_uuid_kinds::OmicronZoneUuid,
         TypedUuidForPropolisKind = omicron_uuid_kinds::PropolisUuid,
         TypedUuidForSledKind = omicron_uuid_kinds::SledUuid,
+        TypedUuidForSupportBundleKind = omicron_uuid_kinds::SupportBundleUuid,
         TypedUuidForZpoolKind = omicron_uuid_kinds::ZpoolUuid,
         Vni = omicron_common::api::external::Vni,
         ZpoolKind = omicron_common::zpool_name::ZpoolKind,

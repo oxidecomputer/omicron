@@ -48,7 +48,6 @@ use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_common::policy::OXIMETER_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use slog::error;
@@ -234,7 +233,7 @@ impl PlanningInputFromDb<'_> {
                         serial: disk.serial.clone(),
                         model: disk.model.clone(),
                     },
-                    disk_id: PhysicalDiskUuid::from_untyped_uuid(disk.id()),
+                    disk_id: disk.id(),
                     policy: disk.disk_policy.into(),
                     state: disk.disk_state.into(),
                 };
@@ -357,14 +356,15 @@ pub async fn reconfigurator_state_load(
             .blueprints_list(opctx, &p.current_pagparams())
             .await
             .context("listing blueprints")?;
-        paginator =
-            p.found_batch(&blueprint_ids, &|b: &BlueprintMetadata| b.id);
+        paginator = p.found_batch(&blueprint_ids, &|b: &BlueprintMetadata| {
+            b.id.into_untyped_uuid()
+        });
         blueprint_ids.extend(batch.into_iter());
     }
 
     let blueprints = futures::stream::iter(blueprint_ids)
         .filter_map(|bpm| async move {
-            let blueprint_id = bpm.id;
+            let blueprint_id = bpm.id.into_untyped_uuid();
             let read = datastore
                 .blueprint_read(
                     opctx,

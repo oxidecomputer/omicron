@@ -18,7 +18,6 @@ use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::SledState;
 use nexus_types::identity::Asset;
 use omicron_physical_disks::DeployDisksDone;
-use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -102,6 +101,14 @@ pub async fn realize_blueprint_with_overrides(
         &opctx,
         datastore,
         blueprint,
+    );
+
+    register_support_bundle_failure_step(
+        &engine.for_component(ExecutionComponent::SupportBundles),
+        &opctx,
+        datastore,
+        blueprint,
+        nexus_id,
     );
 
     let sled_list = register_sled_list_step(
@@ -234,6 +241,31 @@ fn register_zone_external_networking_step<'a>(
                 datastore
                     .blueprint_ensure_external_networking_resources(
                         &opctx, blueprint,
+                    )
+                    .await
+                    .map_err(|err| anyhow!(err))?;
+
+                StepSuccess::new(()).into()
+            },
+        )
+        .register();
+}
+
+fn register_support_bundle_failure_step<'a>(
+    registrar: &ComponentRegistrar<'_, 'a>,
+    opctx: &'a OpContext,
+    datastore: &'a DataStore,
+    blueprint: &'a Blueprint,
+    nexus_id: OmicronZoneUuid,
+) {
+    registrar
+        .new_step(
+            ExecutionStepId::Ensure,
+            "Mark support bundles as failed if they rely on an expunged disk or sled",
+            move |_cx| async move {
+                datastore
+                    .support_bundle_fail_expunged(
+                        &opctx, blueprint, nexus_id
                     )
                     .await
                     .map_err(|err| anyhow!(err))?;
@@ -390,7 +422,6 @@ fn register_dataset_records_step<'a>(
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
 ) {
-    let bp_id = BlueprintUuid::from_untyped_uuid(blueprint.id);
     registrar
         .new_step(
             ExecutionStepId::Ensure,
@@ -399,8 +430,10 @@ fn register_dataset_records_step<'a>(
                 datasets::ensure_dataset_records_exist(
                     &opctx,
                     datastore,
-                    bp_id,
-                    blueprint.all_omicron_datasets(BlueprintDatasetFilter::All),
+                    blueprint.id,
+                    blueprint
+                        .all_omicron_datasets(BlueprintDatasetFilter::All)
+                        .map(|(_sled_id, dataset)| dataset),
                 )
                 .await?;
 
@@ -717,6 +750,7 @@ mod tests {
     use nexus_db_model::SledUpdate;
     use nexus_db_model::Zpool;
     use omicron_common::api::external::Error;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
     use std::collections::BTreeSet;
     use uuid::Uuid;
 
@@ -776,7 +810,7 @@ mod tests {
                 continue;
             };
 
-            let physical_disk_id = Uuid::new_v4();
+            let physical_disk_id = PhysicalDiskUuid::new_v4();
             let pool_id = dataset.dataset.pool_name.id();
 
             let disk = PhysicalDisk::new(

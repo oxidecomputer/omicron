@@ -6,7 +6,7 @@
 
 use super::sled_agent::SledAgent;
 use crate::sled_agent::Error as SledAgentError;
-use crate::support_bundle::SupportBundleCommandHttpOutput;
+use crate::support_bundle::storage::SupportBundleQueryType;
 use crate::zone_bundle::BundleError;
 use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
@@ -33,6 +33,7 @@ use omicron_common::disk::{
     DisksManagementResult, M2Slot, OmicronPhysicalDisksConfig,
 };
 use omicron_common::update::ArtifactHash;
+use range_requests::RequestContextEx;
 use sled_agent_api::*;
 use sled_agent_types::boot_disk::{
     BootDiskOsWriteStatus, BootDiskPathParams, BootDiskUpdatePathParams,
@@ -51,6 +52,9 @@ use sled_agent_types::time_sync::TimeSync;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     StorageLimit, ZoneBundleId, ZoneBundleMetadata,
+};
+use sled_diagnostics::{
+    SledDiagnosticsCommandHttpOutput, SledDiagnosticsQueryOutput,
 };
 use std::collections::BTreeMap;
 
@@ -223,6 +227,194 @@ impl SledAgentApi for SledAgentImpl {
         .await
         .map(|_| HttpResponseUpdatedNoContent())
         .map_err(HttpError::from)
+    }
+
+    async fn support_bundle_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundleListPathParam>,
+    ) -> Result<HttpResponseOk<Vec<SupportBundleMetadata>>, HttpError> {
+        let sa = rqctx.context();
+
+        let SupportBundleListPathParam { zpool_id, dataset_id } =
+            path_params.into_inner();
+
+        let bundles =
+            sa.as_support_bundle_storage().list(zpool_id, dataset_id).await?;
+
+        Ok(HttpResponseOk(bundles))
+    }
+
+    async fn support_bundle_create(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        query_params: Query<SupportBundleCreateQueryParams>,
+        body: StreamingBody,
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
+        let sa = rqctx.context();
+
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+        let SupportBundleCreateQueryParams { hash } = query_params.into_inner();
+
+        let metadata = sa
+            .as_support_bundle_storage()
+            .create(
+                zpool_id,
+                dataset_id,
+                support_bundle_id,
+                hash,
+                body.into_stream(),
+            )
+            .await?;
+
+        Ok(HttpResponseCreated(metadata))
+    }
+
+    async fn support_bundle_download(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<http::Response<Body>, HttpError> {
+        let sa = rqctx.context();
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+
+        let range = rqctx.range();
+        Ok(sa
+            .as_support_bundle_storage()
+            .get(
+                zpool_id,
+                dataset_id,
+                support_bundle_id,
+                range,
+                SupportBundleQueryType::Whole,
+            )
+            .await?)
+    }
+
+    async fn support_bundle_download_file(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundleFilePathParam>,
+    ) -> Result<http::Response<Body>, HttpError> {
+        let sa = rqctx.context();
+        let SupportBundleFilePathParam {
+            parent:
+                SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id },
+            file,
+        } = path_params.into_inner();
+
+        let range = rqctx.range();
+        Ok(sa
+            .as_support_bundle_storage()
+            .get(
+                zpool_id,
+                dataset_id,
+                support_bundle_id,
+                range,
+                SupportBundleQueryType::Path { file_path: file },
+            )
+            .await?)
+    }
+
+    async fn support_bundle_index(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<http::Response<Body>, HttpError> {
+        let sa = rqctx.context();
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+
+        let range = rqctx.range();
+        Ok(sa
+            .as_support_bundle_storage()
+            .get(
+                zpool_id,
+                dataset_id,
+                support_bundle_id,
+                range,
+                SupportBundleQueryType::Index,
+            )
+            .await?)
+    }
+
+    async fn support_bundle_head(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<http::Response<Body>, HttpError> {
+        let sa = rqctx.context();
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+
+        let range = rqctx.range();
+        Ok(sa
+            .as_support_bundle_storage()
+            .head(
+                zpool_id,
+                dataset_id,
+                support_bundle_id,
+                range,
+                SupportBundleQueryType::Whole,
+            )
+            .await?)
+    }
+
+    async fn support_bundle_head_file(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundleFilePathParam>,
+    ) -> Result<http::Response<Body>, HttpError> {
+        let sa = rqctx.context();
+        let SupportBundleFilePathParam {
+            parent:
+                SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id },
+            file,
+        } = path_params.into_inner();
+
+        let range = rqctx.range();
+        Ok(sa
+            .as_support_bundle_storage()
+            .head(
+                zpool_id,
+                dataset_id,
+                support_bundle_id,
+                range,
+                SupportBundleQueryType::Path { file_path: file },
+            )
+            .await?)
+    }
+
+    async fn support_bundle_head_index(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<http::Response<Body>, HttpError> {
+        let sa = rqctx.context();
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+
+        let range = rqctx.range();
+        Ok(sa
+            .as_support_bundle_storage()
+            .head(
+                zpool_id,
+                dataset_id,
+                support_bundle_id,
+                range,
+                SupportBundleQueryType::Index,
+            )
+            .await?)
+    }
+
+    async fn support_bundle_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let sa = rqctx.context();
+
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+
+        sa.as_support_bundle_storage()
+            .delete(zpool_id, dataset_id, support_bundle_id)
+            .await?;
+        Ok(HttpResponseDeleted())
     }
 
     async fn datasets_put(
@@ -774,41 +966,79 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn support_zoneadm_info(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
         let sa = request_context.context();
         let res = sa.support_zoneadm_info().await;
-        Ok(HttpResponseOk(FreeformBody(res.get_output().into())))
+        Ok(HttpResponseOk(res.get_output()))
     }
 
     async fn support_ipadm_info(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
         let sa = request_context.context();
-        let output = sa
-            .support_ipadm_info()
-            .await
-            .into_iter()
-            .map(|cmd| cmd.get_output())
-            .collect::<Vec<_>>()
-            .as_slice()
-            .join("\n\n");
-
-        Ok(HttpResponseOk(FreeformBody(output.into())))
+        Ok(HttpResponseOk(
+            sa.support_ipadm_info()
+                .await
+                .into_iter()
+                .map(|cmd| cmd.get_output())
+                .collect::<Vec<_>>(),
+        ))
     }
 
     async fn support_dladm_info(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
         let sa = request_context.context();
-        let output = sa
-            .support_dladm_info()
-            .await
-            .into_iter()
-            .map(|cmd| cmd.get_output())
-            .collect::<Vec<_>>()
-            .as_slice()
-            .join("\n\n");
+        Ok(HttpResponseOk(
+            sa.support_dladm_info()
+                .await
+                .into_iter()
+                .map(|cmd| cmd.get_output())
+                .collect::<Vec<_>>(),
+        ))
+    }
 
-        Ok(HttpResponseOk(FreeformBody(output.into())))
+    async fn support_pargs_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
+        let sa = request_context.context();
+        Ok(HttpResponseOk(
+            sa.support_pargs_info()
+                .await
+                .into_iter()
+                .map(|cmd| cmd.get_output())
+                .collect::<Vec<_>>(),
+        ))
+    }
+
+    async fn support_pstack_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
+        let sa = request_context.context();
+        Ok(HttpResponseOk(
+            sa.support_pstack_info()
+                .await
+                .into_iter()
+                .map(|cmd| cmd.get_output())
+                .collect::<Vec<_>>(),
+        ))
+    }
+
+    async fn support_pfiles_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
+        let sa = request_context.context();
+        Ok(HttpResponseOk(
+            sa.support_pfiles_info()
+                .await
+                .into_iter()
+                .map(|cmd| cmd.get_output())
+                .collect::<Vec<_>>(),
+        ))
     }
 }

@@ -38,7 +38,6 @@ use authz_macros::authz_resource;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_fixed_data::FLEET_ID;
-use nexus_db_model::{ArtifactId, SemverVersion};
 use nexus_types::external_api::shared::{FleetRole, ProjectRole, SiloRole};
 use omicron_common::api::external::{Error, LookupType, ResourceType};
 use once_cell::sync::Lazy;
@@ -1012,9 +1011,17 @@ authz_resource! {
 }
 
 authz_resource! {
+    name = "SupportBundle",
+    parent = "Fleet",
+    primary_key = { uuid_kind = SupportBundleKind },
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
     name = "PhysicalDisk",
     parent = "Fleet",
-    primary_key = Uuid,
+    primary_key = { uuid_kind = PhysicalDiskKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }
@@ -1030,8 +1037,7 @@ authz_resource! {
 authz_resource! {
     name = "TufArtifact",
     parent = "Fleet",
-    primary_key = (String, SemverVersion, String),
-    input_key = ArtifactId,
+    primary_key = { uuid_kind = TufArtifactKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }

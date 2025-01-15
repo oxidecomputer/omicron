@@ -76,6 +76,11 @@ pub static DEMO_UNINITIALIZED_SLED: Lazy<params::UninitializedSledId> =
         part: "demo-part".to_string(),
     });
 
+pub const SUPPORT_BUNDLES_URL: &'static str =
+    "/experimental/v1/system/support-bundles";
+pub static SUPPORT_BUNDLE_URL: Lazy<String> =
+    Lazy::new(|| format!("{SUPPORT_BUNDLES_URL}/{{id}}"));
+
 // Global policy
 pub const SYSTEM_POLICY_URL: &'static str = "/v1/system/policy";
 
@@ -948,10 +953,14 @@ pub static DEMO_SILO_METRICS_URL: Lazy<String> = Lazy::new(|| {
     )
 });
 
-pub static TIMESERIES_LIST_URL: Lazy<String> =
+pub static TIMESERIES_QUERY_URL: Lazy<String> = Lazy::new(|| {
+    format!("/v1/timeseries/query?project={}", *DEMO_PROJECT_NAME)
+});
+
+pub static SYSTEM_TIMESERIES_LIST_URL: Lazy<String> =
     Lazy::new(|| String::from("/v1/system/timeseries/schemas"));
 
-pub static TIMESERIES_QUERY_URL: Lazy<String> =
+pub static SYSTEM_TIMESERIES_QUERY_URL: Lazy<String> =
     Lazy::new(|| String::from("/v1/system/timeseries/query"));
 
 pub static DEMO_TIMESERIES_QUERY: Lazy<params::TimeseriesQuery> =
@@ -2164,6 +2173,28 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             allowed_methods: vec![AllowedMethod::Get],
         },
 
+        /* Support Bundles */
+
+        VerifyEndpoint {
+            url: &SUPPORT_BUNDLES_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Post(serde_json::to_value(()).unwrap())
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &SUPPORT_BUNDLE_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Delete,
+            ],
+        },
+
         /* Updates */
 
         VerifyEndpoint {
@@ -2208,7 +2239,18 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
         },
 
         VerifyEndpoint {
-            url: &TIMESERIES_LIST_URL,
+            url: &TIMESERIES_QUERY_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_TIMESERIES_QUERY).unwrap()
+                ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &SYSTEM_TIMESERIES_LIST_URL,
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
@@ -2217,7 +2259,7 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
         },
 
         VerifyEndpoint {
-            url: &TIMESERIES_QUERY_URL,
+            url: &SYSTEM_TIMESERIES_QUERY_URL,
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![

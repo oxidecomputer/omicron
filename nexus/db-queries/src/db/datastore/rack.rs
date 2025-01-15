@@ -26,7 +26,6 @@ use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
 use crate::db::TransactionError;
-use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -674,12 +673,11 @@ impl DataStore {
         let log = opctx.log.clone();
         let err = Arc::new(OnceLock::new());
 
-        // NOTE: This transaction cannot yet be made retryable, as it uses
-        // nested transactions.
-        let rack = self
-            .pool_connection_authorized(opctx)
-            .await?
-            .transaction_async(|conn| {
+        // This method uses nested transactions, which are not supported
+        // with retryable transactions.
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let rack = self.transaction_non_retry_wrapper("rack_set_initialized")
+            .transaction(&conn, |conn| {
                 let err = err.clone();
                 let log = log.clone();
                 let authz_service_pool = authz_service_pool.clone();
@@ -751,7 +749,7 @@ impl DataStore {
                     }
 
                     // Insert the RSS-generated blueprint.
-                    Self::blueprint_insert_on_connection(
+                    self.blueprint_insert_on_connection(
                         &conn, opctx, &blueprint,
                     )
                     .await
@@ -1040,7 +1038,7 @@ mod test {
     use omicron_common::api::internal::shared::SourceNatConfig;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::{ExternalIpUuid, OmicronZoneUuid};
+    use omicron_uuid_kinds::{BlueprintUuid, ExternalIpUuid, OmicronZoneUuid};
     use omicron_uuid_kinds::{GenericUuid, ZpoolUuid};
     use omicron_uuid_kinds::{SledUuid, TypedUuid};
     use oxnet::IpNet;
@@ -1056,7 +1054,7 @@ mod test {
                 rack_id: Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap(),
                 rack_subnet: nexus_test_utils::RACK_SUBNET.parse().unwrap(),
                 blueprint: Blueprint {
-                    id: Uuid::new_v4(),
+                    id: BlueprintUuid::new_v4(),
                     blueprint_zones: BTreeMap::new(),
                     blueprint_disks: BTreeMap::new(),
                     blueprint_datasets: BTreeMap::new(),
@@ -1375,7 +1373,7 @@ mod test {
             SledUuid::from_untyped_uuid(sled1.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
-                zones: vec![
+                zones: [
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: external_dns_id,
@@ -1439,14 +1437,16 @@ mod test {
                             },
                         ),
                     },
-                ],
+                ]
+                .into_iter()
+                .collect(),
             },
         );
         blueprint_zones.insert(
             SledUuid::from_untyped_uuid(sled2.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
-                zones: vec![
+                zones: [
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: nexus_id,
@@ -1513,14 +1513,16 @@ mod test {
                             },
                         ),
                     },
-                ],
+                ]
+                .into_iter()
+                .collect(),
             },
         );
         blueprint_zones.insert(
             SledUuid::from_untyped_uuid(sled3.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
-                zones: vec![BlueprintZoneConfig {
+                zones: [BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: ntp3_id,
                     filesystem_pool: Some(random_zpool()),
@@ -1529,14 +1531,13 @@ mod test {
                             address: "[::1]:80".parse().unwrap(),
                         },
                     ),
-                }],
+                }]
+                .into_iter()
+                .collect(),
             },
         );
-        for zone_config in blueprint_zones.values_mut() {
-            zone_config.sort();
-        }
         let blueprint = Blueprint {
-            id: Uuid::new_v4(),
+            id: BlueprintUuid::new_v4(),
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
@@ -1700,7 +1701,7 @@ mod test {
             SledUuid::from_untyped_uuid(sled.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
-                zones: vec![
+                zones: [
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: nexus_id1,
@@ -1765,7 +1766,9 @@ mod test {
                             },
                         ),
                     },
-                ],
+                ]
+                .into_iter()
+                .collect(),
             },
         );
 
@@ -1793,11 +1796,8 @@ mod test {
             HashMap::from([("api.sys".to_string(), external_records.clone())]),
         );
 
-        for zone_config in blueprint_zones.values_mut() {
-            zone_config.sort();
-        }
         let blueprint = Blueprint {
-            id: Uuid::new_v4(),
+            id: BlueprintUuid::new_v4(),
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
@@ -1973,7 +1973,7 @@ mod test {
             SledUuid::from_untyped_uuid(sled.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
-                zones: vec![BlueprintZoneConfig {
+                zones: [BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: nexus_id,
                     filesystem_pool: Some(random_zpool()),
@@ -2002,14 +2002,13 @@ mod test {
                             },
                         },
                     ),
-                }],
+                }]
+                .into_iter()
+                .collect(),
             },
         );
-        for zone_config in blueprint_zones.values_mut() {
-            zone_config.sort();
-        }
         let blueprint = Blueprint {
-            id: Uuid::new_v4(),
+            id: BlueprintUuid::new_v4(),
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
@@ -2082,7 +2081,7 @@ mod test {
             SledUuid::from_untyped_uuid(sled.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
-                zones: vec![
+                zones: [
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: external_dns_id,
@@ -2144,15 +2143,14 @@ mod test {
                             },
                         ),
                     },
-                ],
+                ]
+                .into_iter()
+                .collect(),
             },
         );
 
-        for zone_config in blueprint_zones.values_mut() {
-            zone_config.sort();
-        }
         let blueprint = Blueprint {
-            id: Uuid::new_v4(),
+            id: BlueprintUuid::new_v4(),
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),

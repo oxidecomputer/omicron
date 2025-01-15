@@ -19,11 +19,11 @@ use crate::params::OmicronZoneTypeExt;
 use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::StorageMonitorHandle;
-use crate::support_bundle::{SupportBundleCmdError, SupportBundleCmdOutput};
+use crate::support_bundle::storage::SupportBundleManager;
 use crate::updates::{ConfigUpdates, UpdateManager};
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
+use crate::zone_bundle;
 use crate::zone_bundle::BundleError;
-use crate::{support_bundle, zone_bundle};
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use derive_more::From;
@@ -72,6 +72,7 @@ use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     PriorityOrder, StorageLimit, ZoneBundleMetadata,
 };
+use sled_diagnostics::{SledDiagnosticsCmdError, SledDiagnosticsCmdOutput};
 use sled_hardware::{underlay, HardwareManager};
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_hardware_types::Baseboard;
@@ -159,6 +160,9 @@ pub enum Error {
 
     #[error("Failed to deserialize early network config: {0}")]
     EarlyNetworkDeserialize(serde_json::Error),
+
+    #[error("Support bundle error: {0}")]
+    SupportBundle(String),
 
     #[error("Zone bundle error: {0}")]
     ZoneBundle(#[from] BundleError),
@@ -382,7 +386,7 @@ impl SledAgentInner {
 #[derive(Clone)]
 pub struct SledAgent {
     inner: Arc<SledAgentInner>,
-    log: Logger,
+    pub(crate) log: Logger,
     sprockets: SprocketsConfig,
 }
 
@@ -692,6 +696,11 @@ impl SledAgent {
         .unwrap(); // we retry forever, so this can't fail
     }
 
+    /// Accesses the [SupportBundleManager] API.
+    pub(crate) fn as_support_bundle_storage(&self) -> SupportBundleManager<'_> {
+        SupportBundleManager::new(&self.log, self.storage())
+    }
+
     pub(crate) fn switch_zone_underlay_info(
         &self,
     ) -> (Ipv6Addr, Option<&RackNetworkConfig>) {
@@ -953,12 +962,21 @@ impl SledAgent {
                 continue;
             };
 
-            // First, ensure the dataset exists
-            let dataset_id = zone.id.into_untyped_uuid();
-            self.inner
-                .storage
-                .upsert_filesystem(dataset_id, dataset_name)
-                .await?;
+            // NOTE: This code will be deprecated by https://github.com/oxidecomputer/omicron/pull/7160
+            //
+            // However, we need to ensure that all blueprints have datasets
+            // within them before we can remove this back-fill.
+            //
+            // Therefore, we do something hairy here: We ensure the filesystem
+            // exists, but don't specify any dataset UUID value.
+            //
+            // This means that:
+            // - If the dataset exists and has a UUID, this will be a no-op
+            // - If the dataset doesn't exist, it'll be created without its
+            // oxide:uuid zfs property set
+            // - If a subsequent call to "datasets_ensure" tries to set a UUID,
+            // it should be able to get set (once).
+            self.inner.storage.upsert_filesystem(None, dataset_name).await?;
         }
 
         self.inner
@@ -1349,25 +1367,44 @@ impl SledAgent {
             disks,
             zpools,
             datasets,
+            omicron_physical_disks_generation: *all_disks.generation(),
         })
     }
 
     pub(crate) async fn support_zoneadm_info(
         &self,
-    ) -> Result<SupportBundleCmdOutput, SupportBundleCmdError> {
-        support_bundle::zoneadm_info().await
+    ) -> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
+        sled_diagnostics::zoneadm_info().await
     }
 
     pub(crate) async fn support_ipadm_info(
         &self,
-    ) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
-        support_bundle::ipadm_info().await
+    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+        sled_diagnostics::ipadm_info().await
     }
 
     pub(crate) async fn support_dladm_info(
         &self,
-    ) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
-        support_bundle::dladm_info().await
+    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+        sled_diagnostics::dladm_info().await
+    }
+
+    pub(crate) async fn support_pargs_info(
+        &self,
+    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+        sled_diagnostics::pargs_oxide_processes(&self.log).await
+    }
+
+    pub(crate) async fn support_pstack_info(
+        &self,
+    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+        sled_diagnostics::pstack_oxide_processes(&self.log).await
+    }
+
+    pub(crate) async fn support_pfiles_info(
+        &self,
+    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+        sled_diagnostics::pfiles_oxide_processes(&self.log).await
     }
 }
 

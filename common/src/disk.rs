@@ -6,14 +6,15 @@
 
 use anyhow::bail;
 use camino::{Utf8Path, Utf8PathBuf};
+use diffus::Diffus;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::str::FromStr;
-use uuid::Uuid;
 
 use crate::{
     api::external::{ByteCount, Generation},
@@ -37,7 +38,7 @@ pub use crate::api::internal::shared::DatasetKind;
 )]
 pub struct OmicronPhysicalDiskConfig {
     pub identity: DiskIdentity,
-    pub id: Uuid,
+    pub id: PhysicalDiskUuid,
     pub pool_id: ZpoolUuid,
 }
 
@@ -103,13 +104,15 @@ impl DatasetName {
         Self { pool_name, kind }
     }
 
+    pub fn into_parts(self) -> (ZpoolName, DatasetKind) {
+        (self.pool_name, self.kind)
+    }
+
     pub fn pool(&self) -> &ZpoolName {
         &self.pool_name
     }
 
-    // TODO(https://github.com/oxidecomputer/omicron/issues/7115): Rename
-    // this to "kind?
-    pub fn dataset(&self) -> &DatasetKind {
+    pub fn kind(&self) -> &DatasetKind {
         &self.kind
     }
 
@@ -172,6 +175,7 @@ impl DatasetName {
     Hash,
     PartialOrd,
     Ord,
+    Diffus,
 )]
 pub struct GzipLevel(u8);
 
@@ -214,6 +218,7 @@ impl FromStr for GzipLevel {
     Hash,
     PartialOrd,
     Ord,
+    Diffus,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CompressionAlgorithm {
@@ -408,6 +413,7 @@ impl DatasetsManagementResult {
     Serialize,
     Deserialize,
     JsonSchema,
+    Diffus,
 )]
 pub struct DiskIdentity {
     pub vendor: String,
