@@ -54,6 +54,7 @@ use strum::IntoEnumIterator;
 mod blueprint_diff;
 mod blueprint_display;
 mod clickhouse;
+pub mod diff_visitors;
 pub mod execution;
 pub mod id_map;
 mod network_resources;
@@ -62,6 +63,7 @@ mod tri_map;
 mod zone_type;
 
 pub use clickhouse::ClickhouseClusterConfig;
+pub use diff_visitors::BpVisitorContext;
 pub use network_resources::AddNetworkResourceError;
 pub use network_resources::OmicronZoneExternalFloatingAddr;
 pub use network_resources::OmicronZoneExternalFloatingIp;
