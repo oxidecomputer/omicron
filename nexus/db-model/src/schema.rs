@@ -1065,7 +1065,8 @@ table! {
         time_created -> Timestamptz,
         time_tombstoned -> Nullable<Timestamptz>,
         pool_id -> Uuid,
-        blueprint_id_when_recorded -> Uuid,
+        blueprint_id_when_created -> Uuid,
+        blueprint_id_when_tombstoned -> Nullable<Uuid>,
     }
 }
 

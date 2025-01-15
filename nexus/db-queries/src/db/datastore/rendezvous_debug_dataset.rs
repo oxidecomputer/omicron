@@ -22,13 +22,14 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 
 impl DataStore {
     /// List one page of debug datasets
     ///
-    /// This fetches all debug  datasets, including those that have been
+    /// This fetches all debug datasets, including those that have been
     /// tombstoned.
     async fn debug_dataset_list_all_page(
         &self,
@@ -117,6 +118,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         dataset_id: DatasetUuid,
+        blueprint_id: BlueprintUuid,
     ) -> Result<bool, Error> {
         opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
 
@@ -125,7 +127,11 @@ impl DataStore {
         diesel::update(dsl::rendezvous_debug_dataset)
             .filter(dsl::id.eq(to_db_typed_uuid(dataset_id)))
             .filter(dsl::time_tombstoned.is_null())
-            .set(dsl::time_tombstoned.eq(Utc::now()))
+            .set((
+                dsl::time_tombstoned.eq(Utc::now()),
+                dsl::blueprint_id_when_tombstoned
+                    .eq(to_db_typed_uuid(blueprint_id)),
+            ))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map(|rows_modified| match rows_modified {
@@ -144,7 +150,6 @@ mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::ZpoolUuid;
 
     #[tokio::test]
@@ -222,8 +227,13 @@ mod tests {
         );
 
         // Tombstoning a nonexistent dataset should do nothing.
+        let tombstone_blueprint_id = BlueprintUuid::new_v4();
         let tombstoned = datastore
-            .debug_dataset_tombstone(opctx, dataset.id())
+            .debug_dataset_tombstone(
+                opctx,
+                dataset.id(),
+                tombstone_blueprint_id,
+            )
             .await
             .expect("query succeeded");
         assert!(!tombstoned);
@@ -242,7 +252,11 @@ mod tests {
         // Tombstoning it should now succeed, and we should see the tombstoned
         // version when listing all datasets.
         let tombstoned = datastore
-            .debug_dataset_tombstone(opctx, dataset.id())
+            .debug_dataset_tombstone(
+                opctx,
+                dataset.id(),
+                tombstone_blueprint_id,
+            )
             .await
             .expect("query succeeded");
         assert!(tombstoned);
@@ -252,8 +266,12 @@ mod tests {
         assert_eq!(all_datasets[0].id(), dataset.id());
         assert_eq!(all_datasets[0].pool_id(), dataset.pool_id());
         assert_eq!(
-            all_datasets[0].blueprint_id_when_recorded(),
-            dataset.blueprint_id_when_recorded()
+            all_datasets[0].blueprint_id_when_created(),
+            dataset.blueprint_id_when_created()
+        );
+        assert_eq!(
+            all_datasets[0].blueprint_id_when_tombstoned(),
+            Some(tombstone_blueprint_id)
         );
         assert!(all_datasets[0].is_tombstoned());
 

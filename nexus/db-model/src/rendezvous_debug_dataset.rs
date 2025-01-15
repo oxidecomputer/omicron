@@ -30,7 +30,8 @@ pub struct RendezvousDebugDataset {
     time_created: DateTime<Utc>,
     time_tombstoned: Option<DateTime<Utc>>,
     pool_id: DbTypedUuid<ZpoolKind>,
-    blueprint_id_when_recorded: DbTypedUuid<BlueprintKind>,
+    blueprint_id_when_created: DbTypedUuid<BlueprintKind>,
+    blueprint_id_when_tombstoned: Option<DbTypedUuid<BlueprintKind>>,
 }
 
 impl RendezvousDebugDataset {
@@ -44,7 +45,8 @@ impl RendezvousDebugDataset {
             time_created: Utc::now(),
             time_tombstoned: None,
             pool_id: pool_id.into(),
-            blueprint_id_when_recorded: blueprint_id.into(),
+            blueprint_id_when_created: blueprint_id.into(),
+            blueprint_id_when_tombstoned: None,
         }
     }
 
@@ -56,11 +58,22 @@ impl RendezvousDebugDataset {
         self.pool_id.into()
     }
 
-    pub fn blueprint_id_when_recorded(&self) -> BlueprintUuid {
-        self.blueprint_id_when_recorded.into()
+    pub fn blueprint_id_when_created(&self) -> BlueprintUuid {
+        self.blueprint_id_when_created.into()
+    }
+
+    pub fn blueprint_id_when_tombstoned(&self) -> Option<BlueprintUuid> {
+        self.blueprint_id_when_tombstoned.map(From::from)
     }
 
     pub fn is_tombstoned(&self) -> bool {
+        // A CHECK constraint in the schema guarantees both the `*_tombstoned`
+        // fields are set or not set; document that check here with an
+        // assertion.
+        debug_assert_eq!(
+            self.time_tombstoned.is_some(),
+            self.blueprint_id_when_tombstoned.is_some()
+        );
         self.time_tombstoned.is_some()
     }
 }

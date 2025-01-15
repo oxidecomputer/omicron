@@ -4063,17 +4063,37 @@ CREATE TABLE IF NOT EXISTS omicron.public.rendezvous_debug_dataset (
     pool_id UUID NOT NULL,
 
     /*
-     * ID of the target blueprint from which this row was inserted.
+     * ID of the target blueprint the Reconfigurator reconciliation RPW was
+     * acting on when this row was created.
      *
-     * Rows are added to this table when the Reconfigurator reconciliation
-     * background task sees (a) an in-service debug dataset in the current
-     * target blueprint and (b) a report from an inventory collection that that
-     * dataset has been created on a sled. Recording the inventory collection is
-     * not particularly useful, as they age off quickly, but we do record the
-     * blueprint ID that was the target at the point at which this row was
-     * added.
+     * In practice, this will often be the same blueprint ID in which this
+     * dataset was added, but it's not guaranteed to be (it could be any
+     * descendent blueprint in which this dataset is still in service).
      */
-    blueprint_id_when_recorded UUID NOT NULL
+    blueprint_id_when_created UUID NOT NULL,
+
+    /*
+     * ID of the target blueprint the Reconfigurator reconciliation RPW was
+     * acting on when this row was tombstoned.
+     *
+     * In practice, this will often be the same blueprint ID in which this
+     * dataset was expunged, but it's not guaranteed to be (it could be any
+     * descendent blueprint in which this dataset is expunged and not yet
+     * pruned).
+     */
+    blueprint_id_when_tombstoned UUID,
+
+    /*
+     * Either both `*_tombstoned` columns should be set (if this row has been
+     * tombstoned) or neither should (if it has not).
+     */
+    CONSTRAINT tombstoned_consistency CHECK (
+        (time_tombstoned IS NULL
+            AND blueprint_id_when_tombstoned IS NULL)
+        OR
+        (time_tombstoned IS NOT NULL
+            AND blueprint_id_when_tombstoned IS NOT NULL)
+    )
 );
 
 /* Add an index which lets us find usable debug datasets */
