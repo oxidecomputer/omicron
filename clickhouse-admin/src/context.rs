@@ -3,8 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{ClickhouseCli, Clickward};
+
+use anyhow::{anyhow, bail, Result};
 use camino::Utf8PathBuf;
 use clickhouse_admin_types::{
+    CLICKHOUSE_KEEPER_CONFIG_DIR, CLICKHOUSE_KEEPER_CONFIG_FILE,
     CLICKHOUSE_SERVER_CONFIG_DIR, CLICKHOUSE_SERVER_CONFIG_FILE,
 };
 use omicron_common::address::CLICKHOUSE_TCP_PORT;
@@ -31,9 +34,11 @@ impl KeeperServerContext {
             .log
             .new(slog::o!("component" => "KeeperServerContext"));
         let clickward = Clickward::new();
-        // TODO: Read configuration file to retrieve generation
-        // number if it already exists.
-        let generation = None;
+        let config_path = Utf8PathBuf::from_str(CLICKHOUSE_KEEPER_CONFIG_DIR)
+            .unwrap()
+            .join(CLICKHOUSE_KEEPER_CONFIG_FILE);
+        // TODO: handle error
+        let generation = read_generation_from_file(config_path).unwrap();
         Self { clickward, clickhouse_cli, log, generation }
     }
 
@@ -59,6 +64,7 @@ impl KeeperServerContext {
     }
 }
 
+// TODO: Create a separate context for single node. That one won't have a gen number
 pub struct ServerContext {
     clickhouse_cli: ClickhouseCli,
     clickward: Clickward,
@@ -69,6 +75,8 @@ pub struct ServerContext {
 }
 
 impl ServerContext {
+    // TODO: Clean up and build clickhouse_cli inside this function
+    // TODO: Clean up logs
     pub fn new(clickhouse_cli: ClickhouseCli) -> Self {
         let ip = clickhouse_cli.listen_address.ip();
         let address = SocketAddrV6::new(*ip, CLICKHOUSE_TCP_PORT, 0, 0);
@@ -77,12 +85,12 @@ impl ServerContext {
         let clickward = Clickward::new();
         let log =
             clickhouse_cli.log.new(slog::o!("component" => "ServerContext"));
-        // TODO: Read configuration file to retrieve generation
-        // number if it already exists.
-        // TODO: Check that error is file doesn't exist so we can set as None
-        let _directory = Utf8PathBuf::from_str(CLICKHOUSE_SERVER_CONFIG_DIR);
 
-        let generation = None;
+        let config_path = Utf8PathBuf::from_str(CLICKHOUSE_SERVER_CONFIG_DIR)
+            .unwrap()
+            .join(CLICKHOUSE_SERVER_CONFIG_FILE);
+        // TODO: handle error
+        let generation = read_generation_from_file(config_path).unwrap();
         Self {
             clickhouse_cli,
             clickward,
@@ -123,22 +131,55 @@ impl ServerContext {
     }
 }
 
-fn read_generation_from_file(path: Utf8PathBuf) -> Option<Generation> {
-    let file = File::open(path).unwrap();
+fn read_generation_from_file(path: Utf8PathBuf) -> Result<Option<Generation>> {
+    // When the configuration file does not exist yet, this means it's a new server.
+    // It won't have a running clickhouse server and no generation number yet.
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let file = File::open(&path)?;
     let reader = BufReader::new(file);
     // We know the generation number is on the top of the file so we only
     // need the first line.
-    let first_line = reader.lines().next().unwrap().unwrap();
-    let gen = first_line
-        .rsplit(':')
-        .next()
-        .unwrap()
-        .split_terminator(" -->")
-        .next()
-        .unwrap();
-    let gen_int: u64 = gen.parse().unwrap();
+    let first_line = match reader.lines().next() {
+        Some(g) => g?,
+        // When the clickhouse configuration file exists but has no contents,
+        // it means something went wrong when creating the file earlier.
+        // We should return because something is definitely broken.
+        None => bail!(
+            "clickhouse configuration file exists at {}, but is empty",
+            path
+        ),
+    };
 
-    Some(Generation::try_from(gen_int).unwrap())
+    let line_parts: Vec<&str> = first_line.rsplit(':').collect();
+    if line_parts.len() != 2 {
+        bail!("first line of configuration file is malformed: {}", first_line);
+    }
+
+    // It's safe to unwrap since we already know `line_parts` contains two items.
+    let line_end_part: Vec<&str> =
+        line_parts.first().unwrap().split_terminator(" -->").collect();
+    if line_end_part.len() != 1 {
+        bail!("first line of configuration file is malformed: {}", first_line);
+    }
+
+    // It's safe to unwrap since we already know `line_end_part` contains an item.
+    let gen_u64: u64 = line_end_part.first().unwrap().parse().map_err(|e| {
+        anyhow!(
+            concat!(
+                "first line of configuration file is malformed: {}; ",
+                "error = {}",
+            ),
+            first_line,
+            e
+        )
+    })?;
+
+    let gen = Generation::try_from(gen_u64)?;
+
+    Ok(Some(gen))
 }
 
 #[cfg(test)]
@@ -150,12 +191,67 @@ mod tests {
     use std::str::FromStr;
 
     #[test]
-    fn test_read_generation_from_file() {
+    fn test_read_generation_from_file_success() {
         let dir = Utf8PathBuf::from_str("types/testutils")
             .unwrap()
             .join(CLICKHOUSE_SERVER_CONFIG_FILE);
-        let generation = read_generation_from_file(dir).unwrap();
+        let generation = read_generation_from_file(dir).unwrap().unwrap();
 
         assert_eq!(Generation::from(1), generation);
+    }
+
+    #[test]
+    fn test_read_generation_from_file_none() {
+        let dir = Utf8PathBuf::from_str("types/testutils")
+            .unwrap()
+            .join("i-dont-exist.xml");
+        let generation = read_generation_from_file(dir).unwrap();
+
+        assert_eq!(None, generation);
+    }
+
+    #[test]
+    fn test_read_generation_from_file_malformed_1() {
+        let dir = Utf8PathBuf::from_str("types/testutils")
+            .unwrap()
+            .join("malformed_1.xml");
+        let result = read_generation_from_file(dir);
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+            "first line of configuration file is malformed: <clickhouse>"
+        );
+    }
+
+    #[test]
+    fn test_read_generation_from_file_malformed_2() {
+        let dir = Utf8PathBuf::from_str("types/testutils")
+            .unwrap()
+            .join("malformed_2.xml");
+        let result = read_generation_from_file(dir);
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+            "first line of configuration file is malformed: <!-- generation:bob -->; error = invalid digit found in string"
+        );
+    }
+
+    #[test]
+    fn test_read_generation_from_file_malformed_3() {
+        let dir = Utf8PathBuf::from_str("types/testutils")
+            .unwrap()
+            .join("malformed_3.xml");
+        let result = read_generation_from_file(dir);
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+           "first line of configuration file is malformed: <!-- generation:2 --> -->"
+        );
     }
 }
