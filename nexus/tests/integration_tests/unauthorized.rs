@@ -60,7 +60,7 @@ type DiskTest<'a> =
 #[nexus_test]
 async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
     let mut disk_test = DiskTest::new(cptestctx).await;
-    let sled_id = cptestctx.first_sled();
+    let sled_id = cptestctx.first_sled_id();
     disk_test
         .add_zpool_with_dataset_ext(
             sled_id,
