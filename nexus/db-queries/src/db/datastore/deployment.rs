@@ -245,7 +245,7 @@ impl DataStore {
             .blueprint_datasets
             .iter()
             .flat_map(|(sled_id, datasets_config)| {
-                datasets_config.datasets.values().map(move |dataset| {
+                datasets_config.datasets.iter().map(move |dataset| {
                     BpOmicronDataset::new(blueprint_id, *sled_id, dataset)
                 })
             })
@@ -628,7 +628,7 @@ impl DataStore {
                         s.sled_id.into(),
                         BlueprintPhysicalDisksConfig {
                             generation: *s.generation,
-                            disks: Vec::new(),
+                            disks: IdMap::new(),
                         },
                     );
                     bail_unless!(
@@ -672,7 +672,7 @@ impl DataStore {
                         s.sled_id.into(),
                         BlueprintDatasetsConfig {
                             generation: *s.generation,
-                            datasets: BTreeMap::new(),
+                            datasets: IdMap::new(),
                         },
                     );
                     bail_unless!(
@@ -839,7 +839,7 @@ impl DataStore {
                                 d.id, d.sled_id
                             ))
                         })?;
-                    sled_disks.disks.push(d.into());
+                    sled_disks.disks.insert(d.into());
                 }
             }
         }
@@ -883,22 +883,16 @@ impl DataStore {
                         })?;
 
                     let dataset_id = d.id;
-                    sled_datasets.datasets.insert(
-                        dataset_id.into(),
-                        d.try_into().map_err(|e| {
+                    sled_datasets.datasets.insert(d.try_into().map_err(
+                        |e| {
                             Error::internal_error(&format!(
                                 "Cannot parse dataset {}: {e}",
                                 dataset_id
                             ))
-                        })?,
-                    );
+                        },
+                    )?);
                 }
             }
-        }
-
-        // Sort all disks to match what blueprint builders do.
-        for (_, disks_config) in blueprint_disks.iter_mut() {
-            disks_config.disks.sort_unstable_by_key(|d| d.id);
         }
 
         // Load our `ClickhouseClusterConfig` if it exists

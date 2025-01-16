@@ -250,7 +250,7 @@ mod test {
         fn make_disks() -> BlueprintPhysicalDisksConfig {
             BlueprintPhysicalDisksConfig {
                 generation: Generation::new().next(),
-                disks: vec![BlueprintPhysicalDiskConfig {
+                disks: [BlueprintPhysicalDiskConfig {
                     disposition: BlueprintPhysicalDiskDisposition::InService,
                     identity: DiskIdentity {
                         vendor: "test-vendor".to_string(),
@@ -259,7 +259,9 @@ mod test {
                     },
                     id: PhysicalDiskUuid::new_v4(),
                     pool_id: ZpoolUuid::new_v4(),
-                }],
+                }]
+                .into_iter()
+                .collect(),
             }
         }
 

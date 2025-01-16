@@ -271,6 +271,7 @@ impl_dyn_authorized_resource_for_resource!(authz::SiloUser);
 impl_dyn_authorized_resource_for_resource!(authz::Sled);
 impl_dyn_authorized_resource_for_resource!(authz::Snapshot);
 impl_dyn_authorized_resource_for_resource!(authz::SshKey);
+impl_dyn_authorized_resource_for_resource!(authz::SupportBundle);
 impl_dyn_authorized_resource_for_resource!(authz::TufArtifact);
 impl_dyn_authorized_resource_for_resource!(authz::TufRepo);
 impl_dyn_authorized_resource_for_resource!(authz::Vpc);

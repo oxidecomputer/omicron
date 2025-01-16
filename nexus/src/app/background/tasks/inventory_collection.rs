@@ -378,7 +378,7 @@ mod test {
         assert!(!latest_collectors.contains("disabled"));
     }
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_db_sled_enumerator(cptestctx: &ControlPlaneTestContext) {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();

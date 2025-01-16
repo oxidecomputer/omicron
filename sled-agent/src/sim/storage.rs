@@ -1312,6 +1312,11 @@ impl StorageInner {
             .map(|config| config.name.clone())
             .collect();
         for dataset in &dataset_names {
+            // Datasets delegated to zones manage their own storage.
+            if dataset.kind().zoned() {
+                continue;
+            }
+
             let root = self.root().to_path_buf();
             self.nested_datasets.entry(dataset.clone()).or_insert_with(|| {
                 NestedDatasetStorage::new(

@@ -2090,10 +2090,7 @@
         "type": "object",
         "properties": {
           "datasets": {
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/BlueprintDatasetConfig"
-            }
+            "$ref": "#/components/schemas/IdMapBlueprintDatasetConfig"
           },
           "generation": {
             "$ref": "#/components/schemas/Generation"
@@ -2247,10 +2244,7 @@
         "type": "object",
         "properties": {
           "disks": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BlueprintPhysicalDiskConfig"
-            }
+            "$ref": "#/components/schemas/IdMapBlueprintPhysicalDiskConfig"
           },
           "generation": {
             "$ref": "#/components/schemas/Generation"
@@ -3755,6 +3749,18 @@
         "type": "integer",
         "format": "uint8",
         "minimum": 0
+      },
+      "IdMapBlueprintDatasetConfig": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/BlueprintDatasetConfig"
+        }
+      },
+      "IdMapBlueprintPhysicalDiskConfig": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/BlueprintPhysicalDiskConfig"
+        }
       },
       "IdMapBlueprintZoneConfig": {
         "type": "object",

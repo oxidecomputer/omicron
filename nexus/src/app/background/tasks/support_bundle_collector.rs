@@ -14,12 +14,16 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::SledFilter;
 use nexus_types::identity::Asset;
+use nexus_types::internal_api::background::SupportBundleCleanupReport;
+use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::DatasetUuid;
@@ -28,7 +32,6 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use serde::Serialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::io::Write;
@@ -43,24 +46,19 @@ use zip::ZipWriter;
 // rather than "/tmp", which would keep this collected data in-memory.
 const TEMPDIR: &str = "/var/tmp";
 
+fn authz_support_bundle_from_id(id: SupportBundleUuid) -> authz::SupportBundle {
+    authz::SupportBundle::new(
+        authz::FLEET,
+        id,
+        LookupType::ById(id.into_untyped_uuid()),
+    )
+}
+
 // Specifies the data to be collected within the Support Bundle.
 #[derive(Default)]
 struct BundleRequest {
     // If "false": Skip collecting host-specific info from each sled.
     skip_sled_info: bool,
-}
-
-// Describes what happened while attempting to clean up Support Bundles.
-#[derive(Debug, Default, Serialize, Eq, PartialEq)]
-struct CleanupReport {
-    // Responses from Sled Agents
-    sled_bundles_deleted_ok: usize,
-    sled_bundles_deleted_not_found: usize,
-    sled_bundles_delete_failed: usize,
-
-    // Results from updating our database records
-    db_destroying_bundles_removed: usize,
-    db_failing_bundles_updated: usize,
 }
 
 // Result of asking a sled agent to clean up a bundle
@@ -154,13 +152,14 @@ impl SupportBundleCollector {
         opctx: &OpContext,
         bundle: &SupportBundle,
     ) -> anyhow::Result<DatabaseBundleCleanupResult> {
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         match bundle.state {
             SupportBundleState::Destroying => {
                 // Destroying is a terminal state; no one should be able to
                 // change this state from underneath us.
                 self.datastore.support_bundle_delete(
                     opctx,
-                    bundle.id.into(),
+                    &authz_bundle,
                 ).await.map_err(|err| {
                     warn!(
                         &opctx.log,
@@ -179,7 +178,7 @@ impl SupportBundleCollector {
                     .datastore
                     .support_bundle_update(
                         &opctx,
-                        bundle.id.into(),
+                        &authz_bundle,
                         SupportBundleState::Failed,
                     )
                     .await
@@ -232,7 +231,7 @@ impl SupportBundleCollector {
     async fn cleanup_destroyed_bundles(
         &self,
         opctx: &OpContext,
-    ) -> anyhow::Result<CleanupReport> {
+    ) -> anyhow::Result<SupportBundleCleanupReport> {
         let pagparams = DataPageParams::max_page();
         let result = self
             .datastore
@@ -259,7 +258,7 @@ impl SupportBundleCollector {
             }
         };
 
-        let mut report = CleanupReport::default();
+        let mut report = SupportBundleCleanupReport::default();
 
         // NOTE: This could be concurrent, but the priority for that also seems low
         for bundle in bundles_to_destroy {
@@ -332,7 +331,7 @@ impl SupportBundleCollector {
         &self,
         opctx: &OpContext,
         request: &BundleRequest,
-    ) -> anyhow::Result<Option<CollectionReport>> {
+    ) -> anyhow::Result<Option<SupportBundleCollectionReport>> {
         let pagparams = DataPageParams::max_page();
         let result = self
             .datastore
@@ -377,12 +376,13 @@ impl SupportBundleCollector {
             bundle: &bundle,
         };
 
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         let mut report = collection.collect_bundle_and_store_on_sled().await?;
         if let Err(err) = self
             .datastore
             .support_bundle_update(
                 &opctx,
-                bundle.id.into(),
+                &authz_bundle,
                 SupportBundleState::Active,
             )
             .await
@@ -425,7 +425,7 @@ impl BundleCollection<'_> {
     // Collect the bundle within Nexus, and store it on a target sled.
     async fn collect_bundle_and_store_on_sled(
         &self,
-    ) -> anyhow::Result<CollectionReport> {
+    ) -> anyhow::Result<SupportBundleCollectionReport> {
         // Create a temporary directory where we'll store the support bundle
         // as it's being collected.
         let dir = tempdir_in(TEMPDIR)?;
@@ -530,8 +530,8 @@ impl BundleCollection<'_> {
     // - "bundle" is metadata about the bundle being collected.
     //
     // If a partial bundle can be collected, it should be returned as
-    // an Ok(CollectionReport). Any failures from this function will prevent
-    // the support bundle from being collected altogether.
+    // an Ok(SupportBundleCollectionReport). Any failures from this function
+    // will prevent the support bundle from being collected altogether.
     //
     // NOTE: The background task infrastructure will periodically check to see
     // if the bundle has been cancelled by a user while it is being collected.
@@ -542,11 +542,12 @@ impl BundleCollection<'_> {
     async fn collect_bundle_as_file(
         &self,
         dir: &Utf8TempDir,
-    ) -> anyhow::Result<CollectionReport> {
+    ) -> anyhow::Result<SupportBundleCollectionReport> {
         let log = &self.log;
 
         info!(&log, "Collecting bundle as local file");
-        let mut report = CollectionReport::new(self.bundle.id.into());
+        let mut report =
+            SupportBundleCollectionReport::new(self.bundle.id.into());
 
         tokio::fs::write(
             dir.path().join("bundle_id.txt"),
@@ -727,30 +728,6 @@ async fn sha2_hash(file: &mut tokio::fs::File) -> anyhow::Result<ArtifactHash> {
     Ok(ArtifactHash(digest.as_slice().try_into()?))
 }
 
-// Identifies what we could or could not store within this support bundle.
-//
-// This struct will get emitted as part of the background task infrastructure.
-#[derive(Debug, Serialize, PartialEq, Eq)]
-struct CollectionReport {
-    bundle: SupportBundleUuid,
-
-    // True iff we could list in-service sleds
-    listed_in_service_sleds: bool,
-
-    // True iff the bundle was successfully made 'active' in the database.
-    activated_in_db_ok: bool,
-}
-
-impl CollectionReport {
-    fn new(bundle: SupportBundleUuid) -> Self {
-        Self {
-            bundle,
-            listed_in_service_sleds: false,
-            activated_in_db_ok: false,
-        }
-    }
-}
-
 async fn write_command_result_or_error<D: std::fmt::Debug>(
     path: &Utf8Path,
     command: &str,
@@ -845,7 +822,7 @@ mod test {
             .await
             .expect("Cleanup should succeed with no work to do");
 
-        assert_eq!(report, CleanupReport::default());
+        assert_eq!(report, SupportBundleCleanupReport::default());
     }
 
     // If there are no bundles in need of collection, the collection task should
@@ -950,7 +927,7 @@ mod test {
                 //
                 // (We could do this via HTTP request, but it's in the test process,
                 // so we can just directly call the method on the sled agent)
-                cptestctx.sled_agent.sled_agent.create_zpool(
+                cptestctx.first_sled_agent().create_zpool(
                     zpool_id,
                     disk_id,
                     1 << 40,
@@ -980,8 +957,7 @@ mod test {
                 DatasetsConfig { generation: Generation::new(), datasets };
 
             let res = cptestctx
-                .sled_agent
-                .sled_agent
+                .first_sled_agent()
                 .datasets_ensure(dataset_config)
                 .unwrap();
             assert!(!res.has_error());
@@ -1144,10 +1120,11 @@ mod test {
         assert_eq!(bundle.state, SupportBundleState::Collecting);
 
         // Cancel the bundle immediately
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         datastore
             .support_bundle_update(
                 &opctx,
-                bundle.id.into(),
+                &authz_bundle,
                 SupportBundleState::Destroying,
             )
             .await
@@ -1162,7 +1139,7 @@ mod test {
             .expect("Cleanup should succeed with no work to do");
         assert_eq!(
             report,
-            CleanupReport {
+            SupportBundleCleanupReport {
                 // Nothing was provisioned on the sled, since we hadn't started
                 // collection yet.
                 sled_bundles_deleted_not_found: 1,
@@ -1209,10 +1186,11 @@ mod test {
         assert!(report.activated_in_db_ok);
 
         // Cancel the bundle after collection has completed
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         datastore
             .support_bundle_update(
                 &opctx,
-                bundle.id.into(),
+                &authz_bundle,
                 SupportBundleState::Destroying,
             )
             .await
@@ -1226,7 +1204,7 @@ mod test {
             .expect("Cleanup should succeed with no work to do");
         assert_eq!(
             report,
-            CleanupReport {
+            SupportBundleCleanupReport {
                 // Nothing was provisioned on the sled, since we hadn't started
                 // collection yet.
                 sled_bundles_deleted_ok: 1,
@@ -1264,10 +1242,11 @@ mod test {
         // Mark the bundle as "failing" - this should be triggered
         // automatically by the blueprint executor if the corresponding
         // storage has been expunged.
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         datastore
             .support_bundle_update(
                 &opctx,
-                bundle.id.into(),
+                &authz_bundle,
                 SupportBundleState::Failing,
             )
             .await
@@ -1282,7 +1261,7 @@ mod test {
             .expect("Cleanup should delete failing bundle");
         assert_eq!(
             report,
-            CleanupReport {
+            SupportBundleCleanupReport {
                 // Nothing was provisioned on the sled, since we hadn't started
                 // collection yet.
                 sled_bundles_deleted_not_found: 1,
@@ -1332,10 +1311,11 @@ mod test {
         // Mark the bundle as "failing" - this should be triggered
         // automatically by the blueprint executor if the corresponding
         // storage has been expunged.
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         datastore
             .support_bundle_update(
                 &opctx,
-                bundle.id.into(),
+                &authz_bundle,
                 SupportBundleState::Failing,
             )
             .await
@@ -1349,7 +1329,7 @@ mod test {
             .expect("Cleanup should delete failing bundle");
         assert_eq!(
             report,
-            CleanupReport {
+            SupportBundleCleanupReport {
                 // The bundle was provisioned on the sled, so we should have
                 // successfully removed it when we later talk to the sled.
                 //
@@ -1405,10 +1385,11 @@ mod test {
         // Mark the bundle as "failing" - this should be triggered
         // automatically by the blueprint executor if the corresponding
         // storage has been expunged.
+        let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         datastore
             .support_bundle_update(
                 &opctx,
-                bundle.id.into(),
+                &authz_bundle,
                 SupportBundleState::Failing,
             )
             .await
@@ -1430,7 +1411,7 @@ mod test {
             .expect("Cleanup should delete failing bundle");
         assert_eq!(
             report,
-            CleanupReport {
+            SupportBundleCleanupReport {
                 // The database state was "failing", and now it's updated.
                 //
                 // Note that it isn't immediately deleted, so the end-user

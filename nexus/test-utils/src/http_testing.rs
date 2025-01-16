@@ -246,6 +246,20 @@ impl<'a> RequestBuilder<'a> {
         self
     }
 
+    /// Tells the requst to expect headers related to range requests
+    pub fn expect_range_requestable(mut self) -> Self {
+        self.allowed_headers.as_mut().unwrap().extend([
+            http::header::CONTENT_LENGTH,
+            http::header::CONTENT_TYPE,
+            http::header::ACCEPT_RANGES,
+        ]);
+        self.expect_response_header(
+            http::header::CONTENT_TYPE,
+            "application/zip",
+        )
+        .expect_response_header(http::header::ACCEPT_RANGES, "bytes")
+    }
+
     /// Tells the request to initiate and expect a WebSocket upgrade handshake.
     /// This also sets the request method to GET.
     pub fn expect_websocket_handshake(mut self) -> Self {
@@ -306,7 +320,7 @@ impl<'a> RequestBuilder<'a> {
         }
 
         let mut builder =
-            http::Request::builder().method(self.method).uri(self.uri);
+            http::Request::builder().method(self.method.clone()).uri(self.uri);
         for (header_name, header_value) in &self.headers {
             builder = builder.header(header_name, header_value);
         }
@@ -460,6 +474,7 @@ impl<'a> RequestBuilder<'a> {
         };
         if (status.is_client_error() || status.is_server_error())
             && !self.allow_non_dropshot_errors
+            && self.method != http::Method::HEAD
         {
             let error_body = test_response
                 .parsed_body::<dropshot::HttpErrorResponseBody>()

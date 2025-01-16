@@ -75,6 +75,7 @@ async fn test_oximeter_database_records(context: &ControlPlaneTestContext) {
 async fn test_oximeter_reregistration() {
     let mut context = nexus_test_utils::test_setup::<omicron_nexus::Server>(
         "test_oximeter_reregistration",
+        0,
     )
     .await;
     let db = &context.database;

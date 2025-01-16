@@ -30,7 +30,6 @@ use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
-use nexus_types::external_api::views::SledProvisionPolicy;
 use nexus_types::internal_api::params::{
     PhysicalDiskPutRequest, ZpoolPutRequest,
 };
@@ -41,6 +40,7 @@ use omicron_common::api::internal::nexus::{ProducerEndpoint, ProducerKind};
 use omicron_common::api::internal::shared::{
     AllowedSourceIps, ExternalPortDiscovery, RackNetworkConfig, SwitchLocation,
 };
+use omicron_common::disk::DatasetKind;
 use omicron_common::FileKv;
 use omicron_uuid_kinds::DatasetUuid;
 use oximeter::types::ProducerRegistry;
@@ -49,7 +49,6 @@ use slog::Logger;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
-use uuid::Uuid;
 
 #[macro_use]
 extern crate slog;
@@ -257,7 +256,6 @@ impl nexus_test_interface::NexusServer for Server {
         external_dns_zone_name: &str,
         recovery_silo: nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
         certs: Vec<omicron_common::api::internal::nexus::Certificate>,
-        disable_sled_id: Uuid,
     ) -> Self {
         // Perform the "handoff from RSS".
         //
@@ -332,25 +330,7 @@ impl nexus_test_interface::NexusServer for Server {
             .expect("Could not initialize rack");
 
         // Start the Nexus external API.
-        let rv = Server::start(internal_server).await.unwrap();
-
-        // Historically, tests have assumed that there's only one provisionable
-        // sled, and that's convenient for a lot of purposes.  Mark our second
-        // sled non-provisionable.
-        let nexus = &rv.server_context().nexus;
-        nexus
-            .sled_set_provision_policy(
-                &opctx,
-                &nexus_db_queries::db::lookup::LookupPath::new(
-                    &opctx,
-                    nexus.datastore(),
-                )
-                .sled_id(disable_sled_id),
-                SledProvisionPolicy::NonProvisionable,
-            )
-            .await
-            .unwrap();
-        rv
+        Server::start(internal_server).await.unwrap()
     }
 
     async fn get_http_server_external_address(&self) -> SocketAddr {
@@ -365,18 +345,19 @@ impl nexus_test_interface::NexusServer for Server {
         self.apictx.context.nexus.get_internal_server_address().await.unwrap()
     }
 
-    async fn upsert_crucible_dataset(
+    async fn upsert_test_dataset(
         &self,
         physical_disk: PhysicalDiskPutRequest,
         zpool: ZpoolPutRequest,
         dataset_id: DatasetUuid,
-        address: SocketAddrV6,
+        kind: DatasetKind,
+        address: Option<SocketAddrV6>,
     ) {
         let opctx = self.apictx.context.nexus.opctx_for_internal_api();
         self.apictx
             .context
             .nexus
-            .upsert_physical_disk(&opctx, physical_disk)
+            .insert_test_physical_disk_if_not_exists(&opctx, physical_disk)
             .await
             .unwrap();
 
@@ -387,7 +368,7 @@ impl nexus_test_interface::NexusServer for Server {
         self.apictx
             .context
             .nexus
-            .upsert_crucible_dataset(dataset_id, zpool_id, address)
+            .upsert_dataset(dataset_id, zpool_id, kind, address)
             .await
             .unwrap();
     }

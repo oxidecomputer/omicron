@@ -257,6 +257,18 @@ fn redact_basic(input: &str) -> String {
         .replace_all(&s, "<REDACTED_DURATION>m")
         .to_string();
 
+    // Replace interval (h).
+    let s = regex::Regex::new(r"\d+h")
+        .unwrap()
+        .replace_all(&s, "<REDACTED_DURATION>h")
+        .to_string();
+
+    // Replace interval (days).
+    let s = regex::Regex::new(r"\d+days")
+        .unwrap()
+        .replace_all(&s, "<REDACTED_DURATION>days")
+        .to_string();
+
     let s = regex::Regex::new(
         r"note: database schema version matches expected \(\d+\.\d+\.\d+\)",
     )
