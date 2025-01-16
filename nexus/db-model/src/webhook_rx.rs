@@ -12,13 +12,60 @@ use crate::Generation;
 use crate::WebhookDelivery;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
+use nexus_types::external_api::views;
 use omicron_common::api::external::Error;
-use omicron_uuid_kinds::{WebhookReceiverKind, WebhookReceiverUuid};
+use omicron_uuid_kinds::{
+    WebhookReceiverKind, WebhookReceiverUuid, WebhookSecretKind,
+    WebhookSecretUuid,
+};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use uuid::Uuid;
 
-/// A webhook receiver configuration.
+/// The full configuration of a webhook receiver, including the
+/// [`WebhookReceiver`] itself and its subscriptions and secrets.
+pub struct WebhookReceiverConfig {
+    pub rx: WebhookReceiver,
+    pub secrets: Vec<WebhookRxSecret>,
+    pub events: Vec<WebhookSubscriptionKind>,
+}
+
+impl TryFrom<WebhookReceiverConfig> for views::Webhook {
+    type Error = Error;
+    fn try_from(
+        WebhookReceiverConfig { rx, secrets, events }: WebhookReceiverConfig,
+    ) -> Result<views::Webhook, Self::Error> {
+        let secrets = secrets
+            .iter()
+            .map(|WebhookRxSecret { signature_id, .. }| {
+                views::WebhookSecretId { id: signature_id.to_string() }
+            })
+            .collect();
+        let events = events
+            .into_iter()
+            .map(WebhookSubscriptionKind::into_event_class_string)
+            .collect();
+        let WebhookReceiver { identity, endpoint, probes_enabled, rcgen: _ } =
+            rx;
+        let WebhookReceiverIdentity { id, name, description, .. } = identity;
+        let endpoint = endpoint.parse().map_err(|e| Error::InternalError {
+            // This is an internal error, as we should not have ever allowed
+            // an invalid URL to be inserted into the database...
+            internal_message: format!("invalid webhook URL {endpoint:?}: {e}",),
+        })?;
+        Ok(views::Webhook {
+            id: id.into(),
+            name: name.to_string(),
+            description,
+            endpoint,
+            secrets,
+            events,
+            disable_probes: !probes_enabled,
+        })
+    }
+}
+
+/// A row in the `webhook_rx` table.
 #[derive(
     Clone,
     Debug,
@@ -78,10 +125,22 @@ impl DatastoreCollectionConfig<WebhookDelivery> for WebhookReceiver {
 #[diesel(table_name = webhook_rx_secret)]
 pub struct WebhookRxSecret {
     pub rx_id: DbTypedUuid<WebhookReceiverKind>,
-    pub signature_id: String,
-    pub secret: Vec<u8>,
+    pub signature_id: DbTypedUuid<WebhookSecretKind>,
+    pub secret: String,
     pub time_created: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
+}
+
+impl WebhookRxSecret {
+    pub fn new(rx_id: WebhookReceiverUuid, secret: String) -> Self {
+        Self {
+            rx_id: rx_id.into(),
+            signature_id: WebhookSecretUuid::new_v4().into(),
+            secret,
+            time_created: Utc::now(),
+            time_deleted: None,
+        }
+    }
 }
 
 #[derive(
@@ -130,6 +189,13 @@ impl WebhookSubscriptionKind {
             Ok(Self::Glob(WebhookGlob { regex, glob: value }))
         } else {
             Ok(Self::Exact(value))
+        }
+    }
+
+    fn into_event_class_string(self) -> String {
+        match self {
+            Self::Exact(class) => class,
+            Self::Glob(WebhookGlob { glob, .. }) => glob,
         }
     }
 }
