@@ -6,6 +6,7 @@
 //!
 //! Modelled after [`syn::visit`](https://docs.rs/syn/1/syn/visit).
 
+pub mod visit_blueprint;
 pub mod visit_blueprint_datasets_config;
 pub mod visit_blueprint_physical_disks_config;
 pub mod visit_blueprint_zones_config;
