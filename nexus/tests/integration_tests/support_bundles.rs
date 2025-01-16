@@ -342,7 +342,7 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     let mut disk_test = DiskTest::new(&cptestctx).await;
 
     // We really care about just "getting a debug dataset" here.
-    let sled_id = cptestctx.first_sled();
+    let sled_id = cptestctx.first_sled_id();
     disk_test
         .add_zpool_with_dataset_ext(
             sled_id,

@@ -644,7 +644,7 @@ async fn test_instance_start_creates_networking_state(
     let mut sled_agents: Vec<&Arc<SledAgent>> =
         additional_sleds.iter().map(|x| &x.sled_agent).collect();
 
-    sled_agents.push(&cptestctx.sled_agent.sled_agent);
+    sled_agents.push(&cptestctx.first_sled_agent());
     for agent in &sled_agents {
         agent.v2p_mappings.lock().unwrap().clear();
     }
@@ -1004,13 +1004,13 @@ async fn test_instance_migrate_v2p_and_routes(
         .expect("running instance should have a sled")
         .sled_id;
 
-    let mut sled_agents = vec![cptestctx.sled_agent.sled_agent.clone()];
+    let mut sled_agents = vec![cptestctx.first_sled_agent().clone()];
     sled_agents.extend(other_sleds.iter().map(|tup| tup.1.sled_agent.clone()));
     for sled_agent in &sled_agents {
         assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni).await;
     }
 
-    let testctx_sled_id = cptestctx.sled_agent.sled_agent.id;
+    let testctx_sled_id = cptestctx.first_sled_agent().id;
     let dst_sled_id = if original_sled_id == testctx_sled_id {
         other_sleds[0].0
     } else {
@@ -1462,7 +1462,7 @@ async fn test_instances_are_not_marked_failed_on_other_sled_agent_errors(
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
-    let sled_agent = &cptestctx.sled_agent.sled_agent;
+    let sled_agent = cptestctx.first_sled_agent();
     sled_agent
         .set_instance_ensure_state_error(Some(
             omicron_common::api::external::Error::internal_error(
@@ -1506,7 +1506,7 @@ async fn test_instances_are_not_marked_failed_on_other_sled_agent_errors_by_inst
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
-    let sled_agent = &cptestctx.sled_agent.sled_agent;
+    let sled_agent = cptestctx.first_sled_agent();
     sled_agent
         .set_instance_ensure_state_error(Some(
             omicron_common::api::external::Error::internal_error(
@@ -1566,7 +1566,7 @@ async fn make_forgotten_instance(
         .unwrap()
         .expect("running instance must be on a sled")
         .propolis_id;
-    let sled_agent = &cptestctx.sled_agent.sled_agent;
+    let sled_agent = cptestctx.first_sled_agent();
     sled_agent
         .instance_unregister(vmm_id)
         .await
@@ -4998,8 +4998,7 @@ async fn test_instance_create_with_ssh_keys(
     let instance_name = "ssh-keys";
 
     cptestctx
-        .sled_agent
-        .sled_agent
+        .first_sled_agent()
         .start_local_mock_propolis_server(&cptestctx.logctx.log)
         .await
         .unwrap();
@@ -5425,8 +5424,7 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     let instance_name = "kris-picks";
 
     let propolis_addr = cptestctx
-        .sled_agent
-        .sled_agent
+        .first_sled_agent()
         .start_local_mock_propolis_server(&cptestctx.logctx.log)
         .await
         .unwrap();
@@ -6229,7 +6227,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
 
     let mut sled_agents: Vec<&Arc<SledAgent>> =
         additional_sleds.iter().map(|x| &x.sled_agent).collect();
-    sled_agents.push(&cptestctx.sled_agent.sled_agent);
+    sled_agents.push(&cptestctx.first_sled_agent());
 
     for sled_agent in &sled_agents {
         assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni).await;

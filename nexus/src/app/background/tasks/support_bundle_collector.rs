@@ -963,7 +963,7 @@ mod test {
                 //
                 // (We could do this via HTTP request, but it's in the test process,
                 // so we can just directly call the method on the sled agent)
-                cptestctx.sled_agent.sled_agent.create_zpool(
+                cptestctx.first_sled_agent().create_zpool(
                     zpool_id,
                     disk_id,
                     1 << 40,
@@ -993,8 +993,7 @@ mod test {
                 DatasetsConfig { generation: Generation::new(), datasets };
 
             let res = cptestctx
-                .sled_agent
-                .sled_agent
+                .first_sled_agent()
                 .datasets_ensure(dataset_config)
                 .unwrap();
             assert!(!res.has_error());

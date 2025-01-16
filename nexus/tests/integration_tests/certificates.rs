@@ -350,6 +350,7 @@ async fn test_silo_certificates() {
             &mut config,
             omicron_sled_agent::sim::SimMode::Explicit,
             Some(silo1.cert.clone()),
+            0,
         )
         .await
     };

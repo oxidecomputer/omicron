@@ -13,8 +13,9 @@ use omicron_test_utils::dev;
 // Benchmark how long an "empty test" would take.
 async fn do_full_setup() {
     let ctx =
-        nexus_test_utils::test_setup::<omicron_nexus::Server>("full_setup")
+        nexus_test_utils::test_setup::<omicron_nexus::Server>("full_setup", 0)
             .await;
+
     ctx.teardown().await;
 }
 
