@@ -2147,8 +2147,8 @@ table! {
 table! {
     webhook_rx_secret (rx_id, signature_id) {
         rx_id -> Uuid,
-        signature_id -> Text,
-        secret -> Binary,
+        signature_id -> Uuid,
+        secret -> Text,
         time_created -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
     }

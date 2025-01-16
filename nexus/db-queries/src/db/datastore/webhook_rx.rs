@@ -14,6 +14,7 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::Generation;
 use crate::db::model::WebhookReceiver;
+use crate::db::model::WebhookReceiverConfig;
 use crate::db::model::WebhookReceiverIdentity;
 use crate::db::model::WebhookRxEventGlob;
 use crate::db::model::WebhookRxSecret;
@@ -41,7 +42,7 @@ impl DataStore {
         opctx: &OpContext,
         params: params::WebhookCreate,
         event_classes: &[&str],
-    ) -> CreateResult<WebhookReceiver> {
+    ) -> CreateResult<WebhookReceiverConfig> {
         // TODO(eliza): someday we gotta allow creating webhooks with more
         // restrictive permissions...
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
@@ -59,9 +60,8 @@ impl DataStore {
             .into_iter()
             .map(WebhookSubscriptionKind::new)
             .collect::<Result<Vec<_>, _>>()?;
-
         let err = OptionalError::new();
-        let rx = self
+        let (rx, secrets) = self
             .transaction_retry_wrapper("webhook_rx_create")
             .transaction(&conn, |conn| {
                 // make a fresh UUID for each transaction, in case the
@@ -79,6 +79,7 @@ impl DataStore {
                     rcgen: Generation::new(),
                 };
                 let subscriptions = subscriptions.clone();
+                let secret_keys = secrets.clone();
                 let err = err.clone();
                 async move {
                     let rx = diesel::insert_into(rx_dsl::webhook_rx)
@@ -100,8 +101,21 @@ impl DataStore {
                             TransactionError::Database(e) => e,
                         })?;
                     }
-                    // TODO(eliza): secrets?
-                    Ok(rx)
+                    let mut secrets = Vec::with_capacity(secret_keys.len());
+                    for secret in secret_keys {
+                        let secret = self
+                            .add_secret_on_conn(
+                                WebhookRxSecret::new(id, secret),
+                                &conn,
+                            )
+                            .await
+                            .map_err(|e| match e {
+                                TransactionError::CustomError(e) => err.bail(e),
+                                TransactionError::Database(e) => e,
+                            })?;
+                        secrets.push(secret);
+                    }
+                    Ok((rx, secrets))
                 }
             })
             .await
@@ -117,7 +131,7 @@ impl DataStore {
                     ),
                 )
             })?;
-        Ok(rx)
+        Ok(WebhookReceiverConfig { rx, secrets, events: subscriptions })
     }
 
     // pub async fn webhook_rx_fetch_all(&self, opctx: &OpContext, authz_rx: &authz::WebhookReceiver) -> Fet

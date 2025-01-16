@@ -1049,11 +1049,9 @@ pub struct Webhook {
     pub id: WebhookReceiverUuid,
     /// The identifier assigned to this webhook receiver upon creation.
     pub name: String,
+    pub description: String,
     /// The URL that webhook notification requests are sent to.
     pub endpoint: Url,
-    /// The UUID of the user associated with this webhook receiver for
-    /// role-based ccess control.
-    pub actor_id: Uuid,
     // A list containing the IDs of the secret keys used to sign payloads sent
     // to this receiver.
     pub secrets: Vec<WebhookSecretId>,
