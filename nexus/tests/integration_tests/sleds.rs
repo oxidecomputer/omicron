@@ -162,14 +162,18 @@ async fn test_sled_instance_list(cptestctx: &ControlPlaneTestContext) {
 
     // Verify that there are two sleds to begin with.
     let sleds_url = "/v1/system/hardware/sleds";
-    assert_eq!(sleds_list(&external_client, &sleds_url).await.len(), 2);
+    let sleds = sleds_list(&external_client, &sleds_url).await;
+    assert_eq!(sleds.len(), 2);
 
-    // Verify that there are no instances.
-    let instances_url =
-        format!("/v1/system/hardware/sleds/{SLED_AGENT_UUID}/instances");
-    assert!(sled_instance_list(&external_client, &instances_url)
-        .await
-        .is_empty());
+    // Verify that there are no instances on the sleds.
+    for sled in &sleds {
+        let sled_id = sled.identity.id;
+        let instances_url =
+            format!("/v1/system/hardware/sleds/{sled_id}/instances");
+        assert!(sled_instance_list(&external_client, &instances_url)
+            .await
+            .is_empty());
+    }
 
     // Create an IP pool and project that we'll use for testing.
     create_default_ip_pool(&external_client).await;
@@ -181,14 +185,25 @@ async fn test_sled_instance_list(cptestctx: &ControlPlaneTestContext) {
     // Ensure 1 instance was created on a sled
     let sled_instances = wait_for_condition(
         || {
-            let instances_url = instances_url.clone();
+            let sleds = sleds.clone();
 
             async move {
-                let sled_instances =
-                    sled_instance_list(&external_client, &instances_url).await;
+                let mut total_instances = vec![];
 
-                if sled_instances.len() == 1 {
-                    Ok(sled_instances)
+                for sled in &sleds {
+                    let sled_id = sled.identity.id;
+
+                    let instances_url =
+                        format!("/v1/system/hardware/sleds/{sled_id}/instances");
+
+                    let mut sled_instances =
+                        sled_instance_list(&external_client, &instances_url).await;
+
+                    total_instances.append(&mut sled_instances);
+                }
+
+                if total_instances.len() == 1 {
+                    Ok(total_instances)
                 } else {
                     Err(CondCheckError::<()>::NotYet)
                 }
