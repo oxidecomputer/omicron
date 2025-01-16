@@ -304,13 +304,10 @@ impl Versions {
     // that semantic conflicts result in git conflicts.
     pub fn new_versioned(supported_versions: &[&semver::Version]) -> Versions {
         assert!(!supported_versions.is_empty());
-        // XXX-dap uncomment this when
-        // https://github.com/oxidecomputer/omicron/pull/7334 lands (update to
-        // Rust 1.84).  This stabilized in 1.82.
-        // assert!(
-        //     supported_versions.is_sorted(),
-        //     "array of supported API versions is not sorted"
-        // );
+        assert!(
+            supported_versions.is_sorted(),
+            "array of supported API versions is not sorted"
+        );
         Versions::Versioned {
             supported_versions: supported_versions
                 .into_iter()
