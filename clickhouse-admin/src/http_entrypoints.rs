@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::context::{KeeperServerContext, ServerContext};
+use crate::context::{KeeperServerContext, ServerContext, SingleServerContext};
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::{
     ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
@@ -31,7 +31,8 @@ pub fn clickhouse_admin_keeper_api() -> ApiDescription<Arc<KeeperServerContext>>
         .expect("registered entrypoints")
 }
 
-pub fn clickhouse_admin_single_api() -> ApiDescription<Arc<ServerContext>> {
+pub fn clickhouse_admin_single_api() -> ApiDescription<Arc<SingleServerContext>>
+{
     clickhouse_admin_single_api_mod::api_description::<ClickhouseAdminSingleImpl>()
         .expect("registered entrypoints")
 }
@@ -215,7 +216,7 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
 enum ClickhouseAdminSingleImpl {}
 
 impl ClickhouseAdminSingleApi for ClickhouseAdminSingleImpl {
-    type Context = Arc<ServerContext>;
+    type Context = Arc<SingleServerContext>;
 
     async fn init_db(
         rqctx: RequestContext<Self::Context>,
