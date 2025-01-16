@@ -43,7 +43,6 @@ use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use slog::Logger;
 use std::net::{SocketAddr, SocketAddrV6};
-use uuid::Uuid;
 
 #[async_trait]
 pub trait NexusServer: Send + Sync + 'static {
@@ -78,7 +77,6 @@ pub trait NexusServer: Send + Sync + 'static {
         tls_certificates: Vec<
             omicron_common::api::internal::nexus::Certificate,
         >,
-        disable_sled_id: Uuid,
     ) -> Self;
 
     async fn get_http_server_external_address(&self) -> SocketAddr;
