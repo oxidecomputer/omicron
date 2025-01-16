@@ -146,7 +146,7 @@ pub(crate) fn display_api_spec_new(
     api: &ManagedApi,
     styles: &Styles,
 ) -> String {
-    let versions: Vec<_> = api.iter_versions().collect();
+    let versions: Vec<_> = api.iter_versions_semver().collect();
     let latest_version = versions.last().expect("must be at least one version");
     if api.is_versioned() {
         format!(

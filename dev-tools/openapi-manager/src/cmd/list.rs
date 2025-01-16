@@ -75,7 +75,7 @@ pub(crate) fn list_impl(
                 "spec details".style(styles.header),
             )?;
 
-            for v in api.iter_versions() {
+            for v in api.iter_versions_semver() {
                 match api.generate_openapi_doc(v) {
                     Ok(openapi) => {
                         let num_paths = openapi.paths.paths.len();

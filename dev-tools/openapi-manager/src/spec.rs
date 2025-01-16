@@ -235,7 +235,7 @@ impl ApiSpec {
 
     pub fn versions(&self) -> impl Iterator<Item = ApiSpecVersion<'_>> {
         self.versions
-            .iter_versions()
+            .iter_versions_semvers()
             .map(|v| ApiSpecVersion { spec: self, version: v })
     }
 }

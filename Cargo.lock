@@ -2527,6 +2527,7 @@ dependencies = [
  "dropshot 0.13.0",
  "internal-dns-types",
  "omicron-workspace-hack",
+ "openapi-manager-types",
  "schemars",
  "semver 1.0.24",
  "serde",
@@ -7702,6 +7703,7 @@ dependencies = [
  "anyhow",
  "camino",
  "omicron-workspace-hack",
+ "semver 1.0.24",
 ]
 
 [[package]]

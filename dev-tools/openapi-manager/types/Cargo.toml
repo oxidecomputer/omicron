@@ -10,4 +10,5 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 camino.workspace = true
+semver.workspace = true
 omicron-workspace-hack.workspace = true

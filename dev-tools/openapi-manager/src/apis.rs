@@ -129,12 +129,12 @@ impl ManagedApi {
         self.versions.is_versioned()
     }
 
-    pub fn iter_versions(&self) -> impl Iterator<Item = &semver::Version> + '_ {
-        self.versions.iter_versions()
+    pub fn iter_versions_semver(&self) -> impl Iterator<Item = &semver::Version> + '_ {
+        self.versions.iter_versions_semvers()
     }
 
     pub fn has_version(&self, version: &semver::Version) -> bool {
-        self.iter_versions().any(|v| v == version)
+        self.iter_versions_semver().any(|v| v == version)
     }
 
     pub fn generate_openapi_doc(
@@ -284,7 +284,7 @@ pub enum Versions {
     /// Clients and servers may be updated independently of each other.  Other
     /// parts of the system may constrain things so that either clients or
     /// servers are always updated first, but this tool does not assume that.
-    Versioned { supported_versions: Vec<semver::Version> },
+    Versioned { supported_versions: SupportedVersions },
 }
 
 impl Versions {
@@ -302,19 +302,8 @@ impl Versions {
     // is generally coming in through a definition in the source code and we
     // want people to write these definitions in sorted order in order to ensure
     // that semantic conflicts result in git conflicts.
-    pub fn new_versioned(supported_versions: &[&semver::Version]) -> Versions {
-        assert!(!supported_versions.is_empty());
-        assert!(
-            supported_versions.is_sorted(),
-            "array of supported API versions is not sorted"
-        );
-        Versions::Versioned {
-            supported_versions: supported_versions
-                .into_iter()
-                .cloned()
-                .cloned()
-                .collect(),
-        }
+    pub fn new_versioned(supported_versions: SupportedVersions) -> Versions {
+        Versions::Versioned { supported_versions }
     }
 
     /// Returns whether this API is versioned (as opposed to lockstep)
@@ -334,7 +323,9 @@ impl Versions {
     }
 
     /// Iterate over the semver versions of an API that are supported
-    pub fn iter_versions(&self) -> impl Iterator<Item = &semver::Version> + '_ {
+    pub fn iter_versions_semvers(
+        &self,
+    ) -> impl Iterator<Item = &semver::Version> + '_ {
         match self {
             Versions::Lockstep { version } => {
                 Either::Left(std::iter::once(version))

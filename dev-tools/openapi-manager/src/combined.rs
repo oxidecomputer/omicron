@@ -106,7 +106,7 @@ impl CombinedApis {
         // files.
         for (api_ident, managed_api) in &apis {
             let api_versions = versions.get(api_ident);
-            for api_version in managed_api.iter_versions() {
+            for api_version in managed_api.iter_versions_semver() {
                 if api_versions.and_then(|vs| vs.get(api_version)).is_none() {
                     problems.push(Problem::MissingSpecFile {
                         api_ident: api_ident.clone(),

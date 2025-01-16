@@ -8,5 +8,7 @@
 //! exposed by the OpenAPI manager.
 
 mod validation;
+mod versions;
 
 pub use validation::*;
+pub use versions::*;
