@@ -31,6 +31,13 @@ pub use config::{
     RaftServerSettings, RaftServers, ReplicaConfig, ServerNodeConfig,
 };
 
+pub const CLICKHOUSE_SERVER_CONFIG_DIR: &str =
+    "/opt/oxide/clickhouse_server/config.d";
+pub const CLICKHOUSE_SERVER_CONFIG_FILE: &str = "replica-server-config.xml";
+pub const CLICKHOUSE_KEEPER_CONFIG_DIR: &str = "/opt/oxide/clickhouse_keeper";
+pub const CLICKHOUSE_KEEPER_CONFIG_FILE: &str = "keeper_config.xml";
+pub const OXIMETER_CLUSTER: &str = "oximeter_cluster";
+
 // Used for schemars to be able to be used with camino:
 // See https://github.com/camino-rs/camino/issues/91#issuecomment-2027908513
 pub fn path_schema(gen: &mut SchemaGenerator) -> Schema {
@@ -38,8 +45,6 @@ pub fn path_schema(gen: &mut SchemaGenerator) -> Schema {
     schema.format = Some("Utf8PathBuf".to_owned());
     schema.into()
 }
-
-pub const OXIMETER_CLUSTER: &str = "oximeter_cluster";
 
 /// A unique ID for a ClickHouse Keeper
 #[derive(
