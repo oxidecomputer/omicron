@@ -1033,6 +1033,7 @@ pub struct TestZpool {
 
 enum WhichSledAgents {
     Specific(SledUuid),
+    List(Vec<SledUuid>),
     All,
 }
 
@@ -1052,9 +1053,7 @@ impl<'a, N: NexusServer> DiskTestBuilder<'a, N> {
     pub fn new(cptestctx: &'a ControlPlaneTestContext<N>) -> Self {
         Self {
             cptestctx,
-            sled_agents: WhichSledAgents::Specific(
-                cptestctx.sled_agent.sled_agent.id,
-            ),
+            sled_agents: WhichSledAgents::Specific(cptestctx.first_sled_id()),
             zpool_count: DiskTest::<'a, N>::DEFAULT_ZPOOL_COUNT,
         }
     }
@@ -1068,6 +1067,12 @@ impl<'a, N: NexusServer> DiskTestBuilder<'a, N> {
     /// Chooses a specific sled where zpools should be added
     pub fn on_specific_sled(mut self, sled_id: SledUuid) -> Self {
         self.sled_agents = WhichSledAgents::Specific(sled_id);
+        self
+    }
+
+    /// Supply a list of sleds where zpools should be added
+    pub fn on_these_sleds(mut self, sled_ids: Vec<SledUuid>) -> Self {
+        self.sled_agents = WhichSledAgents::List(sled_ids);
         self
     }
 
@@ -1155,6 +1160,9 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
             WhichSledAgents::Specific(id) => {
                 vec![id]
             }
+
+            WhichSledAgents::List(ids) => ids.clone(),
+
             WhichSledAgents::All => cptestctx
                 .all_sled_agents()
                 .map(|agent| agent.sled_agent.id)

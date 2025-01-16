@@ -49,7 +49,7 @@ pub trait VisitBlueprintZonesConfig<'e> {
         // Leaf node
     }
 
-    // A change in a value in `BlueprintZonesConfig::zones`
+    /// A change in a value in `BlueprintZonesConfig::zones`
     fn visit_zone_change(
         &mut self,
         _ctx: &mut BpVisitorContext,
@@ -58,13 +58,12 @@ pub trait VisitBlueprintZonesConfig<'e> {
         // Leaf node
     }
 
-    // The representation of a diffus generated `EditedBlueprintZoneConfig`
-    // which contains recursive edits for each field when there is at least
-    // one change.
-    //
-    // This the equivalent node in the tree to `visit_zone_change`, but gives a
-    // diffus_derive generated structure rather than the before and after of the
-    // original structs that were diffed.
+    /// A point where we allow direct access to a `diffus_derive` generated
+    /// struct representing a change to a `BlueprintZoneConfig`.
+    ///
+    /// This is the equivalent node in the tree to `visit_zone_change`, but
+    /// gives a `diffus_derive` generated structure rather than the before and
+    /// after of the original structs that were diffed.
     fn visit_zone_edit(
         &mut self,
         ctx: &mut BpVisitorContext,
@@ -478,5 +477,6 @@ mod tests {
 
         assert_eq!(visitor.total_inserts, 1);
         assert_eq!(visitor.total_removes, 1);
+        assert_eq!(visitor.change_callbacks_fired, 2);
     }
 }

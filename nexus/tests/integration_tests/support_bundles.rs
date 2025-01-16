@@ -18,8 +18,9 @@ use nexus_test_utils::resource_helpers::TestDataset;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::shared::SupportBundleInfo;
 use nexus_types::external_api::shared::SupportBundleState;
+use nexus_types::internal_api::background::SupportBundleCleanupReport;
+use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use omicron_common::api::internal::shared::DatasetKind;
-use omicron_nexus::app::test_interfaces::task_output;
 use omicron_uuid_kinds::{DatasetUuid, SupportBundleUuid, ZpoolUuid};
 use serde::Deserialize;
 use std::io::Cursor;
@@ -236,8 +237,8 @@ async fn bundle_download_expect_fail(
 struct TaskOutput {
     cleanup_err: Option<String>,
     collection_err: Option<String>,
-    cleanup_report: Option<task_output::CleanupReport>,
-    collection_report: Option<task_output::CollectionReport>,
+    cleanup_report: Option<SupportBundleCleanupReport>,
+    collection_report: Option<SupportBundleCollectionReport>,
 }
 
 async fn activate_bundle_collection_background_task(
@@ -342,7 +343,7 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     let mut disk_test = DiskTest::new(&cptestctx).await;
 
     // We really care about just "getting a debug dataset" here.
-    let sled_id = cptestctx.first_sled();
+    let sled_id = cptestctx.first_sled_id();
     disk_test
         .add_zpool_with_dataset_ext(
             sled_id,
@@ -416,11 +417,11 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(output.collection_err, None);
     assert_eq!(
         output.cleanup_report,
-        Some(task_output::CleanupReport { ..Default::default() })
+        Some(SupportBundleCleanupReport { ..Default::default() })
     );
     assert_eq!(
         output.collection_report,
-        Some(task_output::CollectionReport {
+        Some(SupportBundleCollectionReport {
             bundle: bundle.id,
             listed_in_service_sleds: true,
             activated_in_db_ok: true,
@@ -459,7 +460,7 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(output.collection_err, None);
     assert_eq!(
         output.cleanup_report,
-        Some(task_output::CleanupReport {
+        Some(SupportBundleCleanupReport {
             sled_bundles_deleted_ok: 1,
             db_destroying_bundles_removed: 1,
             ..Default::default()

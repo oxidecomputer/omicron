@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use omicron_uuid_kinds::SupportBundleUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -191,5 +192,42 @@ impl std::fmt::Display for ReincarnatableInstance {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { instance_id, reason } = self;
         write!(f, "{instance_id} ({reason})")
+    }
+}
+
+/// Describes what happened while attempting to clean up Support Bundles.
+#[derive(Debug, Default, Deserialize, Serialize, Eq, PartialEq)]
+pub struct SupportBundleCleanupReport {
+    // Responses from Sled Agents
+    pub sled_bundles_deleted_ok: usize,
+    pub sled_bundles_deleted_not_found: usize,
+    pub sled_bundles_delete_failed: usize,
+
+    // Results from updating our database records
+    pub db_destroying_bundles_removed: usize,
+    pub db_failing_bundles_updated: usize,
+}
+
+/// Identifies what we could or could not store within a support bundle.
+///
+/// This struct will get emitted as part of the background task infrastructure.
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SupportBundleCollectionReport {
+    pub bundle: SupportBundleUuid,
+
+    /// True iff we could list in-service sleds
+    pub listed_in_service_sleds: bool,
+
+    /// True iff the bundle was successfully made 'active' in the database.
+    pub activated_in_db_ok: bool,
+}
+
+impl SupportBundleCollectionReport {
+    pub fn new(bundle: SupportBundleUuid) -> Self {
+        Self {
+            bundle,
+            listed_in_service_sleds: false,
+            activated_in_db_ok: false,
+        }
     }
 }

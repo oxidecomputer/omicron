@@ -140,13 +140,6 @@ pub use init::BackgroundTasksData;
 pub use init::BackgroundTasksInitializer;
 pub use tasks::saga_recovery::SagaRecoveryHelpers;
 
-// Expose background task outputs to they can be deserialized and
-// observed.
-pub mod task_output {
-    pub use super::tasks::support_bundle_collector::CleanupReport;
-    pub use super::tasks::support_bundle_collector::CollectionReport;
-}
-
 use futures::future::BoxFuture;
 use nexus_auth::context::OpContext;
 
