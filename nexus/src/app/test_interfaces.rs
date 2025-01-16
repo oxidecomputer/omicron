@@ -18,8 +18,6 @@ pub use super::update::SpUpdater;
 pub use super::update::UpdateProgress;
 pub use gateway_client::types::SpType;
 
-pub use crate::app::background::task_output;
-
 /// The information needed to talk to a sled agent about an instance that is
 /// active on that sled.
 pub struct InstanceSledAgentInfo {
