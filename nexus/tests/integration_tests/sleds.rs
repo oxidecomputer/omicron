@@ -193,11 +193,13 @@ async fn test_sled_instance_list(cptestctx: &ControlPlaneTestContext) {
                 for sled in &sleds {
                     let sled_id = sled.identity.id;
 
-                    let instances_url =
-                        format!("/v1/system/hardware/sleds/{sled_id}/instances");
+                    let instances_url = format!(
+                        "/v1/system/hardware/sleds/{sled_id}/instances"
+                    );
 
                     let mut sled_instances =
-                        sled_instance_list(&external_client, &instances_url).await;
+                        sled_instance_list(&external_client, &instances_url)
+                            .await;
 
                     total_instances.append(&mut sled_instances);
                 }
