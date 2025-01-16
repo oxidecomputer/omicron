@@ -47,6 +47,17 @@ WITH
             region_snapshot.snapshot_id = $2
         )
     ),
+  existing_sleds
+    AS (
+      SELECT
+        sled.id
+      FROM
+        zpool
+        INNER JOIN physical_disk ON physical_disk.id = zpool.physical_disk_id
+        INNER JOIN sled ON sled.id = physical_disk.sled_id
+      WHERE
+        zpool.id = ANY (SELECT pool_id FROM existing_zpools)
+    ),
   candidate_zpools
     AS (
       SELECT
@@ -75,6 +86,7 @@ WITH
         AND physical_disk.disk_policy = 'in_service'
         AND physical_disk.disk_state = 'active'
         AND NOT (zpool.id = ANY (SELECT existing_zpools.pool_id FROM existing_zpools))
+        AND NOT (sled.id = ANY (SELECT existing_sleds.id FROM existing_sleds))
       ORDER BY
         zpool.sled_id, md5(CAST(zpool.id AS BYTES) || $4)
     ),

@@ -16,6 +16,7 @@ mod server;
 mod simulatable;
 mod sled_agent;
 mod storage;
+mod upstairs;
 
 pub use crate::updates::ConfigUpdates;
 pub use config::{
@@ -26,3 +27,4 @@ pub use server::{run_standalone_server, RssArgs, Server};
 pub use sled_agent::SledAgent;
 pub use storage::PantryServer;
 pub(crate) use storage::Storage;
+pub use upstairs::SimulatedUpstairs;

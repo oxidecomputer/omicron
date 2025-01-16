@@ -62,7 +62,7 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
     // Now start a few more sled agents.
     let nsleds = 3;
     let mut sas = Vec::with_capacity(nsleds);
-    for _ in 0..nsleds {
+    for i in 0..nsleds {
         let sa_id = SledUuid::new_v4();
         let log =
             cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
@@ -73,8 +73,11 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
                 log,
                 addr,
                 sa_id,
+                // Index starts at 2
+                2 + i as u16,
                 &update_directory,
                 sim::SimMode::Explicit,
+                &cptestctx.first_sled_agent().simulated_upstairs,
             )
             .await
             .unwrap(),

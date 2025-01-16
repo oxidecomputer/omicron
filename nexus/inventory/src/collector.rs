@@ -418,9 +418,11 @@ mod test {
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use slog::o;
     use std::fmt::Write;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
+    use std::sync::Arc;
 
     fn dump_collection(collection: &Collection) -> String {
         // Construct a stable, human-readable summary of the Collection
@@ -561,6 +563,7 @@ mod test {
         log: slog::Logger,
         sled_id: SledUuid,
         zone_id: OmicronZoneUuid,
+        simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
     ) -> sim::Server {
         // Start a simulated sled agent.
         let config = sim::Config::for_testing(
@@ -570,7 +573,11 @@ mod test {
             None,
             Some(vec![]),
         );
-        let agent = sim::Server::start(&config, &log, false).await.unwrap();
+
+        let agent =
+            sim::Server::start(&config, &log, false, &simulated_upstairs, 0)
+                .await
+                .unwrap();
 
         // Pretend to put some zones onto this sled.  We don't need to test this
         // exhaustively here because there are builder tests that exercise a
@@ -607,18 +614,28 @@ mod test {
             gateway_test_utils::setup::test_setup("test_basic", SpPort::One)
                 .await;
         let log = &gwtestctx.logctx.log;
+
+        let simulated_upstairs =
+            Arc::new(sim::SimulatedUpstairs::new(log.new(o!(
+                "component" => "omicron_sled_agent::sim::SimulatedUpstairs",
+            ))));
+
         let sled1 = sim_sled_agent(
             log.clone(),
             "9cb9b78f-5614-440c-b66d-e8e81fab69b0".parse().unwrap(),
             "5125277f-0988-490b-ac01-3bba20cc8f07".parse().unwrap(),
+            &simulated_upstairs,
         )
         .await;
+
         let sled2 = sim_sled_agent(
             log.clone(),
             "03265caf-da7d-46c7-b1c2-39fa90ce5c65".parse().unwrap(),
             "8b88a56f-3eb6-4d80-ba42-75d867bc427d".parse().unwrap(),
+            &simulated_upstairs,
         )
         .await;
+
         let sled1_url = format!("http://{}/", sled1.http_server.local_addr());
         let sled2_url = format!("http://{}/", sled2.http_server.local_addr());
         let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
@@ -664,18 +681,28 @@ mod test {
         )
         .await;
         let log = &gwtestctx1.logctx.log;
+
+        let simulated_upstairs =
+            Arc::new(sim::SimulatedUpstairs::new(log.new(o!(
+                "component" => "omicron_sled_agent::sim::SimulatedUpstairs",
+            ))));
+
         let sled1 = sim_sled_agent(
             log.clone(),
             "9cb9b78f-5614-440c-b66d-e8e81fab69b0".parse().unwrap(),
             "5125277f-0988-490b-ac01-3bba20cc8f07".parse().unwrap(),
+            &simulated_upstairs,
         )
         .await;
+
         let sled2 = sim_sled_agent(
             log.clone(),
             "03265caf-da7d-46c7-b1c2-39fa90ce5c65".parse().unwrap(),
             "8b88a56f-3eb6-4d80-ba42-75d867bc427d".parse().unwrap(),
+            &simulated_upstairs,
         )
         .await;
+
         let sled1_url = format!("http://{}/", sled1.http_server.local_addr());
         let sled2_url = format!("http://{}/", sled2.http_server.local_addr());
         let mgs_clients = [&gwtestctx1, &gwtestctx2]
@@ -765,12 +792,20 @@ mod test {
         )
         .await;
         let log = &gwtestctx.logctx.log;
+
+        let simulated_upstairs =
+            Arc::new(sim::SimulatedUpstairs::new(log.new(o!(
+                "component" => "omicron_sled_agent::sim::SimulatedUpstairs",
+            ))));
+
         let sled1 = sim_sled_agent(
             log.clone(),
             "9cb9b78f-5614-440c-b66d-e8e81fab69b0".parse().unwrap(),
             "5125277f-0988-490b-ac01-3bba20cc8f07".parse().unwrap(),
+            &simulated_upstairs,
         )
         .await;
+
         let sled1_url = format!("http://{}/", sled1.http_server.local_addr());
         let sledbogus_url = String::from("http://[100::1]:45678");
         let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);

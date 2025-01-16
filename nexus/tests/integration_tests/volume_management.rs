@@ -5,14 +5,18 @@
 //! Tests that Nexus properly manages and cleans up Crucible resources
 //! associated with Volumes
 
+use crate::integration_tests::sleds::sleds_list;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::ExpressionMethods;
+use diesel::QueryDsl;
+use diesel::SelectableHelper;
 use dropshot::test_util::ClientTestContext;
 use http::method::Method;
 use http::StatusCode;
 use nexus_config::RegionAllocationStrategy;
 use nexus_db_model::to_db_typed_uuid;
+use nexus_db_model::Dataset;
 use nexus_db_model::RegionSnapshotReplacement;
 use nexus_db_model::RegionSnapshotReplacementState;
 use nexus_db_model::Volume;
@@ -4070,7 +4074,7 @@ async fn test_read_only_region_reference_sanity_rop_multi(
 ///
 /// 5) clean up all the objects, and expect the crucible resources are properly
 ///    cleaned up
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_read_only_region_reference_counting(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -4082,11 +4086,11 @@ async fn test_read_only_region_reference_counting(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    // Four zpools are required for region replacement or region snapshot
-    // replacement
+    // Create one zpool on each of the 4 sleds. This is required for region
+    // replacement or region snapshot replacement
     let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled_id())
-        .with_zpool_count(4)
+        .on_all_sleds()
+        .with_zpool_count(1)
         .build()
         .await;
 
@@ -4214,20 +4218,35 @@ async fn test_read_only_region_reference_counting(
     // or cause Nexus to send delete commands to the appropriate Crucible
     // agent.
 
-    assert_eq!(
-        cptestctx
-            .first_sled_agent()
-            .get_crucible_dataset(
-                TypedUuid::from_untyped_uuid(db_read_only_dataset.pool_id),
-                db_read_only_dataset.id(),
-            )
+    let mut region_found = false;
+    let mut region_still_state_crated = false;
+
+    for sled_agent in cptestctx.all_sled_agents() {
+        let zpool_id =
+            TypedUuid::from_untyped_uuid(db_read_only_dataset.pool_id);
+        if !sled_agent.sled_agent.has_zpool(zpool_id) {
+            continue;
+        }
+
+        if let Some(region) = sled_agent
+            .sled_agent
+            .get_crucible_dataset(zpool_id, db_read_only_dataset.id())
             .get(crucible_agent_client::types::RegionId(
-                read_only_region.id().to_string()
+                read_only_region.id().to_string(),
             ))
-            .unwrap()
-            .state,
-        crucible_agent_client::types::State::Created
-    );
+        {
+            region_found = true;
+
+            if region.state == crucible_agent_client::types::State::Created {
+                region_still_state_crated = true;
+            }
+
+            break;
+        }
+    }
+
+    assert!(region_found);
+    assert!(region_still_state_crated);
 
     // Expect that there is one read-only region reference now, and that's from
     // disk-from-snap
@@ -4283,20 +4302,35 @@ async fn test_read_only_region_reference_counting(
 
     assert!(usage.is_empty());
 
-    assert_eq!(
-        cptestctx
-            .first_sled_agent()
-            .get_crucible_dataset(
-                TypedUuid::from_untyped_uuid(db_read_only_dataset.pool_id),
-                db_read_only_dataset.id(),
-            )
+    let mut region_found = false;
+    let mut region_destroyed = false;
+
+    for sled_agent in cptestctx.all_sled_agents() {
+        let zpool_id =
+            TypedUuid::from_untyped_uuid(db_read_only_dataset.pool_id);
+        if !sled_agent.sled_agent.has_zpool(zpool_id) {
+            continue;
+        }
+
+        if let Some(region) = sled_agent
+            .sled_agent
+            .get_crucible_dataset(zpool_id, db_read_only_dataset.id())
             .get(crucible_agent_client::types::RegionId(
-                read_only_region.id().to_string()
+                read_only_region.id().to_string(),
             ))
-            .unwrap()
-            .state,
-        crucible_agent_client::types::State::Destroyed
-    );
+        {
+            region_found = true;
+
+            if region.state == crucible_agent_client::types::State::Destroyed {
+                region_destroyed = true;
+            }
+
+            break;
+        }
+    }
+
+    assert!(region_found);
+    assert!(region_destroyed);
 
     // Assert everything was cleaned up
     assert!(disk_test.crucible_resources_deleted().await);
@@ -4304,7 +4338,7 @@ async fn test_read_only_region_reference_counting(
 
 /// Assert that a snapshot of a volume with a read-only region is properly
 /// reference counted.
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_read_only_region_reference_counting_layers(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -4316,11 +4350,11 @@ async fn test_read_only_region_reference_counting_layers(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    // Four zpools are required for region replacement or region snapshot
-    // replacement
+    // Create one zpool on each of the 4 sleds. This is required for region
+    // replacement or region snapshot replacement
     let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled_id())
-        .with_zpool_count(4)
+        .on_all_sleds()
+        .with_zpool_count(1)
         .build()
         .await;
 
@@ -5541,7 +5575,7 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
     assert_eq!(records_before, records_after);
 }
 
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_double_layer_with_read_only_region_delete(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -5561,11 +5595,11 @@ async fn test_double_layer_with_read_only_region_delete(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    // Four zpools are required for region replacement or region snapshot
-    // replacement
+    // Create one zpool on each of the four sleds. This is required for region
+    // replacement or region snapshot replacement
     let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled_id())
-        .with_zpool_count(4)
+        .on_all_sleds()
+        .with_zpool_count(1)
         .build()
         .await;
 
@@ -5663,7 +5697,7 @@ async fn test_double_layer_with_read_only_region_delete(
     assert!(disk_test.crucible_resources_deleted().await);
 }
 
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_double_layer_snapshot_with_read_only_region_delete_2(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -5686,11 +5720,11 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    // Four zpools are required for region replacement or region snapshot
-    // replacement
+    // Create one zpool on each of the four sleds. This is required for region
+    // replacement or region snapshot replacement
     let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled_id())
-        .with_zpool_count(4)
+        .on_all_sleds()
+        .with_zpool_count(1)
         .build()
         .await;
 
@@ -5840,7 +5874,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
     assert!(disk_test.crucible_resources_deleted().await);
 }
 
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_no_zombie_region_snapshots(cptestctx: &ControlPlaneTestContext) {
     // 1) Create disk, then a snapshot
     // 2) Delete the disk
@@ -5861,11 +5895,11 @@ async fn test_no_zombie_region_snapshots(cptestctx: &ControlPlaneTestContext) {
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    // Four zpools are required for region replacement or region snapshot
-    // replacement
+    // Create one zpool on each of the 4 sleds. This is required for region
+    // replacement or region snapshot replacement
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled_id())
-        .with_zpool_count(4)
+        .on_all_sleds()
+        .with_zpool_count(1)
         .build()
         .await;
 
@@ -5960,7 +5994,7 @@ async fn test_no_zombie_region_snapshots(cptestctx: &ControlPlaneTestContext) {
     assert!(result.is_err());
 }
 
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_no_zombie_read_only_regions(cptestctx: &ControlPlaneTestContext) {
     // 1) Create a volume with three read-only regions
     // 2) Create another volume that uses the first step's volume as a read-only
@@ -5979,9 +6013,11 @@ async fn test_no_zombie_read_only_regions(cptestctx: &ControlPlaneTestContext) {
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
+    // Create one zpool on each of the 4 sleds. This is required for region
+    // replacement or region snapshot replacement
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled_id())
-        .with_zpool_count(4)
+        .on_all_sleds()
+        .with_zpool_count(1)
         .build()
         .await;
 
@@ -6144,7 +6180,7 @@ async fn test_no_zombie_read_only_regions(cptestctx: &ControlPlaneTestContext) {
     assert!(result.is_err());
 }
 
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_no_zombie_read_write_regions(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -6165,9 +6201,11 @@ async fn test_no_zombie_read_write_regions(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
+    // Create one zpool on each of the 4 sleds. This is required for region
+    // replacement or region snapshot replacement
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled_id())
-        .with_zpool_count(4)
+        .on_all_sleds()
+        .with_zpool_count(1)
         .build()
         .await;
 
@@ -6328,4 +6366,107 @@ async fn test_no_zombie_read_write_regions(
         .await;
 
     assert!(result.is_err());
+}
+
+/// Ensure that regions are not allocated to the same physical sled during
+/// arbitrary region allocation
+#[nexus_test(extra_sled_agents = 3)]
+async fn test_proper_region_sled_redundancy(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+    DiskTestBuilder::new(&cptestctx)
+        .on_all_sleds()
+        .with_zpool_count(10)
+        .build()
+        .await;
+
+    // Assert 4 sleds, all in service and provisionable
+    assert_eq!(cptestctx.all_sled_agents().count(), 4);
+
+    let client = &cptestctx.external_client;
+    let sleds_url = "/v1/system/hardware/sleds";
+    let sleds_found = sleds_list(&client, &sleds_url).await;
+    assert_eq!(sleds_found.len(), 4);
+    for sled in sleds_found {
+        assert_eq!(sled.state, views::SledState::Active);
+        assert!(matches!(
+            sled.policy,
+            views::SledPolicy::InService {
+                provision_policy: views::SledProvisionPolicy::Provisionable
+            },
+        ));
+    }
+
+    // Create a volume with three read-only regions, then simulate a replacement
+    // that will allocate with a bumped redundancy
+
+    let volume_id = VolumeUuid::new_v4();
+    let snapshot_id = Uuid::new_v4();
+
+    for redundancy in 3..=4 {
+        let datasets_and_regions = datastore
+            .arbitrary_region_allocate(
+                &opctx,
+                RegionAllocationFor::SnapshotVolume { volume_id, snapshot_id },
+                RegionAllocationParameters::FromDiskSource {
+                    disk_source: &params::DiskSource::Blank {
+                        block_size: params::BlockSize::try_from(512).unwrap(),
+                    },
+                    size: ByteCount::from_gibibytes_u32(1),
+                },
+                &RegionAllocationStrategy::RandomWithDistinctSleds {
+                    seed: None,
+                },
+                redundancy,
+            )
+            .await
+            .unwrap();
+
+        // Ensure distinct sleds for each region
+
+        let mut sled_ids = HashSet::new();
+
+        for (_, region) in &datasets_and_regions {
+            let sled_id = {
+                let dataset = {
+                    use db::schema::dataset::dsl;
+                    dsl::dataset
+                        .filter(
+                            dsl::id.eq(to_db_typed_uuid(region.dataset_id())),
+                        )
+                        .select(Dataset::as_select())
+                        .get_result_async::<Dataset>(&*conn)
+                        .await
+                        .unwrap()
+                };
+
+                let zpool = {
+                    use db::schema::zpool::dsl;
+                    dsl::zpool
+                        .filter(dsl::id.eq(dataset.pool_id))
+                        .select(db::model::Zpool::as_select())
+                        .get_result_async::<db::model::Zpool>(&*conn)
+                        .await
+                        .unwrap()
+                };
+
+                zpool.sled_id
+            };
+
+            assert!(
+                sled_ids.insert(sled_id),
+                "region {} shares sled {}",
+                region.id(),
+                sled_id
+            );
+        }
+    }
 }
