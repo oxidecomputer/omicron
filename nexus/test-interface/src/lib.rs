@@ -39,6 +39,7 @@ use nexus_types::internal_api::params::{
 };
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Error;
+use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use slog::Logger;
 use std::net::{SocketAddr, SocketAddrV6};
@@ -106,12 +107,13 @@ pub trait NexusServer: Send + Sync + 'static {
     // use the "RackInitializationRequest" handoff, but this would require
     // creating all our Zpools and Datasets before performing handoff to Nexus.
     // However, doing so would let us remove this test-only API.
-    async fn upsert_crucible_dataset(
+    async fn upsert_test_dataset(
         &self,
         physical_disk: PhysicalDiskPutRequest,
         zpool: ZpoolPutRequest,
         dataset_id: DatasetUuid,
-        address: SocketAddrV6,
+        kind: DatasetKind,
+        address: Option<SocketAddrV6>,
     );
 
     async fn inventory_collect_and_get_latest_collection(

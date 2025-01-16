@@ -995,6 +995,14 @@ authz_resource! {
 }
 
 authz_resource! {
+    name = "SupportBundle",
+    parent = "Fleet",
+    primary_key = { uuid_kind = SupportBundleKind },
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
     name = "PhysicalDisk",
     parent = "Fleet",
     primary_key = { uuid_kind = PhysicalDiskKind },

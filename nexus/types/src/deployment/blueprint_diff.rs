@@ -652,14 +652,14 @@ impl BpDiffDatasets {
 
                 let b = before_datasets
                     .datasets
-                    .values()
+                    .iter()
                     .map(|d| (CollectionDatasetIdentifier::from(d), d.clone()));
                 let mut added: BTreeMap<
                     CollectionDatasetIdentifier,
                     BlueprintDatasetConfig,
                 > = after_datasets
                     .datasets
-                    .values()
+                    .iter()
                     .map(|d| (d.into(), d.clone()))
                     .collect();
 
@@ -730,7 +730,7 @@ impl BpDiffDatasets {
                         after_generation: None,
                         datasets: before_datasets
                             .datasets
-                            .into_values()
+                            .into_iter()
                             .map(|d| (CollectionDatasetIdentifier::from(&d), d))
                             .collect(),
                     },
@@ -744,7 +744,7 @@ impl BpDiffDatasets {
             let added: BTreeMap<CollectionDatasetIdentifier, _> =
                 after_datasets
                     .datasets
-                    .into_values()
+                    .into_iter()
                     .map(|d| (CollectionDatasetIdentifier::from(&d), d))
                     .collect();
             if !added.is_empty() {

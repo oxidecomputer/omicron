@@ -123,8 +123,7 @@ pub const RACK_SUBNET: &str = "fd00:1122:3344:0100::/56";
 pub const TEST_SUITE_PASSWORD: &str = "oxide";
 
 pub struct ControlPlaneTestContextSledAgent {
-    #[allow(unused)]
-    storage: camino_tempfile::Utf8TempDir,
+    _storage: camino_tempfile::Utf8TempDir,
 
     server: sim::Server,
 }
@@ -872,8 +871,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
                 sled_state.insert(sled_id, SledState::Active);
 
-                let mut disks = Vec::new();
-                let mut datasets = BTreeMap::new();
+                let mut disks = IdMap::new();
+                let mut datasets = IdMap::new();
 
                 if let Some(zones) = maybe_zones {
                     blueprint_zones.insert(
@@ -886,7 +885,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
                     for zone in zones {
                         if let Some(zpool) = &zone.filesystem_pool {
-                            disks.push(BlueprintPhysicalDiskConfig {
+                            disks.insert(BlueprintPhysicalDiskConfig {
                                 disposition:
                                     BlueprintPhysicalDiskDisposition::InService,
                                 identity: omicron_common::disk::DiskIdentity {
@@ -901,25 +900,22 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                             });
                             disk_index += 1;
                             let id = DatasetUuid::new_v4();
-                            datasets.insert(
+                            datasets.insert(BlueprintDatasetConfig {
+                                disposition:
+                                    BlueprintDatasetDisposition::InService,
                                 id,
-                                BlueprintDatasetConfig {
-                                    disposition:
-                                        BlueprintDatasetDisposition::InService,
-                                    id,
-                                    pool: zpool.clone(),
-                                    kind: DatasetKind::TransientZone {
-                                        name: illumos_utils::zone::zone_name(
-                                            zone.zone_type.kind().zone_prefix(),
-                                            Some(zone.id),
-                                        ),
-                                    },
-                                    address: None,
-                                    quota: None,
-                                    reservation: None,
-                                    compression: CompressionAlgorithm::Off,
+                                pool: zpool.clone(),
+                                kind: DatasetKind::TransientZone {
+                                    name: illumos_utils::zone::zone_name(
+                                        zone.zone_type.kind().zone_prefix(),
+                                        Some(zone.id),
+                                    ),
                                 },
-                            );
+                                address: None,
+                                quota: None,
+                                reservation: None,
+                                compression: CompressionAlgorithm::Off,
+                            });
                         }
                     }
                 } else {
@@ -935,7 +931,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 // Populate extra fake disks, giving each sled 10 total.
                 if disks.len() < 10 {
                     for _ in disks.len()..10 {
-                        disks.push(BlueprintPhysicalDiskConfig {
+                        disks.insert(BlueprintPhysicalDiskConfig {
                             disposition:
                                 BlueprintPhysicalDiskDisposition::InService,
                             identity: omicron_common::disk::DiskIdentity {
@@ -1082,7 +1078,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         .expect("Failed to start sled agent");
 
         self.sled_agents.push(ControlPlaneTestContextSledAgent {
-            storage: tempdir,
+            _storage: tempdir,
             server: sled_agent,
         });
     }
@@ -1179,7 +1175,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         .expect("Failed to start sled agent");
 
         self.sled_agents.push(ControlPlaneTestContextSledAgent {
-            storage: tempdir,
+            _storage: tempdir,
             server: sled_agent,
         })
     }
