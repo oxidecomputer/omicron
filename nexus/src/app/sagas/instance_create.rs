@@ -1320,7 +1320,7 @@ pub mod test {
     pub(crate) async fn verify_clean_slate(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let sled_agent = &cptestctx.sled_agent.sled_agent;
+        let sled_agent = cptestctx.first_sled_agent();
         let datastore = cptestctx.server.server_context().nexus.datastore();
 
         // Check that no partial artifacts of instance creation exist

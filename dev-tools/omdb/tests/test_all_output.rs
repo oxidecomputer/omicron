@@ -114,7 +114,7 @@ async fn test_omdb_usage_errors() {
     assert_contents("tests/usage_errors.out", &output);
 }
 
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 1)]
 async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     clear_omdb_env();
 
@@ -306,7 +306,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
 /// (1) no URL is specified in either place because that's covered by the usage
 /// test above, nor (2) the URL is specified only in the environment because
 /// that's covered by the success tests above.
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 1)]
 async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     clear_omdb_env();
 
