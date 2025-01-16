@@ -879,1086 +879,1149 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
 
     // The rest is task-specific, keyed by the name.
     let name = &bgtask.name;
-    if name == "dns_config_external" || name == "dns_config_internal" {
-        // The "dns_config" tasks emit the generation number of the config that
-        // they read.
-        #[derive(Deserialize)]
-        struct DnsConfigSuccess {
-            generation: usize,
+    match name.as_str() {
+        "dns_config_external" | "dns_config_internal" => {
+            print_task_dns_config(details);
         }
-
-        match serde_json::from_value::<DnsConfigSuccess>(details.clone()) {
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            ),
-            Ok(found_dns_config) => println!(
-                "    last generation found: {}",
-                found_dns_config.generation
-            ),
-        };
-    } else if name == "dns_servers_external" || name == "dns_servers_internal" {
-        // The "dns_servers" tasks emit the list of servers that were found.
-        #[derive(Deserialize)]
-        struct DnsServersSuccess {
-            addresses: Vec<String>,
+        "dns_servers_external" | "dns_servers_internal" => {
+            print_task_dns_servers(details);
         }
+        "dns_propagation_internal" | "dns_propagation_external" => {
+            print_task_dns_propagation(details);
+        }
+        "external_endpoints" => {
+            print_task_external_endpoints(details);
+        }
+        "inventory_collection" => {
+            print_task_inventory_collection(details);
+        }
+        "phantom_disks" => {
+            print_task_phantom_disks(details);
+        }
+        "region_replacement" => {
+            print_task_region_replacement(details);
+        }
+        "instance_watcher" => {
+            print_task_instance_watcher(details);
+        }
+        "service_firewall_rule_propagation" => {
+            print_task_service_firewall_rule_propagation(details);
+        }
+        "abandoned_vmm_reaper" => {
+            print_task_abandoned_vmm_reaper(details);
+        }
+        "region_replacement_driver" => {
+            print_task_region_replacement_driver(details);
+        }
+        "saga_recovery" => {
+            print_task_saga_recovery(details);
+        }
+        "lookup_region_port" => {
+            print_task_lookup_region_port(details);
+        }
+        "instance_updater" => {
+            print_task_instance_updater(details);
+        }
+        "region_snapshot_replacement_start" => {
+            print_task_region_snapshot_replacement_start(details);
+        }
+        "region_snapshot_replacement_garbage_collection" => {
+            print_task_region_snapshot_replacement_garbage_collection(details);
+        }
+        "region_snapshot_replacement_step" => {
+            print_task_region_snapshot_replacement_step(details);
+        }
+        "blueprint_loader" => {
+            print_task_blueprint_loader(details);
+        }
+        "blueprint_executor" => {
+            print_task_blueprint_executor(details);
+        }
+        "region_snapshot_replacement_finish" => {
+            print_task_region_snapshot_replacement_finish(details);
+        }
+        "instance_reincarnation" => {
+            print_task_instance_reincarnation(details);
+        }
+        _ => {
+            println!(
+                "warning: unknown background task: {:?} \
+                (don't know how to interpret details: {:?})",
+                name, details
+            );
+        }
+    }
 
-        match serde_json::from_value::<DnsServersSuccess>(details.clone()) {
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            ),
-            Ok(found_dns_servers) => {
-                println!(
-                    "    servers found: {}\n",
-                    found_dns_servers.addresses.len(),
-                );
+    println!("");
+}
 
-                if !found_dns_servers.addresses.is_empty() {
-                    #[derive(Tabled)]
-                    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-                    struct ServerRow<'a> {
-                        dns_server_addr: &'a str,
+fn print_task_dns_config(details: &serde_json::Value) {
+    // The "dns_config" tasks emit the generation number of the config that
+    // they read.
+    #[derive(Deserialize)]
+    struct DnsConfigSuccess {
+        generation: usize,
+    }
+
+    match serde_json::from_value::<DnsConfigSuccess>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(found_dns_config) => println!(
+            "    last generation found: {}",
+            found_dns_config.generation
+        ),
+    };
+}
+
+fn print_task_dns_servers(details: &serde_json::Value) {
+    // The "dns_servers" tasks emit the list of servers that were found.
+    #[derive(Deserialize)]
+    struct DnsServersSuccess {
+        addresses: Vec<String>,
+    }
+
+    match serde_json::from_value::<DnsServersSuccess>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(found_dns_servers) => {
+            println!(
+                "    servers found: {}\n",
+                found_dns_servers.addresses.len(),
+            );
+
+            if !found_dns_servers.addresses.is_empty() {
+                #[derive(Tabled)]
+                #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+                struct ServerRow<'a> {
+                    dns_server_addr: &'a str,
+                }
+
+                let mut addrs = found_dns_servers.addresses;
+                addrs.sort();
+                let rows = addrs
+                    .iter()
+                    .map(|dns_server_addr| ServerRow { dns_server_addr });
+                let table = tabled::Table::new(rows)
+                    .with(tabled::settings::Style::empty())
+                    .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                    .to_string();
+                println!("{}", textwrap::indent(&table.to_string(), "      "));
+            }
+        }
+    }
+}
+
+fn print_task_dns_propagation(details: &serde_json::Value) {
+    // The "dns_propagation" tasks emit a mapping of (dns server address) to
+    // (result of propagation attempt).  There's no data in the success
+    // variant.  On error, there's an error message.
+    #[derive(Deserialize)]
+    struct DnsPropSuccess {
+        generation: usize,
+        server_results: BTreeMap<String, Result<(), String>>,
+    }
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct DnsPropRow<'a> {
+        dns_server_addr: &'a str,
+        last_result: &'static str,
+    }
+
+    match serde_json::from_value::<DnsPropSuccess>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(details) => {
+            println!(
+                "    attempt to propagate generation: {}\n",
+                details.generation
+            );
+            let server_results = &details.server_results;
+
+            if !server_results.is_empty() {
+                let rows =
+                    server_results.iter().map(|(addr, result)| DnsPropRow {
+                        dns_server_addr: addr,
+                        last_result: match result {
+                            Ok(_) => "success",
+                            Err(_) => "error (see below)",
+                        },
+                    });
+
+                let table = tabled::Table::new(rows)
+                    .with(tabled::settings::Style::empty())
+                    .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                    .to_string();
+                println!("{}", textwrap::indent(&table.to_string(), "      "));
+            }
+
+            println!("");
+            for (addr, error) in server_results.iter().filter_map(
+                |(addr, result)| match result {
+                    Ok(_) => None,
+                    Err(error) => Some((addr, error)),
+                },
+            ) {
+                println!("    error: server {}: {}", addr, error);
+            }
+        }
+    };
+}
+
+fn print_task_external_endpoints(details: &serde_json::Value) {
+    // The "external_endpoints" task emits somewhat complex data.
+    // This corresponds to the `ExternalEndpoints` type in Nexus.
+    #[derive(Deserialize)]
+    struct EndpointsFound {
+        /// mapping of DNS names on which we serve the API to "endpoint"
+        by_dns_name: BTreeMap<String, Endpoint>,
+        /// an endpoint used when we cannot figure out the DNS name of an
+        /// incoming request
+        default_endpoint: Option<Endpoint>,
+        /// pending problems related to DNS/TLS configuration
+        warnings: Vec<String>,
+    }
+
+    #[derive(Deserialize)]
+    struct Endpoint {
+        /// the silo id whose endpoint this is
+        silo_id: Uuid,
+        /// TLS certificates that could be used for this endpoint
+        /// (digests only)
+        tls_certs: Vec<String>,
+    }
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct EndpointRow<'a> {
+        #[tabled(rename = " ")]
+        is_default: char,
+        silo_id: Uuid,
+        dns_name: &'a str,
+    }
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct TlsCertRow<'a> {
+        dns_name: &'a str,
+        digest: &'a str,
+    }
+
+    match serde_json::from_value::<EndpointsFound>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(details) => {
+            println!(
+                "    external API endpoints: {} \
+                ('*' below marks default)\n",
+                details.by_dns_name.len()
+            );
+            let endpoint_rows =
+                details.by_dns_name.iter().map(|(dns_name, endpoint)| {
+                    let is_default = match &details.default_endpoint {
+                        Some(e) if e.silo_id == endpoint.silo_id => '*',
+                        _ => ' ',
+                    };
+
+                    EndpointRow {
+                        silo_id: endpoint.silo_id,
+                        is_default,
+                        dns_name,
                     }
+                });
+            let table = tabled::Table::new(endpoint_rows)
+                .with(tabled::settings::Style::empty())
+                .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                .to_string();
+            println!("{}\n", textwrap::indent(&table.to_string(), "        "));
 
-                    let mut addrs = found_dns_servers.addresses;
-                    addrs.sort();
-                    let rows = addrs
+            let tls_cert_rows: Vec<TlsCertRow> = details
+                .by_dns_name
+                .iter()
+                .flat_map(|(dns_name, endpoint)| {
+                    endpoint
+                        .tls_certs
                         .iter()
-                        .map(|dns_server_addr| ServerRow { dns_server_addr });
-                    let table = tabled::Table::new(rows)
-                        .with(tabled::settings::Style::empty())
-                        .with(tabled::settings::Padding::new(0, 1, 0, 0))
-                        .to_string();
-                    println!(
-                        "{}",
-                        textwrap::indent(&table.to_string(), "      ")
-                    );
-                }
+                        .map(|digest| TlsCertRow { dns_name, digest })
+                })
+                .collect();
+
+            println!("    warnings: {}", details.warnings.len());
+            for w in &details.warnings {
+                println!("        warning: {}", w);
             }
-        }
-    } else if name == "dns_propagation_internal"
-        || name == "dns_propagation_external"
-    {
-        // The "dns_propagation" tasks emit a mapping of (dns server address) to
-        // (result of propagation attempt).  There's no data in the success
-        // variant.  On error, there's an error message.
-        #[derive(Deserialize)]
-        struct DnsPropSuccess {
-            generation: usize,
-            server_results: BTreeMap<String, Result<(), String>>,
-        }
 
-        #[derive(Tabled)]
-        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-        struct DnsPropRow<'a> {
-            dns_server_addr: &'a str,
-            last_result: &'static str,
-        }
-
-        match serde_json::from_value::<DnsPropSuccess>(details.clone()) {
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            ),
-            Ok(details) => {
-                println!(
-                    "    attempt to propagate generation: {}\n",
-                    details.generation
-                );
-                let server_results = &details.server_results;
-
-                if !server_results.is_empty() {
-                    let rows = server_results.iter().map(|(addr, result)| {
-                        DnsPropRow {
-                            dns_server_addr: addr,
-                            last_result: match result {
-                                Ok(_) => "success",
-                                Err(_) => "error (see below)",
-                            },
-                        }
-                    });
-
-                    let table = tabled::Table::new(rows)
-                        .with(tabled::settings::Style::empty())
-                        .with(tabled::settings::Padding::new(0, 1, 0, 0))
-                        .to_string();
-                    println!(
-                        "{}",
-                        textwrap::indent(&table.to_string(), "      ")
-                    );
-                }
-
-                println!("");
-                for (addr, error) in
-                    server_results.iter().filter_map(|(addr, result)| {
-                        match result {
-                            Ok(_) => None,
-                            Err(error) => Some((addr, error)),
-                        }
-                    })
-                {
-                    println!("    error: server {}: {}", addr, error);
-                }
-            }
-        };
-    } else if name == "external_endpoints" {
-        // The "external_endpoints" task emits somewhat complex data.
-        // This corresponds to the `ExternalEndpoints` type in Nexus.
-        #[derive(Deserialize)]
-        struct EndpointsFound {
-            /// mapping of DNS names on which we serve the API to "endpoint"
-            by_dns_name: BTreeMap<String, Endpoint>,
-            /// an endpoint used when we cannot figure out the DNS name of an
-            /// incoming request
-            default_endpoint: Option<Endpoint>,
-            /// pending problems related to DNS/TLS configuration
-            warnings: Vec<String>,
-        }
-
-        #[derive(Deserialize)]
-        struct Endpoint {
-            /// the silo id whose endpoint this is
-            silo_id: Uuid,
-            /// TLS certificates that could be used for this endpoint
-            /// (digests only)
-            tls_certs: Vec<String>,
-        }
-
-        #[derive(Tabled)]
-        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-        struct EndpointRow<'a> {
-            #[tabled(rename = " ")]
-            is_default: char,
-            silo_id: Uuid,
-            dns_name: &'a str,
-        }
-
-        #[derive(Tabled)]
-        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-        struct TlsCertRow<'a> {
-            dns_name: &'a str,
-            digest: &'a str,
-        }
-
-        match serde_json::from_value::<EndpointsFound>(details.clone()) {
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            ),
-            Ok(details) => {
-                println!(
-                    "    external API endpoints: {} \
-                    ('*' below marks default)\n",
-                    details.by_dns_name.len()
-                );
-                let endpoint_rows =
-                    details.by_dns_name.iter().map(|(dns_name, endpoint)| {
-                        let is_default = match &details.default_endpoint {
-                            Some(e) if e.silo_id == endpoint.silo_id => '*',
-                            _ => ' ',
-                        };
-
-                        EndpointRow {
-                            silo_id: endpoint.silo_id,
-                            is_default,
-                            dns_name,
-                        }
-                    });
-                let table = tabled::Table::new(endpoint_rows)
+            println!("");
+            println!("    TLS certificates: {}", tls_cert_rows.len());
+            if !tls_cert_rows.is_empty() {
+                let table = tabled::Table::new(tls_cert_rows)
                     .with(tabled::settings::Style::empty())
                     .with(tabled::settings::Padding::new(0, 1, 0, 0))
                     .to_string();
                 println!(
-                    "{}\n",
+                    "{}",
                     textwrap::indent(&table.to_string(), "        ")
                 );
-
-                let tls_cert_rows: Vec<TlsCertRow> = details
-                    .by_dns_name
-                    .iter()
-                    .flat_map(|(dns_name, endpoint)| {
-                        endpoint
-                            .tls_certs
-                            .iter()
-                            .map(|digest| TlsCertRow { dns_name, digest })
-                    })
-                    .collect();
-
-                println!("    warnings: {}", details.warnings.len());
-                for w in &details.warnings {
-                    println!("        warning: {}", w);
-                }
-
-                println!("");
-                println!("    TLS certificates: {}", tls_cert_rows.len());
-                if !tls_cert_rows.is_empty() {
-                    let table = tabled::Table::new(tls_cert_rows)
-                        .with(tabled::settings::Style::empty())
-                        .with(tabled::settings::Padding::new(0, 1, 0, 0))
-                        .to_string();
-                    println!(
-                        "{}",
-                        textwrap::indent(&table.to_string(), "        ")
-                    );
-                }
             }
         }
-    } else if name == "inventory_collection" {
-        #[derive(Deserialize)]
-        struct InventorySuccess {
-            collection_id: Uuid,
-            time_started: DateTime<Utc>,
-            time_done: DateTime<Utc>,
+    }
+}
+
+fn print_task_inventory_collection(details: &serde_json::Value) {
+    #[derive(Deserialize)]
+    struct InventorySuccess {
+        collection_id: Uuid,
+        time_started: DateTime<Utc>,
+        time_done: DateTime<Utc>,
+    }
+
+    match serde_json::from_value::<InventorySuccess>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(found_inventory) => {
+            println!(
+                "    last collection id:      {}",
+                found_inventory.collection_id
+            );
+            println!(
+                "    last collection started: {}",
+                found_inventory
+                    .time_started
+                    .to_rfc3339_opts(SecondsFormat::Secs, true),
+            );
+            println!(
+                "    last collection done:    {}",
+                found_inventory
+                    .time_done
+                    .to_rfc3339_opts(SecondsFormat::Secs, true),
+            );
         }
+    };
+}
 
-        match serde_json::from_value::<InventorySuccess>(details.clone()) {
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            ),
-            Ok(found_inventory) => {
-                println!(
-                    "    last collection id:      {}",
-                    found_inventory.collection_id
-                );
-                println!(
-                    "    last collection started: {}",
-                    found_inventory
-                        .time_started
-                        .to_rfc3339_opts(SecondsFormat::Secs, true),
-                );
-                println!(
-                    "    last collection done:    {}",
-                    found_inventory
-                        .time_done
-                        .to_rfc3339_opts(SecondsFormat::Secs, true),
-                );
-            }
-        };
-    } else if name == "phantom_disks" {
-        #[derive(Deserialize)]
-        struct TaskSuccess {
-            /// how many phantom disks were deleted ok
-            phantom_disk_deleted_ok: usize,
+fn print_task_phantom_disks(details: &serde_json::Value) {
+    #[derive(Deserialize)]
+    struct TaskSuccess {
+        /// how many phantom disks were deleted ok
+        phantom_disk_deleted_ok: usize,
 
-            /// how many phantom disks could not be deleted
-            phantom_disk_deleted_err: usize,
+        /// how many phantom disks could not be deleted
+        phantom_disk_deleted_err: usize,
+    }
+
+    match serde_json::from_value::<TaskSuccess>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(success) => {
+            println!(
+                "    number of phantom disks deleted: {}",
+                success.phantom_disk_deleted_ok
+            );
+            println!(
+                "    number of phantom disk delete errors: {}",
+                success.phantom_disk_deleted_err
+            );
         }
+    };
+}
 
-        match serde_json::from_value::<TaskSuccess>(details.clone()) {
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            ),
-            Ok(success) => {
-                println!(
-                    "    number of phantom disks deleted: {}",
-                    success.phantom_disk_deleted_ok
-                );
-                println!(
-                    "    number of phantom disk delete errors: {}",
-                    success.phantom_disk_deleted_err
-                );
+fn print_task_region_replacement(details: &serde_json::Value) {
+    match serde_json::from_value::<RegionReplacementStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+
+        Ok(status) => {
+            println!(
+                "    region replacement requests created ok: {}",
+                status.requests_created_ok.len()
+            );
+            for line in &status.requests_created_ok {
+                println!("    > {line}");
             }
-        };
-    } else if name == "region_replacement" {
-        match serde_json::from_value::<RegionReplacementStatus>(details.clone())
-        {
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            ),
 
-            Ok(status) => {
-                println!(
-                    "    region replacement requests created ok: {}",
-                    status.requests_created_ok.len()
-                );
-                for line in &status.requests_created_ok {
-                    println!("    > {line}");
-                }
-
-                println!(
-                    "    region replacement start sagas started ok: {}",
-                    status.start_invoked_ok.len()
-                );
-                for line in &status.start_invoked_ok {
-                    println!("    > {line}");
-                }
-
-                println!(
-                    "    region replacement requests set to completed ok: {}",
-                    status.requests_completed_ok.len()
-                );
-                for line in &status.requests_completed_ok {
-                    println!("    > {line}");
-                }
-
-                println!("    errors: {}", status.errors.len());
-                for line in &status.errors {
-                    println!("    > {line}");
-                }
+            println!(
+                "    region replacement start sagas started ok: {}",
+                status.start_invoked_ok.len()
+            );
+            for line in &status.start_invoked_ok {
+                println!("    > {line}");
             }
-        };
-    } else if name == "instance_watcher" {
-        #[derive(Deserialize)]
-        struct TaskSuccess {
-            /// total number of instances checked
-            total_instances: usize,
 
-            /// number of stale instance metrics that were deleted
-            pruned_instances: usize,
+            println!(
+                "    region replacement requests set to completed ok: {}",
+                status.requests_completed_ok.len()
+            );
+            for line in &status.requests_completed_ok {
+                println!("    > {line}");
+            }
 
-            /// update sagas queued due to instance updates.
-            update_sagas_queued: usize,
-
-            /// instance states from completed checks.
-            ///
-            /// this is a mapping of stringified instance states to the number
-            /// of instances in that state. these stringified states correspond
-            /// to the `state` field recorded by the instance watcher's
-            /// `virtual_machine:check` timeseries with the `healthy` field set
-            /// to `true`. any changes to the instance state type which cause it
-            /// to print differently will be counted as a distinct state.
-            instance_states: BTreeMap<String, usize>,
-
-            /// instance check failures.
-            ///
-            /// this is a mapping of stringified instance check failure reasons
-            /// to the number of instances with checks that failed for that
-            /// reason. these stringified  failure reasons correspond to the
-            /// `state` field recorded by the instance watcher's
-            /// `virtual_machine:check` timeseries with the `healthy` field set
-            /// to `false`. any changes to the instance state type which cause
-            /// it to print differently will be counted as a distinct failure
-            /// reason.
-            failed_checks: BTreeMap<String, usize>,
-
-            /// instance checks that could not be completed successfully.
-            ///
-            /// this is a mapping of stringified instance check errors
-            /// to the number of instance checks that were not completed due to
-            /// that error. these stringified errors correspond to the `reason `
-            /// field recorded by the instance watcher's
-            /// `virtual_machine:incomplete_check` timeseries. any changes to
-            /// the check error type which cause it to print
-            /// differently will be counted as a distinct check error.
-            incomplete_checks: BTreeMap<String, usize>,
+            println!("    errors: {}", status.errors.len());
+            for line in &status.errors {
+                println!("    > {line}");
+            }
         }
+    };
+}
 
-        match serde_json::from_value::<TaskSuccess>(details.clone()) {
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            ),
-            Ok(TaskSuccess {
-                total_instances,
-                update_sagas_queued,
-                pruned_instances,
-                instance_states,
-                failed_checks,
-                incomplete_checks,
-            }) => {
-                let total_successes: usize = instance_states.values().sum();
-                let total_failures: usize = failed_checks.values().sum();
-                let total_incomplete: usize = incomplete_checks.values().sum();
-                println!("    total instances checked: {total_instances}",);
-                println!(
-                    "    checks completed: {}",
-                    total_successes + total_failures
-                );
-                println!("       successful checks: {total_successes}",);
-                for (state, count) in &instance_states {
-                    println!("       -> {count} instances {state}")
-                }
-                println!("       update sagas queued: {update_sagas_queued}");
-                println!("       failed checks: {total_failures}");
-                for (failure, count) in &failed_checks {
-                    println!("       -> {count} {failure}")
-                }
-                println!(
-                    "    checks that could not be completed: {total_incomplete}",
-                );
-                for (error, count) in &incomplete_checks {
-                    println!("       -> {count} {error} errors")
-                }
-                println!(
-                    "    stale instance metrics pruned: {pruned_instances}"
-                );
+fn print_task_instance_watcher(details: &serde_json::Value) {
+    #[derive(Deserialize)]
+    struct TaskSuccess {
+        /// total number of instances checked
+        total_instances: usize,
+
+        /// number of stale instance metrics that were deleted
+        pruned_instances: usize,
+
+        /// update sagas queued due to instance updates.
+        update_sagas_queued: usize,
+
+        /// instance states from completed checks.
+        ///
+        /// this is a mapping of stringified instance states to the number
+        /// of instances in that state. these stringified states correspond
+        /// to the `state` field recorded by the instance watcher's
+        /// `virtual_machine:check` timeseries with the `healthy` field set
+        /// to `true`. any changes to the instance state type which cause it
+        /// to print differently will be counted as a distinct state.
+        instance_states: BTreeMap<String, usize>,
+
+        /// instance check failures.
+        ///
+        /// this is a mapping of stringified instance check failure reasons
+        /// to the number of instances with checks that failed for that
+        /// reason. these stringified  failure reasons correspond to the
+        /// `state` field recorded by the instance watcher's
+        /// `virtual_machine:check` timeseries with the `healthy` field set
+        /// to `false`. any changes to the instance state type which cause
+        /// it to print differently will be counted as a distinct failure
+        /// reason.
+        failed_checks: BTreeMap<String, usize>,
+
+        /// instance checks that could not be completed successfully.
+        ///
+        /// this is a mapping of stringified instance check errors
+        /// to the number of instance checks that were not completed due to
+        /// that error. these stringified errors correspond to the `reason `
+        /// field recorded by the instance watcher's
+        /// `virtual_machine:incomplete_check` timeseries. any changes to
+        /// the check error type which cause it to print
+        /// differently will be counted as a distinct check error.
+        incomplete_checks: BTreeMap<String, usize>,
+    }
+
+    match serde_json::from_value::<TaskSuccess>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(TaskSuccess {
+            total_instances,
+            update_sagas_queued,
+            pruned_instances,
+            instance_states,
+            failed_checks,
+            incomplete_checks,
+        }) => {
+            let total_successes: usize = instance_states.values().sum();
+            let total_failures: usize = failed_checks.values().sum();
+            let total_incomplete: usize = incomplete_checks.values().sum();
+            println!("    total instances checked: {total_instances}",);
+            println!(
+                "    checks completed: {}",
+                total_successes + total_failures
+            );
+            println!("       successful checks: {total_successes}",);
+            for (state, count) in &instance_states {
+                println!("       -> {count} instances {state}")
             }
-        };
-    } else if name == "service_firewall_rule_propagation" {
-        match serde_json::from_value::<serde_json::Value>(details.clone()) {
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            ),
-            Ok(serde_json::Value::Object(map)) => {
-                if !map.is_empty() {
-                    eprintln!(
-                        "    unexpected return value from task: {:?}",
-                        map
-                    )
+            println!("       update sagas queued: {update_sagas_queued}");
+            println!("       failed checks: {total_failures}");
+            for (failure, count) in &failed_checks {
+                println!("       -> {count} {failure}")
+            }
+            println!(
+                "    checks that could not be completed: {total_incomplete}",
+            );
+            for (error, count) in &incomplete_checks {
+                println!("       -> {count} {error} errors")
+            }
+            println!("    stale instance metrics pruned: {pruned_instances}");
+        }
+    };
+}
+
+fn print_task_service_firewall_rule_propagation(details: &serde_json::Value) {
+    match serde_json::from_value::<serde_json::Value>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(serde_json::Value::Object(map)) => {
+            if !map.is_empty() {
+                eprintln!("    unexpected return value from task: {:?}", map)
+            }
+        }
+        Ok(val) => {
+            eprintln!("    unexpected return value from task: {:?}", val)
+        }
+    };
+}
+
+fn print_task_abandoned_vmm_reaper(details: &serde_json::Value) {
+    match serde_json::from_value::<AbandonedVmmReaperStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(AbandonedVmmReaperStatus {
+            vmms_found,
+            vmms_deleted,
+            vmms_already_deleted,
+            sled_reservations_deleted,
+            errors,
+        }) => {
+            if !errors.is_empty() {
+                println!(
+                    "    task did not complete successfully! ({} errors)",
+                    errors.len()
+                );
+                for error in errors {
+                    println!("    > {error}");
                 }
             }
-            Ok(val) => {
-                eprintln!("    unexpected return value from task: {:?}", val)
-            }
-        };
-    } else if name == "abandoned_vmm_reaper" {
-        match serde_json::from_value::<AbandonedVmmReaperStatus>(
-            details.clone(),
-        ) {
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            ),
-            Ok(AbandonedVmmReaperStatus {
-                vmms_found,
-                vmms_deleted,
-                vmms_already_deleted,
+
+            const VMMS_FOUND: &'static str = "total abandoned VMMs found:";
+            const VMMS_DELETED: &'static str = "  VMM records deleted:";
+            const VMMS_ALREADY_DELETED: &'static str =
+                "  VMMs already deleted by another Nexus:";
+            const SLED_RESERVATIONS_DELETED: &'static str =
+                "sled resource reservations deleted:";
+            // To align the number column, figure out the length of the
+            // longest line of text and add one (so that there's a space).
+            //
+            // Yes, I *could* just count the number of characters in each
+            // line myself, but why do something by hand when you could make
+            // the computer do it for you? And, this way, if we change the
+            // text, we won't need to figure it out again.
+            const WIDTH: usize = const_max_len(&[
+                VMMS_FOUND,
+                VMMS_DELETED,
+                VMMS_ALREADY_DELETED,
+                SLED_RESERVATIONS_DELETED,
+            ]) + 1;
+            const NUM_WIDTH: usize = 3;
+
+            println!("    {VMMS_FOUND:<WIDTH$}{vmms_found:>NUM_WIDTH$}");
+            println!("    {VMMS_DELETED:<WIDTH$}{vmms_deleted:>NUM_WIDTH$}");
+            println!(
+                "    {VMMS_ALREADY_DELETED:<WIDTH$}{:>NUM_WIDTH$}",
+                vmms_already_deleted
+            );
+            println!(
+                "    {SLED_RESERVATIONS_DELETED:<WIDTH$}{:>NUM_WIDTH$}",
                 sled_reservations_deleted,
-                errors,
-            }) => {
-                if !errors.is_empty() {
-                    println!(
-                        "    task did not complete successfully! ({} errors)",
-                        errors.len()
-                    );
-                    for error in errors {
-                        println!("    > {error}");
-                    }
-                }
+            );
+        }
+    };
+}
 
-                const VMMS_FOUND: &'static str = "total abandoned VMMs found:";
-                const VMMS_DELETED: &'static str = "  VMM records deleted:";
-                const VMMS_ALREADY_DELETED: &'static str =
-                    "  VMMs already deleted by another Nexus:";
-                const SLED_RESERVATIONS_DELETED: &'static str =
-                    "sled resource reservations deleted:";
-                // To align the number column, figure out the length of the
-                // longest line of text and add one (so that there's a space).
-                //
-                // Yes, I *could* just count the number of characters in each
-                // line myself, but why do something by hand when you could make
-                // the computer do it for you? And, this way, if we change the
-                // text, we won't need to figure it out again.
-                const WIDTH: usize = const_max_len(&[
-                    VMMS_FOUND,
-                    VMMS_DELETED,
-                    VMMS_ALREADY_DELETED,
-                    SLED_RESERVATIONS_DELETED,
-                ]) + 1;
-                const NUM_WIDTH: usize = 3;
+fn print_task_region_replacement_driver(details: &serde_json::Value) {
+    match serde_json::from_value::<RegionReplacementDriverStatus>(
+        details.clone(),
+    ) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
 
-                println!("    {VMMS_FOUND:<WIDTH$}{vmms_found:>NUM_WIDTH$}");
-                println!(
-                    "    {VMMS_DELETED:<WIDTH$}{vmms_deleted:>NUM_WIDTH$}"
-                );
-                println!(
-                    "    {VMMS_ALREADY_DELETED:<WIDTH$}{:>NUM_WIDTH$}",
-                    vmms_already_deleted
-                );
-                println!(
-                    "    {SLED_RESERVATIONS_DELETED:<WIDTH$}{:>NUM_WIDTH$}",
-                    sled_reservations_deleted,
-                );
+        Ok(status) => {
+            println!(
+                "    region replacement drive sagas started ok: {}",
+                status.drive_invoked_ok.len()
+            );
+            for line in &status.drive_invoked_ok {
+                println!("    > {line}");
             }
-        };
-    } else if name == "region_replacement_driver" {
-        match serde_json::from_value::<RegionReplacementDriverStatus>(
-            details.clone(),
-        ) {
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            ),
 
-            Ok(status) => {
-                println!(
-                    "    region replacement drive sagas started ok: {}",
-                    status.drive_invoked_ok.len()
-                );
-                for line in &status.drive_invoked_ok {
-                    println!("    > {line}");
-                }
-
-                println!(
-                    "    region replacement finish sagas started ok: {}",
-                    status.finish_invoked_ok.len()
-                );
-                for line in &status.finish_invoked_ok {
-                    println!("    > {line}");
-                }
-
-                println!("    errors: {}", status.errors.len());
-                for line in &status.errors {
-                    println!("    > {line}");
-                }
+            println!(
+                "    region replacement finish sagas started ok: {}",
+                status.finish_invoked_ok.len()
+            );
+            for line in &status.finish_invoked_ok {
+                println!("    > {line}");
             }
-        };
-    } else if name == "saga_recovery" {
-        match serde_json::from_value::<nexus_saga_recovery::Report>(
-            details.clone(),
-        ) {
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            ),
 
-            Ok(report) => {
-                println!("    since Nexus started:");
-                println!(
-                    "        sagas recovered:         {:3}",
-                    report.ntotal_recovered
-                );
-                println!(
-                    "        sagas recovery errors:   {:3}",
-                    report.ntotal_failures,
-                );
-                println!(
-                    "        sagas observed started:  {:3}",
-                    report.ntotal_started
-                );
-                println!(
-                    "        sagas inferred finished: {:3}",
-                    report.ntotal_finished
-                );
-                println!(
-                    "        missing from SEC:        {:3}",
-                    report.ntotal_sec_errors_missing,
-                );
-                println!(
-                    "        bad state in SEC:        {:3}",
-                    report.ntotal_sec_errors_bad_state,
-                );
-                match report.last_pass {
-                    LastPass::NeverStarted => {
-                        println!("    never run");
-                    }
-                    LastPass::Failed { message } => {
-                        println!("    last pass FAILED: {}", message);
-                    }
-                    LastPass::Success(success) => {
-                        println!("    last pass:");
-                        println!(
-                            "        found sagas: {:3} \
-                            (in-progress, assigned to this Nexus)",
-                            success.nfound
-                        );
-                        println!(
-                            "        recovered:   {:3} (successfully)",
-                            success.nrecovered
-                        );
-                        println!("        failed:      {:3}", success.nfailed);
-                        println!(
-                            "        skipped:     {:3} (already running)",
-                            success.nskipped
-                        );
-                        println!(
-                            "        removed:     {:3} (newly finished)",
-                            success.nskipped
-                        );
-                    }
-                };
-
-                if report.recent_recoveries.is_empty() {
-                    println!("    no recovered sagas");
-                } else {
-                    println!(
-                        "    recently recovered sagas ({}):",
-                        report.recent_recoveries.len()
-                    );
-
-                    #[derive(Tabled)]
-                    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-                    struct SagaRow {
-                        time: String,
-                        saga_id: String,
-                    }
-                    let table_rows =
-                        report.recent_recoveries.iter().map(|r| SagaRow {
-                            time: r
-                                .time
-                                .to_rfc3339_opts(SecondsFormat::Secs, true),
-                            saga_id: r.saga_id.to_string(),
-                        });
-                    let table = tabled::Table::new(table_rows)
-                        .with(tabled::settings::Style::empty())
-                        .with(tabled::settings::Padding::new(0, 1, 0, 0))
-                        .to_string();
-                    println!(
-                        "{}",
-                        textwrap::indent(&table.to_string(), "        ")
-                    );
-                }
-
-                if report.recent_failures.is_empty() {
-                    println!("    no saga recovery failures");
-                } else {
-                    println!(
-                        "    recent sagas recovery failures ({}):",
-                        report.recent_failures.len()
-                    );
-
-                    #[derive(Tabled)]
-                    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-                    struct SagaRow<'a> {
-                        time: String,
-                        saga_id: String,
-                        message: &'a str,
-                    }
-                    let table_rows =
-                        report.recent_failures.iter().map(|r| SagaRow {
-                            time: r
-                                .time
-                                .to_rfc3339_opts(SecondsFormat::Secs, true),
-                            saga_id: r.saga_id.to_string(),
-                            message: &r.message,
-                        });
-                    let table = tabled::Table::new(table_rows)
-                        .with(tabled::settings::Style::empty())
-                        .with(tabled::settings::Padding::new(0, 1, 0, 0))
-                        .to_string();
-                    println!(
-                        "{}",
-                        textwrap::indent(&table.to_string(), "        ")
-                    );
-                }
+            println!("    errors: {}", status.errors.len());
+            for line in &status.errors {
+                println!("    > {line}");
             }
         }
-    } else if name == "lookup_region_port" {
-        match serde_json::from_value::<LookupRegionPortStatus>(details.clone())
-        {
-            Ok(LookupRegionPortStatus { found_port_ok, errors }) => {
-                println!("    total filled in ports: {}", found_port_ok.len());
-                for line in &found_port_ok {
-                    println!("    > {line}");
-                }
+    };
+}
 
-                println!("    errors: {}", errors.len());
-                for line in &errors {
-                    println!("    > {line}");
+fn print_task_saga_recovery(details: &serde_json::Value) {
+    match serde_json::from_value::<nexus_saga_recovery::Report>(details.clone())
+    {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+
+        Ok(report) => {
+            println!("    since Nexus started:");
+            println!(
+                "        sagas recovered:         {:3}",
+                report.ntotal_recovered
+            );
+            println!(
+                "        sagas recovery errors:   {:3}",
+                report.ntotal_failures,
+            );
+            println!(
+                "        sagas observed started:  {:3}",
+                report.ntotal_started
+            );
+            println!(
+                "        sagas inferred finished: {:3}",
+                report.ntotal_finished
+            );
+            println!(
+                "        missing from SEC:        {:3}",
+                report.ntotal_sec_errors_missing,
+            );
+            println!(
+                "        bad state in SEC:        {:3}",
+                report.ntotal_sec_errors_bad_state,
+            );
+            match report.last_pass {
+                LastPass::NeverStarted => {
+                    println!("    never run");
                 }
+                LastPass::Failed { message } => {
+                    println!("    last pass FAILED: {}", message);
+                }
+                LastPass::Success(success) => {
+                    println!("    last pass:");
+                    println!(
+                        "        found sagas: {:3} \
+                        (in-progress, assigned to this Nexus)",
+                        success.nfound
+                    );
+                    println!(
+                        "        recovered:   {:3} (successfully)",
+                        success.nrecovered
+                    );
+                    println!("        failed:      {:3}", success.nfailed);
+                    println!(
+                        "        skipped:     {:3} (already running)",
+                        success.nskipped
+                    );
+                    println!(
+                        "        removed:     {:3} (newly finished)",
+                        success.nskipped
+                    );
+                }
+            };
+
+            if report.recent_recoveries.is_empty() {
+                println!("    no recovered sagas");
+            } else {
+                println!(
+                    "    recently recovered sagas ({}):",
+                    report.recent_recoveries.len()
+                );
+
+                #[derive(Tabled)]
+                #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+                struct SagaRow {
+                    time: String,
+                    saga_id: String,
+                }
+                let table_rows =
+                    report.recent_recoveries.iter().map(|r| SagaRow {
+                        time: r.time.to_rfc3339_opts(SecondsFormat::Secs, true),
+                        saga_id: r.saga_id.to_string(),
+                    });
+                let table = tabled::Table::new(table_rows)
+                    .with(tabled::settings::Style::empty())
+                    .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                    .to_string();
+                println!(
+                    "{}",
+                    textwrap::indent(&table.to_string(), "        ")
+                );
             }
 
-            Err(error) => eprintln!(
+            if report.recent_failures.is_empty() {
+                println!("    no saga recovery failures");
+            } else {
+                println!(
+                    "    recent sagas recovery failures ({}):",
+                    report.recent_failures.len()
+                );
+
+                #[derive(Tabled)]
+                #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+                struct SagaRow<'a> {
+                    time: String,
+                    saga_id: String,
+                    message: &'a str,
+                }
+                let table_rows =
+                    report.recent_failures.iter().map(|r| SagaRow {
+                        time: r.time.to_rfc3339_opts(SecondsFormat::Secs, true),
+                        saga_id: r.saga_id.to_string(),
+                        message: &r.message,
+                    });
+                let table = tabled::Table::new(table_rows)
+                    .with(tabled::settings::Style::empty())
+                    .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                    .to_string();
+                println!(
+                    "{}",
+                    textwrap::indent(&table.to_string(), "        ")
+                );
+            }
+        }
+    }
+}
+
+fn print_task_lookup_region_port(details: &serde_json::Value) {
+    match serde_json::from_value::<LookupRegionPortStatus>(details.clone()) {
+        Ok(LookupRegionPortStatus { found_port_ok, errors }) => {
+            println!("    total filled in ports: {}", found_port_ok.len());
+            for line in &found_port_ok {
+                println!("    > {line}");
+            }
+
+            println!("    errors: {}", errors.len());
+            for line in &errors {
+                println!("    > {line}");
+            }
+        }
+
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details,
+        ),
+    }
+}
+
+fn print_task_instance_updater(details: &serde_json::Value) {
+    let status = match serde_json::from_value::<InstanceUpdaterStatus>(
+        details.clone(),
+    ) {
+        Err(error) => {
+            eprintln!(
                 "warning: failed to interpret task details: {:?}: {:?}",
                 error, details,
-            ),
+            );
+            return;
         }
-    } else if name == "instance_updater" {
-        let status = match serde_json::from_value::<InstanceUpdaterStatus>(
-            details.clone(),
-        ) {
-            Err(error) => {
-                eprintln!(
-                    "warning: failed to interpret task details: {:?}: {:?}",
-                    error, details,
+        Ok(status) => status,
+    };
+    let errors = status.errors();
+    let instances_found = status.total_instances_found();
+    let InstanceUpdaterStatus {
+        disabled,
+        destroyed_active_vmms,
+        failed_active_vmms,
+        terminated_active_migrations,
+        sagas_started,
+        sagas_completed,
+        saga_errors,
+        query_errors,
+    } = status;
+
+    if disabled {
+        println!("    task explicitly disabled by config!")
+    }
+
+    const FOUND: &'static str = "instances in need of updates:";
+    const DESTROYED: &'static str = "  instances with Destroyed active VMMs:";
+    const FAILED: &'static str = "  instances with Failed active VMMs:";
+    const MIGRATIONS: &'static str = "  instances with terminated migrations:";
+    const SAGAS_STARTED: &'static str = "update sagas started:";
+    const SAGAS_COMPLETED: &'static str =
+        "  update sagas completed successfully:";
+    const SAGA_ERRORS: &'static str = "  update sagas failed:";
+    const QUERY_ERRORS: &'static str = "  errors finding instances to update:";
+    const WIDTH: usize = const_max_len(&[
+        FOUND,
+        DESTROYED,
+        FAILED,
+        MIGRATIONS,
+        SAGAS_STARTED,
+        SAGA_ERRORS,
+        QUERY_ERRORS,
+    ]) + 1;
+    const NUM_WIDTH: usize = 3;
+    if errors > 0 {
+        println!("    task did not complete successfully! ({errors} errors)");
+        println!(
+            "      {QUERY_ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+            query_errors.len()
+        );
+        for error in query_errors {
+            println!("     > {error}");
+        }
+        println!(
+            "      {SAGA_ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+            saga_errors.len()
+        );
+        for (instance_id, error) in &saga_errors {
+            match instance_id {
+                Some(id) => println!("      > {id}: {error}"),
+                None => println!("      > {error}"),
+            }
+        }
+    }
+
+    println!("    {FOUND:<WIDTH$}{instances_found:>NUM_WIDTH$}");
+    println!("    {DESTROYED:<WIDTH$}{destroyed_active_vmms:>NUM_WIDTH$}",);
+    println!("    {FAILED:<WIDTH$}{failed_active_vmms:>NUM_WIDTH$}");
+    println!(
+        "    {MIGRATIONS:<WIDTH$}{:>NUM_WIDTH$}",
+        terminated_active_migrations,
+    );
+    println!("    {SAGAS_STARTED:<WIDTH$}{sagas_started:>NUM_WIDTH$}");
+    println!("    {SAGAS_COMPLETED:<WIDTH$}{sagas_completed:>NUM_WIDTH$}",);
+    println!("    {SAGA_ERRORS:<WIDTH$}{:>NUM_WIDTH$}", saga_errors.len());
+}
+
+fn print_task_region_snapshot_replacement_start(details: &serde_json::Value) {
+    match serde_json::from_value::<RegionSnapshotReplacementStartStatus>(
+        details.clone(),
+    ) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+
+        Ok(status) => {
+            println!(
+                "    total requests created ok: {}",
+                status.requests_created_ok.len(),
+            );
+            for line in &status.requests_created_ok {
+                println!("    > {line}");
+            }
+
+            println!(
+                "    total start saga invoked ok: {}",
+                status.start_invoked_ok.len(),
+            );
+            for line in &status.start_invoked_ok {
+                println!("    > {line}");
+            }
+
+            println!(
+                "    total requests completed ok: {}",
+                status.requests_completed_ok.len(),
+            );
+            for line in &status.requests_completed_ok {
+                println!("    > {line}");
+            }
+
+            println!("    errors: {}", status.errors.len());
+            for line in &status.errors {
+                println!("    > {line}");
+            }
+        }
+    }
+}
+
+fn print_task_region_snapshot_replacement_garbage_collection(
+    details: &serde_json::Value,
+) {
+    match serde_json::from_value::<RegionSnapshotReplacementGarbageCollectStatus>(
+        details.clone(),
+    ) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+
+        Ok(status) => {
+            println!(
+                "    total garbage collections requested: {}",
+                status.garbage_collect_requested.len(),
+            );
+            for line in &status.garbage_collect_requested {
+                println!("    > {line}");
+            }
+
+            println!("    errors: {}", status.errors.len());
+            for line in &status.errors {
+                println!("    > {line}");
+            }
+        }
+    }
+}
+
+fn print_task_region_snapshot_replacement_step(details: &serde_json::Value) {
+    match serde_json::from_value::<RegionSnapshotReplacementStepStatus>(
+        details.clone(),
+    ) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+
+        Ok(status) => {
+            println!(
+                "    total step records created ok: {}",
+                status.step_records_created_ok.len(),
+            );
+            for line in &status.step_records_created_ok {
+                println!("    > {line}");
+            }
+
+            println!(
+                "    total step garbage collect saga invoked ok: {}",
+                status.step_garbage_collect_invoked_ok.len(),
+            );
+            for line in &status.step_garbage_collect_invoked_ok {
+                println!("    > {line}");
+            }
+
+            println!(
+                "    total step saga invoked ok: {}",
+                status.step_invoked_ok.len(),
+            );
+            for line in &status.step_invoked_ok {
+                println!("    > {line}");
+            }
+
+            println!(
+                "    total steps set to volume_deleted ok: {}",
+                status.step_set_volume_deleted_ok.len(),
+            );
+            for line in &status.step_set_volume_deleted_ok {
+                println!("    > {line}");
+            }
+
+            println!("    errors: {}", status.errors.len());
+            for line in &status.errors {
+                println!("    > {line}");
+            }
+        }
+    }
+}
+
+fn print_task_blueprint_loader(details: &serde_json::Value) {
+    #[derive(Deserialize)]
+    struct BlueprintLoaderStatus {
+        target_id: Uuid,
+        time_created: DateTime<Utc>,
+        status: String,
+        enabled: bool,
+    }
+
+    match serde_json::from_value::<BlueprintLoaderStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            println!("    target blueprint: {}", status.target_id);
+            println!(
+                "    execution:        {}",
+                if status.enabled { "enabled" } else { "disabled" }
+            );
+            println!(
+                "    created at:       {}",
+                humantime::format_rfc3339_millis(status.time_created.into())
+            );
+            println!("    status:           {}", status.status);
+        }
+    }
+}
+
+fn print_task_blueprint_executor(details: &serde_json::Value) {
+    let mut value = details.clone();
+    // Extract and remove the event report. (If we don't do this, the
+    // `Debug` output can be quite large.)
+    //
+    // TODO: show more of the event buffer.
+    let event_buffer = extract_event_buffer(&mut value);
+
+    #[derive(Deserialize)]
+    struct BlueprintExecutorStatus {
+        target_id: Uuid,
+        enabled: bool,
+        execution_error: Option<NestedError>,
+    }
+
+    match serde_json::from_value::<BlueprintExecutorStatus>(value) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            // TODO: switch the other outputs to tabled as well.
+            let mut builder = tabled::builder::Builder::default();
+            builder.push_record([
+                "target blueprint:".to_string(),
+                status.target_id.to_string(),
+            ]);
+            builder.push_record([
+                "execution:".to_string(),
+                if status.enabled {
+                    "enabled".to_string()
+                } else {
+                    "disabled".to_string()
+                },
+            ]);
+
+            push_event_buffer_summary(event_buffer, &mut builder);
+
+            match status.execution_error {
+                Some(error) => {
+                    builder
+                        .push_record(["error:".to_string(), error.to_string()]);
+
+                    for source in error.sources() {
+                        builder.push_record([
+                            "  caused by:".to_string(),
+                            source.to_string(),
+                        ]);
+                    }
+                }
+                None => {
+                    builder.push_record([
+                        "error:".to_string(),
+                        "(none)".to_string(),
+                    ]);
+                }
+            }
+
+            let mut table = builder.build();
+            bgtask_apply_kv_style(&mut table);
+            println!("{}", table);
+        }
+    }
+}
+
+fn print_task_region_snapshot_replacement_finish(details: &serde_json::Value) {
+    match serde_json::from_value::<RegionSnapshotReplacementFinishStatus>(
+        details.clone(),
+    ) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+
+        Ok(status) => {
+            println!(
+                "    region snapshot replacement finish sagas started \
+                ok: {}",
+                status.finish_invoked_ok.len()
+            );
+            for line in &status.finish_invoked_ok {
+                println!("    > {line}");
+            }
+
+            println!("    errors: {}", status.errors.len());
+            for line in &status.errors {
+                println!("    > {line}");
+            }
+        }
+    }
+}
+
+fn print_task_instance_reincarnation(details: &serde_json::Value) {
+    match serde_json::from_value::<InstanceReincarnationStatus>(details.clone())
+    {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            const FOUND: &'static str = "instances eligible for reincarnation:";
+            const REINCARNATED: &'static str =
+                "instances reincarnated successfully:";
+            const CHANGED_STATE: &'static str =
+                "instances which changed state before they could reincarnate:";
+            const ERRORS: &'static str =
+                "instances which failed to reincarnate:";
+            const WIDTH: usize =
+                const_max_len(&[FOUND, REINCARNATED, CHANGED_STATE, ERRORS]);
+            if status.disabled {
+                println!(
+                    "    instance reincarnation explicitly disabled \
+                     by config!"
                 );
                 return;
             }
-            Ok(status) => status,
-        };
-        let errors = status.errors();
-        let instances_found = status.total_instances_found();
-        let InstanceUpdaterStatus {
-            disabled,
-            destroyed_active_vmms,
-            failed_active_vmms,
-            terminated_active_migrations,
-            sagas_started,
-            sagas_completed,
-            saga_errors,
-            query_errors,
-        } = status;
 
-        if disabled {
-            println!("    task explicitly disabled by config!")
-        }
+            if !status.errors.is_empty() {
+                println!(
+                    "    errors occurred while finding instances to \
+                      reincarnate:"
+                );
+                for error in &status.errors {
+                    println!("    > {error}")
+                }
+            }
 
-        const FOUND: &'static str = "instances in need of updates:";
-        const DESTROYED: &'static str =
-            "  instances with Destroyed active VMMs:";
-        const FAILED: &'static str = "  instances with Failed active VMMs:";
-        const MIGRATIONS: &'static str =
-            "  instances with terminated migrations:";
-        const SAGAS_STARTED: &'static str = "update sagas started:";
-        const SAGAS_COMPLETED: &'static str =
-            "  update sagas completed successfully:";
-        const SAGA_ERRORS: &'static str = "  update sagas failed:";
-        const QUERY_ERRORS: &'static str =
-            "  errors finding instances to update:";
-        const WIDTH: usize = const_max_len(&[
-            FOUND,
-            DESTROYED,
-            FAILED,
-            MIGRATIONS,
-            SAGAS_STARTED,
-            SAGA_ERRORS,
-            QUERY_ERRORS,
-        ]) + 1;
-        const NUM_WIDTH: usize = 3;
-        if errors > 0 {
+            let n_restart_errors = status.restart_errors.len();
+            let n_restarted = status.instances_reincarnated.len();
+            let n_changed_state = status.changed_state.len();
             println!(
-                "    task did not complete successfully! ({errors} errors)"
+                "    {FOUND:<WIDTH$} {:>3}",
+                status.total_instances_found()
             );
-            println!(
-                "      {QUERY_ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
-                query_errors.len()
-            );
-            for error in query_errors {
-                println!("     > {error}");
+            for (reason, count) in &status.instances_found {
+                let reason = format!("  {reason} instances:");
+                println!("    {reason:<WIDTH$} {count:>3}",);
             }
-            println!(
-                "      {SAGA_ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
-                saga_errors.len()
-            );
-            for (instance_id, error) in &saga_errors {
-                match instance_id {
-                    Some(id) => println!("      > {id}: {error}"),
-                    None => println!("      > {error}"),
+            println!("    {REINCARNATED:<WIDTH$} {n_restarted:>3}");
+            println!("    {CHANGED_STATE:<WIDTH$} {n_changed_state:>3}",);
+            println!("    {ERRORS:<WIDTH$} {n_restart_errors:>3}");
+
+            if n_restart_errors > 0 {
+                println!(
+                    "    errors occurred while restarting the following \
+                     instances:"
+                );
+                for (id, error) in status.restart_errors {
+                    println!("    > {id}: {error}");
                 }
             }
-        }
 
-        println!("    {FOUND:<WIDTH$}{instances_found:>NUM_WIDTH$}");
-        println!("    {DESTROYED:<WIDTH$}{destroyed_active_vmms:>NUM_WIDTH$}",);
-        println!("    {FAILED:<WIDTH$}{failed_active_vmms:>NUM_WIDTH$}");
-        println!(
-            "    {MIGRATIONS:<WIDTH$}{:>NUM_WIDTH$}",
-            terminated_active_migrations,
-        );
-        println!("    {SAGAS_STARTED:<WIDTH$}{sagas_started:>NUM_WIDTH$}");
-        println!("    {SAGAS_COMPLETED:<WIDTH$}{sagas_completed:>NUM_WIDTH$}",);
-        println!("    {SAGA_ERRORS:<WIDTH$}{:>NUM_WIDTH$}", saga_errors.len());
-    } else if name == "region_snapshot_replacement_start" {
-        match serde_json::from_value::<RegionSnapshotReplacementStartStatus>(
-            details.clone(),
-        ) {
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            ),
-
-            Ok(status) => {
-                println!(
-                    "    total requests created ok: {}",
-                    status.requests_created_ok.len(),
-                );
-                for line in &status.requests_created_ok {
-                    println!("    > {line}");
+            if n_restarted > 0 {
+                println!("    the following instances have reincarnated:");
+                for id in status.instances_reincarnated {
+                    println!("    > {id}")
                 }
+            }
 
+            if n_changed_state > 0 {
                 println!(
-                    "    total start saga invoked ok: {}",
-                    status.start_invoked_ok.len(),
+                    "    the following instances states changed before \
+                     they could be reincarnated:"
                 );
-                for line in &status.start_invoked_ok {
-                    println!("    > {line}");
-                }
-
-                println!(
-                    "    total requests completed ok: {}",
-                    status.requests_completed_ok.len(),
-                );
-                for line in &status.requests_completed_ok {
-                    println!("    > {line}");
-                }
-
-                println!("    errors: {}", status.errors.len());
-                for line in &status.errors {
-                    println!("    > {line}");
+                for id in status.changed_state {
+                    println!("    > {id}")
                 }
             }
         }
-    } else if name == "region_snapshot_replacement_garbage_collection" {
-        match serde_json::from_value::<
-            RegionSnapshotReplacementGarbageCollectStatus,
-        >(details.clone())
-        {
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            ),
-
-            Ok(status) => {
-                println!(
-                    "    total garbage collections requested: {}",
-                    status.garbage_collect_requested.len(),
-                );
-                for line in &status.garbage_collect_requested {
-                    println!("    > {line}");
-                }
-
-                println!("    errors: {}", status.errors.len());
-                for line in &status.errors {
-                    println!("    > {line}");
-                }
-            }
-        }
-    } else if name == "region_snapshot_replacement_step" {
-        match serde_json::from_value::<RegionSnapshotReplacementStepStatus>(
-            details.clone(),
-        ) {
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            ),
-
-            Ok(status) => {
-                println!(
-                    "    total step records created ok: {}",
-                    status.step_records_created_ok.len(),
-                );
-                for line in &status.step_records_created_ok {
-                    println!("    > {line}");
-                }
-
-                println!(
-                    "    total step garbage collect saga invoked ok: {}",
-                    status.step_garbage_collect_invoked_ok.len(),
-                );
-                for line in &status.step_garbage_collect_invoked_ok {
-                    println!("    > {line}");
-                }
-
-                println!(
-                    "    total step saga invoked ok: {}",
-                    status.step_invoked_ok.len(),
-                );
-                for line in &status.step_invoked_ok {
-                    println!("    > {line}");
-                }
-
-                println!(
-                    "    total steps set to volume_deleted ok: {}",
-                    status.step_set_volume_deleted_ok.len(),
-                );
-                for line in &status.step_set_volume_deleted_ok {
-                    println!("    > {line}");
-                }
-
-                println!("    errors: {}", status.errors.len());
-                for line in &status.errors {
-                    println!("    > {line}");
-                }
-            }
-        }
-    } else if name == "blueprint_loader" {
-        #[derive(Deserialize)]
-        struct BlueprintLoaderStatus {
-            target_id: Uuid,
-            time_created: DateTime<Utc>,
-            status: String,
-            enabled: bool,
-        }
-
-        match serde_json::from_value::<BlueprintLoaderStatus>(details.clone()) {
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            ),
-            Ok(status) => {
-                println!("    target blueprint: {}", status.target_id);
-                println!(
-                    "    execution:        {}",
-                    if status.enabled { "enabled" } else { "disabled" }
-                );
-                println!(
-                    "    created at:       {}",
-                    humantime::format_rfc3339_millis(
-                        status.time_created.into()
-                    )
-                );
-                println!("    status:           {}", status.status);
-            }
-        }
-    } else if name == "blueprint_executor" {
-        let mut value = details.clone();
-        // Extract and remove the event report. (If we don't do this, the
-        // `Debug` output can be quite large.)
-        //
-        // TODO: show more of the event buffer.
-        let event_buffer = extract_event_buffer(&mut value);
-
-        #[derive(Deserialize)]
-        struct BlueprintExecutorStatus {
-            target_id: Uuid,
-            enabled: bool,
-            execution_error: Option<NestedError>,
-        }
-
-        match serde_json::from_value::<BlueprintExecutorStatus>(value) {
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            ),
-            Ok(status) => {
-                // TODO: switch the other outputs to tabled as well.
-                let mut builder = tabled::builder::Builder::default();
-                builder.push_record([
-                    "target blueprint:".to_string(),
-                    status.target_id.to_string(),
-                ]);
-                builder.push_record([
-                    "execution:".to_string(),
-                    if status.enabled {
-                        "enabled".to_string()
-                    } else {
-                        "disabled".to_string()
-                    },
-                ]);
-
-                push_event_buffer_summary(event_buffer, &mut builder);
-
-                match status.execution_error {
-                    Some(error) => {
-                        builder.push_record([
-                            "error:".to_string(),
-                            error.to_string(),
-                        ]);
-
-                        for source in error.sources() {
-                            builder.push_record([
-                                "  caused by:".to_string(),
-                                source.to_string(),
-                            ]);
-                        }
-                    }
-                    None => {
-                        builder.push_record([
-                            "error:".to_string(),
-                            "(none)".to_string(),
-                        ]);
-                    }
-                }
-
-                let mut table = builder.build();
-                bgtask_apply_kv_style(&mut table);
-                println!("{}", table);
-            }
-        }
-    } else if name == "region_snapshot_replacement_finish" {
-        match serde_json::from_value::<RegionSnapshotReplacementFinishStatus>(
-            details.clone(),
-        ) {
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            ),
-
-            Ok(status) => {
-                println!(
-                    "    region snapshot replacement finish sagas started \
-                    ok: {}",
-                    status.finish_invoked_ok.len()
-                );
-                for line in &status.finish_invoked_ok {
-                    println!("    > {line}");
-                }
-
-                println!("    errors: {}", status.errors.len());
-                for line in &status.errors {
-                    println!("    > {line}");
-                }
-            }
-        }
-    } else if name == "instance_reincarnation" {
-        match serde_json::from_value::<InstanceReincarnationStatus>(
-            details.clone(),
-        ) {
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            ),
-            Ok(status) => {
-                const FOUND: &'static str =
-                    "instances eligible for reincarnation:";
-                const REINCARNATED: &'static str =
-                    "instances reincarnated successfully:";
-                const CHANGED_STATE: &'static str =
-                    "instances which changed state before they could reincarnate:";
-                const ERRORS: &'static str =
-                    "instances which failed to reincarnate:";
-                const WIDTH: usize = const_max_len(&[
-                    FOUND,
-                    REINCARNATED,
-                    CHANGED_STATE,
-                    ERRORS,
-                ]);
-                if status.disabled {
-                    println!(
-                        "    instance reincarnation explicitly disabled \
-                         by config!"
-                    );
-                    return;
-                }
-
-                if !status.errors.is_empty() {
-                    println!(
-                        "    errors occurred while finding instances to \
-                          reincarnate:"
-                    );
-                    for error in &status.errors {
-                        println!("    > {error}")
-                    }
-                }
-
-                let n_restart_errors = status.restart_errors.len();
-                let n_restarted = status.instances_reincarnated.len();
-                let n_changed_state = status.changed_state.len();
-                println!(
-                    "    {FOUND:<WIDTH$} {:>3}",
-                    status.total_instances_found()
-                );
-                for (reason, count) in &status.instances_found {
-                    let reason = format!("  {reason} instances:");
-                    println!("    {reason:<WIDTH$} {count:>3}",);
-                }
-                println!("    {REINCARNATED:<WIDTH$} {n_restarted:>3}");
-                println!("    {CHANGED_STATE:<WIDTH$} {n_changed_state:>3}",);
-                println!("    {ERRORS:<WIDTH$} {n_restart_errors:>3}");
-
-                if n_restart_errors > 0 {
-                    println!(
-                        "    errors occurred while restarting the following \
-                         instances:"
-                    );
-                    for (id, error) in status.restart_errors {
-                        println!("    > {id}: {error}");
-                    }
-                }
-
-                if n_restarted > 0 {
-                    println!("    the following instances have reincarnated:");
-                    for id in status.instances_reincarnated {
-                        println!("    > {id}")
-                    }
-                }
-
-                if n_changed_state > 0 {
-                    println!(
-                        "    the following instances states changed before \
-                         they could be reincarnated:"
-                    );
-                    for id in status.changed_state {
-                        println!("    > {id}")
-                    }
-                }
-            }
-        };
-    } else {
-        println!(
-            "warning: unknown background task: {:?} \
-            (don't know how to interpret details: {:?})",
-            name, details
-        );
     }
-
-    println!("");
 }
 
 /// Summarizes an `ActivationReason`
