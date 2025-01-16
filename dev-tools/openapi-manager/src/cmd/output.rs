@@ -10,7 +10,10 @@ use indent_write::fmt::IndentWriter;
 use owo_colors::{OwoColorize, Style};
 use similar::{ChangeTag, DiffableStr, TextDiff};
 
-use crate::spec::{ApiSpec, ApiSpecFileWhich, ApiSpecVersion, DocumentSummary};
+use crate::{
+    apis::ManagedApi,
+    spec::{ApiSpec, ApiSpecFileWhich, ApiSpecVersion, DocumentSummary},
+};
 
 #[derive(Debug, Args)]
 #[clap(next_help_heading = "Global options")]
@@ -115,6 +118,7 @@ where
 }
 
 // XXX-dap should these calls be replaced with a specific version one?
+// XXX-dap actually, remove this one
 pub(crate) fn display_api_spec(spec: &ApiSpec, styles: &Styles) -> String {
     let versions: Vec<_> = spec.versions().collect();
     let latest_version =
@@ -132,6 +136,31 @@ pub(crate) fn display_api_spec(spec: &ApiSpec, styles: &Styles) -> String {
             "{} ({}, unversioned, v{})",
             spec.file_stem().style(styles.filename),
             spec.title,
+            latest_version,
+        )
+    }
+}
+
+// XXX-dap should these calls be replaced with a specific version one?
+pub(crate) fn display_api_spec_new(
+    api: &ManagedApi,
+    styles: &Styles,
+) -> String {
+    let versions: Vec<_> = api.iter_versions().collect();
+    let latest_version = versions.last().expect("must be at least one version");
+    if api.is_versioned() {
+        format!(
+            "{} ({}, versioned ({} supported), latest = {})",
+            api.ident().style(styles.filename),
+            api.title(),
+            versions.len(),
+            latest_version,
+        )
+    } else {
+        format!(
+            "{} ({}, unversioned, v{})",
+            api.ident().style(styles.filename),
+            api.title(),
             latest_version,
         )
     }

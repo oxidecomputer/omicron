@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::bail;
+use anyhow::{bail, Context};
 use dropshot::{ApiDescription, ApiDescriptionBuildErrors, StubContext};
 use itertools::Either;
 use openapi_manager_types::ValidationContext;
@@ -113,6 +113,14 @@ impl ManagedApi {
         &self.ident
     }
 
+    pub fn title(&self) -> &str {
+        self.title
+    }
+
+    pub fn description(&self) -> &str {
+        self.description
+    }
+
     pub fn is_lockstep(&self) -> bool {
         self.versions.is_lockstep()
     }
@@ -127,6 +135,19 @@ impl ManagedApi {
 
     pub fn has_version(&self, version: &semver::Version) -> bool {
         self.iter_versions().any(|v| v == version)
+    }
+
+    pub fn generate_openapi_doc(
+        &self,
+        version: &semver::Version,
+    ) -> anyhow::Result<OpenAPI> {
+        // It's a bit weird to first convert to bytes and then back to OpenAPI,
+        // but this is the easiest way to do so (currently, Dropshot doesn't
+        // return the OpenAPI type directly). It is also consistent with the
+        // other code paths.
+        let contents = self.generate_spec_bytes(version)?;
+        serde_json::from_slice(&contents)
+            .context("generated document is not valid OpenAPI")
     }
 
     pub fn generate_spec_bytes(
@@ -197,6 +218,14 @@ impl ManagedApis {
         }
 
         Ok(ManagedApis { apis })
+    }
+
+    pub fn len(&self) -> usize {
+        self.apis.len()
+    }
+
+    pub fn iter_apis(&self) -> impl Iterator<Item = &'_ ManagedApi> + '_ {
+        self.apis.values()
     }
 
     pub fn api(&self, ident: &ApiIdent) -> Option<&ManagedApi> {

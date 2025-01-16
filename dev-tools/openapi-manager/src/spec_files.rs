@@ -313,7 +313,6 @@ impl ApiSpecFile {
         openapi: OpenAPI,
         contents_buf: Vec<u8>,
     ) -> ApiSpecFile {
-        let ident = api.ident();
         let kind = if api.is_versioned() {
             ApiSpecFileNameKind::Versioned {
                 version: version.clone(),

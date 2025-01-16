@@ -5,7 +5,7 @@
 use std::io::Write;
 
 use crate::apis::{ApiBoundary, Versions};
-use crate::combined::{check_file, read_opt, CheckStatus, SpecCheckStatus};
+use crate::combined::{check_file, read_opt, SpecCheckStatus};
 pub(crate) use crate::combined::{ApiSpecFileWhich, CheckStale};
 pub(crate) use crate::validation::DocumentSummary;
 use crate::validation::{ValidationContextImpl, ValidationResult};
@@ -13,7 +13,6 @@ use anyhow::{Context, Result};
 use atomicwrites::AtomicFile;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::{ApiDescription, ApiDescriptionBuildErrors, StubContext};
-use fs_err as fs;
 use openapi_manager_types::ValidationContext;
 use openapiv3::OpenAPI;
 

@@ -7,9 +7,10 @@ use std::io::Write;
 use indent_write::io::IndentWriter;
 use owo_colors::OwoColorize;
 
+use super::output::display_api_spec_new;
 use crate::{
-    cmd::output::{display_api_spec, display_error, OutputOpts, Styles},
-    spec::all_apis,
+    apis::ManagedApis,
+    cmd::output::{display_error, OutputOpts, Styles},
 };
 
 pub(crate) fn list_impl(
@@ -22,7 +23,7 @@ pub(crate) fn list_impl(
     }
     let mut out = std::io::stdout();
 
-    let all_apis = all_apis();
+    let all_apis = ManagedApis::all()?;
     let total = all_apis.len();
     let count_width = total.to_string().len();
 
@@ -33,20 +34,20 @@ pub(crate) fn list_impl(
         // This plus 4 more for continued indentation.
         let continued_indent = " ".repeat(count_width + 1 + 2 + 4);
 
-        for (ix, api) in all_apis.iter().enumerate() {
+        for (ix, api) in all_apis.iter_apis().enumerate() {
             let count = ix + 1;
 
             writeln!(
                 &mut out,
                 "{count:count_width$}) {}",
-                api.file_stem().style(styles.bold),
+                api.ident().style(styles.bold),
             )?;
 
             writeln!(
                 &mut out,
                 "{initial_indent} {}: {} ({})",
                 "title".style(styles.header),
-                api.title,
+                api.title(),
                 if api.is_versioned() { "versioned" } else { "unversioned" },
             )?;
 
@@ -58,14 +59,14 @@ pub(crate) fn list_impl(
             writeln!(
                 IndentWriter::new_skip_initial(&continued_indent, &mut out),
                 "{}",
-                api.description,
+                api.description(),
             )?;
 
             writeln!(
                 &mut out,
                 "{initial_indent} {}: {}",
                 "boundary".style(styles.header),
-                api.boundary,
+                api.boundary(),
             )?;
 
             writeln!(
@@ -74,8 +75,8 @@ pub(crate) fn list_impl(
                 "spec details".style(styles.header),
             )?;
 
-            for v in api.versions() {
-                match v.to_openapi_doc() {
+            for v in api.iter_versions() {
+                match api.generate_openapi_doc(v) {
                     Ok(openapi) => {
                         let num_paths = openapi.paths.paths.len();
                         let num_schemas = openapi.components.map_or_else(
@@ -85,7 +86,7 @@ pub(crate) fn list_impl(
                         writeln!(
                             &mut out,
                             "{continued_indent} {}: {} paths, {} schemas",
-                            format!("v{}", v.version).style(styles.header),
+                            format!("v{}", v).style(styles.header),
                             num_paths.style(styles.bold),
                             num_schemas.style(styles.bold),
                         )?;
@@ -114,13 +115,13 @@ pub(crate) fn list_impl(
             }
         }
     } else {
-        for (ix, spec) in all_apis.iter().enumerate() {
+        for (ix, spec) in all_apis.iter_apis().enumerate() {
             let count = ix + 1;
 
             writeln!(
                 &mut out,
                 "{count:count_width$}) {}",
-                display_api_spec(spec, &styles),
+                display_api_spec_new(spec, &styles),
             )?;
         }
 

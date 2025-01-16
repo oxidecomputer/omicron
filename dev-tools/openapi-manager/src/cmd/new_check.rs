@@ -4,7 +4,7 @@
 
 use crate::{
     cmd::output::{headers, OutputOpts, Styles},
-    combined::{ApiSpecFileWhich, CheckStale, CheckStatus, SpecCheckStatus},
+    combined::{ApiSpecFileWhich, CheckStale},
     spec::Environment,
     FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
 };
@@ -76,6 +76,7 @@ pub(crate) fn new_check_impl(
 
             println!("{}", headers::STALE.style(styles.failure_header));
             for (which, check_stale) in check.iter_errors() {
+                nstale += 1;
                 println!(
                     "    {} {}",
                     match which {
