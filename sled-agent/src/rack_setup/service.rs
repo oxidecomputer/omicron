@@ -91,7 +91,7 @@ use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
 use nexus_types::deployment::{
-    blueprint_zone_type, Blueprint, BlueprintDatasetConfig,
+    blueprint_zone_type, id_map::IdMap, Blueprint, BlueprintDatasetConfig,
     BlueprintDatasetDisposition, BlueprintDatasetsConfig, BlueprintZoneType,
     BlueprintZonesConfig, CockroachDbPreserveDowngrade,
 };
@@ -108,6 +108,7 @@ use omicron_common::disk::{
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -135,7 +136,6 @@ use std::net::SocketAddrV6;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::watch;
-use uuid::Uuid;
 
 /// For tracking the current RSS step and sending notifications about it.
 pub struct RssProgress {
@@ -1538,7 +1538,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
 
     let mut blueprint_datasets = BTreeMap::new();
     for (sled_id, sled_config) in sled_configs_by_id {
-        let mut datasets = BTreeMap::new();
+        let mut datasets = IdMap::new();
         for d in sled_config.datasets.datasets.values() {
             // Only the "Crucible" dataset needs to know the address
             let address = if *d.name.kind() == DatasetKind::Crucible {
@@ -1565,19 +1565,16 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
                 None
             };
 
-            datasets.insert(
-                d.id,
-                BlueprintDatasetConfig {
-                    disposition: BlueprintDatasetDisposition::InService,
-                    id: d.id,
-                    pool: d.name.pool().clone(),
-                    kind: d.name.kind().clone(),
-                    address,
-                    compression: d.inner.compression,
-                    quota: d.inner.quota,
-                    reservation: d.inner.reservation,
-                },
-            );
+            datasets.insert(BlueprintDatasetConfig {
+                disposition: BlueprintDatasetDisposition::InService,
+                id: d.id,
+                pool: d.name.pool().clone(),
+                kind: d.name.kind().clone(),
+                address,
+                compression: d.inner.compression,
+                quota: d.inner.quota,
+                reservation: d.inner.reservation,
+            });
         }
 
         blueprint_datasets.insert(
@@ -1604,12 +1601,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
             // value, we will need to revisit storing this in the serialized
             // RSS plan.
             generation: DeployStepVersion::V5_EVERYTHING,
-            zones: sled_config
-                .zones
-                .iter()
-                .cloned()
-                .map(|z| (z.id, z))
-                .collect(),
+            zones: sled_config.zones.iter().cloned().collect(),
         };
 
         blueprint_zones.insert(*sled_id, zones_config);
@@ -1617,7 +1609,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
     }
 
     Ok(Blueprint {
-        id: Uuid::new_v4(),
+        id: BlueprintUuid::new_v4(),
         blueprint_zones,
         blueprint_disks,
         blueprint_datasets,

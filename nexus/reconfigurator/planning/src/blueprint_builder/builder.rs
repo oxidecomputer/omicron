@@ -21,6 +21,7 @@ use nexus_inventory::now_db_precision;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::blueprint_zone_type;
+use nexus_types::deployment::id_map::IdMap;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
@@ -413,7 +414,7 @@ impl<'a> BlueprintBuilder<'a> {
             .map(|sled_id| {
                 let config = BlueprintZonesConfig {
                     generation: Generation::new(),
-                    zones: BTreeMap::new(),
+                    zones: IdMap::new(),
                 };
                 (sled_id, config)
             })
@@ -422,10 +423,7 @@ impl<'a> BlueprintBuilder<'a> {
             .keys()
             .copied()
             .map(|sled_id| {
-                let config = BlueprintPhysicalDisksConfig {
-                    generation: Generation::new(),
-                    disks: Vec::new(),
-                };
+                let config = BlueprintPhysicalDisksConfig::default();
                 (sled_id, config)
             })
             .collect();
@@ -435,7 +433,7 @@ impl<'a> BlueprintBuilder<'a> {
             .map(|sled_id| {
                 let config = BlueprintDatasetsConfig {
                     generation: Generation::new(),
-                    datasets: BTreeMap::new(),
+                    datasets: IdMap::new(),
                 };
                 (sled_id, config)
             })
@@ -544,17 +542,14 @@ impl<'a> BlueprintBuilder<'a> {
                 .blueprint_disks
                 .get(sled_id)
                 .cloned()
-                .unwrap_or_else(|| BlueprintPhysicalDisksConfig {
-                    generation: Generation::new(),
-                    disks: Vec::new(),
-                });
+                .unwrap_or_else(|| BlueprintPhysicalDisksConfig::default());
             let datasets = parent_blueprint
                 .blueprint_datasets
                 .get(sled_id)
                 .cloned()
                 .unwrap_or_else(|| BlueprintDatasetsConfig {
                     generation: Generation::new(),
-                    datasets: BTreeMap::new(),
+                    datasets: IdMap::new(),
                 });
             let editor = SledEditor::for_existing(
                 state,
@@ -2142,7 +2137,7 @@ pub mod test {
         // We're going under the hood of the blueprint here; a sled can only get
         // to the decommissioned state if all its disks/datasets/zones have been
         // expunged, so do that too.
-        for (_, zone) in &mut blueprint1
+        for mut zone in &mut blueprint1
             .blueprint_zones
             .get_mut(&decommision_sled_id)
             .expect("has zones")
@@ -2189,7 +2184,7 @@ pub mod test {
         builder.sleds_mut().get_mut(&decommision_sled_id).unwrap().state =
             SledState::Decommissioned;
         let input = builder.build();
-        for (_, z) in &mut blueprint2
+        for mut z in &mut blueprint2
             .blueprint_zones
             .get_mut(&decommision_sled_id)
             .unwrap()
@@ -2328,7 +2323,7 @@ pub mod test {
         let (_, _, blueprint) = example(&logctx.log, TEST_NAME);
 
         for (_, zone_config) in &blueprint.blueprint_zones {
-            for (_, zone) in &zone_config.zones {
+            for zone in &zone_config.zones {
                 // The pool should only be optional for backwards compatibility.
                 let filesystem_pool = zone
                     .filesystem_pool
@@ -2432,7 +2427,7 @@ pub mod test {
             .get(&sled_id)
             .unwrap()
             .datasets
-            .values()
+            .iter()
             .filter_map(|dataset_config| {
                 if dataset_config.disposition
                     == BlueprintDatasetDisposition::Expunged
@@ -2553,7 +2548,7 @@ pub mod test {
                         .get_mut(sled_id)
                         .expect("missing sled")
                         .zones
-                        .retain(|_, z| match &z.zone_type {
+                        .retain(|z| match &z.zone_type {
                             BlueprintZoneType::Nexus(z) => {
                                 removed_nexus = Some(z.clone());
                                 false
@@ -2839,12 +2834,12 @@ pub mod test {
         let mut output_dataset_ids = BTreeMap::new();
         let mut output_ndatasets = 0;
         for datasets in output.blueprint_datasets.values() {
-            for (id, dataset) in &datasets.datasets {
+            for dataset in &datasets.datasets {
                 let zpool_id = dataset.pool.id();
                 let kind = dataset.kind.clone();
                 let by_kind: &mut BTreeMap<_, _> =
                     output_dataset_ids.entry(zpool_id).or_default();
-                let prev = by_kind.insert(kind, *id);
+                let prev = by_kind.insert(kind, dataset.id);
                 output_ndatasets += 1;
                 assert!(prev.is_none());
             }

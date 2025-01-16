@@ -461,7 +461,7 @@ impl ExampleSystemBuilder {
             let Some(zones) = blueprint.blueprint_zones.get(&sled_id) else {
                 continue;
             };
-            for (_, zone) in zones.zones.iter() {
+            for zone in zones.zones.iter() {
                 let service_id = zone.id;
                 if let Some((external_ip, nic)) =
                     zone.zone_type.external_networking()
@@ -504,7 +504,7 @@ impl ExampleSystemBuilder {
         let input_sleds = input_builder.sleds_mut();
         for (sled_id, bp_datasets_config) in &blueprint.blueprint_datasets {
             let sled = input_sleds.get_mut(sled_id).unwrap();
-            for (_, bp_dataset) in &bp_datasets_config.datasets {
+            for bp_dataset in &bp_datasets_config.datasets {
                 let (_, datasets) = sled
                     .resources
                     .zpools
@@ -526,7 +526,7 @@ impl ExampleSystemBuilder {
         for (sled_id, datasets) in &blueprint.blueprint_datasets {
             let sled = system.get_sled_mut(*sled_id).unwrap();
 
-            for dataset_config in datasets.datasets.values() {
+            for dataset_config in datasets.datasets.iter() {
                 let config = dataset_config.clone().try_into().unwrap();
                 sled.add_synthetic_dataset(config);
             }

@@ -2352,6 +2352,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo (
 -- In the future, this may also be used to describe artifacts that are fetched
 -- from a remote TUF repo, but that requires some additional design work.
 CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
+    id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
     version STRING(63) NOT NULL,
     -- This used to be an enum but is now a string, because it can represent
@@ -2368,29 +2369,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
     -- The length of the artifact, in bytes.
     artifact_size INT8 NOT NULL,
 
-    PRIMARY KEY (name, version, kind)
+    CONSTRAINT unique_name_version_kind UNIQUE (name, version, kind)
 );
 
 -- Reflects that a particular artifact was provided by a particular TUF repo.
 -- This is a many-many mapping.
 CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo_artifact (
     tuf_repo_id UUID NOT NULL,
-    tuf_artifact_name STRING(63) NOT NULL,
-    tuf_artifact_version STRING(63) NOT NULL,
-    tuf_artifact_kind STRING(63) NOT NULL,
+    tuf_artifact_id UUID NOT NULL,
 
-    /*
-    For the primary key, this definition uses the natural key rather than a
-    smaller surrogate key (UUID). That's because with CockroachDB the most
-    important factor in selecting a primary key is the ability to distribute
-    well. In this case, the first element of the primary key is the tuf_repo_id,
-    which is a random UUID.
-
-    For more, see https://www.cockroachlabs.com/blog/how-to-choose-a-primary-key/.
-    */
-    PRIMARY KEY (
-        tuf_repo_id, tuf_artifact_name, tuf_artifact_version, tuf_artifact_kind
-    )
+    PRIMARY KEY (tuf_repo_id, tuf_artifact_id)
 );
 
 /*******************************************************************/
@@ -4031,6 +4019,76 @@ CREATE TABLE IF NOT EXISTS omicron.public.cockroachdb_zone_id_to_node_id (
     PRIMARY KEY (omicron_zone_id, crdb_node_id)
 );
 
+/*
+ * List of debug datasets available for use (e.g., by support bundles).
+ *
+ * This is a Reconfigurator rendezvous table: it reflects resources that
+ * Reconfigurator has ensured exist. It is always possible that a resource
+ * chosen from this table could be deleted after it's selected, but any
+ * non-deleted row in this table is guaranteed to have been created.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.rendezvous_debug_dataset (
+    /* ID of the dataset in a blueprint */
+    id UUID PRIMARY KEY,
+
+    /* Time this dataset was added to the table */
+    time_created TIMESTAMPTZ NOT NULL,
+
+    /*
+     * If not NULL, indicates this dataset has been expunged in a blueprint.
+     * Multiple Nexus instances operate concurrently, and it's possible any
+     * given Nexus is operating on an old blueprint. We need to avoid a Nexus
+     * operating on an old blueprint from inserting a dataset that has already
+     * been expunged and removed from this table by a later blueprint, so
+     * instead of hard deleting, we tombstone rows via this column.
+     *
+     * Hard deletion of tombstoned datasets will require some care with respect
+     * to the problem above. For now we keep tombstoned datasets around forever.
+     */
+    time_tombstoned TIMESTAMPTZ,
+
+    /* ID of the zpool on which this dataset is placed */
+    pool_id UUID NOT NULL,
+
+    /*
+     * ID of the target blueprint the Reconfigurator reconciliation RPW was
+     * acting on when this row was created.
+     *
+     * In practice, this will often be the same blueprint ID in which this
+     * dataset was added, but it's not guaranteed to be (it could be any
+     * descendent blueprint in which this dataset is still in service).
+     */
+    blueprint_id_when_created UUID NOT NULL,
+
+    /*
+     * ID of the target blueprint the Reconfigurator reconciliation RPW was
+     * acting on when this row was tombstoned.
+     *
+     * In practice, this will often be the same blueprint ID in which this
+     * dataset was expunged, but it's not guaranteed to be (it could be any
+     * descendent blueprint in which this dataset is expunged and not yet
+     * pruned).
+     */
+    blueprint_id_when_tombstoned UUID,
+
+    /*
+     * Either both `*_tombstoned` columns should be set (if this row has been
+     * tombstoned) or neither should (if it has not).
+     */
+    CONSTRAINT tombstoned_consistency CHECK (
+        (time_tombstoned IS NULL
+            AND blueprint_id_when_tombstoned IS NULL)
+        OR
+        (time_tombstoned IS NOT NULL
+            AND blueprint_id_when_tombstoned IS NOT NULL)
+    )
+);
+
+/* Add an index which lets us find usable debug datasets */
+CREATE INDEX IF NOT EXISTS lookup_usable_rendezvous_debug_dataset
+    ON omicron.public.rendezvous_debug_dataset (id)
+    WHERE time_tombstoned IS NULL;
+
 /*******************************************************************/
 
 /*
@@ -4757,7 +4815,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '118.0.0', NULL)
+    (TRUE, NOW(), NOW(), '120.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

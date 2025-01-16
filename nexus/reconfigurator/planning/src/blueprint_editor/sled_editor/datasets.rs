@@ -5,6 +5,7 @@
 use crate::blueprint_builder::EditCounts;
 use crate::planner::SledPlannerRng;
 use illumos_utils::zpool::ZpoolName;
+use nexus_types::deployment::id_map::{self, IdMap};
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintDatasetsConfig;
@@ -211,7 +212,7 @@ impl DatasetsEditor {
     ) -> Result<Self, MultipleDatasetsOfKind> {
         let mut in_service_by_zpool_and_kind = BTreeMap::new();
         let mut expunged_datasets = BTreeSet::new();
-        for dataset in config.datasets.values() {
+        for dataset in config.datasets.iter() {
             match dataset.disposition {
                 BlueprintDatasetDisposition::InService => {
                     let by_kind: &mut BTreeMap<_, _> =
@@ -251,7 +252,7 @@ impl DatasetsEditor {
             preexisting_dataset_ids,
             config: BlueprintDatasetsConfig {
                 generation: Generation::new(),
-                datasets: BTreeMap::new(),
+                datasets: IdMap::new(),
             },
             in_service_by_zpool_and_kind: BTreeMap::new(),
             expunged_datasets: BTreeSet::new(),
@@ -278,14 +279,14 @@ impl DatasetsEditor {
     ) -> impl Iterator<Item = &BlueprintDatasetConfig> {
         self.config
             .datasets
-            .values()
+            .iter()
             .filter(move |dataset| dataset.disposition.matches(filter))
     }
 
     // Private method; panics if given an ID that isn't present in
     // `self.config.datasets`. Callers must ensure the ID is valid.
     fn expunge_by_known_valid_id(&mut self, id: DatasetUuid) {
-        let dataset = self
+        let mut dataset = self
             .config
             .datasets
             .get_mut(&id)
@@ -341,7 +342,7 @@ impl DatasetsEditor {
         &mut self,
         dataset: PartialDatasetConfig,
         rng: &mut SledPlannerRng,
-    ) -> &BlueprintDatasetConfig {
+    ) -> id_map::RefMut<'_, BlueprintDatasetConfig> {
         // Convert the partial config into a full config by finding or
         // generating its ID.
         let PartialDatasetConfig {
@@ -407,20 +408,20 @@ impl DatasetsEditor {
 
         // Add or update our config with this new dataset info.
         match self.config.datasets.entry(dataset.id) {
-            Entry::Vacant(slot) => {
+            id_map::Entry::Vacant(slot) => {
                 self.in_service_by_zpool_and_kind
                     .entry(dataset.pool.id())
                     .or_default()
                     .insert(dataset.kind.clone(), dataset.id);
                 self.counts.added += 1;
-                &*slot.insert(dataset)
+                slot.insert(dataset)
             }
-            Entry::Occupied(mut prev) => {
+            id_map::Entry::Occupied(mut prev) => {
                 if *prev.get() != dataset {
                     self.counts.updated += 1;
                     prev.insert(dataset);
                 }
-                &*prev.into_mut()
+                prev.into_mut()
             }
         }
     }
@@ -467,7 +468,7 @@ mod tests {
         I: Iterator<Item = J>,
         J: Iterator<Item = (BlueprintDatasetDisposition, DatasetKind)>,
     {
-        let mut datasets = BTreeMap::new();
+        let mut datasets = IdMap::new();
         let mut dataset_id_index = 0;
         for (zpool_id_index, disposition_kinds) in values.enumerate() {
             let zpool_id = ZpoolUuid::from_untyped_uuid(Uuid::from_u128(
@@ -491,7 +492,7 @@ mod tests {
                     reservation: None,
                     compression: CompressionAlgorithm::Off,
                 };
-                let prev = datasets.insert(id, dataset);
+                let prev = datasets.insert(dataset);
                 assert!(prev.is_none(), "no duplicate dataset IDs");
             }
         }
@@ -608,7 +609,9 @@ mod tests {
         // We need a sled ID to get a sled-specific RNG from `rng`; we're not
         // testing blueprints as a whole here, so steal a blueprint ID and use
         // it as a sled ID to get reproducibility.
-        let sled_id = SledUuid::from_untyped_uuid(rng.next_blueprint());
+        let sled_id = SledUuid::from_untyped_uuid(
+            rng.next_blueprint().into_untyped_uuid(),
+        );
         let rng = rng.sled_rng(sled_id);
 
         // For each originally-in-service dataset:
@@ -616,7 +619,7 @@ mod tests {
         // 1. Expunge that dataset
         // 2. Add a new dataset of the same kind
         // 3. Ensure the new dataset ID is freshly-generated
-        for dataset in config.datasets.values().filter(|dataset| {
+        for dataset in config.datasets.iter().filter(|dataset| {
             dataset.disposition.matches(BlueprintDatasetFilter::InService)
         }) {
             editor
@@ -642,7 +645,7 @@ mod tests {
         // after expunging zones.
         let database_backfill = {
             let mut by_zpool: BTreeMap<_, BTreeMap<_, _>> = BTreeMap::new();
-            for dataset in config.datasets.values().filter(|dataset| {
+            for dataset in config.datasets.iter().filter(|dataset| {
                 dataset.disposition.matches(BlueprintDatasetFilter::InService)
             }) {
                 let prev = by_zpool
@@ -658,7 +661,7 @@ mod tests {
         };
         let mut editor = DatasetsEditor::new(config.clone(), database_backfill)
             .expect("built editor");
-        for dataset in config.datasets.values().filter(|dataset| {
+        for dataset in config.datasets.iter().filter(|dataset| {
             dataset.disposition.matches(BlueprintDatasetFilter::InService)
         }) {
             editor
@@ -688,7 +691,7 @@ mod tests {
         let config = initial.into_config();
         let all_zpools = config
             .datasets
-            .values()
+            .iter()
             .map(|dataset| dataset.pool.id())
             .collect::<BTreeSet<_>>();
         let mut editor = DatasetsEditor::new(
@@ -705,7 +708,9 @@ mod tests {
         // We need a sled ID to get a sled-specific RNG from `rng`; we're not
         // testing blueprints as a whole here, so steal a blueprint ID and use
         // it as a sled ID to get reproducibility.
-        let sled_id = SledUuid::from_untyped_uuid(rng.next_blueprint());
+        let sled_id = SledUuid::from_untyped_uuid(
+            rng.next_blueprint().into_untyped_uuid(),
+        );
         let rng = rng.sled_rng(sled_id);
 
         // Expunge all datasets on all zpools, by zpool.
@@ -724,7 +729,7 @@ mod tests {
         //
         // 1. Add a new dataset of the same kind
         // 2. Ensure the new dataset ID is freshly-generated
-        for dataset in config.datasets.values().filter(|dataset| {
+        for dataset in config.datasets.iter().filter(|dataset| {
             dataset.disposition.matches(BlueprintDatasetFilter::InService)
         }) {
             let new_dataset = PartialDatasetConfig {
@@ -746,7 +751,7 @@ mod tests {
         // after expunging zones.
         let database_backfill = {
             let mut by_zpool: BTreeMap<_, BTreeMap<_, _>> = BTreeMap::new();
-            for dataset in config.datasets.values().filter(|dataset| {
+            for dataset in config.datasets.iter().filter(|dataset| {
                 dataset.disposition.matches(BlueprintDatasetFilter::InService)
             }) {
                 let prev = by_zpool
@@ -772,7 +777,7 @@ mod tests {
                 "in-service dataset remains after expunging zpool"
             );
         }
-        for dataset in config.datasets.values().filter(|dataset| {
+        for dataset in config.datasets.iter().filter(|dataset| {
             dataset.disposition.matches(BlueprintDatasetFilter::InService)
         }) {
             let new_dataset = PartialDatasetConfig {

@@ -303,7 +303,7 @@ impl<'a> StyledWord<'a> {
     }
 }
 
-impl<'a> Fragment for StyledWord<'a> {
+impl Fragment for StyledWord<'_> {
     fn width(&self) -> f64 {
         // self.width is the display width, which is what we care about here.
         self.width as f64

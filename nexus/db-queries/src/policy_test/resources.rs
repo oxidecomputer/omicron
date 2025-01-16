@@ -6,12 +6,11 @@
 
 use super::resource_builder::ResourceBuilder;
 use super::resource_builder::ResourceSet;
-use crate::db::model::ArtifactId;
 use nexus_auth::authz;
-use nexus_db_model::SemverVersion;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SupportBundleUuid;
 use oso::PolarClass;
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -111,6 +110,14 @@ pub async fn make_resources(
         LookupType::ById(physical_disk_id.into_untyped_uuid()),
     ));
 
+    let support_bundle_id: SupportBundleUuid =
+        "d9f923f6-caf3-4c83-96f9-8ffe8c627dd2".parse().unwrap();
+    builder.new_resource(authz::SupportBundle::new(
+        authz::FLEET,
+        support_bundle_id,
+        LookupType::ById(support_bundle_id.into_untyped_uuid()),
+    ));
+
     let device_user_code = String::from("a-device-user-code");
     builder.new_resource(authz::DeviceAuthRequest::new(
         authz::FLEET,
@@ -139,16 +146,12 @@ pub async fn make_resources(
         LookupType::ById(tuf_repo_id.into_untyped_uuid()),
     ));
 
-    let artifact_id = ArtifactId {
-        name: "a".to_owned(),
-        version: SemverVersion("1.0.0".parse().unwrap()),
-        kind: "b".to_owned(),
-    };
-    let artifact_id_desc = artifact_id.to_string();
+    let tuf_artifact_id =
+        "6827813e-bfaa-4205-9b9f-9f7901e4aab1".parse().unwrap();
     builder.new_resource(authz::TufArtifact::new(
         authz::FLEET,
-        artifact_id,
-        LookupType::ByCompositeId(artifact_id_desc),
+        tuf_artifact_id,
+        LookupType::ById(tuf_artifact_id.into_untyped_uuid()),
     ));
 
     let address_lot_id =

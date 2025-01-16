@@ -37,6 +37,7 @@ use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::blueprint_zone_type;
+use nexus_types::deployment::id_map::IdMap;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
@@ -74,6 +75,7 @@ use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -140,7 +142,7 @@ pub struct ControlPlaneTestContext<N> {
     pub external_dns_zone_name: String,
     pub external_dns: dns_server::TransientServer,
     pub internal_dns: dns_server::TransientServer,
-    pub initial_blueprint_id: Uuid,
+    pub initial_blueprint_id: BlueprintUuid,
     pub silo_name: Name,
     pub user_name: UserId,
 }
@@ -328,7 +330,7 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
     pub external_dns: Option<dns_server::TransientServer>,
     pub internal_dns: Option<dns_server::TransientServer>,
     dns_config: Option<DnsConfigParams>,
-    initial_blueprint_id: Option<Uuid>,
+    initial_blueprint_id: Option<BlueprintUuid>,
     blueprint_zones: Vec<BlueprintZoneConfig>,
     blueprint_zones2: Vec<BlueprintZoneConfig>,
 
@@ -824,20 +826,16 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         sled_id,
                         BlueprintZonesConfig {
                             generation: Generation::new().next(),
-                            zones: zones
-                                .iter()
-                                .cloned()
-                                .map(|z| (z.id, z))
-                                .collect(),
+                            zones: zones.iter().cloned().collect(),
                         },
                     );
                     sled_state.insert(sled_id, SledState::Active);
 
-                    let mut disks = Vec::new();
-                    let mut datasets = BTreeMap::new();
+                    let mut disks = IdMap::new();
+                    let mut datasets = IdMap::new();
                     for zone in zones {
                         if let Some(zpool) = &zone.filesystem_pool {
-                            disks.push(BlueprintPhysicalDiskConfig {
+                            disks.insert(BlueprintPhysicalDiskConfig {
                                 disposition:
                                     BlueprintPhysicalDiskDisposition::InService,
                                 identity: omicron_common::disk::DiskIdentity {
@@ -852,31 +850,28 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                             });
                             disk_index += 1;
                             let id = DatasetUuid::new_v4();
-                            datasets.insert(
+                            datasets.insert(BlueprintDatasetConfig {
+                                disposition:
+                                    BlueprintDatasetDisposition::InService,
                                 id,
-                                BlueprintDatasetConfig {
-                                    disposition:
-                                        BlueprintDatasetDisposition::InService,
-                                    id,
-                                    pool: zpool.clone(),
-                                    kind: DatasetKind::TransientZone {
-                                        name: illumos_utils::zone::zone_name(
-                                            zone.zone_type.kind().zone_prefix(),
-                                            Some(zone.id),
-                                        ),
-                                    },
-                                    address: None,
-                                    quota: None,
-                                    reservation: None,
-                                    compression: CompressionAlgorithm::Off,
+                                pool: zpool.clone(),
+                                kind: DatasetKind::TransientZone {
+                                    name: illumos_utils::zone::zone_name(
+                                        zone.zone_type.kind().zone_prefix(),
+                                        Some(zone.id),
+                                    ),
                                 },
-                            );
+                                address: None,
+                                quota: None,
+                                reservation: None,
+                                compression: CompressionAlgorithm::Off,
+                            });
                         }
                     }
                     // Populate extra fake disks, giving each sled 10 total.
                     if disks.len() < 10 {
                         for _ in disks.len()..10 {
-                            disks.push(BlueprintPhysicalDiskConfig {
+                            disks.insert(BlueprintPhysicalDiskConfig {
                                 disposition:
                                     BlueprintPhysicalDiskDisposition::InService,
                                 identity: omicron_common::disk::DiskIdentity {
@@ -909,7 +904,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 }
             }
             Blueprint {
-                id: Uuid::new_v4(),
+                id: BlueprintUuid::new_v4(),
                 blueprint_zones,
                 blueprint_disks,
                 blueprint_datasets,

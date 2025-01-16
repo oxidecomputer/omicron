@@ -356,14 +356,15 @@ pub async fn reconfigurator_state_load(
             .blueprints_list(opctx, &p.current_pagparams())
             .await
             .context("listing blueprints")?;
-        paginator =
-            p.found_batch(&blueprint_ids, &|b: &BlueprintMetadata| b.id);
+        paginator = p.found_batch(&blueprint_ids, &|b: &BlueprintMetadata| {
+            b.id.into_untyped_uuid()
+        });
         blueprint_ids.extend(batch.into_iter());
     }
 
     let blueprints = futures::stream::iter(blueprint_ids)
         .filter_map(|bpm| async move {
-            let blueprint_id = bpm.id;
+            let blueprint_id = bpm.id.into_untyped_uuid();
             let read = datastore
                 .blueprint_read(
                     opctx,

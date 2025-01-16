@@ -41,6 +41,7 @@ use omicron_common::api::internal::nexus::{ProducerEndpoint, ProducerKind};
 use omicron_common::api::internal::shared::{
     AllowedSourceIps, ExternalPortDiscovery, RackNetworkConfig, SwitchLocation,
 };
+use omicron_common::disk::DatasetKind;
 use omicron_common::FileKv;
 use omicron_uuid_kinds::DatasetUuid;
 use oximeter::types::ProducerRegistry;
@@ -365,18 +366,19 @@ impl nexus_test_interface::NexusServer for Server {
         self.apictx.context.nexus.get_internal_server_address().await.unwrap()
     }
 
-    async fn upsert_crucible_dataset(
+    async fn upsert_test_dataset(
         &self,
         physical_disk: PhysicalDiskPutRequest,
         zpool: ZpoolPutRequest,
         dataset_id: DatasetUuid,
-        address: SocketAddrV6,
+        kind: DatasetKind,
+        address: Option<SocketAddrV6>,
     ) {
         let opctx = self.apictx.context.nexus.opctx_for_internal_api();
         self.apictx
             .context
             .nexus
-            .upsert_physical_disk(&opctx, physical_disk)
+            .insert_test_physical_disk_if_not_exists(&opctx, physical_disk)
             .await
             .unwrap();
 
@@ -387,7 +389,7 @@ impl nexus_test_interface::NexusServer for Server {
         self.apictx
             .context
             .nexus
-            .upsert_crucible_dataset(dataset_id, zpool_id, address)
+            .upsert_dataset(dataset_id, zpool_id, kind, address)
             .await
             .unwrap();
     }
