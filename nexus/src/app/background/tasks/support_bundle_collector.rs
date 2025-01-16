@@ -797,9 +797,9 @@ mod test {
     use super::*;
 
     use camino_tempfile::tempdir;
-    use nexus_db_model::Dataset;
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
+    use nexus_db_model::RendezvousDebugDataset;
     use nexus_db_model::Zpool;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
@@ -810,7 +810,9 @@ mod test {
     use omicron_common::disk::DatasetsConfig;
     use omicron_common::disk::SharedDatasetConfig;
     use omicron_common::zpool_name::ZpoolName;
-    use omicron_uuid_kinds::{DatasetUuid, PhysicalDiskUuid, SledUuid};
+    use omicron_uuid_kinds::{
+        BlueprintUuid, DatasetUuid, PhysicalDiskUuid, SledUuid,
+    };
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -887,6 +889,7 @@ mod test {
         opctx: &OpContext,
         id: PhysicalDiskUuid,
         sled_id: SledUuid,
+        blueprint_id: BlueprintUuid,
     ) -> (ZpoolUuid, DatasetUuid) {
         let zpool = datastore
             .zpool_insert(
@@ -895,17 +898,21 @@ mod test {
             )
             .await
             .unwrap();
+        let zpool_id = ZpoolUuid::from_untyped_uuid(zpool.id());
 
         let dataset = datastore
-            .dataset_upsert(Dataset::new(
-                DatasetUuid::new_v4(),
-                zpool.id(),
-                None,
-                DatasetKind::Debug,
-            ))
+            .debug_dataset_insert_if_not_exists(
+                opctx,
+                RendezvousDebugDataset::new(
+                    DatasetUuid::new_v4(),
+                    zpool_id,
+                    blueprint_id,
+                ),
+            )
             .await
-            .unwrap();
-        (ZpoolUuid::from_untyped_uuid(zpool.id()), dataset.id())
+            .unwrap()
+            .expect("inserted new dataset");
+        (zpool_id, dataset.id())
     }
 
     async fn make_disk_in_db(
@@ -950,12 +957,20 @@ mod test {
 
             let mut disks = vec![];
 
+            // The fake disks/datasets we create aren't really part of the test
+            // blueprint, but that's fine for our purposes.
+            let blueprint_id = cptestctx.initial_blueprint_id;
+
             for i in 0..count {
                 // Create the (disk, zpool, dataset) tuple in Nexus
                 let disk_id =
                     make_disk_in_db(datastore, opctx, i, sled_id).await;
                 let (zpool_id, dataset_id) = add_zpool_and_debug_dataset(
-                    &datastore, &opctx, disk_id, sled_id,
+                    &datastore,
+                    &opctx,
+                    disk_id,
+                    sled_id,
+                    blueprint_id,
                 )
                 .await;
 
