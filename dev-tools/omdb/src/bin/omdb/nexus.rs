@@ -901,14 +901,14 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "external_endpoints" => {
             print_task_external_endpoints(details);
         }
+        "instance_reincarnation" => {
+            print_task_instance_reincarnation(details);
+        }
         "instance_updater" => {
             print_task_instance_updater(details);
         }
         "instance_watcher" => {
             print_task_instance_watcher(details);
-        }
-        "instance_reincarnation" => {
-            print_task_instance_reincarnation(details);
         }
         "inventory_collection" => {
             print_task_inventory_collection(details);
@@ -1327,6 +1327,86 @@ fn print_task_external_endpoints(details: &serde_json::Value) {
     }
 }
 
+fn print_task_instance_reincarnation(details: &serde_json::Value) {
+    match serde_json::from_value::<InstanceReincarnationStatus>(details.clone())
+    {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            const FOUND: &'static str = "instances eligible for reincarnation:";
+            const REINCARNATED: &'static str =
+                "instances reincarnated successfully:";
+            const CHANGED_STATE: &'static str =
+                "instances which changed state before they could reincarnate:";
+            const ERRORS: &'static str =
+                "instances which failed to reincarnate:";
+            const WIDTH: usize =
+                const_max_len(&[FOUND, REINCARNATED, CHANGED_STATE, ERRORS]);
+            if status.disabled {
+                println!(
+                    "    instance reincarnation explicitly disabled \
+                     by config!"
+                );
+                return;
+            }
+
+            if !status.errors.is_empty() {
+                println!(
+                    "    errors occurred while finding instances to \
+                      reincarnate:"
+                );
+                for error in &status.errors {
+                    println!("    > {error}")
+                }
+            }
+
+            let n_restart_errors = status.restart_errors.len();
+            let n_restarted = status.instances_reincarnated.len();
+            let n_changed_state = status.changed_state.len();
+            println!(
+                "    {FOUND:<WIDTH$} {:>3}",
+                status.total_instances_found()
+            );
+            for (reason, count) in &status.instances_found {
+                let reason = format!("  {reason} instances:");
+                println!("    {reason:<WIDTH$} {count:>3}",);
+            }
+            println!("    {REINCARNATED:<WIDTH$} {n_restarted:>3}");
+            println!("    {CHANGED_STATE:<WIDTH$} {n_changed_state:>3}",);
+            println!("    {ERRORS:<WIDTH$} {n_restart_errors:>3}");
+
+            if n_restart_errors > 0 {
+                println!(
+                    "    errors occurred while restarting the following \
+                     instances:"
+                );
+                for (id, error) in status.restart_errors {
+                    println!("    > {id}: {error}");
+                }
+            }
+
+            if n_restarted > 0 {
+                println!("    the following instances have reincarnated:");
+                for id in status.instances_reincarnated {
+                    println!("    > {id}")
+                }
+            }
+
+            if n_changed_state > 0 {
+                println!(
+                    "    the following instances states changed before \
+                     they could be reincarnated:"
+                );
+                for id in status.changed_state {
+                    println!("    > {id}")
+                }
+            }
+        }
+    }
+}
+
 fn print_task_instance_updater(details: &serde_json::Value) {
     let status = match serde_json::from_value::<InstanceUpdaterStatus>(
         details.clone(),
@@ -1494,86 +1574,6 @@ fn print_task_instance_watcher(details: &serde_json::Value) {
             println!("    stale instance metrics pruned: {pruned_instances}");
         }
     };
-}
-
-fn print_task_instance_reincarnation(details: &serde_json::Value) {
-    match serde_json::from_value::<InstanceReincarnationStatus>(details.clone())
-    {
-        Err(error) => eprintln!(
-            "warning: failed to interpret task details: {:?}: {:?}",
-            error, details
-        ),
-        Ok(status) => {
-            const FOUND: &'static str = "instances eligible for reincarnation:";
-            const REINCARNATED: &'static str =
-                "instances reincarnated successfully:";
-            const CHANGED_STATE: &'static str =
-                "instances which changed state before they could reincarnate:";
-            const ERRORS: &'static str =
-                "instances which failed to reincarnate:";
-            const WIDTH: usize =
-                const_max_len(&[FOUND, REINCARNATED, CHANGED_STATE, ERRORS]);
-            if status.disabled {
-                println!(
-                    "    instance reincarnation explicitly disabled \
-                     by config!"
-                );
-                return;
-            }
-
-            if !status.errors.is_empty() {
-                println!(
-                    "    errors occurred while finding instances to \
-                      reincarnate:"
-                );
-                for error in &status.errors {
-                    println!("    > {error}")
-                }
-            }
-
-            let n_restart_errors = status.restart_errors.len();
-            let n_restarted = status.instances_reincarnated.len();
-            let n_changed_state = status.changed_state.len();
-            println!(
-                "    {FOUND:<WIDTH$} {:>3}",
-                status.total_instances_found()
-            );
-            for (reason, count) in &status.instances_found {
-                let reason = format!("  {reason} instances:");
-                println!("    {reason:<WIDTH$} {count:>3}",);
-            }
-            println!("    {REINCARNATED:<WIDTH$} {n_restarted:>3}");
-            println!("    {CHANGED_STATE:<WIDTH$} {n_changed_state:>3}",);
-            println!("    {ERRORS:<WIDTH$} {n_restart_errors:>3}");
-
-            if n_restart_errors > 0 {
-                println!(
-                    "    errors occurred while restarting the following \
-                     instances:"
-                );
-                for (id, error) in status.restart_errors {
-                    println!("    > {id}: {error}");
-                }
-            }
-
-            if n_restarted > 0 {
-                println!("    the following instances have reincarnated:");
-                for id in status.instances_reincarnated {
-                    println!("    > {id}")
-                }
-            }
-
-            if n_changed_state > 0 {
-                println!(
-                    "    the following instances states changed before \
-                     they could be reincarnated:"
-                );
-                for id in status.changed_state {
-                    println!("    > {id}")
-                }
-            }
-        }
-    }
 }
 
 fn print_task_inventory_collection(details: &serde_json::Value) {
