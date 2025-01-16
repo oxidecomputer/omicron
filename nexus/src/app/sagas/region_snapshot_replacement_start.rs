@@ -1171,7 +1171,7 @@ pub(crate) mod test {
         assert_eq!(region_allocations(&datastore).await, 0);
 
         let mut disk_test = DiskTest::new(cptestctx).await;
-        disk_test.add_zpool_with_dataset(cptestctx.first_sled()).await;
+        disk_test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
 
         assert_eq!(region_allocations(&datastore).await, 0);
 
@@ -1348,7 +1348,7 @@ pub(crate) mod test {
         request: &RegionSnapshotReplacement,
         affected_volume_original: &Volume,
     ) {
-        let sled_agent = &cptestctx.sled_agent.sled_agent;
+        let sled_agent = cptestctx.first_sled_agent();
         let datastore = cptestctx.server.server_context().nexus.datastore();
 
         crate::app::sagas::test_helpers::assert_no_failed_undo_steps(
@@ -1728,7 +1728,7 @@ pub(crate) mod test {
         // Create four zpools, each with one dataset. This is required for
         // region and region snapshot replacement to have somewhere to move the
         // data, and for this test we're doing one expungements.
-        let sled_id = cptestctx.first_sled();
+        let sled_id = cptestctx.first_sled_id();
 
         let disk_test = DiskTestBuilder::new(&cptestctx)
             .on_specific_sled(sled_id)
@@ -1740,7 +1740,7 @@ pub(crate) mod test {
         // active for this test
 
         cptestctx
-            .sled_agent
+            .first_sim_server()
             .pantry_server
             .as_ref()
             .unwrap()
@@ -1886,7 +1886,7 @@ pub(crate) mod test {
         // Create five zpools, each with one dataset. This is required for
         // region and region snapshot replacement to have somewhere to move the
         // data, and for this test we're doing two expungements.
-        let sled_id = cptestctx.first_sled();
+        let sled_id = cptestctx.first_sled_id();
 
         let disk_test = DiskTestBuilder::new(&cptestctx)
             .on_specific_sled(sled_id)
@@ -1898,7 +1898,7 @@ pub(crate) mod test {
         // active for this test
 
         cptestctx
-            .sled_agent
+            .first_sim_server()
             .pantry_server
             .as_ref()
             .unwrap()
