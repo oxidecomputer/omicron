@@ -62,7 +62,7 @@ pub trait VisitBlueprintPhysicalDisksConfig<'e> {
     /// A point where we allow direct access to a `diffus_derive` generated
     /// struct representing a change to a `BlueprintPhysicalDiskConfig`.
     ///
-    /// This the equivalent node in the tree to `visit_disk_change`, but gives a
+    /// This is the equivalent node in the tree to `visit_disk_change`, but gives a
     /// `diffus_derive` generated structure rather than the before and after of
     /// the original structs that were diffed.
     fn visit_disk_edit(
