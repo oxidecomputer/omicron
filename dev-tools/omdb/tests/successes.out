@@ -702,7 +702,12 @@ task: "support_bundle_collector"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "support_bundle_collector" (don't know how to interpret details: Object {"cleanup_err": Null, "cleanup_report": Object {"db_destroying_bundles_removed": Number(0), "db_failing_bundles_updated": Number(0), "sled_bundles_delete_failed": Number(0), "sled_bundles_deleted_not_found": Number(0), "sled_bundles_deleted_ok": Number(0)}, "collection_err": Null, "collection_report": Null})
+    Support Bundle Cleanup Report:
+      Bundles deleted from sleds: 0
+      Bundles not found on sleds: 0
+      Bundles delete failed on sleds: 0
+      Bundles deleted from database: 0
+      Bundles marked failed in database: 0
 
 task: "switch_port_config_manager"
   configured period: every <REDACTED_DURATION>s
@@ -1154,7 +1159,12 @@ task: "support_bundle_collector"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "support_bundle_collector" (don't know how to interpret details: Object {"cleanup_err": Null, "cleanup_report": Object {"db_destroying_bundles_removed": Number(0), "db_failing_bundles_updated": Number(0), "sled_bundles_delete_failed": Number(0), "sled_bundles_deleted_not_found": Number(0), "sled_bundles_deleted_ok": Number(0)}, "collection_err": Null, "collection_report": Null})
+    Support Bundle Cleanup Report:
+      Bundles deleted from sleds: 0
+      Bundles not found on sleds: 0
+      Bundles delete failed on sleds: 0
+      Bundles deleted from database: 0
+      Bundles marked failed in database: 0
 
 task: "switch_port_config_manager"
   configured period: every <REDACTED_DURATION>s
