@@ -9557,6 +9557,7 @@ dependencies = [
  "nexus-client",
  "nexus-db-queries",
  "nexus-inventory",
+ "nexus-reconfigurator-blippy",
  "nexus-reconfigurator-planning",
  "nexus-reconfigurator-preparation",
  "nexus-reconfigurator-simulation",

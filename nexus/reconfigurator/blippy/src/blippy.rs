@@ -315,6 +315,15 @@ impl fmt::Display for SledKind {
                     zone.id,
                 )
             }
+            SledKind::ZoneMissingFilesystemPool { zone } => {
+                write!(
+                    f,
+                    "in-service zone's filesytem pool property is missing: \
+                     {:?} {}",
+                    zone.zone_type.kind(),
+                    zone.id,
+                )
+            }
             SledKind::ZoneMissingDurableDataset { zone } => {
                 write!(
                     f,
