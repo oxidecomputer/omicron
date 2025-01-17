@@ -9,31 +9,17 @@
 //! these routes directly from the external API.
 
 use crate::context::ApiContext;
-use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::Body;
-use dropshot::{
-    http_response_found, http_response_see_other, HttpError, HttpResponseFound,
-    HttpResponseSeeOther, Path, Query, RequestContext,
-};
+use dropshot::{HttpError, Path, RequestContext};
 use futures::TryStreamExt;
-use http::{header, HeaderName, HeaderValue, Response, StatusCode};
+use http::{HeaderName, HeaderValue, Response, StatusCode};
 use nexus_db_model::AuthenticationMode;
-use nexus_db_queries::authn::silos::IdentityProviderType;
-use nexus_db_queries::context::OpContext;
-use nexus_db_queries::{
-    authn::external::session_cookie::{
-        session_cookie_header_value, SessionStore,
-    },
-    db::identity::Asset,
-};
 use nexus_types::external_api::params::{self, RelativeUri};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{DataPageParams, Error, NameOrId};
 use once_cell::sync::Lazy;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use serde_urlencoded;
 use std::collections::HashMap;
 use std::num::NonZeroU32;
@@ -176,160 +162,6 @@ use tokio_util::codec::{BytesCodec, FramedRead};
 // For IDP inititated, the IDP can spontaneously POST a LogoutRequest to
 //
 //   /logout/{silo_name}/{provider_name}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RelayState {
-    pub redirect_uri: Option<RelativeUri>,
-}
-
-impl RelayState {
-    pub fn to_encoded(&self) -> Result<String, anyhow::Error> {
-        Ok(base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            serde_json::to_string(&self).context("encoding relay state")?,
-        ))
-    }
-
-    pub fn from_encoded(encoded: String) -> Result<Self, anyhow::Error> {
-        serde_json::from_str(
-            &String::from_utf8(
-                base64::Engine::decode(
-                    &base64::engine::general_purpose::STANDARD,
-                    encoded,
-                )
-                .context("base64 decoding relay state")?,
-            )
-            .context("creating relay state string")?,
-        )
-        .context("json from relay state string")
-    }
-}
-
-pub(crate) async fn login_saml_redirect(
-    rqctx: RequestContext<ApiContext>,
-    path_params: Path<params::LoginToProviderPathParam>,
-    query_params: Query<params::LoginUrlQuery>,
-) -> Result<HttpResponseFound, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.context.nexus;
-        let path_params = path_params.into_inner();
-
-        // Use opctx_external_authn because this request will be
-        // unauthenticated.
-        let opctx = nexus.opctx_external_authn();
-
-        let (.., identity_provider) = nexus
-            .datastore()
-            .identity_provider_lookup(
-                &opctx,
-                &path_params.silo_name.into(),
-                &path_params.provider_name.into(),
-            )
-            .await?;
-
-        match identity_provider {
-            IdentityProviderType::Saml(saml_identity_provider) => {
-                // Relay state is sent to the IDP, to be sent back to the SP
-                // after a successful login.
-                let redirect_uri = query_params.into_inner().redirect_uri;
-                let relay_state =
-                    RelayState { redirect_uri }.to_encoded().map_err(|e| {
-                        HttpError::for_internal_error(format!(
-                            "encoding relay state failed: {}",
-                            e
-                        ))
-                    })?;
-
-                let sign_in_url = saml_identity_provider
-                    .sign_in_url(Some(relay_state))
-                    .map_err(|e| {
-                        HttpError::for_internal_error(e.to_string())
-                    })?;
-
-                http_response_found(sign_in_url)
-            }
-        }
-    };
-
-    apictx
-        .context
-        .external_latencies
-        .instrument_dropshot_handler(&rqctx, handler)
-        .await
-}
-
-pub(crate) async fn login_saml(
-    opctx: &OpContext,
-    body_bytes: dropshot::UntypedBody,
-    apictx: &ApiContext,
-    path_params: params::LoginToProviderPathParam,
-) -> Result<HttpResponseSeeOther, HttpError> {
-    let nexus = &apictx.context.nexus;
-    let (authz_silo, db_silo, identity_provider) = nexus
-        .datastore()
-        .identity_provider_lookup(
-            &opctx,
-            &path_params.silo_name.into(),
-            &path_params.provider_name.into(),
-        )
-        .await?;
-    let (authenticated_subject, relay_state_string) = match identity_provider {
-        IdentityProviderType::Saml(saml_identity_provider) => {
-            let body_bytes = body_bytes.as_str()?;
-            saml_identity_provider.authenticated_subject(
-                &body_bytes,
-                nexus.samael_max_issue_delay(),
-            )?
-        }
-    };
-    let relay_state =
-        relay_state_string.and_then(|v| RelayState::from_encoded(v).ok());
-    let user = nexus
-        .silo_user_from_authenticated_subject(
-            &opctx,
-            &authz_silo,
-            &db_silo,
-            &authenticated_subject,
-        )
-        .await?;
-    let session = create_session(opctx, apictx, user).await?;
-    let next_url = relay_state
-        .and_then(|r| r.redirect_uri)
-        .map(|u| u.to_string())
-        .unwrap_or_else(|| "/".to_string());
-    let mut response = http_response_see_other(next_url)?;
-    {
-        let headers = response.headers_mut();
-        let cookie = session_cookie_header_value(
-            &session.token,
-            // use absolute timeout even though session might idle out first.
-            // browser expiration is mostly for convenience, as the API will
-            // reject requests with an expired session regardless
-            apictx.context.session_absolute_timeout(),
-            apictx.context.external_tls_enabled,
-        )?;
-        headers.append(header::SET_COOKIE, cookie);
-    }
-    Ok(response)
-}
-
-pub(crate) async fn create_session(
-    opctx: &OpContext,
-    apictx: &ApiContext,
-    user: Option<nexus_db_queries::db::model::SiloUser>,
-) -> Result<nexus_db_queries::db::model::ConsoleSession, HttpError> {
-    let nexus = &apictx.context.nexus;
-    let session = match user {
-        Some(user) => nexus.session_create(&opctx, user.id()).await?,
-        None => Err(Error::Unauthenticated {
-            internal_message: String::from(
-                "no matching user found or credentials were not valid",
-            ),
-        })?,
-    };
-    Ok(session)
-}
 
 /// Generate URI to the appropriate login form for this Silo. Optional
 /// `redirect_uri` represents the URL to send the user back to after successful

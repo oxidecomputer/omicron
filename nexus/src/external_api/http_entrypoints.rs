@@ -17,7 +17,6 @@ use crate::app::external_endpoints::authority_for_request;
 use crate::app::support_bundles::SupportBundleQueryType;
 use crate::context::ApiContext;
 use crate::external_api::shared;
-use dropshot::http_response_found;
 use dropshot::Body;
 use dropshot::EmptyScanParams;
 use dropshot::HttpError;
@@ -32,6 +31,7 @@ use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use dropshot::WhichPage;
+use dropshot::{http_response_found, http_response_see_other};
 use dropshot::{ApiDescription, StreamingBody};
 use dropshot::{HttpResponseAccepted, HttpResponseFound, HttpResponseSeeOther};
 use dropshot::{HttpResponseCreated, HttpResponseHeaders};
@@ -6441,7 +6441,31 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::LoginToProviderPathParam>,
         query_params: Query<params::LoginUrlQuery>,
     ) -> Result<HttpResponseFound, HttpError> {
-        console_api::login_saml_redirect(rqctx, path_params, query_params).await
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path_params = path_params.into_inner();
+            let query_params = query_params.into_inner();
+
+            // Use opctx_external_authn because this request will be
+            // unauthenticated.
+            let opctx = nexus.opctx_external_authn();
+
+            nexus
+                .login_saml_redirect(
+                    &opctx,
+                    &path_params.silo_name.into(),
+                    &path_params.provider_name.into(),
+                    query_params.redirect_uri,
+                )
+                .await
+        };
+
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn login_saml(
@@ -6459,8 +6483,29 @@ impl NexusExternalApi for NexusExternalApiImpl {
             // keep specifically for this purpose.
             let opctx = nexus.opctx_external_authn();
 
-            console_api::login_saml(opctx, body_bytes, apictx, path_params)
-                .await
+            let (session, next_url) = nexus
+                .login_saml(
+                    opctx,
+                    body_bytes,
+                    &path_params.silo_name.into(),
+                    &path_params.provider_name.into(),
+                )
+                .await?;
+
+            let mut response = http_response_see_other(next_url)?;
+            {
+                let headers = response.headers_mut();
+                let cookie = session_cookie::session_cookie_header_value(
+                    &session.token,
+                    // use absolute timeout even though session might idle out first.
+                    // browser expiration is mostly for convenience, as the API will
+                    // reject requests with an expired session regardless
+                    apictx.context.session_absolute_timeout(),
+                    apictx.context.external_tls_enabled,
+                )?;
+                headers.append(header::SET_COOKIE, cookie);
+            }
+            Ok(response)
         };
         apictx
             .context
@@ -6502,8 +6547,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let user =
                 nexus.login_local(&opctx, &silo_lookup, credentials).await?;
 
-            let session =
-                console_api::create_session(opctx, apictx, user).await?;
+            let session = nexus.create_session(opctx, user).await?;
             let mut response = HttpResponseHeaders::new_unnamed(
                 HttpResponseUpdatedNoContent(),
             );
