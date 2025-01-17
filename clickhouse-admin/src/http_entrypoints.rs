@@ -14,6 +14,7 @@ use dropshot::{
     ApiDescription, HttpError, HttpResponseCreated, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
 };
+use http::StatusCode;
 use illumos_utils::svcadm::Svcadm;
 use omicron_common::api::external::Generation;
 use oximeter_db::OXIMETER_VERSION;
@@ -48,8 +49,21 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
     ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError> {
         let ctx = rqctx.context();
         let replica_server = body.into_inner();
-        // TODO: check that new generation number is equal to or more than current generation number.
-        // Do not generate otherwise
+        let current_generation = ctx.generation();
+        let incoming_generation = replica_server.generation();
+
+        // If the incoming generation number is lower, then we have a problem.
+        // We should return an error instead of silently skipping the configuration
+        // file generation.
+        if let Some(current) = current_generation {
+            if current > incoming_generation {
+                return Err(HttpError::for_internal_error(
+                    "current generation is greater than incoming generation"
+                        .to_string(),
+                ));
+            }
+        };
+
         let output = ctx.clickward().generate_server_config(replica_server)?;
 
         // Once we have generated the client we can safely enable the clickhouse_server service
@@ -66,7 +80,9 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         let gen = match ctx.generation() {
             Some(g) => g,
             None => {
-                return Err(HttpError::for_internal_error(
+                return Err(HttpError::for_client_error(
+                    Some(String::from("ObjectNotFound")),
+                    StatusCode::NOT_FOUND,
                     "no generation number found".to_string(),
                 ))
             }
@@ -153,8 +169,21 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
     ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError> {
         let ctx = rqctx.context();
         let keeper = body.into_inner();
-        // TODO: check that new generation number is equal to or more than current generation number.
-        // Do not generate otherwise
+        let current_generation = ctx.generation();
+        let incoming_generation = keeper.generation();
+
+        // If the incoming generation number is lower, then we have a problem.
+        // We should return an error instead of silently skipping the configuration
+        // file generation.
+        if let Some(current) = current_generation {
+            if current > incoming_generation {
+                return Err(HttpError::for_internal_error(
+                    "current generation is greater than incoming generation"
+                        .to_string(),
+                ));
+            }
+        };
+
         let output = ctx.clickward().generate_keeper_config(keeper)?;
 
         // Once we have generated the client we can safely enable the clickhouse_keeper service
@@ -171,7 +200,9 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
         let gen = match ctx.generation() {
             Some(g) => g,
             None => {
-                return Err(HttpError::for_internal_error(
+                return Err(HttpError::for_client_error(
+                    Some(String::from("ObjectNotFound")),
+                    StatusCode::NOT_FOUND,
                     "no generation number found".to_string(),
                 ))
             }

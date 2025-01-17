@@ -145,6 +145,10 @@ impl ServerConfigurableSettings {
 
         Ok(config)
     }
+
+    pub fn generation(&self) -> Generation {
+        self.generation
+    }
 }
 
 /// The top most type for configuring clickhouse-servers via
@@ -198,6 +202,10 @@ impl KeeperConfigurableSettings {
         .with_context(|| format!("failed to write to `{}`", path))?;
 
         Ok(config)
+    }
+
+    pub fn generation(&self) -> Generation {
+        self.generation
     }
 }
 
