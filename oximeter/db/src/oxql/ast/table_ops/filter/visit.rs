@@ -514,6 +514,3 @@ impl<'a> Visit for RewriteForMeasurementTable<'a> {
         )
     }
 }
-
-#[cfg(test)]
-mod tests {}

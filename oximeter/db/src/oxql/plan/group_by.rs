@@ -46,11 +46,11 @@ impl GroupBy {
             table.schema.name,
         );
         anyhow::ensure!(
-            table.schema.metric_types.len() == 1,
+            table.schema.n_dims() == 1,
             "`group_by` table operations require 1-dimensional tables, but \
             table '{}' has {} dimensions",
             table.schema.name,
-            table.schema.metric_types.len(),
+            table.schema.n_dims(),
         );
         anyhow::ensure!(
             table.schema.metric_types[0] != MetricType::Cumulative,
