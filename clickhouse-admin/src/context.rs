@@ -29,10 +29,14 @@ pub struct KeeperServerContext {
 }
 
 impl KeeperServerContext {
-    pub fn new(clickhouse_cli: ClickhouseCli) -> Result<Self> {
-        let log = clickhouse_cli
-            .log
-            .new(slog::o!("component" => "KeeperServerContext"));
+    pub fn new(
+        log: &Logger,
+        binary_path: Utf8PathBuf,
+        listen_address: SocketAddrV6,
+    ) -> Result<Self> {
+        let clickhouse_cli =
+            ClickhouseCli::new(binary_path, listen_address, log);
+        let log = log.new(slog::o!("component" => "KeeperServerContext"));
         let clickward = Clickward::new();
         let config_path = Utf8PathBuf::from_str(CLICKHOUSE_KEEPER_CONFIG_DIR)
             .unwrap()
@@ -73,22 +77,25 @@ pub struct ServerContext {
 }
 
 impl ServerContext {
-    // TODO: Clean up and build clickhouse_cli inside this function
-    // TODO: Clean up logs
-    pub fn new(clickhouse_cli: ClickhouseCli) -> Result<Self> {
-        let ip = clickhouse_cli.listen_address.ip();
+    pub fn new(
+        log: &Logger,
+        binary_path: Utf8PathBuf,
+        listen_address: SocketAddrV6,
+    ) -> Result<Self> {
+        let clickhouse_cli =
+            ClickhouseCli::new(binary_path, listen_address, log);
+
+        let ip = listen_address.ip();
         let address = SocketAddrV6::new(*ip, CLICKHOUSE_TCP_PORT, 0, 0);
-        let oximeter_client =
-            OximeterClient::new(address.into(), &clickhouse_cli.log);
+        let oximeter_client = OximeterClient::new(address.into(), log);
         let clickward = Clickward::new();
-        let log =
-            clickhouse_cli.log.new(slog::o!("component" => "ServerContext"));
+        let log = log.new(slog::o!("component" => "ServerContext"));
 
         let config_path = Utf8PathBuf::from_str(CLICKHOUSE_SERVER_CONFIG_DIR)
             .unwrap()
             .join(CLICKHOUSE_SERVER_CONFIG_FILE);
-        // TODO: handle error
         let generation = read_generation_from_file(config_path)?;
+
         Ok(Self {
             clickhouse_cli,
             clickward,
@@ -137,11 +144,17 @@ pub struct SingleServerContext {
 }
 
 impl SingleServerContext {
-    pub fn new(clickhouse_cli: ClickhouseCli) -> Self {
-        let ip = clickhouse_cli.listen_address.ip();
+    pub fn new(
+        log: &Logger,
+        binary_path: Utf8PathBuf,
+        listen_address: SocketAddrV6,
+    ) -> Self {
+        let clickhouse_cli =
+            ClickhouseCli::new(binary_path, listen_address, log);
+
+        let ip = listen_address.ip();
         let address = SocketAddrV6::new(*ip, CLICKHOUSE_TCP_PORT, 0, 0);
-        let oximeter_client =
-            OximeterClient::new(address.into(), &clickhouse_cli.log);
+        let oximeter_client = OximeterClient::new(address.into(), log);
         let log =
             clickhouse_cli.log.new(slog::o!("component" => "ServerContext"));
 
