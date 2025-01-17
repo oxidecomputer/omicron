@@ -15,19 +15,32 @@ use diffus::edit::enm;
 use omicron_uuid_kinds::{
     DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid, SledUuid,
 };
+use thiserror::Error;
 
 use super::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
     BlueprintZonesConfig, EditedBlueprintZoneConfig,
 };
 
+#[derive(Debug, Error)]
+pub enum BpVisitorError {
+    #[error(
+        "BlueprintZonesConfig inserted for sled {} with missing sled_state",
+        sled_id
+    )]
+    MissingSledStateOnZoneInsert { sled_id: SledUuid },
+}
+
 /// A context for blueprint related visitors
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct BpVisitorContext {
     pub sled_id: Option<SledUuid>,
     pub zone_id: Option<OmicronZoneUuid>,
     pub disk_id: Option<PhysicalDiskUuid>,
     pub dataset_id: Option<DatasetUuid>,
+    // Structural errors must be reported through the context, as we can't really
+    // return results from visitor methods.
+    pub errors: Vec<BpVisitorError>,
 }
 
 #[derive(Debug, Clone, Copy)]

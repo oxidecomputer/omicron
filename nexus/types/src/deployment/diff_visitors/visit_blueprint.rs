@@ -8,7 +8,7 @@ use super::{
     visit_blueprint_datasets_config::VisitBlueprintDatasetsConfig,
     visit_blueprint_physical_disks_config::VisitBlueprintPhysicalDisksConfig,
     visit_blueprint_zones_config::VisitBlueprintZonesConfig, BpVisitorContext,
-    Change,
+    BpVisitorError, Change,
 };
 use crate::{
     deployment::{
@@ -18,6 +18,7 @@ use crate::{
     external_api::views::SledState,
 };
 use diffus::edit::{map, Edit};
+use diffus::Diffable;
 use std::collections::BTreeMap;
 
 /// State and Resources for an inserted sled
@@ -53,6 +54,10 @@ pub trait VisitBlueprint<'e> {
     type ZonesVisitor: VisitBlueprintZonesConfig<'e>;
     type DisksVisitor: VisitBlueprintPhysicalDisksConfig<'e>;
     type DatasetsVisitor: VisitBlueprintDatasetsConfig<'e>;
+
+    fn zones_visitor(&mut self) -> &mut Self::ZonesVisitor;
+    fn disks_visitor(&mut self) -> &mut Self::DisksVisitor;
+    fn datasets_visitor(&mut self) -> &mut Self::DatasetsVisitor;
 
     fn visit_root(
         &mut self,
@@ -106,7 +111,7 @@ pub fn visit_root<'e, V>(
 
     // Build up the set of all edits for a given sled
     // This is going to be much easier once maps are collapsed!!!
-    if let Edit::Change { before, after, diff } = &diff.sled_state {
+    if let Edit::Change { diff, .. } = &diff.sled_state {
         for (&sled_id, edit) in diff {
             ctx.sled_id = Some(*sled_id);
             match edit {
@@ -146,18 +151,30 @@ pub fn visit_root<'e, V>(
                             // insert. Once we collapse the maps this will no longer
                             // be an issue, but for now we insert what the sled state
                             // should be for a newly inserted sled.
-                            //
-                            // TODO: We should add errors to the context for stuff like this,
-                            // since we don't want to force passing in a logger
-                            // and we can't really return errors in visitors.
+                            ctx.errors.push(
+                                BpVisitorError::MissingSledStateOnZoneInsert {
+                                    sled_id: *sled_id,
+                                },
+                            );
                             let mut insert = SledInsert::new(SledState::Active);
                             insert.zones = Some(zones);
                             insert
                         });
                 }
-                map::Edit::Remove(zones) => {}
-                map::Edit::Change { diff, .. } => {}
-                map::Edit::Copy(_) => {}
+                map::Edit::Remove(_) => {
+                    sled_removes.get_mut(sled_id).map(|e| e.zones = None);
+                }
+                map::Edit::Change { diff, .. } => {
+                    v.zones_visitor().visit_zones_edit(ctx, diff);
+                    // Clean up any removes related to sled_state. See the
+                    // comment in the `diff.sled_state` clause.
+                    sled_removes.remove(sled_id);
+                }
+                map::Edit::Copy(_) => {
+                    // Clean up any removes related to sled_state. See the
+                    // comment in the `diff.sled_state` clause.
+                    sled_removes.remove(sled_id);
+                }
             }
         }
         ctx.sled_id = None;
