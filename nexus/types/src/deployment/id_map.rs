@@ -74,8 +74,16 @@ impl<T: IdMappable> IdMap<T> {
         self.inner.is_empty()
     }
 
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
     pub fn insert(&mut self, entry: T) -> Option<T> {
         self.inner.insert(entry.id(), entry)
+    }
+
+    pub fn remove(&mut self, key: &T::Id) -> Option<T> {
+        self.inner.remove(key)
     }
 
     pub fn first(&self) -> Option<&T> {
@@ -88,6 +96,14 @@ impl<T: IdMappable> IdMap<T> {
 
     pub fn get_mut(&mut self, key: &T::Id) -> Option<RefMut<'_, T>> {
         self.inner.get_mut(key).map(RefMut::new)
+    }
+
+    pub fn contains_key(&self, key: &T::Id) -> bool {
+        self.inner.contains_key(key)
+    }
+
+    pub fn keys(&self) -> btree_map::Keys<'_, T::Id, T> {
+        self.inner.keys()
     }
 
     pub fn iter(&self) -> btree_map::Values<'_, T::Id, T> {
@@ -228,7 +244,9 @@ impl<'a, T: IdMappable + 'a> Diffable<'a> for IdMap<T> {
     fn diff(&'a self, other: &'a Self) -> Edit<'a, Self> {
         match self.inner.diff(&other.inner) {
             Edit::Copy(_) => Edit::Copy(self),
-            Edit::Change(change) => Edit::Change(change),
+            Edit::Change { diff, .. } => {
+                Edit::Change { before: self, after: other, diff }
+            }
         }
     }
 }

@@ -305,7 +305,7 @@ impl<'a> DatasetsBySled<'a> {
             let by_zpool: &mut BTreeMap<_, _> =
                 by_sled.entry(sled_id).or_default();
 
-            for dataset in config.datasets.values() {
+            for dataset in config.datasets.iter() {
                 let by_kind: &mut BTreeMap<_, _> =
                     by_zpool.entry(dataset.pool.id()).or_default();
 
@@ -454,8 +454,13 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
                 }
             }
             None => {
-                // TODO-john Add a Severity::BackwardsCompatibility and note the
-                // missing filesystem pool
+                blippy.push_sled_note(
+                    sled_id,
+                    Severity::BackwardsCompatibility,
+                    SledKind::ZoneMissingFilesystemPool {
+                        zone: zone_config.clone(),
+                    },
+                );
             }
         }
 
@@ -1209,7 +1214,7 @@ mod tests {
         'outer: for (sled_id, datasets_config) in
             blueprint.blueprint_datasets.iter_mut()
         {
-            for dataset in datasets_config.datasets.values_mut() {
+            for mut dataset in datasets_config.datasets.iter_mut() {
                 if let Some(prev) =
                     by_kind.insert(dataset.kind.clone(), dataset.clone())
                 {
@@ -1269,7 +1274,7 @@ mod tests {
 
         let mut debug_dataset = None;
         let mut zoneroot_dataset = None;
-        for dataset in &mut datasets_config.datasets.values_mut() {
+        for dataset in &mut datasets_config.datasets.iter_mut() {
             match &dataset.kind {
                 DatasetKind::Debug if debug_dataset.is_none() => {
                     debug_dataset = Some(dataset.clone());
@@ -1295,8 +1300,8 @@ mod tests {
         assert_ne!(debug_dataset.pool, zoneroot_dataset.pool);
 
         // Actually strip these from the blueprint.
-        datasets_config.datasets.retain(|&dataset_id, _| {
-            dataset_id != debug_dataset.id && dataset_id != zoneroot_dataset.id
+        datasets_config.datasets.retain(|dataset| {
+            dataset.id != debug_dataset.id && dataset.id != zoneroot_dataset.id
         });
 
         let expected_notes = [
@@ -1370,7 +1375,7 @@ mod tests {
         assert_ne!(durable_zone.filesystem_pool, root_zone.filesystem_pool);
 
         // Actually strip these from the blueprint.
-        datasets_config.datasets.retain(|_, dataset| {
+        datasets_config.datasets.retain(|dataset| {
             let matches_durable = (dataset.pool
                 == *durable_zone.zone_type.durable_zpool().unwrap())
                 && (dataset.kind
@@ -1543,7 +1548,7 @@ mod tests {
         // Find the datasets we expect to have been orphaned.
         let expected_notes = datasets_config
             .datasets
-            .values()
+            .iter()
             .filter_map(|dataset| {
                 if (dataset.pool == durable_dataset.dataset.pool_name
                     && dataset.kind == durable_dataset.kind)
@@ -1591,7 +1596,8 @@ mod tests {
             .iter_mut()
             .next()
             .expect("at least one sled");
-        let removed_disk = disks_config.disks.remove(0);
+        let first = disks_config.disks.first().unwrap().id;
+        let removed_disk = disks_config.disks.remove(&first).unwrap();
         eprintln!("removed disk {removed_disk:?}");
 
         let expected_notes = blueprint
@@ -1599,7 +1605,7 @@ mod tests {
             .get(sled_id)
             .unwrap()
             .datasets
-            .values()
+            .iter()
             .filter_map(|dataset| {
                 if dataset.pool.id() != removed_disk.pool_id {
                     return None;
@@ -1684,7 +1690,7 @@ mod tests {
         for (sled_id, datasets_config) in
             blueprint.blueprint_datasets.iter_mut()
         {
-            for dataset in datasets_config.datasets.values_mut() {
+            for mut dataset in datasets_config.datasets.iter_mut() {
                 match dataset.kind {
                     DatasetKind::Crucible => {
                         let bad_address = if !cleared_crucible_addr {

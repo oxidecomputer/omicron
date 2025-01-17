@@ -505,7 +505,7 @@ impl ExampleSystemBuilder {
         for (sled_id, datasets) in &blueprint.blueprint_datasets {
             let sled = system.get_sled_mut(*sled_id).unwrap();
 
-            for dataset_config in datasets.datasets.values() {
+            for dataset_config in datasets.datasets.iter() {
                 let config = dataset_config.clone().try_into().unwrap();
                 sled.add_synthetic_dataset(config);
             }

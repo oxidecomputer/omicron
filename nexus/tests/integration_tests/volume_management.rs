@@ -2192,7 +2192,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
 
     // Four zpools, one dataset each
     let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -2526,8 +2526,7 @@ async fn test_disk_create_saga_unwinds_correctly(
     let zpool = &disk_test.zpools().nth(2).expect("Expected three zpools");
     let dataset = &zpool.datasets[0];
     cptestctx
-        .sled_agent
-        .sled_agent
+        .first_sled_agent()
         .get_crucible_dataset(zpool.id, dataset.id)
         .set_region_creation_error(true);
 
@@ -2594,8 +2593,7 @@ async fn test_snapshot_create_saga_unwinds_correctly(
         &disk_test.zpools().nth(2).expect("Expected at least three zpools");
     let dataset = &zpool.datasets[0];
     cptestctx
-        .sled_agent
-        .sled_agent
+        .first_sled_agent()
         .get_crucible_dataset(zpool.id, dataset.id)
         .set_region_creation_error(true);
 
@@ -3583,7 +3581,7 @@ impl TestReadOnlyRegionReferenceUsage {
         );
 
         DiskTestBuilder::new(&cptestctx)
-            .on_specific_sled(cptestctx.first_sled())
+            .on_specific_sled(cptestctx.first_sled_id())
             .with_zpool_count(4)
             .build()
             .await;
@@ -4086,7 +4084,7 @@ async fn test_read_only_region_reference_counting(
     // Four zpools are required for region replacement or region snapshot
     // replacement
     let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -4217,8 +4215,7 @@ async fn test_read_only_region_reference_counting(
 
     assert_eq!(
         cptestctx
-            .sled_agent
-            .sled_agent
+            .first_sled_agent()
             .get_crucible_dataset(
                 TypedUuid::from_untyped_uuid(db_read_only_dataset.pool_id),
                 db_read_only_dataset.id(),
@@ -4287,8 +4284,7 @@ async fn test_read_only_region_reference_counting(
 
     assert_eq!(
         cptestctx
-            .sled_agent
-            .sled_agent
+            .first_sled_agent()
             .get_crucible_dataset(
                 TypedUuid::from_untyped_uuid(db_read_only_dataset.pool_id),
                 db_read_only_dataset.id(),
@@ -4322,7 +4318,7 @@ async fn test_read_only_region_reference_counting_layers(
     // Four zpools are required for region replacement or region snapshot
     // replacement
     let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -4555,7 +4551,7 @@ async fn test_volume_replace_snapshot_respects_accounting(
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -4761,7 +4757,7 @@ async fn test_volume_remove_rop_respects_accounting(
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -4920,7 +4916,7 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -5173,7 +5169,7 @@ async fn test_migrate_to_ref_count_with_records(
     let datastore = nexus.datastore();
 
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -5283,7 +5279,7 @@ async fn test_migrate_to_ref_count_with_records_soft_delete_volume(
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -5358,7 +5354,7 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
     let datastore = nexus.datastore();
 
     let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -5555,7 +5551,7 @@ async fn test_double_layer_with_read_only_region_delete(
     // Four zpools are required for region replacement or region snapshot
     // replacement
     let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -5680,7 +5676,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
     // Four zpools are required for region replacement or region snapshot
     // replacement
     let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -5855,7 +5851,7 @@ async fn test_no_zombie_region_snapshots(cptestctx: &ControlPlaneTestContext) {
     // Four zpools are required for region replacement or region snapshot
     // replacement
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -5970,7 +5966,7 @@ async fn test_no_zombie_read_only_regions(cptestctx: &ControlPlaneTestContext) {
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -6156,7 +6152,7 @@ async fn test_no_zombie_read_write_regions(
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;

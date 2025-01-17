@@ -72,6 +72,7 @@ progenitor-client.workspace = true
 propolis-client.workspace = true
 qorb.workspace = true
 rand.workspace = true
+range-requests.workspace = true
 ref-cast.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 ring.workspace = true
@@ -108,6 +109,7 @@ nexus-metrics-producer-gc.workspace = true
 nexus-reconfigurator-execution.workspace = true
 nexus-reconfigurator-planning.workspace = true
 nexus-reconfigurator-preparation.workspace = true
+nexus-reconfigurator-rendezvous.workspace = true
 nexus-sled-agent-shared.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true

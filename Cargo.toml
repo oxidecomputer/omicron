@@ -83,6 +83,7 @@ members = [
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
     "nexus/reconfigurator/preparation",
+    "nexus/reconfigurator/rendezvous",
     "nexus/reconfigurator/simulation",
     "nexus/saga-recovery",
     "nexus/test-interface",
@@ -218,6 +219,7 @@ default-members = [
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
     "nexus/reconfigurator/preparation",
+    "nexus/reconfigurator/rendezvous",
     "nexus/reconfigurator/simulation",
     "nexus/saga-recovery",
     "nexus/test-interface",
@@ -378,7 +380,7 @@ dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { path = "clients/dpd-client" }
-dropshot = { version = "0.13.0", features = [ "usdt-probes" ] }
+dropshot = { version = "0.15.1", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.17"
 either = "1.13.0"
 expectorate = "1.1.0"
@@ -428,7 +430,7 @@ humantime = "2.1.0"
 hyper = "1.4.1"
 hyper-util = "0.1.10"
 hyper-rustls = "0.26.0"
-hyper-staticfile = "0.10.0"
+hyper-staticfile = "0.10.1"
 illumos-utils = { path = "illumos-utils" }
 iana-time-zone = "0.1.61"
 indent_write = "2.2.0"
@@ -479,6 +481,7 @@ nexus-reconfigurator-blippy = { path = "nexus/reconfigurator/blippy" }
 nexus-reconfigurator-execution = { path = "nexus/reconfigurator/execution" }
 nexus-reconfigurator-planning = { path = "nexus/reconfigurator/planning" }
 nexus-reconfigurator-preparation = { path = "nexus/reconfigurator/preparation" }
+nexus-reconfigurator-rendezvous = { path = "nexus/reconfigurator/rendezvous" }
 nexus-reconfigurator-simulation = { path = "nexus/reconfigurator/simulation" }
 nexus-saga-recovery = { path = "nexus/saga-recovery" }
 nexus-sled-agent-shared = { path = "nexus-sled-agent-shared" }
@@ -669,7 +672,7 @@ update-common = { path = "update-common" }
 update-engine = { path = "update-engine" }
 url = "2.5.3"
 usdt = "0.5.0"
-uuid = { version = "1.10.0", features = ["serde", "v4"] }
+uuid = { version = "1.12.0", features = ["serde", "v4"] }
 uzers = "0.12"
 walkdir = "2.5"
 whoami = "1.5"
@@ -687,7 +690,7 @@ zone = { version = "0.3", default-features = false, features = ["async"] }
 # the kinds). However, uses of omicron-uuid-kinds _within omicron_ will have
 # std and the other features enabled because they'll refer to it via
 # omicron-uuid-kinds.workspace = true.
-newtype-uuid = { version = "1.1.3", default-features = false }
+newtype-uuid = { version = "1.2.1", default-features = false }
 omicron-uuid-kinds = { path = "uuid-kinds", features = ["serde", "schemars08", "uuid-v4"] }
 
 # NOTE: The test profile inherits from the dev profile, so settings under

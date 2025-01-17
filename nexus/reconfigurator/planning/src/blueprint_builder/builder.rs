@@ -421,10 +421,7 @@ impl<'a> BlueprintBuilder<'a> {
             .keys()
             .copied()
             .map(|sled_id| {
-                let config = BlueprintPhysicalDisksConfig {
-                    generation: Generation::new(),
-                    disks: Vec::new(),
-                };
+                let config = BlueprintPhysicalDisksConfig::default();
                 (sled_id, config)
             })
             .collect();
@@ -434,7 +431,7 @@ impl<'a> BlueprintBuilder<'a> {
             .map(|sled_id| {
                 let config = BlueprintDatasetsConfig {
                     generation: Generation::new(),
-                    datasets: BTreeMap::new(),
+                    datasets: IdMap::new(),
                 };
                 (sled_id, config)
             })
@@ -518,17 +515,14 @@ impl<'a> BlueprintBuilder<'a> {
                 .blueprint_disks
                 .get(sled_id)
                 .cloned()
-                .unwrap_or_else(|| BlueprintPhysicalDisksConfig {
-                    generation: Generation::new(),
-                    disks: Vec::new(),
-                });
+                .unwrap_or_else(|| BlueprintPhysicalDisksConfig::default());
             let datasets = parent_blueprint
                 .blueprint_datasets
                 .get(sled_id)
                 .cloned()
                 .unwrap_or_else(|| BlueprintDatasetsConfig {
                     generation: Generation::new(),
-                    datasets: BTreeMap::new(),
+                    datasets: IdMap::new(),
                 });
             let editor = SledEditor::for_existing(
                 state,
@@ -2403,7 +2397,7 @@ pub mod test {
             .get(&sled_id)
             .unwrap()
             .datasets
-            .values()
+            .iter()
             .filter_map(|dataset_config| {
                 if dataset_config.disposition
                     == BlueprintDatasetDisposition::Expunged

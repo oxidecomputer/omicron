@@ -45,7 +45,7 @@ mod test {
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
-    #[nexus_test]
+    #[nexus_test(extra_sled_agents = 1)]
     async fn test_ensure_preserve_downgrade_option(
         cptestctx: &ControlPlaneTestContext,
     ) {

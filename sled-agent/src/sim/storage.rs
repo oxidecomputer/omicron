@@ -1288,7 +1288,7 @@ impl StorageInner {
             if stored_config.generation > config.generation {
                 return Err(HttpError::for_client_error(
                     None,
-                    http::StatusCode::BAD_REQUEST,
+                    dropshot::ClientErrorStatusCode::BAD_REQUEST,
                     "Generation number too old".to_string(),
                 ));
             } else if stored_config.generation == config.generation
@@ -1296,7 +1296,7 @@ impl StorageInner {
             {
                 return Err(HttpError::for_client_error(
                     None,
-                    http::StatusCode::BAD_REQUEST,
+                    dropshot::ClientErrorStatusCode::BAD_REQUEST,
                     "Generation number unchanged but data is different"
                         .to_string(),
                 ));
@@ -1312,6 +1312,11 @@ impl StorageInner {
             .map(|config| config.name.clone())
             .collect();
         for dataset in &dataset_names {
+            // Datasets delegated to zones manage their own storage.
+            if dataset.kind().zoned() {
+                continue;
+            }
+
             let root = self.root().to_path_buf();
             self.nested_datasets.entry(dataset.clone()).or_insert_with(|| {
                 NestedDatasetStorage::new(
@@ -1501,7 +1506,7 @@ impl StorageInner {
             if stored_config.generation > config.generation {
                 return Err(HttpError::for_client_error(
                     None,
-                    http::StatusCode::BAD_REQUEST,
+                    dropshot::ClientErrorStatusCode::BAD_REQUEST,
                     "Generation number too old".to_string(),
                 ));
             } else if stored_config.generation == config.generation
@@ -1509,7 +1514,7 @@ impl StorageInner {
             {
                 return Err(HttpError::for_client_error(
                     None,
-                    http::StatusCode::BAD_REQUEST,
+                    dropshot::ClientErrorStatusCode::BAD_REQUEST,
                     "Generation number unchanged but data is different"
                         .to_string(),
                 ));
@@ -2014,7 +2019,7 @@ impl PantryServer {
             bind_address: SocketAddr::new(ip, 0),
             // This has to be large enough to support:
             // - bulk writes into disks
-            request_body_max_bytes: 8192 * 1024,
+            default_request_body_max_bytes: 8192 * 1024,
             default_handler_task_mode: HandlerTaskMode::Detached,
             log_headers: vec![],
         })

@@ -15,6 +15,8 @@ use internal_dns_types::diff::DnsDiff;
 use itertools::Itertools;
 use log_capture::LogCapture;
 use nexus_inventory::CollectionBuilder;
+use nexus_reconfigurator_blippy::Blippy;
+use nexus_reconfigurator_blippy::BlippyReportSortKey;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
@@ -276,6 +278,7 @@ fn process_entry(
         Commands::InventoryList => cmd_inventory_list(sim),
         Commands::InventoryGenerate => cmd_inventory_generate(sim),
         Commands::BlueprintList => cmd_blueprint_list(sim),
+        Commands::BlueprintBlippy(args) => cmd_blueprint_blippy(sim, args),
         Commands::BlueprintEdit(args) => cmd_blueprint_edit(sim, args),
         Commands::BlueprintPlan(args) => cmd_blueprint_plan(sim, args),
         Commands::BlueprintShow(args) => cmd_blueprint_show(sim, args),
@@ -339,6 +342,8 @@ enum Commands {
 
     /// list all blueprints
     BlueprintList,
+    /// run blippy on a blueprint
+    BlueprintBlippy(BlueprintArgs),
     /// run planner to generate a new blueprint
     BlueprintPlan(BlueprintPlanArgs),
     /// edit contents of a blueprint directly
@@ -750,6 +755,17 @@ fn cmd_blueprint_list(
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
         .to_string();
     Ok(Some(table))
+}
+
+fn cmd_blueprint_blippy(
+    sim: &mut ReconfiguratorSim,
+    args: BlueprintArgs,
+) -> anyhow::Result<Option<String>> {
+    let state = sim.current_state();
+    let blueprint = state.system().get_blueprint(args.blueprint_id)?;
+    let report =
+        Blippy::new(&blueprint).into_report(BlippyReportSortKey::Severity);
+    Ok(Some(format!("{}", report.display())))
 }
 
 fn cmd_blueprint_plan(

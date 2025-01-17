@@ -91,7 +91,7 @@ use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
 use nexus_types::deployment::{
-    blueprint_zone_type, Blueprint, BlueprintDatasetConfig,
+    blueprint_zone_type, id_map::IdMap, Blueprint, BlueprintDatasetConfig,
     BlueprintDatasetDisposition, BlueprintDatasetsConfig, BlueprintZoneType,
     BlueprintZonesConfig, CockroachDbPreserveDowngrade,
 };
@@ -1538,7 +1538,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
 
     let mut blueprint_datasets = BTreeMap::new();
     for (sled_id, sled_config) in sled_configs_by_id {
-        let mut datasets = BTreeMap::new();
+        let mut datasets = IdMap::new();
         for d in sled_config.datasets.datasets.values() {
             // Only the "Crucible" dataset needs to know the address
             let address = if *d.name.kind() == DatasetKind::Crucible {
@@ -1565,19 +1565,16 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
                 None
             };
 
-            datasets.insert(
-                d.id,
-                BlueprintDatasetConfig {
-                    disposition: BlueprintDatasetDisposition::InService,
-                    id: d.id,
-                    pool: d.name.pool().clone(),
-                    kind: d.name.kind().clone(),
-                    address,
-                    compression: d.inner.compression,
-                    quota: d.inner.quota,
-                    reservation: d.inner.reservation,
-                },
-            );
+            datasets.insert(BlueprintDatasetConfig {
+                disposition: BlueprintDatasetDisposition::InService,
+                id: d.id,
+                pool: d.name.pool().clone(),
+                kind: d.name.kind().clone(),
+                address,
+                compression: d.inner.compression,
+                quota: d.inner.quota,
+                reservation: d.inner.reservation,
+            });
         }
 
         blueprint_datasets.insert(
