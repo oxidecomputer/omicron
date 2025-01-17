@@ -10,6 +10,10 @@ use super::blueprint_display::{
     BpGeneration, BpOmicronZonesTableSchema, BpPhysicalDisksTableSchema,
     BpTable, BpTableColumn, BpTableData, BpTableRow, KvListWithHeading, KvPair,
 };
+use super::diff_visitors::visit_blueprint::VisitBlueprint;
+use super::diff_visitors::visit_blueprint_datasets_config::VisitBlueprintDatasetsConfig;
+use super::diff_visitors::visit_blueprint_physical_disks_config::VisitBlueprintPhysicalDisksConfig;
+use super::diff_visitors::visit_blueprint_zones_config::VisitBlueprintZonesConfig;
 use super::{
     zone_sort_key, Blueprint, ClickhouseClusterConfig,
     CockroachDbPreserveDowngrade, DiffBeforeClickhouseClusterConfig,
@@ -793,6 +797,51 @@ impl BpDiffDatasets {
         }
     }
 }
+
+/// Output of a `BlueprintDiffer`
+pub struct BpDiffOutput {}
+
+/// A mechanism for creating tables from blueprint diffs
+pub struct BlueprintDiffer<'e> {
+    before: &'e Blueprint,
+    after: &'e Blueprint,
+    output: BpDiffOutput,
+}
+
+impl<'e> BlueprintDiffer<'e> {
+    pub fn new(
+        before: &'e Blueprint,
+        after: &'e Blueprint,
+    ) -> BlueprintDiffer<'e> {
+        BlueprintDiffer { before, after, output: BpDiffOutput {} }
+    }
+
+    pub fn diff(&mut self) -> BpDiffOutput {
+        todo!()
+    }
+}
+
+impl<'e> VisitBlueprint<'e> for BlueprintDiffer<'e> {
+    type ZonesVisitor = Self;
+    type DisksVisitor = Self;
+    type DatasetsVisitor = Self;
+
+    fn zones_visitor(&mut self) -> &mut Self::ZonesVisitor {
+        &mut *self
+    }
+
+    fn disks_visitor(&mut self) -> &mut Self::DisksVisitor {
+        &mut *self
+    }
+
+    fn datasets_visitor(&mut self) -> &mut Self::DatasetsVisitor {
+        &mut *self
+    }
+}
+
+impl<'e> VisitBlueprintZonesConfig<'e> for BlueprintDiffer<'e> {}
+impl<'e> VisitBlueprintPhysicalDisksConfig<'e> for BlueprintDiffer<'e> {}
+impl<'e> VisitBlueprintDatasetsConfig<'e> for BlueprintDiffer<'e> {}
 
 /// Summarizes the differences between two blueprints
 #[derive(Debug)]

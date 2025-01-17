@@ -14,12 +14,11 @@ use crate::{
     deployment::{
         Blueprint, BlueprintDatasetsConfig, BlueprintPhysicalDisksConfig,
         BlueprintZonesConfig, ClickhouseClusterConfig,
-        CockroachDbPreserveDowngrade, EditedBlueprint, SledUuid,
+        CockroachDbPreserveDowngrade, SledUuid,
     },
     external_api::views::SledState,
 };
 use diffus::edit::{map, Edit};
-use diffus::Diffable;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::BlueprintUuid;
 use std::collections::BTreeMap;
