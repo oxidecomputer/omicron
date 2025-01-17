@@ -426,10 +426,12 @@ fn load_extra_logs(
         let mut path = dir.clone();
         path.push(filename);
         let mut logfile = LogFile::new(path);
-        logfile.read_metadata(&entry);
-        if logfile.size == Some(0) && !show_empty {
-            // skip 0 size files
-            continue;
+        if !show_empty {
+            logfile.read_metadata(&entry);
+            if logfile.size == Some(0) {
+                // skip 0 size files
+                continue;
+            }
         }
         svc_logs.extra.push(logfile);
     }
