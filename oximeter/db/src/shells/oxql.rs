@@ -300,7 +300,11 @@ fn print_query_summary(
     println!("{}", "Query summary".underlined().bold());
     println!(" {}: {}", "ID".bold(), result.query_id);
     println!(" {}: {}", "Tables".bold(), result.tables.len());
-    println!(" {}: {}", "Timeseries".bold(), result.tables.iter().map(|t| t.n_timeseries()).sum::<usize>());
+    println!(
+        " {}: {}",
+        "Timeseries".bold(),
+        result.tables.iter().map(|t| t.n_timeseries()).sum::<usize>()
+    );
     if print_elapsed {
         println!(" {}: {:?}\n", "Total duration".bold(), result.total_duration);
     }
