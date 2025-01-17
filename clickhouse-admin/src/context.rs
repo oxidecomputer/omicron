@@ -29,7 +29,7 @@ pub struct KeeperServerContext {
 }
 
 impl KeeperServerContext {
-    pub fn new(clickhouse_cli: ClickhouseCli) -> Self {
+    pub fn new(clickhouse_cli: ClickhouseCli) -> Result<Self> {
         let log = clickhouse_cli
             .log
             .new(slog::o!("component" => "KeeperServerContext"));
@@ -37,9 +37,8 @@ impl KeeperServerContext {
         let config_path = Utf8PathBuf::from_str(CLICKHOUSE_KEEPER_CONFIG_DIR)
             .unwrap()
             .join(CLICKHOUSE_KEEPER_CONFIG_FILE);
-        // TODO: handle error
-        let generation = read_generation_from_file(config_path).unwrap();
-        Self { clickward, clickhouse_cli, log, generation }
+        let generation = read_generation_from_file(config_path)?;
+        Ok(Self { clickward, clickhouse_cli, log, generation })
     }
 
     pub fn clickward(&self) -> &Clickward {
@@ -76,7 +75,7 @@ pub struct ServerContext {
 impl ServerContext {
     // TODO: Clean up and build clickhouse_cli inside this function
     // TODO: Clean up logs
-    pub fn new(clickhouse_cli: ClickhouseCli) -> Self {
+    pub fn new(clickhouse_cli: ClickhouseCli) -> Result<Self> {
         let ip = clickhouse_cli.listen_address.ip();
         let address = SocketAddrV6::new(*ip, CLICKHOUSE_TCP_PORT, 0, 0);
         let oximeter_client =
@@ -89,15 +88,15 @@ impl ServerContext {
             .unwrap()
             .join(CLICKHOUSE_SERVER_CONFIG_FILE);
         // TODO: handle error
-        let generation = read_generation_from_file(config_path).unwrap();
-        Self {
+        let generation = read_generation_from_file(config_path)?;
+        Ok(Self {
             clickhouse_cli,
             clickward,
             oximeter_client,
             initialization_lock: Arc::new(Mutex::new(())),
             log,
             generation,
-        }
+        })
     }
 
     pub fn clickhouse_cli(&self) -> &ClickhouseCli {
