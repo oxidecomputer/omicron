@@ -469,7 +469,7 @@ fn start_producer_server(
         // Some(_) here prevents DNS resolution, using our own address to
         // register.
         registration_address: Some(nexus_addr),
-        request_body_max_bytes: 1024 * 1024 * 10,
+        default_request_body_max_bytes: 1024 * 1024 * 10,
         log: oximeter_producer::LogConfig::Logger(
             log.new(o!("component" => "nexus-producer-server")),
         ),
