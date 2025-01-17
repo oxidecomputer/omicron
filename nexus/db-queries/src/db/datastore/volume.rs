@@ -4122,7 +4122,7 @@ mod tests {
 
         assert_eq!(
             region_snapshot.snapshot_id,
-            "f548332c-6026-4eff-8c1c-ba202cd5c834".parse().unwrap()
+            "f548332c-6026-4eff-8c1c-ba202cd5c834".parse::<Uuid>().unwrap()
         );
         assert_eq!(region_snapshot.deleting, false);
 

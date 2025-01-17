@@ -131,7 +131,7 @@ unicode-bidi = { version = "0.3.17" }
 unicode-normalization = { version = "0.1.24" }
 usdt = { version = "0.5.0" }
 usdt-impl = { version = "0.5.0", default-features = false, features = ["asm", "des"] }
-uuid = { version = "1.11.0", features = ["serde", "v4"] }
+uuid = { version = "1.12.0", features = ["serde", "v4"] }
 x509-cert = { version = "0.2.5" }
 zerocopy = { version = "0.7.35", features = ["derive", "simd"] }
 zeroize = { version = "1.8.1", features = ["std", "zeroize_derive"] }
@@ -255,7 +255,7 @@ unicode-normalization = { version = "0.1.24" }
 unicode-xid = { version = "0.2.6" }
 usdt = { version = "0.5.0" }
 usdt-impl = { version = "0.5.0", default-features = false, features = ["asm", "des"] }
-uuid = { version = "1.11.0", features = ["serde", "v4"] }
+uuid = { version = "1.12.0", features = ["serde", "v4"] }
 x509-cert = { version = "0.2.5" }
 zerocopy = { version = "0.7.35", features = ["derive", "simd"] }
 zeroize = { version = "1.8.1", features = ["std", "zeroize_derive"] }
