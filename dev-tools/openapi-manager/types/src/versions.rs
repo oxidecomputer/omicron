@@ -5,6 +5,8 @@
 //! Types used by trait-based API definitions to define the versions that they
 //! support.
 
+use std::collections::BTreeMap;
+
 #[derive(Debug)]
 pub struct SupportedVersion {
     semver: &'static semver::Version,
@@ -39,17 +41,41 @@ impl SupportedVersions {
             !versions.is_empty(),
             "at least one version of an API must be supported"
         );
-        // XXX-dap need to add other constraints:
-        // - no semver is duplicated
-        // - no id is duplicated
-        // - look at schema_versions to see what else
-        // XXX-dap should this be in a test instead?  downside is you could get
-        // pretty far (running `cargo xtask openapi generate`) without noticing
+
+        // We require that the list of supported versions for an API be sorted
+        // because this helps ensure a git conflict when two people attempt to
+        // add or modify the same version in different branches.
         assert!(
             versions.iter().map(|v| v.semver()).is_sorted(),
-            "list of supported versions for an API must be sorted to ensure \
-             that upstream merges have been done correctly"
+            "list of supported versions for an API must be sorted"
         );
+
+        // Each semver and each label must be unique.
+        let mut unique_versions = BTreeMap::new();
+        let mut unique_labels = BTreeMap::new();
+        for v in &versions {
+            if let Some(previous) =
+                unique_versions.insert(v.semver(), v.label())
+            {
+                panic!(
+                    "version {} appears multiple times (labels: {:?}, {:?})",
+                    v.semver(),
+                    previous,
+                    v.label()
+                );
+            }
+
+            if let Some(previous) = unique_labels.insert(v.label(), v.semver())
+            {
+                panic!(
+                    "label {:?} appears multiple times (versions: {}, {})",
+                    v.label(),
+                    previous,
+                    v.semver()
+                );
+            }
+        }
+
         SupportedVersions { versions }
     }
 
