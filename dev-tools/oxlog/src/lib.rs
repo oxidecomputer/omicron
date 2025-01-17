@@ -383,10 +383,12 @@ fn load_svc_logs(
                 continue;
             };
 
-            logfile.read_metadata(&entry);
-            if logfile.size == Some(0) && !show_empty {
-                // skip 0 size files
-                continue;
+            if !show_empty {
+                logfile.read_metadata(&entry);
+                if logfile.size == Some(0) {
+                    // skip 0 size files
+                    continue;
+                }
             }
 
             let is_current = filename.ends_with(".log");
