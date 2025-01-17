@@ -141,7 +141,7 @@ pub struct OnlyDatum<'a> {
     pub schema: &'a TableSchema,
 }
 
-impl<'a> Visit for OnlyDatum<'a> {
+impl Visit for OnlyDatum<'_> {
     type Output = Filter;
 
     fn visit_simple(
@@ -186,7 +186,7 @@ pub struct RemoveDatum<'a> {
     pub schema: &'a TableSchema,
 }
 
-impl<'a> Visit for RemoveDatum<'a> {
+impl Visit for RemoveDatum<'_> {
     type Output = Filter;
 
     fn visit_simple(
@@ -275,7 +275,7 @@ pub struct RestrictToFields<'a> {
     pub schema: &'a TableSchema,
 }
 
-impl<'a> Visit for RestrictToFields<'a> {
+impl Visit for RestrictToFields<'_> {
     type Output = Filter;
 
     fn visit_simple(
@@ -322,7 +322,7 @@ pub struct RestrictToMeasurements<'a> {
     pub schema: &'a TableSchema,
 }
 
-impl<'a> Visit for RestrictToMeasurements<'a> {
+impl Visit for RestrictToMeasurements<'_> {
     type Output = Filter;
 
     fn visit_simple(
@@ -391,7 +391,7 @@ pub struct RewriteForFieldTables<'a> {
     pub schema: &'a TableSchema,
 }
 
-impl<'a> Visit for RewriteForFieldTables<'a> {
+impl Visit for RewriteForFieldTables<'_> {
     type Output = String;
 
     fn visit_simple(
@@ -441,7 +441,7 @@ pub struct RewriteForMeasurementTable<'a> {
     pub schema: &'a TableSchema,
 }
 
-impl<'a> Visit for RewriteForMeasurementTable<'a> {
+impl Visit for RewriteForMeasurementTable<'_> {
     type Output = String;
 
     fn visit_simple(
