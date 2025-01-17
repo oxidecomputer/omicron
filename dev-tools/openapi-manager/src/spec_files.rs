@@ -4,7 +4,7 @@
 
 //! Working with OpenAPI specification files in the repository
 
-use crate::apis::{ApiIdent, ManagedApi, ManagedApis};
+use crate::apis::{ApiIdent, ManagedApis};
 use anyhow::{anyhow, bail, Context};
 use camino::{Utf8Path, Utf8PathBuf};
 use debug_ignore::DebugIgnore;
@@ -162,9 +162,7 @@ impl ApiSpecFileName {
     /// Attempts to parse the given file basename as an ApiSpecFileName of kind
     /// `Versioned`.  These look like:
     ///
-    ///     ident-SEMVER-CHECKSUM.json
-    ///
-    /// However, the `ident-` must have already been stripped off by the caller.
+    ///     ident-SEMVER-LABEL.json
     fn new_versioned(
         ident: &str,
         basename: &str,
@@ -182,12 +180,13 @@ impl ApiSpecFileName {
             anyhow!("versioned API document filename did not end in .json")
         })?;
 
-        let (version_str, sum) = middle.rsplit_once("-").ok_or_else(|| {
-            anyhow!(
-                "extracting version and checksum from versioned API \
+        let (version_str, label) =
+            middle.rsplit_once("-").ok_or_else(|| {
+                anyhow!(
+                    "extracting version and label from versioned API \
                  document filename"
-            )
-        })?;
+                )
+            })?;
 
         let version: semver::Version =
             version_str.parse().with_context(|| {
@@ -215,7 +214,7 @@ impl ApiSpecFileName {
             ident: ApiIdent::from(ident.to_string()),
             kind: ApiSpecFileNameKind::Versioned {
                 version,
-                sum: sum.to_string(),
+                label: label.to_string(),
             },
         })
     }
@@ -248,9 +247,10 @@ impl ApiSpecFileName {
     fn basename(&self) -> String {
         match &self.kind {
             ApiSpecFileNameKind::Lockstep => format!("{}.json", self.ident),
-            ApiSpecFileNameKind::Versioned { version, sum } => {
+            ApiSpecFileNameKind::Versioned { version, label } => {
                 // XXX-dap the version number must not contain dashes
-                format!("{}-{}-{}.json", self.ident, version, sum)
+                // XXX-dap actually I think that's fine now?
+                format!("{}-{}-{}.json", self.ident, version, label)
             }
         }
     }
@@ -260,7 +260,7 @@ impl ApiSpecFileName {
 #[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
 enum ApiSpecFileNameKind {
     Lockstep,
-    Versioned { version: semver::Version, sum: String },
+    Versioned { version: semver::Version, label: String },
 }
 
 /// Describes an OpenAPI document found on disk
@@ -287,8 +287,8 @@ impl ApiSpecFile {
                 format!("version in {:?} was not a semver", path)
             })?;
 
-        if let ApiSpecFileNameKind::Versioned { version, sum: _ } = &name.kind {
-            // XXX-dap verify checksum
+        if let ApiSpecFileNameKind::Versioned { version, label: _ } = &name.kind
+        {
             if *version != parsed_version {
                 bail!(
                     "file {:?}: version in the file ({:?}) differs from \
@@ -308,27 +308,21 @@ impl ApiSpecFile {
     }
 
     pub fn for_contents(
-        api: &ManagedApi,
-        version: &semver::Version,
+        spec_file_name: &ApiSpecFileName,
         openapi: OpenAPI,
         contents_buf: Vec<u8>,
-    ) -> ApiSpecFile {
-        let kind = if api.is_versioned() {
-            ApiSpecFileNameKind::Versioned {
-                version: version.clone(),
-                sum: "bogus".to_owned(), // XXX-dap
-            }
-        } else {
-            ApiSpecFileNameKind::Lockstep
-        };
-
-        let name = ApiSpecFileName { ident: api.ident().clone(), kind };
-        ApiSpecFile {
-            name,
+    ) -> anyhow::Result<ApiSpecFile> {
+        let version: semver::Version = openapi
+            .info
+            .version
+            .parse()
+            .context("parsing version from generated spec")?;
+        Ok(ApiSpecFile {
+            name: spec_file_name.clone(),
             contents: DebugIgnore(openapi),
             contents_buf: DebugIgnore(contents_buf),
-            version: version.clone(),
-        }
+            version,
+        })
     }
 
     pub fn spec_file_name(&self) -> &ApiSpecFileName {

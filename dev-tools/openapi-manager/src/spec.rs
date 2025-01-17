@@ -249,13 +249,13 @@ pub struct ApiSpecVersion<'a> {
 
 impl<'a> ApiSpecVersion<'a> {
     pub(crate) fn file_name(&self, contents: &[u8]) -> String {
-        let sum = "dummy-checksum"; // XXX-dap replace with shasum
+        let label = "dummy-label"; // XXX-dap
         match self.spec.versions {
             Versions::Lockstep { .. } => {
                 format!("{}.json", &self.spec.file_stem)
             }
             Versions::Versioned { .. } => {
-                format!("{}-{}.json", &self.spec.file_stem, sum)
+                format!("{}-{}.json", &self.spec.file_stem, label)
             }
         }
     }

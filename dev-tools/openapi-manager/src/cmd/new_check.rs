@@ -62,12 +62,12 @@ pub(crate) fn new_check_impl(
                 format!(
                     "checking API {} version {}",
                     api_ident,
-                    api_version.version()
+                    api_version.semver()
                 )
             })?;
 
             // XXX-dap
-            print!("API {} version {}: ", api_ident, api_version.version(),);
+            print!("API {} version {}: ", api_ident, api_version.semver(),);
 
             if check.total_errors() == 0 {
                 println!("{}", headers::FRESH.style(styles.success_header));

@@ -248,12 +248,6 @@ NewtypeDeref! { () pub struct ApiIdent(String); }
 NewtypeDerefMut! { () pub struct ApiIdent(String); }
 NewtypeDisplay! { () pub struct ApiIdent(String); }
 NewtypeFrom! { () pub struct ApiIdent(String); }
-// XXX-dap do I need this
-// impl std::borrow::Borrow<str> for ApiIdent {
-//     fn borrow(&self) -> &str {
-//         self.0.as_str()
-//     }
-// }
 
 /// Whether an API is exposed externally from the Oxide system
 ///
@@ -296,14 +290,6 @@ impl Versions {
     }
 
     /// Constructor for a versioned API
-    ///
-    /// # Panics
-    ///
-    /// Panics if the list of supported versions is not already sorted.
-    // We could choose to sort the supported versions here.  However, this value
-    // is generally coming in through a definition in the source code and we
-    // want people to write these definitions in sorted order in order to ensure
-    // that semantic conflicts result in git conflicts.
     pub fn new_versioned(supported_versions: SupportedVersions) -> Versions {
         Versions::Versioned { supported_versions }
     }

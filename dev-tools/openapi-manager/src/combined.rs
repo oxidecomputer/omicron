@@ -50,6 +50,7 @@ impl CombinedApis {
         // - spec files with no associated API
         // - spec files for a version of an API that does not exist
         // - duplicate spec files for a given API version
+        //   XXX-dap this is now impossible
         for (api_ident, spec_files) in all_spec_files {
             let Some(managed_api) = apis.get(&api_ident) else {
                 // unwrap(): there should always be at least one spec file for
@@ -224,7 +225,7 @@ pub struct CombinedApiVersion<'a> {
 }
 
 impl<'a> CombinedApiVersion<'a> {
-    pub fn version(&self) -> &semver::Version {
+    pub fn semver(&self) -> &semver::Version {
         self.version
     }
 
@@ -239,11 +240,10 @@ impl<'a> CombinedApiVersion<'a> {
         let summary = DocumentSummary::new(&openapi);
 
         let api_spec = ApiSpecFile::for_contents(
-            self.managed_api,
-            self.version,
+            self.spec_file_name,
             openapi,
             freshly_generated,
-        );
+        )?;
 
         // XXX-dap
         // What we want to do here is check:
