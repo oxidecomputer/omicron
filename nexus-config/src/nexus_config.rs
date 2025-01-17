@@ -924,10 +924,10 @@ mod test {
             external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
-            request_body_max_bytes = 1024
+            default_request_body_max_bytes = 1024
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
-            request_body_max_bytes = 1024
+            default_request_body_max_bytes = 1024
             [deployment.internal_dns]
             type = "from_subnet"
             subnet.net = "::/56"
@@ -1206,10 +1206,10 @@ mod test {
             external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
-            request_body_max_bytes = 1024
+            default_request_body_max_bytes = 1024
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
-            request_body_max_bytes = 1024
+            default_request_body_max_bytes = 1024
             [deployment.internal_dns]
             type = "from_subnet"
             subnet.net = "::/56"
@@ -1294,10 +1294,10 @@ mod test {
             external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
-            request_body_max_bytes = 1024
+            default_request_body_max_bytes = 1024
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
-            request_body_max_bytes = 1024
+            default_request_body_max_bytes = 1024
             [deployment.internal_dns]
             type = "from_subnet"
             subnet.net = "::/56"
@@ -1351,10 +1351,10 @@ mod test {
             external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
-            request_body_max_bytes = 1024
+            default_request_body_max_bytes = 1024
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
-            request_body_max_bytes = 1024
+            default_request_body_max_bytes = 1024
             [deployment.internal_dns]
             type = "from_subnet"
             subnet.net = "::/56"
