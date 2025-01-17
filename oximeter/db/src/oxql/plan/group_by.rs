@@ -15,7 +15,7 @@ use oxql_types::point::MetricType;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-/// A node that groups input tables with the same values for the listed field.
+/// A node that groups input tables with the same values for the listed fields.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GroupBy {
     pub output: TableOpData,
@@ -77,12 +77,7 @@ impl GroupBy {
                 | (DataType::Integer, group_by::Reducer::Mean) => {
                     DataType::Double
                 }
-                (ty, _) => anyhow::bail!(
-                    "`group_by` table operations require numeric data types, \
-                    but table '{}' has data type '{}'",
-                    table.schema.name,
-                    ty,
-                ),
+                (_, _) => unreachable!(),
             };
         let mut output_fields = BTreeMap::new();
         for ident in group_by.identifiers.iter() {

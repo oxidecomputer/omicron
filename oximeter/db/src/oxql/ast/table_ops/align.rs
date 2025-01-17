@@ -90,11 +90,7 @@ pub struct Align {
 
 impl std::fmt::Display for Align {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let name = match self.method {
-            AlignmentMethod::Interpolate => "interpolate",
-            AlignmentMethod::MeanWithin => "mean_within",
-        };
-        write!(f, "{}({:?})", name, self.period)
+        write!(f, "{}({:?})", self.method, self.period)
     }
 }
 

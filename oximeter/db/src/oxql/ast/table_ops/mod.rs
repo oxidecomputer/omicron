@@ -83,10 +83,10 @@ impl fmt::Display for GroupedTableOp {
             if i < n_queries - 1 {
                 write!(f, "; ")?;
             } else {
-                write!(f, "")?;
+                write!(f, " ")?;
             }
         }
-        write!(f, " }}")
+        write!(f, "}}")
     }
 }
 
@@ -116,5 +116,30 @@ impl TableOp {
             panic!("Should not apply grouped table ops");
         };
         basic.apply(tables, query_end)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::GroupedTableOp;
+    use crate::oxql::ast::table_ops::BasicTableOp;
+    use crate::oxql::ast::table_ops::TableOp;
+    use crate::oxql::ast::Query;
+
+    #[test]
+    fn test_grouped_table_op_display() {
+        let op = GroupedTableOp { ops: vec![] };
+        assert_eq!(op.to_string(), "{ }");
+
+        let name = "foo:bar".try_into().unwrap();
+        let op = TableOp::Basic(BasicTableOp::Get(name));
+        let grouped =
+            GroupedTableOp { ops: vec![Query { ops: vec![op.clone()] }] };
+        assert_eq!(grouped.to_string(), "{ get foo:bar }");
+
+        let grouped = GroupedTableOp {
+            ops: vec![Query { ops: vec![op.clone()] }, Query { ops: vec![op] }],
+        };
+        assert_eq!(grouped.to_string(), "{ get foo:bar; get foo:bar }");
     }
 }

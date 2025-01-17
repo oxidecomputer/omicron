@@ -145,7 +145,7 @@ impl Filter {
         schema: &TableSchema,
     ) -> Result<Option<Self>, Error> {
         anyhow::ensure!(
-            schema.data_types.len() == 1,
+            schema.n_dims() == 1,
             "Rewriting measurement filters is only valid \
             for 1-dimensional tables"
         );
@@ -175,7 +175,7 @@ impl Filter {
         schema: &TableSchema,
     ) -> Result<Option<String>, Error> {
         anyhow::ensure!(
-            schema.data_types.len() == 1,
+            schema.n_dims() == 1,
             "Rewriting measurement filters is only valid \
             for 1-dimensional tables"
         );
@@ -1298,6 +1298,8 @@ mod tests {
     use std::time::Duration;
     use uuid::Uuid;
 
+    use super::implicit_field_names_for_types;
+
     #[test]
     fn test_atom_filter_double_points() {
         let start_times = None;
@@ -1518,5 +1520,47 @@ mod tests {
         assert!(
             msg.contains(r#"timeseries fields: {"datum", "foo", "timestamp"}"#)
         );
+    }
+
+    #[test]
+    fn test_implicit_field_names_for_types() {
+        // Test all gauges
+        for dt in [
+            DataType::Integer,
+            DataType::Double,
+            DataType::Boolean,
+            DataType::String,
+        ] {
+            let ty = &[(MetricType::Gauge, dt)];
+            let names = implicit_field_names_for_types(ty.iter().copied());
+            assert_eq!(
+                names.iter().cloned().collect::<Vec<_>>(),
+                ["datum", "timestamp"],
+            );
+        }
+
+        // All cumulatives and delta scalars have a start time too.
+        for dt in [DataType::Integer, DataType::Double] {
+            for mt in [MetricType::Cumulative, MetricType::Delta] {
+                let ty = &[(mt, dt)];
+                let names = implicit_field_names_for_types(ty.iter().copied());
+                assert_eq!(
+                    names.iter().cloned().collect::<Vec<_>>(),
+                    ["datum", "start_time", "timestamp"],
+                );
+            }
+        }
+
+        // All histograms have...stuff.
+        for dt in [DataType::IntegerDistribution, DataType::DoubleDistribution]
+        {
+            let ty = &[(MetricType::Cumulative, dt)];
+            let names = implicit_field_names_for_types(ty.iter().copied());
+            for name in
+                ["bins", "counts", "min", "max", "start_time", "timestamp"]
+            {
+                assert!(names.contains(name));
+            }
+        }
     }
 }

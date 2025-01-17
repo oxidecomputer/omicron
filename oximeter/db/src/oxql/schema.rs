@@ -16,12 +16,17 @@ use oxql_types::point::MetricType;
 use serde::Deserialize;
 use serde::Serialize;
 
-// TODO(ben) Move MetricType and DataType enums here, or probably this type
-// there.
-// TODO(ben) Consider biting the bullet and supporting every data type now. Why
-// not? Lots more code, since we need to deal with type promotion rules and
-// such.
-
+/// The schema for a table in an OxQL query.
+///
+/// This type is used in OxQL query planning and execution. It describes the
+/// schema of the data that is sent into or emitted from any table operation.
+/// These are initially built directly from the schema of the raw data stored in
+/// the database, which is a [`TimeseriesSchema`]. The query planner generates
+/// new schema as it plans a query, representing the expected data
+/// transformation that table operation performs. The planner also uses these to
+/// validate the query, such as ensuring that identifiers in the query actually
+/// appear on the tables they're operating on, or that data types are correct,
+/// for example.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct TableSchema {
     /// The name of the table.
@@ -78,22 +83,22 @@ impl TableSchema {
                 (MetricType::Cumulative, DataType::IntegerDistribution)
             }
             DatumType::HistogramI16 => {
-                (MetricType::Cumulative, DataType::DoubleDistribution)
+                (MetricType::Cumulative, DataType::IntegerDistribution)
             }
             DatumType::HistogramU16 => {
-                (MetricType::Cumulative, DataType::DoubleDistribution)
+                (MetricType::Cumulative, DataType::IntegerDistribution)
             }
             DatumType::HistogramI32 => {
-                (MetricType::Cumulative, DataType::DoubleDistribution)
+                (MetricType::Cumulative, DataType::IntegerDistribution)
             }
             DatumType::HistogramU32 => {
-                (MetricType::Cumulative, DataType::DoubleDistribution)
+                (MetricType::Cumulative, DataType::IntegerDistribution)
             }
             DatumType::HistogramI64 => {
-                (MetricType::Cumulative, DataType::DoubleDistribution)
+                (MetricType::Cumulative, DataType::IntegerDistribution)
             }
             DatumType::HistogramU64 => {
-                (MetricType::Cumulative, DataType::DoubleDistribution)
+                (MetricType::Cumulative, DataType::IntegerDistribution)
             }
             DatumType::HistogramF32 => {
                 (MetricType::Cumulative, DataType::DoubleDistribution)
@@ -117,5 +122,12 @@ impl TableSchema {
     /// Return the type of the named field, if it is part of the schema.
     pub(crate) fn field_type(&self, name: &str) -> Option<&FieldType> {
         self.fields.get(name)
+    }
+
+    /// Return the number of dimensions in the table.
+    ///
+    /// This is the number of data values in each measurement.
+    pub fn n_dims(&self) -> usize {
+        self.metric_types.len()
     }
 }

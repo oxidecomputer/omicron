@@ -47,7 +47,7 @@ use crate::oxql::plan::filter::Filter;
 /// align mean_within(1m) | filter field == 0 || datum > 100
 ///
 /// In this case, pushing the field filter through is not correct! We actually
-/// want _all the data__ to make its way through the alignment operation.
+/// want _all the data_ to make its way through the alignment operation.
 /// However, for scalability, we disallow that kind of "full table scan". But we
 /// can still show the complexities of disjunctions with a filter like:
 ///
@@ -55,7 +55,7 @@ use crate::oxql::plan::filter::Filter;
 ///
 /// In this case, we want to push these two disjunctions _separately_ through
 /// the alignment. However, we now need to match up the predicates we can push
-/// through with those we can't, so we don't accidentally end up apply the
+/// through with those we can't, so we don't accidentally end up applying the
 /// `datum > 100` predicate to the `field == 0` data! So we now need to maintain
 /// a _list_ of predicates, with those pieces we've pushed through and those we
 /// haven't, so we can match them up.
@@ -106,7 +106,7 @@ use crate::oxql::plan::filter::Filter;
 ///
 /// filter field == 0
 ///     | align mean_within(1m)
-///     | filter other_field == 0 || datum > 100
+///     | filter other_field == 0 && datum > 100
 ///
 /// We should be able to push through the field filter, leave behind the
 /// predicate on `datum`, and then merge the two field filters.
@@ -152,6 +152,27 @@ pub struct SplitPredicates {
     pub not_pushed: Option<Predicates>,
 }
 
+impl SplitPredicates {
+    // Construct split predicates from those pushed and not, removing the
+    // predicates that are all none entirely.
+    fn compress_from(
+        pushed: Vec<Option<filter::Filter>>,
+        not_pushed: Vec<Option<filter::Filter>>,
+    ) -> SplitPredicates {
+        let pushed = if pushed.iter().all(Option::is_none) {
+            None
+        } else {
+            Some(Predicates::from(OptionalDisjunctions(pushed)))
+        };
+        let not_pushed = if not_pushed.iter().all(Option::is_none) {
+            None
+        } else {
+            Some(Predicates::from(OptionalDisjunctions(not_pushed)))
+        };
+        Self { pushed, not_pushed }
+    }
+}
+
 impl Predicates {
     /// Split self around an alignment plan node.
     ///
@@ -188,12 +209,14 @@ impl Predicates {
         // single variant.
         if disjunctions.len() == 1 {
             let disjunct = disjunctions.into_iter().next().unwrap();
+
+            // Remove filters that refer to the datum. Those filters by
+            // definition apply to the _aligned_ data, and at this point, we're
+            // pushing these filters before the alignment. Those are not
+            // commutative.
             let pushed = disjunct
-                .remove_datum(schema)
-                .map(|maybe_removed| {
-                    maybe_removed
-                        .map(|f| f.shift_timestamp_by(align.alignment.period))
-                })?
+                .remove_datum(schema)?
+                .map(|f| f.shift_timestamp_by(align.alignment.period))
                 .map(Predicates::Single);
             let not_pushed =
                 disjunct.only_datum(schema)?.map(Predicates::Single);
@@ -204,24 +227,18 @@ impl Predicates {
         let mut pushed = Vec::with_capacity(disjunctions.len());
         let mut not_pushed = Vec::with_capacity(disjunctions.len());
         for disjunct in disjunctions {
-            pushed.push(disjunct.remove_datum(schema)?);
+            pushed.push(
+                disjunct
+                    .remove_datum(schema)?
+                    .map(|f| f.shift_timestamp_by(align.alignment.period)),
+            );
             not_pushed.push(disjunct.only_datum(schema)?);
         }
 
         // We need to "compress" either side if it's an array of all Nones. That
         // means none of disjuncts could be reordered, and so we'll need to
         // elide the plan node entirely.
-        let pushed = if pushed.iter().all(Option::is_none) {
-            None
-        } else {
-            Some(Predicates::from(OptionalDisjunctions(pushed)))
-        };
-        let not_pushed = if not_pushed.iter().all(Option::is_none) {
-            None
-        } else {
-            Some(Predicates::from(OptionalDisjunctions(not_pushed)))
-        };
-        Ok(SplitPredicates { pushed, not_pushed })
+        Ok(SplitPredicates::compress_from(pushed, not_pushed))
     }
 
     /// Split the predicates in self around a delta node.
@@ -266,19 +283,7 @@ impl Predicates {
                         None => not_pushed.push(None),
                     }
                 }
-
-                // Compress again.
-                let pushed = if pushed.iter().all(Option::is_none) {
-                    None
-                } else {
-                    Some(Predicates::from(OptionalDisjunctions(pushed)))
-                };
-                let not_pushed = if not_pushed.iter().all(Option::is_none) {
-                    None
-                } else {
-                    Some(Predicates::from(OptionalDisjunctions(not_pushed)))
-                };
-                Ok(SplitPredicates { pushed, not_pushed })
+                Ok(SplitPredicates::compress_from(pushed, not_pushed))
             }
         }
     }
@@ -311,17 +316,7 @@ impl Predicates {
         // We need to "compress" either side if it's an array of all Nones. That
         // means none of disjuncts could be reordered, and so we'll need to
         // elide the plan node entirely.
-        let pushed = if pushed.iter().all(Option::is_none) {
-            None
-        } else {
-            Some(Predicates::from(OptionalDisjunctions(pushed)))
-        };
-        let not_pushed = if not_pushed.iter().all(Option::is_none) {
-            None
-        } else {
-            Some(Predicates::from(OptionalDisjunctions(not_pushed)))
-        };
-        Ok(SplitPredicates { pushed, not_pushed })
+        Ok(SplitPredicates::compress_from(pushed, not_pushed))
     }
 
     pub(crate) fn to_required(&self) -> anyhow::Result<Vec<filter::Filter>> {
@@ -397,6 +392,7 @@ impl Predicates {
         }
     }
 
+    /// Convert to entries in a query plan tree, one for each predicate.
     pub fn plan_tree_entries(&self) -> Vec<String> {
         let mut out = Vec::with_capacity(1);
         match self {

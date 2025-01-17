@@ -88,3 +88,34 @@ fn align_input_schema(
     }
     Ok(TableSchema { data_types, ..schema })
 }
+
+#[cfg(test)]
+mod test {
+    use super::align;
+    use super::align_input_schema;
+    use super::TableSchema;
+    use oximeter::FieldType;
+    use oxql_types::point::DataType;
+    use oxql_types::point::MetricType;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn test_align_input_schema() {
+        let schema = TableSchema {
+            name: String::from("foo:bar"),
+            fields: BTreeMap::from([
+                (String::from("a"), FieldType::Bool),
+                (String::from("b"), FieldType::String),
+            ]),
+            metric_types: vec![MetricType::Gauge],
+            data_types: vec![DataType::Integer],
+        };
+        let method = align::AlignmentMethod::MeanWithin;
+
+        let out = align_input_schema(schema.clone(), method).unwrap();
+        assert_eq!(out.name, schema.name);
+        assert_eq!(out.fields, schema.fields);
+        assert_eq!(out.metric_types, schema.metric_types);
+        assert_eq!(out.data_types[0], DataType::Double);
+    }
+}

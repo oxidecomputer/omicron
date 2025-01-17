@@ -173,7 +173,7 @@ impl Filter {
         Ok(())
     }
 
-    // Check that the provided lteral is valid for a special identifier.
+    // Check that the provided literal is valid for a special identifier.
     fn ensure_special_ident_is_compatible(
         ident: &str,
         value: &Literal,

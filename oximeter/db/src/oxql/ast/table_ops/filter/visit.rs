@@ -21,7 +21,7 @@ use crate::shells::special_idents;
 
 /// A trait for visiting a tree of filter nodes.
 ///
-/// This is used to walk a tree of filter nodes and produce some oputput based
+/// This is used to walk a tree of filter nodes and produce some output based
 /// on them. For example, this can be used to convert the tree into a string
 /// representation for use in the database.
 pub trait Visit {
@@ -46,7 +46,25 @@ pub trait Visit {
 }
 
 /// A visitor that shifts timestamps.
+///
+/// This is used to correct timestamps when handling alignment operations.
+/// Suppose we have a query like:
+///
+/// ```ignore
+/// ... | align mean_within(1m) | filter timestamp > t0
+/// ```
+///
+/// That alignment method takes into account measurements in one minute windows.
+/// That means data from t0 - 1m ultimately goes into the measurement that
+/// appears at t0 in the output itself, i.e., it includes data in the window
+/// `[t0 - 1m, t0]`.
+///
+/// If we naively push the filter through the alignment method, then we'll
+/// truncate that window to only `[t0, t0]`, which changes the data we output.
+/// By shifting the timestamp in the filter expression forward as we push them
+/// through, we ensure the result set is not changed by that optimization.
 pub struct ShiftTimestamps {
+    /// The period by which we shift timestamps.
     pub period: Duration,
 }
 
@@ -93,14 +111,28 @@ impl Visit for ShiftTimestamps {
         right: Self::Output,
         op: LogicalOp,
     ) -> Self::Output {
-        Filter {
-            negated,
-            expr: FilterExpr::Compound(CompoundFilter {
-                left: Box::new(left),
-                op,
-                right: Box::new(right),
-            }),
-        }
+        default_combine_impl(negated, left, right, op)
+    }
+}
+
+// A helper that implements the default `Visitor::combine()` method.
+//
+// We'd like to make this the default impl of the method itself, but that would
+// require that the type `Visitor::Output` have a default, which isn't yet
+// stable.
+fn default_combine_impl(
+    negated: bool,
+    left: Filter,
+    right: Filter,
+    op: LogicalOp,
+) -> Filter {
+    Filter {
+        negated,
+        expr: FilterExpr::Compound(CompoundFilter {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        }),
     }
 }
 
@@ -122,8 +154,8 @@ impl<'a> Visit for OnlyDatum<'a> {
             for ty in self.schema.data_types.iter().copied() {
                 anyhow::ensure!(
                     filter.value.is_compatible_with_datum(ty),
-                    "Expression for datum on table {} is not \
-                    compatible with its type {}",
+                    "Expression for datum on table '{}' is not \
+                    compatible with its type ({})",
                     self.schema.name,
                     ty,
                 );
@@ -145,14 +177,7 @@ impl<'a> Visit for OnlyDatum<'a> {
         right: Self::Output,
         op: LogicalOp,
     ) -> Self::Output {
-        Filter {
-            negated,
-            expr: FilterExpr::Compound(CompoundFilter {
-                left: Box::new(left),
-                op,
-                right: Box::new(right),
-            }),
-        }
+        default_combine_impl(negated, left, right, op)
     }
 }
 
@@ -169,12 +194,15 @@ impl<'a> Visit for RemoveDatum<'a> {
         negated: bool,
         filter: &SimpleFilter,
     ) -> Result<Option<Self::Output>, Error> {
-        if let Some(field_type) = self.schema.field_type(filter.ident.as_str())
-        {
+        let ident = filter.ident.as_str();
+        // First check if the ident refers to a field, in which case we return
+        // it directly. We don't handle `None`, instead moving on to check if
+        // the filter ident refers to the datum, timestamp, etc.
+        if let Some(field_type) = self.schema.field_type(ident) {
             if !filter.value_type_is_compatible_with_field(*field_type) {
                 return Err(anyhow::anyhow!(
-                    "Expression for field {} is not compatible with \
-                    its type {}",
+                    "Expression for field '{}' is not compatible with \
+                    its type ({})",
                     filter.ident,
                     field_type,
                 ));
@@ -187,7 +215,6 @@ impl<'a> Visit for RemoveDatum<'a> {
 
         // The relevant columns on which we filter depend on the datum
         // type of the table. All tables support "timestamp".
-        let ident = filter.ident.as_str();
         if ident == special_idents::TIMESTAMP {
             if matches!(filter.value, Literal::Timestamp(_)) {
                 return Ok(Some(Filter {
@@ -196,7 +223,7 @@ impl<'a> Visit for RemoveDatum<'a> {
                 }));
             }
             return Err(anyhow::anyhow!(
-                "Literal cannot be compared with a timestamp"
+                "Expression cannot be compared with a timestamp"
             ));
         }
 
@@ -218,17 +245,17 @@ impl<'a> Visit for RemoveDatum<'a> {
                 }));
             }
             return Err(anyhow::anyhow!(
-                "Literal cannot be compared with a timestamp"
+                "Expression cannot be compared with a timestamp"
             ));
         }
 
-        // It should be a datum. Check and remove it.
+        // Remove the filter iff it refers to the datum.
         if ident == special_idents::DATUM {
             return Ok(None);
         }
 
         // Anything else is a bug.
-        unreachable!("Filter identifier '{}' is not valid", filter.ident,);
+        unreachable!("Filter identifier '{}' is not valid", filter.ident);
     }
 
     fn combine(
@@ -238,14 +265,7 @@ impl<'a> Visit for RemoveDatum<'a> {
         right: Self::Output,
         op: LogicalOp,
     ) -> Self::Output {
-        Filter {
-            negated,
-            expr: FilterExpr::Compound(CompoundFilter {
-                left: Box::new(left),
-                op,
-                right: Box::new(right),
-            }),
-        }
+        default_combine_impl(negated, left, right, op)
     }
 }
 
@@ -269,8 +289,8 @@ impl<'a> Visit for RestrictToFields<'a> {
         };
         if !filter.value_type_is_compatible_with_field(*field_type) {
             return Err(anyhow::anyhow!(
-                "Expression for field {} is not compatible with \
-                its type {}",
+                "Expression for field '{}' is not compatible with \
+                its type ({})",
                 filter.ident,
                 field_type,
             ));
@@ -321,7 +341,7 @@ impl<'a> Visit for RestrictToMeasurements<'a> {
                 }));
             }
             return Err(anyhow::anyhow!(
-                "Literal cannot be compared with a timestamp"
+                "Expression cannot be compared with a timestamp"
             ));
         }
 
@@ -343,7 +363,7 @@ impl<'a> Visit for RestrictToMeasurements<'a> {
                 }));
             }
             return Err(anyhow::anyhow!(
-                "Literal cannot be compared with a timestamp"
+                "Expression cannot be compared with a timestamp"
             ));
         }
 
@@ -362,14 +382,7 @@ impl<'a> Visit for RestrictToMeasurements<'a> {
         right: Self::Output,
         op: LogicalOp,
     ) -> Self::Output {
-        Filter {
-            negated,
-            expr: FilterExpr::Compound(CompoundFilter {
-                left: Box::new(left),
-                op,
-                right: Box::new(right),
-            }),
-        }
+        default_combine_impl(negated, left, right, op)
     }
 }
 
@@ -395,8 +408,8 @@ impl<'a> Visit for RewriteForFieldTables<'a> {
         };
         if !filter.value_type_is_compatible_with_field(*field_type) {
             return Err(anyhow::anyhow!(
-                "Expression for field {} is not compatible with \
-                its type {}",
+                "Expression for field '{}' is not compatible with \
+                its type ({})",
                 filter.ident,
                 field_type,
             ));
@@ -413,7 +426,13 @@ impl<'a> Visit for RewriteForFieldTables<'a> {
         op: LogicalOp,
     ) -> Self::Output {
         let maybe_not = if negated { "NOT " } else { "" };
-        format!("{}{}({left}, {right})", maybe_not, op.as_db_function_name())
+        format!(
+            "{}{}({}, {})",
+            maybe_not,
+            op.as_db_function_name(),
+            left,
+            right
+        )
     }
 }
 
@@ -443,7 +462,7 @@ impl<'a> Visit for RewriteForMeasurementTable<'a> {
                 )));
             }
             return Err(anyhow::anyhow!(
-                "Literal cannot be compared with a timestamp"
+                "Expression cannot be compared with a timestamp"
             ));
         }
 
@@ -466,7 +485,7 @@ impl<'a> Visit for RewriteForMeasurementTable<'a> {
                 )));
             }
             return Err(anyhow::anyhow!(
-                "Literal cannot be compared with a timestamp"
+                "Expression cannot be compared with a timestamp"
             ));
         }
 
@@ -486,7 +505,13 @@ impl<'a> Visit for RewriteForMeasurementTable<'a> {
         op: LogicalOp,
     ) -> Self::Output {
         let maybe_not = if negated { "NOT " } else { "" };
-        format!("{}{}({left}, {right})", maybe_not, op.as_db_function_name())
+        format!(
+            "{}{}({}, {})",
+            maybe_not,
+            op.as_db_function_name(),
+            left,
+            right
+        )
     }
 }
 

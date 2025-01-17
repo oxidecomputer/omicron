@@ -763,3 +763,25 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::GroupBy;
+    use super::Reducer;
+    use crate::oxql::ast::ident::Ident;
+
+    #[test]
+    fn test_group_by_display() {
+        let g = GroupBy {
+            identifiers: vec![
+                Ident(String::from("foo")),
+                Ident(String::from("bar")),
+            ],
+            reducer: Reducer::Mean,
+        };
+        assert_eq!(g.to_string(), "group_by [foo, bar], mean");
+
+        let g = GroupBy { identifiers: vec![], reducer: Reducer::Sum };
+        assert_eq!(g.to_string(), "group_by [], sum");
+    }
+}

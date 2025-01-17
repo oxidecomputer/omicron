@@ -95,7 +95,7 @@ impl Node {
     /// # Panics
     ///
     /// This panics for subquery plans, that should be printed separately using
-    /// the recurisve `to_plan_tree_impl()` method.
+    /// the recursive [`Plan::to_plan_tree_impl()`] method.
     pub fn plan_tree_entry(&self) -> termtree::Tree<String> {
         match self {
             Node::Subquery(_) => unreachable!(),

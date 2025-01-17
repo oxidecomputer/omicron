@@ -15,12 +15,15 @@ use crate::oxql::schema::TableSchema;
 pub struct Get {
     /// The table schema we're fetching from.
     ///
-    /// This is really a _timeseries_ schema, selecting the named timeseries
-    /// from the database. These two are synonymous at this point in a plan
-    /// tree, but we use the table schema for consistency with other plan nodes.
+    /// This is derived from a [`TimeseriesSchema`], which is the format the raw
+    /// data has in the database itself. These two are synonymous as far as a
+    /// `get` table operation is concerned. As the planner processes the query,
+    /// the schema will potentially be modified by the other operations, and so
+    /// we use a [`TableSchema`] here for consistency with all the other plan
+    /// nodes.
     pub table_schema: TableSchema,
 
-    /// The filters applied to the database table for this schema.
+    /// The filters applied to the database table itself by this plan node.
     ///
     /// There is one entry here for every disjunction in the filters that we
     /// ultimately push down into the get operation. E.g., for a filter like
@@ -28,6 +31,9 @@ pub struct Get {
     /// == 0)` and `filter x == 1`. These are used to construct "consistent key
     /// groups", sets of timeseries keys that can all be fetched in one
     /// combination of (field SQL query, measurements SQL query).
+    ///
+    /// NOTE: This refers to the filters we can apply directly in the ClickHouse
+    /// database at selection time.
     pub filters: Vec<filter::Filter>,
 
     /// An optional limit to the number of samples selected from each

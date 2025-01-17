@@ -10,7 +10,8 @@ use crate::oxql::plan::plan::TableOpData;
 use crate::oxql::plan::plan::TableOpInput;
 use crate::oxql::schema::TableSchema;
 
-/// A node that joins input tables with the same field values.
+/// A node that joins timeseries in its input tables which have the same field
+/// values.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Join {
     pub output: TableOpData,
@@ -46,17 +47,22 @@ impl Join {
                     table.schema.name,
                 );
             };
+            // NOTE: For a join, we require that the tables are aligned to the
+            // same _period_, but not that they use the same method. Since we're
+            // concatenating the values into an array, not combining them, they
+            // don't need to be of the same "category", e.g., both a mean or
+            // both a sum.
             anyhow::ensure!(
-                this_alignment == alignment,
+                this_alignment.period == alignment.period,
                 "All input tables to a `join` operation must have the \
-                same alignment, table '{}' was expected to be aligned \
-                with {}, but found {}",
+                same alignment period, table '{}' was expected to be aligned \
+                to {:?}, but found {:?}",
                 table.schema.name,
-                alignment,
-                this_alignment,
+                alignment.period,
+                this_alignment.period,
             );
             anyhow::ensure!(
-                table.schema.metric_types.len() == 1,
+                table.schema.n_dims() == 1,
                 "All input tables to `join` operation must be \
                 1-dimensional, but table '{}' has {} dimensions",
                 table.schema.name,

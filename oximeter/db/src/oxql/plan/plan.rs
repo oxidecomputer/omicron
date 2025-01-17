@@ -4,7 +4,7 @@
 
 //! The top-level query plan itself.
 
-// Copyright 2024 Oxide Computer Company
+// Copyright 2025 Oxide Computer Company
 
 use crate::oxql::ast::table_ops::align;
 use crate::oxql::ast::table_ops::BasicTableOp;
@@ -176,6 +176,16 @@ impl OptimizedPlan {
 }
 
 /// An OxQL query plan.
+///
+/// The query plan represents the set of database or in-process operations we
+/// take to implement the query. These are computed by parsing the original OxQL
+/// query; generating a node in the plan for each step; and then possibly
+/// rewriting the plan to implement certain kinds of optimizations.
+///
+/// All query plans start by fetching some set of data from the database,
+/// possibly applying some filtering or processing operations in the DB as well.
+/// Once data is fetched out of the database, every following step is a table
+/// operation implemented in Rust.
 #[derive(Clone, Debug)]
 pub struct Plan {
     /// The original parsed query.
@@ -455,10 +465,12 @@ impl Plan {
                 break;
             };
 
-            // If this isn't a limit node, just push it and continue
+            // If this isn't a limit node, just push it and continue. Note that
+            // we always pus the next node back onto the list of remaining
+            // nodes, to process it on the next pass through the loop.
             let Node::Limit(limit) = current_node else {
                 processed_nodes.push_front(current_node);
-                processed_nodes.push_front(next_node);
+                remaining_nodes.push_back(next_node);
                 continue;
             };
 
@@ -514,10 +526,14 @@ impl Plan {
                     // We always push the get node last.
                     processed_nodes.push_front(Node::Get(get));
                 }
-                Node::Delta(_)
-                | Node::Align(_)
-                | Node::GroupBy(_)
-                | Node::Join(_) => {
+                Node::Align(_) => {
+                    // An alignment operation changes the number of elements, so
+                    // pushing a limit through it is not valid. Push both in
+                    // order onto the list of processed nodes.
+                    processed_nodes.push_front(Node::Limit(limit));
+                    processed_nodes.push_front(next_node);
+                }
+                Node::Delta(_) | Node::GroupBy(_) | Node::Join(_) => {
                     remaining_nodes.push_back(Node::Limit(limit));
                     processed_nodes.push_front(next_node);
                     modified = true;
@@ -690,7 +706,7 @@ impl Plan {
                         let new_input = remaining_nodes
                             .back()
                             .as_ref()
-                            .expect("Align cannot start a query")
+                            .expect("Delta nodes cannot start a query")
                             .output()
                             .into_input();
                         let filter =
@@ -1362,5 +1378,20 @@ mod tests {
         .unwrap();
         let plan = Plan::new(query, all_schema().await).unwrap();
         assert!(!plan.requires_full_table_scan());
+    }
+
+    #[tokio::test]
+    async fn limit_pushdown_does_not_reorder_around_align() {
+        let query = query_parser::query(
+            "get physical_data_link:bytes_sent | align mean_within(10m) | first 10"
+        ).unwrap();
+        let plan = Plan::new(query, all_schema().await).unwrap();
+        let Node::Get(get) = &plan.optimized_nodes()[0] else {
+            unreachable!();
+        };
+        assert!(
+            get.limit.is_none(),
+            "Limit should not be pushed through alignment"
+        );
     }
 }

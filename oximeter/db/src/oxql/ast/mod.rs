@@ -55,6 +55,9 @@ impl Query {
         self.ops.iter()
     }
 
+    /// Return the name of the first referenced timeseries.
+    ///
+    /// This is from the first `get`, which might be from a subquery.
     pub(crate) fn timeseries_name(&self) -> &TimeseriesName {
         match self.first_op() {
             TableOp::Basic(BasicTableOp::Get(n)) => n,
@@ -72,6 +75,7 @@ impl Query {
         set
     }
 
+    // Add all timeseries names to the provided set, recursing into subqueries.
     fn all_timeseries_names_impl<'a>(
         &'a self,
         set: &mut BTreeSet<&'a TimeseriesName>,
