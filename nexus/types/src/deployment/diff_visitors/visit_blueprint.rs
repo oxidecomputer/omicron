@@ -13,12 +13,15 @@ use super::{
 use crate::{
     deployment::{
         Blueprint, BlueprintDatasetsConfig, BlueprintPhysicalDisksConfig,
-        BlueprintZonesConfig, EditedBlueprint, SledUuid,
+        BlueprintZonesConfig, ClickhouseClusterConfig,
+        CockroachDbPreserveDowngrade, EditedBlueprint, SledUuid,
     },
     external_api::views::SledState,
 };
 use diffus::edit::{map, Edit};
 use diffus::Diffable;
+use omicron_common::api::external::Generation;
+use omicron_uuid_kinds::BlueprintUuid;
 use std::collections::BTreeMap;
 
 /// State and Resources for an inserted sled
@@ -86,8 +89,8 @@ pub trait VisitBlueprint<'e> {
     /// A sled has been inserted
     fn visit_sled_insert(
         &mut self,
-        ctx: &mut BpVisitorContext,
-        val: &SledInsert<'e>,
+        _ctx: &mut BpVisitorContext,
+        _val: &SledInsert<'e>,
     ) {
         // Leaf node
     }
@@ -95,8 +98,8 @@ pub trait VisitBlueprint<'e> {
     /// A sled has been removed
     fn visit_sled_remove(
         &mut self,
-        ctx: &mut BpVisitorContext,
-        val: &SledRemove<'e>,
+        _ctx: &mut BpVisitorContext,
+        _val: &SledRemove<'e>,
     ) {
         // Leaf node
     }
@@ -104,8 +107,76 @@ pub trait VisitBlueprint<'e> {
     // A sled's state has been changed
     fn visit_sled_state_change(
         &mut self,
-        ctx: &mut BpVisitorContext,
-        change: Change<'e, SledState>,
+        _ctx: &mut BpVisitorContext,
+        _change: Change<'e, SledState>,
+    ) {
+        // Leaf node
+    }
+
+    fn visit_parent_blueprint_id_change(
+        &mut self,
+        _ctx: &mut BpVisitorContext,
+        _change: Change<'e, Option<BlueprintUuid>>,
+    ) {
+        // Leaf node
+    }
+
+    fn visit_internal_dns_version_change(
+        &mut self,
+        _ctx: &mut BpVisitorContext,
+        _change: Change<'e, Generation>,
+    ) {
+        // Leaf node
+    }
+
+    fn visit_external_dns_version_change(
+        &mut self,
+        _ctx: &mut BpVisitorContext,
+        _change: Change<'e, Generation>,
+    ) {
+        // Leaf node
+    }
+
+    fn visit_cockroachdb_fingerprint_change(
+        &mut self,
+        _ctx: &mut BpVisitorContext,
+        _change: Change<'e, String>,
+    ) {
+        // Leaf node
+    }
+
+    fn visit_cockroachdb_setting_preserve_downgrade_change(
+        &mut self,
+        _ctx: &mut BpVisitorContext,
+        _change: Change<'e, CockroachDbPreserveDowngrade>,
+    ) {
+        // Leaf node
+    }
+
+    fn visit_clickhouse_cluster_config_change(
+        &mut self,
+        _ctx: &mut BpVisitorContext,
+        _change: Change<'e, Option<ClickhouseClusterConfig>>,
+    ) {
+        // Leaf node (for now)
+        //
+        // TODO: This should call a free function that uses a visitor for
+        // `ClickhouseClusterConfig`. First we need to implmement that visitor
+        // though.
+    }
+
+    fn visit_creator_change(
+        &mut self,
+        _ctx: &mut BpVisitorContext,
+        _change: Change<'e, String>,
+    ) {
+        // Leaf node
+    }
+
+    fn visit_comment_change(
+        &mut self,
+        _ctx: &mut BpVisitorContext,
+        _change: Change<'e, String>,
     ) {
         // Leaf node
     }
@@ -320,16 +391,39 @@ pub fn visit_root<'e, V>(
     v.visit_sled_inserts(ctx, sled_inserts);
     v.visit_sled_removes(ctx, sled_removes);
 
-    if let Edit::Change { diff, .. } = diff.parent_blueprint_id {}
-    if let Edit::Change { diff, .. } = diff.internal_dns_version {}
-    if let Edit::Change { diff, .. } = diff.external_dns_version {}
-    if let Edit::Change { diff, .. } = diff.cockroachdb_fingerprint {}
-    if let Edit::Change { diff, .. } =
+    if let Edit::Change { before, after, .. } = diff.parent_blueprint_id {
+        v.visit_parent_blueprint_id_change(ctx, Change::new(before, after));
+    }
+    if let Edit::Change { before, after, .. } = diff.internal_dns_version {
+        v.visit_internal_dns_version_change(ctx, Change::new(before, after));
+    }
+    if let Edit::Change { before, after, .. } = diff.external_dns_version {
+        v.visit_external_dns_version_change(ctx, Change::new(before, after));
+    }
+    if let Edit::Change { before, after, .. } = diff.cockroachdb_fingerprint {
+        v.visit_cockroachdb_fingerprint_change(ctx, Change::new(before, after));
+    }
+    if let Edit::Change { before, after, .. } =
         diff.cockroachdb_setting_preserve_downgrade
-    {}
-    if let Edit::Change { diff, .. } = diff.clickhouse_cluster_config {}
-    if let Edit::Change { diff, .. } = diff.creator {}
-    if let Edit::Change { diff, .. } = diff.comment {}
+    {
+        v.visit_cockroachdb_setting_preserve_downgrade_change(
+            ctx,
+            Change::new(before, after),
+        );
+    }
+    if let Edit::Change { before, after, .. } = diff.clickhouse_cluster_config {
+        // TODO: We need a separate visitor for this config
+        v.visit_clickhouse_cluster_config_change(
+            ctx,
+            Change::new(before, after),
+        );
+    }
+    if let Edit::Change { before, after, .. } = diff.creator {
+        v.visit_creator_change(ctx, Change::new(before, after));
+    }
+    if let Edit::Change { before, after, .. } = diff.comment {
+        v.visit_comment_change(ctx, Change::new(before, after));
+    }
 }
 
 pub fn visit_sled_inserts<'e, V>(
