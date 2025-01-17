@@ -130,12 +130,13 @@ pub async fn shell(
                                 .await
                             {
                                 Ok(result) => {
+                                    print_tables(&result.tables);
+                                    println!();
                                     print_query_summary(
                                         &result,
                                         opts.print_elapsed,
                                         opts.print_summaries,
                                     );
-                                    print_tables(&result.tables);
                                 }
                                 Err(e) => {
                                     eprintln!("{}", "Error".underlined().red());
@@ -298,6 +299,8 @@ fn print_query_summary(
     }
     println!("{}", "Query summary".underlined().bold());
     println!(" {}: {}", "ID".bold(), result.query_id);
+    println!(" {}: {}", "Tables".bold(), result.tables.len());
+    println!(" {}: {}", "Timeseries".bold(), result.tables.iter().map(|t| t.n_timeseries()).sum::<usize>());
     if print_elapsed {
         println!(" {}: {:?}\n", "Total duration".bold(), result.total_duration);
     }
@@ -307,7 +310,7 @@ fn print_query_summary(
             println!("  {}: {}", "ID".bold(), summary.id);
             println!("  {}: {:?}", "Duration".bold(), summary.elapsed);
             println!("  {}: {}", "Read".bold(), summary.io_summary.read);
-            println!();
+            println!()
         }
     }
 }

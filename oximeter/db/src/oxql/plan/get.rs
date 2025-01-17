@@ -15,12 +15,13 @@ use crate::oxql::schema::TableSchema;
 pub struct Get {
     /// The table schema we're fetching from.
     ///
-    /// This is derived from a [`TimeseriesSchema`], which is the format the raw
-    /// data has in the database itself. These two are synonymous as far as a
-    /// `get` table operation is concerned. As the planner processes the query,
-    /// the schema will potentially be modified by the other operations, and so
-    /// we use a [`TableSchema`] here for consistency with all the other plan
-    /// nodes.
+    /// This is derived from a
+    /// [`TimeseriesSchema`](oximeter::TimeseriesSchema), which is the format
+    /// the raw data has in the database itself. These two are synonymous as far
+    /// as a `get` table operation is concerned. As the planner processes the
+    /// query, the schema will potentially be modified by the other operations,
+    /// and so we use a [`TableSchema`] here for consistency with all the other
+    /// plan nodes.
     pub table_schema: TableSchema,
 
     /// The filters applied to the database table itself by this plan node.

@@ -164,7 +164,7 @@ impl OptimizedPlan {
             Node::Subquery(subplans) => {
                 subplans.iter().any(Plan::requires_full_table_scan)
             }
-            Node::Get(get) => get.filters.is_empty(),
+            Node::Get(get) => get.filters.is_empty() && get.limit.is_none(),
             Node::Delta(_)
             | Node::Filter(_)
             | Node::Align(_)
