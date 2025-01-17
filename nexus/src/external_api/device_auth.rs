@@ -9,18 +9,13 @@
 //! are for requesting access tokens that will be managed and used by
 //! the client to make other API requests.
 
-use super::console_api::console_index_or_login_redirect;
 use super::views::DeviceAccessTokenGrant;
-use crate::app::external_endpoints::authority_for_request;
 use crate::ApiContext;
 use dropshot::Body;
-use dropshot::{
-    HttpError, HttpResponseUpdatedNoContent, RequestContext, TypedBody,
-};
+use dropshot::{HttpError, RequestContext};
 use http::{header, Response, StatusCode};
 use nexus_db_queries::db::model::DeviceAccessToken;
 use nexus_types::external_api::params;
-use omicron_common::api::external::InternalContext;
 use serde::Serialize;
 
 // Token granting à la RFC 8628 (OAuth 2.0 Device Authorization Grant)
@@ -29,7 +24,7 @@ use serde::Serialize;
 /// parameter values to indicate protocol errors (see RFC 6749 §5.2).
 /// This is different from Dropshot's error `message` parameter, so we
 /// need a custom response builder.
-fn build_oauth_response<T>(
+pub(crate) fn build_oauth_response<T>(
     status: StatusCode,
     body: &T,
 ) -> Result<Response<Body>, HttpError>
@@ -42,83 +37,6 @@ where
         .status(status)
         .header(header::CONTENT_TYPE, "application/json")
         .body(body.into())?)
-}
-
-pub(crate) async fn device_auth_request(
-    rqctx: RequestContext<ApiContext>,
-    params: TypedBody<params::DeviceAuthRequest>,
-) -> Result<Response<Body>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.context.nexus;
-    let params = params.into_inner();
-    let handler = async {
-        let opctx = nexus.opctx_external_authn();
-        let authority = authority_for_request(&rqctx.request);
-        let host = match &authority {
-            Ok(host) => host.as_str(),
-            Err(error) => {
-                return build_oauth_response(
-                    StatusCode::BAD_REQUEST,
-                    &serde_json::json!({
-                        "error": "invalid_request",
-                        "error_description": error,
-                    }),
-                )
-            }
-        };
-
-        let model =
-            nexus.device_auth_request_create(&opctx, params.client_id).await?;
-        build_oauth_response(
-            StatusCode::OK,
-            &model.into_response(rqctx.server.using_tls(), host),
-        )
-    };
-    apictx
-        .context
-        .external_latencies
-        .instrument_dropshot_handler(&rqctx, handler)
-        .await
-}
-
-pub(crate) async fn device_auth_verify(
-    rqctx: RequestContext<ApiContext>,
-) -> Result<Response<Body>, HttpError> {
-    console_index_or_login_redirect(rqctx).await
-}
-
-pub(crate) async fn device_auth_success(
-    rqctx: RequestContext<ApiContext>,
-) -> Result<Response<Body>, HttpError> {
-    console_index_or_login_redirect(rqctx).await
-}
-
-pub(crate) async fn device_auth_confirm(
-    rqctx: RequestContext<ApiContext>,
-    params: TypedBody<params::DeviceAuthVerify>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.context.nexus;
-    let params = params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let &actor = opctx.authn.actor_required().internal_context(
-            "creating new device auth session for current user",
-        )?;
-        let _token = nexus
-            .device_auth_request_verify(
-                &opctx,
-                params.user_code,
-                actor.actor_id(),
-            )
-            .await?;
-        Ok(HttpResponseUpdatedNoContent())
-    };
-    apictx
-        .context
-        .external_latencies
-        .instrument_dropshot_handler(&rqctx, handler)
-        .await
 }
 
 #[derive(Debug)]
