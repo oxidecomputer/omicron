@@ -67,11 +67,27 @@ pub trait VisitBlueprint<'e> {
         visit_root(self, ctx, node);
     }
 
+    fn visit_sled_inserts(
+        &mut self,
+        ctx: &mut BpVisitorContext,
+        node: BTreeMap<SledUuid, SledInsert<'e>>,
+    ) {
+        visit_sled_inserts(self, ctx, node);
+    }
+
+    fn visit_sled_removes(
+        &mut self,
+        ctx: &mut BpVisitorContext,
+        node: BTreeMap<SledUuid, SledRemove<'e>>,
+    ) {
+        visit_sled_removes(self, ctx, node);
+    }
+
     /// A sled has been inserted
     fn visit_sled_insert(
         &mut self,
         ctx: &mut BpVisitorContext,
-        val: SledInsert,
+        val: &SledInsert<'e>,
     ) {
         // Leaf node
     }
@@ -80,7 +96,7 @@ pub trait VisitBlueprint<'e> {
     fn visit_sled_remove(
         &mut self,
         ctx: &mut BpVisitorContext,
-        val: SledRemove,
+        val: &SledRemove<'e>,
     ) {
         // Leaf node
     }
@@ -301,8 +317,8 @@ pub fn visit_root<'e, V>(
         ctx.sled_id = None;
     }
 
-    // TODO: Callback v.visit_sled_inserts()
-    // TODO: Callback v.visit_sled_removes()
+    v.visit_sled_inserts(ctx, sled_inserts);
+    v.visit_sled_removes(ctx, sled_removes);
 
     if let Edit::Change { diff, .. } = diff.parent_blueprint_id {}
     if let Edit::Change { diff, .. } = diff.internal_dns_version {}
@@ -314,4 +330,32 @@ pub fn visit_root<'e, V>(
     if let Edit::Change { diff, .. } = diff.clickhouse_cluster_config {}
     if let Edit::Change { diff, .. } = diff.creator {}
     if let Edit::Change { diff, .. } = diff.comment {}
+}
+
+pub fn visit_sled_inserts<'e, V>(
+    v: &mut V,
+    ctx: &mut BpVisitorContext,
+    node: BTreeMap<SledUuid, SledInsert<'e>>,
+) where
+    V: VisitBlueprint<'e> + ?Sized,
+{
+    for (sled_id, insert) in &node {
+        ctx.sled_id = Some(*sled_id);
+        v.visit_sled_insert(ctx, insert);
+    }
+    ctx.sled_id = None;
+}
+
+pub fn visit_sled_removes<'e, V>(
+    v: &mut V,
+    ctx: &mut BpVisitorContext,
+    node: BTreeMap<SledUuid, SledRemove<'e>>,
+) where
+    V: VisitBlueprint<'e> + ?Sized,
+{
+    for (sled_id, remove) in &node {
+        ctx.sled_id = Some(*sled_id);
+        v.visit_sled_remove(ctx, remove);
+    }
+    ctx.sled_id = None;
 }
