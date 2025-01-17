@@ -4,7 +4,12 @@
 
 //! A visitor for a `Blueprint`
 
-use super::{BpVisitorContext, Change};
+use super::{
+    visit_blueprint_datasets_config::VisitBlueprintDatasetsConfig,
+    visit_blueprint_physical_disks_config::VisitBlueprintPhysicalDisksConfig,
+    visit_blueprint_zones_config::VisitBlueprintZonesConfig, BpVisitorContext,
+    Change,
+};
 use crate::{
     deployment::{
         Blueprint, BlueprintDatasetsConfig, BlueprintPhysicalDisksConfig,
@@ -15,8 +20,40 @@ use crate::{
 use diffus::edit::{map, Edit};
 use std::collections::BTreeMap;
 
+/// State and Resources for an inserted sled
+pub struct SledInsert<'e> {
+    sled_state: SledState,
+    zones: Option<&'e BlueprintZonesConfig>,
+    disks: Option<&'e BlueprintPhysicalDisksConfig>,
+    datasets: Option<&'e BlueprintDatasetsConfig>,
+}
+
+impl<'e> SledInsert<'e> {
+    pub fn new(sled_state: SledState) -> SledInsert<'e> {
+        SledInsert { sled_state, zones: None, disks: None, datasets: None }
+    }
+}
+
+/// State and Resources for a removed sled
+pub struct SledRemove<'e> {
+    sled_state: SledState,
+    zones: Option<&'e BlueprintZonesConfig>,
+    disks: Option<&'e BlueprintPhysicalDisksConfig>,
+    datasets: Option<&'e BlueprintDatasetsConfig>,
+}
+
+impl<'e> SledRemove<'e> {
+    pub fn new(sled_state: SledState) -> SledRemove<'e> {
+        SledRemove { sled_state, zones: None, disks: None, datasets: None }
+    }
+}
+
 /// A trait to visit a [`Blueprint`]
 pub trait VisitBlueprint<'e> {
+    type ZonesVisitor: VisitBlueprintZonesConfig<'e>;
+    type DisksVisitor: VisitBlueprintPhysicalDisksConfig<'e>;
+    type DatasetsVisitor: VisitBlueprintDatasetsConfig<'e>;
+
     fn visit_root(
         &mut self,
         ctx: &mut BpVisitorContext,
@@ -24,14 +61,33 @@ pub trait VisitBlueprint<'e> {
     ) {
         visit_root(self, ctx, node);
     }
-}
 
-#[derive(Default)]
-struct EditedPerSled<'a, 'e> {
-    sled_state: Option<&'a map::Edit<'e, SledState>>,
-    zones: Option<&'a map::Edit<'e, BlueprintZonesConfig>>,
-    disks: Option<&'a map::Edit<'e, BlueprintPhysicalDisksConfig>>,
-    datasets: Option<&'a map::Edit<'e, BlueprintDatasetsConfig>>,
+    /// A sled has been inserted
+    fn visit_sled_insert(
+        &mut self,
+        ctx: &mut BpVisitorContext,
+        val: SledInsert,
+    ) {
+        // Leaf node
+    }
+
+    /// A sled has been removed
+    fn visit_sled_remove(
+        &mut self,
+        ctx: &mut BpVisitorContext,
+        val: SledRemove,
+    ) {
+        // Leaf node
+    }
+
+    // A sled's state has been changed
+    fn visit_sled_state_change(
+        &mut self,
+        ctx: &mut BpVisitorContext,
+        change: Change<'e, SledState>,
+    ) {
+        // Leaf node
+    }
 }
 
 pub fn visit_root<'e, V>(
@@ -45,38 +101,90 @@ pub fn visit_root<'e, V>(
         return;
     };
 
+    let mut sled_inserts = BTreeMap::new();
+    let mut sled_removes = BTreeMap::new();
+
     // Build up the set of all edits for a given sled
-    let mut sled_edits = BTreeMap::new();
-    if let Edit::Change { diff, .. } = &diff.sled_state {
+    // This is going to be much easier once maps are collapsed!!!
+    if let Edit::Change { before, after, diff } = &diff.sled_state {
         for (&sled_id, edit) in diff {
-            let mut edits = EditedPerSled::default();
-            edits.sled_state = Some(edit);
-            sled_edits.insert(*sled_id, edits);
+            ctx.sled_id = Some(*sled_id);
+            match edit {
+                map::Edit::Insert(&sled_state) => {
+                    sled_inserts.insert(*sled_id, SledInsert::new(sled_state));
+                }
+                map::Edit::Remove(&sled_state) => {
+                    // Work around a quirk of sled decommissioning. If a sled
+                    // has a before state of `decommissioned`, it may or may not
+                    // be present in `after` (presence will depend on whether
+                    // or not the sled was present in the `PlanningInput`).
+                    // However, we may still have entries in `zones`, `disks`,
+                    // or `datasets`  that haven't been fully cleaned up yet.
+                    //
+                    // In the case that we do still have entries in the other maps
+                    // we'll delete this entry from `sled_removes` below.
+                    sled_removes.insert(*sled_id, SledRemove::new(sled_state));
+                }
+                map::Edit::Change { before, after, .. } => {
+                    v.visit_sled_state_change(ctx, Change::new(before, after));
+                }
+                map::Edit::Copy(_) => {}
+            }
         }
+        ctx.sled_id = None;
     }
     if let Edit::Change { diff, .. } = &diff.blueprint_zones {
         for (&sled_id, edit) in diff {
-            sled_edits
-                .entry(*sled_id)
-                .and_modify(|e| e.zones = Some(edit))
-                .or_default();
+            ctx.sled_id = Some(*sled_id);
+            match edit {
+                map::Edit::Insert(zones) => {
+                    sled_inserts
+                        .entry(*sled_id)
+                        .and_modify(|e| e.zones = Some(zones))
+                        .or_insert_with(|| {
+                            // This is a *bug*. We don't have a valid `sled_state`
+                            // insert. Once we collapse the maps this will no longer
+                            // be an issue, but for now we insert what the sled state
+                            // should be for a newly inserted sled.
+                            //
+                            // TODO: We should add errors to the context for stuff like this,
+                            // since we don't want to force passing in a logger
+                            // and we can't really return errors in visitors.
+                            let mut insert = SledInsert::new(SledState::Active);
+                            insert.zones = Some(zones);
+                            insert
+                        });
+                }
+                map::Edit::Remove(zones) => {}
+                map::Edit::Change { diff, .. } => {}
+                map::Edit::Copy(_) => {}
+            }
         }
+        ctx.sled_id = None;
     }
     if let Edit::Change { diff, .. } = &diff.blueprint_disks {
         for (&sled_id, edit) in diff {
-            sled_edits
-                .entry(*sled_id)
-                .and_modify(|e| e.disks = Some(edit))
-                .or_default();
+            ctx.sled_id = Some(*sled_id);
+            match edit {
+                map::Edit::Insert(disks) => {}
+                map::Edit::Remove(disks) => {}
+                map::Edit::Change { diff, .. } => {}
+                map::Edit::Copy(_) => {}
+            }
         }
+        ctx.sled_id = None;
     }
     if let Edit::Change { diff, .. } = &diff.blueprint_datasets {
         for (&sled_id, edit) in diff {
-            sled_edits
-                .entry(*sled_id)
-                .and_modify(|e| e.datasets = Some(edit))
-                .or_default();
+            ctx.sled_id = Some(*sled_id);
+            match edit {
+                map::Edit::Insert(datasets) => {}
+                map::Edit::Remove(datasets) => {}
+                map::Edit::Change { diff, .. } => {}
+                map::Edit::Copy(_) => {}
+            }
         }
+        ctx.sled_id = None;
     }
 
     if let Edit::Change { diff, .. } = diff.parent_blueprint_id {}
