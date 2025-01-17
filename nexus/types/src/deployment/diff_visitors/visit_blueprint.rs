@@ -152,7 +152,7 @@ pub fn visit_root<'e, V>(
                             // be an issue, but for now we insert what the sled state
                             // should be for a newly inserted sled.
                             ctx.errors.push(
-                                BpVisitorError::MissingSledStateOnZoneInsert {
+                                BpVisitorError::MissingSledStateOnZonesInsert {
                                     sled_id: *sled_id,
                                 },
                             );
@@ -161,8 +161,21 @@ pub fn visit_root<'e, V>(
                             insert
                         });
                 }
-                map::Edit::Remove(_) => {
-                    sled_removes.get_mut(sled_id).map(|e| e.zones = None);
+                map::Edit::Remove(zones) => {
+                    sled_removes
+                        .entry(*sled_id)
+                        .and_modify(|e| e.zones = Some(*zones))
+                        .or_insert_with(|| {
+                            // This is a a workaround, where in some cases we have removed
+                            // the sled-state from the blueprint before any other sled resources.
+                            //
+                            // We backfill the sled state so we can create a proper
+                            // `SledRemove` entry.
+                            let mut remove =
+                                SledRemove::new(SledState::Decommissioned);
+                            remove.zones = Some(zones);
+                            remove
+                        });
                 }
                 map::Edit::Change { diff, .. } => {
                     v.zones_visitor().visit_zones_edit(ctx, diff);
@@ -183,10 +196,52 @@ pub fn visit_root<'e, V>(
         for (&sled_id, edit) in diff {
             ctx.sled_id = Some(*sled_id);
             match edit {
-                map::Edit::Insert(disks) => {}
-                map::Edit::Remove(disks) => {}
-                map::Edit::Change { diff, .. } => {}
-                map::Edit::Copy(_) => {}
+                map::Edit::Insert(disks) => {
+                    sled_inserts
+                        .entry(*sled_id)
+                        .and_modify(|e| e.disks = Some(disks))
+                        .or_insert_with(|| {
+                            // This is a *bug*. We don't have a valid `sled_state`
+                            // insert. Once we collapse the maps this will no longer
+                            // be an issue, but for now we insert what the sled state
+                            // should be for a newly inserted sled.
+                            ctx.errors.push(
+                                BpVisitorError::MissingSledStateOnDisksInsert {
+                                    sled_id: *sled_id,
+                                },
+                            );
+                            let mut insert = SledInsert::new(SledState::Active);
+                            insert.disks = Some(disks);
+                            insert
+                        });
+                }
+                map::Edit::Remove(disks) => {
+                    sled_removes
+                        .entry(*sled_id)
+                        .and_modify(|e| e.disks = Some(*disks))
+                        .or_insert_with(|| {
+                            // This is a a workaround, where in some cases we have removed
+                            // the sled-state from the blueprint before any other sled resources.
+                            //
+                            // We backfill the sled state so we can create a proper
+                            // `SledRemove` entry.
+                            let mut remove =
+                                SledRemove::new(SledState::Decommissioned);
+                            remove.disks = Some(disks);
+                            remove
+                        });
+                }
+                map::Edit::Change { diff, .. } => {
+                    v.disks_visitor().visit_disks_edit(ctx, diff);
+                    // Clean up any removes related to sled_state. See the
+                    // comment in the `diff.sled_state` clause.
+                    sled_removes.remove(sled_id);
+                }
+                map::Edit::Copy(_) => {
+                    // Clean up any removes related to sled_state. See the
+                    // comment in the `diff.sled_state` clause.
+                    sled_removes.remove(sled_id);
+                }
             }
         }
         ctx.sled_id = None;
@@ -195,14 +250,59 @@ pub fn visit_root<'e, V>(
         for (&sled_id, edit) in diff {
             ctx.sled_id = Some(*sled_id);
             match edit {
-                map::Edit::Insert(datasets) => {}
-                map::Edit::Remove(datasets) => {}
-                map::Edit::Change { diff, .. } => {}
-                map::Edit::Copy(_) => {}
+                map::Edit::Insert(datasets) => {
+                    sled_inserts
+                        .entry(*sled_id)
+                        .and_modify(|e| e.datasets = Some(datasets))
+                        .or_insert_with(|| {
+                            // This is a *bug*. We don't have a valid `sled_state`
+                            // insert. Once we collapse the maps this will no longer
+                            // be an issue, but for now we insert what the sled state
+                            // should be for a newly inserted sled.
+                            ctx.errors.push(
+                                BpVisitorError::MissingSledStateOnDatasetsInsert {
+                                    sled_id: *sled_id,
+                                },
+                            );
+                            let mut insert = SledInsert::new(SledState::Active);
+                            insert.datasets = Some(datasets);
+                            insert
+                        });
+                }
+                map::Edit::Remove(datasets) => {
+                    sled_removes
+                        .entry(*sled_id)
+                        .and_modify(|e| e.datasets = Some(*datasets))
+                        .or_insert_with(|| {
+                            // This is a a workaround, where in some cases we have removed
+                            // the sled-state from the blueprint before any other sled resources.
+                            //
+                            // We backfill the sled state so we can create a proper
+                            // `SledRemove` entry.
+                            let mut remove =
+                                SledRemove::new(SledState::Decommissioned);
+                            remove.datasets = Some(datasets);
+                            remove
+                        });
+                }
+                map::Edit::Change { diff, .. } => {
+                    v.datasets_visitor().visit_datasets_edit(ctx, diff);
+                    // Clean up any removes related to sled_state. See the
+                    // comment in the `diff.sled_state` clause.
+                    sled_removes.remove(sled_id);
+                }
+                map::Edit::Copy(_) => {
+                    // Clean up any removes related to sled_state. See the
+                    // comment in the `diff.sled_state` clause.
+                    sled_removes.remove(sled_id);
+                }
             }
         }
         ctx.sled_id = None;
     }
+
+    // TODO: Callback v.visit_sled_inserts()
+    // TODO: Callback v.visit_sled_removes()
 
     if let Edit::Change { diff, .. } = diff.parent_blueprint_id {}
     if let Edit::Change { diff, .. } = diff.internal_dns_version {}

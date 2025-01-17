@@ -25,10 +25,20 @@ use super::{
 #[derive(Debug, Error)]
 pub enum BpVisitorError {
     #[error(
-        "BlueprintZonesConfig inserted for sled {} with missing sled_state",
+        "BlueprintZonesConfig inserted for sled {} with no sled_state",
         sled_id
     )]
-    MissingSledStateOnZoneInsert { sled_id: SledUuid },
+    MissingSledStateOnZonesInsert { sled_id: SledUuid },
+    #[error(
+        "BlueprintPhysicalDisksConfig inserted for sled {} with no sled_state",
+        sled_id
+    )]
+    MissingSledStateOnDisksInsert { sled_id: SledUuid },
+    #[error(
+        "BlueprintDatasetsConfig inserted for sled {} with no sled_state",
+        sled_id
+    )]
+    MissingSledStateOnDatasetsInsert { sled_id: SledUuid },
 }
 
 /// A context for blueprint related visitors

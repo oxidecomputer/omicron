@@ -8,7 +8,7 @@ use super::Change;
 use crate::deployment::{
     BlueprintDatasetConfig, BlueprintDatasetDisposition,
     BlueprintDatasetsConfig, BpVisitorContext, DatasetKind,
-    EditedBlueprintDatasetConfig, ZpoolName,
+    EditedBlueprintDatasetConfig, EditedBlueprintDatasetsConfig, ZpoolName,
 };
 use diffus::edit::{map, Edit};
 use omicron_common::{
@@ -25,6 +25,15 @@ pub trait VisitBlueprintDatasetsConfig<'e> {
         node: Edit<'e, BlueprintDatasetsConfig>,
     ) {
         visit_root(self, ctx, node);
+    }
+
+    /// An alternate top-level call for use by wrapper visitors
+    fn visit_datasets_edit(
+        &mut self,
+        ctx: &mut BpVisitorContext,
+        node: &EditedBlueprintDatasetsConfig<'e>,
+    ) {
+        visit_datasets_edit(self, ctx, node);
     }
 
     /// A change to `BlueprintZonesConfig::generation`
@@ -144,15 +153,23 @@ pub fn visit_root<'e, V>(
 ) where
     V: VisitBlueprintDatasetsConfig<'e> + ?Sized,
 {
-    let Edit::Change { diff, .. } = node else {
-        return;
-    };
+    if let Edit::Change { diff, .. } = node {
+        v.visit_datasets_edit(ctx, &diff);
+    }
+}
 
-    if let Edit::Change { diff, .. } = diff.generation {
+pub fn visit_datasets_edit<'e, V>(
+    v: &mut V,
+    ctx: &mut BpVisitorContext,
+    node: &EditedBlueprintDatasetsConfig<'e>,
+) where
+    V: VisitBlueprintDatasetsConfig<'e> + ?Sized,
+{
+    if let Edit::Change { diff, .. } = node.generation {
         v.visit_generation_change(ctx, diff.into());
     }
-    if let Edit::Change { diff, .. } = diff.datasets {
-        for (&dataset_id, edit) in &diff {
+    if let Edit::Change { diff, .. } = &node.datasets {
+        for (&dataset_id, edit) in diff {
             ctx.dataset_id = Some(*dataset_id);
             match edit {
                 map::Edit::Copy(_) => {}
@@ -164,7 +181,7 @@ pub fn visit_root<'e, V>(
                 }
                 map::Edit::Change { before, after, diff } => {
                     v.visit_dataset_change(ctx, Change::new(before, after));
-                    v.visit_dataset_edit(ctx, diff);
+                    v.visit_dataset_edit(ctx, &diff);
                 }
             }
         }
