@@ -126,7 +126,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
         &nexus,
         &|builder: &mut BlueprintBuilder| {
             builder
-                .sled_expunge_zone(sled_id, new_zone.id())
+                .sled_expunge_zone(sled_id, new_zone.id)
                 .context("expunging zone")?;
             Ok(())
         },

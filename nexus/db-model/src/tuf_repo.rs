@@ -13,11 +13,9 @@ use chrono::{DateTime, Utc};
 use diesel::{deserialize::FromSql, serialize::ToSql, sql_types::Text};
 use omicron_common::{
     api::external,
-    update::{
-        ArtifactHash as ExternalArtifactHash, ArtifactId as ExternalArtifactId,
-        ArtifactKind,
-    },
+    update::{ArtifactHash as ExternalArtifactHash, ArtifactId, ArtifactKind},
 };
+use omicron_uuid_kinds::TufArtifactKind;
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
 use serde::{Deserialize, Serialize};
@@ -148,8 +146,10 @@ impl TufRepo {
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, AsChangeset)]
 #[diesel(table_name = tuf_artifact)]
 pub struct TufArtifact {
-    #[diesel(embed)]
-    pub id: ArtifactId,
+    pub id: DbTypedUuid<TufArtifactKind>,
+    pub name: String,
+    pub version: SemverVersion,
+    pub kind: String,
     pub time_created: DateTime<Utc>,
     pub sha256: ArtifactHash,
     artifact_size: i64,
@@ -158,12 +158,15 @@ pub struct TufArtifact {
 impl TufArtifact {
     /// Creates a new `TufArtifact` ready for insertion.
     pub fn new(
-        id: ArtifactId,
+        artifact_id: ArtifactId,
         sha256: ArtifactHash,
         artifact_size: u64,
     ) -> Self {
         Self {
-            id,
+            id: TypedUuid::new_v4().into(),
+            name: artifact_id.name,
+            version: artifact_id.version.into(),
+            kind: artifact_id.kind.as_str().to_owned(),
             time_created: Utc::now(),
             sha256,
             artifact_size: artifact_size as i64,
@@ -177,21 +180,31 @@ impl TufArtifact {
     /// as part of the process, which `From` doesn't necessarily communicate
     /// and can be surprising.
     pub fn from_external(artifact: external::TufArtifactMeta) -> Self {
-        Self::new(artifact.id.into(), artifact.hash.into(), artifact.size)
+        Self::new(artifact.id, artifact.hash.into(), artifact.size)
     }
 
     /// Converts self into [`external::TufArtifactMeta`].
     pub fn into_external(self) -> external::TufArtifactMeta {
         external::TufArtifactMeta {
-            id: self.id.into(),
+            id: ArtifactId {
+                name: self.name,
+                version: self.version.into(),
+                kind: ArtifactKind::new(self.kind),
+            },
             hash: self.sha256.into(),
             size: self.artifact_size as u64,
         }
     }
 
     /// Returns the artifact's ID.
-    pub fn id(&self) -> (String, SemverVersion, String) {
-        (self.id.name.clone(), self.id.version.clone(), self.id.kind.clone())
+    pub fn id(&self) -> TypedUuid<TufArtifactKind> {
+        self.id.into()
+    }
+
+    /// Returns the artifact's name, version, and kind, which is unique across
+    /// all artifacts.
+    pub fn nvk(&self) -> (&str, &SemverVersion, &str) {
+        (&self.name, &self.version, &self.kind)
     }
 
     /// Returns the artifact length in bytes.
@@ -200,70 +213,12 @@ impl TufArtifact {
     }
 }
 
-/// The ID (primary key) of a [`TufArtifact`].
-///
-/// This is the internal variant of a [`ExternalArtifactId`].
-#[derive(
-    Queryable,
-    Insertable,
-    Clone,
-    Debug,
-    Selectable,
-    PartialEq,
-    Eq,
-    Hash,
-    Deserialize,
-    Serialize,
-)]
-#[diesel(table_name = tuf_artifact)]
-pub struct ArtifactId {
-    pub name: String,
-    pub version: SemverVersion,
-    pub kind: String,
-}
-
-impl From<ExternalArtifactId> for ArtifactId {
-    fn from(id: ExternalArtifactId) -> Self {
-        Self {
-            name: id.name,
-            version: id.version.into(),
-            kind: id.kind.as_str().to_owned(),
-        }
-    }
-}
-
-impl From<ArtifactId> for ExternalArtifactId {
-    fn from(id: ArtifactId) -> Self {
-        Self {
-            name: id.name,
-            version: id.version.into(),
-            kind: ArtifactKind::new(id.kind),
-        }
-    }
-}
-
-impl fmt::Display for ArtifactId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // This is the same as ExternalArtifactId's Display impl.
-        write!(f, "{} v{} ({})", self.name, self.version, self.kind)
-    }
-}
-
-/// Required by the authz_resource macro.
-impl From<ArtifactId> for (String, SemverVersion, String) {
-    fn from(id: ArtifactId) -> Self {
-        (id.name, id.version, id.kind)
-    }
-}
-
 /// A many-to-many relationship between [`TufRepo`] and [`TufArtifact`].
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = tuf_repo_artifact)]
 pub struct TufRepoArtifact {
     pub tuf_repo_id: Uuid,
-    pub tuf_artifact_name: String,
-    pub tuf_artifact_version: SemverVersion,
-    pub tuf_artifact_kind: String,
+    pub tuf_artifact_id: Uuid,
 }
 
 /// A wrapper around omicron-common's [`ArtifactHash`](ExternalArtifactHash),

@@ -769,10 +769,9 @@ async fn test_disk_region_creation_failure(
     .await
     .unwrap();
 
-    // After the failed allocation, the disk should be Faulted
+    // After the failed allocation, the disk creation should have unwound
     let disks = disks_list(&client, &disks_url).await;
-    assert_eq!(disks.len(), 1);
-    assert_eq!(disks[0].state, DiskState::Faulted);
+    assert_eq!(disks.len(), 0);
 }
 
 // Tests that invalid block sizes are rejected
@@ -1004,9 +1003,9 @@ async fn test_disk_backed_by_multiple_region_sets(
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
     // Create another three zpools, all 10 gibibytes, each with one dataset
-    test.add_zpool_with_dataset(cptestctx.first_sled()).await;
-    test.add_zpool_with_dataset(cptestctx.first_sled()).await;
-    test.add_zpool_with_dataset(cptestctx.first_sled()).await;
+    test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
+    test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
+    test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
 
     create_project_and_pool(client).await;
 
@@ -1338,12 +1337,9 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
         &disk_test.zpools().nth(2).expect("Expected at least three zpools");
     let dataset = &zpool.datasets[0];
     cptestctx
-        .sled_agent
-        .sled_agent
+        .first_sled_agent()
         .get_crucible_dataset(zpool.id, dataset.id)
-        .await
-        .set_region_deletion_error(true)
-        .await;
+        .set_region_deletion_error(true);
 
     // Delete the disk - expect this to fail
     NexusRequest::new(
@@ -1376,12 +1372,9 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
 
     // Set the third agent to respond normally
     cptestctx
-        .sled_agent
-        .sled_agent
+        .first_sled_agent()
         .get_crucible_dataset(zpool.id, dataset.id)
-        .await
-        .set_region_deletion_error(false)
-        .await;
+        .set_region_deletion_error(false);
 
     // Request disk delete again
     NexusRequest::new(
@@ -1718,7 +1711,7 @@ async fn test_multiple_disks_multiple_zpools(
 
     // Create six 10 GB zpools, each with one dataset
     let _test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(6)
         .build()
         .await;
@@ -2142,7 +2135,7 @@ async fn test_region_allocation_strategy_random_is_idempotent(
 
     // Create four 10 GiB zpools, each with one dataset.
     let _test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -2212,7 +2205,7 @@ async fn test_region_allocation_strategy_random_is_idempotent_arbitrary(
 
     // Create four 10 GiB zpools, each with one dataset.
     let _test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -2278,7 +2271,7 @@ async fn test_single_region_allocate_for_replace(
     // We add one more then the "three" default to meet `region_allocate`'s
     // redundancy requirements.
     let _test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -2479,7 +2472,7 @@ async fn test_no_halt_disk_delete_one_region_on_expunged_agent(
     let zpool = disk_test.zpools().next().expect("Expected at least one zpool");
     let dataset = &zpool.datasets[0];
 
-    cptestctx.sled_agent.sled_agent.drop_dataset(zpool.id, dataset.id).await;
+    cptestctx.first_sled_agent().drop_dataset(zpool.id, dataset.id);
 
     // Spawn a task that tries to delete the disk
     let disk_url = get_disk_url(DISK_NAME);
@@ -2578,7 +2571,7 @@ async fn test_disk_expunge(cptestctx: &ControlPlaneTestContext) {
 
     // All three regions should be returned
     let expunged_regions = datastore
-        .find_regions_on_expunged_physical_disks(&opctx)
+        .find_read_write_regions_on_expunged_physical_disks(&opctx)
         .await
         .unwrap();
 

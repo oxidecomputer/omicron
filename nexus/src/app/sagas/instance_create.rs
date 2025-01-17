@@ -1320,7 +1320,7 @@ pub mod test {
     pub(crate) async fn verify_clean_slate(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let sled_agent = &cptestctx.sled_agent.sled_agent;
+        let sled_agent = cptestctx.first_sled_agent();
         let datastore = cptestctx.server.server_context().nexus.datastore();
 
         // Check that no partial artifacts of instance creation exist
@@ -1346,7 +1346,7 @@ pub mod test {
         assert!(disk_is_detached(datastore).await);
         assert!(no_instances_or_disks_on_sled(&sled_agent).await);
 
-        let v2p_mappings = &*sled_agent.v2p_mappings.lock().await;
+        let v2p_mappings = &*sled_agent.v2p_mappings.lock().unwrap();
         assert!(v2p_mappings.is_empty());
     }
 

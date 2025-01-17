@@ -1034,6 +1034,20 @@ resource: PhysicalDisk id "c9f923f6-caf3-4c83-96f9-8ffe8c627dd2"
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
+resource: SupportBundle id "d9f923f6-caf3-4c83-96f9-8ffe8c627dd2"
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  fleet-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
 resource: DeviceAuthRequest "a-device-user-code"
 
   USER                             Q  R LC RP  M MP CC  D
@@ -1090,7 +1104,7 @@ resource: TufRepo id "3c52d72f-cbf7-4951-a62f-a4154e74da87"
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: TufArtifact id "a v1.0.0 (b)"
+resource: TufArtifact id "6827813e-bfaa-4205-9b9f-9f7901e4aab1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔

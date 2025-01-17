@@ -24,3 +24,5 @@ pub use config::{
 };
 pub use server::{run_standalone_server, RssArgs, Server};
 pub use sled_agent::SledAgent;
+pub use storage::PantryServer;
+pub(crate) use storage::Storage;

@@ -399,8 +399,7 @@ pub async fn execute_timeseries_query(
     if rsp.status.is_client_error() {
         let text = std::str::from_utf8(&rsp.body)
             .expect("Timeseries query response body should be UTF-8");
-        if text.contains("Schema for timeseries") && text.contains("not found")
-        {
+        if text.starts_with("Timeseries not found for: ") {
             return None;
         }
     }

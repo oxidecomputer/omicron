@@ -92,6 +92,7 @@ use super::tasks::abandoned_vmm_reaper;
 use super::tasks::bfd;
 use super::tasks::blueprint_execution;
 use super::tasks::blueprint_load;
+use super::tasks::blueprint_rendezvous;
 use super::tasks::crdb_node_id_collector;
 use super::tasks::decommissioned_disk_cleaner;
 use super::tasks::dns_config;
@@ -115,6 +116,7 @@ use super::tasks::region_snapshot_replacement_start::*;
 use super::tasks::region_snapshot_replacement_step::*;
 use super::tasks::saga_recovery;
 use super::tasks::service_firewall_rules;
+use super::tasks::support_bundle_collector;
 use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
 use super::tasks::v2p_mappings::V2PManager;
@@ -149,11 +151,13 @@ pub struct BackgroundTasks {
     pub task_nat_cleanup: Activator,
     pub task_bfd_manager: Activator,
     pub task_inventory_collection: Activator,
+    pub task_support_bundle_collector: Activator,
     pub task_physical_disk_adoption: Activator,
     pub task_decommissioned_disk_cleaner: Activator,
     pub task_phantom_disks: Activator,
     pub task_blueprint_loader: Activator,
     pub task_blueprint_executor: Activator,
+    pub task_blueprint_rendezvous: Activator,
     pub task_crdb_node_id_collector: Activator,
     pub task_service_zone_nat_tracker: Activator,
     pub task_switch_port_settings_manager: Activator,
@@ -235,11 +239,13 @@ impl BackgroundTasksInitializer {
             task_nat_cleanup: Activator::new(),
             task_bfd_manager: Activator::new(),
             task_inventory_collection: Activator::new(),
+            task_support_bundle_collector: Activator::new(),
             task_physical_disk_adoption: Activator::new(),
             task_decommissioned_disk_cleaner: Activator::new(),
             task_phantom_disks: Activator::new(),
             task_blueprint_loader: Activator::new(),
             task_blueprint_executor: Activator::new(),
+            task_blueprint_rendezvous: Activator::new(),
             task_crdb_node_id_collector: Activator::new(),
             task_service_zone_nat_tracker: Activator::new(),
             task_switch_port_settings_manager: Activator::new(),
@@ -302,11 +308,13 @@ impl BackgroundTasksInitializer {
             task_nat_cleanup,
             task_bfd_manager,
             task_inventory_collection,
+            task_support_bundle_collector,
             task_physical_disk_adoption,
             task_decommissioned_disk_cleaner,
             task_phantom_disks,
             task_blueprint_loader,
             task_blueprint_executor,
+            task_blueprint_rendezvous,
             task_crdb_node_id_collector,
             task_service_zone_nat_tracker,
             task_switch_port_settings_manager,
@@ -487,19 +495,15 @@ impl BackgroundTasksInitializer {
             period: config.blueprints.period_secs_collect_crdb_node_ids,
             task_impl: Box::new(crdb_node_id_collector),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![Box::new(rx_blueprint)],
+            watchers: vec![Box::new(rx_blueprint.clone())],
             activator: task_crdb_node_id_collector,
         });
 
         // Background task: inventory collector
         //
-        // This currently depends on the "output" of the blueprint executor in
+        // This depends on the "output" of the blueprint executor in
         // order to automatically trigger inventory collection whenever the
-        // blueprint executor runs.  In the limit, this could become a problem
-        // because the blueprint executor might also depend indirectly on the
-        // inventory collector.  In that case, we could expose `Activator`s to
-        // one or both of these tasks to directly activate the other precisely
-        // when needed.  But for now, this works.
+        // blueprint executor runs.
         let inventory_watcher = {
             let collector = inventory_collection::InventoryCollector::new(
                 datastore.clone(),
@@ -517,12 +521,33 @@ impl BackgroundTasksInitializer {
                 period: config.inventory.period_secs,
                 task_impl: Box::new(collector),
                 opctx: opctx.child(BTreeMap::new()),
-                watchers: vec![Box::new(rx_blueprint_exec)],
+                watchers: vec![Box::new(rx_blueprint_exec.clone())],
                 activator: task_inventory_collection,
             });
 
             inventory_watcher
         };
+
+        // Cleans up and collects support bundles.
+        //
+        // This task is triggered by blueprint execution, since blueprint
+        // execution may cause bundles to start failing and need garbage
+        // collection.
+        driver.register(TaskDefinition {
+            name: "support_bundle_collector",
+            description: "Manage support bundle collection and cleanup",
+            period: config.support_bundle_collector.period_secs,
+            task_impl: Box::new(
+                support_bundle_collector::SupportBundleCollector::new(
+                    datastore.clone(),
+                    config.support_bundle_collector.disable,
+                    nexus_id,
+                ),
+            ),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![Box::new(rx_blueprint_exec)],
+            activator: task_support_bundle_collector,
+        });
 
         driver.register(TaskDefinition {
             name: "physical_disk_adoption",
@@ -538,8 +563,26 @@ impl BackgroundTasksInitializer {
                 ),
             ),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![Box::new(inventory_watcher)],
+            watchers: vec![Box::new(inventory_watcher.clone())],
             activator: task_physical_disk_adoption,
+        });
+
+        driver.register(TaskDefinition {
+            name: "blueprint_rendezvous",
+            description:
+                "reconciles blueprints and inventory collection, updating \
+                 Reconfigurator-owned rendezvous tables that other subsystems \
+                 consume",
+            period: config.blueprints.period_secs_rendezvous,
+            task_impl: Box::new(
+                blueprint_rendezvous::BlueprintRendezvous::new(
+                    datastore.clone(),
+                    rx_blueprint.clone(),
+                ),
+            ),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![Box::new(inventory_watcher.clone())],
+            activator: task_blueprint_rendezvous,
         });
 
         driver.register(TaskDefinition {
@@ -825,7 +868,7 @@ impl BackgroundTasksInitializer {
                 done",
             period: config.region_snapshot_replacement_finish.period_secs,
             task_impl: Box::new(RegionSnapshotReplacementFinishDetector::new(
-                datastore,
+                datastore, sagas,
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],

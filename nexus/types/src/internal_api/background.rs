@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use omicron_uuid_kinds::SupportBundleUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -37,6 +38,7 @@ pub struct LookupRegionPortStatus {
 pub struct RegionSnapshotReplacementStartStatus {
     pub requests_created_ok: Vec<String>,
     pub start_invoked_ok: Vec<String>,
+    pub requests_completed_ok: Vec<String>,
     pub errors: Vec<String>,
 }
 
@@ -55,13 +57,14 @@ pub struct RegionSnapshotReplacementStepStatus {
     pub step_records_created_ok: Vec<String>,
     pub step_garbage_collect_invoked_ok: Vec<String>,
     pub step_invoked_ok: Vec<String>,
+    pub step_set_volume_deleted_ok: Vec<String>,
     pub errors: Vec<String>,
 }
 
 /// The status of a `region_snapshot_replacement_finish` background task activation
 #[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
 pub struct RegionSnapshotReplacementFinishStatus {
-    pub records_set_to_done: Vec<String>,
+    pub finish_invoked_ok: Vec<String>,
     pub errors: Vec<String>,
 }
 
@@ -189,5 +192,42 @@ impl std::fmt::Display for ReincarnatableInstance {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { instance_id, reason } = self;
         write!(f, "{instance_id} ({reason})")
+    }
+}
+
+/// Describes what happened while attempting to clean up Support Bundles.
+#[derive(Debug, Default, Deserialize, Serialize, Eq, PartialEq)]
+pub struct SupportBundleCleanupReport {
+    // Responses from Sled Agents
+    pub sled_bundles_deleted_ok: usize,
+    pub sled_bundles_deleted_not_found: usize,
+    pub sled_bundles_delete_failed: usize,
+
+    // Results from updating our database records
+    pub db_destroying_bundles_removed: usize,
+    pub db_failing_bundles_updated: usize,
+}
+
+/// Identifies what we could or could not store within a support bundle.
+///
+/// This struct will get emitted as part of the background task infrastructure.
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SupportBundleCollectionReport {
+    pub bundle: SupportBundleUuid,
+
+    /// True iff we could list in-service sleds
+    pub listed_in_service_sleds: bool,
+
+    /// True iff the bundle was successfully made 'active' in the database.
+    pub activated_in_db_ok: bool,
+}
+
+impl SupportBundleCollectionReport {
+    pub fn new(bundle: SupportBundleUuid) -> Self {
+        Self {
+            bundle,
+            listed_in_service_sleds: false,
+            activated_in_db_ok: false,
+        }
     }
 }

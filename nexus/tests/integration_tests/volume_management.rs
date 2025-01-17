@@ -55,6 +55,7 @@ use omicron_common::api::external::Name;
 use omicron_common::api::internal;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::DownstairsKind;
 use omicron_uuid_kinds::DownstairsRegionKind;
 use omicron_uuid_kinds::GenericUuid;
@@ -64,9 +65,9 @@ use omicron_uuid_kinds::UpstairsRepairKind;
 use omicron_uuid_kinds::UpstairsSessionKind;
 use rand::prelude::SliceRandom;
 use rand::{rngs::StdRng, SeedableRng};
-use sled_agent_client::types::{CrucibleOpts, VolumeConstructionRequest};
+use sled_agent_client::{CrucibleOpts, VolumeConstructionRequest};
 use std::collections::HashSet;
-use std::net::SocketAddrV6;
+use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -2191,7 +2192,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
 
     // Four zpools, one dataset each
     let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -2206,44 +2207,44 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
     // insert those here manually.
 
     // (dataset_id, region_id, snapshot_id, snapshot_addr)
-    let region_snapshots = vec![
+    let region_snapshots: Vec<(DatasetUuid, Uuid, Uuid, SocketAddr)> = vec![
         // first snapshot-create
         (
             zpool0.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
-            String::from("[fd00:1122:3344:101::7]:19016"),
+            "[fd00:1122:3344:101::7]:19016".parse().unwrap(),
         ),
         (
             zpool1.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
-            String::from("[fd00:1122:3344:102::7]:19016"),
+            "[fd00:1122:3344:102::7]:19016".parse().unwrap(),
         ),
         (
             zpool2.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
-            String::from("[fd00:1122:3344:103::7]:19016"),
+            "[fd00:1122:3344:103::7]:19016".parse().unwrap(),
         ),
         // second snapshot-create
         (
             zpool0.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
-            String::from("[fd00:1122:3344:101::7]:19016"), // duplicate!
+            "[fd00:1122:3344:101::7]:19016".parse().unwrap(),
         ),
         (
             zpool3.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
-            String::from("[fd00:1122:3344:104::7]:19016"),
+            "[fd00:1122:3344:104::7]:19016".parse().unwrap(),
         ),
         (
             zpool2.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
-            String::from("[fd00:1122:3344:103::7]:19017"),
+            "[fd00:1122:3344:103::7]:19017".parse().unwrap(),
         ),
     ];
 
@@ -2258,7 +2259,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
                 dataset_id: (*dataset_id).into(),
                 region_id: *region_id,
                 snapshot_id: *snapshot_id,
-                snapshot_addr: snapshot_addr.clone(),
+                snapshot_addr: snapshot_addr.to_string(),
                 volume_references: 0,
                 deleting: false,
             })
@@ -2283,9 +2284,9 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![
-                                region_snapshots[0].3.clone(),
-                                region_snapshots[1].3.clone(),
-                                region_snapshots[2].3.clone(),
+                                region_snapshots[0].3,
+                                region_snapshots[1].3,
+                                region_snapshots[2].3,
                             ],
                             lossy: false,
                             flush_timeout: None,
@@ -2379,7 +2380,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
                 dataset_id: (*dataset_id).into(),
                 region_id: *region_id,
                 snapshot_id: *snapshot_id,
-                snapshot_addr: snapshot_addr.clone(),
+                snapshot_addr: snapshot_addr.to_string(),
                 volume_references: 0,
                 deleting: false,
             })
@@ -2404,9 +2405,9 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![
-                                region_snapshots[3].3.clone(),
-                                region_snapshots[4].3.clone(),
-                                region_snapshots[5].3.clone(),
+                                region_snapshots[3].3,
+                                region_snapshots[4].3,
+                                region_snapshots[5].3,
                             ],
                             lossy: false,
                             flush_timeout: None,
@@ -2525,12 +2526,9 @@ async fn test_disk_create_saga_unwinds_correctly(
     let zpool = &disk_test.zpools().nth(2).expect("Expected three zpools");
     let dataset = &zpool.datasets[0];
     cptestctx
-        .sled_agent
-        .sled_agent
+        .first_sled_agent()
         .get_crucible_dataset(zpool.id, dataset.id)
-        .await
-        .set_region_creation_error(true)
-        .await;
+        .set_region_creation_error(true);
 
     let disk_size = ByteCount::from_gibibytes_u32(2);
     let base_disk = params::DiskCreate {
@@ -2595,12 +2593,9 @@ async fn test_snapshot_create_saga_unwinds_correctly(
         &disk_test.zpools().nth(2).expect("Expected at least three zpools");
     let dataset = &zpool.datasets[0];
     cptestctx
-        .sled_agent
-        .sled_agent
+        .first_sled_agent()
         .get_crucible_dataset(zpool.id, dataset.id)
-        .await
-        .set_region_creation_error(true)
-        .await;
+        .set_region_creation_error(true);
 
     // Create a snapshot
     let snapshot_create = params::SnapshotCreate {
@@ -3586,7 +3581,7 @@ impl TestReadOnlyRegionReferenceUsage {
         );
 
         DiskTestBuilder::new(&cptestctx)
-            .on_specific_sled(cptestctx.first_sled())
+            .on_specific_sled(cptestctx.first_sled_id())
             .with_zpool_count(4)
             .build()
             .await;
@@ -3659,7 +3654,7 @@ impl TestReadOnlyRegionReferenceUsage {
                         gen: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
-                            target: vec![self.region_address.to_string()],
+                            target: vec![self.region_address.into()],
                             lossy: false,
                             flush_timeout: None,
                             key: None,
@@ -3764,12 +3759,13 @@ impl TestReadOnlyRegionReferenceUsage {
 
     // read-only regions should never be returned by find_deleted_volume_regions
     pub async fn region_not_returned_by_find_deleted_volume_regions(&self) {
-        let deleted_volume_regions =
+        let freed_crucible_resources =
             self.datastore.find_deleted_volume_regions().await.unwrap();
 
-        assert!(!deleted_volume_regions
+        assert!(!freed_crucible_resources
+            .datasets_and_regions
             .into_iter()
-            .any(|(_, r, _)| r.id() == self.region.id()));
+            .any(|(_, r)| r.id() == self.region.id()));
     }
 
     pub async fn create_first_volume_region_in_rop(&self) {
@@ -3788,7 +3784,7 @@ impl TestReadOnlyRegionReferenceUsage {
                             gen: 1,
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
-                                target: vec![self.region_address.to_string()],
+                                target: vec![self.region_address.into()],
                                 lossy: false,
                                 flush_timeout: None,
                                 key: None,
@@ -3821,7 +3817,7 @@ impl TestReadOnlyRegionReferenceUsage {
                         gen: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
-                            target: vec![self.region_address.to_string()],
+                            target: vec![self.region_address.into()],
                             lossy: false,
                             flush_timeout: None,
                             key: None,
@@ -3856,7 +3852,7 @@ impl TestReadOnlyRegionReferenceUsage {
                             gen: 1,
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
-                                target: vec![self.region_address.to_string()],
+                                target: vec![self.region_address.into()],
                                 lossy: false,
                                 flush_timeout: None,
                                 key: None,
@@ -4088,7 +4084,7 @@ async fn test_read_only_region_reference_counting(
     // Four zpools are required for region replacement or region snapshot
     // replacement
     let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -4219,17 +4215,14 @@ async fn test_read_only_region_reference_counting(
 
     assert_eq!(
         cptestctx
-            .sled_agent
-            .sled_agent
+            .first_sled_agent()
             .get_crucible_dataset(
                 TypedUuid::from_untyped_uuid(db_read_only_dataset.pool_id),
                 db_read_only_dataset.id(),
             )
-            .await
             .get(crucible_agent_client::types::RegionId(
                 read_only_region.id().to_string()
             ))
-            .await
             .unwrap()
             .state,
         crucible_agent_client::types::State::Created
@@ -4291,17 +4284,14 @@ async fn test_read_only_region_reference_counting(
 
     assert_eq!(
         cptestctx
-            .sled_agent
-            .sled_agent
+            .first_sled_agent()
             .get_crucible_dataset(
                 TypedUuid::from_untyped_uuid(db_read_only_dataset.pool_id),
                 db_read_only_dataset.id(),
             )
-            .await
             .get(crucible_agent_client::types::RegionId(
                 read_only_region.id().to_string()
             ))
-            .await
             .unwrap()
             .state,
         crucible_agent_client::types::State::Destroyed
@@ -4328,7 +4318,7 @@ async fn test_read_only_region_reference_counting_layers(
     // Four zpools are required for region replacement or region snapshot
     // replacement
     let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -4561,7 +4551,7 @@ async fn test_volume_replace_snapshot_respects_accounting(
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -4767,7 +4757,7 @@ async fn test_volume_remove_rop_respects_accounting(
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -4926,7 +4916,7 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -5179,7 +5169,7 @@ async fn test_migrate_to_ref_count_with_records(
     let datastore = nexus.datastore();
 
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -5289,7 +5279,7 @@ async fn test_migrate_to_ref_count_with_records_soft_delete_volume(
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -5364,7 +5354,7 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
     let datastore = nexus.datastore();
 
     let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -5376,30 +5366,30 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
     let zpool3 = iter.next().expect("Expected four zpools");
 
     // (dataset_id, region_id, snapshot_id, snapshot_addr)
-    let region_snapshots = vec![
+    let region_snapshots: Vec<(DatasetUuid, Uuid, Uuid, SocketAddr)> = vec![
         (
             zpool0.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
-            String::from("[fd00:1122:3344:101::7]:19016"),
+            "[fd00:1122:3344:101::7]:19016".parse().unwrap(),
         ),
         (
             zpool1.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
-            String::from("[fd00:1122:3344:102::7]:19016"),
+            "[fd00:1122:3344:102::7]:19016".parse().unwrap(),
         ),
         (
             zpool2.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
-            String::from("[fd00:1122:3344:103::7]:19016"),
+            "[fd00:1122:3344:103::7]:19016".parse().unwrap(),
         ),
         (
             zpool3.datasets[0].id,
             Uuid::new_v4(),
             Uuid::new_v4(),
-            String::from("[fd00:1122:3344:104::7]:19016"),
+            "[fd00:1122:3344:104::7]:19016".parse().unwrap(),
         ),
     ];
 
@@ -5412,7 +5402,7 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
                 dataset_id: to_db_typed_uuid(*dataset_id),
                 region_id: *region_id,
                 snapshot_id: *snapshot_id,
-                snapshot_addr: snapshot_addr.clone(),
+                snapshot_addr: snapshot_addr.to_string(),
                 volume_references: 0,
                 deleting: false,
             })
@@ -5440,9 +5430,9 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![
-                                region_snapshots[0].3.clone(),
-                                region_snapshots[1].3.clone(),
-                                region_snapshots[2].3.clone(),
+                                region_snapshots[0].3,
+                                region_snapshots[1].3,
+                                region_snapshots[2].3,
                             ],
                             lossy: false,
                             flush_timeout: None,
@@ -5478,9 +5468,9 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![
-                                region_snapshots[1].3.clone(),
-                                region_snapshots[2].3.clone(),
-                                region_snapshots[3].3.clone(),
+                                region_snapshots[1].3,
+                                region_snapshots[2].3,
+                                region_snapshots[3].3,
                             ],
                             lossy: false,
                             flush_timeout: None,
@@ -5518,7 +5508,10 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
     );
     assert_eq!(region_snapshot_to_delete.region_id, region_snapshots[0].1);
     assert_eq!(region_snapshot_to_delete.snapshot_id, region_snapshots[0].2);
-    assert_eq!(region_snapshot_to_delete.snapshot_addr, region_snapshots[0].3);
+    assert_eq!(
+        region_snapshot_to_delete.snapshot_addr.parse::<SocketAddr>().unwrap(),
+        region_snapshots[0].3
+    );
     assert_eq!(region_snapshot_to_delete.volume_references, 0);
     assert_eq!(region_snapshot_to_delete.deleting, true);
 
@@ -5558,7 +5551,7 @@ async fn test_double_layer_with_read_only_region_delete(
     // Four zpools are required for region replacement or region snapshot
     // replacement
     let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -5683,7 +5676,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
     // Four zpools are required for region replacement or region snapshot
     // replacement
     let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -5858,7 +5851,7 @@ async fn test_no_zombie_region_snapshots(cptestctx: &ControlPlaneTestContext) {
     // Four zpools are required for region replacement or region snapshot
     // replacement
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -5973,7 +5966,7 @@ async fn test_no_zombie_read_only_regions(cptestctx: &ControlPlaneTestContext) {
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -6049,9 +6042,9 @@ async fn test_no_zombie_read_only_regions(cptestctx: &ControlPlaneTestContext) {
                     opts: CrucibleOpts {
                         id: Uuid::new_v4(),
                         target: vec![
-                            region_addrs[0].to_string(),
-                            region_addrs[1].to_string(),
-                            region_addrs[2].to_string(),
+                            region_addrs[0].into(),
+                            region_addrs[1].into(),
+                            region_addrs[2].into(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -6159,7 +6152,7 @@ async fn test_no_zombie_read_write_regions(
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -6235,9 +6228,9 @@ async fn test_no_zombie_read_write_regions(
                     opts: CrucibleOpts {
                         id: Uuid::new_v4(),
                         target: vec![
-                            region_addrs[0].to_string(),
-                            region_addrs[1].to_string(),
-                            region_addrs[2].to_string(),
+                            region_addrs[0].into(),
+                            region_addrs[1].into(),
+                            region_addrs[2].into(),
                         ],
                         lossy: false,
                         flush_timeout: None,
