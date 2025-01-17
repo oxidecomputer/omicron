@@ -87,7 +87,9 @@ pub fn all_apis() -> Vec<ApiSpec> {
         },
         ApiSpec {
             title: "Internal DNS",
-            versions: Versions::new_versioned(dns_server_api::VERSIONS_SUPPORTED),
+            versions: Versions::new_versioned(
+                dns_server_api::supported_versions()
+            ),
             description: "API for the internal DNS server",
             boundary: ApiBoundary::Internal,
             api_description:

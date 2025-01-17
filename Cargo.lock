@@ -7703,6 +7703,7 @@ dependencies = [
  "anyhow",
  "camino",
  "omicron-workspace-hack",
+ "paste",
  "semver 1.0.24",
 ]
 

@@ -91,54 +91,35 @@
 
 use dropshot::{HttpError, HttpResponseOk, RequestContext};
 use internal_dns_types::config::{DnsConfig, DnsConfigParams};
-use openapi_manager_types::{SupportedVersion, SupportedVersions};
+use openapi_manager_types::{SupportedVersion, SupportedVersions, api_versions};
 
-// XXX-dap the syntax here is a little boilerplatey.  competing concerns:
-// - want less boilerplate
-// - want to be able to validate the list of versions (so want a
-//   SupportedVersions first-class struct)
-// - definitions should fit on one line
-// - MUST cause a git conflict when other people change the same line
-// XXX-dap maybe could drop the separate SupportedVersion and use tuples
-// instead?
-//
-// WHEN CHANGING THE API (part 1 of 3)
-//
-// There are two changes you need to make to this file.
-//
-// + 1. Pick a new semver and define a new symbolic constant here, above all the
-// |    previous ones.  If in doubt about what constant to pick, choose a major
-// |    number greater than the previous one.
-// |
-// |    Add yours by duplicating this line, uncommenting the *second* copy, then
-// |    updating that copy for your version, leaving the first copy as an
-// |    example for the next person.
-// |
-// |    DON'T FORGET ABOUT STEP 2 BELOW AFTER THIS!
-// v
-// const VERSION_???: semver::Version = semver::Version::new(maj, min, patch);
-const VERSION_INITIAL: semver::Version = semver::Version::new(0, 0, 1);
+api_versions!([
+    // WHEN CHANGING THE API (part 1 of 2):
+    //
+    // +- Pick a new semver and define it in the list below.  The list MUST
+    // |  remain sorted, which generally means that your version should go at
+    // |  the very top.
+    // |
+    // |  Duplicate this line, uncomment the *second* copy, update that copy for
+    // |  your new API version, and leave the first copy commented out as an
+    // |  example for the next person.
+    // v
+    // (next_int, 0, 0, IDENT, "label"),
+    (0, 0, 1, INITIAL, "initial"),
+]);
 
-pub fn versions_supported() -> SupportedVersions {
-    SupportedVersions::new(&[
-        // WHEN CHANGING THE API (part 2 of 3):
-        //
-        // +- 2. Take the constant you added above and include it in this list
-        // |     here along with a human-readable label.  As above, duplicate
-        // |     this line, uncomment the *second* copy, then update that copy
-        // |     for your version, leaving the first copy as an example for the
-        // |     the next person.
-        // v
-        // SupportedVersion::new(&VERSION_???, "short-description-of-change"),
-        SupportedVersion::new(&VERSION_INITIAL, "initial"),
-    ])
-}
-
-// WHEN CHANGING THE API (part 3 of 3):
+// WHEN CHANGING THE API (part 2 of 2):
 //
-// As needed, use the VERSION_ constant you defined in step 1 above in the
-// "versions" field of Dropshot `endpoint` macros below.  See the Dropshot
-// documentation on API versioning.
+// The call to `api_versions!` above defines constants of type
+// `semver::Version` that you can use in your Dropshot API definition to specify
+// the version when a particular endpoint was added or removed.  For example, if
+// you used:
+//
+//     (2, 0, 0, ADD_FOOBAR, "add-foobar")
+//
+// Then you could use `VERSION_ADD_FOOBAR` as the version in which endpoints
+// were added or removed.
+// XXX-dap does this work
 
 #[dropshot::api_description]
 pub trait DnsServerApi {

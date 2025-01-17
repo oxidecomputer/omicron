@@ -5,7 +5,7 @@
 use anyhow::{bail, Context};
 use dropshot::{ApiDescription, ApiDescriptionBuildErrors, StubContext};
 use itertools::Either;
-use openapi_manager_types::ValidationContext;
+use openapi_manager_types::{SupportedVersions, ValidationContext};
 use openapiv3::OpenAPI;
 use std::{collections::BTreeMap, fmt};
 
@@ -129,7 +129,9 @@ impl ManagedApi {
         self.versions.is_versioned()
     }
 
-    pub fn iter_versions_semver(&self) -> impl Iterator<Item = &semver::Version> + '_ {
+    pub fn iter_versions_semver(
+        &self,
+    ) -> impl Iterator<Item = &semver::Version> + '_ {
         self.versions.iter_versions_semvers()
     }
 
@@ -331,7 +333,7 @@ impl Versions {
                 Either::Left(std::iter::once(version))
             }
             Versions::Versioned { supported_versions } => {
-                Either::Right(supported_versions.iter())
+                Either::Right(supported_versions.iter().map(|v| v.semver()))
             }
         }
     }
