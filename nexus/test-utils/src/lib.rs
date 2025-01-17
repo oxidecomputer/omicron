@@ -1795,7 +1795,7 @@ pub fn start_producer_server(
     let config = oximeter_producer::Config {
         server_info,
         registration_address: Some(nexus_address),
-        request_body_max_bytes: 1024,
+        default_request_body_max_bytes: 1024,
         log: LogConfig::Config(ConfigLogging::StderrTerminal {
             level: ConfigLoggingLevel::Error,
         }),
@@ -1873,7 +1873,7 @@ pub async fn start_dns_server(
         },
         &dropshot::ConfigDropshot {
             bind_address: "[::1]:0".parse().unwrap(),
-            request_body_max_bytes: 8 * 1024,
+            default_request_body_max_bytes: 8 * 1024,
             default_handler_task_mode: HandlerTaskMode::Detached,
             log_headers: vec![],
         },
