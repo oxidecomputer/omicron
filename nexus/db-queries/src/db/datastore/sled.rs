@@ -13,6 +13,7 @@ use crate::db::datastore::ValidateTransition;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::to_db_sled_policy;
+use crate::db::model::AffinityPolicy;
 use crate::db::model::Sled;
 use crate::db::model::SledResource;
 use crate::db::model::SledState;
@@ -20,6 +21,8 @@ use crate::db::model::SledUpdate;
 use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
 use crate::db::pool::DbConnection;
+use crate::db::queries::affinity::lookup_affinity_sleds_query;
+use crate::db::queries::affinity::lookup_anti_affinity_sleds_query;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
 use crate::db::TransactionError;
 use crate::transaction_retry::OptionalError;
@@ -40,7 +43,9 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::SledUuid;
+use std::collections::HashSet;
 use std::fmt;
 use strum::IntoEnumIterator;
 use thiserror::Error;
@@ -288,10 +293,7 @@ impl DataStore {
 
                     define_sql_function!(fn random() -> diesel::sql_types::Float);
 
-                    // We only actually care about one target here, so this
-                    // query should have a `.limit(1)` attached. We fetch all
-                    // sled targets to leave additional debugging information in
-                    // the logs, for now.
+                    // Fetch all viable sled targets
                     let sled_targets = sled_targets
                         .order(random())
                         .get_results_async::<Uuid>(&conn)
@@ -302,15 +304,180 @@ impl DataStore {
                         "sled_ids" => ?sled_targets,
                     );
 
-                    if sled_targets.is_empty() {
+                    let instance_id = InstanceUuid::from_untyped_uuid(resource_id);
+                    let anti_affinity_sleds = lookup_anti_affinity_sleds_query(
+                        instance_id,
+                    ).get_results_async::<(AffinityPolicy, Uuid)>(&conn).await?;
+
+                    println!("(db) anti_affinity_sleds: {anti_affinity_sleds:?}");
+
+                    let affinity_sleds = lookup_affinity_sleds_query(
+                        instance_id,
+                    ).get_results_async::<(AffinityPolicy, Uuid)>(&conn).await?;
+
+                    println!("(db) affinity_sleds: {affinity_sleds:?}");
+
+                    // We use the following logic to calculate a desirable sled,
+                    // given a possible set of "targets", and the information
+                    // from affinity groups.
+                    //
+                    // # Rules vs Preferenes
+                    //
+                    // Due to the flavors "affinity policy", it's possible to
+                    // bucket affinity choices into two categories: "rules" and
+                    // "preferences". "rules" are affinity dispositions for or
+                    // against sled placement that must be followed, and
+                    // "preferences" are affinity dispositions that should be
+                    // followed for sled selection, in order of "most
+                    // preferential" to "least preferential".
+                    //
+                    // As example of a "rule" is "an anti-affinity group exists,
+                    // containing a target sled, with affinity_policy = 'fail'".
+                    //
+                    // An example of a "preference" is "an anti-affinity group
+                    // exists, containing a target sled, but the policy is
+                    // 'allow'. We don't want to use it as a target, but we
+                    // will if there are no other choices."
+                    //
+                    // We apply rules before preferences to ensure they are
+                    // always respected. Furthermore, the evaluation of
+                    // preferences is a target-seeking operation, which
+                    // identifies the distinct sets of targets, and searches
+                    // them in decreasing preference order.
+                    //
+                    // # Logic
+                    //
+                    // ## Background: Notation
+                    //
+                    // We use the following symbols for sets below:
+                    // - ∩: Intersection of two sets (A ∩ B is "everything that
+                    // exists in A and also exists in B").
+                    // - Δ: Symmetric difference of two sets (A Δ B is
+                    // "everything that exists in A that does not exist in B).
+                    //
+                    // We also use the following notation for brevity:
+                    // - AA,P=Fail: All sleds sharing an anti-affinity instance
+                    // within a group with policy = 'fail'.
+                    // - AA,P=Allow: Same as above, but with policy = 'allow'.
+                    // - A,P=Fail: All sleds sharing an affinity instance within
+                    // a group with policy = 'fail'.
+                    // - A,P=Allow: Same as above, but with policy = 'allow'.
+                    //
+                    // ## Affinity: Apply Rules
+                    //
+                    // - Targets := All viable sleds for instance placement
+                    // - Banned := AA,P=Fail
+                    // - Required := A,P=Fail
+                    // - if Required.len() > 1: Fail (too many constraints).
+                    // - if Required.len() == 1...
+                    //   - ... if the entry exists in the "Banned" set: Fail
+                    //     (contradicting constraints 'Banned' + 'Required')
+                    //   - ... if the entry does not exist in "Targets": Fail
+                    //     ('Required' constraint not satisfiable)
+                    //   - ... if the entry does not exist in "Banned": Use it.
+                    //
+                    // If we have not yet picked a target, we can filter the
+                    // set of targets to ignore "banned" sleds, and then apply
+                    // preferences.
+                    //
+                    // - Targets := Targets Δ Banned
+                    //
+                    // ## Affinity: Apply Preferences
+                    //
+                    // - Preferred := Targets ∩ A,P=Allow
+                    // - Unpreferred := Targets ∩ AA,P=Allow
+                    // - Preferred := Preferred Δ Unpreferred
+                    // - If Preferred isn't empty, pick a target from it.
+                    // - Targets := Targets Δ Unpreferred
+                    // - If Targets isn't empty, pick a target from it.
+                    // - If Unpreferred isn't empty, pick a target from it.
+                    // - Fail, no targets are available.
+
+                    let mut targets: HashSet<_> = sled_targets.into_iter().collect();
+
+                    let banned = anti_affinity_sleds.iter().filter_map(|(policy, id)| {
+                        if *policy == AffinityPolicy::Fail {
+                            Some(*id)
+                        } else {
+                            None
+                        }
+                    }).collect::<HashSet<_>>();
+                    let required = affinity_sleds.iter().filter_map(|(policy, id)| {
+                        if *policy == AffinityPolicy::Fail {
+                            Some(*id)
+                        } else {
+                            None
+                        }
+                    }).collect::<HashSet<_>>();
+
+                    let sled_target = if required.len() > 1 {
+                        println!("(db) more than one required sled");
+                        // TODO: Better error
                         return Err(err.bail(SledReservationError::NotFound));
-                    }
+                    } else if let Some(required_id) = required.iter().next() {
+                        println!("(db) one required sled");
+                        if banned.contains(&required_id) {
+                            println!("(db) but the required sled is banned");
+                            // TODO: Better error
+                            return Err(err.bail(SledReservationError::NotFound));
+                        }
+                        if !targets.contains(&required_id) {
+                            println!("(db) but the required sled is not a target");
+                            // TODO: Better error
+                            return Err(err.bail(SledReservationError::NotFound));
+                        }
+                        *required_id
+                    } else {
+                        targets = targets.symmetric_difference(&banned).cloned().collect();
+
+                        let mut preferred = anti_affinity_sleds.iter().filter_map(|(policy, id)| {
+                            if *policy == AffinityPolicy::Allow {
+                                Some(*id)
+                            } else {
+                                None
+                            }
+                        }).collect::<HashSet<_>>();
+                        let mut unpreferred = affinity_sleds.iter().filter_map(|(policy, id)| {
+                            if *policy == AffinityPolicy::Allow {
+                                Some(*id)
+                            } else {
+                                None
+                            }
+                        }).collect::<HashSet<_>>();
+
+                        preferred = targets.intersection(&preferred).cloned().collect();
+                        unpreferred = targets.intersection(&unpreferred).cloned().collect();
+                        preferred = preferred.symmetric_difference(&unpreferred).cloned().collect();
+
+                        if let Some(target) = preferred.iter().next() {
+                            println!("(db) found a preferred target");
+                            *target
+                        } else {
+                            targets = targets.symmetric_difference(&unpreferred).cloned().collect();
+                            if let Some(target) = targets.iter().next() {
+                            println!("(db) found a viable target, neither preferred nor unpreferred");
+                                *target
+                            } else {
+                                if let Some(target) = unpreferred.iter().next() {
+                                    println!("(db) found a viable unpreferred target");
+                                    *target
+                                } else {
+                                    println!("(db) found no targets");
+                                    // TODO: Better error
+                                    return Err(err.bail(SledReservationError::NotFound));
+                                }
+                            }
+                        }
+                    };
+
+                    // TODO: Ensure our "target selection" still remains random
+                    // for the set from which we're choosing
 
                     // Create a SledResource record, associate it with the target
                     // sled.
                     let resource = SledResource::new(
                         resource_id,
-                        sled_targets[0],
+                        sled_target,
                         resource_kind,
                         resources,
                     );
@@ -846,7 +1013,9 @@ pub(in crate::db::datastore) mod test {
     };
     use crate::db::lookup::LookupPath;
     use crate::db::model::to_db_typed_uuid;
+    use crate::db::model::AntiAffinityGroup;
     use crate::db::model::ByteCount;
+    use crate::db::model::Project;
     use crate::db::model::SqlU32;
     use crate::db::pub_test_utils::TestDatabase;
     use anyhow::{Context, Result};
@@ -856,7 +1025,9 @@ pub(in crate::db::datastore) mod test {
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::PhysicalDiskPolicy;
     use nexus_db_model::PhysicalDiskState;
+    use nexus_types::external_api::params;
     use nexus_types::identity::Asset;
+    use nexus_types::identity::Resource;
     use omicron_common::api::external;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::GenericUuid;
@@ -1155,6 +1326,173 @@ pub(in crate::db::datastore) mod test {
         db.terminate().await;
         logctx.cleanup_successful();
     }
+
+    fn small_resource_request() -> db::model::Resources {
+        db::model::Resources::new(
+            1,
+            // Just require the bare non-zero amount of RAM.
+            ByteCount::try_from(1024).unwrap(),
+            ByteCount::try_from(1024).unwrap(),
+        )
+    }
+
+    async fn create_project(
+        opctx: &OpContext,
+        datastore: &DataStore,
+    ) -> (authz::Project, db::model::Project) {
+        let authz_silo = opctx.authn.silo_required().unwrap();
+
+        // Create a project
+        let project = Project::new(
+            authz_silo.id(),
+            params::ProjectCreate {
+                identity: external::IdentityMetadataCreateParams {
+                    name: "project".parse().unwrap(),
+                    description: "desc".to_string(),
+                },
+            },
+        );
+        datastore.project_create(&opctx, project).await.unwrap()
+    }
+
+    async fn create_anti_affinity_group(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        authz_project: &authz::Project,
+        name: &'static str,
+        policy: external::AffinityPolicy,
+    ) -> AntiAffinityGroup {
+        datastore
+            .anti_affinity_group_create(
+                &opctx,
+                &authz_project,
+                AntiAffinityGroup::new(
+                    authz_project.id(),
+                    params::AntiAffinityGroupCreate {
+                        identity: external::IdentityMetadataCreateParams {
+                            name: name.parse().unwrap(),
+                            description: "desc".to_string(),
+                        },
+                        policy,
+                        failure_domain: external::FailureDomain::Sled,
+                    },
+                ),
+            )
+            .await
+            .unwrap()
+    }
+
+    // This short-circuits some of the logic and checks we normally have when
+    // creating affinity groups, but makes testing easier.
+    async fn add_instance_to_anti_affinity_group(
+        datastore: &DataStore,
+        group_id: Uuid,
+        instance_id: Uuid,
+    ) {
+        use db::model::AntiAffinityGroupInstanceMembership;
+        use db::schema::anti_affinity_group_instance_membership::dsl as membership_dsl;
+        use omicron_uuid_kinds::AntiAffinityGroupUuid;
+
+        diesel::insert_into(
+            membership_dsl::anti_affinity_group_instance_membership,
+        )
+        .values(AntiAffinityGroupInstanceMembership::new(
+            AntiAffinityGroupUuid::from_untyped_uuid(group_id),
+            InstanceUuid::from_untyped_uuid(instance_id),
+        ))
+        .on_conflict((membership_dsl::group_id, membership_dsl::instance_id))
+        .do_nothing()
+        .execute_async(&*datastore.pool_connection_for_tests().await.unwrap())
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn sled_reservation_anti_affinity() {
+        let logctx = dev::test_setup_log("sled_reservation_anti_affinity");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, project) = create_project(&opctx, &datastore).await;
+
+        const SLED_COUNT: usize = 2;
+
+        let mut sleds = vec![];
+        for _ in 0..SLED_COUNT {
+            let (sled, _) =
+                datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+            println!("created sled: {}", sled.id());
+            sleds.push(sled);
+        }
+
+        let group = create_anti_affinity_group(
+            &opctx,
+            &datastore,
+            &authz_project,
+            "group",
+            external::AffinityPolicy::Fail,
+        )
+        .await;
+
+        // Create three instances, all in an anti-affinity group, even though we
+        // only have two sleds.
+        const INSTANCE_COUNT: usize = 3;
+        let mut instances = vec![];
+        for _ in 0..INSTANCE_COUNT {
+            let instance = Uuid::new_v4();
+            add_instance_to_anti_affinity_group(
+                &datastore,
+                group.id(),
+                instance,
+            )
+            .await;
+            instances.push(instance);
+        }
+
+        // We can create two of the instances, as we have two sleds.
+        for i in 0..SLED_COUNT {
+            // TODO: Check resource to see where it landed
+            let resource = datastore
+                .sled_reservation_create(
+                    &opctx,
+                    instances[i],
+                    db::model::SledResourceKind::Instance,
+                    small_resource_request(),
+                    db::model::SledReservationConstraints::none(),
+                )
+                .await
+                .unwrap();
+
+            println!("put {} on {}", i, resource.sled_id);
+        }
+
+        // However, we cannot place multiple instances on the same sled, due to
+        // the anti-affinity group. We expect this to throw an error.
+        let err = datastore
+            .sled_reservation_create(
+                &opctx,
+                instances[SLED_COUNT],
+                db::model::SledResourceKind::Instance,
+                small_resource_request(),
+                db::model::SledReservationConstraints::none(),
+            )
+            .await
+            .unwrap_err();
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // TODO: Want testing for:
+    //
+    // - AA,P = Allow
+    // - A,P = Fail
+    // - A,P = Fail, but no targets
+    // - A,P = Allow
+    // - AA,P = Fail + A,P = Fail, overlapping constraints
+    // - AA,P = Allow + A,P = Allow (other groups should have preference)
+    // - Validate that anti-affinity groups don't impact instances not within them
+    // - Validate that affinity groups don't impact instances not within them
+    // - A "more complex, many sled case" with overlapping groups
 
     async fn lookup_physical_disk(
         datastore: &DataStore,

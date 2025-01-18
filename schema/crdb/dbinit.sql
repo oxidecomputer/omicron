@@ -4101,7 +4101,7 @@ BEGIN;
 
 -- Describes what happens when
 -- (for affinity groups) instance cannot be co-located, or
--- (for ani-affinity groups) instance must be co-located, or
+-- (for anti-affinity groups) instance must be co-located, or
 CREATE TYPE IF NOT EXISTS omicron.public.affinity_policy AS ENUM (
     -- If the affinity request cannot be satisfied, fail.
     'fail',

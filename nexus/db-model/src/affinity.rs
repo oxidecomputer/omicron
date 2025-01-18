@@ -27,7 +27,7 @@ use omicron_uuid_kinds::InstanceUuid;
 use uuid::Uuid;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug)]
+    #[derive(SqlType, Debug, QueryId)]
     #[diesel(postgres_type(name = "affinity_policy", schema = "public"))]
     pub struct AffinityPolicyEnum;
 

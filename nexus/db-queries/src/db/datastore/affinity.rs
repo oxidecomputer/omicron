@@ -450,6 +450,9 @@ impl DataStore {
         Ok(())
     }
 
+    // TODO: Do we need to verify removal from affinity / anti-affinity groups
+    // during instance deletion? Probably yes?
+
     pub async fn anti_affinity_group_member_add(
         &self,
         opctx: &OpContext,

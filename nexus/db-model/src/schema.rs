@@ -2072,6 +2072,10 @@ allow_tables_to_appear_in_same_query!(
 allow_tables_to_appear_in_same_query!(hw_baseboard_id, inv_sled_agent,);
 
 allow_tables_to_appear_in_same_query!(
+    anti_affinity_group,
+    anti_affinity_group_instance_membership,
+    affinity_group,
+    affinity_group_instance_membership,
     bp_omicron_zone,
     bp_target,
     dataset,
