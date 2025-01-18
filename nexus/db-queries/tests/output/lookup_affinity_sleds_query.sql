@@ -1,7 +1,14 @@
 WITH
+  our_groups AS (SELECT group_id FROM affinity_group_instance_membership WHERE instance_id = $1),
   other_instances
     AS (
-      SELECT group_id, instance_id FROM affinity_group_instance_membership WHERE instance_id = $1
+      SELECT
+        affinity_group_instance_membership.group_id, instance_id
+      FROM
+        affinity_group_instance_membership
+        JOIN our_groups ON affinity_group_instance_membership.group_id = our_groups.group_id
+      WHERE
+        instance_id != $2
     ),
   other_instances_by_policy
     AS (
