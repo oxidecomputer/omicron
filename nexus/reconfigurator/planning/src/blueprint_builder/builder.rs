@@ -1876,6 +1876,7 @@ pub mod test {
     use nexus_reconfigurator_blippy::Blippy;
     use nexus_reconfigurator_blippy::BlippyReportSortKey;
     use nexus_types::deployment::BlueprintDatasetDisposition;
+    use nexus_types::deployment::BlueprintDiffer;
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::OmicronZoneNetworkResources;
     use nexus_types::external_api::views::SledPolicy;
@@ -2003,6 +2004,30 @@ pub mod test {
         verify_blueprint(&blueprint3);
         let diff = blueprint3.diff_since_blueprint(&blueprint2);
         println!("expecting new NTP and Crucible zones:\n{}", diff.display());
+        {
+            println!("---DIFFER START---\n");
+            let differ = BlueprintDiffer::new(&blueprint2, &blueprint3);
+            let output = differ.diff();
+            println!(" ADDED SLEDS:\n");
+            for (sled_id, tables) in output.added_sleds {
+                println!("  sled {sled_id} (active):\n");
+                // Write the physical disks table if it exists
+                if let Some(table) = tables.disks {
+                    println!("{table}\n");
+                }
+
+                // Write the datasets table if it exists
+                if let Some(table) = tables.datasets {
+                    println!("{table}\n");
+                }
+
+                // Write the zones table if it exists
+                if let Some(table) = tables.zones {
+                    println!("{table}\n");
+                }
+            }
+            println!("---DIFFER END ---\n");
+        }
 
         // No sleds were changed or removed.
         assert_eq!(diff.sleds_modified.len(), 0);

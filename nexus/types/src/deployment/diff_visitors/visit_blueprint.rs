@@ -61,12 +61,12 @@ pub trait VisitBlueprint<'e> {
     fn disks_visitor(&mut self) -> &mut Self::DisksVisitor;
     fn datasets_visitor(&mut self) -> &mut Self::DatasetsVisitor;
 
-    fn visit_root(
+    fn visit_blueprint(
         &mut self,
         ctx: &mut BpVisitorContext,
         node: Edit<'e, Blueprint>,
     ) {
-        visit_root(self, ctx, node);
+        visit_blueprint(self, ctx, node);
     }
 
     fn visit_sled_inserts(
@@ -181,7 +181,7 @@ pub trait VisitBlueprint<'e> {
     }
 }
 
-pub fn visit_root<'e, V>(
+pub fn visit_blueprint<'e, V>(
     v: &mut V,
     ctx: &mut BpVisitorContext,
     node: Edit<'e, Blueprint>,

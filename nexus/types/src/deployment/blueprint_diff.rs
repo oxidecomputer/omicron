@@ -803,17 +803,17 @@ impl BpDiffDatasets {
 
 /// Tables for added sleds in a blueprint diff
 pub struct AddedSledTables {
-    disks: Option<BpTable>,
-    datasets: Option<BpTable>,
-    zones: Option<BpTable>,
+    pub disks: Option<BpTable>,
+    pub datasets: Option<BpTable>,
+    pub zones: Option<BpTable>,
 }
 
 /// Output of a `BlueprintDiffer`
 #[derive(Default)]
 pub struct BpDiffOutput {
-    errors: Vec<String>,
-    warnings: Vec<String>,
-    added_sleds: BTreeMap<SledUuid, AddedSledTables>,
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+    pub added_sleds: BTreeMap<SledUuid, AddedSledTables>,
 }
 
 /// A mechanism for creating tables from blueprint diffs
@@ -831,8 +831,11 @@ impl<'e> BlueprintDiffer<'e> {
         BlueprintDiffer { before, after, output: BpDiffOutput::default() }
     }
 
-    pub fn diff(&mut self) -> BpDiffOutput {
-        todo!()
+    pub fn diff(mut self) -> BpDiffOutput {
+        let diff = self.before.diff(&self.after);
+        let mut ctx = BpVisitorContext::default();
+        self.visit_blueprint(&mut ctx, diff);
+        self.output
     }
 }
 
