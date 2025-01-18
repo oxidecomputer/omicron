@@ -25,10 +25,10 @@ use std::collections::BTreeMap;
 
 /// State and Resources for an inserted sled
 pub struct SledInsert<'e> {
-    sled_state: SledState,
-    zones: Option<&'e BlueprintZonesConfig>,
-    disks: Option<&'e BlueprintPhysicalDisksConfig>,
-    datasets: Option<&'e BlueprintDatasetsConfig>,
+    pub sled_state: SledState,
+    pub zones: Option<&'e BlueprintZonesConfig>,
+    pub disks: Option<&'e BlueprintPhysicalDisksConfig>,
+    pub datasets: Option<&'e BlueprintDatasetsConfig>,
 }
 
 impl<'e> SledInsert<'e> {
@@ -39,10 +39,10 @@ impl<'e> SledInsert<'e> {
 
 /// State and Resources for a removed sled
 pub struct SledRemove<'e> {
-    sled_state: SledState,
-    zones: Option<&'e BlueprintZonesConfig>,
-    disks: Option<&'e BlueprintPhysicalDisksConfig>,
-    datasets: Option<&'e BlueprintDatasetsConfig>,
+    pub sled_state: SledState,
+    pub zones: Option<&'e BlueprintZonesConfig>,
+    pub disks: Option<&'e BlueprintPhysicalDisksConfig>,
+    pub datasets: Option<&'e BlueprintDatasetsConfig>,
 }
 
 impl<'e> SledRemove<'e> {

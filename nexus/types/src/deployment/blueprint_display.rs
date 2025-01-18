@@ -89,6 +89,12 @@ pub enum BpGeneration {
     Diff { before: Option<Generation>, after: Option<Generation> },
 }
 
+impl From<Generation> for BpGeneration {
+    fn from(value: Generation) -> Self {
+        BpGeneration::Value(value)
+    }
+}
+
 impl BpGeneration {
     // Used when there isn't a corresponding generation
     pub fn unknown() -> Self {

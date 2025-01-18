@@ -10,10 +10,13 @@ use super::blueprint_display::{
     BpGeneration, BpOmicronZonesTableSchema, BpPhysicalDisksTableSchema,
     BpTable, BpTableColumn, BpTableData, BpTableRow, KvListWithHeading, KvPair,
 };
-use super::diff_visitors::visit_blueprint::VisitBlueprint;
+use super::diff_visitors::visit_blueprint::{SledInsert, VisitBlueprint};
 use super::diff_visitors::visit_blueprint_datasets_config::VisitBlueprintDatasetsConfig;
 use super::diff_visitors::visit_blueprint_physical_disks_config::VisitBlueprintPhysicalDisksConfig;
 use super::diff_visitors::visit_blueprint_zones_config::VisitBlueprintZonesConfig;
+use super::diff_visitors::BpVisitorContext;
+use super::diff_visitors::BpVisitorError;
+use super::diff_visitors::Change;
 use super::{
     zone_sort_key, Blueprint, ClickhouseClusterConfig,
     CockroachDbPreserveDowngrade, DiffBeforeClickhouseClusterConfig,
@@ -798,8 +801,20 @@ impl BpDiffDatasets {
     }
 }
 
+/// Tables for added sleds in a blueprint diff
+pub struct AddedSledTables {
+    disks: Option<BpTable>,
+    datasets: Option<BpTable>,
+    zones: Option<BpTable>,
+}
+
 /// Output of a `BlueprintDiffer`
-pub struct BpDiffOutput {}
+#[derive(Default)]
+pub struct BpDiffOutput {
+    errors: Vec<String>,
+    warnings: Vec<String>,
+    added_sleds: BTreeMap<SledUuid, AddedSledTables>,
+}
 
 /// A mechanism for creating tables from blueprint diffs
 pub struct BlueprintDiffer<'e> {
@@ -813,7 +828,7 @@ impl<'e> BlueprintDiffer<'e> {
         before: &'e Blueprint,
         after: &'e Blueprint,
     ) -> BlueprintDiffer<'e> {
-        BlueprintDiffer { before, after, output: BpDiffOutput {} }
+        BlueprintDiffer { before, after, output: BpDiffOutput::default() }
     }
 
     pub fn diff(&mut self) -> BpDiffOutput {
@@ -836,6 +851,93 @@ impl<'e> VisitBlueprint<'e> for BlueprintDiffer<'e> {
 
     fn datasets_visitor(&mut self) -> &mut Self::DatasetsVisitor {
         &mut *self
+    }
+
+    fn visit_sled_insert(
+        &mut self,
+        ctx: &mut BpVisitorContext,
+        node: &SledInsert<'e>,
+    ) {
+        let Some(sled_id) = ctx.sled_id else {
+            let err =
+                "Missing sled id in ctx for visit_sled_insert".to_string();
+            self.output.errors.push(err);
+            return;
+        };
+
+        let disks = node.disks.map(|disks_config| {
+            let rows = disks_config
+                .disks
+                .iter()
+                .map(|d| {
+                    BpTableRow::from_strings(
+                        BpDiffState::Added,
+                        vec![
+                            d.identity.vendor.clone(),
+                            d.identity.model.clone(),
+                            d.identity.serial.clone(),
+                        ],
+                    )
+                })
+                .collect();
+            BpTable::new(
+                BpPhysicalDisksTableSchema {},
+                disks_config.generation.into(),
+                rows,
+            )
+        });
+
+        let datasets = node.datasets.map(|datasets_config| {
+            // `self.datasets` is naturally ordered by ID, but that doesn't play
+            // well with expectorate-based tests: We end up sorted by (random)
+            // UUIDs. We redact the UUIDs, but that still results in test-to-test
+            // variance in the _order_ of the rows. We can work around this for now
+            // by sorting by dataset kind: after UUID redaction, that produces
+            // a stable table ordering for datasets.
+            let mut rows = datasets_config.datasets.iter().collect::<Vec<_>>();
+            rows.sort_unstable_by_key(|d| (&d.kind, &d.pool));
+            let rows = rows
+                .into_iter()
+                .map(move |dataset| {
+                    BpTableRow::from_strings(
+                        BpDiffState::Added,
+                        dataset.as_strings(),
+                    )
+                })
+                .collect();
+            BpTable::new(
+                BpDatasetsTableSchema {},
+                datasets_config.generation.into(),
+                rows,
+            )
+        });
+
+        let zones = node.zones.map(|zones_config| {
+            let rows = zones_config
+                .zones
+                .iter()
+                .map(|zone| {
+                    BpTableRow::from_strings(
+                        BpDiffState::Added,
+                        vec![
+                            zone.kind().report_str().to_string(),
+                            zone.id().to_string(),
+                            zone.disposition.to_string(),
+                            zone.underlay_ip().to_string(),
+                        ],
+                    )
+                })
+                .collect();
+            BpTable::new(
+                BpOmicronZonesTableSchema {},
+                zones_config.generation.into(),
+                rows,
+            )
+        });
+
+        self.output
+            .added_sleds
+            .insert(sled_id, AddedSledTables { disks, datasets, zones });
     }
 }
 
