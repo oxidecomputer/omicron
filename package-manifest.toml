@@ -210,7 +210,6 @@ source.type = "local"
 source.paths = [
   { from = "out/clickhouse", to = "/opt/oxide/clickhouse_server" },
   { from = "smf/clickhouse_server/manifest.xml", to = "/var/svc/manifest/site/clickhouse_server/manifest.xml" },
-  { from = "smf/clickhouse_server/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse_server.sh" },
   { from = "smf/clickhouse-admin-server", to = "/var/svc/manifest/site/clickhouse-admin-server" },
 ]
 output.type = "zone"
@@ -240,7 +239,6 @@ source.type = "local"
 source.paths = [
   { from = "out/clickhouse", to = "/opt/oxide/clickhouse_keeper" },
   { from = "smf/clickhouse_keeper/manifest.xml", to = "/var/svc/manifest/site/clickhouse_keeper/manifest.xml" },
-  { from = "smf/clickhouse_keeper/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse_keeper.sh" },
   { from = "smf/clickhouse-admin-keeper", to = "/var/svc/manifest/site/clickhouse-admin-keeper" },
 ]
 output.type = "zone"

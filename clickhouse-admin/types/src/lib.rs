@@ -122,11 +122,11 @@ impl ServerConfigurableSettings {
         let config = ReplicaConfig::new(
             logger,
             macros,
-            self.settings.listen_addr,
+            self.listen_addr(),
             servers.clone(),
             keepers.clone(),
-            self.settings.datastore_path.clone(),
-            self.generation,
+            self.datastore_path(),
+            self.generation(),
         );
 
         match create_dir(self.settings.config_dir.clone()) {
@@ -148,6 +148,14 @@ impl ServerConfigurableSettings {
 
     pub fn generation(&self) -> Generation {
         self.generation
+    }
+
+    fn listen_addr(&self) -> Ipv6Addr {
+        self.settings.listen_addr
+    }
+
+    fn datastore_path(&self) -> Utf8PathBuf {
+        self.settings.datastore_path.clone()
     }
 }
 
@@ -179,12 +187,11 @@ impl KeeperConfigurableSettings {
 
         let config = KeeperConfig::new(
             logger,
-            // TODO: make this nicer
-            self.settings.listen_addr,
-            self.settings.id,
-            self.settings.datastore_path.clone(),
+            self.listen_addr(),
+            self.id(),
+            self.datastore_path(),
             raft_config,
-            self.generation,
+            self.generation(),
         );
 
         match create_dir(self.settings.config_dir.clone()) {
@@ -206,6 +213,18 @@ impl KeeperConfigurableSettings {
 
     pub fn generation(&self) -> Generation {
         self.generation
+    }
+
+    fn listen_addr(&self) -> Ipv6Addr {
+        self.settings.listen_addr
+    }
+
+    fn id(&self) -> KeeperId {
+        self.settings.id
+    }
+
+    fn datastore_path(&self) -> Utf8PathBuf {
+        self.settings.datastore_path.clone()
     }
 }
 

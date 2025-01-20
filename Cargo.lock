@@ -7281,6 +7281,7 @@ dependencies = [
  "cfg-if",
  "chrono",
  "clap",
+ "clickhouse-admin-types",
  "crucible-agent-client",
  "derive_more",
  "display-error-chain",

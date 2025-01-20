@@ -37,6 +37,10 @@ use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
+use clickhouse_admin_types::CLICKHOUSE_KEEPER_CONFIG_DIR;
+use clickhouse_admin_types::CLICKHOUSE_SERVER_CONFIG_DIR;
+use clickhouse_admin_types::CLICKHOUSE_KEEPER_CONFIG_FILE;
+use clickhouse_admin_types::CLICKHOUSE_SERVER_CONFIG_FILE;
 use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
 use dropshot::HandlerTaskMode;
 use illumos_utils::addrobj::AddrObject;
@@ -1673,10 +1677,17 @@ impl ServiceManager {
 
                 let dns_service = Self::dns_install(info, None, None).await?;
 
+                let clickhouse_server_config =
+                    PropertyGroupBuilder::new("config")
+                        .add_property(
+                            "config_path",
+                            "astring",
+                            format!("{CLICKHOUSE_SERVER_CONFIG_DIR}/{CLICKHOUSE_SERVER_CONFIG_FILE}"),
+                        );
                 let disabled_clickhouse_server_service =
                     ServiceBuilder::new("oxide/clickhouse_server")
                         .add_instance(
-                            ServiceInstanceBuilder::new("default").disable(),
+                            ServiceInstanceBuilder::new("default").disable().add_property_group(clickhouse_server_config),
                         );
 
                 // We shouldn't need to hardcode a port here:
@@ -1754,10 +1765,17 @@ impl ServiceManager {
 
                 let dns_service = Self::dns_install(info, None, None).await?;
 
+                let clickhouse_keeper_config =
+                    PropertyGroupBuilder::new("config")
+                        .add_property(
+                            "config_path",
+                            "astring",
+                            format!("{CLICKHOUSE_KEEPER_CONFIG_DIR}/{CLICKHOUSE_KEEPER_CONFIG_FILE}"),
+                        );
                 let disaled_clickhouse_keeper_service =
                     ServiceBuilder::new("oxide/clickhouse_keeper")
                         .add_instance(
-                            ServiceInstanceBuilder::new("default").disable(),
+                            ServiceInstanceBuilder::new("default").disable().add_property_group(clickhouse_keeper_config),
                         );
 
                 // We shouldn't need to hardcode a port here:
