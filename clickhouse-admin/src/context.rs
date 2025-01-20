@@ -25,7 +25,8 @@ pub struct KeeperServerContext {
     clickward: Clickward,
     clickhouse_cli: ClickhouseCli,
     log: Logger,
-    generation: Option<Generation>,
+    // TODO: Use tokio mutex like theone above?
+    pub generation: std::sync::Mutex<Option<Generation>>,
 }
 
 impl KeeperServerContext {
@@ -41,7 +42,8 @@ impl KeeperServerContext {
         let config_path = Utf8PathBuf::from_str(CLICKHOUSE_KEEPER_CONFIG_DIR)
             .unwrap()
             .join(CLICKHOUSE_KEEPER_CONFIG_FILE);
-        let generation = read_generation_from_file(config_path)?;
+        let gen = read_generation_from_file(config_path)?;
+        let generation = std::sync::Mutex::new(gen);
         Ok(Self { clickward, clickhouse_cli, log, generation })
     }
 
@@ -58,13 +60,16 @@ impl KeeperServerContext {
     }
 
     pub fn generation(&self) -> Option<Generation> {
-        self.generation
+        self.generation.lock().unwrap().clone()
     }
 
-    // TODO: actually make this work
+    // TODO: Try this one next
+    // TODO: actually make this work?
     pub fn update_generation(mut self, new_generation: Generation) {
-        self.generation = Some(new_generation)
+        self.generation = std::sync::Mutex::new(Some(new_generation))
     }
+
+    
 }
 
 pub struct ServerContext {
@@ -73,7 +78,7 @@ pub struct ServerContext {
     oximeter_client: OximeterClient,
     initialization_lock: Arc<Mutex<()>>,
     log: Logger,
-    generation: Option<Generation>,
+    pub generation: std::sync::Mutex<Option<Generation>>,
 }
 
 impl ServerContext {
@@ -94,8 +99,8 @@ impl ServerContext {
         let config_path = Utf8PathBuf::from_str(CLICKHOUSE_SERVER_CONFIG_DIR)
             .unwrap()
             .join(CLICKHOUSE_SERVER_CONFIG_FILE);
-        let generation = read_generation_from_file(config_path)?;
-
+        let gen = read_generation_from_file(config_path)?;
+        let generation = std::sync::Mutex::new(gen);
         Ok(Self {
             clickhouse_cli,
             clickward,
@@ -127,12 +132,13 @@ impl ServerContext {
     }
 
     pub fn generation(&self) -> Option<Generation> {
-        self.generation
+        self.generation.lock().unwrap().clone()
     }
 
-    // TODO: actually make this work
+    // TODO: Try this one next
+    // TODO: actually make this work?
     pub fn update_generation(mut self, new_generation: Generation) {
-        self.generation = Some(new_generation)
+        self.generation = std::sync::Mutex::new(Some(new_generation))
     }
 }
 

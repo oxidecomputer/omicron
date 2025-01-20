@@ -66,6 +66,10 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
 
         let output = ctx.clickward().generate_server_config(replica_server)?;
 
+        // We want to update the generation number only if the config file has been
+        // generated successfully.
+        *ctx.generation.lock().unwrap() = Some(incoming_generation);
+
         // Once we have generated the client we can safely enable the clickhouse_server service
         let fmri = "svc:/oxide/clickhouse_server:default".to_string();
         Svcadm::enable_service(fmri)?;
@@ -185,6 +189,10 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
         };
 
         let output = ctx.clickward().generate_keeper_config(keeper)?;
+
+        // We want to update the generation number only if the config file has been
+        // generated successfully.
+        *ctx.generation.lock().unwrap() = Some(incoming_generation);
 
         // Once we have generated the client we can safely enable the clickhouse_keeper service
         let fmri = "svc:/oxide/clickhouse_keeper:default".to_string();

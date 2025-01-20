@@ -780,6 +780,12 @@ impl Generation {
         assert!(next_gen <= i64::MAX as u64);
         Generation(next_gen)
     }
+
+    // TODO: fix linter
+    #[allow(unused_assignments)]
+    pub fn update_with_override(&mut self, new_generation: Generation) {
+        *self = new_generation
+    }
 }
 
 impl Display for Generation {
