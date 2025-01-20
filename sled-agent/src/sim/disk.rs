@@ -174,7 +174,7 @@ impl SimDisk {
         let config = oximeter_producer::Config {
             server_info,
             registration_address: Some(nexus_address),
-            request_body_max_bytes: 2048,
+            default_request_body_max_bytes: 2048,
             log: LogConfig::Config(ConfigLogging::StderrTerminal {
                 level: ConfigLoggingLevel::Error,
             }),

@@ -380,7 +380,7 @@ dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { path = "clients/dpd-client" }
-dropshot = { version = "0.13.0", features = [ "usdt-probes" ] }
+dropshot = { version = "0.15.1", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.17"
 either = "1.13.0"
 expectorate = "1.1.0"
@@ -430,7 +430,7 @@ humantime = "2.1.0"
 hyper = "1.4.1"
 hyper-util = "0.1.10"
 hyper-rustls = "0.26.0"
-hyper-staticfile = "0.10.0"
+hyper-staticfile = "0.10.1"
 illumos-utils = { path = "illumos-utils" }
 iana-time-zone = "0.1.61"
 indent_write = "2.2.0"
@@ -650,6 +650,7 @@ tar = "0.4"
 tempfile = "3.10"
 term = "0.7"
 termios = "0.3"
+termtree = "0.5.1"
 textwrap = "0.16.1"
 test-strategy = "0.3.1"
 thiserror = "1.0"
@@ -672,7 +673,7 @@ update-common = { path = "update-common" }
 update-engine = { path = "update-engine" }
 url = "2.5.3"
 usdt = "0.5.0"
-uuid = { version = "1.10.0", features = ["serde", "v4"] }
+uuid = { version = "1.12.0", features = ["serde", "v4"] }
 uzers = "0.12"
 walkdir = "2.5"
 whoami = "1.5"

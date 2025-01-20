@@ -9,6 +9,7 @@ use crate::support_bundle::storage::SupportBundleQueryType;
 use camino::Utf8PathBuf;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
+use dropshot::ErrorStatusCode;
 use dropshot::FreeformBody;
 use dropshot::HttpError;
 use dropshot::HttpResponseAccepted;
@@ -763,12 +764,13 @@ fn method_unimplemented<T>() -> Result<T, HttpError> {
         // Use a client error here (405 Method Not Allowed vs 501 Not
         // Implemented) even though it isn't strictly accurate here, so tests
         // get to see the error message.
-        status_code: http::StatusCode::METHOD_NOT_ALLOWED,
+        status_code: ErrorStatusCode::METHOD_NOT_ALLOWED,
         error_code: None,
         external_message: "Method not implemented in sled-agent-sim"
             .to_string(),
         internal_message: "Method not implemented in sled-agent-sim"
             .to_string(),
+        headers: None,
     })
 }
 

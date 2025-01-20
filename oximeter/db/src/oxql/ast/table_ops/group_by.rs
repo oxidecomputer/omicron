@@ -19,6 +19,7 @@ use oxql_types::Table;
 use oxql_types::Timeseries;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::fmt;
 
 /// A table operation for grouping data by fields, apply a reducer to the
 /// remaining.
@@ -26,6 +27,20 @@ use std::collections::BTreeMap;
 pub struct GroupBy {
     pub identifiers: Vec<Ident>,
     pub reducer: Reducer,
+}
+
+impl fmt::Display for GroupBy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "group_by [")?;
+        let n_idents = self.identifiers.len();
+        for (i, ident) in self.identifiers.iter().enumerate() {
+            write!(f, "{}", ident.as_str())?;
+            if i < n_idents - 1 {
+                write!(f, ", ")?;
+            }
+        }
+        write!(f, "], {}", self.reducer)
+    }
 }
 
 impl GroupBy {
@@ -423,6 +438,15 @@ pub enum Reducer {
     Sum,
 }
 
+impl fmt::Display for Reducer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Reducer::Mean => write!(f, "mean"),
+            Reducer::Sum => write!(f, "sum"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{GroupBy, Reducer};
@@ -737,5 +761,27 @@ mod tests {
                 test_config = {test_config:?}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::GroupBy;
+    use super::Reducer;
+    use crate::oxql::ast::ident::Ident;
+
+    #[test]
+    fn test_group_by_display() {
+        let g = GroupBy {
+            identifiers: vec![
+                Ident(String::from("foo")),
+                Ident(String::from("bar")),
+            ],
+            reducer: Reducer::Mean,
+        };
+        assert_eq!(g.to_string(), "group_by [foo, bar], mean");
+
+        let g = GroupBy { identifiers: vec![], reducer: Reducer::Sum };
+        assert_eq!(g.to_string(), "group_by [], sum");
     }
 }
