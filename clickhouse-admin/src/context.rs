@@ -25,8 +25,7 @@ pub struct KeeperServerContext {
     clickward: Clickward,
     clickhouse_cli: ClickhouseCli,
     log: Logger,
-    // TODO: Use tokio mutex like theone above?
-    pub generation: std::sync::Mutex<Option<Generation>>,
+    pub generation: Mutex<Option<Generation>>,
 }
 
 impl KeeperServerContext {
@@ -42,8 +41,10 @@ impl KeeperServerContext {
         let config_path = Utf8PathBuf::from_str(CLICKHOUSE_KEEPER_CONFIG_DIR)
             .unwrap()
             .join(CLICKHOUSE_KEEPER_CONFIG_FILE);
+        // If there is already a configuration file with a generation number we'll
+        // use that. Otherwise, we set the generation number to None.
         let gen = read_generation_from_file(config_path)?;
-        let generation = std::sync::Mutex::new(gen);
+        let generation = Mutex::new(gen);
         Ok(Self { clickward, clickhouse_cli, log, generation })
     }
 
@@ -59,17 +60,15 @@ impl KeeperServerContext {
         &self.log
     }
 
-    pub fn generation(&self) -> Option<Generation> {
-        self.generation.lock().unwrap().clone()
+    pub async fn generation(&self) -> Option<Generation> {
+        self.generation.lock().await.clone()
     }
 
     // TODO: Try this one next
     // TODO: actually make this work?
-    pub fn update_generation(mut self, new_generation: Generation) {
-        self.generation = std::sync::Mutex::new(Some(new_generation))
-    }
-
-    
+    //  pub fn update_generation(mut self, new_generation: Generation) {
+    //      self.generation = std::sync::Mutex::new(Some(new_generation))
+    //  }
 }
 
 pub struct ServerContext {
@@ -78,7 +77,7 @@ pub struct ServerContext {
     oximeter_client: OximeterClient,
     initialization_lock: Arc<Mutex<()>>,
     log: Logger,
-    pub generation: std::sync::Mutex<Option<Generation>>,
+    pub generation: Mutex<Option<Generation>>,
 }
 
 impl ServerContext {
@@ -99,8 +98,11 @@ impl ServerContext {
         let config_path = Utf8PathBuf::from_str(CLICKHOUSE_SERVER_CONFIG_DIR)
             .unwrap()
             .join(CLICKHOUSE_SERVER_CONFIG_FILE);
+
+        // If there is already a configuration file with a generation number we'll
+        // use that. Otherwise, we set the generation number to None.
         let gen = read_generation_from_file(config_path)?;
-        let generation = std::sync::Mutex::new(gen);
+        let generation = Mutex::new(gen);
         Ok(Self {
             clickhouse_cli,
             clickward,
@@ -131,15 +133,15 @@ impl ServerContext {
         &self.log
     }
 
-    pub fn generation(&self) -> Option<Generation> {
-        self.generation.lock().unwrap().clone()
+    pub async fn generation(&self) -> Option<Generation> {
+        self.generation.lock().await.clone()
     }
 
     // TODO: Try this one next
     // TODO: actually make this work?
-    pub fn update_generation(mut self, new_generation: Generation) {
-        self.generation = std::sync::Mutex::new(Some(new_generation))
-    }
+    //    pub fn update_generation(mut self, new_generation: Generation) {
+    //        self.generation = std::sync::Mutex::new(Some(new_generation))
+    //    }
 }
 
 pub struct SingleServerContext {

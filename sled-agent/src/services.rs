@@ -38,8 +38,8 @@ use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use clickhouse_admin_types::CLICKHOUSE_KEEPER_CONFIG_DIR;
-use clickhouse_admin_types::CLICKHOUSE_SERVER_CONFIG_DIR;
 use clickhouse_admin_types::CLICKHOUSE_KEEPER_CONFIG_FILE;
+use clickhouse_admin_types::CLICKHOUSE_SERVER_CONFIG_DIR;
 use clickhouse_admin_types::CLICKHOUSE_SERVER_CONFIG_FILE;
 use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
 use dropshot::HandlerTaskMode;
@@ -1687,7 +1687,9 @@ impl ServiceManager {
                 let disabled_clickhouse_server_service =
                     ServiceBuilder::new("oxide/clickhouse_server")
                         .add_instance(
-                            ServiceInstanceBuilder::new("default").disable().add_property_group(clickhouse_server_config),
+                            ServiceInstanceBuilder::new("default")
+                                .disable()
+                                .add_property_group(clickhouse_server_config),
                         );
 
                 // We shouldn't need to hardcode a port here:
@@ -1775,7 +1777,9 @@ impl ServiceManager {
                 let disaled_clickhouse_keeper_service =
                     ServiceBuilder::new("oxide/clickhouse_keeper")
                         .add_instance(
-                            ServiceInstanceBuilder::new("default").disable().add_property_group(clickhouse_keeper_config),
+                            ServiceInstanceBuilder::new("default")
+                                .disable()
+                                .add_property_group(clickhouse_keeper_config),
                         );
 
                 // We shouldn't need to hardcode a port here:

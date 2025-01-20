@@ -78,6 +78,7 @@ impl WicketdApi for WicketdApiImpl {
         // need to fill in the bootstrap sleds first.
         let inventory = inventory_or_unavail(&ctx.mgs_handle).await?;
 
+        // TODO: Use this as inspiration for saving in cache
         let mut config = ctx.rss_config.lock().unwrap();
         config.update_with_inventory_and_bootstrap_peers(
             &inventory,
