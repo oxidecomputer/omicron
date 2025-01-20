@@ -8,7 +8,6 @@
 use super::{instance_common::VmmAndSledIds, instance_start, NexusSaga};
 use crate::{app::saga::create_saga_dag, Nexus};
 use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
-use camino::Utf8Path;
 use diesel::{
     BoolExpressionMethods, ExpressionMethods, QueryDsl, SelectableHelper,
 };
@@ -23,8 +22,6 @@ use nexus_db_queries::{
         DataStore,
     },
 };
-use nexus_test_interface::NexusServer;
-use nexus_test_utils::start_sled_agent;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::NameOrId;
@@ -806,36 +803,9 @@ pub(crate) async fn assert_no_failed_undo_steps(
     assert!(saga_node_events.is_empty());
 }
 
-pub(crate) async fn add_sleds(
-    cptestctx: &ControlPlaneTestContext,
-    num_sleds: usize,
-) -> Vec<(SledUuid, omicron_sled_agent::sim::Server)> {
-    let mut sas = Vec::with_capacity(num_sleds);
-    for _ in 0..num_sleds {
-        let sa_id = SledUuid::new_v4();
-        let log = cptestctx.logctx.log.new(o!("sled_id" => sa_id.to_string()));
-        let addr = cptestctx.server.get_http_server_internal_address().await;
-
-        info!(&cptestctx.logctx.log, "Adding simulated sled"; "sled_id" => %sa_id);
-        let update_dir = Utf8Path::new("/should/be/unused");
-        let sa = start_sled_agent(
-            log,
-            addr,
-            sa_id,
-            &update_dir,
-            omicron_sled_agent::sim::SimMode::Explicit,
-        )
-        .await
-        .unwrap();
-        sas.push((sa_id, sa));
-    }
-
-    sas
-}
-
 pub(crate) fn select_first_alternate_sled(
     db_vmm: &crate::app::db::model::Vmm,
-    other_sleds: &[(SledUuid, omicron_sled_agent::sim::Server)],
+    other_sleds: &[&omicron_sled_agent::sim::Server],
 ) -> SledUuid {
     let default_sled_uuid: SledUuid =
         nexus_test_utils::SLED_AGENT_UUID.parse().unwrap();
@@ -843,12 +813,12 @@ pub(crate) fn select_first_alternate_sled(
         panic!("need at least one other sled");
     }
 
-    if other_sleds.iter().any(|sled| sled.0 == default_sled_uuid) {
+    if other_sleds.iter().any(|sled| sled.sled_agent.id == default_sled_uuid) {
         panic!("default test sled agent was in other_sleds");
     }
 
     if db_vmm.sled_id == default_sled_uuid.into_untyped_uuid() {
-        other_sleds[0].0
+        other_sleds[0].sled_agent.id
     } else {
         default_sled_uuid
     }

@@ -624,11 +624,11 @@ mod tests {
         .await
     }
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_saga_basic_usage_succeeds(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+        let other_sleds: Vec<_> = cptestctx.all_sled_agents().skip(1).collect();
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
@@ -671,12 +671,12 @@ mod tests {
         );
     }
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_action_failure_can_unwind(
         cptestctx: &ControlPlaneTestContext,
     ) {
         let log = &cptestctx.logctx.log;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
+        let other_sleds: Vec<_> = cptestctx.all_sled_agents().skip(1).collect();
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;

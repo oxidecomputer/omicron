@@ -192,6 +192,10 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         self.sled_agents[0].sled_agent_id()
     }
 
+    pub fn second_sled_id(&self) -> SledUuid {
+        self.sled_agents[1].sled_agent_id()
+    }
+
     pub fn all_sled_agents(&self) -> impl Iterator<Item = &sim::Server> {
         self.sled_agents.iter().map(|sa| sa.server())
     }
