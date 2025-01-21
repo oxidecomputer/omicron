@@ -271,7 +271,7 @@ impl DbUrlOptions {
     }
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 pub struct DbFetchOptions {
     /// limit to apply to queries that fetch rows
     #[clap(
@@ -295,7 +295,7 @@ pub struct DbFetchOptions {
 }
 
 /// Subcommands that query or update the database
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, Clone)]
 enum DbCommands {
     /// Print information about the rack
     Rack(RackArgs),
@@ -341,25 +341,25 @@ enum DbCommands {
     Vmms(VmmListArgs),
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct RackArgs {
     #[command(subcommand)]
     command: RackCommands,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, Clone)]
 enum RackCommands {
     /// Summarize current racks
     List,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct DiskArgs {
     #[command(subcommand)]
     command: DiskCommands,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, Clone)]
 enum DiskCommands {
     /// Get info for a specific disk
     Info(DiskInfoArgs),
@@ -369,25 +369,25 @@ enum DiskCommands {
     Physical(DiskPhysicalArgs),
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct DiskInfoArgs {
     /// The UUID of the volume
     uuid: Uuid,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct DiskPhysicalArgs {
     /// The UUID of the physical disk
     uuid: Uuid,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct DnsArgs {
     #[command(subcommand)]
     command: DnsCommands,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, Clone)]
 enum DnsCommands {
     /// Summarize current version of all DNS zones
     Show,
@@ -397,7 +397,7 @@ enum DnsCommands {
     Names(DnsVersionArgs),
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct DnsVersionArgs {
     /// name of a DNS group
     #[arg(value_enum)]
@@ -421,13 +421,13 @@ impl CliDnsGroup {
     }
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct InstanceArgs {
     #[command(subcommand)]
     command: InstanceCommands,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, Clone)]
 enum InstanceCommands {
     /// list instances
     #[clap(alias = "ls")]
@@ -437,7 +437,7 @@ enum InstanceCommands {
     Info(InstanceInfoArgs),
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct InstanceListArgs {
     /// Only show the running instances
     #[arg(short, long, action=ArgAction::SetTrue)]
@@ -460,7 +460,7 @@ struct InstanceListArgs {
     states: Vec<db::model::InstanceState>,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct InstanceInfoArgs {
     /// the UUID of the instance to show details for
     #[clap(value_name = "UUID")]
@@ -487,13 +487,13 @@ struct InstanceInfoArgs {
     all: bool,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct InventoryArgs {
     #[command(subcommand)]
     command: InventoryCommands,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, Clone)]
 enum InventoryCommands {
     /// list all baseboards ever found
     BaseboardIds,
@@ -507,13 +507,13 @@ enum InventoryCommands {
     RotPages,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct CollectionsArgs {
     #[command(subcommand)]
     command: CollectionsCommands,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, Clone)]
 enum CollectionsCommands {
     /// list collections
     List,
@@ -521,7 +521,7 @@ enum CollectionsCommands {
     Show(CollectionsShowArgs),
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct CollectionsShowArgs {
     /// id of the collection
     id: CollectionUuid,
@@ -539,33 +539,33 @@ struct InvPhysicalDisksArgs {
     sled_id: Option<SledUuid>,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct PhysicalDisksArgs {
     /// Show disks that match the given filter
     #[clap(short = 'F', long, value_enum)]
     filter: Option<DiskFilter>,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct ReconfiguratorSaveArgs {
     /// where to save the output
     output_file: Utf8PathBuf,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct SledsArgs {
     /// Show sleds that match the given filter
     #[clap(short = 'F', long, value_enum)]
     filter: Option<SledFilter>,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct RegionArgs {
     #[command(subcommand)]
     command: RegionCommands,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, Clone)]
 enum RegionCommands {
     /// List regions that are still missing ports
     ListRegionsMissingPorts,
@@ -580,25 +580,25 @@ enum RegionCommands {
     FindDeletedVolumeRegions,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct RegionListArgs {
     /// Print region IDs only
     #[arg(short)]
     id_only: bool,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct RegionUsedByArgs {
     region_id: Vec<Uuid>,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct RegionReplacementArgs {
     #[command(subcommand)]
     command: RegionReplacementCommands,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, Clone)]
 enum RegionReplacementCommands {
     /// List region replacement requests
     List(RegionReplacementListArgs),
@@ -610,7 +610,7 @@ enum RegionReplacementCommands {
     Request(RegionReplacementRequestArgs),
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct RegionReplacementListArgs {
     /// Only show region replacement requests in this state
     #[clap(long)]
@@ -621,19 +621,19 @@ struct RegionReplacementListArgs {
     after: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct RegionReplacementInfoArgs {
     /// The UUID of the region replacement request
     replacement_id: Uuid,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct RegionReplacementRequestArgs {
     /// The UUID of the region to replace
     region_id: Uuid,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct NetworkArgs {
     #[command(subcommand)]
     command: NetworkCommands,
@@ -643,7 +643,7 @@ struct NetworkArgs {
     verbose: bool,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, Clone)]
 enum NetworkCommands {
     /// List external IPs
     ListEips,
@@ -651,13 +651,13 @@ enum NetworkCommands {
     ListVnics,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct MigrationsArgs {
     #[command(subcommand)]
     command: MigrationsCommands,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, Clone)]
 enum MigrationsCommands {
     /// List migrations
     #[clap(alias = "ls")]
@@ -667,7 +667,7 @@ enum MigrationsCommands {
     // than `list`...
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct MigrationsListArgs {
     /// Include only migrations where at least one side reports the migration
     /// is in progress.
@@ -720,13 +720,13 @@ struct MigrationsListArgs {
     verbose: bool,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct SnapshotArgs {
     #[command(subcommand)]
     command: SnapshotCommands,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, Clone)]
 enum SnapshotCommands {
     /// Get info for a specific snapshot
     Info(SnapshotInfoArgs),
@@ -734,19 +734,19 @@ enum SnapshotCommands {
     List,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct SnapshotInfoArgs {
     /// The UUID of the snapshot
     uuid: Uuid,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct RegionSnapshotReplacementArgs {
     #[command(subcommand)]
     command: RegionSnapshotReplacementCommands,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, Clone)]
 enum RegionSnapshotReplacementCommands {
     /// List region snapshot replacement requests
     List(RegionSnapshotReplacementListArgs),
@@ -758,7 +758,7 @@ enum RegionSnapshotReplacementCommands {
     Request(RegionSnapshotReplacementRequestArgs),
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct RegionSnapshotReplacementListArgs {
     /// Only show region snapshot replacement requests in this state
     #[clap(long)]
@@ -769,13 +769,13 @@ struct RegionSnapshotReplacementListArgs {
     after: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct RegionSnapshotReplacementInfoArgs {
     /// The UUID of the region snapshot replacement request
     replacement_id: Uuid,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct RegionSnapshotReplacementRequestArgs {
     /// The dataset id for a given region snapshot
     dataset_id: DatasetUuid,
@@ -787,13 +787,13 @@ struct RegionSnapshotReplacementRequestArgs {
     snapshot_id: Uuid,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct ValidateArgs {
     #[command(subcommand)]
     command: ValidateCommands,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, Clone)]
 enum ValidateCommands {
     /// Validate each `volume_references` column in the region snapshots table
     ValidateVolumeReferences,
@@ -808,20 +808,20 @@ enum ValidateCommands {
     ValidateRegionSnapshots,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct ValidateRegionsArgs {
     /// Delete Regions Nexus is unaware of
     #[clap(long, default_value_t = false)]
     clean_up_orphaned_regions: bool,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct VolumeArgs {
     #[command(subcommand)]
     command: VolumeCommands,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, Clone)]
 enum VolumeCommands {
     /// Get info for a specific volume
     Info(VolumeInfoArgs),
@@ -829,19 +829,19 @@ enum VolumeCommands {
     List,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct VolumeInfoArgs {
     /// The UUID of the volume
     uuid: Uuid,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct VmmArgs {
     #[command(subcommand)]
     command: VmmCommands,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, Clone)]
 enum VmmCommands {
     /// Get info for a specific VMM process
     #[clap(alias = "show")]
@@ -851,13 +851,13 @@ enum VmmCommands {
     List(VmmListArgs),
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct VmmInfoArgs {
     /// The UUID of the VMM process.
     uuid: Uuid,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct VmmListArgs {
     /// Enable verbose output.
     ///
@@ -884,6 +884,9 @@ struct VmmListArgs {
 
 impl DbArgs {
     /// Run a `omdb db` subcommand.
+    ///
+    /// Mostly delegates to the async block in this function, taking care to
+    /// properly terminate the database connection.
     pub(crate) async fn run_cmd(
         &self,
         omdb: &Omdb,
@@ -891,253 +894,260 @@ impl DbArgs {
     ) -> Result<(), anyhow::Error> {
         let datastore = self.db_url_opts.connect(omdb, log).await?;
         let opctx = OpContext::for_tests(log.clone(), datastore.clone());
-        let res = match &self.command {
-            DbCommands::Rack(RackArgs { command: RackCommands::List }) => {
-                cmd_db_rack_list(&opctx, &datastore, &self.fetch_opts).await
-            }
-            DbCommands::Disks(DiskArgs {
-                command: DiskCommands::Info(uuid),
-            }) => cmd_db_disk_info(&opctx, &datastore, uuid).await,
-            DbCommands::Disks(DiskArgs { command: DiskCommands::List }) => {
-                cmd_db_disk_list(&datastore, &self.fetch_opts).await
-            }
-            DbCommands::Disks(DiskArgs {
-                command: DiskCommands::Physical(uuid),
-            }) => {
-                cmd_db_disk_physical(&opctx, &datastore, &self.fetch_opts, uuid)
-                    .await
-            }
-            DbCommands::Dns(DnsArgs { command: DnsCommands::Show }) => {
-                cmd_db_dns_show(&opctx, &datastore, &self.fetch_opts).await
-            }
-            DbCommands::Dns(DnsArgs { command: DnsCommands::Diff(args) }) => {
-                cmd_db_dns_diff(&opctx, &datastore, &self.fetch_opts, args)
-                    .await
-            }
-            DbCommands::Dns(DnsArgs { command: DnsCommands::Names(args) }) => {
-                cmd_db_dns_names(&opctx, &datastore, &self.fetch_opts, args)
-                    .await
-            }
-            DbCommands::Inventory(inventory_args) => {
-                cmd_db_inventory(
-                    &opctx,
-                    &datastore,
-                    &self.fetch_opts,
-                    inventory_args,
-                )
-                .await
-            }
-            DbCommands::PhysicalDisks(args) => {
-                cmd_db_physical_disks(
-                    &opctx,
-                    &datastore,
-                    &self.fetch_opts,
-                    args,
-                )
-                .await
-            }
-            DbCommands::ReconfiguratorSave(reconfig_save_args) => {
-                cmd_db_reconfigurator_save(
-                    &opctx,
-                    &datastore,
-                    reconfig_save_args,
-                )
-                .await
-            }
-            DbCommands::Region(RegionArgs {
-                command: RegionCommands::ListRegionsMissingPorts,
-            }) => cmd_db_region_missing_porst(&opctx, &datastore).await,
-            DbCommands::Region(RegionArgs {
-                command: RegionCommands::List(region_list_args),
-            }) => {
-                cmd_db_region_list(
-                    &datastore,
-                    &self.fetch_opts,
-                    region_list_args,
-                )
-                .await
-            }
-            DbCommands::Region(RegionArgs {
-                command: RegionCommands::UsedBy(region_used_by_args),
-            }) => {
-                cmd_db_region_used_by(
-                    &datastore,
-                    &self.fetch_opts,
-                    region_used_by_args,
-                )
-                .await
-            }
-            DbCommands::Region(RegionArgs {
-                command: RegionCommands::FindDeletedVolumeRegions,
-            }) => cmd_db_region_find_deleted(&datastore).await,
-            DbCommands::RegionReplacement(RegionReplacementArgs {
-                command: RegionReplacementCommands::List(args),
-            }) => {
-                cmd_db_region_replacement_list(
-                    &datastore,
-                    &self.fetch_opts,
-                    args,
-                )
-                .await
-            }
-            DbCommands::RegionReplacement(RegionReplacementArgs {
-                command: RegionReplacementCommands::Status,
-            }) => {
-                cmd_db_region_replacement_status(
-                    &opctx,
-                    &datastore,
-                    &self.fetch_opts,
-                )
-                .await
-            }
-            DbCommands::RegionReplacement(RegionReplacementArgs {
-                command: RegionReplacementCommands::Info(args),
-            }) => {
-                cmd_db_region_replacement_info(&opctx, &datastore, args).await
-            }
-            DbCommands::RegionReplacement(RegionReplacementArgs {
-                command: RegionReplacementCommands::Request(args),
-            }) => {
-                let token = omdb.check_allow_destructive()?;
-                cmd_db_region_replacement_request(
-                    &opctx, &datastore, args, token,
-                )
-                .await
-            }
-            DbCommands::Sleds(args) => {
-                cmd_db_sleds(&opctx, &datastore, &self.fetch_opts, args).await
-            }
-            DbCommands::Instance(InstanceArgs {
-                command: InstanceCommands::List(args),
-            }) => {
-                cmd_db_instances(&opctx, &datastore, &self.fetch_opts, args)
-                    .await
-            }
-            DbCommands::Instance(InstanceArgs {
-                command: InstanceCommands::Info(args),
-            }) => {
-                cmd_db_instance_info(&opctx, &datastore, &self.fetch_opts, args)
-                    .await
-            }
-            DbCommands::Instances(instances_options) => {
-                cmd_db_instances(
-                    &opctx,
-                    &datastore,
-                    &self.fetch_opts,
-                    instances_options,
-                )
-                .await
-            }
-            DbCommands::Network(NetworkArgs {
-                command: NetworkCommands::ListEips,
-                verbose,
-            }) => {
-                cmd_db_eips(&opctx, &datastore, &self.fetch_opts, *verbose)
-                    .await
-            }
-            DbCommands::Network(NetworkArgs {
-                command: NetworkCommands::ListVnics,
-                verbose,
-            }) => {
-                cmd_db_network_list_vnics(
-                    &datastore,
-                    &self.fetch_opts,
-                    *verbose,
-                )
-                .await
-            }
-            DbCommands::Migrations(MigrationsArgs {
-                command: MigrationsCommands::List(args),
-            }) => {
-                cmd_db_migrations_list(&datastore, &self.fetch_opts, args).await
-            }
-            DbCommands::Snapshots(SnapshotArgs {
-                command: SnapshotCommands::Info(uuid),
-            }) => cmd_db_snapshot_info(&opctx, &datastore, uuid).await,
-            DbCommands::Snapshots(SnapshotArgs {
-                command: SnapshotCommands::List,
-            }) => cmd_db_snapshot_list(&datastore, &self.fetch_opts).await,
-            DbCommands::RegionSnapshotReplacement(
-                RegionSnapshotReplacementArgs {
-                    command: RegionSnapshotReplacementCommands::List(args),
-                },
-            ) => {
-                cmd_db_region_snapshot_replacement_list(
-                    &datastore,
-                    &self.fetch_opts,
-                    args,
-                )
-                .await
-            }
-            DbCommands::RegionSnapshotReplacement(
-                RegionSnapshotReplacementArgs {
-                    command: RegionSnapshotReplacementCommands::Status,
-                },
-            ) => {
-                cmd_db_region_snapshot_replacement_status(
-                    &opctx,
-                    &datastore,
-                    &self.fetch_opts,
-                )
-                .await
-            }
-            DbCommands::RegionSnapshotReplacement(
-                RegionSnapshotReplacementArgs {
-                    command: RegionSnapshotReplacementCommands::Info(args),
-                },
-            ) => {
-                cmd_db_region_snapshot_replacement_info(
-                    &opctx, &datastore, args,
-                )
-                .await
-            }
-            DbCommands::RegionSnapshotReplacement(
-                RegionSnapshotReplacementArgs {
-                    command: RegionSnapshotReplacementCommands::Request(args),
-                },
-            ) => {
-                let token = omdb.check_allow_destructive()?;
-                cmd_db_region_snapshot_replacement_request(
-                    &opctx, &datastore, args, token,
-                )
-                .await
-            }
-            DbCommands::Validate(ValidateArgs {
-                command: ValidateCommands::ValidateVolumeReferences,
-            }) => cmd_db_validate_volume_references(&datastore).await,
-            DbCommands::Validate(ValidateArgs {
-                command: ValidateCommands::ValidateRegions(args),
-            }) => {
-                let clean_up_orphaned_regions =
-                    if args.clean_up_orphaned_regions {
+        let res = {
+            let command = self.command.clone();
+            let fetch_opts = self.fetch_opts.clone();
+            let datastore = datastore.clone();
+            async move {
+                match &command {
+                    DbCommands::Rack(RackArgs { command: RackCommands::List }) => {
+                        cmd_db_rack_list(&opctx, &datastore, &fetch_opts).await
+                    }
+                    DbCommands::Disks(DiskArgs {
+                        command: DiskCommands::Info(uuid),
+                    }) => cmd_db_disk_info(&opctx, &datastore, uuid).await,
+                    DbCommands::Disks(DiskArgs { command: DiskCommands::List }) => {
+                        cmd_db_disk_list(&datastore, &fetch_opts).await
+                    }
+                    DbCommands::Disks(DiskArgs {
+                        command: DiskCommands::Physical(uuid),
+                    }) => {
+                        cmd_db_disk_physical(&opctx, &datastore, &fetch_opts, uuid)
+                            .await
+                    }
+                    DbCommands::Dns(DnsArgs { command: DnsCommands::Show }) => {
+                        cmd_db_dns_show(&opctx, &datastore, &fetch_opts).await
+                    }
+                    DbCommands::Dns(DnsArgs { command: DnsCommands::Diff(args) }) => {
+                        cmd_db_dns_diff(&opctx, &datastore, &fetch_opts, args)
+                            .await
+                    }
+                    DbCommands::Dns(DnsArgs { command: DnsCommands::Names(args) }) => {
+                        cmd_db_dns_names(&opctx, &datastore, &fetch_opts, args)
+                            .await
+                    }
+                    DbCommands::Inventory(inventory_args) => {
+                        cmd_db_inventory(
+                            &opctx,
+                            &datastore,
+                            &fetch_opts,
+                            inventory_args,
+                        )
+                        .await
+                    }
+                    DbCommands::PhysicalDisks(args) => {
+                        cmd_db_physical_disks(
+                            &opctx,
+                            &datastore,
+                            &fetch_opts,
+                            args,
+                        )
+                        .await
+                    }
+                    DbCommands::ReconfiguratorSave(reconfig_save_args) => {
+                        cmd_db_reconfigurator_save(
+                            &opctx,
+                            &datastore,
+                            reconfig_save_args,
+                        )
+                        .await
+                    }
+                    DbCommands::Region(RegionArgs {
+                        command: RegionCommands::ListRegionsMissingPorts,
+                    }) => cmd_db_region_missing_porst(&opctx, &datastore).await,
+                    DbCommands::Region(RegionArgs {
+                        command: RegionCommands::List(region_list_args),
+                    }) => {
+                        cmd_db_region_list(
+                            &datastore,
+                            &fetch_opts,
+                            region_list_args,
+                        )
+                        .await
+                    }
+                    DbCommands::Region(RegionArgs {
+                        command: RegionCommands::UsedBy(region_used_by_args),
+                    }) => {
+                        cmd_db_region_used_by(
+                            &datastore,
+                            &fetch_opts,
+                            region_used_by_args,
+                        )
+                        .await
+                    }
+                    DbCommands::Region(RegionArgs {
+                        command: RegionCommands::FindDeletedVolumeRegions,
+                    }) => cmd_db_region_find_deleted(&datastore).await,
+                    DbCommands::RegionReplacement(RegionReplacementArgs {
+                        command: RegionReplacementCommands::List(args),
+                    }) => {
+                        cmd_db_region_replacement_list(
+                            &datastore,
+                            &fetch_opts,
+                            args,
+                        )
+                        .await
+                    }
+                    DbCommands::RegionReplacement(RegionReplacementArgs {
+                        command: RegionReplacementCommands::Status,
+                    }) => {
+                        cmd_db_region_replacement_status(
+                            &opctx,
+                            &datastore,
+                            &fetch_opts,
+                        )
+                        .await
+                    }
+                    DbCommands::RegionReplacement(RegionReplacementArgs {
+                        command: RegionReplacementCommands::Info(args),
+                    }) => {
+                        cmd_db_region_replacement_info(&opctx, &datastore, args).await
+                    }
+                    DbCommands::RegionReplacement(RegionReplacementArgs {
+                        command: RegionReplacementCommands::Request(args),
+                    }) => {
                         let token = omdb.check_allow_destructive()?;
-                        CleanUpOrphanedRegions::Yes { _token: token }
-                    } else {
-                        CleanUpOrphanedRegions::No
-                    };
+                        cmd_db_region_replacement_request(
+                            &opctx, &datastore, args, token,
+                        )
+                        .await
+                    }
+                    DbCommands::Sleds(args) => {
+                        cmd_db_sleds(&opctx, &datastore, &fetch_opts, args).await
+                    }
+                    DbCommands::Instance(InstanceArgs {
+                        command: InstanceCommands::List(args),
+                    }) => {
+                        cmd_db_instances(&opctx, &datastore, &fetch_opts, args)
+                            .await
+                    }
+                    DbCommands::Instance(InstanceArgs {
+                        command: InstanceCommands::Info(args),
+                    }) => {
+                        cmd_db_instance_info(&opctx, &datastore, &fetch_opts, args)
+                            .await
+                    }
+                    DbCommands::Instances(instances_options) => {
+                        cmd_db_instances(
+                            &opctx,
+                            &datastore,
+                            &fetch_opts,
+                            instances_options,
+                        )
+                        .await
+                    }
+                    DbCommands::Network(NetworkArgs {
+                        command: NetworkCommands::ListEips,
+                        verbose,
+                    }) => {
+                        cmd_db_eips(&opctx, &datastore, &fetch_opts, *verbose)
+                            .await
+                    }
+                    DbCommands::Network(NetworkArgs {
+                        command: NetworkCommands::ListVnics,
+                        verbose,
+                    }) => {
+                        cmd_db_network_list_vnics(
+                            &datastore,
+                            &fetch_opts,
+                            *verbose,
+                        )
+                        .await
+                    }
+                    DbCommands::Migrations(MigrationsArgs {
+                        command: MigrationsCommands::List(args),
+                    }) => {
+                        cmd_db_migrations_list(&datastore, &fetch_opts, args).await
+                    }
+                    DbCommands::Snapshots(SnapshotArgs {
+                        command: SnapshotCommands::Info(uuid),
+                    }) => cmd_db_snapshot_info(&opctx, &datastore, uuid).await,
+                    DbCommands::Snapshots(SnapshotArgs {
+                        command: SnapshotCommands::List,
+                    }) => cmd_db_snapshot_list(&datastore, &fetch_opts).await,
+                    DbCommands::RegionSnapshotReplacement(
+                        RegionSnapshotReplacementArgs {
+                            command: RegionSnapshotReplacementCommands::List(args),
+                        },
+                    ) => {
+                        cmd_db_region_snapshot_replacement_list(
+                            &datastore,
+                            &fetch_opts,
+                            args,
+                        )
+                        .await
+                    }
+                    DbCommands::RegionSnapshotReplacement(
+                        RegionSnapshotReplacementArgs {
+                            command: RegionSnapshotReplacementCommands::Status,
+                        },
+                    ) => {
+                        cmd_db_region_snapshot_replacement_status(
+                            &opctx,
+                            &datastore,
+                            &fetch_opts,
+                        )
+                        .await
+                    }
+                    DbCommands::RegionSnapshotReplacement(
+                        RegionSnapshotReplacementArgs {
+                            command: RegionSnapshotReplacementCommands::Info(args),
+                        },
+                    ) => {
+                        cmd_db_region_snapshot_replacement_info(
+                            &opctx, &datastore, args,
+                        )
+                        .await
+                    }
+                    DbCommands::RegionSnapshotReplacement(
+                        RegionSnapshotReplacementArgs {
+                            command: RegionSnapshotReplacementCommands::Request(args),
+                        },
+                    ) => {
+                        let token = omdb.check_allow_destructive()?;
+                        cmd_db_region_snapshot_replacement_request(
+                            &opctx, &datastore, args, token,
+                        )
+                        .await
+                    }
+                    DbCommands::Validate(ValidateArgs {
+                        command: ValidateCommands::ValidateVolumeReferences,
+                    }) => cmd_db_validate_volume_references(&datastore).await,
+                    DbCommands::Validate(ValidateArgs {
+                        command: ValidateCommands::ValidateRegions(args),
+                    }) => {
+                        let clean_up_orphaned_regions =
+                            if args.clean_up_orphaned_regions {
+                                let token = omdb.check_allow_destructive()?;
+                                CleanUpOrphanedRegions::Yes { _token: token }
+                            } else {
+                                CleanUpOrphanedRegions::No
+                            };
 
-                cmd_db_validate_regions(&datastore, clean_up_orphaned_regions)
-                    .await
-            }
-            DbCommands::Validate(ValidateArgs {
-                command: ValidateCommands::ValidateRegionSnapshots,
-            }) => cmd_db_validate_region_snapshots(&datastore).await,
-            DbCommands::Volumes(VolumeArgs {
-                command: VolumeCommands::Info(uuid),
-            }) => cmd_db_volume_info(&datastore, uuid).await,
-            DbCommands::Volumes(VolumeArgs {
-                command: VolumeCommands::List,
-            }) => cmd_db_volume_list(&datastore, &self.fetch_opts).await,
+                        cmd_db_validate_regions(&datastore, clean_up_orphaned_regions)
+                            .await
+                    }
+                    DbCommands::Validate(ValidateArgs {
+                        command: ValidateCommands::ValidateRegionSnapshots,
+                    }) => cmd_db_validate_region_snapshots(&datastore).await,
+                    DbCommands::Volumes(VolumeArgs {
+                        command: VolumeCommands::Info(uuid),
+                    }) => cmd_db_volume_info(&datastore, uuid).await,
+                    DbCommands::Volumes(VolumeArgs {
+                        command: VolumeCommands::List,
+                    }) => cmd_db_volume_list(&datastore, &fetch_opts).await,
 
-            DbCommands::Vmm(VmmArgs { command: VmmCommands::Info(args) }) => {
-                cmd_db_vmm_info(&opctx, &datastore, &self.fetch_opts, &args)
-                    .await
+                    DbCommands::Vmm(VmmArgs { command: VmmCommands::Info(args) }) => {
+                        cmd_db_vmm_info(&opctx, &datastore, &fetch_opts, &args)
+                            .await
+                    }
+                    DbCommands::Vmm(VmmArgs { command: VmmCommands::List(args) })
+                    | DbCommands::Vmms(args) => {
+                        cmd_db_vmm_list(&datastore, &fetch_opts, args).await
+                    }
+                }
             }
-            DbCommands::Vmm(VmmArgs { command: VmmCommands::List(args) })
-            | DbCommands::Vmms(args) => {
-                cmd_db_vmm_list(&datastore, &self.fetch_opts, args).await
-            }
-        };
+        }.await;
         datastore.terminate().await;
         res
     }
