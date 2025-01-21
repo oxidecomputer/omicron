@@ -356,8 +356,8 @@ mod test {
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::VolumeUuid;
-    use sled_agent_client::types::CrucibleOpts;
-    use sled_agent_client::types::VolumeConstructionRequest;
+    use sled_agent_client::CrucibleOpts;
+    use sled_agent_client::VolumeConstructionRequest;
     use std::collections::BTreeMap;
     use uuid::Uuid;
 
@@ -703,10 +703,7 @@ mod test {
                             gen: 1,
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
-                                target: vec![
-                                    // the region snapshot
-                                    String::from("[::1]:12345"),
-                                ],
+                                target: vec!["[::1]:12345".parse().unwrap()],
                                 lossy: false,
                                 flush_timeout: None,
                                 key: None,

@@ -12,10 +12,10 @@ use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
 use display_error_chain::DisplayErrorChain;
 use dropshot::{
-    ApiDescription, Body, FreeformBody, HttpError, HttpResponseAccepted,
-    HttpResponseCreated, HttpResponseDeleted, HttpResponseHeaders,
-    HttpResponseOk, HttpResponseUpdatedNoContent, Path, Query, RequestContext,
-    StreamingBody, TypedBody,
+    ApiDescription, Body, ErrorStatusCode, FreeformBody, HttpError,
+    HttpResponseAccepted, HttpResponseCreated, HttpResponseDeleted,
+    HttpResponseHeaders, HttpResponseOk, HttpResponseUpdatedNoContent, Path,
+    Query, RequestContext, StreamingBody, TypedBody,
 };
 use nexus_sled_agent_shared::inventory::{
     Inventory, OmicronZonesConfig, SledRole,
@@ -53,7 +53,9 @@ use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     StorageLimit, ZoneBundleId, ZoneBundleMetadata,
 };
-use sled_diagnostics::SledDiagnosticsCommandHttpOutput;
+use sled_diagnostics::{
+    SledDiagnosticsCommandHttpOutput, SledDiagnosticsQueryOutput,
+};
 use std::collections::BTreeMap;
 
 type SledApiDescription = ApiDescription<SledAgent>;
@@ -803,10 +805,11 @@ impl SledAgentApi for SledAgentImpl {
         .map_err(|e| {
             let message = format!("Failed to add sled to rack cluster: {e}");
             HttpError {
-                status_code: http::StatusCode::INTERNAL_SERVER_ERROR,
+                status_code: ErrorStatusCode::INTERNAL_SERVER_ERROR,
                 error_code: None,
                 external_message: message.clone(),
                 internal_message: message,
+                headers: None,
             }
         })?;
         Ok(HttpResponseUpdatedNoContent())
@@ -854,19 +857,21 @@ impl SledAgentApi for SledAgentImpl {
                     DisplayErrorChain::new(&err)
                 );
                 return Err(HttpError {
-                    status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                    status_code: ErrorStatusCode::SERVICE_UNAVAILABLE,
                     error_code: None,
                     external_message: message.clone(),
                     internal_message: message,
+                    headers: None,
                 });
             }
             None => {
                 let message = format!("no disk found for slot {boot_disk:?}",);
                 return Err(HttpError {
-                    status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                    status_code: ErrorStatusCode::SERVICE_UNAVAILABLE,
                     error_code: None,
                     external_message: message.clone(),
                     internal_message: message,
+                    headers: None,
                 });
             }
         };
@@ -964,41 +969,79 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn support_zoneadm_info(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
         let sa = request_context.context();
         let res = sa.support_zoneadm_info().await;
-        Ok(HttpResponseOk(FreeformBody(res.get_output().into())))
+        Ok(HttpResponseOk(res.get_output()))
     }
 
     async fn support_ipadm_info(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
         let sa = request_context.context();
-        let output = sa
-            .support_ipadm_info()
-            .await
-            .into_iter()
-            .map(|cmd| cmd.get_output())
-            .collect::<Vec<_>>()
-            .as_slice()
-            .join("\n\n");
-
-        Ok(HttpResponseOk(FreeformBody(output.into())))
+        Ok(HttpResponseOk(
+            sa.support_ipadm_info()
+                .await
+                .into_iter()
+                .map(|cmd| cmd.get_output())
+                .collect::<Vec<_>>(),
+        ))
     }
 
     async fn support_dladm_info(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
         let sa = request_context.context();
-        let output = sa
-            .support_dladm_info()
-            .await
-            .into_iter()
-            .map(|cmd| cmd.get_output())
-            .collect::<Vec<_>>()
-            .as_slice()
-            .join("\n\n");
+        Ok(HttpResponseOk(
+            sa.support_dladm_info()
+                .await
+                .into_iter()
+                .map(|cmd| cmd.get_output())
+                .collect::<Vec<_>>(),
+        ))
+    }
 
-        Ok(HttpResponseOk(FreeformBody(output.into())))
+    async fn support_pargs_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
+        let sa = request_context.context();
+        Ok(HttpResponseOk(
+            sa.support_pargs_info()
+                .await
+                .into_iter()
+                .map(|cmd| cmd.get_output())
+                .collect::<Vec<_>>(),
+        ))
+    }
+
+    async fn support_pstack_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
+        let sa = request_context.context();
+        Ok(HttpResponseOk(
+            sa.support_pstack_info()
+                .await
+                .into_iter()
+                .map(|cmd| cmd.get_output())
+                .collect::<Vec<_>>(),
+        ))
+    }
+
+    async fn support_pfiles_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
+        let sa = request_context.context();
+        Ok(HttpResponseOk(
+            sa.support_pfiles_info()
+                .await
+                .into_iter()
+                .map(|cmd| cmd.get_output())
+                .collect::<Vec<_>>(),
+        ))
     }
 }

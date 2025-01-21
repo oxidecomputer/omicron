@@ -1385,7 +1385,7 @@ mod test {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::VolumeUuid;
-    use sled_agent_client::types::VolumeConstructionRequest;
+    use sled_agent_client::VolumeConstructionRequest;
 
     #[tokio::test]
     async fn test_one_replacement_per_volume() {

@@ -128,7 +128,7 @@ impl<'a, S: StepSpec> AbortMessageDisplay<'a, S> {
     }
 }
 
-impl<'a, S: StepSpec> fmt::Display for AbortMessageDisplay<'a, S> {
+impl<S: StepSpec> fmt::Display for AbortMessageDisplay<'_, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.reason {
             AbortReason::StepAborted(info) => {

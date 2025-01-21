@@ -644,9 +644,9 @@ async fn test_instance_start_creates_networking_state(
     let mut sled_agents: Vec<&Arc<SledAgent>> =
         additional_sleds.iter().map(|x| &x.sled_agent).collect();
 
-    sled_agents.push(&cptestctx.sled_agent.sled_agent);
+    sled_agents.push(&cptestctx.first_sled_agent());
     for agent in &sled_agents {
-        agent.v2p_mappings.lock().await.clear();
+        agent.v2p_mappings.lock().unwrap().clear();
     }
 
     // Start the instance and make sure that it gets to Running.
@@ -1004,13 +1004,13 @@ async fn test_instance_migrate_v2p_and_routes(
         .expect("running instance should have a sled")
         .sled_id;
 
-    let mut sled_agents = vec![cptestctx.sled_agent.sled_agent.clone()];
+    let mut sled_agents = vec![cptestctx.first_sled_agent().clone()];
     sled_agents.extend(other_sleds.iter().map(|tup| tup.1.sled_agent.clone()));
     for sled_agent in &sled_agents {
         assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni).await;
     }
 
-    let testctx_sled_id = cptestctx.sled_agent.sled_agent.id;
+    let testctx_sled_id = cptestctx.first_sled_agent().id;
     let dst_sled_id = if original_sled_id == testctx_sled_id {
         other_sleds[0].0
     } else {
@@ -1374,15 +1374,20 @@ async fn test_instance_failed_when_on_expunged_sled(
 
     // The restarted instance should now transition back to `Running`, on its
     // new sled.
-    instance_wait_for_vmm_registration(cptestctx, &instance2_id).await;
-    instance_simulate(nexus, &instance2_id).await;
-    instance_wait_for_state(client, instance2_id, InstanceState::Running).await;
+    instance_wait_for_simulated_transition(
+        &cptestctx,
+        &instance2_id,
+        InstanceState::Running,
+    )
+    .await;
 
     // The auto-restartable instance should be...restarted automatically.
-
-    instance_wait_for_vmm_registration(cptestctx, &instance3_id).await;
-    instance_simulate(nexus, &instance3_id).await;
-    instance_wait_for_state(client, instance3_id, InstanceState::Running).await;
+    instance_wait_for_simulated_transition(
+        &cptestctx,
+        &instance3_id,
+        InstanceState::Running,
+    )
+    .await;
 }
 
 // Verifies that the instance-watcher background task transitions an instance
@@ -1393,7 +1398,6 @@ async fn test_instance_failed_by_instance_watcher_automatically_reincarnates(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.server_context().nexus;
     let instance_id = dbg!(
         make_forgotten_instance(
             &cptestctx,
@@ -1430,10 +1434,13 @@ async fn test_instance_failed_by_instance_watcher_automatically_reincarnates(
     // it.
     dbg!(instance_wait_for_vmm_registration(cptestctx, &instance_id).await);
     // Now, we can actually poke the instance.
-    dbg!(instance_simulate(nexus, &instance_id).await);
     dbg!(
-        instance_wait_for_state(client, instance_id, InstanceState::Running)
-            .await
+        instance_wait_for_simulated_transition(
+            &cptestctx,
+            &instance_id,
+            InstanceState::Running
+        )
+        .await
     );
 }
 
@@ -1455,7 +1462,7 @@ async fn test_instances_are_not_marked_failed_on_other_sled_agent_errors(
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
-    let sled_agent = &cptestctx.sled_agent.sled_agent;
+    let sled_agent = cptestctx.first_sled_agent();
     sled_agent
         .set_instance_ensure_state_error(Some(
             omicron_common::api::external::Error::internal_error(
@@ -1499,7 +1506,7 @@ async fn test_instances_are_not_marked_failed_on_other_sled_agent_errors_by_inst
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
-    let sled_agent = &cptestctx.sled_agent.sled_agent;
+    let sled_agent = cptestctx.first_sled_agent();
     sled_agent
         .set_instance_ensure_state_error(Some(
             omicron_common::api::external::Error::internal_error(
@@ -1559,7 +1566,7 @@ async fn make_forgotten_instance(
         .unwrap()
         .expect("running instance must be on a sled")
         .propolis_id;
-    let sled_agent = &cptestctx.sled_agent.sled_agent;
+    let sled_agent = cptestctx.first_sled_agent();
     sled_agent
         .instance_unregister(vmm_id)
         .await
@@ -4991,8 +4998,7 @@ async fn test_instance_create_with_ssh_keys(
     let instance_name = "ssh-keys";
 
     cptestctx
-        .sled_agent
-        .sled_agent
+        .first_sled_agent()
         .start_local_mock_propolis_server(&cptestctx.logctx.log)
         .await
         .unwrap();
@@ -5418,8 +5424,7 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     let instance_name = "kris-picks";
 
     let propolis_addr = cptestctx
-        .sled_agent
-        .sled_agent
+        .first_sled_agent()
         .start_local_mock_propolis_server(&cptestctx.logctx.log)
         .await
         .unwrap();
@@ -6222,7 +6227,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
 
     let mut sled_agents: Vec<&Arc<SledAgent>> =
         additional_sleds.iter().map(|x| &x.sled_agent).collect();
-    sled_agents.push(&cptestctx.sled_agent.sled_agent);
+    sled_agents.push(&cptestctx.first_sled_agent());
 
     for sled_agent in &sled_agents {
         assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni).await;
@@ -6244,7 +6249,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     // Validate that every sled no longer has the V2P mapping for this instance
     for sled_agent in &sled_agents {
         let condition = || async {
-            let v2p_mappings = sled_agent.v2p_mappings.lock().await;
+            let v2p_mappings = sled_agent.v2p_mappings.lock().unwrap();
             if v2p_mappings.is_empty() {
                 Ok(())
             } else {
@@ -6501,7 +6506,7 @@ async fn assert_sled_v2p_mappings(
     vni: Vni,
 ) {
     let condition = || async {
-        let v2p_mappings = sled_agent.v2p_mappings.lock().await;
+        let v2p_mappings = sled_agent.v2p_mappings.lock().unwrap();
         let mapping = v2p_mappings.iter().find(|mapping| {
             mapping.virtual_ip == nic.ip
                 && mapping.virtual_mac == nic.mac
@@ -6573,7 +6578,7 @@ pub async fn assert_sled_vpc_routes(
             kind: RouterKind::Custom(db_subnet.ipv4_block.0.into()),
         };
 
-        let vpc_routes = sled_agent.vpc_routes.lock().await;
+        let vpc_routes = sled_agent.vpc_routes.lock().unwrap();
         let sys_routes_found = vpc_routes
             .iter()
             .any(|(id, set)| *id == sys_key && set.routes == system_routes);
@@ -6670,6 +6675,67 @@ pub async fn instance_simulate_with_opctx(
         .expect("instance must be on a sled to simulate a state change");
 
     sled_info.sled_client.vmm_finish_transition(sled_info.propolis_id).await;
+}
+
+/// Wait for an instance to complete a simulated state transition, repeatedly
+/// poking the simulated sled-agent until the transition occurs.
+///
+/// This can be used to avoid races between Nexus processes (like sagas) which
+/// trigger a state transition but cannot be easily awaited by the test, and the
+/// actual request to simulate the state transition. However, it should be used
+/// cautiously to avoid simulating multiple state transitions accidentally.
+async fn instance_wait_for_simulated_transition(
+    cptestctx: &ControlPlaneTestContext,
+    id: &InstanceUuid,
+    state: InstanceState,
+) -> Instance {
+    const MAX_WAIT: Duration = Duration::from_secs(120);
+    let client = &cptestctx.external_client;
+    slog::info!(
+        &client.client_log,
+        "waiting for instance {id} transition to {state} \
+         (and poking simulated sled-agent)...";
+    );
+    let url = format!("/v1/instances/{id}");
+    let result = wait_for_condition(
+        || async {
+            let instance: Instance = NexusRequest::object_get(&client, &url)
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute()
+                .await?
+                .parsed_body()?;
+            if instance.runtime.run_state == state {
+                Ok(instance)
+            } else {
+                slog::info!(
+                    &client.client_log,
+                    "instance {id} has not transitioned to {state}, \
+                     poking sled-agent";
+                    "instance_id" => %instance.identity.id,
+                    "instance_runtime_state" => ?instance.runtime,
+                );
+                instance_simulate(&cptestctx.server.server_context().nexus, id)
+                    .await;
+                Err(CondCheckError::<anyhow::Error>::NotYet)
+            }
+        },
+        &Duration::from_secs(1),
+        &MAX_WAIT,
+    )
+    .await;
+    match result {
+        Ok(instance) => {
+            slog::info!(
+                &client.client_log,
+                "instance {id} has transitioned to {state}"
+            );
+            instance
+        }
+        Err(e) => panic!(
+            "instance {id} did not transition to {state:?} \
+             after {MAX_WAIT:?}: {e}"
+        ),
+    }
 }
 
 /// Simulates state transitions for the incarnation of the instance on the

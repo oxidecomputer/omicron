@@ -1,0 +1,36 @@
+[package]
+name = "nexus-reconfigurator-rendezvous"
+version = "0.1.0"
+edition = "2021"
+
+[lints]
+workspace = true
+
+[build-dependencies]
+omicron-rpaths.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+nexus-db-queries.workspace = true
+nexus-types.workspace = true
+omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
+slog.workspace = true
+
+# See omicron-rpaths for more about the "pq-sys" dependency.  This is needed
+# because we use the database in the test suite, though it doesn't appear to
+# work to put the pq-sys dependency only in dev-dependencies.
+pq-sys = "*"
+
+omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+async-bb8-diesel.workspace = true
+diesel.workspace = true
+nexus-db-model.workspace = true
+nexus-db-queries = { workspace = true, features = ["testing"] }
+omicron-test-utils.workspace = true
+proptest.workspace = true
+test-strategy.workspace = true
+tokio.workspace = true
+uuid.workspace = true

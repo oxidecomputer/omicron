@@ -162,6 +162,7 @@ mod test {
     use omicron_common::disk::DiskManagementStatus;
     use omicron_common::disk::DisksManagementResult;
     use omicron_common::disk::OmicronPhysicalDisksConfig;
+    use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -179,7 +180,7 @@ mod test {
     fn create_blueprint(
         blueprint_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
     ) -> (BlueprintTarget, Blueprint) {
-        let id = Uuid::new_v4();
+        let id = BlueprintUuid::new_v4();
         (
             BlueprintTarget {
                 target_id: id,
@@ -250,7 +251,7 @@ mod test {
         fn make_disks() -> BlueprintPhysicalDisksConfig {
             BlueprintPhysicalDisksConfig {
                 generation: Generation::new().next(),
-                disks: vec![BlueprintPhysicalDiskConfig {
+                disks: [BlueprintPhysicalDiskConfig {
                     disposition: BlueprintPhysicalDiskDisposition::InService,
                     identity: DiskIdentity {
                         vendor: "test-vendor".to_string(),
@@ -259,7 +260,9 @@ mod test {
                     },
                     id: PhysicalDiskUuid::new_v4(),
                     pool_id: ZpoolUuid::new_v4(),
-                }],
+                }]
+                .into_iter()
+                .collect(),
             }
         }
 

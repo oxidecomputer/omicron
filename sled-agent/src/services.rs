@@ -2372,9 +2372,7 @@ impl ServiceManager {
                         tls: *external_tls,
                         dropshot: dropshot::ConfigDropshot {
                             bind_address: SocketAddr::new(*opte_ip, nexus_port),
-                            // This has to be large enough to support:
-                            // - bulk writes to disks
-                            request_body_max_bytes: 8192 * 1024,
+                            default_request_body_max_bytes: 1048576,
                             default_handler_task_mode:
                                 HandlerTaskMode::Detached,
                             log_headers: vec![],
@@ -2382,11 +2380,7 @@ impl ServiceManager {
                     },
                     dropshot_internal: dropshot::ConfigDropshot {
                         bind_address: (*internal_address).into(),
-                        // This has to be large enough to support, among
-                        // other things, the initial list of TLS
-                        // certificates provided by the customer during
-                        // rack setup.
-                        request_body_max_bytes: 10 * 1024 * 1024,
+                        default_request_body_max_bytes: 1048576,
                         default_handler_task_mode: HandlerTaskMode::Detached,
                         log_headers: vec![],
                     },
@@ -3692,7 +3686,7 @@ impl ServiceManager {
             };
             check_property("zoned", zoned, "on")?;
             check_property("canmount", canmount, "on")?;
-            if dataset.dataset().dataset_should_be_encrypted() {
+            if dataset.kind().dataset_should_be_encrypted() {
                 check_property("encryption", encryption, "aes-256-gcm")?;
             }
 
@@ -5066,10 +5060,7 @@ mod illumos_tests {
     }
 
     impl<'a> LedgerTestHelper<'a> {
-        async fn new(
-            log: slog::Logger,
-            test_config: &'a TestConfig,
-        ) -> LedgerTestHelper {
+        async fn new(log: slog::Logger, test_config: &'a TestConfig) -> Self {
             let ddmd_client = DdmAdminClient::localhost(&log).unwrap();
             let storage_test_harness = setup_storage(&log).await;
             let zone_bundler = ZoneBundler::new(

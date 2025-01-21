@@ -156,7 +156,7 @@ impl super::Nexus {
                 let image_id = Uuid::new_v4();
 
                 let volume_construction_request =
-                    sled_agent_client::types::VolumeConstructionRequest::File {
+                    sled_agent_client::VolumeConstructionRequest::File {
                         id: image_id,
                         block_size,
                         path: "/opt/oxide/propolis-server/blob/alpine.iso"

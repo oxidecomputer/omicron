@@ -711,7 +711,7 @@ struct UpdateGuard<'store, 'req_id> {
     finished: bool,
 }
 
-impl<'a, 'b> UpdateGuard<'a, 'b> {
+impl UpdateGuard<'_, '_> {
     async fn finish(mut self) {
         let store = self.store;
         let mut update = store.updating.lock().await;
@@ -732,7 +732,7 @@ impl<'a, 'b> UpdateGuard<'a, 'b> {
     }
 }
 
-impl<'a, 'b> Drop for UpdateGuard<'a, 'b> {
+impl Drop for UpdateGuard<'_, '_> {
     fn drop(&mut self) {
         // UpdateGuard exists because we must enforce at most one Update is
         // happening at a time, but we also want to catch the case where an

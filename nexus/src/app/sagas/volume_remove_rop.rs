@@ -12,7 +12,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::VolumeConstructionRequest;
+use sled_agent_client::VolumeConstructionRequest;
 use steno::{ActionError, Node};
 
 // Volume remove read only parent saga: input parameters

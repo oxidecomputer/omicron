@@ -60,8 +60,8 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::CrucibleOpts;
-use sled_agent_client::types::VolumeConstructionRequest;
+use sled_agent_client::CrucibleOpts;
+use sled_agent_client::VolumeConstructionRequest;
 use std::net::SocketAddrV6;
 use steno::ActionError;
 use steno::Node;
@@ -690,7 +690,7 @@ async fn srrs_create_fake_volume(
             gen: 0,
             opts: CrucibleOpts {
                 id: *new_volume_id.as_untyped_uuid(),
-                target: vec![old_region_address.to_string()],
+                target: vec![old_region_address.into()],
                 lossy: false,
                 flush_timeout: None,
                 key: None,
@@ -796,7 +796,7 @@ pub(crate) mod test {
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::VolumeUuid;
-    use sled_agent_client::types::VolumeConstructionRequest;
+    use sled_agent_client::VolumeConstructionRequest;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -812,7 +812,7 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let mut disk_test = DiskTest::new(cptestctx).await;
-        disk_test.add_zpool_with_dataset(cptestctx.first_sled()).await;
+        disk_test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
@@ -1135,7 +1135,7 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let mut disk_test = DiskTest::new(cptestctx).await;
-        disk_test.add_zpool_with_dataset(cptestctx.first_sled()).await;
+        disk_test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
 
         let log = &cptestctx.logctx.log;
 
@@ -1212,7 +1212,7 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let mut disk_test = DiskTest::new(cptestctx).await;
-        disk_test.add_zpool_with_dataset(cptestctx.first_sled()).await;
+        disk_test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
