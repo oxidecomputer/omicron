@@ -41,6 +41,7 @@ impl KeeperServerContext {
         let config_path = Utf8PathBuf::from_str(CLICKHOUSE_KEEPER_CONFIG_DIR)
             .unwrap()
             .join(CLICKHOUSE_KEEPER_CONFIG_FILE);
+
         // If there is already a configuration file with a generation number we'll
         // use that. Otherwise, we set the generation number to None.
         let gen = read_generation_from_file(config_path)?;
@@ -61,14 +62,8 @@ impl KeeperServerContext {
     }
 
     pub async fn generation(&self) -> Option<Generation> {
-        self.generation.lock().await.clone()
+        *self.generation.lock().await
     }
-
-    // TODO: Try this one next
-    // TODO: actually make this work?
-    //  pub fn update_generation(mut self, new_generation: Generation) {
-    //      self.generation = std::sync::Mutex::new(Some(new_generation))
-    //  }
 }
 
 pub struct ServerContext {
@@ -134,14 +129,8 @@ impl ServerContext {
     }
 
     pub async fn generation(&self) -> Option<Generation> {
-        self.generation.lock().await.clone()
+        *self.generation.lock().await
     }
-
-    // TODO: Try this one next
-    // TODO: actually make this work?
-    //    pub fn update_generation(mut self, new_generation: Generation) {
-    //        self.generation = std::sync::Mutex::new(Some(new_generation))
-    //    }
 }
 
 pub struct SingleServerContext {
