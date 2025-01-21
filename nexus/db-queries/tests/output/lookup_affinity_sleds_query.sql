@@ -15,12 +15,14 @@ WITH
       SELECT
         policy, instance_id
       FROM
-        other_instances JOIN affinity_group ON affinity_group.id = other_instances.group_id
+        other_instances
+        JOIN affinity_group ON
+            affinity_group.id = other_instances.group_id AND affinity_group.failure_domain = 'sled'
       WHERE
         affinity_group.time_deleted IS NULL
     )
 SELECT
-  policy, sled_id
+  DISTINCT policy, sled_id
 FROM
   other_instances_by_policy
   JOIN sled_resource ON

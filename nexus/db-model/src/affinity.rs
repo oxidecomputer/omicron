@@ -31,7 +31,7 @@ impl_enum_type!(
     #[diesel(postgres_type(name = "affinity_policy", schema = "public"))]
     pub struct AffinityPolicyEnum;
 
-    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq, Eq, Ord, PartialOrd)]
     #[diesel(sql_type = AffinityPolicyEnum)]
     pub enum AffinityPolicy;
 

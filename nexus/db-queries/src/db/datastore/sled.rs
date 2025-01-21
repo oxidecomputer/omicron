@@ -1412,7 +1412,8 @@ pub(in crate::db::datastore) mod test {
         let logctx = dev::test_setup_log("sled_reservation_anti_affinity");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
-        let (authz_project, project) = create_project(&opctx, &datastore).await;
+        let (authz_project, _project) =
+            create_project(&opctx, &datastore).await;
 
         const SLED_COUNT: usize = 2;
 
@@ -1477,6 +1478,10 @@ pub(in crate::db::datastore) mod test {
             )
             .await
             .unwrap_err();
+
+        let Error::InsufficientCapacity { .. } = err else {
+            panic!("Unexpected error: {err:?}");
+        };
 
         db.terminate().await;
         logctx.cleanup_successful();
