@@ -230,37 +230,46 @@ pub(crate) async fn get_login_url(
 }
 
 /// Serve console index if the user is authenticated, otherwise redirect to a
-/// login URL for the silo.
+/// login URL for the silo. Note that this function includes instrumentation,
+/// so it should only be called at top level in a handler definition.
 pub(crate) async fn console_index_or_login_redirect(
     rqctx: RequestContext<ApiContext>,
 ) -> Result<Response<Body>, HttpError> {
-    let opctx = crate::context::op_context_for_external_api(&rqctx).await;
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await;
 
-    // if authed, serve console index.html with JS bundle in script tag
-    if let Ok(opctx) = opctx {
-        if opctx.authn.actor().is_some() {
-            return serve_console_index(&rqctx).await;
+        // if authed, serve console index.html with JS bundle in script tag
+        if let Ok(opctx) = opctx {
+            if opctx.authn.actor().is_some() {
+                return serve_console_index(&rqctx).await;
+            }
         }
-    }
 
-    // otherwise redirect to idp
+        // otherwise redirect to idp
 
-    // Put the current URI in the query string to redirect back to after login.
-    let redirect_uri = rqctx
-        .request
-        .uri()
-        .path_and_query()
-        .map(|p| p.to_string().parse::<RelativeUri>())
-        .transpose()
-        .map_err(|e| {
-            HttpError::for_internal_error(format!("parsing URI: {}", e))
-        })?;
-    let login_url = get_login_url(&rqctx, redirect_uri).await?;
+        // Put the current URI in the query string to redirect back to after login.
+        let redirect_uri = rqctx
+            .request
+            .uri()
+            .path_and_query()
+            .map(|p| p.to_string().parse::<RelativeUri>())
+            .transpose()
+            .map_err(|e| {
+                HttpError::for_internal_error(format!("parsing URI: {}", e))
+            })?;
+        let login_url = get_login_url(&rqctx, redirect_uri).await?;
 
-    Ok(Response::builder()
-        .status(StatusCode::FOUND)
-        .header(http::header::LOCATION, login_url)
-        .body("".into())?)
+        Ok(Response::builder()
+            .status(StatusCode::FOUND)
+            .header(http::header::LOCATION, login_url)
+            .body("".into())?)
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
 }
 
 /// Check if `gzip` is listed in the request's `Accept-Encoding` header.
@@ -407,6 +416,9 @@ pub(crate) async fn asset(
 }
 
 /// Serve `<static_dir>/index.html` via [`serve_static`]. Disallow caching.
+/// Does not include instrumentation logic because this is used directly in some
+/// endpoints and indirectly in others, and the latter have their own top-level
+/// instrumentation call.
 pub(crate) async fn serve_console_index(
     rqctx: &RequestContext<ApiContext>,
 ) -> Result<Response<Body>, HttpError> {

@@ -6433,7 +6433,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
         _path_params: Path<params::LoginToProviderPathParam>,
         _query_params: Query<params::LoginUrlQuery>,
     ) -> Result<Response<Body>, HttpError> {
-        console_api::serve_console_index(&rqctx).await
+        let apictx = rqctx.context();
+        let handler = async { console_api::serve_console_index(&rqctx).await };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn login_saml_redirect(
@@ -6460,7 +6466,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await
         };
-
         apictx
             .context
             .external_latencies
@@ -6519,11 +6524,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
         _path_params: Path<params::LoginPath>,
         _query_params: Query<params::LoginUrlQuery>,
     ) -> Result<Response<Body>, HttpError> {
-        // TODO: instrument
-        // let apictx = rqctx.context();
-        // let handler = async { serve_console_index(rqctx.context()).await };
-        // apictx.context.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-        console_api::serve_console_index(&rqctx).await
+        let apictx = rqctx.context();
+        let handler = async { console_api::serve_console_index(&rqctx).await };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn login_local(
@@ -6703,7 +6710,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::RestPathParam>,
     ) -> Result<Response<Body>, HttpError> {
-        console_api::asset(&rqctx, path_params).await
+        let apictx = rqctx.context();
+        let handler = async { console_api::asset(&rqctx, path_params).await };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn device_auth_request(
