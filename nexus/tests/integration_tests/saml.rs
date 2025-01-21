@@ -1324,7 +1324,6 @@ async fn test_post_saml_response_with_relay_state(
                 saml_response: base64::engine::general_purpose::STANDARD
                     .encode(SAML_RESPONSE),
                 relay_state: Some(
-                    // TODO: import (put the type somewhere better than the nexus app file)
                     RelayState {
                         redirect_uri: Some(
                             "/some/actual/nexus/url".parse().unwrap(),

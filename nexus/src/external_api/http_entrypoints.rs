@@ -5,7 +5,7 @@
 //! Handler functions (entrypoints) for external HTTP APIs
 
 use super::{
-    console_api, device_auth, params,
+    console_api, params,
     views::{
         self, Certificate, FloatingIp, Group, IdentityProvider, Image, IpPool,
         IpPoolRange, PhysicalDisk, Project, Rack, Role, Silo, SiloQuotas,
@@ -6719,6 +6719,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    // Entrypoints for the OAuth 2.0 Device Authorization Grant flow.
+    //
+    // These are endpoints used by the API client per se (e.g., the CLI),
+    // *not* the user of that client (e.g., an Oxide rack operator). They
+    // are for requesting access tokens that will be managed and used by
+    // the client to make other API requests.
+
     async fn device_auth_request(
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<params::DeviceAuthRequest>,
@@ -6732,7 +6739,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let host = match &authority {
                 Ok(host) => host.as_str(),
                 Err(error) => {
-                    return device_auth::build_oauth_response(
+                    return nexus.build_oauth_response(
                         StatusCode::BAD_REQUEST,
                         &serde_json::json!({
                             "error": "invalid_request",
@@ -6745,7 +6752,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let model = nexus
                 .device_auth_request_create(&opctx, params.client_id)
                 .await?;
-            device_auth::build_oauth_response(
+            nexus.build_oauth_response(
                 StatusCode::OK,
                 &model.into_response(rqctx.server.using_tls(), host),
             )
@@ -6802,6 +6809,17 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<params::DeviceAccessTokenRequest>,
     ) -> Result<Response<Body>, HttpError> {
-        device_auth::device_access_token(rqctx, params.into_inner()).await
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx = nexus.opctx_external_authn();
+            let params = params.into_inner();
+            nexus.device_access_token(&opctx, params).await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 }
