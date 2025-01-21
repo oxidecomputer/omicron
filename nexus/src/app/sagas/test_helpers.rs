@@ -802,24 +802,3 @@ pub(crate) async fn assert_no_failed_undo_steps(
 
     assert!(saga_node_events.is_empty());
 }
-
-pub(crate) fn select_first_alternate_sled(
-    db_vmm: &crate::app::db::model::Vmm,
-    other_sleds: &[&omicron_sled_agent::sim::Server],
-) -> SledUuid {
-    let default_sled_uuid: SledUuid =
-        nexus_test_utils::SLED_AGENT_UUID.parse().unwrap();
-    if other_sleds.is_empty() {
-        panic!("need at least one other sled");
-    }
-
-    if other_sleds.iter().any(|sled| sled.sled_agent.id == default_sled_uuid) {
-        panic!("default test sled agent was in other_sleds");
-    }
-
-    if db_vmm.sled_id == default_sled_uuid.into_untyped_uuid() {
-        other_sleds[0].sled_agent.id
-    } else {
-        default_sled_uuid
-    }
-}

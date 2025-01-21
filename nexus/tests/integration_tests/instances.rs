@@ -604,8 +604,7 @@ async fn test_instance_start_creates_networking_state(
     let instance_name = "series-of-tubes";
 
     // This test requires some additional sleds that can receive V2P mappings.
-    let additional_sleds: Vec<_> =
-        cptestctx.all_sled_agents().skip(1).collect();
+    let additional_sleds: Vec<_> = cptestctx.extra_sled_agents().collect();
 
     create_project_and_pool(&client).await;
     let instance_url = get_instance_url(instance_name);
@@ -903,7 +902,7 @@ async fn test_instance_migrate_v2p_and_routes(
     let instance_name = "desert-locust";
 
     // Get the extra test sleds.
-    let other_sleds: Vec<_> = cptestctx.all_sled_agents().skip(1).collect();
+    let other_sleds: Vec<_> = cptestctx.extra_sled_agents().collect();
 
     // Set up the project and test instance.
     create_project_and_pool(client).await;
@@ -6127,8 +6126,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     create_project_and_pool(client).await;
 
     // This test requires some additional sleds that can receive V2P mappings.
-    let additional_sleds: Vec<_> =
-        cptestctx.all_sled_agents().skip(1).collect();
+    let additional_sleds: Vec<_> = cptestctx.extra_sled_agents().collect();
 
     // Create an instance.
     let instance_name = "test-instance";
