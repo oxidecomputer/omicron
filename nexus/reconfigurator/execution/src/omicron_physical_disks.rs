@@ -167,6 +167,7 @@ mod test {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
+    use omicron_uuid_kinds::VolumeUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::BTreeMap;
     use std::net::SocketAddr;
@@ -456,7 +457,7 @@ mod test {
         // There isn't a great API to insert regions (we normally allocate!)
         // so insert the record manually here.
         let region = {
-            let volume_id = Uuid::new_v4();
+            let volume_id = VolumeUuid::new_v4();
             Region::new(
                 dataset.id(),
                 volume_id,

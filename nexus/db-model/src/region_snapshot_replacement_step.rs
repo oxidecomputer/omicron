@@ -4,8 +4,11 @@
 
 use super::impl_enum_type;
 use crate::schema::region_snapshot_replacement_step;
+use crate::typed_uuid::DbTypedUuid;
 use chrono::DateTime;
 use chrono::Utc;
+use omicron_uuid_kinds::VolumeKind;
+use omicron_uuid_kinds::VolumeUuid;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -90,10 +93,10 @@ pub struct RegionSnapshotReplacementStep {
     pub request_time: DateTime<Utc>,
 
     /// A volume that references the snapshot
-    pub volume_id: Uuid,
+    pub volume_id: DbTypedUuid<VolumeKind>,
 
     /// A synthetic volume that only is used to later delete the old snapshot
-    pub old_snapshot_volume_id: Option<Uuid>,
+    pub old_snapshot_volume_id: Option<DbTypedUuid<VolumeKind>>,
 
     pub replacement_state: RegionSnapshotReplacementStepState,
 
@@ -101,15 +104,23 @@ pub struct RegionSnapshotReplacementStep {
 }
 
 impl RegionSnapshotReplacementStep {
-    pub fn new(request_id: Uuid, volume_id: Uuid) -> Self {
+    pub fn new(request_id: Uuid, volume_id: VolumeUuid) -> Self {
         Self {
             id: Uuid::new_v4(),
             request_id,
             request_time: Utc::now(),
-            volume_id,
+            volume_id: volume_id.into(),
             old_snapshot_volume_id: None,
             replacement_state: RegionSnapshotReplacementStepState::Requested,
             operating_saga_id: None,
         }
+    }
+
+    pub fn volume_id(&self) -> VolumeUuid {
+        self.volume_id.into()
+    }
+
+    pub fn old_snapshot_volume_id(&self) -> Option<VolumeUuid> {
+        self.old_snapshot_volume_id.map(|v| v.into())
     }
 }

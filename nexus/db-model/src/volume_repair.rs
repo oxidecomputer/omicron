@@ -3,6 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::schema::volume_repair;
+use crate::typed_uuid::DbTypedUuid;
+use omicron_uuid_kinds::VolumeKind;
 use uuid::Uuid;
 
 /// When modifying a Volume by replacing its parts, Nexus should take care to
@@ -15,6 +17,6 @@ use uuid::Uuid;
 #[derive(Queryable, Insertable, Debug, Selectable, Clone)]
 #[diesel(table_name = volume_repair)]
 pub struct VolumeRepair {
-    pub volume_id: Uuid,
+    pub volume_id: DbTypedUuid<VolumeKind>,
     pub repair_id: Uuid,
 }

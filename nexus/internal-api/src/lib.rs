@@ -41,7 +41,7 @@ use omicron_common::{
 };
 use omicron_uuid_kinds::{
     DemoSagaUuid, DownstairsKind, PropolisUuid, SledUuid, TypedUuid,
-    UpstairsKind, UpstairsRepairKind,
+    UpstairsKind, UpstairsRepairKind, VolumeUuid,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -570,7 +570,7 @@ pub struct DiskPathParam {
 /// Path parameters for Volume requests (internal API)
 #[derive(Deserialize, JsonSchema)]
 pub struct VolumePathParam {
-    pub volume_id: Uuid,
+    pub volume_id: VolumeUuid,
 }
 
 /// Path parameters for Rack requests.

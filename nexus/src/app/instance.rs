@@ -1077,7 +1077,7 @@ impl super::Nexus {
             let volume = self
                 .db_datastore
                 .volume_checkout(
-                    disk.volume_id,
+                    disk.volume_id(),
                     match operation {
                         InstanceRegisterReason::Start { vmm_id } =>
                             db::datastore::VolumeCheckoutReason::InstanceStart { vmm_id },

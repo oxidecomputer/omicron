@@ -31,6 +31,7 @@ use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::VolumeUuid;
 use slog::Logger;
 use std::collections::HashSet;
 use std::net::SocketAddr;
@@ -123,7 +124,7 @@ async fn test_region_replacement_does_not_create_freed_region(
     // Next, expunge a physical disk that contains a region
 
     let disk_allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
     let (dataset, _) = &disk_allocated_regions[0];
     let zpool = disk_test
         .zpools()
@@ -217,7 +218,7 @@ mod region_replacement {
             assert_eq!(db_disk.id(), disk.identity.id);
 
             let disk_allocated_regions = datastore
-                .get_allocated_regions(db_disk.volume_id)
+                .get_allocated_regions(db_disk.volume_id())
                 .await
                 .unwrap();
             let (_, region) = &disk_allocated_regions[0];
@@ -652,7 +653,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     // means it'll have the region too)
 
     let disk_allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
     let (dataset, region) = &disk_allocated_regions[0];
     let zpool = disk_test
         .zpools()
@@ -714,7 +715,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
                 .unwrap();
 
             let snapshot_allocated_datasets_and_regions = datastore
-                .get_allocated_regions(db_snapshot.destination_volume_id)
+                .get_allocated_regions(db_snapshot.destination_volume_id())
                 .await
                 .unwrap();
 
@@ -865,7 +866,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     // volume for later deletion, but has not actually deleted that temporary
     // volume yet, so the count will not have gone to 0.
 
-    let volume = datastore.volume_get(db_disk.volume_id).await.unwrap();
+    let volume = datastore.volume_get(db_disk.volume_id()).await.unwrap();
     assert!(volume.is_some());
     assert!(volume.unwrap().time_deleted.is_some());
 
@@ -913,7 +914,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
 
     // Assert that the disk's volume is still only soft-deleted, because the two
     // other associated region snapshots still exist.
-    let volume = datastore.volume_get(db_disk.volume_id).await.unwrap();
+    let volume = datastore.volume_get(db_disk.volume_id()).await.unwrap();
     assert!(volume.is_some());
 
     // Check on the old region id - it should not be deleted
@@ -1103,7 +1104,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     wait_for_condition(
         || {
             let datastore = datastore.clone();
-            let volume_id = db_disk.volume_id;
+            let volume_id = db_disk.volume_id();
 
             async move {
                 let volume = datastore.volume_get(volume_id).await.unwrap();
@@ -1206,7 +1207,7 @@ mod region_snapshot_replacement {
             assert_eq!(db_disk.id(), disk.identity.id);
 
             let disk_allocated_regions = datastore
-                .get_allocated_regions(db_disk.volume_id)
+                .get_allocated_regions(db_disk.volume_id())
                 .await
                 .unwrap();
             let (_, region) = &disk_allocated_regions[0];
@@ -1261,7 +1262,7 @@ mod region_snapshot_replacement {
 
             // Validate that they are snapshot and disk from snapshot
 
-            let volumes_set: HashSet<Uuid> =
+            let volumes_set: HashSet<VolumeUuid> =
                 volumes.into_iter().map(|v| v.id()).collect();
 
             let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
@@ -1277,8 +1278,8 @@ mod region_snapshot_replacement {
                     .await
                     .unwrap();
 
-            assert!(volumes_set.contains(&db_snapshot.volume_id));
-            assert!(volumes_set.contains(&db_disk_from_snapshot.volume_id));
+            assert!(volumes_set.contains(&db_snapshot.volume_id()));
+            assert!(volumes_set.contains(&db_disk_from_snapshot.volume_id()));
 
             DeletedVolumeTest {
                 log: cptestctx.logctx.log.new(o!()),
@@ -1541,7 +1542,7 @@ mod region_snapshot_replacement {
                 .create_region_snapshot_replacement_step(
                     &self.opctx(),
                     self.replacement_request_id,
-                    db_disk_from_snapshot.volume_id,
+                    db_disk_from_snapshot.volume_id(),
                 )
                 .await
                 .unwrap();
@@ -1783,7 +1784,7 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
     // Next, expunge a physical disk that contains a region
 
     let disk_allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
     let (dataset, _) = &disk_allocated_regions[0];
 
     let zpool = disk_test
@@ -1884,9 +1885,9 @@ async fn test_region_replacement_triple_sanity(
     let internal_client = &cptestctx.internal_client;
 
     let disk_allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
     let snapshot_allocated_regions =
-        datastore.get_allocated_regions(db_snapshot.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_snapshot.volume_id()).await.unwrap();
 
     assert_eq!(disk_allocated_regions.len(), 3);
     assert_eq!(snapshot_allocated_regions.len(), 0);
@@ -1919,9 +1920,9 @@ async fn test_region_replacement_triple_sanity(
     }
 
     let disk_allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
     let snapshot_allocated_regions =
-        datastore.get_allocated_regions(db_snapshot.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_snapshot.volume_id()).await.unwrap();
 
     assert_eq!(disk_allocated_regions.len(), 3);
     assert!(disk_allocated_regions.iter().all(|(_, r)| !r.read_only()));
@@ -1995,9 +1996,9 @@ async fn test_region_replacement_triple_sanity_2(
     let internal_client = &cptestctx.internal_client;
 
     let disk_allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
     let snapshot_allocated_regions =
-        datastore.get_allocated_regions(db_snapshot.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_snapshot.volume_id()).await.unwrap();
 
     assert_eq!(disk_allocated_regions.len(), 3);
     assert_eq!(snapshot_allocated_regions.len(), 0);
@@ -2059,9 +2060,9 @@ async fn test_region_replacement_triple_sanity_2(
     run_replacement_tasks_to_completion(&internal_client).await;
 
     let disk_allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
     let snapshot_allocated_regions =
-        datastore.get_allocated_regions(db_snapshot.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_snapshot.volume_id()).await.unwrap();
 
     assert_eq!(disk_allocated_regions.len(), 3);
     assert!(disk_allocated_regions.iter().all(|(_, r)| !r.read_only()));

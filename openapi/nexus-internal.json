@@ -1526,8 +1526,7 @@
             "name": "volume_id",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/TypedUuidForVolumeKind"
             }
           }
         ],
@@ -6125,6 +6124,10 @@
         ]
       },
       "TypedUuidForPropolisKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForVolumeKind": {
         "type": "string",
         "format": "uuid"
       }
