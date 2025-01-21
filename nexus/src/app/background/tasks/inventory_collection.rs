@@ -215,7 +215,7 @@ struct DbSledAgentEnumerator<'a> {
     datastore: &'a DataStore,
 }
 
-impl<'a> nexus_inventory::SledAgentEnumerator for DbSledAgentEnumerator<'a> {
+impl nexus_inventory::SledAgentEnumerator for DbSledAgentEnumerator<'_> {
     fn list_sled_agents(
         &self,
     ) -> BoxFuture<'_, Result<Vec<String>, InventoryError>> {
@@ -378,7 +378,7 @@ mod test {
         assert!(!latest_collectors.contains("disabled"));
     }
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_db_sled_enumerator(cptestctx: &ControlPlaneTestContext) {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();

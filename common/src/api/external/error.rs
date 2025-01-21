@@ -147,7 +147,7 @@ impl MessagePair {
 
 struct MessagePairDisplayInternal<'a>(&'a MessagePair);
 
-impl<'a> Display for MessagePairDisplayInternal<'a> {
+impl Display for MessagePairDisplayInternal<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0.external_message)?;
         if !self.0.internal_context.is_empty() {
@@ -413,7 +413,7 @@ impl From<Error> for HttpError {
                 };
                 HttpError::for_client_error(
                     Some(String::from("ObjectNotFound")),
-                    http::StatusCode::NOT_FOUND,
+                    dropshot::ClientErrorStatusCode::NOT_FOUND,
                     format!("not found: {}", message),
                 )
             }
@@ -427,7 +427,7 @@ impl From<Error> for HttpError {
             }
 
             Error::Unauthenticated { internal_message } => HttpError {
-                status_code: http::StatusCode::UNAUTHORIZED,
+                status_code: dropshot::ErrorStatusCode::UNAUTHORIZED,
                 // TODO-polish We may want to rethink this error code.  This is
                 // what HTTP calls it, but it's confusing.
                 error_code: Some(String::from("Unauthorized")),
@@ -435,16 +435,18 @@ impl From<Error> for HttpError {
                     "credentials missing or invalid",
                 ),
                 internal_message,
+                headers: None,
             },
 
             Error::InvalidRequest { message } => {
                 let (internal_message, external_message) =
                     message.into_internal_external();
                 HttpError {
-                    status_code: http::StatusCode::BAD_REQUEST,
+                    status_code: dropshot::ErrorStatusCode::BAD_REQUEST,
                     error_code: Some(String::from("InvalidRequest")),
                     external_message,
                     internal_message,
+                    headers: None,
                 }
             }
 
@@ -452,19 +454,20 @@ impl From<Error> for HttpError {
                 let (internal_message, external_message) =
                     message.into_internal_external();
                 HttpError {
-                    status_code: http::StatusCode::BAD_REQUEST,
+                    status_code: dropshot::ErrorStatusCode::BAD_REQUEST,
                     error_code: Some(String::from("InvalidValue")),
                     external_message: format!(
                         "unsupported value for \"{}\": {}",
                         label, external_message
                     ),
                     internal_message,
+                    headers: None,
                 }
             }
 
             Error::Forbidden => HttpError::for_client_error(
                 Some(String::from("Forbidden")),
-                http::StatusCode::FORBIDDEN,
+                dropshot::ClientErrorStatusCode::FORBIDDEN,
                 String::from("Forbidden"),
             ),
 
@@ -485,13 +488,15 @@ impl From<Error> for HttpError {
                 // Need to construct an `HttpError` explicitly to present both
                 // an internal and an external message.
                 HttpError {
-                    status_code: http::StatusCode::INSUFFICIENT_STORAGE,
+                    status_code:
+                        dropshot::ErrorStatusCode::INSUFFICIENT_STORAGE,
                     error_code: Some(String::from("InsufficientCapacity")),
                     external_message: format!(
                         "Insufficient capacity: {}",
                         external_message
                     ),
                     internal_message,
+                    headers: None,
                 }
             }
 
@@ -503,10 +508,11 @@ impl From<Error> for HttpError {
                 let (internal_message, external_message) =
                     message.into_internal_external();
                 HttpError {
-                    status_code: http::StatusCode::CONFLICT,
+                    status_code: dropshot::ErrorStatusCode::CONFLICT,
                     error_code: Some(String::from("Conflict")),
                     external_message,
                     internal_message,
+                    headers: None,
                 }
             }
 
@@ -514,16 +520,17 @@ impl From<Error> for HttpError {
                 let (internal_message, external_message) =
                     message.into_internal_external();
                 HttpError {
-                    status_code: http::StatusCode::NOT_FOUND,
+                    status_code: dropshot::ErrorStatusCode::NOT_FOUND,
                     error_code: Some(String::from("Not Found")),
                     external_message,
                     internal_message,
+                    headers: None,
                 }
             }
 
             Error::Gone => HttpError::for_client_error(
                 Some(String::from("Gone")),
-                http::StatusCode::GONE,
+                dropshot::ClientErrorStatusCode::GONE,
                 String::from("Gone"),
             ),
         }
@@ -552,7 +559,8 @@ impl<T: ClientError> From<progenitor_client::Error<T>> for Error {
             | progenitor_client::Error::UnexpectedResponse(_)
             | progenitor_client::Error::InvalidUpgrade(_)
             | progenitor_client::Error::ResponseBodyError(_)
-            | progenitor_client::Error::PreHookError(_) => {
+            | progenitor_client::Error::PreHookError(_)
+            | progenitor_client::Error::PostHookError(_) => {
                 Error::internal_error(&e.to_string())
             }
             // This error represents an expected error from the remote service.

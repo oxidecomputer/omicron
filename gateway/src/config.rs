@@ -45,7 +45,7 @@ impl Config {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PartialDropshotConfig {
-    pub request_body_max_bytes: usize,
+    pub default_request_body_max_bytes: usize,
 }
 
 #[derive(Debug, Error, SlogInlineError)]

@@ -38,7 +38,6 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
-use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
@@ -63,7 +62,6 @@ pub struct PlanningInputFromDb<'a> {
     pub sled_rows: &'a [nexus_db_model::Sled],
     pub zpool_rows:
         &'a [(nexus_db_model::Zpool, nexus_db_model::PhysicalDisk)],
-    pub dataset_rows: &'a [nexus_db_model::Dataset],
     pub ip_pool_range_rows: &'a [nexus_db_model::IpPoolRange],
     pub external_ip_rows: &'a [nexus_db_model::ExternalIp],
     pub service_nic_rows: &'a [nexus_db_model::ServiceNetworkInterface],
@@ -108,10 +106,6 @@ impl PlanningInputFromDb<'_> {
             .zpool_list_all_external_batched(opctx)
             .await
             .internal_context("fetching all external zpool rows")?;
-        let dataset_rows = datastore
-            .dataset_list_all_batched(opctx, None)
-            .await
-            .internal_context("fetching all datasets")?;
         let ip_pool_range_rows = {
             let (authz_service_ip_pool, _) = datastore
                 .ip_pools_service_lookup(opctx)
@@ -153,7 +147,6 @@ impl PlanningInputFromDb<'_> {
         let planning_input = PlanningInputFromDb {
             sled_rows: &sled_rows,
             zpool_rows: &zpool_rows,
-            dataset_rows: &dataset_rows,
             ip_pool_range_rows: &ip_pool_range_rows,
             target_boundary_ntp_zone_count: BOUNDARY_NTP_REDUNDANCY,
             target_nexus_zone_count: NEXUS_REDUNDANCY,
@@ -201,26 +194,6 @@ impl PlanningInputFromDb<'_> {
         );
 
         let mut zpools_by_sled_id = {
-            // Gather all the datasets first, by Zpool ID
-            let mut datasets: Vec<_> = self
-                .dataset_rows
-                .iter()
-                .map(|dataset| {
-                    (
-                        ZpoolUuid::from_untyped_uuid(dataset.pool_id),
-                        dataset.clone(),
-                    )
-                })
-                .collect();
-            datasets.sort_unstable_by_key(|(zpool_id, _)| *zpool_id);
-            let mut datasets_by_zpool: BTreeMap<_, Vec<_>> = BTreeMap::new();
-            for (zpool_id, dataset) in datasets {
-                datasets_by_zpool
-                    .entry(zpool_id)
-                    .or_default()
-                    .push(DatasetConfig::try_from(dataset)?);
-            }
-
             // Iterate over all Zpools, identifying their disks and datasets
             let mut zpools = BTreeMap::new();
             for (zpool, disk) in self.zpool_rows {
@@ -237,11 +210,7 @@ impl PlanningInputFromDb<'_> {
                     policy: disk.disk_policy.into(),
                     state: disk.disk_state.into(),
                 };
-
-                let datasets = datasets_by_zpool
-                    .remove(&zpool_id)
-                    .unwrap_or_else(|| vec![]);
-                sled_zpool_names.insert(zpool_id, (disk, datasets));
+                sled_zpool_names.insert(zpool_id, disk);
             }
             zpools
         };
@@ -356,14 +325,15 @@ pub async fn reconfigurator_state_load(
             .blueprints_list(opctx, &p.current_pagparams())
             .await
             .context("listing blueprints")?;
-        paginator =
-            p.found_batch(&blueprint_ids, &|b: &BlueprintMetadata| b.id);
+        paginator = p.found_batch(&blueprint_ids, &|b: &BlueprintMetadata| {
+            b.id.into_untyped_uuid()
+        });
         blueprint_ids.extend(batch.into_iter());
     }
 
     let blueprints = futures::stream::iter(blueprint_ids)
         .filter_map(|bpm| async move {
-            let blueprint_id = bpm.id;
+            let blueprint_id = bpm.id.into_untyped_uuid();
             let read = datastore
                 .blueprint_read(
                     opctx,

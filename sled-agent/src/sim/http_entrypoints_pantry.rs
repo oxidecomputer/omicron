@@ -9,7 +9,7 @@ use dropshot::{
     HttpResponseDeleted, HttpResponseOk, HttpResponseUpdatedNoContent,
     Path as TypedPath, RequestContext, TypedBody,
 };
-use propolis_client::types::VolumeConstructionRequest;
+use propolis_client::VolumeConstructionRequest;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -69,7 +69,7 @@ async fn pantry_status(
 ) -> Result<HttpResponseOk<PantryStatus>, HttpError> {
     let pantry = rc.context();
 
-    let status = pantry.status().await?;
+    let status = pantry.status()?;
 
     Ok(HttpResponseOk(status))
 }
@@ -103,7 +103,7 @@ async fn volume_status(
     let path = path.into_inner();
     let pantry = rc.context();
 
-    let status = pantry.volume_status(path.id.clone()).await?;
+    let status = pantry.volume_status(path.id.clone())?;
     Ok(HttpResponseOk(status))
 }
 
@@ -134,7 +134,6 @@ async fn attach(
 
     pantry
         .attach(path.id.clone(), body.volume_construction_request)
-        .await
         .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
     Ok(HttpResponseOk(AttachResult { id: path.id }))
@@ -161,13 +160,11 @@ async fn attach_activate_background(
     let body = body.into_inner();
     let pantry = rc.context();
 
-    pantry
-        .attach_activate_background(
-            path.id.clone(),
-            body.job_id,
-            body.volume_construction_request,
-        )
-        .await?;
+    pantry.attach_activate_background(
+        path.id.clone(),
+        body.job_id,
+        body.volume_construction_request,
+    )?;
 
     Ok(HttpResponseUpdatedNoContent())
 }
@@ -194,7 +191,7 @@ async fn is_job_finished(
     let path = path.into_inner();
     let pantry = rc.context();
 
-    let job_is_finished = pantry.is_job_finished(path.id).await?;
+    let job_is_finished = pantry.is_job_finished(path.id)?;
 
     Ok(HttpResponseOk(JobPollResponse { job_is_finished }))
 }
@@ -217,7 +214,7 @@ async fn job_result_ok(
     let path = path.into_inner();
     let pantry = rc.context();
 
-    let job_result = pantry.get_job_result(path.id).await?;
+    let job_result = pantry.get_job_result(path.id)?;
 
     match job_result {
         Ok(job_result_ok) => {
@@ -260,7 +257,6 @@ async fn import_from_url(
 
     let job_id = pantry
         .import_from_url(path.id.clone(), body.url, body.expected_digest)
-        .await
         .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
     Ok(HttpResponseOk(ImportFromUrlResponse { job_id }))
@@ -287,7 +283,6 @@ async fn snapshot(
 
     pantry
         .snapshot(path.id.clone(), body.snapshot_id)
-        .await
         .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
     Ok(HttpResponseUpdatedNoContent())
@@ -320,7 +315,7 @@ async fn bulk_write(
     )
     .map_err(|e| HttpError::for_bad_request(None, e.to_string()))?;
 
-    pantry.bulk_write(path.id.clone(), body.offset, data).await?;
+    pantry.bulk_write(path.id.clone(), body.offset, data)?;
 
     Ok(HttpResponseUpdatedNoContent())
 }
@@ -344,7 +339,6 @@ async fn scrub(
 
     let job_id = pantry
         .scrub(path.id.clone())
-        .await
         .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
     Ok(HttpResponseOk(ScrubResponse { job_id }))
@@ -364,7 +358,6 @@ async fn detach(
 
     pantry
         .detach(path.id)
-        .await
         .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
     Ok(HttpResponseDeleted())

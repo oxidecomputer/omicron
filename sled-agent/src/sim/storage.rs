@@ -12,15 +12,18 @@ use crate::sim::http_entrypoints_pantry::ExpectedDigest;
 use crate::sim::http_entrypoints_pantry::PantryStatus;
 use crate::sim::http_entrypoints_pantry::VolumeStatus;
 use crate::sim::SledAgent;
+use crate::support_bundle::storage::SupportBundleManager;
 use anyhow::{self, bail, Result};
+use camino::Utf8Path;
+use camino_tempfile::Utf8TempDir;
 use chrono::prelude::*;
 use crucible_agent_client::types::{
     CreateRegion, Region, RegionId, RunningSnapshot, Snapshot, State,
 };
 use dropshot::HandlerTaskMode;
 use dropshot::HttpError;
-use futures::lock::Mutex;
 use omicron_common::disk::DatasetManagementStatus;
+use omicron_common::disk::DatasetName;
 use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::DatasetsManagementResult;
 use omicron_common::disk::DiskIdentity;
@@ -28,24 +31,26 @@ use omicron_common::disk::DiskManagementStatus;
 use omicron_common::disk::DiskVariant;
 use omicron_common::disk::DisksManagementResult;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
-use omicron_common::update::ArtifactHash;
+use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
-use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use propolis_client::types::VolumeConstructionRequest;
+use propolis_client::VolumeConstructionRequest;
 use serde::Serialize;
-use sled_agent_api::SupportBundleMetadata;
-use sled_agent_api::SupportBundleState;
+use sled_storage::manager::NestedDatasetConfig;
+use sled_storage::manager::NestedDatasetListOptions;
+use sled_storage::manager::NestedDatasetLocation;
 use slog::Logger;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::Mutex;
 use uuid::Uuid;
 
 type CreateCallback = Box<dyn Fn(&CreateRegion) -> State + Send + 'static>;
@@ -396,6 +401,11 @@ impl CrucibleDataInner {
 #[cfg(test)]
 mod test {
     use super::*;
+    use omicron_common::api::external::Generation;
+    use omicron_common::disk::DatasetConfig;
+    use omicron_common::disk::DatasetKind;
+    use omicron_common::disk::DatasetName;
+    use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
 
     /// Validate that the simulated Crucible agent reuses ports when regions are
@@ -656,6 +666,243 @@ mod test {
 
         logctx.cleanup_successful();
     }
+
+    #[test]
+    fn nested_dataset_not_found_missing_dataset() {
+        let logctx = test_setup_log("nested_dataset_not_found_missing_dataset");
+
+        let storage = StorageInner::new(
+            Uuid::new_v4(),
+            std::net::Ipv4Addr::LOCALHOST.into(),
+            logctx.log.clone(),
+        );
+
+        let zpool_id = ZpoolUuid::new_v4();
+
+        let err = storage
+            .nested_dataset_list(
+                NestedDatasetLocation {
+                    path: String::new(),
+                    root: DatasetName::new(
+                        ZpoolName::new_external(zpool_id),
+                        DatasetKind::Debug,
+                    ),
+                },
+                NestedDatasetListOptions::SelfAndChildren,
+            )
+            .expect_err("Nested dataset listing should fail on fake dataset");
+
+        assert_eq!(err.status_code, 404);
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn nested_dataset() {
+        let logctx = test_setup_log("nested_dataset");
+
+        let mut storage = StorageInner::new(
+            Uuid::new_v4(),
+            std::net::Ipv4Addr::LOCALHOST.into(),
+            logctx.log.clone(),
+        );
+
+        let zpool_id = ZpoolUuid::new_v4();
+        let zpool_name = ZpoolName::new_external(zpool_id);
+        let dataset_id = DatasetUuid::new_v4();
+        let dataset_name = DatasetName::new(zpool_name, DatasetKind::Debug);
+
+        let config = DatasetsConfig {
+            generation: Generation::new(),
+            datasets: BTreeMap::from([(
+                dataset_id,
+                DatasetConfig {
+                    id: dataset_id,
+                    name: dataset_name.clone(),
+                    inner: SharedDatasetConfig::default(),
+                },
+            )]),
+        };
+
+        // Create the debug dataset on which we'll store everything else.
+        let result = storage.datasets_ensure(config).unwrap();
+        assert!(!result.has_error());
+
+        // The list of nested datasets should only contain the root dataset.
+        let nested_datasets = storage
+            .nested_dataset_list(
+                NestedDatasetLocation {
+                    path: String::new(),
+                    root: dataset_name.clone(),
+                },
+                NestedDatasetListOptions::SelfAndChildren,
+            )
+            .unwrap();
+        assert_eq!(
+            nested_datasets,
+            vec![NestedDatasetConfig {
+                name: NestedDatasetLocation {
+                    path: String::new(),
+                    root: dataset_name.clone(),
+                },
+                inner: SharedDatasetConfig::default(),
+            }]
+        );
+
+        // Or, if we're requesting children explicitly, it should be empty.
+        let nested_dataset_root = NestedDatasetLocation {
+            path: String::new(),
+            root: dataset_name.clone(),
+        };
+
+        let nested_datasets = storage
+            .nested_dataset_list(
+                nested_dataset_root.clone(),
+                NestedDatasetListOptions::ChildrenOnly,
+            )
+            .unwrap();
+        assert_eq!(nested_datasets, vec![]);
+
+        // We can request a nested dataset explicitly.
+        let foo_config = NestedDatasetConfig {
+            name: NestedDatasetLocation {
+                path: "foo".into(),
+                root: dataset_name.clone(),
+            },
+            inner: SharedDatasetConfig::default(),
+        };
+        storage.nested_dataset_ensure(foo_config.clone()).unwrap();
+        let foobar_config = NestedDatasetConfig {
+            name: NestedDatasetLocation {
+                path: "foo/bar".into(),
+                root: dataset_name.clone(),
+            },
+            inner: SharedDatasetConfig::default(),
+        };
+        storage.nested_dataset_ensure(foobar_config.clone()).unwrap();
+
+        // We can observe the nested datasets we just created
+        let nested_datasets = storage
+            .nested_dataset_list(
+                nested_dataset_root.clone(),
+                NestedDatasetListOptions::ChildrenOnly,
+            )
+            .unwrap();
+        assert_eq!(nested_datasets, vec![foo_config.clone(),]);
+
+        let nested_datasets = storage
+            .nested_dataset_list(
+                foo_config.name.clone(),
+                NestedDatasetListOptions::ChildrenOnly,
+            )
+            .unwrap();
+        assert_eq!(nested_datasets, vec![foobar_config.clone(),]);
+
+        // We can destroy nested datasets too
+        storage.nested_dataset_destroy(foobar_config.name.clone()).unwrap();
+        storage.nested_dataset_destroy(foo_config.name.clone()).unwrap();
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn nested_dataset_child_parent_relationship() {
+        let logctx = test_setup_log("nested_dataset_child_parent_relationship");
+
+        let mut storage = StorageInner::new(
+            Uuid::new_v4(),
+            std::net::Ipv4Addr::LOCALHOST.into(),
+            logctx.log.clone(),
+        );
+
+        let zpool_id = ZpoolUuid::new_v4();
+        let zpool_name = ZpoolName::new_external(zpool_id);
+        let dataset_id = DatasetUuid::new_v4();
+        let dataset_name = DatasetName::new(zpool_name, DatasetKind::Debug);
+
+        let config = DatasetsConfig {
+            generation: Generation::new(),
+            datasets: BTreeMap::from([(
+                dataset_id,
+                DatasetConfig {
+                    id: dataset_id,
+                    name: dataset_name.clone(),
+                    inner: SharedDatasetConfig::default(),
+                },
+            )]),
+        };
+
+        // Create the debug dataset on which we'll store everything else.
+        let result = storage.datasets_ensure(config).unwrap();
+        assert!(!result.has_error());
+        let nested_dataset_root = NestedDatasetLocation {
+            path: String::new(),
+            root: dataset_name.clone(),
+        };
+        let nested_datasets = storage
+            .nested_dataset_list(
+                nested_dataset_root.clone(),
+                NestedDatasetListOptions::ChildrenOnly,
+            )
+            .unwrap();
+        assert_eq!(nested_datasets, vec![]);
+
+        // If we try to create a nested dataset "foo/bar" before the parent
+        // "foo", we expect an error.
+
+        let foo_config = NestedDatasetConfig {
+            name: NestedDatasetLocation {
+                path: "foo".into(),
+                root: dataset_name.clone(),
+            },
+            inner: SharedDatasetConfig::default(),
+        };
+        let foobar_config = NestedDatasetConfig {
+            name: NestedDatasetLocation {
+                path: "foo/bar".into(),
+                root: dataset_name.clone(),
+            },
+            inner: SharedDatasetConfig::default(),
+        };
+
+        let err = storage
+            .nested_dataset_ensure(foobar_config.clone())
+            .expect_err("Should have failed to provision foo/bar before foo");
+        assert_eq!(err.status_code, 404);
+
+        // Try again, but creating them successfully this time.
+        storage.nested_dataset_ensure(foo_config.clone()).unwrap();
+        storage.nested_dataset_ensure(foobar_config.clone()).unwrap();
+
+        // We can observe the nested datasets we just created
+        let nested_datasets = storage
+            .nested_dataset_list(
+                nested_dataset_root.clone(),
+                NestedDatasetListOptions::ChildrenOnly,
+            )
+            .unwrap();
+        assert_eq!(nested_datasets, vec![foo_config.clone(),]);
+        let nested_datasets = storage
+            .nested_dataset_list(
+                foo_config.name.clone(),
+                NestedDatasetListOptions::ChildrenOnly,
+            )
+            .unwrap();
+        assert_eq!(nested_datasets, vec![foobar_config.clone(),]);
+
+        // Destroying the nested dataset parent should destroy children.
+        storage.nested_dataset_destroy(foo_config.name.clone()).unwrap();
+
+        let nested_datasets = storage
+            .nested_dataset_list(
+                nested_dataset_root.clone(),
+                NestedDatasetListOptions::ChildrenOnly,
+            )
+            .unwrap();
+        assert_eq!(nested_datasets, vec![]);
+
+        logctx.cleanup_successful();
+    }
 }
 
 /// Represents a running Crucible Agent. Contains regions.
@@ -672,91 +919,90 @@ impl CrucibleData {
         }
     }
 
-    pub async fn set_create_callback(&self, callback: CreateCallback) {
-        self.inner.lock().await.set_create_callback(callback);
+    pub fn set_create_callback(&self, callback: CreateCallback) {
+        self.inner.lock().unwrap().set_create_callback(callback);
     }
 
-    pub async fn list(&self) -> Vec<Region> {
-        self.inner.lock().await.list()
+    pub fn list(&self) -> Vec<Region> {
+        self.inner.lock().unwrap().list()
     }
 
-    pub async fn create(&self, params: CreateRegion) -> Result<Region> {
-        self.inner.lock().await.create(params)
+    pub fn create(&self, params: CreateRegion) -> Result<Region> {
+        self.inner.lock().unwrap().create(params)
     }
 
-    pub async fn get(&self, id: RegionId) -> Option<Region> {
-        self.inner.lock().await.get(id)
+    pub fn get(&self, id: RegionId) -> Option<Region> {
+        self.inner.lock().unwrap().get(id)
     }
 
-    pub async fn delete(&self, id: RegionId) -> Result<Option<Region>> {
-        self.inner.lock().await.delete(id)
+    pub fn delete(&self, id: RegionId) -> Result<Option<Region>> {
+        self.inner.lock().unwrap().delete(id)
     }
 
-    pub async fn create_snapshot(
+    pub fn create_snapshot(
         &self,
         id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<Snapshot> {
-        self.inner.lock().await.create_snapshot(id, snapshot_id)
+        self.inner.lock().unwrap().create_snapshot(id, snapshot_id)
     }
 
-    pub async fn snapshots_for_region(&self, id: &RegionId) -> Vec<Snapshot> {
-        self.inner.lock().await.snapshots_for_region(id)
+    pub fn snapshots_for_region(&self, id: &RegionId) -> Vec<Snapshot> {
+        self.inner.lock().unwrap().snapshots_for_region(id)
     }
 
-    pub async fn get_snapshot_for_region(
+    pub fn get_snapshot_for_region(
         &self,
         id: &RegionId,
         snapshot_id: &str,
     ) -> Option<Snapshot> {
-        self.inner.lock().await.get_snapshot_for_region(id, snapshot_id)
+        self.inner.lock().unwrap().get_snapshot_for_region(id, snapshot_id)
     }
 
-    pub async fn running_snapshots_for_id(
+    pub fn running_snapshots_for_id(
         &self,
         id: &RegionId,
     ) -> HashMap<String, RunningSnapshot> {
-        self.inner.lock().await.running_snapshots_for_id(id)
+        self.inner.lock().unwrap().running_snapshots_for_id(id)
     }
 
-    pub async fn delete_snapshot(
-        &self,
-        id: &RegionId,
-        name: &str,
-    ) -> Result<()> {
-        self.inner.lock().await.delete_snapshot(id, name)
+    pub fn delete_snapshot(&self, id: &RegionId, name: &str) -> Result<()> {
+        self.inner.lock().unwrap().delete_snapshot(id, name)
     }
 
-    pub async fn set_creating_a_running_snapshot_should_fail(&self) {
-        self.inner.lock().await.set_creating_a_running_snapshot_should_fail();
+    pub fn set_creating_a_running_snapshot_should_fail(&self) {
+        self.inner
+            .lock()
+            .unwrap()
+            .set_creating_a_running_snapshot_should_fail();
     }
 
-    pub async fn set_region_creation_error(&self, value: bool) {
-        self.inner.lock().await.set_region_creation_error(value);
+    pub fn set_region_creation_error(&self, value: bool) {
+        self.inner.lock().unwrap().set_region_creation_error(value);
     }
 
-    pub async fn set_region_deletion_error(&self, value: bool) {
-        self.inner.lock().await.set_region_deletion_error(value);
+    pub fn set_region_deletion_error(&self, value: bool) {
+        self.inner.lock().unwrap().set_region_deletion_error(value);
     }
 
-    pub async fn create_running_snapshot(
+    pub fn create_running_snapshot(
         &self,
         id: &RegionId,
         name: &str,
     ) -> Result<RunningSnapshot> {
-        self.inner.lock().await.create_running_snapshot(id, name)
+        self.inner.lock().unwrap().create_running_snapshot(id, name)
     }
 
-    pub async fn delete_running_snapshot(
+    pub fn delete_running_snapshot(
         &self,
         id: &RegionId,
         name: &str,
     ) -> Result<()> {
-        self.inner.lock().await.delete_running_snapshot(id, name)
+        self.inner.lock().unwrap().delete_running_snapshot(id, name)
     }
 
-    pub async fn is_empty(&self) -> bool {
-        self.inner.lock().await.is_empty()
+    pub fn is_empty(&self) -> bool {
+        self.inner.lock().unwrap().is_empty()
     }
 }
 
@@ -810,11 +1056,6 @@ impl CrucibleServer {
     }
 }
 
-#[derive(Default)]
-pub(crate) struct DebugData {
-    bundles: HashMap<SupportBundleUuid, ArtifactHash>,
-}
-
 pub(crate) struct PhysicalDisk {
     pub(crate) identity: DiskIdentity,
     pub(crate) variant: DiskVariant,
@@ -824,7 +1065,6 @@ pub(crate) struct PhysicalDisk {
 /// Describes data being simulated within a dataset.
 pub(crate) enum DatasetContents {
     Crucible(CrucibleServer),
-    Debug(DebugData),
 }
 
 pub(crate) struct Zpool {
@@ -841,10 +1081,6 @@ impl Zpool {
         total_size: u64,
     ) -> Self {
         Zpool { id, physical_disk_id, total_size, datasets: HashMap::new() }
-    }
-
-    fn insert_debug_dataset(&mut self, id: DatasetUuid) {
-        self.datasets.insert(id, DatasetContents::Debug(DebugData::default()));
     }
 
     fn insert_crucible_dataset(
@@ -867,10 +1103,7 @@ impl Zpool {
         let DatasetContents::Crucible(crucible) = self
             .datasets
             .get(&id)
-            .expect("Failed to get the dataset we just inserted")
-        else {
-            panic!("Should have just inserted Crucible dataset");
-        };
+            .expect("Failed to get the dataset we just inserted");
         crucible
     }
 
@@ -878,17 +1111,16 @@ impl Zpool {
         self.total_size
     }
 
-    pub async fn get_dataset_for_region(
+    pub fn get_dataset_for_region(
         &self,
         region_id: Uuid,
     ) -> Option<Arc<CrucibleData>> {
         for dataset in self.datasets.values() {
-            if let DatasetContents::Crucible(dataset) = dataset {
-                for region in &dataset.data().list().await {
-                    let id = Uuid::from_str(&region.id.0).unwrap();
-                    if id == region_id {
-                        return Some(dataset.data());
-                    }
+            let DatasetContents::Crucible(dataset) = dataset;
+            for region in &dataset.data().list() {
+                let id = Uuid::from_str(&region.id.0).unwrap();
+                if id == region_id {
+                    return Some(dataset.data());
                 }
             }
         }
@@ -896,19 +1128,18 @@ impl Zpool {
         None
     }
 
-    pub async fn get_region_for_port(&self, port: u16) -> Option<Region> {
+    pub fn get_region_for_port(&self, port: u16) -> Option<Region> {
         let mut regions = vec![];
 
         for dataset in self.datasets.values() {
-            if let DatasetContents::Crucible(dataset) = dataset {
-                for region in &dataset.data().list().await {
-                    if region.state == State::Destroyed {
-                        continue;
-                    }
+            let DatasetContents::Crucible(dataset) = dataset;
+            for region in &dataset.data().list() {
+                if region.state == State::Destroyed {
+                    continue;
+                }
 
-                    if port == region.port_number {
-                        regions.push(region.clone());
-                    }
+                if port == region.port_number {
+                    regions.push(region.clone());
                 }
             }
         }
@@ -924,12 +1155,87 @@ impl Zpool {
     }
 }
 
+/// Represents a nested dataset
+pub struct NestedDatasetStorage {
+    config: NestedDatasetConfig,
+    // We intentionally store the children before the mountpoint,
+    // so they are deleted first.
+    children: BTreeMap<String, NestedDatasetStorage>,
+    // We store this directory as a temporary directory so it gets
+    // removed when this struct is dropped.
+    #[allow(dead_code)]
+    mountpoint: Utf8TempDir,
+}
+
+impl NestedDatasetStorage {
+    fn new(
+        zpool_root: &Utf8Path,
+        dataset_root: DatasetName,
+        path: String,
+        shared_config: SharedDatasetConfig,
+    ) -> Self {
+        let name = NestedDatasetLocation { path, root: dataset_root };
+
+        // Create a mountpoint for the nested dataset storage that lasts
+        // as long as the nested dataset does.
+        let mountpoint = name.mountpoint(zpool_root);
+        let parent = mountpoint.as_path().parent().unwrap();
+        std::fs::create_dir_all(&parent).unwrap();
+
+        let new_dir_name = mountpoint.as_path().file_name().unwrap();
+        let mountpoint = camino_tempfile::Builder::new()
+            .rand_bytes(0)
+            .prefix(new_dir_name)
+            .tempdir_in(parent)
+            .unwrap();
+
+        Self {
+            config: NestedDatasetConfig { name, inner: shared_config },
+            children: BTreeMap::new(),
+            mountpoint,
+        }
+    }
+}
+
 /// Simulated representation of all storage on a sled.
+#[derive(Clone)]
 pub struct Storage {
-    sled_id: Uuid,
+    inner: Arc<Mutex<StorageInner>>,
+}
+
+impl Storage {
+    pub fn new(sled_id: Uuid, crucible_ip: IpAddr, log: Logger) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(StorageInner::new(
+                sled_id,
+                crucible_ip,
+                log,
+            ))),
+        }
+    }
+
+    pub fn lock(&self) -> std::sync::MutexGuard<StorageInner> {
+        self.inner.lock().unwrap()
+    }
+
+    pub fn as_support_bundle_storage<'a>(
+        &'a self,
+        log: &'a Logger,
+    ) -> SupportBundleManager<'a> {
+        SupportBundleManager::new(log, self)
+    }
+}
+
+/// Simulated representation of all storage on a sled.
+///
+/// Guarded by a mutex from [Storage].
+pub struct StorageInner {
     log: Logger,
+    sled_id: Uuid,
+    root: Utf8TempDir,
     config: Option<OmicronPhysicalDisksConfig>,
     dataset_config: Option<DatasetsConfig>,
+    nested_datasets: HashMap<DatasetName, NestedDatasetStorage>,
     physical_disks: HashMap<PhysicalDiskUuid, PhysicalDisk>,
     next_disk_slot: i64,
     zpools: HashMap<ZpoolUuid, Zpool>,
@@ -937,13 +1243,15 @@ pub struct Storage {
     next_crucible_port: u16,
 }
 
-impl Storage {
+impl StorageInner {
     pub fn new(sled_id: Uuid, crucible_ip: IpAddr, log: Logger) -> Self {
         Self {
             sled_id,
             log,
+            root: camino_tempfile::tempdir().unwrap(),
             config: None,
             dataset_config: None,
+            nested_datasets: HashMap::new(),
             physical_disks: HashMap::new(),
             next_disk_slot: 0,
             zpools: HashMap::new(),
@@ -952,14 +1260,17 @@ impl Storage {
         }
     }
 
+    /// Returns a path to the "zpool root" for storage.
+    pub fn root(&self) -> &Utf8Path {
+        self.root.path()
+    }
+
     /// Returns an immutable reference to all (currently known) physical disks
     pub fn physical_disks(&self) -> &HashMap<PhysicalDiskUuid, PhysicalDisk> {
         &self.physical_disks
     }
 
-    pub async fn datasets_config_list(
-        &self,
-    ) -> Result<DatasetsConfig, HttpError> {
+    pub fn datasets_config_list(&self) -> Result<DatasetsConfig, HttpError> {
         let Some(config) = self.dataset_config.as_ref() else {
             return Err(HttpError::for_not_found(
                 None,
@@ -969,7 +1280,7 @@ impl Storage {
         Ok(config.clone())
     }
 
-    pub async fn datasets_ensure(
+    pub fn datasets_ensure(
         &mut self,
         config: DatasetsConfig,
     ) -> Result<DatasetsManagementResult, HttpError> {
@@ -977,7 +1288,7 @@ impl Storage {
             if stored_config.generation > config.generation {
                 return Err(HttpError::for_client_error(
                     None,
-                    http::StatusCode::BAD_REQUEST,
+                    dropshot::ClientErrorStatusCode::BAD_REQUEST,
                     "Generation number too old".to_string(),
                 ));
             } else if stored_config.generation == config.generation
@@ -985,13 +1296,39 @@ impl Storage {
             {
                 return Err(HttpError::for_client_error(
                     None,
-                    http::StatusCode::BAD_REQUEST,
+                    dropshot::ClientErrorStatusCode::BAD_REQUEST,
                     "Generation number unchanged but data is different"
                         .to_string(),
                 ));
             }
         }
         self.dataset_config.replace(config.clone());
+
+        // Add a "nested dataset" entry for all datasets that should exist,
+        // and remove it for all datasets that have been removed.
+        let dataset_names: HashSet<_> = config
+            .datasets
+            .values()
+            .map(|config| config.name.clone())
+            .collect();
+        for dataset in &dataset_names {
+            // Datasets delegated to zones manage their own storage.
+            if dataset.kind().zoned() {
+                continue;
+            }
+
+            let root = self.root().to_path_buf();
+            self.nested_datasets.entry(dataset.clone()).or_insert_with(|| {
+                NestedDatasetStorage::new(
+                    &root,
+                    dataset.clone(),
+                    String::new(),
+                    SharedDatasetConfig::default(),
+                )
+            });
+        }
+        self.nested_datasets
+            .retain(|dataset, _| dataset_names.contains(&dataset));
 
         Ok(DatasetsManagementResult {
             status: config
@@ -1005,7 +1342,151 @@ impl Storage {
         })
     }
 
-    pub async fn omicron_physical_disks_list(
+    pub fn nested_dataset_list(
+        &self,
+        name: NestedDatasetLocation,
+        options: NestedDatasetListOptions,
+    ) -> Result<Vec<NestedDatasetConfig>, HttpError> {
+        let Some(mut nested_dataset) = self.nested_datasets.get(&name.root)
+        else {
+            return Err(HttpError::for_not_found(
+                None,
+                "Dataset not found".to_string(),
+            ));
+        };
+
+        for path_component in name.path.split('/') {
+            if path_component.is_empty() {
+                continue;
+            }
+            match nested_dataset.children.get(path_component) {
+                Some(dataset) => nested_dataset = dataset,
+                None => {
+                    return Err(HttpError::for_not_found(
+                        None,
+                        "Dataset not found".to_string(),
+                    ))
+                }
+            };
+        }
+
+        let mut children: Vec<_> = nested_dataset
+            .children
+            .values()
+            .map(|storage| storage.config.clone())
+            .collect();
+
+        match options {
+            NestedDatasetListOptions::ChildrenOnly => return Ok(children),
+            NestedDatasetListOptions::SelfAndChildren => {
+                children.insert(0, nested_dataset.config.clone());
+                return Ok(children);
+            }
+        }
+    }
+
+    pub fn nested_dataset_ensure(
+        &mut self,
+        config: NestedDatasetConfig,
+    ) -> Result<(), HttpError> {
+        let name = &config.name;
+        let nested_path = name.path.to_string();
+        let zpool_root = self.root().to_path_buf();
+        let Some(mut nested_dataset) = self.nested_datasets.get_mut(&name.root)
+        else {
+            return Err(HttpError::for_not_found(
+                None,
+                "Dataset not found".to_string(),
+            ));
+        };
+
+        let mut path_components = nested_path.split('/').peekable();
+        while let Some(path_component) = path_components.next() {
+            if path_component.is_empty() {
+                continue;
+            }
+
+            // Final component of path -- insert it here if it doesn't exist
+            // already.
+            if path_components.peek().is_none() {
+                let entry =
+                    nested_dataset.children.entry(path_component.to_string());
+                entry
+                    .and_modify(|storage| {
+                        storage.config = config.clone();
+                    })
+                    .or_insert_with(|| {
+                        NestedDatasetStorage::new(
+                            &zpool_root,
+                            config.name.root,
+                            nested_path,
+                            config.inner,
+                        )
+                    });
+                return Ok(());
+            }
+
+            match nested_dataset.children.get_mut(path_component) {
+                Some(dataset) => nested_dataset = dataset,
+                None => {
+                    return Err(HttpError::for_not_found(
+                        None,
+                        "Dataset not found".to_string(),
+                    ))
+                }
+            };
+        }
+        return Err(HttpError::for_not_found(
+            None,
+            "Nested Dataset not found".to_string(),
+        ));
+    }
+
+    pub fn nested_dataset_destroy(
+        &mut self,
+        name: NestedDatasetLocation,
+    ) -> Result<(), HttpError> {
+        let Some(mut nested_dataset) = self.nested_datasets.get_mut(&name.root)
+        else {
+            return Err(HttpError::for_not_found(
+                None,
+                "Dataset not found".to_string(),
+            ));
+        };
+
+        let mut path_components = name.path.split('/').peekable();
+        while let Some(path_component) = path_components.next() {
+            if path_component.is_empty() {
+                continue;
+            }
+
+            // Final component of path -- remove it if it exists.
+            if path_components.peek().is_none() {
+                if nested_dataset.children.remove(path_component).is_none() {
+                    return Err(HttpError::for_not_found(
+                        None,
+                        "Nested Dataset not found".to_string(),
+                    ));
+                };
+                return Ok(());
+            }
+            match nested_dataset.children.get_mut(path_component) {
+                Some(dataset) => nested_dataset = dataset,
+                None => {
+                    return Err(HttpError::for_not_found(
+                        None,
+                        "Dataset not found".to_string(),
+                    ))
+                }
+            };
+        }
+        return Err(HttpError::for_not_found(
+            None,
+            "Nested Dataset not found".to_string(),
+        ));
+    }
+
+    pub fn omicron_physical_disks_list(
         &mut self,
     ) -> Result<OmicronPhysicalDisksConfig, HttpError> {
         let Some(config) = self.config.as_ref() else {
@@ -1017,7 +1498,7 @@ impl Storage {
         Ok(config.clone())
     }
 
-    pub async fn omicron_physical_disks_ensure(
+    pub fn omicron_physical_disks_ensure(
         &mut self,
         config: OmicronPhysicalDisksConfig,
     ) -> Result<DisksManagementResult, HttpError> {
@@ -1025,7 +1506,7 @@ impl Storage {
             if stored_config.generation > config.generation {
                 return Err(HttpError::for_client_error(
                     None,
-                    http::StatusCode::BAD_REQUEST,
+                    dropshot::ClientErrorStatusCode::BAD_REQUEST,
                     "Generation number too old".to_string(),
                 ));
             } else if stored_config.generation == config.generation
@@ -1033,7 +1514,7 @@ impl Storage {
             {
                 return Err(HttpError::for_client_error(
                     None,
-                    http::StatusCode::BAD_REQUEST,
+                    dropshot::ClientErrorStatusCode::BAD_REQUEST,
                     "Generation number unchanged but data is different"
                         .to_string(),
                 ));
@@ -1053,7 +1534,7 @@ impl Storage {
         })
     }
 
-    pub async fn insert_physical_disk(
+    pub fn insert_physical_disk(
         &mut self,
         id: PhysicalDiskUuid,
         identity: DiskIdentity,
@@ -1066,7 +1547,7 @@ impl Storage {
     }
 
     /// Adds a Zpool to the sled's simulated storage.
-    pub async fn insert_zpool(
+    pub fn insert_zpool(
         &mut self,
         zpool_id: ZpoolUuid,
         disk_id: PhysicalDiskUuid,
@@ -1081,143 +1562,8 @@ impl Storage {
         &self.zpools
     }
 
-    fn get_debug_dataset(
-        &self,
-        zpool_id: ZpoolUuid,
-        dataset_id: DatasetUuid,
-    ) -> Result<&DebugData, HttpError> {
-        let Some(zpool) = self.zpools.get(&zpool_id) else {
-            return Err(HttpError::for_not_found(
-                None,
-                format!("zpool does not exist {zpool_id}"),
-            ));
-        };
-        let Some(dataset) = zpool.datasets.get(&dataset_id) else {
-            return Err(HttpError::for_not_found(
-                None,
-                format!("dataset does not exist {dataset_id}"),
-            ));
-        };
-
-        let DatasetContents::Debug(debug) = dataset else {
-            return Err(HttpError::for_bad_request(
-                None,
-                format!("Not a debug dataset: {zpool_id} / {dataset_id}"),
-            ));
-        };
-
-        Ok(debug)
-    }
-
-    fn get_debug_dataset_mut(
-        &mut self,
-        zpool_id: ZpoolUuid,
-        dataset_id: DatasetUuid,
-    ) -> Result<&mut DebugData, HttpError> {
-        let Some(zpool) = self.zpools.get_mut(&zpool_id) else {
-            return Err(HttpError::for_not_found(
-                None,
-                format!("zpool does not exist {zpool_id}"),
-            ));
-        };
-        let Some(dataset) = zpool.datasets.get_mut(&dataset_id) else {
-            return Err(HttpError::for_not_found(
-                None,
-                format!("dataset does not exist {dataset_id}"),
-            ));
-        };
-
-        let DatasetContents::Debug(debug) = dataset else {
-            return Err(HttpError::for_bad_request(
-                None,
-                format!("Not a debug dataset: {zpool_id} / {dataset_id}"),
-            ));
-        };
-
-        Ok(debug)
-    }
-
-    pub async fn support_bundle_list(
-        &self,
-        zpool_id: ZpoolUuid,
-        dataset_id: DatasetUuid,
-    ) -> Result<Vec<SupportBundleMetadata>, HttpError> {
-        let debug = self.get_debug_dataset(zpool_id, dataset_id)?;
-
-        Ok(debug
-            .bundles
-            .keys()
-            .map(|id| SupportBundleMetadata {
-                support_bundle_id: *id,
-                state: SupportBundleState::Complete,
-            })
-            .collect())
-    }
-
-    pub async fn support_bundle_create(
-        &mut self,
-        zpool_id: ZpoolUuid,
-        dataset_id: DatasetUuid,
-        support_bundle_id: SupportBundleUuid,
-        hash: ArtifactHash,
-    ) -> Result<(), HttpError> {
-        let debug = self.get_debug_dataset_mut(zpool_id, dataset_id)?;
-
-        // This is for the simulated server, so we totally ignore the "contents"
-        // of the bundle and just accept that it should exist.
-        debug.bundles.insert(support_bundle_id, hash);
-
-        Ok(())
-    }
-
-    pub async fn support_bundle_exists(
-        &self,
-        zpool_id: ZpoolUuid,
-        dataset_id: DatasetUuid,
-        support_bundle_id: SupportBundleUuid,
-    ) -> Result<(), HttpError> {
-        let debug = self.get_debug_dataset(zpool_id, dataset_id)?;
-
-        if !debug.bundles.contains_key(&support_bundle_id) {
-            return Err(HttpError::for_not_found(
-                None,
-                format!("Support bundle not found {support_bundle_id}"),
-            ));
-        }
-        Ok(())
-    }
-
-    pub async fn support_bundle_delete(
-        &mut self,
-        zpool_id: ZpoolUuid,
-        dataset_id: DatasetUuid,
-        support_bundle_id: SupportBundleUuid,
-    ) -> Result<(), HttpError> {
-        let debug = self.get_debug_dataset_mut(zpool_id, dataset_id)?;
-
-        if debug.bundles.remove(&support_bundle_id).is_none() {
-            return Err(HttpError::for_not_found(
-                None,
-                format!("Support bundle not found {support_bundle_id}"),
-            ));
-        }
-        Ok(())
-    }
-
-    /// Adds a debug dataset to the sled's simulated storage
-    pub async fn insert_debug_dataset(
-        &mut self,
-        zpool_id: ZpoolUuid,
-        dataset_id: DatasetUuid,
-    ) {
-        self.zpools
-            .get_mut(&zpool_id)
-            .expect("Zpool does not exist")
-            .insert_debug_dataset(dataset_id);
-    }
-
     /// Adds a Crucible dataset to the sled's simulated storage.
-    pub async fn insert_crucible_dataset(
+    pub fn insert_crucible_dataset(
         &mut self,
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
@@ -1287,16 +1633,13 @@ impl Storage {
         zpool
             .datasets
             .iter()
-            .filter_map(|(id, dataset)| match dataset {
-                DatasetContents::Crucible(server) => {
-                    Some((*id, server.address()))
-                }
-                _ => None,
+            .map(|(id, dataset)| match dataset {
+                DatasetContents::Crucible(server) => (*id, server.address()),
             })
             .collect()
     }
 
-    pub async fn get_dataset(
+    pub fn get_dataset(
         &self,
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
@@ -1309,24 +1652,22 @@ impl Storage {
             .expect("Dataset does not exist")
     }
 
-    pub async fn get_crucible_dataset(
+    pub fn get_crucible_dataset(
         &self,
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
     ) -> Arc<CrucibleData> {
-        match self.get_dataset(zpool_id, dataset_id).await {
+        match self.get_dataset(zpool_id, dataset_id) {
             DatasetContents::Crucible(crucible) => crucible.data.clone(),
-            _ => panic!("{zpool_id} / {dataset_id} is not a crucible dataset"),
         }
     }
 
-    pub async fn get_dataset_for_region(
+    pub fn get_dataset_for_region(
         &self,
         region_id: Uuid,
     ) -> Option<Arc<CrucibleData>> {
         for zpool in self.zpools.values() {
-            if let Some(dataset) = zpool.get_dataset_for_region(region_id).await
-            {
+            if let Some(dataset) = zpool.get_dataset_for_region(region_id) {
                 return Some(dataset);
             }
         }
@@ -1334,10 +1675,10 @@ impl Storage {
         None
     }
 
-    pub async fn get_region_for_port(&self, port: u16) -> Option<Region> {
+    pub fn get_region_for_port(&self, port: u16) -> Option<Region> {
         let mut regions = vec![];
         for zpool in self.zpools.values() {
-            if let Some(region) = zpool.get_region_for_port(port).await {
+            if let Some(region) = zpool.get_region_for_port(port) {
                 regions.push(region);
             }
         }
@@ -1396,19 +1737,19 @@ impl Pantry {
         }
     }
 
-    pub async fn status(&self) -> Result<PantryStatus, HttpError> {
-        let inner = self.inner.lock().await;
+    pub fn status(&self) -> Result<PantryStatus, HttpError> {
+        let inner = self.inner.lock().unwrap();
         Ok(PantryStatus {
             volumes: inner.volumes.keys().cloned().collect(),
             num_job_handles: inner.jobs.len(),
         })
     }
 
-    pub async fn entry(
+    pub fn entry(
         &self,
         volume_id: String,
     ) -> Result<VolumeConstructionRequest, HttpError> {
-        let inner = self.inner.lock().await;
+        let inner = self.inner.lock().unwrap();
 
         match inner.volumes.get(&volume_id) {
             Some(entry) => Ok(entry.vcr.clone()),
@@ -1417,12 +1758,12 @@ impl Pantry {
         }
     }
 
-    pub async fn attach(
+    pub fn attach(
         &self,
         volume_id: String,
         volume_construction_request: VolumeConstructionRequest,
     ) -> Result<()> {
-        let mut inner = self.inner.lock().await;
+        let mut inner = self.inner.lock().unwrap();
 
         inner.volumes.insert(
             volume_id,
@@ -1440,17 +1781,17 @@ impl Pantry {
         Ok(())
     }
 
-    pub async fn set_auto_activate_volumes(&self) {
-        self.inner.lock().await.auto_activate_volumes = true;
+    pub fn set_auto_activate_volumes(&self) {
+        self.inner.lock().unwrap().auto_activate_volumes = true;
     }
 
-    pub async fn attach_activate_background(
+    pub fn attach_activate_background(
         &self,
         volume_id: String,
         activate_job_id: String,
         volume_construction_request: VolumeConstructionRequest,
     ) -> Result<(), HttpError> {
-        let mut inner = self.inner.lock().await;
+        let mut inner = self.inner.lock().unwrap();
 
         let auto_activate_volumes = inner.auto_activate_volumes;
 
@@ -1472,30 +1813,30 @@ impl Pantry {
         Ok(())
     }
 
-    pub async fn activate_background_attachment(
+    pub fn activate_background_attachment(
         &self,
         volume_id: String,
     ) -> Result<String, HttpError> {
         let activate_job = {
-            let inner = self.inner.lock().await;
+            let inner = self.inner.lock().unwrap();
             inner.volumes.get(&volume_id).unwrap().activate_job.clone().unwrap()
         };
 
-        let mut status = self.volume_status(volume_id.clone()).await?;
+        let mut status = self.volume_status(volume_id.clone())?;
 
         status.active = true;
         status.seen_active = true;
 
-        self.update_volume_status(volume_id, status).await?;
+        self.update_volume_status(volume_id, status)?;
 
         Ok(activate_job)
     }
 
-    pub async fn volume_status(
+    pub fn volume_status(
         &self,
         volume_id: String,
     ) -> Result<VolumeStatus, HttpError> {
-        let inner = self.inner.lock().await;
+        let inner = self.inner.lock().unwrap();
 
         match inner.volumes.get(&volume_id) {
             Some(pantry_volume) => Ok(pantry_volume.status.clone()),
@@ -1504,12 +1845,12 @@ impl Pantry {
         }
     }
 
-    pub async fn update_volume_status(
+    pub fn update_volume_status(
         &self,
         volume_id: String,
         status: VolumeStatus,
     ) -> Result<(), HttpError> {
-        let mut inner = self.inner.lock().await;
+        let mut inner = self.inner.lock().unwrap();
 
         match inner.volumes.get_mut(&volume_id) {
             Some(pantry_volume) => {
@@ -1521,22 +1862,19 @@ impl Pantry {
         }
     }
 
-    pub async fn is_job_finished(
-        &self,
-        job_id: String,
-    ) -> Result<bool, HttpError> {
-        let inner = self.inner.lock().await;
+    pub fn is_job_finished(&self, job_id: String) -> Result<bool, HttpError> {
+        let inner = self.inner.lock().unwrap();
         if !inner.jobs.contains(&job_id) {
             return Err(HttpError::for_not_found(None, job_id));
         }
         Ok(true)
     }
 
-    pub async fn get_job_result(
+    pub fn get_job_result(
         &self,
         job_id: String,
     ) -> Result<Result<bool>, HttpError> {
-        let mut inner = self.inner.lock().await;
+        let mut inner = self.inner.lock().unwrap();
         if !inner.jobs.contains(&job_id) {
             return Err(HttpError::for_not_found(None, job_id));
         }
@@ -1544,23 +1882,23 @@ impl Pantry {
         Ok(Ok(true))
     }
 
-    pub async fn import_from_url(
+    pub fn import_from_url(
         &self,
         volume_id: String,
         _url: String,
         _expected_digest: Option<ExpectedDigest>,
     ) -> Result<String, HttpError> {
-        self.entry(volume_id).await?;
+        self.entry(volume_id)?;
 
         // Make up job
-        let mut inner = self.inner.lock().await;
+        let mut inner = self.inner.lock().unwrap();
         let job_id = Uuid::new_v4().to_string();
         inner.jobs.insert(job_id.clone());
 
         Ok(job_id)
     }
 
-    pub async fn snapshot(
+    pub fn snapshot(
         &self,
         volume_id: String,
         snapshot_id: String,
@@ -1569,13 +1907,12 @@ impl Pantry {
         // the simulated instance ensure, then call
         // [`instance_issue_disk_snapshot_request`] as the snapshot logic is the
         // same.
-        let inner = self.inner.lock().await;
+        let inner = self.inner.lock().unwrap();
         let volume_construction_request =
             &inner.volumes.get(&volume_id).unwrap().vcr;
 
         self.sled_agent
-            .map_disk_ids_to_region_ids(volume_construction_request)
-            .await?;
+            .map_disk_ids_to_region_ids(volume_construction_request)?;
 
         self.sled_agent
             .instance_issue_disk_snapshot_request(
@@ -1583,17 +1920,16 @@ impl Pantry {
                 volume_id.parse().unwrap(),
                 snapshot_id.parse().unwrap(),
             )
-            .await
             .map_err(|e| HttpError::for_internal_error(e.to_string()))
     }
 
-    pub async fn bulk_write(
+    pub fn bulk_write(
         &self,
         volume_id: String,
         offset: u64,
         data: Vec<u8>,
     ) -> Result<(), HttpError> {
-        let vcr = self.entry(volume_id).await?;
+        let vcr = self.entry(volume_id)?;
 
         // Currently, Nexus will only make volumes where the first subvolume is
         // a Region. This will change in the future!
@@ -1647,19 +1983,19 @@ impl Pantry {
         Ok(())
     }
 
-    pub async fn scrub(&self, volume_id: String) -> Result<String, HttpError> {
-        self.entry(volume_id).await?;
+    pub fn scrub(&self, volume_id: String) -> Result<String, HttpError> {
+        self.entry(volume_id)?;
 
         // Make up job
-        let mut inner = self.inner.lock().await;
+        let mut inner = self.inner.lock().unwrap();
         let job_id = Uuid::new_v4().to_string();
         inner.jobs.insert(job_id.clone());
 
         Ok(job_id)
     }
 
-    pub async fn detach(&self, volume_id: String) -> Result<()> {
-        let mut inner = self.inner.lock().await;
+    pub fn detach(&self, volume_id: String) -> Result<()> {
+        let mut inner = self.inner.lock().unwrap();
         inner.volumes.remove(&volume_id);
         Ok(())
     }
@@ -1671,11 +2007,7 @@ pub struct PantryServer {
 }
 
 impl PantryServer {
-    pub async fn new(
-        log: Logger,
-        ip: IpAddr,
-        sled_agent: Arc<SledAgent>,
-    ) -> Self {
+    pub fn new(log: Logger, ip: IpAddr, sled_agent: Arc<SledAgent>) -> Self {
         let pantry = Arc::new(Pantry::new(sled_agent));
 
         let server = dropshot::ServerBuilder::new(
@@ -1687,7 +2019,7 @@ impl PantryServer {
             bind_address: SocketAddr::new(ip, 0),
             // This has to be large enough to support:
             // - bulk writes into disks
-            request_body_max_bytes: 8192 * 1024,
+            default_request_body_max_bytes: 8192 * 1024,
             default_handler_task_mode: HandlerTaskMode::Detached,
             log_headers: vec![],
         })

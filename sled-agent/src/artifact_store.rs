@@ -27,7 +27,6 @@ use dropshot::{
     RequestContext, ServerBuilder, StreamingBody,
 };
 use futures::{Stream, TryStreamExt};
-use http::StatusCode;
 use omicron_common::address::REPO_DEPOT_PORT;
 use omicron_common::disk::{DatasetKind, DatasetsConfig};
 use omicron_common::update::ArtifactHash;
@@ -453,7 +452,7 @@ pub(crate) fn filter_dataset_mountpoints(
     config
         .datasets
         .into_values()
-        .filter(|dataset| *dataset.name.dataset() == DatasetKind::Update)
+        .filter(|dataset| *dataset.name.kind() == DatasetKind::Update)
         .map(|dataset| dataset.name.mountpoint(root))
 }
 
@@ -689,7 +688,7 @@ impl From<Error> for HttpError {
         match err {
             Error::AlreadyInProgress { .. } => HttpError::for_client_error(
                 None,
-                StatusCode::CONFLICT,
+                dropshot::ClientErrorStatusCode::CONFLICT,
                 err.to_string(),
             ),
             Error::Body(inner) => inner,

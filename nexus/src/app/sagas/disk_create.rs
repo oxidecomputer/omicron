@@ -20,10 +20,10 @@ use omicron_common::api::external::Error;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::{CrucibleOpts, VolumeConstructionRequest};
-use std::collections::VecDeque;
+use sled_agent_client::{CrucibleOpts, VolumeConstructionRequest};
 use std::convert::TryFrom;
 use std::net::SocketAddrV6;
+use std::{collections::VecDeque, net::SocketAddr};
 use steno::ActionError;
 use steno::Node;
 use uuid::Uuid;
@@ -506,7 +506,7 @@ async fn sdc_regions_ensure(
                                     )),
                                 )
                             })
-                            .map(|addr| addr.to_string())
+                            .map(SocketAddr::V6)
                     })
                     .collect::<Result<Vec<_>, ActionError>>()?,
 
@@ -1034,15 +1034,12 @@ pub(crate) mod test {
         true
     }
 
-    async fn no_regions_ensured(
-        sled_agent: &SledAgent,
-        test: &DiskTest<'_>,
-    ) -> bool {
+    fn no_regions_ensured(sled_agent: &SledAgent, test: &DiskTest<'_>) -> bool {
         for zpool in test.zpools() {
             for dataset in &zpool.datasets {
                 let crucible_dataset =
-                    sled_agent.get_crucible_dataset(zpool.id, dataset.id).await;
-                if !crucible_dataset.is_empty().await {
+                    sled_agent.get_crucible_dataset(zpool.id, dataset.id);
+                if !crucible_dataset.is_empty() {
                     return false;
                 }
             }
@@ -1054,7 +1051,7 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
         test: &DiskTest<'_>,
     ) {
-        let sled_agent = &cptestctx.sled_agent.sled_agent;
+        let sled_agent = cptestctx.first_sled_agent();
         let datastore = cptestctx.server.server_context().nexus.datastore();
 
         crate::app::sagas::test_helpers::assert_no_failed_undo_steps(
@@ -1073,7 +1070,7 @@ pub(crate) mod test {
                 .await
         );
         assert!(no_region_allocations_exist(datastore, &test).await);
-        assert!(no_regions_ensured(&sled_agent, &test).await);
+        assert!(no_regions_ensured(&sled_agent, &test));
 
         assert!(test.crucible_resources_deleted().await);
     }
