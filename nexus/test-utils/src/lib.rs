@@ -192,8 +192,25 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         self.sled_agents[0].sled_agent_id()
     }
 
+    pub fn second_sled_id(&self) -> SledUuid {
+        self.sled_agents[1].sled_agent_id()
+    }
+
     pub fn all_sled_agents(&self) -> impl Iterator<Item = &sim::Server> {
         self.sled_agents.iter().map(|sa| sa.server())
+    }
+
+    /// Return an iterator over all sled agents except the first one
+    pub fn extra_sled_agents(&self) -> impl Iterator<Item = &sim::Server> {
+        self.all_sled_agents().skip(1)
+    }
+
+    /// Find a sled agent that doesn't match the provided ID
+    pub fn find_sled_agent(&self, exclude_sled: Uuid) -> Option<SledUuid> {
+        let exclude_sled = SledUuid::from_untyped_uuid(exclude_sled);
+        self.all_sled_agents()
+            .find(|sa| sa.sled_agent.id != exclude_sled)
+            .map(|sa| sa.sled_agent.id)
     }
 
     pub fn wildcard_silo_dns_name(&self) -> String {

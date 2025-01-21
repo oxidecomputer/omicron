@@ -624,11 +624,10 @@ mod tests {
         .await
     }
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_saga_basic_usage_succeeds(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
@@ -642,8 +641,9 @@ mod tests {
 
         let state = test_helpers::instance_fetch(cptestctx, instance_id).await;
         let vmm = state.vmm().as_ref().unwrap();
-        let dst_sled_id =
-            test_helpers::select_first_alternate_sled(vmm, &other_sleds[..]);
+        let dst_sled_id = cptestctx
+            .find_sled_agent(vmm.sled_id)
+            .expect("need at least one other sled");
         let params = Params {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
             instance: state.instance().clone(),
@@ -671,12 +671,11 @@ mod tests {
         );
     }
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_action_failure_can_unwind(
         cptestctx: &ControlPlaneTestContext,
     ) {
         let log = &cptestctx.logctx.log;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
         let _project_id = setup_test_project(&client).await;
@@ -701,10 +700,9 @@ mod tests {
                         .as_ref()
                         .expect("instance should have a vmm before migrating");
 
-                    let dst_sled_id = test_helpers::select_first_alternate_sled(
-                        old_vmm,
-                        &other_sleds[..],
-                    );
+                    let dst_sled_id = cptestctx
+                        .find_sled_agent(old_vmm.sled_id)
+                        .expect("need at least one other sled");
 
                     info!(log, "setting up new migration saga";
                           "old_instance" => ?old_instance,
