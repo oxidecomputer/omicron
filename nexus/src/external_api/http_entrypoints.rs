@@ -6977,19 +6977,25 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn webhook_view(
         rqctx: RequestContext<Self::Context>,
-        _path_params: Path<params::WebhookPath>,
+        path_params: Path<params::WebhookPath>,
     ) -> Result<HttpResponseOk<views::Webhook>, HttpError> {
         let apictx = rqctx.context();
+        let params::WebhookPath { webhook_id } = path_params.into_inner();
         let handler = async {
             let nexus = &apictx.context.nexus;
 
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
-            Err(nexus
-                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
-                .await
-                .into())
+            let webhook = nexus
+                .webhook_receiver_config_fetch(
+                    &opctx,
+                    omicron_uuid_kinds::WebhookReceiverUuid::from_untyped_uuid(
+                        webhook_id,
+                    ),
+                )
+                .await?;
+            Ok(HttpResponseOk(views::Webhook::try_from(webhook)?))
         };
         apictx
             .context

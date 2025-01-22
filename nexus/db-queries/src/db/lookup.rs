@@ -26,6 +26,7 @@ use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::TufArtifactKind;
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::WebhookReceiverUuid;
 use uuid::Uuid;
 
 /// Look up an API resource in the database
@@ -543,6 +544,16 @@ impl<'a> LookupPath<'a> {
     {
         SamlIdentityProvider::PrimaryKey(Root { lookup_root: self }, id)
     }
+
+    pub fn webhook_receiver_id<'b>(
+        self,
+        id: WebhookReceiverUuid,
+    ) -> WebhookReceiver<'b>
+    where
+        'a: 'b,
+    {
+        WebhookReceiver::PrimaryKey(Root { lookup_root: self }, id)
+    }
 }
 
 /// Represents the head of the selection path for a resource
@@ -944,6 +955,17 @@ lookup_resource! {
         { column_name = "address", rust_type = IpNetwork },
         { column_name = "rack_id", rust_type = Uuid },
         { column_name = "switch_location", rust_type = String }
+    ]
+}
+
+lookup_resource! {
+    name = "WebhookReceiver",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [
+        { column_name = "id", uuid_kind = WebhookReceiverKind }
     ]
 }
 
