@@ -29,7 +29,7 @@ use diffus::{edit::Edit, Diffable};
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::{ByteCount, Generation};
 use omicron_common::disk::{CompressionAlgorithm, DiskIdentity};
-use omicron_uuid_kinds::{DatasetUuid, SledUuid};
+use omicron_uuid_kinds::{BlueprintUuid, DatasetUuid, SledUuid};
 use omicron_uuid_kinds::{OmicronZoneUuid, PhysicalDiskUuid};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -43,22 +43,6 @@ use crate::deployment::{
     ZoneSortKey, ZpoolName,
 };
 use crate::external_api::views::SledState;
-
-/// Tables for added sleds in a blueprint diff
-pub struct SledTables {
-    pub disks: Option<BpTable>,
-    pub datasets: Option<BpTable>,
-    pub zones: Option<BpTable>,
-}
-
-/// Output of a `BlueprintDiffer`
-#[derive(Default)]
-pub struct BpDiffOutput {
-    pub errors: Vec<String>,
-    pub warnings: Vec<String>,
-    pub added_sleds: BTreeMap<SledUuid, SledTables>,
-    pub removed_sleds: BTreeMap<SledUuid, SledTables>,
-}
 
 /// A single value in a diff.
 pub enum DiffValue<'e, T> {
@@ -181,17 +165,74 @@ impl<'e> ModifiedSled<'e> {
     }
 }
 
+/// All possible modifications to `BlueprintMetadata`
+pub struct MetadataDiff<'e> {
+    blueprint_id: DiffValue<'e, BlueprintUuid>,
+    parent_blueprint_id: DiffValue<'e, Option<BlueprintUuid>>,
+    internal_dns_version: DiffValue<'e, Generation>,
+    external_dns_version: DiffValue<'e, Generation>,
+    cockroachdb_fingerprint: DiffValue<'e, String>,
+    cockroachdb_setting_preserve_downgrade:
+        DiffValue<'e, CockroachDbPreserveDowngrade>,
+    creator: DiffValue<'e, String>,
+    comment: DiffValue<'e, String>,
+}
+
+impl<'e> MetadataDiff<'e> {
+    /// Initialize a `MetadataDiff`.
+    ///
+    /// We always initialize to the `before` state as if this value is
+    /// unchanged. If a change callback fires for a given field, then we'll
+    /// update the value.
+    pub fn new(before: &'e Blueprint) -> MetadataDiff<'e> {
+        MetadataDiff {
+            blueprint_id: DiffValue::Unchanged(&before.id),
+            parent_blueprint_id: DiffValue::Unchanged(
+                &before.parent_blueprint_id,
+            ),
+            internal_dns_version: DiffValue::Unchanged(
+                &before.internal_dns_version,
+            ),
+            external_dns_version: DiffValue::Unchanged(
+                &before.external_dns_version,
+            ),
+            cockroachdb_fingerprint: DiffValue::Unchanged(
+                &before.cockroachdb_fingerprint,
+            ),
+            cockroachdb_setting_preserve_downgrade: DiffValue::Unchanged(
+                &before.cockroachdb_setting_preserve_downgrade,
+            ),
+            creator: DiffValue::Unchanged(&before.creator),
+            comment: DiffValue::Unchanged(&before.comment),
+        }
+    }
+}
+
 /// Accumulated state about diffs inside a `BlueprintDiffer`.
 ///
 /// Tied to the lifetime of a diffus diff.
-#[derive(Default)]
 pub struct BpDiffAccumulator<'e> {
     pub errors: Vec<String>,
     pub warnings: Vec<String>,
     added_sleds: BTreeMap<SledUuid, SledInsert<'e>>,
     removed_sleds: BTreeMap<SledUuid, SledRemove<'e>>,
-    unchanged_sleds: BTreeSet<SledUuid>,
+    // TODO: Should we fill this in explicitly or just use the data from `before`?
+    // unchanged_sleds: BTreeSet<SledUuid>,
     modified_sleds: BTreeMap<SledUuid, ModifiedSled<'e>>,
+    metadata: MetadataDiff<'e>,
+}
+
+impl<'e> BpDiffAccumulator<'e> {
+    pub fn new(before: &'e Blueprint) -> BpDiffAccumulator<'e> {
+        BpDiffAccumulator {
+            errors: vec![],
+            warnings: vec![],
+            added_sleds: BTreeMap::new(),
+            removed_sleds: BTreeMap::new(),
+            modified_sleds: BTreeMap::new(),
+            metadata: MetadataDiff::new(before),
+        }
+    }
 }
 
 /// A mechanism for creating tables from blueprint diffs via a `VisitBlueprint` implementation.
@@ -214,7 +255,7 @@ impl<'e> BlueprintDiffer<'e> {
             before,
             after,
             ctx: BpVisitorContext::default(),
-            acc: BpDiffAccumulator::default(),
+            acc: BpDiffAccumulator::new(before),
             diff,
         }
     }
@@ -798,6 +839,22 @@ impl<'e> VisitBlueprintDatasetsConfig<'e> for BlueprintDiffer<'e> {
         s.datasets_modified.get_mut(&dataset_id).unwrap().compression =
             DiffValue::Change(change);
     }
+}
+
+/// Tables for added sleds in a blueprint diff
+pub struct SledTables {
+    pub disks: Option<BpTable>,
+    pub datasets: Option<BpTable>,
+    pub zones: Option<BpTable>,
+}
+
+/// Output of a `BlueprintDiffer`
+#[derive(Default)]
+pub struct BpDiffOutput {
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+    pub added_sleds: BTreeMap<SledUuid, SledTables>,
+    pub removed_sleds: BTreeMap<SledUuid, SledTables>,
 }
 
 /// Create a `BpTable` from a `BlueprintPhysicalDisksConfig`.
