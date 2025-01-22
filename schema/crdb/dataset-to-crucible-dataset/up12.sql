@@ -1,2 +1,2 @@
-ALTER TABLE omicron.public.crucible_dataset
-    RENAME CONSTRAINT dataset_pkey TO crucible_dataset_pkey;
+ALTER INDEX IF EXISTS omicron.public.crucible_dataset @ dataset_pkey
+    RENAME TO crucible_dataset_pkey;
