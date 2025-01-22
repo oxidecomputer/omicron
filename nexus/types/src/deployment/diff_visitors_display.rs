@@ -184,9 +184,18 @@ impl<'e> MetadataDiff<'e> {
     /// We always initialize to the `before` state as if this value is
     /// unchanged. If a change callback fires for a given field, then we'll
     /// update the value.
-    pub fn new(before: &'e Blueprint) -> MetadataDiff<'e> {
+    pub fn new(
+        before: &'e Blueprint,
+        after: &'e Blueprint,
+    ) -> MetadataDiff<'e> {
+        // We don't get a callback for `id`, so just fill it in here.
+        let blueprint_id = if before.id == after.id {
+            DiffValue::Unchanged(&before.id)
+        } else {
+            DiffValue::Change(Change { before: &before.id, after: &after.id })
+        };
         MetadataDiff {
-            blueprint_id: DiffValue::Unchanged(&before.id),
+            blueprint_id,
             parent_blueprint_id: DiffValue::Unchanged(
                 &before.parent_blueprint_id,
             ),
@@ -223,14 +232,17 @@ pub struct BpDiffAccumulator<'e> {
 }
 
 impl<'e> BpDiffAccumulator<'e> {
-    pub fn new(before: &'e Blueprint) -> BpDiffAccumulator<'e> {
+    pub fn new(
+        before: &'e Blueprint,
+        after: &'e Blueprint,
+    ) -> BpDiffAccumulator<'e> {
         BpDiffAccumulator {
             errors: vec![],
             warnings: vec![],
             added_sleds: BTreeMap::new(),
             removed_sleds: BTreeMap::new(),
             modified_sleds: BTreeMap::new(),
-            metadata: MetadataDiff::new(before),
+            metadata: MetadataDiff::new(before, after),
         }
     }
 }
@@ -255,7 +267,7 @@ impl<'e> BlueprintDiffer<'e> {
             before,
             after,
             ctx: BpVisitorContext::default(),
-            acc: BpDiffAccumulator::new(before),
+            acc: BpDiffAccumulator::new(before, after),
             diff,
         }
     }
@@ -325,6 +337,71 @@ impl<'e> VisitBlueprint<'e> for BlueprintDiffer<'e> {
             .entry(sled_id)
             .or_insert(ModifiedSled::new(&self.before, sled_id));
         s.sled_state = DiffValue::Change(change);
+    }
+
+    fn visit_parent_blueprint_id_change(
+        &mut self,
+        _ctx: &mut BpVisitorContext,
+        change: Change<'e, Option<BlueprintUuid>>,
+    ) {
+        self.acc.metadata.parent_blueprint_id = DiffValue::Change(change);
+    }
+
+    fn visit_internal_dns_version_change(
+        &mut self,
+        _ctx: &mut BpVisitorContext,
+        change: Change<'e, Generation>,
+    ) {
+        self.acc.metadata.internal_dns_version = DiffValue::Change(change);
+    }
+
+    fn visit_external_dns_version_change(
+        &mut self,
+        _ctx: &mut BpVisitorContext,
+        change: Change<'e, Generation>,
+    ) {
+        self.acc.metadata.external_dns_version = DiffValue::Change(change);
+    }
+
+    fn visit_cockroachdb_fingerprint_change(
+        &mut self,
+        _ctx: &mut BpVisitorContext,
+        change: Change<'e, String>,
+    ) {
+        self.acc.metadata.cockroachdb_fingerprint = DiffValue::Change(change);
+    }
+
+    fn visit_cockroachdb_setting_preserve_downgrade_change(
+        &mut self,
+        _ctx: &mut BpVisitorContext,
+        change: Change<'e, CockroachDbPreserveDowngrade>,
+    ) {
+        self.acc.metadata.cockroachdb_setting_preserve_downgrade =
+            DiffValue::Change(change);
+    }
+
+    fn visit_creator_change(
+        &mut self,
+        _ctx: &mut BpVisitorContext,
+        change: Change<'e, String>,
+    ) {
+        self.acc.metadata.creator = DiffValue::Change(change);
+    }
+
+    fn visit_comment_change(
+        &mut self,
+        _ctx: &mut BpVisitorContext,
+        change: Change<'e, String>,
+    ) {
+        self.acc.metadata.comment = DiffValue::Change(change);
+    }
+
+    fn visit_clickhouse_cluster_config_change(
+        &mut self,
+        _ctx: &mut BpVisitorContext,
+        _change: Change<'e, Option<ClickhouseClusterConfig>>,
+    ) {
+        todo!()
     }
 }
 
