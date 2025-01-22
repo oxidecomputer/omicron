@@ -231,7 +231,7 @@ mod tests {
             .unwrap();
 
         let dataset = datastore
-            .dataset_upsert(CrucibleDataset::new(
+            .crucible_dataset_upsert(CrucibleDataset::new(
                 DatasetUuid::new_v4(),
                 zpool.id(),
                 std::net::SocketAddrV6::new(

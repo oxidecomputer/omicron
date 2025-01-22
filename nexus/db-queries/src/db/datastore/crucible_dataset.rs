@@ -40,9 +40,8 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use uuid::Uuid;
 
-// TODO-john rename all these to crucible_*?
 impl DataStore {
-    pub async fn dataset_get(
+    pub async fn crucible_dataset_get(
         &self,
         dataset_id: DatasetUuid,
     ) -> LookupResult<CrucibleDataset> {
@@ -59,22 +58,22 @@ impl DataStore {
     }
 
     /// Stores a new dataset in the database.
-    pub async fn dataset_upsert(
+    pub async fn crucible_dataset_upsert(
         &self,
         dataset: CrucibleDataset,
     ) -> CreateResult<CrucibleDataset> {
         let conn = &*self.pool_connection_unauthorized().await?;
-        Self::dataset_upsert_on_connection(&conn, dataset).await.map_err(|e| {
-            match e {
+        Self::crucible_dataset_upsert_on_connection(&conn, dataset)
+            .await
+            .map_err(|e| match e {
                 TransactionError::CustomError(e) => e,
                 TransactionError::Database(e) => {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
-            }
-        })
+            })
     }
 
-    pub async fn dataset_upsert_if_blueprint_is_current_target(
+    pub async fn crucible_dataset_upsert_if_blueprint_is_current_target(
         &self,
         opctx: &OpContext,
         bp_id: BlueprintUuid,
@@ -90,7 +89,8 @@ impl DataStore {
             |conn| {
                 let dataset = dataset.clone();
                 async move {
-                    Self::dataset_upsert_on_connection(&conn, dataset).await
+                    Self::crucible_dataset_upsert_on_connection(&conn, dataset)
+                        .await
                 }
                 .boxed()
             },
@@ -98,7 +98,7 @@ impl DataStore {
         .await
     }
 
-    async fn dataset_upsert_on_connection(
+    async fn crucible_dataset_upsert_on_connection(
         conn: &async_bb8_diesel::Connection<db::DbConnection>,
         dataset: CrucibleDataset,
     ) -> Result<CrucibleDataset, TransactionError<Error>> {
@@ -148,7 +148,7 @@ impl DataStore {
     ///
     /// Does not update existing rows. If a dataset with the given ID already
     /// exists, returns `Ok(None)`.
-    pub async fn dataset_insert_if_not_exists(
+    pub async fn crucible_dataset_insert_if_not_exists(
         &self,
         dataset: CrucibleDataset,
     ) -> CreateResult<Option<CrucibleDataset>> {
@@ -178,7 +178,7 @@ impl DataStore {
     }
 
     /// List one page of datasets
-    async fn dataset_list(
+    async fn crucible_dataset_list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
@@ -194,12 +194,13 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// List all datasets, making as many queries as needed to get them all
+    /// List all Crucible datasets, making as many queries as needed to get them
+    /// all
     ///
     /// This should generally not be used in API handlers or other
     /// latency-sensitive contexts, but it can make sense in saga actions or
     /// background tasks.
-    pub async fn dataset_list_all_batched(
+    pub async fn crucible_dataset_list_all_batched(
         &self,
         opctx: &OpContext,
     ) -> ListResultVec<CrucibleDataset> {
@@ -209,8 +210,9 @@ impl DataStore {
         let mut all_datasets = Vec::new();
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         while let Some(p) = paginator.next() {
-            let batch =
-                self.dataset_list(opctx, &p.current_pagparams()).await?;
+            let batch = self
+                .crucible_dataset_list(opctx, &p.current_pagparams())
+                .await?;
             paginator = p.found_batch(
                 &batch,
                 &|d: &nexus_db_model::CrucibleDataset| {
@@ -223,7 +225,7 @@ impl DataStore {
         Ok(all_datasets)
     }
 
-    pub async fn dataset_physical_disk_in_service(
+    pub async fn crucible_dataset_physical_disk_in_service(
         &self,
         dataset_id: DatasetUuid,
     ) -> LookupResult<bool> {
@@ -337,7 +339,7 @@ mod test {
 
         // There should be no datasets initially.
         assert_eq!(
-            datastore.dataset_list_all_batched(opctx).await.unwrap(),
+            datastore.crucible_dataset_list_all_batched(opctx).await.unwrap(),
             []
         );
 
@@ -346,7 +348,7 @@ mod test {
 
         // Inserting a new dataset should succeed.
         let dataset1 = datastore
-            .dataset_insert_if_not_exists(CrucibleDataset::new(
+            .crucible_dataset_insert_if_not_exists(CrucibleDataset::new(
                 DatasetUuid::new_v4(),
                 *zpool_id.as_untyped_uuid(),
                 "[::1]:0".parse().unwrap(),
@@ -356,11 +358,11 @@ mod test {
             .expect("insert found unexpected existing dataset");
         let mut expected_datasets = vec![dataset1.clone()];
         assert_eq!(
-            datastore.dataset_list_all_batched(opctx).await.unwrap(),
+            datastore.crucible_dataset_list_all_batched(opctx).await.unwrap(),
             expected_datasets,
         );
         assert_eq!(
-            datastore.dataset_list_all_batched(opctx).await.unwrap(),
+            datastore.crucible_dataset_list_all_batched(opctx).await.unwrap(),
             expected_datasets,
         );
 
@@ -368,7 +370,7 @@ mod test {
         // without updating the existing record. We'll check this by passing a
         // different socket address.
         let insert_again_result = datastore
-            .dataset_insert_if_not_exists(CrucibleDataset::new(
+            .crucible_dataset_insert_if_not_exists(CrucibleDataset::new(
                 dataset1.id(),
                 *zpool_id.as_untyped_uuid(),
                 "[::1]:12345".parse().unwrap(),
@@ -377,13 +379,13 @@ mod test {
             .expect("failed to do-nothing insert dataset");
         assert_eq!(insert_again_result, None);
         assert_eq!(
-            datastore.dataset_list_all_batched(opctx).await.unwrap(),
+            datastore.crucible_dataset_list_all_batched(opctx).await.unwrap(),
             expected_datasets,
         );
 
         // We can can also upsert a different dataset...
         let dataset2 = datastore
-            .dataset_upsert(CrucibleDataset::new(
+            .crucible_dataset_upsert(CrucibleDataset::new(
                 DatasetUuid::new_v4(),
                 *zpool_id.as_untyped_uuid(),
                 "[::1]:0".parse().unwrap(),
@@ -393,14 +395,14 @@ mod test {
         expected_datasets.push(dataset2.clone());
         expected_datasets.sort_by_key(|d| d.id());
         assert_eq!(
-            datastore.dataset_list_all_batched(opctx).await.unwrap(),
+            datastore.crucible_dataset_list_all_batched(opctx).await.unwrap(),
             expected_datasets,
         );
 
         // ... and trying to `insert_if_not_exists` should similarly return
         // `None`.
         let insert_again_result = datastore
-            .dataset_insert_if_not_exists(CrucibleDataset::new(
+            .crucible_dataset_insert_if_not_exists(CrucibleDataset::new(
                 dataset1.id(),
                 *zpool_id.as_untyped_uuid(),
                 "[::1]:12345".parse().unwrap(),
@@ -409,7 +411,7 @@ mod test {
             .expect("failed to do-nothing insert dataset");
         assert_eq!(insert_again_result, None);
         assert_eq!(
-            datastore.dataset_list_all_batched(opctx).await.unwrap(),
+            datastore.crucible_dataset_list_all_batched(opctx).await.unwrap(),
             expected_datasets,
         );
 
@@ -457,7 +459,7 @@ mod test {
 
         // Upsert referencing old blueprint: Error
         datastore
-            .dataset_upsert_if_blueprint_is_current_target(
+            .crucible_dataset_upsert_if_blueprint_is_current_target(
                 &opctx,
                 old_blueprint_id,
                 new_dataset_on(zpool_id),
@@ -469,7 +471,7 @@ mod test {
 
         // Upsert referencing current blueprint: OK
         datastore
-            .dataset_upsert_if_blueprint_is_current_target(
+            .crucible_dataset_upsert_if_blueprint_is_current_target(
                 &opctx,
                 current_blueprint_id,
                 new_dataset_on(zpool_id),

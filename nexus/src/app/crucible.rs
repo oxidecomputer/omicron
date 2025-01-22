@@ -89,7 +89,7 @@ impl super::Nexus {
     ) -> Result<bool, Error> {
         let on_in_service_physical_disk = self
             .datastore()
-            .dataset_physical_disk_in_service(dataset_id)
+            .crucible_dataset_physical_disk_in_service(dataset_id)
             .await?;
 
         Ok(!on_in_service_physical_disk)
@@ -112,7 +112,7 @@ impl super::Nexus {
 
         let dataset = {
             let region = self.datastore().get_region(region_id).await?;
-            self.datastore().dataset_get(region.dataset_id()).await?
+            self.datastore().crucible_dataset_get(region.dataset_id()).await?
         };
 
         let Some(returned_region) =

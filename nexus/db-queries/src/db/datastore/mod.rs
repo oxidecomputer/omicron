@@ -1005,7 +1005,10 @@ mod test {
 
                         let datastore = datastore.clone();
                         async move {
-                            datastore.dataset_upsert(dataset).await.unwrap();
+                            datastore
+                                .crucible_dataset_upsert(dataset)
+                                .await
+                                .unwrap();
 
                             (zpool.sled_id, dataset_id)
                         }
@@ -1371,7 +1374,7 @@ mod test {
                 let dataset = CrucibleDataset::new(id, zpool_id, bogus_addr);
                 let datastore = datastore.clone();
                 async move {
-                    datastore.dataset_upsert(dataset).await.unwrap();
+                    datastore.crucible_dataset_upsert(dataset).await.unwrap();
                     id
                 }
             })
@@ -1465,7 +1468,7 @@ mod test {
                 let dataset = CrucibleDataset::new(id, zpool_id, bogus_addr);
                 let datastore = datastore.clone();
                 async move {
-                    datastore.dataset_upsert(dataset).await.unwrap();
+                    datastore.crucible_dataset_upsert(dataset).await.unwrap();
                     id
                 }
             })
@@ -1536,7 +1539,7 @@ mod test {
                 zpool_id,
                 bogus_addr,
             );
-            datastore.dataset_upsert(dataset).await.unwrap();
+            datastore.crucible_dataset_upsert(dataset).await.unwrap();
             physical_disk_ids.push(physical_disk_id);
         }
 

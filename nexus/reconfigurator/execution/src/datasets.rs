@@ -138,7 +138,7 @@ pub(crate) async fn ensure_crucible_dataset_records_exist(
     // necessary in the very common case of "we don't need to do anything at
     // all".
     let existing_datasets = datastore
-        .dataset_list_all_batched(opctx)
+        .crucible_dataset_list_all_batched(opctx)
         .await
         .context("failed to list all datasets")?
         .into_iter()
@@ -186,7 +186,7 @@ pub(crate) async fn ensure_crucible_dataset_records_exist(
         }
 
         datastore
-            .dataset_upsert_if_blueprint_is_current_target(
+            .crucible_dataset_upsert_if_blueprint_is_current_target(
                 &opctx, bp_id, dataset,
             )
             .await
@@ -297,7 +297,11 @@ mod tests {
 
         // Prior to ensuring datasets exist, there should be none.
         assert_eq!(
-            datastore.dataset_list_all_batched(opctx).await.unwrap().len(),
+            datastore
+                .crucible_dataset_list_all_batched(opctx)
+                .await
+                .unwrap()
+                .len(),
             0
         );
 
@@ -327,7 +331,11 @@ mod tests {
         assert_eq!(updated, 0);
         assert_eq!(removed, 0);
         assert_eq!(
-            datastore.dataset_list_all_batched(opctx).await.unwrap().len(),
+            datastore
+                .crucible_dataset_list_all_batched(opctx)
+                .await
+                .unwrap()
+                .len(),
             nzones_with_durable_datasets,
         );
 
@@ -345,7 +353,11 @@ mod tests {
         assert_eq!(updated, 0);
         assert_eq!(removed, 0);
         assert_eq!(
-            datastore.dataset_list_all_batched(opctx).await.unwrap().len(),
+            datastore
+                .crucible_dataset_list_all_batched(opctx)
+                .await
+                .unwrap()
+                .len(),
             nzones_with_durable_datasets,
         );
 
@@ -404,7 +416,11 @@ mod tests {
         assert_eq!(updated, 0);
         assert_eq!(removed, 0);
         assert_eq!(
-            datastore.dataset_list_all_batched(opctx).await.unwrap().len(),
+            datastore
+                .crucible_dataset_list_all_batched(opctx)
+                .await
+                .unwrap()
+                .len(),
             nzones_with_durable_datasets + 2,
         );
     }
@@ -512,7 +528,7 @@ mod tests {
 
         // Make sure the dataset still exists.
         let observed_datasets =
-            datastore.dataset_list_all_batched(opctx).await.unwrap();
+            datastore.crucible_dataset_list_all_batched(opctx).await.unwrap();
         assert!(observed_datasets
             .iter()
             .any(|d| d.id() == crucible_dataset_id));
@@ -593,7 +609,7 @@ mod tests {
         // Make sure the dataset still exists, even if it isn't tracked by our
         // "blueprint".
         let observed_datasets =
-            datastore.dataset_list_all_batched(opctx).await.unwrap();
+            datastore.crucible_dataset_list_all_batched(opctx).await.unwrap();
         assert!(observed_datasets.iter().any(|d| d.id() == removed_dataset_id));
     }
 }

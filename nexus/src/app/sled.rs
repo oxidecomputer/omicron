@@ -349,7 +349,7 @@ impl super::Nexus {
             "dataset_id" => id.to_string(),
         );
         let dataset = db::model::CrucibleDataset::new(id, zpool_id, address);
-        self.db_datastore.dataset_upsert(dataset).await?;
+        self.db_datastore.crucible_dataset_upsert(dataset).await?;
         Ok(())
     }
 

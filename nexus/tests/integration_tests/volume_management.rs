@@ -4151,8 +4151,10 @@ async fn test_read_only_region_reference_counting(
     let (_, read_only_region) = &allocated_regions[0];
     assert!(read_only_region.read_only());
 
-    let db_read_only_dataset =
-        datastore.dataset_get(read_only_region.dataset_id()).await.unwrap();
+    let db_read_only_dataset = datastore
+        .crucible_dataset_get(read_only_region.dataset_id())
+        .await
+        .unwrap();
 
     // The disk-from-snap VCR should also reference that read-only region
 

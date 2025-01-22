@@ -75,20 +75,22 @@ impl BackgroundTask for LookupRegionPort {
             for region in regions_missing_ports {
                 let dataset_id = region.dataset_id();
 
-                let dataset = match self.datastore.dataset_get(dataset_id).await
-                {
-                    Ok(dataset) => dataset,
+                let dataset =
+                    match self.datastore.crucible_dataset_get(dataset_id).await
+                    {
+                        Ok(dataset) => dataset,
 
-                    Err(e) => {
-                        let s =
-                            format!("could not get dataset {dataset_id}: {e}");
+                        Err(e) => {
+                            let s = format!(
+                                "could not get dataset {dataset_id}: {e}"
+                            );
 
-                        error!(log, "{s}");
-                        status.errors.push(s);
+                            error!(log, "{s}");
+                            status.errors.push(s);
 
-                        continue;
-                    }
-                };
+                            continue;
+                        }
+                    };
 
                 let dataset_addr = dataset.address();
                 let returned_region =

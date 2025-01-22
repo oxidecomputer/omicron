@@ -4628,8 +4628,9 @@ async fn cmd_db_validate_regions(
     for (dataset, region) in &datasets_and_regions {
         // If the dataset was expunged, do not attempt to contact the Crucible
         // agent!
-        let in_service =
-            datastore.dataset_physical_disk_in_service(dataset.id()).await?;
+        let in_service = datastore
+            .crucible_dataset_physical_disk_in_service(dataset.id())
+            .await?;
 
         if !in_service {
             eprintln!(
@@ -4745,8 +4746,9 @@ async fn cmd_db_validate_regions(
     for dataset in &datasets {
         // If the dataset was expunged, do not attempt to contact the Crucible
         // agent!
-        let in_service =
-            datastore.dataset_physical_disk_in_service(dataset.id()).await?;
+        let in_service = datastore
+            .crucible_dataset_physical_disk_in_service(dataset.id())
+            .await?;
 
         if !in_service {
             eprintln!(
@@ -4898,8 +4900,9 @@ async fn cmd_db_validate_region_snapshots(
 
         // If the dataset was expunged, do not attempt to contact the Crucible
         // agent!
-        let in_service =
-            datastore.dataset_physical_disk_in_service(dataset.id()).await?;
+        let in_service = datastore
+            .crucible_dataset_physical_disk_in_service(dataset.id())
+            .await?;
 
         if !in_service {
             continue;
@@ -5073,8 +5076,9 @@ async fn cmd_db_validate_region_snapshots(
     for (dataset, region) in datasets_and_regions {
         // If the dataset was expunged, do not attempt to contact the Crucible
         // agent!
-        let in_service =
-            datastore.dataset_physical_disk_in_service(dataset.id()).await?;
+        let in_service = datastore
+            .crucible_dataset_physical_disk_in_service(dataset.id())
+            .await?;
 
         if !in_service {
             continue;

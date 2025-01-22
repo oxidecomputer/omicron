@@ -415,7 +415,9 @@ async fn rsrss_get_clone_source(
 
     let request_dataset_on_in_service_physical_disk = osagactx
         .datastore()
-        .dataset_physical_disk_in_service(params.request.old_dataset_id.into())
+        .crucible_dataset_physical_disk_in_service(
+            params.request.old_dataset_id.into(),
+        )
         .await
         .map_err(ActionError::action_failed)?;
 

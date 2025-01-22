@@ -507,7 +507,7 @@ impl DataStore {
             return Ok(None);
         };
 
-        let dataset = self.dataset_get(region.dataset_id()).await?;
+        let dataset = self.crucible_dataset_get(region.dataset_id()).await?;
         Ok(Some(dataset.address_with_port(port)))
     }
 
