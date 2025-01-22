@@ -129,6 +129,12 @@ pub struct ModifiedSled<'e> {
     datasets_modified: BTreeMap<DatasetUuid, ModifiedDataset<'e>>,
 }
 
+impl<'e> From<&ModifiedSled<'e>> for SledTables {
+    fn from(value: &ModifiedSled<'e>) -> Self {
+        todo!()
+    }
+}
+
 impl<'e> ModifiedSled<'e> {
     /// Initialize a `ModifiedSled`.
     ///
@@ -962,6 +968,8 @@ pub struct BpDiffOutput {
     pub warnings: Vec<String>,
     pub added_sleds: BTreeMap<SledUuid, SledTables>,
     pub removed_sleds: BTreeMap<SledUuid, SledTables>,
+    pub unchanged_sleds: BTreeMap<SledUuid, SledTables>,
+    pub modified_sleds: BTreeMap<SledUuid, SledTables>,
 }
 
 impl<'e> From<&BpDiffAccumulator<'e>> for BpDiffOutput {
@@ -1014,6 +1022,34 @@ impl<'e> From<&BpDiffAccumulator<'e>> for BpDiffOutput {
                         },
                     )
                 })
+                .collect(),
+            unchanged_sleds: value
+                .unchanged_sleds
+                .iter()
+                .map(|sled_id| {
+                    (
+                        *sled_id,
+                        SledTables {
+                            disks: disks_table(
+                                BpDiffState::Unchanged,
+                                value.before.blueprint_disks.get(sled_id),
+                            ),
+                            datasets: datasets_table(
+                                BpDiffState::Unchanged,
+                                value.before.blueprint_datasets.get(sled_id),
+                            ),
+                            zones: zones_table(
+                                BpDiffState::Unchanged,
+                                value.before.blueprint_zones.get(sled_id),
+                            ),
+                        },
+                    )
+                })
+                .collect(),
+            modified_sleds: value
+                .modified_sleds
+                .iter()
+                .map(|(sled_id, modified)| (*sled_id, modified.into()))
                 .collect(),
         }
     }
