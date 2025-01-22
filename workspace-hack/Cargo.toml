@@ -32,7 +32,7 @@ bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.6.0", default-f
 bstr = { version = "1.10.0" }
 byteorder = { version = "1.5.0" }
 bytes = { version = "1.9.0", features = ["serde"] }
-chrono = { version = "0.4.38", features = ["serde"] }
+chrono = { version = "0.4.39", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
 clap = { version = "4.5.21", features = ["cargo", "derive", "env", "wrap_help"] }
 clap_builder = { version = "4.5.21", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
@@ -152,7 +152,7 @@ bstr = { version = "1.10.0" }
 byteorder = { version = "1.5.0" }
 bytes = { version = "1.9.0", features = ["serde"] }
 cc = { version = "1.1.30", default-features = false, features = ["parallel"] }
-chrono = { version = "0.4.38", features = ["serde"] }
+chrono = { version = "0.4.39", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
 clap = { version = "4.5.21", features = ["cargo", "derive", "env", "wrap_help"] }
 clap_builder = { version = "4.5.21", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
