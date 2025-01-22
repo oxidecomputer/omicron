@@ -29,7 +29,7 @@ use diffus::{edit::Edit, Diffable};
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::{ByteCount, Generation};
 use omicron_common::disk::{CompressionAlgorithm, DiskIdentity};
-use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::{DatasetUuid, SledUuid};
 use omicron_uuid_kinds::{OmicronZoneUuid, PhysicalDiskUuid};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -87,6 +87,10 @@ impl<'e> ModifiedZone<'e> {
     }
 }
 
+pub struct ModifiedDisk<'e> {
+    disposition: DiffValue<'e, BlueprintPhysicalDiskDisposition>,
+}
+
 impl<'e> ModifiedDisk<'e> {
     /// Initialize a `ModifiedDisk`.
     ///
@@ -98,15 +102,27 @@ impl<'e> ModifiedDisk<'e> {
     }
 }
 
-pub struct ModifiedDisk<'e> {
-    disposition: DiffValue<'e, BlueprintPhysicalDiskDisposition>,
-}
-
 pub struct ModifiedDataset<'e> {
-    dispostion: DiffValue<'e, BlueprintDatasetDisposition>,
+    disposition: DiffValue<'e, BlueprintDatasetDisposition>,
     quota: DiffValue<'e, Option<ByteCount>>,
     reservation: DiffValue<'e, Option<ByteCount>>,
     compression: DiffValue<'e, CompressionAlgorithm>,
+}
+
+impl<'e> ModifiedDataset<'e> {
+    /// Initialize a `ModifiedDataset`.
+    ///
+    /// We always initialize to the `before` state as if this value is
+    /// unchanged. If a change callback fires for a given field, then we'll
+    /// update the value.
+    pub fn new(before: &'e BlueprintDatasetConfig) -> ModifiedDataset<'e> {
+        ModifiedDataset {
+            disposition: DiffValue::Unchanged(&before.disposition),
+            quota: DiffValue::Unchanged(&before.quota),
+            reservation: DiffValue::Unchanged(&before.reservation),
+            compression: DiffValue::Unchanged(&before.compression),
+        }
+    }
 }
 
 /// All modifications of a sled that we track for purposes of diff display output
@@ -126,7 +142,7 @@ pub struct ModifiedSled<'e> {
     datasets_inserted: IdMap<BlueprintDatasetConfig>,
     datasets_removed: IdMap<BlueprintDatasetConfig>,
     datasets_unchanged: IdMap<BlueprintDatasetConfig>,
-    datasets_modified: BTreeMap<PhysicalDiskUuid, ModifiedDataset<'e>>,
+    datasets_modified: BTreeMap<DatasetUuid, ModifiedDataset<'e>>,
 }
 
 impl<'e> ModifiedSled<'e> {
@@ -571,7 +587,218 @@ impl<'e> VisitBlueprintPhysicalDisksConfig<'e> for BlueprintDiffer<'e> {
             DiffValue::Change(change);
     }
 }
-impl<'e> VisitBlueprintDatasetsConfig<'e> for BlueprintDiffer<'e> {}
+impl<'e> VisitBlueprintDatasetsConfig<'e> for BlueprintDiffer<'e> {
+    fn visit_generation_change(
+        &mut self,
+        ctx: &mut BpVisitorContext,
+        change: Change<'e, Generation>,
+    ) {
+        let Some(sled_id) = ctx.sled_id else {
+            let err =
+                "Missing sled id in ctx for datasets visit_generation_change"
+                    .to_string();
+            self.acc.errors.push(err);
+            return;
+        };
+        let s = self
+            .acc
+            .modified_sleds
+            .entry(sled_id)
+            .or_insert(ModifiedSled::new(&self.before, sled_id));
+        s.datasets_generation = DiffValue::Change(change);
+    }
+
+    fn visit_datasets_insert(
+        &mut self,
+        ctx: &mut BpVisitorContext,
+        node: &BlueprintDatasetConfig,
+    ) {
+        let Some(sled_id) = ctx.sled_id else {
+            let err =
+                "Missing sled id in ctx for visit_datasets_insert".to_string();
+            self.acc.errors.push(err);
+            return;
+        };
+        let s = self
+            .acc
+            .modified_sleds
+            .entry(sled_id)
+            .or_insert(ModifiedSled::new(&self.before, sled_id));
+        s.datasets_inserted.insert(node.clone());
+    }
+
+    fn visit_datasets_remove(
+        &mut self,
+        ctx: &mut BpVisitorContext,
+        node: &BlueprintDatasetConfig,
+    ) {
+        let Some(sled_id) = ctx.sled_id else {
+            let err =
+                "Missing sled id in ctx for visit_datasets_remove".to_string();
+            self.acc.errors.push(err);
+            return;
+        };
+        let s = self
+            .acc
+            .modified_sleds
+            .entry(sled_id)
+            .or_insert(ModifiedSled::new(&self.before, sled_id));
+        s.datasets_removed.insert(node.clone());
+
+        // Remove this zone from the unchanged datasets to compensate
+        // for constructor initialization.
+        s.datasets_unchanged.remove(&node.id);
+    }
+
+    fn visit_dataset_change(
+        &mut self,
+        ctx: &mut BpVisitorContext,
+        change: Change<'e, BlueprintDatasetConfig>,
+    ) {
+        let Some(sled_id) = ctx.sled_id else {
+            let err =
+                "Missing sled id in ctx for visit_dataset_change".to_string();
+            self.acc.errors.push(err);
+            return;
+        };
+
+        let s = self
+            .acc
+            .modified_sleds
+            .entry(sled_id)
+            .or_insert(ModifiedSled::new(&self.before, sled_id));
+        s.datasets_modified
+            .insert(change.before.id, ModifiedDataset::new(&change.before));
+
+        // At least one of the fields for this dataset is going to change in a
+        // follow up callback, so we want to remove it from the unchanged datasets
+        // to compensate for constructor initialization.
+        s.datasets_unchanged.remove(&change.before.id);
+    }
+
+    fn visit_dataset_disposition_change(
+        &mut self,
+        ctx: &mut BpVisitorContext,
+        change: Change<'e, BlueprintDatasetDisposition>,
+    ) {
+        let Some(sled_id) = ctx.sled_id else {
+            let err =
+                "Missing sled id in ctx for visit_dataset_disposition_change"
+                    .to_string();
+            self.acc.errors.push(err);
+            return;
+        };
+
+        let Some(dataset_id) = ctx.dataset_id else {
+            let err =
+                "Missing dataset id in ctx for visit_dataset_disposition_change"
+                    .to_string();
+            self.acc.errors.push(err);
+            return;
+        };
+
+        // Safety: We guarantee a `visit_dataset_change` callback fired and
+        // created the `ModifiedSled` entry if it didn't exist.
+        let s = self.acc.modified_sleds.get_mut(&sled_id).unwrap();
+
+        // Safety: We guarantee a `visit_dataset_change` callback fired and
+        // created the `ModifiedDataset` entry.
+        s.datasets_modified.get_mut(&dataset_id).unwrap().disposition =
+            DiffValue::Change(change);
+    }
+
+    fn visit_dataset_quota_change(
+        &mut self,
+        ctx: &mut BpVisitorContext,
+        change: Change<'e, Option<ByteCount>>,
+    ) {
+        let Some(sled_id) = ctx.sled_id else {
+            let err = "Missing sled id in ctx for visit_dataset_quota_change"
+                .to_string();
+            self.acc.errors.push(err);
+            return;
+        };
+
+        let Some(dataset_id) = ctx.dataset_id else {
+            let err =
+                "Missing dataset id in ctx for visit_dataset_quota_change"
+                    .to_string();
+            self.acc.errors.push(err);
+            return;
+        };
+
+        // Safety: We guarantee a `visit_dataset_change` callback fired and
+        // created the `ModifiedSled` entry if it didn't exist.
+        let s = self.acc.modified_sleds.get_mut(&sled_id).unwrap();
+
+        // Safety: We guarantee a `visit_dataset_change` callback fired and
+        // created the `ModifiedDataset` entry.
+        s.datasets_modified.get_mut(&dataset_id).unwrap().quota =
+            DiffValue::Change(change);
+    }
+
+    fn visit_dataset_reservation_change(
+        &mut self,
+        ctx: &mut BpVisitorContext,
+        change: Change<'e, Option<ByteCount>>,
+    ) {
+        let Some(sled_id) = ctx.sled_id else {
+            let err =
+                "Missing sled id in ctx for visit_dataset_reservation_change"
+                    .to_string();
+            self.acc.errors.push(err);
+            return;
+        };
+
+        let Some(dataset_id) = ctx.dataset_id else {
+            let err =
+                "Missing dataset id in ctx for visit_dataset_reservation_change"
+                    .to_string();
+            self.acc.errors.push(err);
+            return;
+        };
+
+        // Safety: We guarantee a `visit_dataset_change` callback fired and
+        // created the `ModifiedSled` entry if it didn't exist.
+        let s = self.acc.modified_sleds.get_mut(&sled_id).unwrap();
+
+        // Safety: We guarantee a `visit_dataset_change` callback fired and
+        // created the `ModifiedDataset` entry.
+        s.datasets_modified.get_mut(&dataset_id).unwrap().reservation =
+            DiffValue::Change(change);
+    }
+
+    fn visit_dataset_compression_change(
+        &mut self,
+        ctx: &mut BpVisitorContext,
+        change: Change<'e, CompressionAlgorithm>,
+    ) {
+        let Some(sled_id) = ctx.sled_id else {
+            let err =
+                "Missing sled id in ctx for visit_dataset_compression_change"
+                    .to_string();
+            self.acc.errors.push(err);
+            return;
+        };
+
+        let Some(dataset_id) = ctx.dataset_id else {
+            let err =
+                "Missing dataset id in ctx for visit_dataset_compression_change"
+                    .to_string();
+            self.acc.errors.push(err);
+            return;
+        };
+
+        // Safety: We guarantee a `visit_dataset_change` callback fired and
+        // created the `ModifiedSled` entry if it didn't exist.
+        let s = self.acc.modified_sleds.get_mut(&sled_id).unwrap();
+
+        // Safety: We guarantee a `visit_dataset_change` callback fired and
+        // created the `ModifiedDataset` entry.
+        s.datasets_modified.get_mut(&dataset_id).unwrap().compression =
+            DiffValue::Change(change);
+    }
+}
 
 /// Create a `BpTable` from a `BlueprintPhysicalDisksConfig`.
 fn disks_table(
