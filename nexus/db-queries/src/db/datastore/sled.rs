@@ -194,6 +194,8 @@ impl DataStore {
         resources: db::model::Resources,
         constraints: db::model::SledReservationConstraints,
     ) -> CreateResult<db::model::SledResource> {
+        println!("(db) attempting to make reservation for {}", resource_id);
+
         #[derive(Debug)]
         enum SledReservationError {
             NotFound,
@@ -286,6 +288,7 @@ impl DataStore {
                     if let Some(must_select_from) =
                         constraints.must_select_from()
                     {
+                        println!("(db) constraining sled selection to {must_select_from:#?}");
                         sled_targets = sled_targets.filter(
                             sled_dsl::id.eq_any(must_select_from.to_vec()),
                         );
@@ -298,6 +301,9 @@ impl DataStore {
                         .order(random())
                         .get_results_async::<Uuid>(&conn)
                         .await?;
+
+                    println!("(db) possible sled targets: {sled_targets:#?}");
+
                     info!(
                         opctx.log,
                         "found {} available sled targets", sled_targets.len();
@@ -352,7 +358,7 @@ impl DataStore {
                     // We use the following symbols for sets below:
                     // - ∩: Intersection of two sets (A ∩ B is "everything that
                     // exists in A and also exists in B").
-                    // - Δ: Symmetric difference of two sets (A Δ B is
+                    // - \: difference of two sets (A \ B is
                     // "everything that exists in A that does not exist in B).
                     //
                     // We also use the following notation for brevity:
@@ -386,9 +392,9 @@ impl DataStore {
                     //
                     // - Preferred := Targets ∩ A,P=Allow
                     // - Unpreferred := Targets ∩ AA,P=Allow
-                    // - Preferred := Preferred Δ Unpreferred
+                    // - Preferred := Preferred \ Unpreferred
                     // - If Preferred isn't empty, pick a target from it.
-                    // - Targets := Targets Δ Unpreferred
+                    // - Targets := Targets \ Unpreferred
                     // - If Targets isn't empty, pick a target from it.
                     // - If Unpreferred isn't empty, pick a target from it.
                     // - Fail, no targets are available.
@@ -428,7 +434,7 @@ impl DataStore {
                         }
                         *required_id
                     } else {
-                        targets = targets.symmetric_difference(&banned).cloned().collect();
+                        targets = targets.difference(&banned).cloned().collect();
 
                         let mut preferred = anti_affinity_sleds.iter().filter_map(|(policy, id)| {
                             if *policy == AffinityPolicy::Allow {
@@ -447,13 +453,13 @@ impl DataStore {
 
                         preferred = targets.intersection(&preferred).cloned().collect();
                         unpreferred = targets.intersection(&unpreferred).cloned().collect();
-                        preferred = preferred.symmetric_difference(&unpreferred).cloned().collect();
+                        preferred = preferred.difference(&unpreferred).cloned().collect();
 
                         if let Some(target) = preferred.iter().next() {
                             println!("(db) found a preferred target");
                             *target
                         } else {
-                            targets = targets.symmetric_difference(&unpreferred).cloned().collect();
+                            targets = targets.difference(&unpreferred).cloned().collect();
                             if let Some(target) = targets.iter().next() {
                             println!("(db) found a viable target, neither preferred nor unpreferred");
                                 *target
@@ -469,6 +475,8 @@ impl DataStore {
                             }
                         }
                     };
+
+                    println!("(db) target: {sled_target}");
 
                     // TODO: Ensure our "target selection" still remains random
                     // for the set from which we're choosing
@@ -1013,6 +1021,7 @@ pub(in crate::db::datastore) mod test {
     };
     use crate::db::lookup::LookupPath;
     use crate::db::model::to_db_typed_uuid;
+    use crate::db::model::AffinityGroup;
     use crate::db::model::AntiAffinityGroup;
     use crate::db::model::ByteCount;
     use crate::db::model::Project;
@@ -1034,6 +1043,7 @@ pub(in crate::db::datastore) mod test {
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use predicates::{prelude::*, BoxPredicate};
+    use std::collections::HashMap;
     use std::net::{Ipv6Addr, SocketAddrV6};
 
     fn rack_id() -> Uuid {
@@ -1327,6 +1337,8 @@ pub(in crate::db::datastore) mod test {
         logctx.cleanup_successful();
     }
 
+    // Utilities to help with Affinity Testing
+
     fn small_resource_request() -> db::model::Resources {
         db::model::Resources::new(
             1,
@@ -1407,81 +1419,329 @@ pub(in crate::db::datastore) mod test {
         .unwrap();
     }
 
+    async fn create_affinity_group(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        authz_project: &authz::Project,
+        name: &'static str,
+        policy: external::AffinityPolicy,
+    ) -> AffinityGroup {
+        datastore
+            .affinity_group_create(
+                &opctx,
+                &authz_project,
+                AffinityGroup::new(
+                    authz_project.id(),
+                    params::AffinityGroupCreate {
+                        identity: external::IdentityMetadataCreateParams {
+                            name: name.parse().unwrap(),
+                            description: "desc".to_string(),
+                        },
+                        policy,
+                        failure_domain: external::FailureDomain::Sled,
+                    },
+                ),
+            )
+            .await
+            .unwrap()
+    }
+
+    // This short-circuits some of the logic and checks we normally have when
+    // creating affinity groups, but makes testing easier.
+    async fn add_instance_to_affinity_group(
+        datastore: &DataStore,
+        group_id: Uuid,
+        instance_id: Uuid,
+    ) {
+        use db::model::AffinityGroupInstanceMembership;
+        use db::schema::affinity_group_instance_membership::dsl as membership_dsl;
+        use omicron_uuid_kinds::AffinityGroupUuid;
+
+        diesel::insert_into(membership_dsl::affinity_group_instance_membership)
+            .values(AffinityGroupInstanceMembership::new(
+                AffinityGroupUuid::from_untyped_uuid(group_id),
+                InstanceUuid::from_untyped_uuid(instance_id),
+            ))
+            .on_conflict((
+                membership_dsl::group_id,
+                membership_dsl::instance_id,
+            ))
+            .do_nothing()
+            .execute_async(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn create_sleds(datastore: &DataStore, count: usize) -> Vec<Sled> {
+        let mut sleds = vec![];
+        for _ in 0..count {
+            let (sled, _) =
+                datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+            sleds.push(sled);
+        }
+        println!("created sleds: {:#?}", sleds);
+        sleds
+    }
+
+    type GroupName = &'static str;
+
+    #[derive(Copy, Clone, Debug)]
+    enum Affinity {
+        Positive,
+        Negative,
+    }
+
+    struct Group {
+        affinity: Affinity,
+        name: GroupName,
+        policy: external::AffinityPolicy,
+    }
+
+    impl Group {
+        async fn create(
+            &self,
+            opctx: &OpContext,
+            datastore: &DataStore,
+            authz_project: &authz::Project,
+        ) -> Uuid {
+            match self.affinity {
+                Affinity::Positive => create_affinity_group(
+                    &opctx,
+                    &datastore,
+                    &authz_project,
+                    self.name,
+                    self.policy,
+                )
+                .await
+                .id(),
+                Affinity::Negative => create_anti_affinity_group(
+                    &opctx,
+                    &datastore,
+                    &authz_project,
+                    self.name,
+                    self.policy,
+                )
+                .await
+                .id(),
+            }
+        }
+    }
+
+    struct AllGroups {
+        id_by_name: HashMap<&'static str, (Affinity, Uuid)>,
+    }
+
+    impl AllGroups {
+        async fn create(
+            opctx: &OpContext,
+            datastore: &DataStore,
+            authz_project: &authz::Project,
+            groups: &[Group],
+        ) -> AllGroups {
+            let mut id_by_name = HashMap::new();
+
+            for group in groups {
+                id_by_name.insert(
+                    group.name,
+                    (
+                        group.affinity,
+                        group.create(&opctx, &datastore, &authz_project).await,
+                    ),
+                );
+            }
+
+            println!("all groups: {:#?}", id_by_name);
+
+            Self { id_by_name }
+        }
+    }
+
+    struct Instance {
+        id: InstanceUuid,
+        groups: Vec<GroupName>,
+        force_onto_sled: Option<SledUuid>,
+    }
+
+    impl Instance {
+        fn new() -> Self {
+            Self {
+                id: InstanceUuid::new_v4(),
+                groups: vec![],
+                force_onto_sled: None,
+            }
+        }
+
+        // Adds this instance to a group. Can be called multiple times.
+        fn group(mut self, group: GroupName) -> Self {
+            self.groups.push(group);
+            self
+        }
+
+        // Force this instance to be placed on a specific sled
+        fn sled(mut self, sled: Uuid) -> Self {
+            println!("(test) Pinning instance {} to sled {}", self.id, sled);
+            self.force_onto_sled = Some(SledUuid::from_untyped_uuid(sled));
+            self
+        }
+
+        async fn add_to_groups_and_reserve(
+            &self,
+            opctx: &OpContext,
+            datastore: &DataStore,
+            all_groups: &AllGroups,
+        ) -> CreateResult<db::model::SledResource> {
+            self.add_to_groups(&datastore, &all_groups).await;
+            create_instance_reservation(&datastore, &opctx, self).await
+        }
+
+        async fn add_to_groups(
+            &self,
+            datastore: &DataStore,
+            all_groups: &AllGroups,
+        ) {
+            for our_group_name in &self.groups {
+                let (affinity, group_id) = all_groups
+                    .id_by_name
+                    .get(our_group_name)
+                    .expect("Group not found: {our_group_name}");
+
+                println!(
+                    "adding {} to group {} (id: {})",
+                    self.id, our_group_name, group_id
+                );
+
+                match *affinity {
+                    Affinity::Positive => {
+                        add_instance_to_affinity_group(
+                            &datastore,
+                            *group_id,
+                            self.id.into_untyped_uuid(),
+                        )
+                        .await
+                    }
+                    Affinity::Negative => {
+                        add_instance_to_anti_affinity_group(
+                            &datastore,
+                            *group_id,
+                            self.id.into_untyped_uuid(),
+                        )
+                        .await
+                    }
+                }
+            }
+        }
+    }
+
+    async fn create_instance_reservation(
+        db: &DataStore,
+        opctx: &OpContext,
+        instance: &Instance,
+    ) -> CreateResult<db::model::SledResource> {
+        // Pick a specific sled, if requested
+        let constraints = db::model::SledReservationConstraintBuilder::new();
+        let constraints = if let Some(sled_target) = instance.force_onto_sled {
+            constraints.must_select_from(&[sled_target.into_untyped_uuid()])
+        } else {
+            constraints
+        };
+
+        db.sled_reservation_create(
+            &opctx,
+            instance.id.into_untyped_uuid(),
+            db::model::SledResourceKind::Instance,
+            small_resource_request(),
+            constraints.build(),
+        )
+        .await
+    }
+
+    // Anti-Affinity, Policy = Fail
+    // No sleds available => Insufficient Capacity Error
     #[tokio::test]
-    async fn sled_reservation_anti_affinity() {
-        let logctx = dev::test_setup_log("sled_reservation_anti_affinity");
+    async fn anti_affinity_policy_fail_no_capacity() {
+        let logctx =
+            dev::test_setup_log("anti_affinity_policy_fail_no_capacity");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
             create_project(&opctx, &datastore).await;
 
         const SLED_COUNT: usize = 2;
+        let sleds = create_sleds(&datastore, SLED_COUNT).await;
 
-        let mut sleds = vec![];
-        for _ in 0..SLED_COUNT {
-            let (sled, _) =
-                datastore.sled_upsert(test_new_sled_update()).await.unwrap();
-            println!("created sled: {}", sled.id());
-            sleds.push(sled);
-        }
-
-        let group = create_anti_affinity_group(
-            &opctx,
-            &datastore,
-            &authz_project,
-            "group",
-            external::AffinityPolicy::Fail,
-        )
-        .await;
-
-        // Create three instances, all in an anti-affinity group, even though we
-        // only have two sleds.
-        const INSTANCE_COUNT: usize = 3;
-        let mut instances = vec![];
-        for _ in 0..INSTANCE_COUNT {
-            let instance = Uuid::new_v4();
-            add_instance_to_anti_affinity_group(
-                &datastore,
-                group.id(),
-                instance,
-            )
-            .await;
-            instances.push(instance);
-        }
-
-        // We can create two of the instances, as we have two sleds.
-        for i in 0..SLED_COUNT {
-            // TODO: Check resource to see where it landed
-            let resource = datastore
-                .sled_reservation_create(
-                    &opctx,
-                    instances[i],
-                    db::model::SledResourceKind::Instance,
-                    small_resource_request(),
-                    db::model::SledReservationConstraints::none(),
-                )
+        let groups = [Group {
+            affinity: Affinity::Negative,
+            name: "anti-affinity",
+            policy: external::AffinityPolicy::Fail,
+        }];
+        let all_groups =
+            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
+                .await;
+        let instances = [
+            Instance::new().group("anti-affinity").sled(sleds[0].id()),
+            Instance::new().group("anti-affinity").sled(sleds[1].id()),
+        ];
+        for instance in instances {
+            instance
+                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
                 .await
-                .unwrap();
-
-            println!("put {} on {}", i, resource.sled_id);
+                .expect("Failed to set up instances");
         }
 
-        // However, we cannot place multiple instances on the same sled, due to
-        // the anti-affinity group. We expect this to throw an error.
-        let err = datastore
-            .sled_reservation_create(
-                &opctx,
-                instances[SLED_COUNT],
-                db::model::SledResourceKind::Instance,
-                small_resource_request(),
-                db::model::SledReservationConstraints::none(),
-            )
+        let test_instance = Instance::new().group("anti-affinity");
+        let err = test_instance
+            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
             .await
-            .unwrap_err();
+            .expect_err("Should have failed to place instance");
 
         let Error::InsufficientCapacity { .. } = err else {
             panic!("Unexpected error: {err:?}");
         };
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Anti-Affinity, Policy = Fail
+    // We should reliably pick a sled not occupied by another instance
+    #[tokio::test]
+    async fn anti_affinity_policy_fail() {
+        let logctx = dev::test_setup_log("anti_affinity_policy_fail");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _project) =
+            create_project(&opctx, &datastore).await;
+
+        const SLED_COUNT: usize = 3;
+        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+
+        let groups = [Group {
+            affinity: Affinity::Negative,
+            name: "anti-affinity",
+            policy: external::AffinityPolicy::Fail,
+        }];
+        let all_groups =
+            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
+                .await;
+        let instances = [
+            Instance::new().group("anti-affinity").sled(sleds[0].id()),
+            Instance::new().group("anti-affinity").sled(sleds[1].id()),
+        ];
+        for instance in instances {
+            instance
+                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .await
+                .expect("Failed to set up instances");
+        }
+
+        let test_instance = Instance::new().group("anti-affinity");
+        let resource = test_instance
+            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .await
+            .expect("Should have succeeded allocation");
+        assert_eq!(resource.id, sleds[2].id());
 
         db.terminate().await;
         logctx.cleanup_successful();
