@@ -7,7 +7,6 @@
 use crate::Sled;
 
 use anyhow::anyhow;
-use anyhow::bail;
 use anyhow::Context;
 use futures::stream;
 use futures::StreamExt;
@@ -122,7 +121,7 @@ pub(crate) struct EnsureDatasetsResult {
 ///
 /// Updates all existing dataset records that don't match the blueprint.
 /// Returns the number of datasets changed.
-pub(crate) async fn ensure_dataset_records_exist(
+pub(crate) async fn ensure_crucible_dataset_records_exist(
     opctx: &OpContext,
     datastore: &DataStore,
     bp_id: BlueprintUuid,
@@ -134,10 +133,11 @@ pub(crate) async fn ensure_dataset_records_exist(
     // almost all executions of this function to do nothing: new datasets are
     // created very rarely relative to how frequently blueprint realization
     // happens. We could remove this check and filter and instead run the below
-    // "insert if not exists" query on every dataset, and the behavior would still
-    // be correct. However, that would issue far more queries than necessary in
-    // the very common case of "we don't need to do anything at all".
-    let mut existing_datasets = datastore
+    // "insert if not exists" query on every dataset, and the behavior would
+    // still be correct. However, that would issue far more queries than
+    // necessary in the very common case of "we don't need to do anything at
+    // all".
+    let existing_datasets = datastore
         .dataset_list_all_batched(opctx)
         .await
         .context("failed to list all datasets")?
@@ -147,35 +147,37 @@ pub(crate) async fn ensure_dataset_records_exist(
 
     let mut num_inserted = 0;
     let mut num_unchanged = 0;
-    let mut num_removed = 0;
 
-    let (wanted_datasets, unwanted_datasets): (Vec<_>, Vec<_>) = bp_datasets
-        .partition(|d| match d.disposition {
-            BlueprintDatasetDisposition::InService => true,
-            BlueprintDatasetDisposition::Expunged => false,
-        });
-
-    for bp_dataset in wanted_datasets {
-        let id = bp_dataset.id;
-        let kind = &bp_dataset.kind;
-
-        // Only act on Crucible datasets.
-        let dataset = match (&bp_dataset.kind, bp_dataset.address) {
+    // Filter down to in-service Crucible datasets.
+    let wanted_datasets = bp_datasets.filter_map(|d| {
+        match d.disposition {
+            BlueprintDatasetDisposition::InService => (),
+            BlueprintDatasetDisposition::Expunged => return None,
+        }
+        // We only insert records for Crucible datasets.
+        let dataset = match (&d.kind, d.address) {
             (DatasetKind::Crucible, Some(addr)) => CrucibleDataset::new(
-                id,
-                bp_dataset.pool.id().into_untyped_uuid(),
+                d.id,
+                d.pool.id().into_untyped_uuid(),
                 addr,
             ),
             (DatasetKind::Crucible, None) => {
                 // This should be impossible! Ideally we'd prevent it
                 // statically, but for now just fail at runtime.
-                bail!(
+                return Some(Err(anyhow!(
                     "invalid blueprint dataset: \
-                     {id} has kind Crucible but no address"
-                );
+                     {} has kind Crucible but no address",
+                    d.id
+                )));
             }
-            _ => continue,
+            _ => return None,
         };
+        Some(Ok(dataset))
+    });
+
+    for dataset in wanted_datasets {
+        let dataset = dataset?;
+        let id = dataset.id();
 
         // If this dataset already exists, do nothing.
         if existing_datasets.contains_key(&id) {
@@ -195,65 +197,27 @@ pub(crate) async fn ensure_dataset_records_exist(
 
         info!(
             opctx.log,
-            "ensuring dataset record in database";
+            "ensuring Crucible dataset record in database";
             "action" => "insert",
             "id" => %id,
-            "kind" => ?kind,
         );
     }
 
-    for bp_dataset in unwanted_datasets {
-        if existing_datasets.remove(&bp_dataset.id).is_some() {
-            if matches!(
-                bp_dataset.kind,
-                omicron_common::disk::DatasetKind::Crucible
-            ) {
-                // Region and snapshot replacement cannot happen without the
-                // database record, even if the dataset has been expunged.
-                //
-                // This record will still be deleted, but it will happen as a
-                // part of the "decommissioned_disk_cleaner" background task.
-                continue;
-            }
-
-            datastore
-                .dataset_delete_if_blueprint_is_current_target(
-                    &opctx,
-                    bp_id,
-                    bp_dataset.id,
-                )
-                .await?;
-            num_removed += 1;
-        }
-    }
-
-    // We support removing expunged datasets - if we read a dataset that hasn't
-    // been explicitly expunged, log this as an oddity.
+    // Region and snapshot replacement cannot happen without the database
+    // record, even if the dataset has been expunged.
     //
-    // This could be possible in conditions where multiple Nexuses are executing
-    // distinct blueprints.
-    if !existing_datasets.is_empty() {
-        warn!(
-            opctx.log,
-            "database contains {} unexpected datasets",
-            existing_datasets.len();
-            "dataset_ids" => ?existing_datasets,
-        );
-    }
+    // Dataset records for expunged Crucible datasets will be deleted, but it
+    // will happen as a part of the "decommissioned_disk_cleaner" background
+    // task. We do not do so here.
 
     info!(
         opctx.log,
-        "ensured all Omicron datasets have database records";
+        "ensured all Crucible datasets have database records";
         "num_inserted" => num_inserted,
         "num_unchanged" => num_unchanged,
-        "num_removed" => num_removed,
     );
 
-    Ok(EnsureDatasetsResult {
-        inserted: num_inserted,
-        updated: 0,
-        removed: num_removed,
-    })
+    Ok(EnsureDatasetsResult { inserted: num_inserted, updated: 0, removed: 0 })
 }
 
 #[cfg(test)]
@@ -264,6 +228,7 @@ mod tests {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintZoneFilter;
+    use nexus_types::deployment::BlueprintZoneType;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::CompressionAlgorithm;
     use omicron_common::zpool_name::ZpoolName;
@@ -274,13 +239,19 @@ mod tests {
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
-    fn get_all_datasets_from_zones(
+    fn get_all_crucible_datasets_from_zones(
         blueprint: &Blueprint,
     ) -> Vec<BlueprintDatasetConfig> {
         blueprint
             .all_omicron_zones(BlueprintZoneFilter::All)
             .filter_map(|(_, zone)| {
-                let dataset = zone.zone_type.durable_dataset()?;
+                if !matches!(zone.zone_type, BlueprintZoneType::Crucible(_)) {
+                    return None;
+                }
+                let dataset = zone
+                    .zone_type
+                    .durable_dataset()
+                    .expect("crucible zones have datasets");
                 Some(BlueprintDatasetConfig {
                     disposition: BlueprintDatasetDisposition::InService,
                     id: DatasetUuid::new_v4(),
@@ -334,14 +305,14 @@ mod tests {
         //
         // Finding these datasets is normally the responsibility of the planner,
         // but we're kinda hand-rolling it.
-        let all_datasets = get_all_datasets_from_zones(&blueprint);
+        let all_datasets = get_all_crucible_datasets_from_zones(&blueprint);
 
         // How many zones are there with durable datasets?
         let nzones_with_durable_datasets = all_datasets.len();
         assert!(nzones_with_durable_datasets > 0);
 
         let EnsureDatasetsResult { inserted, updated, removed } =
-            ensure_dataset_records_exist(
+            ensure_crucible_dataset_records_exist(
                 opctx,
                 datastore,
                 blueprint.id,
@@ -362,7 +333,7 @@ mod tests {
 
         // Ensuring the same datasets again should insert no new records.
         let EnsureDatasetsResult { inserted, updated, removed } =
-            ensure_dataset_records_exist(
+            ensure_crucible_dataset_records_exist(
                 opctx,
                 datastore,
                 blueprint.id,
@@ -393,7 +364,8 @@ mod tests {
                 .expect("failed to upsert zpool");
         }
 
-        // Call `ensure_dataset_records_exist` again, adding new datasets.
+        // Call `ensure_crucible_dataset_records_exist` again, adding new
+        // datasets.
         //
         // It should only insert these new zones.
         let new_zones = [
@@ -401,8 +373,8 @@ mod tests {
                 disposition: BlueprintDatasetDisposition::InService,
                 id: DatasetUuid::new_v4(),
                 pool: ZpoolName::new_external(new_zpool_id),
-                kind: DatasetKind::Debug,
-                address: None,
+                kind: DatasetKind::Crucible,
+                address: Some("[::1]:0".parse().unwrap()),
                 quota: None,
                 reservation: None,
                 compression: CompressionAlgorithm::Off,
@@ -411,8 +383,8 @@ mod tests {
                 disposition: BlueprintDatasetDisposition::InService,
                 id: DatasetUuid::new_v4(),
                 pool: ZpoolName::new_external(new_zpool_id),
-                kind: DatasetKind::TransientZoneRoot,
-                address: None,
+                kind: DatasetKind::Crucible,
+                address: Some("[::1]:0".parse().unwrap()),
                 quota: None,
                 reservation: None,
                 compression: CompressionAlgorithm::Off,
@@ -420,7 +392,7 @@ mod tests {
         ];
 
         let EnsureDatasetsResult { inserted, updated, removed } =
-            ensure_dataset_records_exist(
+            ensure_crucible_dataset_records_exist(
                 opctx,
                 datastore,
                 blueprint.id,
@@ -493,21 +465,14 @@ mod tests {
         )
         .await;
 
-        let mut all_datasets = get_all_datasets_from_zones(&blueprint);
+        let mut all_datasets = get_all_crucible_datasets_from_zones(&blueprint);
+        assert!(
+            !all_datasets.is_empty(),
+            "blueprint should have at least one crucible dataset"
+        );
 
-        // Ensure that a non-crucible dataset exists
-        all_datasets.push(BlueprintDatasetConfig {
-            disposition: BlueprintDatasetDisposition::InService,
-            id: DatasetUuid::new_v4(),
-            pool: all_datasets[0].pool.clone(),
-            kind: DatasetKind::Debug,
-            address: None,
-            quota: None,
-            reservation: None,
-            compression: CompressionAlgorithm::Off,
-        });
         let EnsureDatasetsResult { inserted, updated, removed } =
-            ensure_dataset_records_exist(
+            ensure_crucible_dataset_records_exist(
                 opctx,
                 datastore,
                 blueprint.id,
@@ -519,9 +484,7 @@ mod tests {
         assert_eq!(updated, 0);
         assert_eq!(removed, 0);
 
-        // Expunge two datasets -- one for Crucible, and one for any other
-        // service.
-
+        // Expunge a Crucible dataset
         let crucible_dataset = all_datasets
             .iter_mut()
             .find(|dataset| matches!(dataset.kind, DatasetKind::Crucible))
@@ -533,25 +496,9 @@ mod tests {
         crucible_dataset.disposition = BlueprintDatasetDisposition::Expunged;
         let crucible_dataset_id = crucible_dataset.id;
 
-        let non_crucible_dataset = all_datasets
-            .iter_mut()
-            .find(|dataset| !matches!(dataset.kind, DatasetKind::Crucible))
-            .expect("No non-crucible dataset found");
-        assert_eq!(
-            non_crucible_dataset.disposition,
-            BlueprintDatasetDisposition::InService
-        );
-        non_crucible_dataset.disposition =
-            BlueprintDatasetDisposition::Expunged;
-        let non_crucible_dataset_id = non_crucible_dataset.id;
-
-        // Observe that we only remove one dataset.
-        //
-        // This is a property of "special-case handling" of the Crucible
-        // dataset, where we punt the deletion to a background task.
-
+        // Observe that we don't remove it.
         let EnsureDatasetsResult { inserted, updated, removed } =
-            ensure_dataset_records_exist(
+            ensure_crucible_dataset_records_exist(
                 opctx,
                 datastore,
                 blueprint.id,
@@ -561,19 +508,14 @@ mod tests {
             .expect("failed to ensure datasets");
         assert_eq!(inserted, 0);
         assert_eq!(updated, 0);
-        assert_eq!(removed, 1);
+        assert_eq!(removed, 0);
 
-        // Make sure the Crucible dataset still exists, even if the other
-        // dataset got deleted.
-
+        // Make sure the dataset still exists.
         let observed_datasets =
             datastore.dataset_list_all_batched(opctx).await.unwrap();
         assert!(observed_datasets
             .iter()
             .any(|d| d.id() == crucible_dataset_id));
-        assert!(!observed_datasets
-            .iter()
-            .any(|d| d.id() == non_crucible_dataset_id));
     }
 
     #[nexus_test]
@@ -607,23 +549,14 @@ mod tests {
         )
         .await;
 
-        let mut all_datasets = get_all_datasets_from_zones(&blueprint);
-
-        // Ensure that a deletable dataset exists
-        let dataset_id = DatasetUuid::new_v4();
-        all_datasets.push(BlueprintDatasetConfig {
-            disposition: BlueprintDatasetDisposition::InService,
-            id: dataset_id,
-            pool: all_datasets[0].pool.clone(),
-            kind: DatasetKind::Debug,
-            address: None,
-            quota: None,
-            reservation: None,
-            compression: CompressionAlgorithm::Off,
-        });
+        let mut all_datasets = get_all_crucible_datasets_from_zones(&blueprint);
+        assert!(
+            !all_datasets.is_empty(),
+            "blueprint should have at least one crucible dataset"
+        );
 
         let EnsureDatasetsResult { inserted, updated, removed } =
-            ensure_dataset_records_exist(
+            ensure_crucible_dataset_records_exist(
                 opctx,
                 datastore,
                 blueprint.id,
@@ -641,11 +574,11 @@ mod tests {
         // This situation mimics a scenario where we are an "old Nexus,
         // executing an old blueprint" - more datasets might be created
         // concurrently with our execution, and we should leave them alone.
-        assert_eq!(dataset_id, all_datasets.pop().unwrap().id);
+        let removed_dataset_id = all_datasets.pop().unwrap().id;
 
         // Observe that no datasets are removed.
         let EnsureDatasetsResult { inserted, updated, removed } =
-            ensure_dataset_records_exist(
+            ensure_crucible_dataset_records_exist(
                 opctx,
                 datastore,
                 blueprint.id,
@@ -661,6 +594,6 @@ mod tests {
         // "blueprint".
         let observed_datasets =
             datastore.dataset_list_all_batched(opctx).await.unwrap();
-        assert!(observed_datasets.iter().any(|d| d.id() == dataset_id));
+        assert!(observed_datasets.iter().any(|d| d.id() == removed_dataset_id));
     }
 }

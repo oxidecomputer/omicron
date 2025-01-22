@@ -30,7 +30,6 @@ use diesel::upsert::excluded;
 use futures::FutureExt;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
-use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
@@ -222,62 +221,6 @@ impl DataStore {
         }
 
         Ok(all_datasets)
-    }
-
-    pub async fn dataset_delete(
-        &self,
-        opctx: &OpContext,
-        id: DatasetUuid,
-    ) -> DeleteResult {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        let conn = self.pool_connection_authorized(&opctx).await?;
-
-        Self::dataset_delete_on_connection(&conn, id)
-            .await
-            .map_err(|e| e.into())
-    }
-
-    pub async fn dataset_delete_if_blueprint_is_current_target(
-        &self,
-        opctx: &OpContext,
-        bp_id: BlueprintUuid,
-        id: DatasetUuid,
-    ) -> DeleteResult {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        let conn = self.pool_connection_authorized(&opctx).await?;
-
-        self.transaction_if_current_blueprint_is(
-            &conn,
-            "dataset_delete_if_blueprint_is_current_target",
-            opctx,
-            bp_id,
-            |conn| {
-                async move {
-                    Self::dataset_delete_on_connection(&conn, id).await
-                }
-                .boxed()
-            },
-        )
-        .await
-    }
-
-    async fn dataset_delete_on_connection(
-        conn: &async_bb8_diesel::Connection<db::DbConnection>,
-        id: DatasetUuid,
-    ) -> Result<(), TransactionError<Error>> {
-        use db::schema::crucible_dataset::dsl as dataset_dsl;
-        let now = Utc::now();
-
-        diesel::update(dataset_dsl::crucible_dataset)
-            .filter(dataset_dsl::time_deleted.is_null())
-            .filter(dataset_dsl::id.eq(to_db_typed_uuid(id)))
-            .set(dataset_dsl::time_deleted.eq(now))
-            .execute_async(conn)
-            .await
-            .map(|_rows_modified| ())
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        Ok(())
     }
 
     pub async fn dataset_physical_disk_in_service(
@@ -483,9 +426,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_upsert_and_delete_while_blueprint_changes() {
-        let logctx =
-            dev::test_setup_log("upsert_and_delete_while_blueprint_changes");
+    async fn test_upsert_while_blueprint_changes() {
+        let logctx = dev::test_setup_log("upsert_while_blueprint_changes");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -526,7 +468,7 @@ mod test {
             );
 
         // Upsert referencing current blueprint: OK
-        let dataset = datastore
+        datastore
             .dataset_upsert_if_blueprint_is_current_target(
                 &opctx,
                 current_blueprint_id,
@@ -534,28 +476,6 @@ mod test {
             )
             .await
             .expect("Should be able to insert while blueprint is active");
-
-        // Delete referencing old blueprint: Error
-        datastore
-            .dataset_delete_if_blueprint_is_current_target(
-                &opctx,
-                old_blueprint_id,
-                dataset.id(),
-            )
-            .await
-            .expect_err(
-                "Shouldn't be able to delete referencing old blueprint",
-            );
-
-        // Delete referencing current blueprint: OK
-        datastore
-            .dataset_delete_if_blueprint_is_current_target(
-                &opctx,
-                current_blueprint_id,
-                dataset.id(),
-            )
-            .await
-            .expect("Should be able to delete while blueprint is active");
 
         db.terminate().await;
         logctx.cleanup_successful();
