@@ -327,46 +327,42 @@ impl DataStore {
                     // given a possible set of "targets", and the information
                     // from affinity groups.
                     //
-                    // # Rules vs Preferenes
+                    // # Rules vs Preferences
                     //
-                    // Due to the flavors "affinity policy", it's possible to
-                    // bucket affinity choices into two categories: "rules" and
-                    // "preferences". "rules" are affinity dispositions for or
-                    // against sled placement that must be followed, and
-                    // "preferences" are affinity dispositions that should be
-                    // followed for sled selection, in order of "most
-                    // preferential" to "least preferential".
+                    // Due to the flavors "affinity policy", it's possible to bucket affinity
+                    // choices into two categories: "rules" and "preferences". "rules" are affinity
+                    // dispositions for or against sled placement that must be followed, and
+                    // "preferences" are affinity dispositions that should be followed for sled
+                    // selection, in order of "most preferential" to "least preferential".
                     //
-                    // As example of a "rule" is "an anti-affinity group exists,
-                    // containing a target sled, with affinity_policy = 'fail'".
+                    // As example of a "rule" is "an anti-affinity group exists, containing a
+                    // target sled, with affinity_policy = 'fail'".
                     //
-                    // An example of a "preference" is "an anti-affinity group
-                    // exists, containing a target sled, but the policy is
-                    // 'allow'. We don't want to use it as a target, but we
-                    // will if there are no other choices."
+                    // An example of a "preference" is "an anti-affinity group exists, containing a
+                    // target sled, but the policy is 'allow'. We don't want to use it as a target,
+                    // but we will if there are no other choices."
                     //
-                    // We apply rules before preferences to ensure they are
-                    // always respected. Furthermore, the evaluation of
-                    // preferences is a target-seeking operation, which
-                    // identifies the distinct sets of targets, and searches
-                    // them in decreasing preference order.
+                    // We apply rules before preferences to ensure they are always respected.
+                    // Furthermore, the evaluation of preferences is a target-seeking operation,
+                    // which identifies the distinct sets of targets, and searches them in
+                    // decreasing preference order.
                     //
                     // # Logic
                     //
                     // ## Background: Notation
                     //
                     // We use the following symbols for sets below:
-                    // - ∩: Intersection of two sets (A ∩ B is "everything that
-                    // exists in A and also exists in B").
-                    // - \: difference of two sets (A \ B is
-                    // "everything that exists in A that does not exist in B).
+                    // - ∩: Intersection of two sets (A ∩ B is "everything that exists in A and
+                    // also exists in B").
+                    // - \: difference of two sets (A \ B is "everything that exists in A that does
+                    // not exist in B).
                     //
                     // We also use the following notation for brevity:
-                    // - AA,P=Fail: All sleds sharing an anti-affinity instance
-                    // within a group with policy = 'fail'.
+                    // - AA,P=Fail: All sleds sharing an anti-affinity instance within a group with
+                    // policy = 'fail'.
                     // - AA,P=Allow: Same as above, but with policy = 'allow'.
-                    // - A,P=Fail: All sleds sharing an affinity instance within
-                    // a group with policy = 'fail'.
+                    // - A,P=Fail: All sleds sharing an affinity instance within a group with
+                    // policy = 'fail'.
                     // - A,P=Allow: Same as above, but with policy = 'allow'.
                     //
                     // ## Affinity: Apply Rules
@@ -386,13 +382,15 @@ impl DataStore {
                     // set of targets to ignore "banned" sleds, and then apply
                     // preferences.
                     //
-                    // - Targets := Targets Δ Banned
+                    // - Targets := Targets \ Banned
                     //
                     // ## Affinity: Apply Preferences
                     //
                     // - Preferred := Targets ∩ A,P=Allow
                     // - Unpreferred := Targets ∩ AA,P=Allow
-                    // - Preferred := Preferred \ Unpreferred
+                    // - Neither := Preferred ∩ Unpreferred
+                    // - Preferred := Preferred \ Neither
+                    // - Unpreferred := Unpreferred \ Neither
                     // - If Preferred isn't empty, pick a target from it.
                     // - Targets := Targets \ Unpreferred
                     // - If Targets isn't empty, pick a target from it.
@@ -436,14 +434,14 @@ impl DataStore {
                     } else {
                         targets = targets.difference(&banned).cloned().collect();
 
-                        let mut preferred = anti_affinity_sleds.iter().filter_map(|(policy, id)| {
+                        let mut preferred = affinity_sleds.iter().filter_map(|(policy, id)| {
                             if *policy == AffinityPolicy::Allow {
                                 Some(*id)
                             } else {
                                 None
                             }
                         }).collect::<HashSet<_>>();
-                        let mut unpreferred = affinity_sleds.iter().filter_map(|(policy, id)| {
+                        let mut unpreferred = anti_affinity_sleds.iter().filter_map(|(policy, id)| {
                             if *policy == AffinityPolicy::Allow {
                                 Some(*id)
                             } else {
@@ -451,9 +449,20 @@ impl DataStore {
                             }
                         }).collect::<HashSet<_>>();
 
+                        // Only consider "preferred" sleds that are viable targets
                         preferred = targets.intersection(&preferred).cloned().collect();
+                        // Only consider "unpreferred" sleds that are viable targets
                         unpreferred = targets.intersection(&unpreferred).cloned().collect();
-                        preferred = preferred.difference(&unpreferred).cloned().collect();
+
+                        // If a target is both preferred and unpreferred, it is removed
+                        // from both sets.
+                        let both = preferred.intersection(&unpreferred).cloned().collect();
+                        preferred = preferred.difference(&both).cloned().collect();
+                        unpreferred = unpreferred.difference(&both).cloned().collect();
+
+                        println!("(db) Preferred: {preferred:#?}");
+                        println!("(db) Unpreferred: {unpreferred:#?}");
+                        println!("(db) Both: {both:#?}");
 
                         if let Some(target) = preferred.iter().next() {
                             println!("(db) found a preferred target");
@@ -1647,14 +1656,21 @@ pub(in crate::db::datastore) mod test {
             constraints
         };
 
-        db.sled_reservation_create(
-            &opctx,
-            instance.id.into_untyped_uuid(),
-            db::model::SledResourceKind::Instance,
-            small_resource_request(),
-            constraints.build(),
-        )
-        .await
+        let result = db
+            .sled_reservation_create(
+                &opctx,
+                instance.id.into_untyped_uuid(),
+                db::model::SledResourceKind::Instance,
+                small_resource_request(),
+                constraints.build(),
+            )
+            .await?;
+
+        if let Some(sled_target) = instance.force_onto_sled {
+            assert_eq!(result.sled_id, sled_target.into_untyped_uuid());
+        }
+
+        Ok(result)
     }
 
     // Anti-Affinity, Policy = Fail
@@ -1741,7 +1757,114 @@ pub(in crate::db::datastore) mod test {
             .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
             .await
             .expect("Should have succeeded allocation");
-        assert_eq!(resource.id, sleds[2].id());
+        assert_eq!(resource.sled_id, sleds[2].id());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Anti-Affinity, Policy = Allow
+    //
+    // Create two sleds, put instances on each belonging to an anti-affinity group.
+    // We can continue to add instances belonging to that anti-affinity group, because
+    // it has "AffinityPolicy::Allow".
+    #[tokio::test]
+    async fn anti_affinity_policy_allow() {
+        let logctx = dev::test_setup_log("anti_affinity_policy_allow");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _project) =
+            create_project(&opctx, &datastore).await;
+
+        const SLED_COUNT: usize = 2;
+        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+
+        let groups = [Group {
+            affinity: Affinity::Negative,
+            name: "anti-affinity",
+            policy: external::AffinityPolicy::Allow,
+        }];
+        let all_groups =
+            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
+                .await;
+        let instances = [
+            Instance::new().group("anti-affinity").sled(sleds[0].id()),
+            Instance::new().group("anti-affinity").sled(sleds[1].id()),
+        ];
+        for instance in instances {
+            instance
+                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .await
+                .expect("Failed to set up instances");
+        }
+
+        let test_instance = Instance::new().group("anti-affinity");
+        let resource = test_instance
+            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .await
+            .expect("Should have succeeded allocation");
+        assert!(
+            [sleds[0].id(), sleds[1].id()].contains(&resource.sled_id),
+            "Should have been provisioned to one of the two viable sleds"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Anti-Affinity, Policy = Fail, with
+    // Affinity, Policy = Fail
+    //
+    // These constraints are contradictory - we're asking the allocator
+    // to colocate and NOT colocate our new instance with existing ones, which
+    // should not be satisfiable.
+    #[tokio::test]
+    async fn affinity_and_anti_affinity_policy_fail() {
+        let logctx =
+            dev::test_setup_log("affinity_and_anti_affinity_policy_fail");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _project) =
+            create_project(&opctx, &datastore).await;
+
+        const SLED_COUNT: usize = 2;
+        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+
+        let groups = [
+            Group {
+                affinity: Affinity::Negative,
+                name: "anti-affinity",
+                policy: external::AffinityPolicy::Fail,
+            },
+            Group {
+                affinity: Affinity::Positive,
+                name: "affinity",
+                policy: external::AffinityPolicy::Fail,
+            },
+        ];
+        let all_groups =
+            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
+                .await;
+        let instances = [Instance::new()
+            .group("anti-affinity")
+            .group("affinity")
+            .sled(sleds[0].id())];
+        for instance in instances {
+            instance
+                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .await
+                .expect("Failed to set up instances");
+        }
+
+        let test_instance =
+            Instance::new().group("anti-affinity").group("affinity");
+        let err = test_instance
+            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .await
+            .expect_err("Contradictory constraints should not be satisfiable");
+        let Error::InsufficientCapacity { .. } = err else {
+            panic!("Unexpected error: {err:?}");
+        };
 
         db.terminate().await;
         logctx.cleanup_successful();
