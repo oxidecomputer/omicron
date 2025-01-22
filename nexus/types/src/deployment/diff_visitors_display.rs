@@ -229,6 +229,9 @@ pub struct BpDiffAccumulator<'e> {
     // unchanged_sleds: BTreeSet<SledUuid>,
     modified_sleds: BTreeMap<SledUuid, ModifiedSled<'e>>,
     metadata: MetadataDiff<'e>,
+
+    // TODO: Change once we have a visitor for `ClickhouseClusterConfig`
+    clickhouse_cluster_config: DiffValue<'e, Option<ClickhouseClusterConfig>>,
 }
 
 impl<'e> BpDiffAccumulator<'e> {
@@ -243,6 +246,9 @@ impl<'e> BpDiffAccumulator<'e> {
             removed_sleds: BTreeMap::new(),
             modified_sleds: BTreeMap::new(),
             metadata: MetadataDiff::new(before, after),
+            clickhouse_cluster_config: DiffValue::Unchanged(
+                &before.clickhouse_cluster_config,
+            ),
         }
     }
 }
@@ -399,9 +405,10 @@ impl<'e> VisitBlueprint<'e> for BlueprintDiffer<'e> {
     fn visit_clickhouse_cluster_config_change(
         &mut self,
         _ctx: &mut BpVisitorContext,
-        _change: Change<'e, Option<ClickhouseClusterConfig>>,
+        change: Change<'e, Option<ClickhouseClusterConfig>>,
     ) {
-        todo!()
+        // TODO: Change this once we have a visitor for `ClickhouseClusterconfig`
+        self.acc.clickhouse_cluster_config = DiffValue::Change(change);
     }
 }
 
