@@ -2110,7 +2110,7 @@ table! {
 }
 
 table! {
-    webhook_rx (id) {
+    webhook_receiver (id) {
         id -> Uuid,
         name -> Text,
         description -> Text,
@@ -2133,9 +2133,6 @@ table! {
     }
 }
 
-allow_tables_to_appear_in_same_query!(webhook_rx, webhook_rx_secret);
-joinable!(webhook_rx_secret -> webhook_rx (rx_id));
-
 table! {
     webhook_rx_subscription (rx_id, event_class) {
         rx_id -> Uuid,
@@ -2154,11 +2151,15 @@ table! {
     }
 }
 
-allow_tables_to_appear_in_same_query!(webhook_rx, webhook_rx_subscription);
-joinable!(webhook_rx_subscription -> webhook_rx (rx_id));
-
-allow_tables_to_appear_in_same_query!(webhook_rx, webhook_rx_event_glob);
-joinable!(webhook_rx_event_glob -> webhook_rx (rx_id));
+allow_tables_to_appear_in_same_query!(
+    webhook_receiver,
+    webhook_rx_secret,
+    webhook_rx_subscription,
+    webhook_rx_event_glob
+);
+joinable!(webhook_rx_subscription -> webhook_receiver (rx_id));
+joinable!(webhook_rx_secret -> webhook_receiver (rx_id));
+joinable!(webhook_rx_event_glob -> webhook_receiver (rx_id));
 
 table! {
     webhook_event (id) {
@@ -2184,8 +2185,8 @@ table! {
     }
 }
 
-allow_tables_to_appear_in_same_query!(webhook_rx, webhook_delivery);
-joinable!(webhook_delivery -> webhook_rx (rx_id));
+allow_tables_to_appear_in_same_query!(webhook_receiver, webhook_delivery);
+joinable!(webhook_delivery -> webhook_receiver (rx_id));
 allow_tables_to_appear_in_same_query!(webhook_delivery, webhook_event);
 joinable!(webhook_delivery -> webhook_event (event_id));
 

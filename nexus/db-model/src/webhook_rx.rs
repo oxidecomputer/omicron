@@ -4,8 +4,8 @@
 
 use crate::collection::DatastoreCollectionConfig;
 use crate::schema::{
-    webhook_delivery, webhook_rx, webhook_rx_event_glob, webhook_rx_secret,
-    webhook_rx_subscription,
+    webhook_delivery, webhook_receiver, webhook_rx_event_glob,
+    webhook_rx_secret, webhook_rx_subscription,
 };
 use crate::typed_uuid::DbTypedUuid;
 use crate::Generation;
@@ -65,7 +65,7 @@ impl TryFrom<WebhookReceiverConfig> for views::Webhook {
     }
 }
 
-/// A row in the `webhook_rx` table.
+/// A row in the `webhook_receiver` table.
 #[derive(
     Clone,
     Debug,
@@ -77,7 +77,7 @@ impl TryFrom<WebhookReceiverConfig> for views::Webhook {
     Deserialize,
 )]
 #[resource(uuid_kind = WebhookReceiverKind)]
-#[diesel(table_name = webhook_rx)]
+#[diesel(table_name = webhook_receiver)]
 pub struct WebhookReceiver {
     #[diesel(embed)]
     pub identity: WebhookReceiverIdentity,
@@ -90,29 +90,29 @@ pub struct WebhookReceiver {
 
 impl DatastoreCollectionConfig<WebhookRxSecret> for WebhookReceiver {
     type CollectionId = Uuid;
-    type GenerationNumberColumn = webhook_rx::dsl::rcgen;
-    type CollectionTimeDeletedColumn = webhook_rx::dsl::time_deleted;
+    type GenerationNumberColumn = webhook_receiver::dsl::rcgen;
+    type CollectionTimeDeletedColumn = webhook_receiver::dsl::time_deleted;
     type CollectionIdColumn = webhook_rx_secret::dsl::rx_id;
 }
 
 impl DatastoreCollectionConfig<WebhookRxSubscription> for WebhookReceiver {
     type CollectionId = Uuid;
-    type GenerationNumberColumn = webhook_rx::dsl::rcgen;
-    type CollectionTimeDeletedColumn = webhook_rx::dsl::time_deleted;
+    type GenerationNumberColumn = webhook_receiver::dsl::rcgen;
+    type CollectionTimeDeletedColumn = webhook_receiver::dsl::time_deleted;
     type CollectionIdColumn = webhook_rx_subscription::dsl::rx_id;
 }
 
 impl DatastoreCollectionConfig<WebhookRxEventGlob> for WebhookReceiver {
     type CollectionId = Uuid;
-    type GenerationNumberColumn = webhook_rx::dsl::rcgen;
-    type CollectionTimeDeletedColumn = webhook_rx::dsl::time_deleted;
+    type GenerationNumberColumn = webhook_receiver::dsl::rcgen;
+    type CollectionTimeDeletedColumn = webhook_receiver::dsl::time_deleted;
     type CollectionIdColumn = webhook_rx_event_glob::dsl::rx_id;
 }
 
 impl DatastoreCollectionConfig<WebhookDelivery> for WebhookReceiver {
     type CollectionId = Uuid;
-    type GenerationNumberColumn = webhook_rx::dsl::rcgen;
-    type CollectionTimeDeletedColumn = webhook_rx::dsl::time_deleted;
+    type GenerationNumberColumn = webhook_receiver::dsl::rcgen;
+    type CollectionTimeDeletedColumn = webhook_receiver::dsl::time_deleted;
     type CollectionIdColumn = webhook_delivery::dsl::rx_id;
 }
 

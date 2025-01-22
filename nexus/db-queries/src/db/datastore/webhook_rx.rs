@@ -13,6 +13,7 @@ use crate::db::datastore::RunnableQuery;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::Generation;
+use crate::db::model::WebhookGlob;
 use crate::db::model::WebhookReceiver;
 use crate::db::model::WebhookReceiverConfig;
 use crate::db::model::WebhookReceiverIdentity;
@@ -21,7 +22,7 @@ use crate::db::model::WebhookRxSecret;
 use crate::db::model::WebhookRxSubscription;
 use crate::db::model::WebhookSubscriptionKind;
 use crate::db::pool::DbConnection;
-use crate::db::schema::webhook_rx::dsl as rx_dsl;
+use crate::db::schema::webhook_receiver::dsl as rx_dsl;
 use crate::db::schema::webhook_rx_event_glob::dsl as glob_dsl;
 use crate::db::schema::webhook_rx_secret::dsl as secret_dsl;
 use crate::db::schema::webhook_rx_subscription::dsl as subscription_dsl;
@@ -82,7 +83,7 @@ impl DataStore {
                 let secret_keys = secrets.clone();
                 let err = err.clone();
                 async move {
-                    let rx = diesel::insert_into(rx_dsl::webhook_rx)
+                    let rx = diesel::insert_into(rx_dsl::webhook_receiver)
                         .values(receiver)
                         .returning(WebhookReceiver::as_returning())
                         .get_result_async(&conn)
@@ -134,7 +135,20 @@ impl DataStore {
         Ok(WebhookReceiverConfig { rx, secrets, events: subscriptions })
     }
 
-    // pub async fn webhook_rx_fetch_all(&self, opctx: &OpContext, authz_rx: &authz::WebhookReceiver) -> Fet
+    pub async fn webhook_rx_config_fetch(
+        &self,
+        opctx: &OpContext,
+        authz_rx: &authz::WebhookReceiver,
+    ) -> Result<(Vec<WebhookSubscriptionKind>, Vec<WebhookRxSecret>), Error>
+    {
+        opctx.authorize(authz::Action::ListChildren, authz_rx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let subscriptions =
+            self.webhook_rx_subscription_list_on_conn(authz_rx, &conn).await?;
+        let secrets =
+            self.webhook_rx_secret_list_on_conn(authz_rx, &conn).await?;
+        Ok((subscriptions, secrets))
+    }
 
     //
     // Subscriptions
@@ -173,6 +187,46 @@ impl DataStore {
         );
 
         Ok(())
+    }
+
+    async fn webhook_rx_subscription_list_on_conn(
+        &self,
+        authz_rx: &authz::WebhookReceiver,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> ListResultVec<WebhookSubscriptionKind> {
+        let rx_id = authz_rx.id().into_untyped_uuid();
+
+        // First, get all the exact subscriptions that aren't from globs.
+        let exact = subscription_dsl::webhook_rx_subscription
+            .filter(subscription_dsl::rx_id.eq(rx_id))
+            .filter(subscription_dsl::glob.is_null())
+            .select(subscription_dsl::event_class)
+            .load_async::<String>(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_rx),
+                )
+            })?;
+        // Then, get the globs
+        let globs = glob_dsl::webhook_rx_event_glob
+            .filter(glob_dsl::rx_id.eq(rx_id))
+            .select(WebhookGlob::as_select())
+            .load_async::<WebhookGlob>(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_rx),
+                )
+            })?;
+        let subscriptions = exact
+            .into_iter()
+            .map(WebhookSubscriptionKind::Exact)
+            .chain(globs.into_iter().map(WebhookSubscriptionKind::Glob))
+            .collect::<Vec<_>>();
+        Ok(subscriptions)
     }
 
     async fn add_subscription_on_conn(
@@ -324,7 +378,8 @@ impl DataStore {
             .filter(subscription_dsl::event_class.eq(event_class))
             .order_by(subscription_dsl::rx_id.asc())
             .inner_join(
-                rx_dsl::webhook_rx.on(subscription_dsl::rx_id.eq(rx_dsl::id)),
+                rx_dsl::webhook_receiver
+                    .on(subscription_dsl::rx_id.eq(rx_dsl::id)),
             )
             .filter(rx_dsl::time_deleted.is_null())
             .select((
@@ -344,11 +399,19 @@ impl DataStore {
     ) -> ListResultVec<WebhookRxSecret> {
         opctx.authorize(authz::Action::ListChildren, authz_rx).await?;
         let conn = self.pool_connection_authorized(&opctx).await?;
+        self.webhook_rx_secret_list_on_conn(authz_rx, &conn).await
+    }
+
+    async fn webhook_rx_secret_list_on_conn(
+        &self,
+        authz_rx: &authz::WebhookReceiver,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> ListResultVec<WebhookRxSecret> {
         secret_dsl::webhook_rx_secret
             .filter(secret_dsl::rx_id.eq(authz_rx.id().into_untyped_uuid()))
             .filter(secret_dsl::time_deleted.is_null())
             .select(WebhookRxSecret::as_select())
-            .load_async(&*conn)
+            .load_async(conn)
             .await
             .map_err(|e| {
                 public_error_from_diesel(
@@ -380,7 +443,7 @@ impl DataStore {
     ) -> ListResultVec<WebhookReceiver> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        rx_dsl::webhook_rx
+        rx_dsl::webhook_receiver
             .filter(rx_dsl::time_deleted.is_null())
             .select(WebhookReceiver::as_select())
             .load_async::<WebhookReceiver>(&*conn)
@@ -522,8 +585,8 @@ mod test {
             datastore: &DataStore,
             // logctx: &LogContext,
             event_class: &str,
-            matches: &[&WebhookReceiver],
-            not_matches: &[&WebhookReceiver],
+            matches: &[&WebhookReceiverConfig],
+            not_matches: &[&WebhookReceiverConfig],
         ) {
             let subscribed = datastore
                 .webhook_rx_list_subscribed_to_event_on_conn(
@@ -546,17 +609,19 @@ mod test {
                 })
                 .collect::<Vec<_>>();
 
-            for rx in matches {
+            for WebhookReceiverConfig { rx, events, .. } in matches {
                 assert!(
                     subscribed.contains(&rx.identity),
-                    "expected {rx:?} to be subscribed to {event_class:?}"
+                    "expected {rx:?} to be subscribed to {event_class:?}\n\
+                     subscriptions: {events:?}"
                 );
             }
 
-            for rx in not_matches {
+            for WebhookReceiverConfig { rx, events, .. } in not_matches {
                 assert!(
                     !subscribed.contains(&rx.identity),
-                    "expected {rx:?} to not be subscribed to {event_class:?}"
+                    "expected {rx:?} to not be subscribed to {event_class:?}\n\
+                     subscriptions: {events:?}"
                 );
             }
         }
