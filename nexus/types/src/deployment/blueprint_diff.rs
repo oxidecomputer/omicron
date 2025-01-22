@@ -10,13 +10,6 @@ use super::blueprint_display::{
     BpGeneration, BpOmicronZonesTableSchema, BpPhysicalDisksTableSchema,
     BpTable, BpTableColumn, BpTableData, BpTableRow, KvListWithHeading, KvPair,
 };
-use super::diff_visitors::visit_blueprint::{
-    SledInsert, SledRemove, VisitBlueprint,
-};
-use super::diff_visitors::visit_blueprint_datasets_config::VisitBlueprintDatasetsConfig;
-use super::diff_visitors::visit_blueprint_physical_disks_config::VisitBlueprintPhysicalDisksConfig;
-use super::diff_visitors::visit_blueprint_zones_config::VisitBlueprintZonesConfig;
-use super::diff_visitors::BpVisitorContext;
 use super::{
     zone_sort_key, Blueprint, ClickhouseClusterConfig,
     CockroachDbPreserveDowngrade, DiffBeforeClickhouseClusterConfig,

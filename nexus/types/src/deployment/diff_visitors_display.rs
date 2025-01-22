@@ -221,17 +221,19 @@ impl<'e> MetadataDiff<'e> {
 ///
 /// Tied to the lifetime of a diffus diff.
 pub struct BpDiffAccumulator<'e> {
+    before: &'e Blueprint,
+    after: &'e Blueprint,
     pub errors: Vec<String>,
     pub warnings: Vec<String>,
-    added_sleds: BTreeMap<SledUuid, SledInsert<'e>>,
-    removed_sleds: BTreeMap<SledUuid, SledRemove<'e>>,
-    // TODO: Should we fill this in explicitly or just use the data from `before`?
-    // unchanged_sleds: BTreeSet<SledUuid>,
-    modified_sleds: BTreeMap<SledUuid, ModifiedSled<'e>>,
-    metadata: MetadataDiff<'e>,
+    pub added_sleds: BTreeMap<SledUuid, SledInsert<'e>>,
+    pub removed_sleds: BTreeMap<SledUuid, SledRemove<'e>>,
+    pub unchanged_sleds: BTreeSet<SledUuid>,
+    pub modified_sleds: BTreeMap<SledUuid, ModifiedSled<'e>>,
+    pub metadata: MetadataDiff<'e>,
 
     // TODO: Change once we have a visitor for `ClickhouseClusterConfig`
-    clickhouse_cluster_config: DiffValue<'e, Option<ClickhouseClusterConfig>>,
+    pub clickhouse_cluster_config:
+        DiffValue<'e, Option<ClickhouseClusterConfig>>,
 }
 
 impl<'e> BpDiffAccumulator<'e> {
@@ -240,10 +242,13 @@ impl<'e> BpDiffAccumulator<'e> {
         after: &'e Blueprint,
     ) -> BpDiffAccumulator<'e> {
         BpDiffAccumulator {
+            before,
+            after,
             errors: vec![],
             warnings: vec![],
             added_sleds: BTreeMap::new(),
             removed_sleds: BTreeMap::new(),
+            unchanged_sleds: BTreeSet::new(),
             modified_sleds: BTreeMap::new(),
             metadata: MetadataDiff::new(before, after),
             clickhouse_cluster_config: DiffValue::Unchanged(
@@ -257,10 +262,8 @@ impl<'e> BpDiffAccumulator<'e> {
 pub struct BlueprintDiffer<'e> {
     before: &'e Blueprint,
     after: &'e Blueprint,
-    ctx: BpVisitorContext,
     /// An accumulator for diff state while traversing a visitor
     acc: BpDiffAccumulator<'e>,
-    diff: Edit<'e, Blueprint>,
 }
 
 impl<'e> BlueprintDiffer<'e> {
@@ -268,14 +271,34 @@ impl<'e> BlueprintDiffer<'e> {
         before: &'e Blueprint,
         after: &'e Blueprint,
     ) -> BlueprintDiffer<'e> {
-        let diff = before.diff(&after);
         BlueprintDiffer {
             before,
             after,
-            ctx: BpVisitorContext::default(),
             acc: BpDiffAccumulator::new(before, after),
-            diff,
         }
+    }
+
+    pub fn diff(mut self) -> BpDiffAccumulator<'e> {
+        let mut ctx = BpVisitorContext::default();
+        let diff = self.before.diff(&self.after);
+        self.visit_blueprint(&mut ctx, diff);
+
+        // Unchanged sleds are those that do not exist in added, removed, or
+        // modified.
+        let changed_sleds: BTreeSet<_> = self
+            .acc
+            .added_sleds
+            .keys()
+            .cloned()
+            .chain(self.acc.removed_sleds.keys().cloned())
+            .chain(self.acc.modified_sleds.keys().cloned())
+            .collect();
+
+        let before_sleds: BTreeSet<_> = self.before.sleds().collect();
+        self.acc.unchanged_sleds =
+            before_sleds.difference(&changed_sleds).cloned().collect();
+
+        self.acc
     }
 }
 
@@ -939,6 +962,61 @@ pub struct BpDiffOutput {
     pub warnings: Vec<String>,
     pub added_sleds: BTreeMap<SledUuid, SledTables>,
     pub removed_sleds: BTreeMap<SledUuid, SledTables>,
+}
+
+impl<'e> From<&BpDiffAccumulator<'e>> for BpDiffOutput {
+    fn from(value: &BpDiffAccumulator<'e>) -> Self {
+        BpDiffOutput {
+            errors: value.errors.clone(),
+            warnings: value.warnings.clone(),
+            added_sleds: value
+                .added_sleds
+                .iter()
+                .map(|(sled_id, insert)| {
+                    (
+                        *sled_id,
+                        SledTables {
+                            disks: disks_table(
+                                BpDiffState::Added,
+                                insert.disks,
+                            ),
+                            datasets: datasets_table(
+                                BpDiffState::Added,
+                                insert.datasets,
+                            ),
+                            zones: zones_table(
+                                BpDiffState::Added,
+                                insert.zones,
+                            ),
+                        },
+                    )
+                })
+                .collect(),
+            removed_sleds: value
+                .removed_sleds
+                .iter()
+                .map(|(sled_id, remove)| {
+                    (
+                        *sled_id,
+                        SledTables {
+                            disks: disks_table(
+                                BpDiffState::Removed,
+                                remove.disks,
+                            ),
+                            datasets: datasets_table(
+                                BpDiffState::Removed,
+                                remove.datasets,
+                            ),
+                            zones: zones_table(
+                                BpDiffState::Removed,
+                                remove.zones,
+                            ),
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
 }
 
 /// Create a `BpTable` from a `BlueprintPhysicalDisksConfig`.
