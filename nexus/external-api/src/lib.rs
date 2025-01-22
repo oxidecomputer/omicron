@@ -3033,6 +3033,11 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseFound, HttpError>;
 
     // Console API: Pages
+    //
+    // Dropshot does not have route match ranking and does not allow overlapping
+    // route definitions, so we cannot use a catchall `/*` route for console pages
+    // because it would overlap with the API routes definitions. So instead we have
+    // to manually define more specific routes.
 
     #[endpoint {
         method = GET,
