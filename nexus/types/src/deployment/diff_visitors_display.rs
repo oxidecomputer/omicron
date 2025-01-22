@@ -73,16 +73,28 @@ pub struct ModifiedZone<'e> {
 }
 
 impl<'e> ModifiedZone<'e> {
-    /// Initialize a `ModifiedSled`.
+    /// Initialize a `ModifiedZone`.
     ///
     /// We always initialize to the `before` state as if this value is
-    /// unchanged. If a change callback fires, then we'll update the value.
+    /// unchanged. If a change callback fires for a given field, then we'll
+    /// update the value.
     pub fn new(before: &'e BlueprintZoneConfig) -> ModifiedZone<'e> {
         ModifiedZone {
             disposition: DiffValue::Unchanged(&before.disposition),
             filesystem_pool: DiffValue::Unchanged(&before.filesystem_pool),
             zone_type: DiffValue::Unchanged(&before.zone_type),
         }
+    }
+}
+
+impl<'e> ModifiedDisk<'e> {
+    /// Initialize a `ModifiedDisk`.
+    ///
+    /// We always initialize to the `before` state as if this value is
+    /// unchanged. If a change callback fires for a given field, then we'll
+    /// update the value.
+    pub fn new(before: &'e BlueprintPhysicalDiskConfig) -> ModifiedDisk<'e> {
+        ModifiedDisk { disposition: DiffValue::Unchanged(&before.disposition) }
     }
 }
 
@@ -439,7 +451,126 @@ impl<'e> VisitBlueprintZonesConfig<'e> for BlueprintDiffer<'e> {
             DiffValue::Change(change);
     }
 }
-impl<'e> VisitBlueprintPhysicalDisksConfig<'e> for BlueprintDiffer<'e> {}
+impl<'e> VisitBlueprintPhysicalDisksConfig<'e> for BlueprintDiffer<'e> {
+    fn visit_generation_change(
+        &mut self,
+        ctx: &mut BpVisitorContext,
+        change: Change<'e, Generation>,
+    ) {
+        let Some(sled_id) = ctx.sled_id else {
+            let err =
+                "Missing sled id in ctx for disks visit_generation_change"
+                    .to_string();
+            self.acc.errors.push(err);
+            return;
+        };
+        let s = self
+            .acc
+            .modified_sleds
+            .entry(sled_id)
+            .or_insert(ModifiedSled::new(&self.before, sled_id));
+        s.disks_generation = DiffValue::Change(change);
+    }
+
+    fn visit_disks_insert(
+        &mut self,
+        ctx: &mut BpVisitorContext,
+        node: &BlueprintPhysicalDiskConfig,
+    ) {
+        let Some(sled_id) = ctx.sled_id else {
+            let err =
+                "Missing sled id in ctx for visit_disks_insert".to_string();
+            self.acc.errors.push(err);
+            return;
+        };
+        let s = self
+            .acc
+            .modified_sleds
+            .entry(sled_id)
+            .or_insert(ModifiedSled::new(&self.before, sled_id));
+        s.disks_inserted.insert(node.clone());
+    }
+
+    fn visit_disks_remove(
+        &mut self,
+        ctx: &mut BpVisitorContext,
+        node: &BlueprintPhysicalDiskConfig,
+    ) {
+        let Some(sled_id) = ctx.sled_id else {
+            let err =
+                "Missing sled id in ctx for visit_disks_remove".to_string();
+            self.acc.errors.push(err);
+            return;
+        };
+        let s = self
+            .acc
+            .modified_sleds
+            .entry(sled_id)
+            .or_insert(ModifiedSled::new(&self.before, sled_id));
+        s.disks_removed.insert(node.clone());
+
+        // Remove this zone from the unchanged disks to compensate for
+        // constructor initialization.
+        s.disks_unchanged.remove(&node.id);
+    }
+
+    fn visit_disk_change(
+        &mut self,
+        ctx: &mut BpVisitorContext,
+        change: Change<'e, BlueprintPhysicalDiskConfig>,
+    ) {
+        let Some(sled_id) = ctx.sled_id else {
+            let err =
+                "Missing sled id in ctx for visit_disk_change".to_string();
+            self.acc.errors.push(err);
+            return;
+        };
+
+        let s = self
+            .acc
+            .modified_sleds
+            .entry(sled_id)
+            .or_insert(ModifiedSled::new(&self.before, sled_id));
+        s.disks_modified
+            .insert(change.before.id, ModifiedDisk::new(&change.before));
+
+        // At least one of the fields for this zone is going to change in a
+        // follow up callback, so we want to remove it from the unchanged disks
+        // to compensate for constructor initialization.
+        s.disks_unchanged.remove(&change.before.id);
+    }
+
+    fn visit_disk_disposition_change(
+        &mut self,
+        ctx: &mut BpVisitorContext,
+        change: Change<'e, BlueprintPhysicalDiskDisposition>,
+    ) {
+        let Some(sled_id) = ctx.sled_id else {
+            let err =
+                "Missing sled id in ctx for visit_disk_disposition_change"
+                    .to_string();
+            self.acc.errors.push(err);
+            return;
+        };
+
+        let Some(disk_id) = ctx.disk_id else {
+            let err =
+                "Missing disk id in ctx for visit_disk_disposition_change"
+                    .to_string();
+            self.acc.errors.push(err);
+            return;
+        };
+
+        // Safety: We guarantee a `visit_disk_change` callback fired and
+        // created the `ModifiedSled` entry if it didn't exist.
+        let s = self.acc.modified_sleds.get_mut(&sled_id).unwrap();
+
+        // Safety: We guarantee a `visit_disk_change` callback fired and
+        // created the `ModifiedZone` entry.
+        s.disks_modified.get_mut(&disk_id).unwrap().disposition =
+            DiffValue::Change(change);
+    }
+}
 impl<'e> VisitBlueprintDatasetsConfig<'e> for BlueprintDiffer<'e> {}
 
 /// Create a `BpTable` from a `BlueprintPhysicalDisksConfig`.
