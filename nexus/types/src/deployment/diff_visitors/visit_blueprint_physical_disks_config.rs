@@ -33,7 +33,7 @@ pub trait VisitBlueprintPhysicalDisksConfig<'e> {
         visit_disks_edit(self, ctx, node);
     }
 
-    /// A change to `BlueprintZonesConfig::generation`
+    /// A change to `BlueprintPhysicalDisksConfig::generation`
     fn visit_generation_change(
         &mut self,
         _ctx: &mut BpVisitorContext,

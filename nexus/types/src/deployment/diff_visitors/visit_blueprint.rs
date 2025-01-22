@@ -24,6 +24,7 @@ use omicron_uuid_kinds::BlueprintUuid;
 use std::collections::BTreeMap;
 
 /// State and Resources for an inserted sled
+#[derive(Clone, Copy)]
 pub struct SledInsert<'e> {
     pub sled_state: SledState,
     pub zones: Option<&'e BlueprintZonesConfig>,
@@ -38,6 +39,7 @@ impl<'e> SledInsert<'e> {
 }
 
 /// State and Resources for a removed sled
+#[derive(Clone, Copy)]
 pub struct SledRemove<'e> {
     pub sled_state: SledState,
     pub zones: Option<&'e BlueprintZonesConfig>,
@@ -89,7 +91,7 @@ pub trait VisitBlueprint<'e> {
     fn visit_sled_insert(
         &mut self,
         _ctx: &mut BpVisitorContext,
-        _val: &SledInsert<'e>,
+        _val: SledInsert<'e>,
     ) {
         // Leaf node
     }
@@ -98,7 +100,7 @@ pub trait VisitBlueprint<'e> {
     fn visit_sled_remove(
         &mut self,
         _ctx: &mut BpVisitorContext,
-        _val: &SledRemove<'e>,
+        _val: SledRemove<'e>,
     ) {
         // Leaf node
     }
@@ -434,7 +436,7 @@ pub fn visit_sled_inserts<'e, V>(
 {
     for (sled_id, insert) in &node {
         ctx.sled_id = Some(*sled_id);
-        v.visit_sled_insert(ctx, insert);
+        v.visit_sled_insert(ctx, *insert);
     }
     ctx.sled_id = None;
 }
@@ -448,7 +450,7 @@ pub fn visit_sled_removes<'e, V>(
 {
     for (sled_id, remove) in &node {
         ctx.sled_id = Some(*sled_id);
-        v.visit_sled_remove(ctx, remove);
+        v.visit_sled_remove(ctx, *remove);
     }
     ctx.sled_id = None;
 }

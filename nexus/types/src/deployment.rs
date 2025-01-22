@@ -55,6 +55,7 @@ mod blueprint_diff;
 mod blueprint_display;
 mod clickhouse;
 pub mod diff_visitors;
+pub mod diff_visitors_display;
 pub mod execution;
 pub mod id_map;
 mod network_resources;
@@ -102,7 +103,7 @@ use blueprint_display::{
 };
 use id_map::{IdMap, IdMappable};
 
-pub use blueprint_diff::{BlueprintDiff, BlueprintDiffer, BpDiffOutput};
+pub use blueprint_diff::BlueprintDiff;
 
 /// Describes a complete set of software and configuration for the system
 // Blueprints are a fundamental part of how the system modifies itself.  Each
