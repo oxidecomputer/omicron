@@ -11,6 +11,7 @@ use nexus_test_utils::resource_helpers;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::{params, views};
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_uuid_kinds::WebhookEventUuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -38,10 +39,12 @@ async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
 
     let server = httpmock::MockServer::start_async().await;
 
+    let id = WebhookEventUuid::new_v4();
     let mock = server
         .mock_async(|when, then| {
             let body = serde_json::json!({
                 "event_class": "test",
+                "event_id": id,
                 "data": {
                     "hello_world": true,
                 }
@@ -75,6 +78,7 @@ async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
     let event = nexus
         .webhook_event_publish(
             &opctx,
+            id,
             "test".to_string(),
             serde_json::json!({"hello_world": true}),
         )

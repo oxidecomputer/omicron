@@ -45,6 +45,7 @@ impl super::Nexus {
     pub async fn webhook_event_publish(
         &self,
         opctx: &OpContext,
+        id: WebhookEventUuid,
         event_class: String,
         event: serde_json::Value,
     ) -> Result<WebhookEvent, Error> {
@@ -56,14 +57,13 @@ impl super::Nexus {
             });
         }
 
-        let id = WebhookEventUuid::new_v4();
         let event = self
             .datastore()
             .webhook_event_create(opctx, id, event_class, event)
             .await?;
         slog::debug!(
             &opctx.log,
-            "published webhook event";
+            "enqueued webhook event";
             "event_id" => ?id,
             "event_class" => ?event.event_class,
             "time_created" => ?event.time_created,
