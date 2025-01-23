@@ -50,11 +50,9 @@ WITH
   existing_sleds
     AS (
       SELECT
-        sled.id
+        zpool.sled_id AS id
       FROM
         zpool
-        INNER JOIN physical_disk ON physical_disk.id = zpool.physical_disk_id
-        INNER JOIN sled ON sled.id = physical_disk.sled_id
       WHERE
         zpool.id = ANY (SELECT pool_id FROM existing_zpools)
     ),
