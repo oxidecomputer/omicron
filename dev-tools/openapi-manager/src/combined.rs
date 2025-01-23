@@ -27,8 +27,11 @@ impl CombinedApis {
         dir: &Utf8Path,
     ) -> anyhow::Result<(CombinedApis, Vec<anyhow::Error>)> {
         let managed_apis = ManagedApis::all()?;
-        let (all_spec_files, warnings) =
-            LocalFiles::load_from_directory(dir, &managed_apis)?;
+        // XXX-dap
+        let all_spec_files = todo!();
+        let warnings = todo!();
+        // let (all_spec_files, warnings) =
+        //     LocalFiles::load_from_directory(dir, &managed_apis)?;
         Ok((CombinedApis::new(managed_apis, all_spec_files), warnings))
     }
 
@@ -37,7 +40,7 @@ impl CombinedApis {
         all_spec_files: LocalFiles,
     ) -> CombinedApis {
         let apis = api_list.into_map();
-        let all_spec_files = all_spec_files.into_map();
+        let all_spec_files: BTreeMap<ApiIdent, Vec<ApiSpecFile>> = todo!(); // all_spec_files.into_map(); // XXX-dap
 
         let mut versions = BTreeMap::new();
         let mut loaded_spec_files = BTreeMap::new();

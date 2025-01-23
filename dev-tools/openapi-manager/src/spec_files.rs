@@ -4,7 +4,7 @@
 
 //! Working with OpenAPI specification files in the repository
 
-use crate::apis::{ApiIdent, ManagedApi, ManagedApis};
+use crate::apis::{ApiIdent, ManagedApis};
 use anyhow::{anyhow, bail, Context};
 use camino::{Utf8Path, Utf8PathBuf};
 use debug_ignore::DebugIgnore;
@@ -21,14 +21,22 @@ use thiserror::Error;
 // XXX-dap move to a separate module?
 #[derive(Debug)]
 pub struct LocalFiles {
-    api_files: BTreeMap<ApiIdent, Vec<ApiSpecFile>>,
+    spec_files:
+        BTreeMap<ApiIdent, BTreeMap<semver::Version, Vec<LocalApiSpecFile>>>,
+    errors: Vec<anyhow::Error>,
+    warnings: Vec<anyhow::Error>,
 }
 
 impl LocalFiles {
+    // XXX-dap goofy that this can return a thing with errors or an error
+    // itself.  but there are different layers of error here:
+    // - error traversing the directory (that's what this returned error means)
+    // - error with individual items found
+    // - things that were skipped, etc.
     pub fn load_from_directory(
         dir: &Utf8Path,
         apis: &ManagedApis,
-    ) -> anyhow::Result<(LocalFiles, Vec<anyhow::Error>)> {
+    ) -> anyhow::Result<LocalFiles> {
         let mut api_files = ApiSpecFilesBuilder::new(apis);
         let entry_iter = dir
             .read_dir_utf8()
@@ -47,12 +55,11 @@ impl LocalFiles {
             if file_type.is_file() {
                 match fs_err::read(path) {
                     Ok(contents) => {
-                        api_files.lockstep_file_name(file_name).and_then(
-                            |file_name| {
-                                api_files
-                                    .try_load_contents(file_name, contents);
-                            },
-                        );
+                        if let Some(file_name) =
+                            api_files.lockstep_file_name(file_name)
+                        {
+                            api_files.load_contents(file_name, contents);
+                        }
                     }
                     Err(error) => {
                         api_files.load_error(anyhow!(error));
@@ -74,7 +81,8 @@ impl LocalFiles {
             };
         }
 
-        Ok((LocalFiles { api_files }, warnings))
+        let (spec_files, errors, warnings) = api_files.into_parts();
+        Ok(LocalFiles { spec_files, errors, warnings })
     }
 
     fn load_versioned_directory(
@@ -82,36 +90,49 @@ impl LocalFiles {
         path: &Utf8Path,
         basename: &str,
     ) {
-        let Some(api_ident) = api_files.versioned_directory(basename) else {
+        let Some(ident) = api_files.versioned_directory(basename) else {
             return;
         };
-        let entry_iter = path
+
+        let entries = match path
             .read_dir_utf8()
-            .with_context(|| format!("readdir {:?}", path))?;
-        for maybe_entry in entry_iter {
-            let entry = maybe_entry
-                .with_context(|| format!("readdir {:?} entry", path))?;
+            .and_then(|entry_iter| entry_iter.collect::<Result<Vec<_>, _>>())
+        {
+            Ok(entries) => entries,
+            Err(error) => {
+                api_files.load_error(
+                    anyhow!(error).context(format!("readdir {:?}", path)),
+                );
+                return;
+            }
+        };
+
+        for entry in entries {
             let file_name = entry.file_name();
-            // XXX-dap check if it's a file first?
-            let contents = fs_err::read(&file_name);
-            let file_name = api_files.versioned_file_name(api_ident, file_name);
-            api_files.try_load_contents(file_name, contents);
+            let Some(file_name) =
+                api_files.versioned_file_name(&ident, file_name)
+            else {
+                continue;
+            };
+
+            let contents = match fs_err::read(&entry.path()) {
+                Ok(contents) => contents,
+                Err(error) => {
+                    api_files.load_error(anyhow!(error));
+                    continue;
+                }
+            };
+
+            api_files.load_contents(file_name, contents);
         }
     }
+}
 
-    pub fn into_map(self) -> BTreeMap<ApiIdent, Vec<ApiSpecFile>> {
-        self.api_files
-    }
-
-    pub fn apis(&self) -> impl Iterator<Item = &ApiIdent> + '_ {
-        self.api_files.keys()
-    }
-
-    pub fn api_spec_files(
-        &self,
-        ident: &ApiIdent,
-    ) -> Option<impl Iterator<Item = &ApiSpecFile> + '_> {
-        self.api_files.get(ident).map(|files| files.iter())
+#[derive(Debug)]
+pub struct LocalApiSpecFile(ApiSpecFile);
+impl From<ApiSpecFile> for LocalApiSpecFile {
+    fn from(value: ApiSpecFile) -> Self {
+        LocalApiSpecFile(value)
     }
 }
 
@@ -135,9 +156,19 @@ impl ApiSpecFileName {
     ///
     ///     ident-SEMVER-LABEL.json
     fn new_versioned(
+        apis: &ManagedApis,
         ident: &str,
         basename: &str,
     ) -> anyhow::Result<ApiSpecFileName> {
+        let ident = ApiIdent::from(ident.to_string());
+        let Some(api) = apis.api(&ident) else {
+            bail!("does not match a known API")
+        };
+
+        if !api.is_versioned() {
+            bail!("{:?} is not a versioned API", ident);
+        }
+
         let expected_prefix = format!("{}-", ident);
         let suffix =
             basename.strip_prefix(&expected_prefix).ok_or_else(|| {
@@ -182,7 +213,7 @@ impl ApiSpecFileName {
         }
 
         Ok(ApiSpecFileName {
-            ident: ApiIdent::from(ident.to_string()),
+            ident: ident,
             kind: ApiSpecFileNameKind::Versioned {
                 version,
                 label: label.to_string(),
@@ -193,15 +224,21 @@ impl ApiSpecFileName {
     /// Attempts to parse the given file basename as an ApiSpecFileName of kind
     /// `Lockstep`
     fn new_lockstep(
+        apis: &ManagedApis,
         basename: &str,
-    ) -> Result<ApiSpecFileName, BadLockstepFileName<'_>> {
-        let ident = basename
-            .strip_suffix(".json")
-            .ok_or_else(|| BadLockstepFileName { path: basename })?;
-        Ok(ApiSpecFileName {
-            ident: ApiIdent::from(ident.to_string()),
-            kind: ApiSpecFileNameKind::Lockstep,
-        })
+    ) -> Result<ApiSpecFileName, BadLockstepFileName> {
+        let ident = ApiIdent::from(
+            basename
+                .strip_suffix(".json")
+                .ok_or(BadLockstepFileName::MissingJsonSuffix)?
+                .to_owned(),
+        );
+        let api = apis.api(&ident).ok_or(BadLockstepFileName::NoSuchApi)?;
+        if !api.is_lockstep() {
+            return Err(BadLockstepFileName::NotLockstep);
+        }
+
+        Ok(ApiSpecFileName { ident, kind: ApiSpecFileNameKind::Lockstep })
     }
 
     pub fn ident(&self) -> &ApiIdent {
@@ -241,9 +278,13 @@ enum ApiSpecFileNameKind {
 }
 
 #[derive(Debug, Error)]
-#[error("lockstep API document filename did not end in .json: {:?path}")]
-struct BadLockstepFileName<'a> {
-    path: &str,
+enum BadLockstepFileName {
+    #[error("expected lockstep API file name to end in \".json\"")]
+    MissingJsonSuffix,
+    #[error("does not match a known API")]
+    NoSuchApi,
+    #[error("this API is not a lockstep API")]
+    NotLockstep,
 }
 
 /// Describes an OpenAPI document found on disk
@@ -350,50 +391,31 @@ impl<'a> ApiSpecFilesBuilder<'a> {
         &mut self,
         basename: &str,
     ) -> Option<ApiSpecFileName> {
-        match ApiSpecFileName::new_lockstep(basename) {
-            Err(warning) => {
-                // The errors returned here are not fatal -- they might just
-                // reflect an extra file here (like an editor swap file or the
-                // like).
-                // XXX-dap not obvious from the type
-                self.load_warning(anyhow!(
-                    warning,
-                    "skipping file {:?}",
-                    basename
-                ));
+        match ApiSpecFileName::new_lockstep(&self.apis, basename) {
+            Err(
+                warning @ (BadLockstepFileName::NoSuchApi
+                | BadLockstepFileName::MissingJsonSuffix),
+            ) => {
+                // These problems are not fatal.  They might just reflect an
+                // extra file here (like an editor swap file or the like).
+                let warning = anyhow!(warning)
+                    .context(format!("skipping file {:?}", basename));
+                self.load_warning(warning);
                 None
             }
-            Ok(file_name) => {
-                let ident = file_name.ident();
-                match self.apis.api(ident) {
-                    Ok(api) if api.is_lockstep() => Some(file_name),
-                    Ok(api) => {
-                        self.load_error(anyhow!(
-                            "found lockstep file for non-lockstep API: \
-                                 {:?}",
-                            basename
-                        ));
-                        None
-                    }
-                    None => {
-                        self.load_warning(anyhow!(
-                            "does not match a known API: {:?}",
-                            basename,
-                        ));
-                        None
-                    }
-                }
+            Err(error @ BadLockstepFileName::NotLockstep) => {
+                self.load_error(anyhow!(error));
+                None
             }
+            Ok(file_name) => Some(file_name),
         }
     }
 
     pub fn versioned_directory(&mut self, basename: &str) -> Option<ApiIdent> {
-        // XXX-dap avoid this until we know it's valid by looking up the str
-        // directly?  will need to impl Borrow
-        let api_ident = ApiIdent::from(basename.to_owned());
-        match self.apis.api(api_ident) {
-            Some(api) if api.is_versioned() => Some(api_ident),
-            Some(api) => {
+        let ident = ApiIdent::from(basename.to_owned());
+        match self.apis.api(&ident) {
+            Some(api) if api.is_versioned() => Some(ident),
+            Some(_) => {
                 self.load_error(anyhow!(
                     "found directory for lockstep API: {:?}",
                     basename,
@@ -412,34 +434,31 @@ impl<'a> ApiSpecFilesBuilder<'a> {
 
     pub fn versioned_file_name(
         &mut self,
-        api: &ApiIdent,
+        ident: &ApiIdent,
         basename: &str,
     ) -> Option<ApiSpecFileName> {
-        // XXX-dap these functions should return/accept a separate type like
-        // ValidatedApiSpecFileName?  But really there would need to be a
-        // ValidApiIdent...
-        match ApiSpecFileName::new_versioned(&api_ident, basename) {
+        match ApiSpecFileName::new_versioned(&self.apis, ident, basename) {
             Ok(file_name) => Some(file_name),
             Err(error) => {
                 // XXX-dap some of these should be warnings
-                self.load_error(error)
+                self.load_error(error);
+                None
             }
         }
     }
 
-    fn load_contents(&self, file_name: ApiSpecFileName, contents: Vec<u8>) {
+    fn load_contents(&mut self, file_name: ApiSpecFileName, contents: Vec<u8>) {
         let maybe_file = serde_json::from_slice(&contents)
-            .with_context(|| format!("parse {:?}", basename))
+            .with_context(|| format!("parse {:?}", file_name.path()))
             .and_then(|parsed| {
                 ApiSpecFile::for_contents(&file_name, parsed, contents)
             });
         match maybe_file {
             Ok(file) => {
-                let file_name = file.spec_file_name();
-                let api_ident = file.spec_file_name().ident();
+                let ident = file.spec_file_name().ident();
                 let api_version = file.version();
                 self.spec_files
-                    .entry(api_ident.clone())
+                    .entry(ident.clone())
                     .or_insert_with(BTreeMap::new)
                     .entry(api_version.clone())
                     .or_insert_with(Vec::new)
@@ -449,5 +468,39 @@ impl<'a> ApiSpecFilesBuilder<'a> {
                 self.errors.push(error);
             }
         }
+    }
+
+    pub fn into_parts<T: From<ApiSpecFile>>(
+        self,
+    ) -> (
+        BTreeMap<ApiIdent, BTreeMap<semver::Version, Vec<T>>>,
+        Vec<anyhow::Error>,
+        Vec<anyhow::Error>,
+    ) {
+        let errors = self.errors;
+        let warnings = self.warnings;
+        // This mess is just mapping the items in the inner BTreeMap with the
+        // caller's type T.
+        let map = self
+            .spec_files
+            .into_iter()
+            .map(|(api_ident, vmap)| {
+                (
+                    api_ident,
+                    vmap.into_iter()
+                        .map(|(v, files)| {
+                            (
+                                v,
+                                files
+                                    .into_iter()
+                                    .map(T::from)
+                                    .collect::<Vec<_>>(),
+                            )
+                        })
+                        .collect::<BTreeMap<_, _>>(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        (map, errors, warnings)
     }
 }
