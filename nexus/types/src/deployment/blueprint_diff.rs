@@ -16,17 +16,15 @@ use super::id_map::IdMap;
 use super::{
     Blueprint, BlueprintDatasetDisposition, BlueprintPhysicalDiskDisposition,
     ClickhouseClusterConfig, CockroachDbPreserveDowngrade,
-    DiffBeforeClickhouseClusterConfig,
 };
 use crate::deployment::blueprint_display::BpClickhouseKeepersTableSchema;
 use crate::deployment::{
     unwrap_or_none, BlueprintDatasetConfig, BlueprintDatasetsConfig,
     BlueprintPhysicalDiskConfig, BlueprintPhysicalDisksConfig,
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
-    BlueprintZonesConfig, DiffBeforeMetadata, ZoneSortKey, ZpoolName,
+    BlueprintZonesConfig, ZoneSortKey, ZpoolName,
 };
 use crate::external_api::views::SledState;
-use diffus::Diffable;
 use omicron_common::api::external::{ByteCount, Generation};
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::disk::{CompressionAlgorithm, DatasetName};
@@ -79,7 +77,9 @@ impl<'e> BlueprintDiff<'e> {
     /// Build a diff with the provided contents, verifying that the provided
     /// Return a struct that can be used to display the diff.
     pub fn display(&self) -> BlueprintDiffDisplay<'_> {
-        BlueprintDiffDisplay::new(self)
+        // backwards compat
+        let show_unchanged = true;
+        BlueprintDiffDisplay::new(self, show_unchanged)
     }
 
     /// Returns whether the diff reflects any changes or if the blueprints are
@@ -877,25 +877,46 @@ pub struct SledTables {
     pub zones: Option<BpTable>,
 }
 
+impl std::fmt::Display for SledTables {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Write the physical disks table if it exists
+        if let Some(table) = &self.disks {
+            writeln!(f, "{table}\n")?;
+        }
+
+        // Write the datasets table if it exists
+        if let Some(table) = &self.datasets {
+            writeln!(f, "{table}\n")?;
+        }
+
+        // Write the zones table if it exists
+        if let Some(table) = &self.zones {
+            writeln!(f, "{table}\n")?;
+        }
+
+        Ok(())
+    }
+}
+
 /// Printable output derived from a `BlueprintDiff`
 #[derive(Default)]
-pub struct BpDiffOutput {
+pub struct BpDiffPrintable {
     pub errors: Vec<String>,
     pub warnings: Vec<String>,
-    pub added_sleds: BTreeMap<SledUuid, SledTables>,
-    pub removed_sleds: BTreeMap<SledUuid, SledTables>,
-    pub unchanged_sleds: BTreeMap<SledUuid, SledTables>,
-    pub modified_sleds: BTreeMap<SledUuid, SledTables>,
+    pub sleds_added: BTreeMap<SledUuid, SledTables>,
+    pub sleds_removed: BTreeMap<SledUuid, SledTables>,
+    pub sleds_unchanged: BTreeMap<SledUuid, SledTables>,
+    pub sleds_modified: BTreeMap<SledUuid, SledTables>,
     pub metadata: Vec<KvListWithHeading>,
     pub clickhouse_cluster_config: Option<ClickhouseClusterConfigDiffTables>,
 }
 
-impl BpDiffOutput {
-    pub fn new(acc: &BlueprintDiff, show_unchanged: bool) -> BpDiffOutput {
-        BpDiffOutput {
+impl BpDiffPrintable {
+    pub fn new(acc: &BlueprintDiff, show_unchanged: bool) -> BpDiffPrintable {
+        BpDiffPrintable {
             errors: acc.errors.clone(),
             warnings: acc.warnings.clone(),
-            added_sleds: acc
+            sleds_added: acc
                 .added_sleds
                 .iter()
                 .map(|(sled_id, insert)| {
@@ -918,7 +939,7 @@ impl BpDiffOutput {
                     )
                 })
                 .collect(),
-            removed_sleds: acc
+            sleds_removed: acc
                 .removed_sleds
                 .iter()
                 .map(|(sled_id, remove)| {
@@ -941,7 +962,7 @@ impl BpDiffOutput {
                     )
                 })
                 .collect(),
-            unchanged_sleds: {
+            sleds_unchanged: {
                 if show_unchanged {
                     acc.unchanged_sleds
                         .iter()
@@ -971,7 +992,7 @@ impl BpDiffOutput {
                     BTreeMap::new()
                 }
             },
-            modified_sleds: acc
+            sleds_modified: acc
                 .modified_sleds
                 .iter()
                 .map(|(sled_id, modified)| {
@@ -1123,39 +1144,15 @@ fn zones_row(state: BpDiffState, zone: &BlueprintZoneConfig) -> BpTableRow {
 #[must_use = "this struct does nothing unless displayed"]
 pub struct BlueprintDiffDisplay<'diff> {
     pub diff: &'diff BlueprintDiff<'diff>,
+    pub printable: BpDiffPrintable,
     // TODO: add colorization with a stylesheet
 }
 
 impl<'diff> BlueprintDiffDisplay<'diff> {
     #[inline]
-    fn new(diff: &'diff BlueprintDiff) -> Self {
-        Self { diff }
-    }
-
-    /// Write out physical disk and zone tables for a given `sled_id`
-    fn write_tables(
-        &self,
-        f: &mut fmt::Formatter<'_>,
-        sled_id: &SledUuid,
-    ) -> fmt::Result {
-        // Write the physical disks table if it exists
-        if let Some(table) =
-            self.diff.physical_disks.to_bp_sled_subtable(sled_id)
-        {
-            writeln!(f, "{table}\n")?;
-        }
-
-        // Write the datasets table if it exists
-        if let Some(table) = self.diff.datasets.to_bp_sled_subtable(sled_id) {
-            writeln!(f, "{table}\n")?;
-        }
-
-        // Write the zones table if it exists
-        if let Some(table) = self.diff.zones.to_bp_sled_subtable(sled_id) {
-            writeln!(f, "{table}\n")?;
-        }
-
-        Ok(())
+    fn new(diff: &'diff BlueprintDiff, show_unchanged: bool) -> Self {
+        let printable = BpDiffPrintable::new(diff, show_unchanged);
+        Self { diff, printable }
     }
 
     /// Helper methods to stringify sled states. These are separated by
@@ -1225,28 +1222,12 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
 
 impl fmt::Display for BlueprintDiffDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let diff = self.diff;
-
-        // Print things differently based on whether the diff is between a
-        // collection and a blueprint, or a blueprint and a blueprint.
-        match &diff.before_meta {
-            DiffBeforeMetadata::Collection { id } => {
-                writeln!(
-                    f,
-                    "from: collection {}\n\
-                     to:   blueprint  {}",
-                    id, diff.after_meta.id,
-                )?;
-            }
-            DiffBeforeMetadata::Blueprint(before) => {
-                writeln!(
-                    f,
-                    "from: blueprint {}\n\
-                     to:   blueprint {}\n",
-                    before.id, diff.after_meta.id
-                )?;
-            }
-        }
+        writeln!(
+            f,
+            "from: blueprint {}\n\
+             to:   blueprint {}\n",
+            self.diff.before.id, self.diff.after.id
+        )?;
 
         // Write out sled information
         //
@@ -1265,83 +1246,81 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
         // We put errors at the bottom to ensure they are seen immediately.
 
         // Write out tables for unchanged sleds
-        if !diff.sleds_unchanged.is_empty() {
+        if !self.printable.sleds_unchanged.is_empty() {
             writeln!(f, " UNCHANGED SLEDS:\n")?;
-            for sled_id in &diff.sleds_unchanged {
+            for (sled_id, tables) in &self.printable.sleds_unchanged {
                 writeln!(
                     f,
-                    "  sled {sled_id} ({}):\n",
+                    "  sled {sled_id} ({}):\n{tables}",
                     self.sled_state_unchanged(sled_id)
                 )?;
-                self.write_tables(f, sled_id)?;
             }
         }
 
         // Write out tables for removed sleds
-        if !diff.sleds_removed.is_empty() {
+        if !self.printable.sleds_removed.is_empty() {
             writeln!(f, " REMOVED SLEDS:\n")?;
-            for sled_id in &diff.sleds_removed {
+            for (sled_id, tables) in &self.printable.sleds_removed {
                 writeln!(
                     f,
-                    "  sled {sled_id} ({}):\n",
+                    "  sled {sled_id} ({}):\n{tables}",
                     self.sled_state_removed(sled_id)
                 )?;
-                self.write_tables(f, sled_id)?;
             }
         }
 
         // Write out tables for modified sleds
-        if !diff.sleds_modified.is_empty() {
+        if !self.printable.sleds_modified.is_empty() {
             writeln!(f, " MODIFIED SLEDS:\n")?;
-            for sled_id in &diff.sleds_modified {
+            for (sled_id, tables) in &self.printable.sleds_modified {
                 writeln!(
                     f,
-                    "  sled {sled_id} ({}):\n",
+                    "  sled {sled_id} ({}):\n{tables}",
                     self.sled_state_modified(sled_id)
                 )?;
-                self.write_tables(f, sled_id)?;
             }
         }
 
         // Write out tables for added sleds
-        if !diff.sleds_added.is_empty() {
+        if !self.printable.sleds_added.is_empty() {
             writeln!(f, " ADDED SLEDS:\n")?;
-            for sled_id in &diff.sleds_added {
+            for (sled_id, tables) in &self.printable.sleds_added {
                 writeln!(
                     f,
-                    "  sled {sled_id} ({}):\n",
+                    "  sled {sled_id} ({}):\n{tables}",
                     self.sled_state_added(sled_id)
                 )?;
-                self.write_tables(f, sled_id)?;
             }
         }
 
-        // Write out zone errors.
-        if !diff.zones.errors.is_empty() {
-            writeln!(f, "ERRORS:")?;
-            for (sled_id, errors) in &diff.zones.errors {
-                writeln!(f, "\n  sled {sled_id}\n")?;
-                writeln!(
-                    f,
-                    "    zone diff errors: before gen {}, after gen {}\n",
-                    errors.generation_before, errors.generation_after
-                )?;
-
-                for err in &errors.errors {
-                    writeln!(f, "      zone id: {}", err.zone_before.id())?;
-                    writeln!(f, "      reason: {}", err.reason)?;
-                }
+        // Write out warnings
+        if !self.printable.warnings.is_empty() {
+            writeln!(f, "WARNINGS:")?;
+            for err in &self.printable.errors {
+                writeln!(f, "{err}");
             }
+            writeln!(f, "");
+        }
+
+        // Write out errors.
+        // This is the only thing that isn't backwards compatible. The old
+        // mechanism for zone errors doesn't really fit with the new automated
+        // diff/visitor accumulator model.
+        if !self.printable.errors.is_empty() {
+            writeln!(f, "ERRORS:")?;
+            for err in &self.printable.errors {
+                writeln!(f, "{err}");
+            }
+            writeln!(f, "")?;
         }
 
         // Write out metadata diff table
-        for table in self.make_metadata_diff_tables() {
+        for table in self.printable.metadata {
             writeln!(f, "{}", table)?;
         }
 
         // Write out clickhouse cluster diff tables
-        if let Some(tables) = self.make_clickhouse_cluster_config_diff_tables()
-        {
+        if let Some(tables) = self.printable.clickhouse_cluster_config {
             writeln!(f, "{}", tables.metadata)?;
             writeln!(f, "{}", tables.keepers)?;
             if let Some(servers) = &tables.servers {

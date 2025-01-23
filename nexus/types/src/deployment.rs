@@ -1157,40 +1157,6 @@ pub struct BlueprintTargetSet {
     pub enabled: bool,
 }
 
-/// Data about the "before" version within a [`BlueprintDiff`].
-#[derive(Clone, Debug)]
-pub enum DiffBeforeMetadata {
-    /// The diff was made from a collection.
-    Collection { id: CollectionUuid },
-    /// The diff was made from a blueprint.
-    Blueprint(Box<BlueprintMetadata>),
-}
-
-impl DiffBeforeMetadata {
-    pub fn display_id(&self) -> String {
-        match self {
-            DiffBeforeMetadata::Collection { id } => format!("collection {id}"),
-            DiffBeforeMetadata::Blueprint(b) => b.display_id(),
-        }
-    }
-}
-
-/// Data about the "before" version within a [`BlueprintDiff`]
-///
-/// We only track keepers in inventory collections.
-#[derive(Clone, Debug)]
-pub enum DiffBeforeClickhouseClusterConfig {
-    Blueprint(Option<ClickhouseClusterConfig>),
-}
-
-impl From<&Blueprint> for DiffBeforeClickhouseClusterConfig {
-    fn from(value: &Blueprint) -> Self {
-        DiffBeforeClickhouseClusterConfig::Blueprint(
-            value.clickhouse_cluster_config.clone(),
-        )
-    }
-}
-
 /// A unique identifier for a dataset within a collection.
 /// TODO: Should we use just the `DatasetUuid` and re-organize the tables to put the `DatasetUuid` first?
 /// This was kept for backwards compatibility, even though IDs are not optional
