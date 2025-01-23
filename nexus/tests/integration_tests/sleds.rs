@@ -73,7 +73,8 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
                 log,
                 addr,
                 sa_id,
-                // Index starts at 2
+                // Index starts at 2: the `nexus_test` macro already created two
+                // sled agents as part of the ControlPlaneTestContext setup.
                 2 + i as u16,
                 &update_directory,
                 sim::SimMode::Explicit,
