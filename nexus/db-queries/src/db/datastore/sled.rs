@@ -252,8 +252,6 @@ impl DataStore {
         resources: db::model::Resources,
         constraints: db::model::SledReservationConstraints,
     ) -> Result<db::model::SledResource, SledReservationTransactionError> {
-        println!("(db) attempting to make reservation for {}", resource_id);
-
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -340,7 +338,6 @@ impl DataStore {
                     if let Some(must_select_from) =
                         constraints.must_select_from()
                     {
-                        println!("(db) constraining sled selection to {must_select_from:#?}");
                         sled_targets = sled_targets.filter(
                             sled_dsl::id.eq_any(must_select_from.to_vec()),
                         );
@@ -354,8 +351,6 @@ impl DataStore {
                         .get_results_async::<Uuid>(&conn)
                         .await?;
 
-                    println!("(db) possible sled targets: {sled_targets:#?}");
-
                     info!(
                         opctx.log,
                         "found {} available sled targets", sled_targets.len();
@@ -367,13 +362,9 @@ impl DataStore {
                         instance_id,
                     ).get_results_async::<(AffinityPolicy, Uuid)>(&conn).await?;
 
-                    println!("(db) anti_affinity_sleds: {anti_affinity_sleds:?}");
-
                     let affinity_sleds = lookup_affinity_sleds_query(
                         instance_id,
                     ).get_results_async::<(AffinityPolicy, Uuid)>(&conn).await?;
-
-                    println!("(db) affinity_sleds: {affinity_sleds:?}");
 
                     // We use the following logic to calculate a desirable sled,
                     // given a possible set of "targets", and the information
@@ -467,20 +458,20 @@ impl DataStore {
                     }).collect::<HashSet<_>>();
 
                     let sled_target = if required.len() > 1 {
-                        println!("(db) more than one required sled");
                         return Err(err.bail(SledReservationError::TooManyAffinityConstraints));
                     } else if let Some(required_id) = required.iter().next() {
-                        println!("(db) one required sled");
+                        // If we have a "required" sled, it must be chosen.
+
                         if banned.contains(&required_id) {
-                            println!("(db) but the required sled is banned");
                             return Err(err.bail(SledReservationError::ConflictingAntiAndAffinityConstraints));
                         }
                         if !targets.contains(&required_id) {
-                            println!("(db) but the required sled is not a target");
                             return Err(err.bail(SledReservationError::RequiredAffinitySledNotValid));
                         }
                         *required_id
                     } else {
+                        // We have no "required" sleds, but might have preferences.
+
                         targets = targets.difference(&banned).cloned().collect();
 
                         let mut preferred = affinity_sleds.iter().filter_map(|(policy, id)| {
@@ -509,34 +500,21 @@ impl DataStore {
                         preferred = preferred.difference(&both).cloned().collect();
                         unpreferred = unpreferred.difference(&both).cloned().collect();
 
-                        println!("(db) Preferred: {preferred:#?}");
-                        println!("(db) Unpreferred: {unpreferred:#?}");
-                        println!("(db) Both: {both:#?}");
-
                         if let Some(target) = preferred.iter().next() {
-                            println!("(db) found a preferred target");
                             *target
                         } else {
                             targets = targets.difference(&unpreferred).cloned().collect();
                             if let Some(target) = targets.iter().next() {
-                            println!("(db) found a viable target, neither preferred nor unpreferred");
                                 *target
                             } else {
                                 if let Some(target) = unpreferred.iter().next() {
-                                    println!("(db) found a viable unpreferred target");
                                     *target
                                 } else {
-                                    println!("(db) found no targets");
                                     return Err(err.bail(SledReservationError::NotFound));
                                 }
                             }
                         }
                     };
-
-                    println!("(db) target: {sled_target}");
-
-                    // TODO: Ensure our "target selection" still remains random
-                    // for the set from which we're choosing
 
                     // Create a SledResource record, associate it with the target
                     // sled.
@@ -1540,7 +1518,6 @@ pub(in crate::db::datastore) mod test {
                 datastore.sled_upsert(test_new_sled_update()).await.unwrap();
             sleds.push(sled);
         }
-        println!("created sleds: {:#?}", sleds);
         sleds
     }
 
@@ -1611,8 +1588,6 @@ pub(in crate::db::datastore) mod test {
                 );
             }
 
-            println!("all groups: {:#?}", id_by_name);
-
             Self { id_by_name }
         }
     }
@@ -1647,7 +1622,6 @@ pub(in crate::db::datastore) mod test {
 
         // Force this instance to be placed on a specific sled
         fn sled(mut self, sled: Uuid) -> Self {
-            println!("(test) Pinning instance {} to sled {}", self.id, sled);
             self.force_onto_sled = Some(SledUuid::from_untyped_uuid(sled));
             self
         }
@@ -1673,12 +1647,6 @@ pub(in crate::db::datastore) mod test {
                     .id_by_name
                     .get(our_group_name)
                     .expect("Group not found: {our_group_name}");
-
-                println!(
-                    "adding {} to group {} (id: {})",
-                    self.id, our_group_name, group_id
-                );
-
                 match *affinity {
                     Affinity::Positive => {
                         add_instance_to_affinity_group(
