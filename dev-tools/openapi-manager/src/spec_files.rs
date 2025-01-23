@@ -231,6 +231,10 @@ impl ApiSpecFileName {
         })
     }
 
+    pub fn ident(&self) -> &ApiIdent {
+        &self.ident
+    }
+
     /// Returns the path of this file relative to the root of the OpenAPI specs
     pub fn path(&self) -> Utf8PathBuf {
         match &self.kind {
@@ -335,5 +339,96 @@ impl ApiSpecFile {
 
     pub fn contents(&self) -> &[u8] {
         &self.contents_buf
+    }
+}
+
+pub struct ApiSpecFilesBuilder<'a> {
+    apis: &'a ManagedApis,
+    spec_files: BTreeMap<ApiIdent, BTreeMap<semver::Version, Vec<ApiSpecFile>>>,
+    errors: Vec<anyhow::Error>,
+}
+
+impl<'a> ApiSpecFilesBuilder<'a> {
+    pub fn new(apis: &'a ManagedApis) -> ApiSpecFilesBuilder<'a> {
+        ApiSpecFilesBuilder {
+            apis,
+            spec_files: BTreeMap::new(),
+            errors: Vec::new(),
+        }
+    }
+
+    pub fn load_lockstep(&mut self, basename: &str, contents: Vec<u8>) {
+        self.try_load(self.lockstep_file_internal(basename, contents))
+    }
+
+    pub fn load_versioned(
+        &mut self,
+        api_ident: &ApiIdent,
+        basename: &str,
+        contents: Vec<u8>,
+    ) {
+        self.try_load(
+            self.versioned_file_internal(api_ident, basename, contents),
+        )
+    }
+
+    fn try_load(&mut self, maybe_loaded: anyhow::Result<ApiSpecFile>) {
+        match maybe_loaded {
+            Ok(file) => {
+                let file_name = file.spec_file_name();
+                let api_ident = file.spec_file_name().ident();
+                let api_version = file.version();
+                self.spec_files
+                    .entry(api_ident.clone())
+                    .or_insert_with(BTreeMap::new)
+                    .entry(api_version.clone())
+                    .or_insert_with(Vec::new)
+                    .push(file);
+            }
+            Err(error) => {
+                self.errors.push(error);
+            }
+        }
+    }
+
+    fn lockstep_file_internal(
+        &self,
+        basename: &str,
+        contents: Vec<u8>,
+    ) -> anyhow::Result<ApiSpecFile> {
+        let file_name = ApiSpecFileName::new_lockstep(basename)
+            .with_context(|| format!("path {:?}", basename))?;
+        let ident = &file_name.ident;
+        let api = self.apis.api(ident).ok_or_else(|| {
+            anyhow!("found file for unknown API: {:?}", basename)
+        })?;
+        if !api.is_lockstep() {
+            bail!("found lockstep file for non-lockstep API: {:?}", basename);
+        }
+
+        let parsed: OpenAPI = serde_json::from_slice(&contents)
+            .with_context(|| format!("parse {:?}", basename))?;
+        ApiSpecFile::for_contents(&file_name, parsed, contents)
+    }
+
+    fn versioned_file_internal(
+        &self,
+        api_ident: &ApiIdent,
+        basename: &str,
+        contents: Vec<u8>,
+    ) -> anyhow::Result<ApiSpecFile> {
+        // XXX-dap use a real path?
+        let path = format!("{}/{}", api_ident, basename);
+        let api = self
+            .apis
+            .api(api_ident)
+            .ok_or_else(|| anyhow!("found file for unknown API: {}", path))?;
+        if !api.is_versioned() {
+            bail!("found directory for non-versioned API: {:?}", api_ident);
+        }
+        let file_name = ApiSpecFileName::new_versioned(&api_ident, basename)?;
+        let parsed: OpenAPI = serde_json::from_slice(&contents)
+            .with_context(|| format!("parse {:?}", path))?;
+        ApiSpecFile::for_contents(&file_name, parsed, contents)
     }
 }
