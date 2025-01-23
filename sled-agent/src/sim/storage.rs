@@ -1251,6 +1251,7 @@ pub(crate) struct StorageInner {
     next_disk_slot: i64,
     zpools: HashMap<ZpoolUuid, Zpool>,
     crucible_ip: IpAddr,
+    start_crucible_port: u16,
     next_crucible_port: u16,
 }
 
@@ -1272,6 +1273,7 @@ impl StorageInner {
             next_disk_slot: 0,
             zpools: HashMap::new(),
             crucible_ip,
+            start_crucible_port: (sled_index + 1) * 1000,
             next_crucible_port: (sled_index + 1) * 1000,
         }
     }
@@ -1584,6 +1586,18 @@ impl StorageInner {
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
     ) -> SocketAddr {
+        // There's a limit to the number of simulated Crucible agents per
+        // dataset:
+        //
+        // - [`StorageInner::new`] allocates 1000 ports per sled for all
+        //   simulated Crucible agents
+        //
+        // - this function allocates 50 ports per simulated Crucible agent,
+        //   meaning a maximum of 20 agents can be created in the tests.
+        //
+        // Assert here if that limit is reached.
+        assert!((self.next_crucible_port - self.start_crucible_port) < 1000);
+
         // Update our local data
         let dataset = self
             .zpools
@@ -1594,14 +1608,10 @@ impl StorageInner {
                 dataset_id,
                 self.crucible_ip,
                 self.next_crucible_port,
-                self.next_crucible_port + 100,
+                self.next_crucible_port + 50,
             );
 
-        // Due to how the sled index works, there's a limit of 10 crucible
-        // agents per dataset: they're separated by 1000 in
-        // [`StorageInner::new`]. Bail here if that limit is reached.
-        self.next_crucible_port += 100;
-        assert!(self.next_crucible_port < 1000);
+        self.next_crucible_port += 50;
 
         dataset.address()
     }
