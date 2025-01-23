@@ -63,7 +63,7 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::DownstairsRegionUuid;
 use omicron_uuid_kinds::DownstairsUuid;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use omicron_uuid_kinds::UpstairsRepairUuid;
 use omicron_uuid_kinds::UpstairsSessionUuid;
 use omicron_uuid_kinds::UpstairsUuid;
@@ -4223,7 +4223,7 @@ async fn test_read_only_region_reference_counting(
 
     for sled_agent in cptestctx.all_sled_agents() {
         let zpool_id =
-            TypedUuid::from_untyped_uuid(db_read_only_dataset.pool_id);
+            ZpoolUuid::from_untyped_uuid(db_read_only_dataset.pool_id);
         if !sled_agent.sled_agent.has_zpool(zpool_id) {
             continue;
         }
@@ -4307,7 +4307,7 @@ async fn test_read_only_region_reference_counting(
 
     for sled_agent in cptestctx.all_sled_agents() {
         let zpool_id =
-            TypedUuid::from_untyped_uuid(db_read_only_dataset.pool_id);
+            ZpoolUuid::from_untyped_uuid(db_read_only_dataset.pool_id);
         if !sled_agent.sled_agent.has_zpool(zpool_id) {
             continue;
         }
