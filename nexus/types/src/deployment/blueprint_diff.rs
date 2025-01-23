@@ -10,42 +10,35 @@ use super::blueprint_display::{
     BpGeneration, BpOmicronZonesTableSchema, BpPhysicalDisksTableSchema,
     BpTable, BpTableColumn, BpTableData, BpTableRow, KvListWithHeading, KvPair,
 };
-use super::diff_visitors::visit_blueprint::{
-    SledInsert, SledRemove, VisitBlueprint,
-};
-use super::diff_visitors::visit_blueprint_datasets_config::VisitBlueprintDatasetsConfig;
-use super::diff_visitors::visit_blueprint_physical_disks_config::VisitBlueprintPhysicalDisksConfig;
-use super::diff_visitors::visit_blueprint_zones_config::VisitBlueprintZonesConfig;
-use super::diff_visitors::{BpVisitorContext, Change};
+use super::diff_visitors::visit_blueprint::{SledInsert, SledRemove};
+use super::diff_visitors::Change;
 use super::id_map::IdMap;
 use super::{
-    zone_sort_key, Blueprint, BlueprintDatasetDisposition,
-    BlueprintPhysicalDiskDisposition, ClickhouseClusterConfig,
-    CockroachDbPreserveDowngrade, DiffBeforeClickhouseClusterConfig,
+    Blueprint, BlueprintDatasetDisposition, BlueprintPhysicalDiskDisposition,
+    ClickhouseClusterConfig, CockroachDbPreserveDowngrade,
+    DiffBeforeClickhouseClusterConfig,
 };
 use crate::deployment::blueprint_display::BpClickhouseKeepersTableSchema;
 use crate::deployment::{
     unwrap_or_none, BlueprintDatasetConfig, BlueprintDatasetsConfig,
-    BlueprintMetadata, BlueprintPhysicalDiskConfig,
-    BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
-    BlueprintZoneDisposition, BlueprintZoneType, BlueprintZonesConfig,
-    CollectionDatasetIdentifier, DiffBeforeMetadata, ZoneSortKey, ZpoolName,
+    BlueprintPhysicalDiskConfig, BlueprintPhysicalDisksConfig,
+    BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
+    BlueprintZonesConfig, DiffBeforeMetadata, ZoneSortKey, ZpoolName,
 };
 use crate::external_api::views::SledState;
-use diffus::{edit::Edit, Diffable};
-use nexus_sled_agent_shared::inventory::ZoneKind;
+use diffus::Diffable;
 use omicron_common::api::external::{ByteCount, Generation};
 use omicron_common::api::internal::shared::DatasetKind;
-use omicron_common::disk::{CompressionAlgorithm, DatasetName, DiskIdentity};
+use omicron_common::disk::{CompressionAlgorithm, DatasetName};
 use omicron_uuid_kinds::{BlueprintUuid, DatasetUuid, SledUuid};
 use omicron_uuid_kinds::{OmicronZoneUuid, PhysicalDiskUuid};
-use parse_display::IntoResult;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 /// Accumulated state about diffs inside a `BlueprintDiffer`.
 ///
 /// Tied to the lifetime of a diffus diff.
+#[derive(Debug)]
 pub struct BlueprintDiff<'e> {
     pub before: &'e Blueprint,
     pub after: &'e Blueprint,
@@ -95,37 +88,20 @@ impl<'e> BlueprintDiff<'e> {
         // Any changes to physical disks, datasets, or zones would be reflected
         // in `self.sleds_modified`, `self.sleds_added`, or
         // `self.sleds_removed`.
-        if !self.sleds_modified.is_empty()
-            || !self.sleds_added.is_empty()
-            || !self.sleds_removed.is_empty()
+        if !self.modified_sleds.is_empty()
+            || !self.added_sleds.is_empty()
+            || !self.removed_sleds.is_empty()
         {
             return true;
         }
 
-        // The clickhouse cluster config has changed if:
-        // - there was one before and now there isn't
-        // - there wasn't one before and now there is
-        // - there's one both before and after and their generation has changed
-        match (
-            &self.before_clickhouse_cluster_config,
-            &self.after_clickhouse_cluster_config,
-        ) {
-            (DiffBeforeClickhouseClusterConfig::Blueprint(None), None) => false,
-            (DiffBeforeClickhouseClusterConfig::Blueprint(None), Some(_)) => {
-                true
-            }
-            (DiffBeforeClickhouseClusterConfig::Blueprint(Some(_)), None) => {
-                true
-            }
-            (
-                DiffBeforeClickhouseClusterConfig::Blueprint(Some(before)),
-                Some(after),
-            ) => before.diff(&after).is_change(),
-        }
+        self.metadata.has_semantic_changes()
+            || self.clickhouse_cluster_config.is_changed()
     }
 }
 
 /// A single value in a diff.
+#[derive(Debug)]
 pub enum DiffValue<'e, T> {
     Unchanged(&'e T),
     Changed(Change<'e, T>),
@@ -145,6 +121,7 @@ impl<'e, T> DiffValue<'e, T> {
     }
 }
 
+#[derive(Debug)]
 pub struct ModifiedZone<'e> {
     pub disposition: DiffValue<'e, BlueprintZoneDisposition>,
     pub filesystem_pool: DiffValue<'e, Option<ZpoolName>>,
@@ -167,6 +144,7 @@ impl<'e> ModifiedZone<'e> {
     }
 }
 
+#[derive(Debug)]
 pub struct ModifiedDisk<'e> {
     pub disposition: DiffValue<'e, BlueprintPhysicalDiskDisposition>,
 }
@@ -181,6 +159,8 @@ impl<'e> ModifiedDisk<'e> {
         ModifiedDisk { disposition: DiffValue::Unchanged(&before.disposition) }
     }
 }
+
+#[derive(Debug)]
 pub struct ModifiedDataset<'e> {
     // The pool is not allowed to change
     pub pool: &'e ZpoolName,
@@ -211,6 +191,7 @@ impl<'e> ModifiedDataset<'e> {
 }
 
 /// All modifications of a sled that we track for purposes of diff display output
+#[derive(Debug)]
 pub struct ModifiedSled<'e> {
     pub sled_state: DiffValue<'e, SledState>,
     pub zones_generation: DiffValue<'e, Generation>,
@@ -521,6 +502,7 @@ impl<'e> ModifiedSled<'e> {
 }
 
 /// All possible modifications to `BlueprintMetadata`
+#[derive(Debug)]
 pub struct MetadataDiff<'e> {
     pub blueprint_id: DiffValue<'e, BlueprintUuid>,
     pub parent_blueprint_id: DiffValue<'e, Option<BlueprintUuid>>,
@@ -1140,7 +1122,7 @@ fn zones_row(state: BpDiffState, zone: &BlueprintZoneConfig) -> BpTableRow {
 #[derive(Clone, Debug)]
 #[must_use = "this struct does nothing unless displayed"]
 pub struct BlueprintDiffDisplay<'diff> {
-    pub diff: &'diff BlueprintDiff,
+    pub diff: &'diff BlueprintDiff<'diff>,
     // TODO: add colorization with a stylesheet
 }
 
@@ -1148,115 +1130,6 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
     #[inline]
     fn new(diff: &'diff BlueprintDiff) -> Self {
         Self { diff }
-    }
-
-    pub fn make_metadata_diff_tables(
-        &self,
-    ) -> impl IntoIterator<Item = KvListWithHeading> {
-        macro_rules! diff_row {
-            ($member:ident, $label:expr) => {
-                diff_row!($member, $label, std::convert::identity)
-            };
-
-            ($member:ident, $label:expr, $display:expr) => {
-                match &self.diff.before_meta {
-                    DiffBeforeMetadata::Collection { .. } => {
-                        // Collections have no metadata, so this is new
-                        KvPair::new(
-                            BpDiffState::Added,
-                            $label,
-                            linear_table_modified(
-                                &NOT_PRESENT_IN_COLLECTION_PARENS,
-                                &$display(&self.diff.after_meta.$member),
-                            ),
-                        )
-                    }
-                    DiffBeforeMetadata::Blueprint(before) => {
-                        if before.$member == self.diff.after_meta.$member {
-                            KvPair::new(
-                                BpDiffState::Unchanged,
-                                $label,
-                                linear_table_unchanged(&$display(
-                                    &self.diff.after_meta.$member,
-                                )),
-                            )
-                        } else {
-                            KvPair::new(
-                                BpDiffState::Modified,
-                                $label,
-                                linear_table_modified(
-                                    &$display(&before.$member),
-                                    &$display(&self.diff.after_meta.$member),
-                                ),
-                            )
-                        }
-                    }
-                }
-            };
-        }
-
-        [
-            KvListWithHeading::new(
-                COCKROACHDB_HEADING,
-                vec![
-                    diff_row!(
-                        cockroachdb_fingerprint,
-                        COCKROACHDB_FINGERPRINT,
-                        display_none_if_empty
-                    ),
-                    diff_row!(
-                        cockroachdb_setting_preserve_downgrade,
-                        COCKROACHDB_PRESERVE_DOWNGRADE,
-                        display_optional_preserve_downgrade
-                    ),
-                ],
-            ),
-            KvListWithHeading::new(
-                METADATA_HEADING,
-                vec![
-                    diff_row!(internal_dns_version, INTERNAL_DNS_VERSION),
-                    diff_row!(external_dns_version, EXTERNAL_DNS_VERSION),
-                ],
-            ),
-        ]
-    }
-
-    pub fn make_clickhouse_cluster_config_diff_tables(
-        &self,
-    ) -> Option<ClickhouseClusterConfigDiffTables> {
-        match (
-            &self.diff.before_clickhouse_cluster_config,
-            &self.diff.after_clickhouse_cluster_config,
-        ) {
-            // Before blueprint + after blueprint
-            (
-                DiffBeforeClickhouseClusterConfig::Blueprint(Some(before)),
-                Some(after),
-            ) => Some(ClickhouseClusterConfigDiffTables::diff_blueprints(
-                before, after,
-            )),
-
-            // Before blueprint only
-            (
-                DiffBeforeClickhouseClusterConfig::Blueprint(Some(before)),
-                None,
-            ) => {
-                Some(ClickhouseClusterConfigDiffTables::removed_from_blueprint(
-                    before,
-                ))
-            }
-
-            // After blueprint only
-            (
-                DiffBeforeClickhouseClusterConfig::Blueprint(None),
-                Some(after),
-            ) => Some(ClickhouseClusterConfigDiffTables::added_to_blueprint(
-                after,
-            )),
-
-            // No before or after
-            (DiffBeforeClickhouseClusterConfig::Blueprint(None), None) => None,
-        }
     }
 
     /// Write out physical disk and zone tables for a given `sled_id`
