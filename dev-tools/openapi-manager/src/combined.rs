@@ -7,7 +7,8 @@
 
 use crate::apis::{ApiIdent, ManagedApi, ManagedApis};
 use crate::spec::Environment;
-use crate::spec_files::{ApiSpecFile, ApiSpecFileName, LocalFiles};
+use crate::spec_files_generic::{ApiSpecFile, ApiSpecFileName};
+use crate::spec_files_local::LocalFiles;
 use crate::validation::{validate_generated_openapi_document, DocumentSummary};
 use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};

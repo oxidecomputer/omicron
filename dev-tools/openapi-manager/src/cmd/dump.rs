@@ -7,7 +7,7 @@ use crate::{
     cmd::output::{headers, OutputOpts, Styles},
     combined::{ApiSpecFileWhich, CheckStale},
     spec::Environment,
-    spec_files::LocalFiles,
+    spec_files_local::LocalFiles,
     FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
 };
 use anyhow::{Context, Result};
