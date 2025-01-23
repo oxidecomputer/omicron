@@ -4,7 +4,7 @@
 
 //! Working with OpenAPI specification files in the repository
 
-use crate::apis::{ApiIdent, ManagedApis};
+use crate::apis::{ApiIdent, ManagedApi, ManagedApis};
 use anyhow::{anyhow, bail, Context};
 use camino::{Utf8Path, Utf8PathBuf};
 use debug_ignore::DebugIgnore;
@@ -12,21 +12,23 @@ use openapiv3::OpenAPI;
 use std::fmt::Display;
 use std::{collections::BTreeMap, ops::Deref};
 
-/// Container for all the OpenAPI spec files found
+/// Container for OpenAPI spec files found in the local filesystem
 ///
 /// Most validation is not done at this point.
+/// XXX-dap be more specific about what has and has not been validated at this
+/// point.
+// XXX-dap move to a separate module?
 #[derive(Debug)]
-pub struct AllApiSpecFiles {
+pub struct LocalFiles {
     api_files: BTreeMap<ApiIdent, Vec<ApiSpecFile>>,
 }
 
-impl AllApiSpecFiles {
+impl LocalFiles {
     pub fn load_from_directory(
         dir: &Utf8Path,
         apis: &ManagedApis,
-    ) -> anyhow::Result<(AllApiSpecFiles, Vec<anyhow::Error>)> {
-        let mut api_files = BTreeMap::new();
-        let mut warnings = Vec::new();
+    ) -> anyhow::Result<(LocalFiles, Vec<anyhow::Error>)> {
+        let mut api_files = ApiSpecFilesBuilder::new(apis);
         let entry_iter = dir
             .read_dir_utf8()
             .with_context(|| format!("readdir {:?}", dir))?;
@@ -41,78 +43,49 @@ impl AllApiSpecFiles {
             let file_type = entry
                 .file_type()
                 .with_context(|| format!("file type of {:?}", path))?;
-            let loaded = if file_type.is_file() {
-                Some(
-                    AllApiSpecFiles::load_lockstep_file(apis, path, file_name)
-                        .map(|v| vec![v]),
-                )
-            } else if file_type.is_dir() {
-                Some(AllApiSpecFiles::load_versioned_directory(
-                    apis, path, file_name,
-                ))
-            } else {
-                None
-            };
-
-            match loaded {
-                Some(Ok(files)) => {
-                    for file in files {
-                        api_files
-                            .entry(file.name.ident.clone())
-                            .or_insert_with(Vec::new)
-                            .push(file);
+            if file_type.is_file() {
+                match fs_err::read(path) {
+                    Ok(contents) => {
+                        api_files.load_lockstep(file_name, contents);
                     }
-                }
-                Some(Err(error)) => {
-                    warnings.push(error);
-                }
-                None => {
-                    warnings
-                        .push(anyhow!("not a file or directory: {:?}", path));
-                }
+                    Err(error) => {
+                        api_files.load_error(anyhow!(error));
+                    }
+                };
+            } else if file_type.is_dir() {
+                LocalFiles::load_versioned_directory(
+                    &mut api_files,
+                    path,
+                    file_name,
+                )
+            } else {
+                // This is not something the tool cares about, but it's not
+                // obviously a problem, either.
+                api_files.load_warning(anyhow!(
+                    "ignored (not a file or directory): {:?}",
+                    path
+                ));
             };
         }
 
-        Ok((AllApiSpecFiles { api_files }, warnings))
-    }
-
-    fn load_lockstep_file(
-        apis: &ManagedApis,
-        path: &Utf8Path,
-        basename: &str,
-    ) -> anyhow::Result<ApiSpecFile> {
-        let file_name = ApiSpecFileName::new_lockstep(basename)
-            .with_context(|| format!("path {:?}", path))?;
-        let ident = &file_name.ident;
-        let api = apis
-            .api(ident)
-            .ok_or_else(|| anyhow!("found file for unknown API: {:?}", path))?;
-        if !api.is_lockstep() {
-            bail!("found lockstep file for non-lockstep API: {:?}", path);
-        }
-
-        ApiSpecFile::load(file_name, path)
+        Ok((LocalFiles { api_files }, warnings))
     }
 
     fn load_versioned_directory(
-        apis: &ManagedApis,
+        api_files: &mut ApiSpecFilesBuilder,
         path: &Utf8Path,
         basename: &str,
-        // XXX-dap either use a builder or an accumulator of both warnings and
-        // spec files
     ) -> anyhow::Result<Vec<ApiSpecFile>> {
         let ident = ApiIdent::from(basename.to_owned());
-        let api = apis.api(&ident).ok_or_else(|| {
-            anyhow!("found directory for unknown API: {:?}", path)
-        })?;
-        if !api.is_versioned() {
-            bail!(
-                "found versioned directory for non-versioned API: {:?}",
-                path
-            );
-        }
-
-        let mut rv = Vec::new();
+        // XXX-dap Whether this is a valid API identifier is checked in the
+        // builder, where it's correctly flagged as a warning, not an error.  it
+        // would make more sense to check it here so that we report it once and
+        // don't bother looking in the directory, I think.
+        //
+        // Similarly, the builder checks if the API is really a versioned one.
+        // That's good, and that should be an error, not a warning, but it also
+        // makes sense to be checked here so that we can report it once and skip
+        // the directory.
         let entry_iter = path
             .read_dir_utf8()
             .with_context(|| format!("readdir {:?}", path))?;
@@ -120,6 +93,9 @@ impl AllApiSpecFiles {
             let entry = maybe_entry
                 .with_context(|| format!("readdir {:?} entry", path))?;
             let file_name = entry.file_name();
+            // XXX-dap check if it's a file first?
+            let contents = fs_err::read(&file_name);
+            api_files.load_versioned(api_ident, file_name);
             let file_name = ApiSpecFileName::new_versioned(basename, file_name)
                 .with_context(|| format!("path {:?}", entry.path()))?;
             rv.push(ApiSpecFile::load(file_name, entry.path())?);
@@ -184,7 +160,7 @@ impl ApiSpecFileName {
             middle.rsplit_once("-").ok_or_else(|| {
                 anyhow!(
                     "extracting version and label from versioned API \
-                 document filename"
+                     document filename"
                 )
             })?;
 
@@ -346,6 +322,7 @@ pub struct ApiSpecFilesBuilder<'a> {
     apis: &'a ManagedApis,
     spec_files: BTreeMap<ApiIdent, BTreeMap<semver::Version, Vec<ApiSpecFile>>>,
     errors: Vec<anyhow::Error>,
+    warnings: Vec<anyhow::Error>,
 }
 
 impl<'a> ApiSpecFilesBuilder<'a> {
@@ -354,11 +331,34 @@ impl<'a> ApiSpecFilesBuilder<'a> {
             apis,
             spec_files: BTreeMap::new(),
             errors: Vec::new(),
+            warnings: Vec::new(),
         }
     }
 
+    pub fn load_error(&mut self, error: anyhow::Error) {
+        self.errors.push(error);
+    }
+
+    pub fn load_warning(&mut self, error: anyhow::Error) {
+        self.warnings.push(error);
+    }
+
     pub fn load_lockstep(&mut self, basename: &str, contents: Vec<u8>) {
-        self.try_load(self.lockstep_file_internal(basename, contents))
+        match self.parse_lockstep_filename(basename) {
+            Ok((file_name, api)) => {
+                if !api.is_lockstep() {
+                    self.load_error(anyhow!(
+                        "found lockstep file for non-lockstep API: {:?}",
+                        basename
+                    ));
+                } else {
+                    self.try_load_contents(file_name, contents);
+                }
+            }
+            Err(warning) => {
+                self.load_warning(warning);
+            }
+        };
     }
 
     pub fn load_versioned(
@@ -367,13 +367,62 @@ impl<'a> ApiSpecFilesBuilder<'a> {
         basename: &str,
         contents: Vec<u8>,
     ) {
-        self.try_load(
-            self.versioned_file_internal(api_ident, basename, contents),
-        )
+        // XXX-dap use a real path?
+        let path = format!("{}/{}", api_ident, basename);
+        match self.parse_versioned_filename(api_ident, &path, basename) {
+            Ok((file_name, api)) => {
+                if !api.is_versioned() {
+                    self.load_error(anyhow!(
+                        "found versioned file for lockstep API: {:?}",
+                        path,
+                    ));
+                } else {
+                    self.try_load_contents(file_name, contents);
+                }
+            }
+            Err(warning) => {
+                self.load_warning(warning);
+            }
+        };
     }
 
-    fn try_load(&mut self, maybe_loaded: anyhow::Result<ApiSpecFile>) {
-        match maybe_loaded {
+    fn parse_lockstep_filename(
+        &self,
+        basename: &str,
+    ) -> anyhow::Result<(ApiSpecFileName, &ManagedApi)> {
+        let file_name = ApiSpecFileName::new_lockstep(basename)
+            .with_context(|| format!("path {:?}", basename))?;
+        let ident = file_name.ident();
+        let api = self
+            .apis
+            .api(ident)
+            .ok_or_else(|| anyhow!("not a known API: {:?}", basename))?;
+        Ok((file_name, api))
+    }
+
+    fn parse_versioned_filename(
+        &self,
+        api_ident: &ApiIdent,
+        path: &str,
+        basename: &str,
+    ) -> anyhow::Result<(ApiSpecFileName, &ManagedApi)> {
+        let api = self
+            .apis
+            .api(api_ident)
+            .ok_or_else(|| anyhow!("not a known API: {}", path))?;
+        // XXX-dap even within ApiSpecFileName::new_versioned() here, there's a
+        // distinction between things that should be warnings vs. errors.
+        let file_name = ApiSpecFileName::new_versioned(&api_ident, basename)?;
+        Ok((file_name, api))
+    }
+
+    fn try_load_contents(&self, file_name: ApiSpecFileName, contents: Vec<u8>) {
+        let maybe_file = serde_json::from_slice(&contents)
+            .with_context(|| format!("parse {:?}", basename))
+            .and_then(|parsed| {
+                ApiSpecFile::for_contents(&file_name, parsed, contents)
+            });
+        match maybe_file {
             Ok(file) => {
                 let file_name = file.spec_file_name();
                 let api_ident = file.spec_file_name().ident();
@@ -389,46 +438,5 @@ impl<'a> ApiSpecFilesBuilder<'a> {
                 self.errors.push(error);
             }
         }
-    }
-
-    fn lockstep_file_internal(
-        &self,
-        basename: &str,
-        contents: Vec<u8>,
-    ) -> anyhow::Result<ApiSpecFile> {
-        let file_name = ApiSpecFileName::new_lockstep(basename)
-            .with_context(|| format!("path {:?}", basename))?;
-        let ident = &file_name.ident;
-        let api = self.apis.api(ident).ok_or_else(|| {
-            anyhow!("found file for unknown API: {:?}", basename)
-        })?;
-        if !api.is_lockstep() {
-            bail!("found lockstep file for non-lockstep API: {:?}", basename);
-        }
-
-        let parsed: OpenAPI = serde_json::from_slice(&contents)
-            .with_context(|| format!("parse {:?}", basename))?;
-        ApiSpecFile::for_contents(&file_name, parsed, contents)
-    }
-
-    fn versioned_file_internal(
-        &self,
-        api_ident: &ApiIdent,
-        basename: &str,
-        contents: Vec<u8>,
-    ) -> anyhow::Result<ApiSpecFile> {
-        // XXX-dap use a real path?
-        let path = format!("{}/{}", api_ident, basename);
-        let api = self
-            .apis
-            .api(api_ident)
-            .ok_or_else(|| anyhow!("found file for unknown API: {}", path))?;
-        if !api.is_versioned() {
-            bail!("found directory for non-versioned API: {:?}", api_ident);
-        }
-        let file_name = ApiSpecFileName::new_versioned(&api_ident, basename)?;
-        let parsed: OpenAPI = serde_json::from_slice(&contents)
-            .with_context(|| format!("parse {:?}", path))?;
-        ApiSpecFile::for_contents(&file_name, parsed, contents)
     }
 }

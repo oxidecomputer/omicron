@@ -7,7 +7,7 @@
 
 use crate::apis::{ApiIdent, ManagedApi, ManagedApis};
 use crate::spec::Environment;
-use crate::spec_files::{AllApiSpecFiles, ApiSpecFile, ApiSpecFileName};
+use crate::spec_files::{ApiSpecFile, ApiSpecFileName, LocalFiles};
 use crate::validation::{validate_generated_openapi_document, DocumentSummary};
 use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -28,13 +28,13 @@ impl CombinedApis {
     ) -> anyhow::Result<(CombinedApis, Vec<anyhow::Error>)> {
         let managed_apis = ManagedApis::all()?;
         let (all_spec_files, warnings) =
-            AllApiSpecFiles::load_from_directory(dir, &managed_apis)?;
+            LocalFiles::load_from_directory(dir, &managed_apis)?;
         Ok((CombinedApis::new(managed_apis, all_spec_files), warnings))
     }
 
     pub fn new(
         api_list: ManagedApis,
-        all_spec_files: AllApiSpecFiles,
+        all_spec_files: LocalFiles,
     ) -> CombinedApis {
         let apis = api_list.into_map();
         let all_spec_files = all_spec_files.into_map();
