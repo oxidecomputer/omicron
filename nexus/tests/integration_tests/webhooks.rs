@@ -40,20 +40,6 @@ async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
     let server = httpmock::MockServer::start_async().await;
 
     let id = WebhookEventUuid::new_v4();
-    let mock = server
-        .mock_async(|when, then| {
-            let body = serde_json::json!({
-                "event_class": "test",
-                "event_id": id,
-                "data": {
-                    "hello_world": true,
-                }
-            })
-            .to_string();
-            when.method(POST).path("/webhooks").json_body_includes(body);
-            then.status(200);
-        })
-        .await;
     let endpoint =
         server.url("/webhooks").parse().expect("this should be a valid URL");
 
@@ -72,7 +58,31 @@ async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
         },
     )
     .await;
-    dbg!(webhook);
+    dbg!(&webhook);
+
+    let mock = server
+        .mock_async(|when, then| {
+            let body = serde_json::json!({
+                "event_class": "test",
+                "event_id": id,
+                "data": {
+                    "hello_world": true,
+                }
+            })
+            .to_string();
+            when.method(POST)
+                .path("/webhooks")
+                .json_body_includes(body)
+                .header("x-oxide-event-class", "test")
+                .header("x-oxide-event-id", id.to_string())
+                .header("x-oxide-webhook-id", webhook.id.to_string())
+                .header("content-type", "application/json")
+                // This should be present, but we don't know what its' value is
+                // going to be, so just assert that it's there.
+                .header_exists("x-oxide-delivery-id");
+            then.status(200);
+        })
+        .await;
 
     // Publish an event
     let event = nexus
