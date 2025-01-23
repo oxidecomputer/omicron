@@ -11,7 +11,7 @@
 use crate::sim::http_entrypoints_pantry::ExpectedDigest;
 use crate::sim::http_entrypoints_pantry::PantryStatus;
 use crate::sim::http_entrypoints_pantry::VolumeStatus;
-use crate::sim::SledAgent;
+use crate::sim::SimulatedUpstairs;
 use crate::support_bundle::storage::SupportBundleManager;
 use anyhow::{self, bail, Result};
 use camino::Utf8Path;
@@ -36,7 +36,6 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
-use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::VolumeConstructionRequest;
 use serde::Serialize;
@@ -149,6 +148,8 @@ impl CrucibleDataInner {
             );
         }
 
+        info!(self.log, "created region {}", region.id);
+
         Ok(region)
     }
 
@@ -177,6 +178,7 @@ impl CrucibleDataInner {
         if let Some(region) = self.regions.get_mut(&id) {
             region.state = State::Destroyed;
             self.used_ports.remove(&region.port_number);
+            info!(self.log, "deleted region {:?}", region.id);
             Ok(Some(region.clone()))
         } else {
             Ok(None)
@@ -188,7 +190,7 @@ impl CrucibleDataInner {
         id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<Snapshot> {
-        info!(self.log, "Creating region {} snapshot {}", id, snapshot_id);
+        info!(self.log, "creating region {} snapshot {}", id, snapshot_id);
 
         if let Some(region) = self.get(RegionId(id.to_string())) {
             match region.state {
@@ -673,6 +675,7 @@ mod test {
 
         let storage = StorageInner::new(
             Uuid::new_v4(),
+            0,
             std::net::Ipv4Addr::LOCALHOST.into(),
             logctx.log.clone(),
         );
@@ -703,6 +706,7 @@ mod test {
 
         let mut storage = StorageInner::new(
             Uuid::new_v4(),
+            0,
             std::net::Ipv4Addr::LOCALHOST.into(),
             logctx.log.clone(),
         );
@@ -811,6 +815,7 @@ mod test {
 
         let mut storage = StorageInner::new(
             Uuid::new_v4(),
+            0,
             std::net::Ipv4Addr::LOCALHOST.into(),
             logctx.log.clone(),
         );
@@ -1199,15 +1204,21 @@ impl NestedDatasetStorage {
 
 /// Simulated representation of all storage on a sled.
 #[derive(Clone)]
-pub struct Storage {
+pub(crate) struct Storage {
     inner: Arc<Mutex<StorageInner>>,
 }
 
 impl Storage {
-    pub fn new(sled_id: Uuid, crucible_ip: IpAddr, log: Logger) -> Self {
+    pub fn new(
+        sled_id: Uuid,
+        sled_index: u16,
+        crucible_ip: IpAddr,
+        log: Logger,
+    ) -> Self {
         Self {
             inner: Arc::new(Mutex::new(StorageInner::new(
                 sled_id,
+                sled_index,
                 crucible_ip,
                 log,
             ))),
@@ -1229,7 +1240,7 @@ impl Storage {
 /// Simulated representation of all storage on a sled.
 ///
 /// Guarded by a mutex from [Storage].
-pub struct StorageInner {
+pub(crate) struct StorageInner {
     log: Logger,
     sled_id: Uuid,
     root: Utf8TempDir,
@@ -1240,11 +1251,17 @@ pub struct StorageInner {
     next_disk_slot: i64,
     zpools: HashMap<ZpoolUuid, Zpool>,
     crucible_ip: IpAddr,
+    start_crucible_port: u16,
     next_crucible_port: u16,
 }
 
 impl StorageInner {
-    pub fn new(sled_id: Uuid, crucible_ip: IpAddr, log: Logger) -> Self {
+    pub fn new(
+        sled_id: Uuid,
+        sled_index: u16,
+        crucible_ip: IpAddr,
+        log: Logger,
+    ) -> Self {
         Self {
             sled_id,
             log,
@@ -1256,7 +1273,8 @@ impl StorageInner {
             next_disk_slot: 0,
             zpools: HashMap::new(),
             crucible_ip,
-            next_crucible_port: 100,
+            start_crucible_port: (sled_index + 1) * 1000,
+            next_crucible_port: (sled_index + 1) * 1000,
         }
     }
 
@@ -1568,6 +1586,18 @@ impl StorageInner {
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
     ) -> SocketAddr {
+        // There's a limit to the number of simulated Crucible agents per
+        // dataset:
+        //
+        // - [`StorageInner::new`] allocates 1000 ports per sled for all
+        //   simulated Crucible agents
+        //
+        // - this function allocates 50 ports per simulated Crucible agent,
+        //   meaning a maximum of 20 agents can be created in the tests.
+        //
+        // Assert here if that limit is reached.
+        assert!((self.next_crucible_port - self.start_crucible_port) < 1000);
+
         // Update our local data
         let dataset = self
             .zpools
@@ -1578,10 +1608,10 @@ impl StorageInner {
                 dataset_id,
                 self.crucible_ip,
                 self.next_crucible_port,
-                self.next_crucible_port + 100,
+                self.next_crucible_port + 50,
             );
 
-        self.next_crucible_port += 100;
+        self.next_crucible_port += 50;
 
         dataset.address()
     }
@@ -1637,6 +1667,10 @@ impl StorageInner {
                 DatasetContents::Crucible(server) => (*id, server.address()),
             })
             .collect()
+    }
+
+    pub fn has_zpool(&self, zpool_id: ZpoolUuid) -> bool {
+        self.zpools.contains_key(&zpool_id)
     }
 
     pub fn get_dataset(
@@ -1720,15 +1754,15 @@ pub struct PantryInner {
 /// Simulated crucible pantry
 pub struct Pantry {
     pub id: OmicronZoneUuid,
-    sled_agent: Arc<SledAgent>,
+    simulated_upstairs: Arc<SimulatedUpstairs>,
     inner: Mutex<PantryInner>,
 }
 
 impl Pantry {
-    pub fn new(sled_agent: Arc<SledAgent>) -> Self {
+    pub fn new(simulated_upstairs: Arc<SimulatedUpstairs>) -> Self {
         Self {
             id: OmicronZoneUuid::new_v4(),
-            sled_agent,
+            simulated_upstairs,
             inner: Mutex::new(PantryInner {
                 volumes: HashMap::default(),
                 jobs: HashSet::default(),
@@ -1903,23 +1937,20 @@ impl Pantry {
         volume_id: String,
         snapshot_id: String,
     ) -> Result<(), HttpError> {
-        // Perform the disk id -> region id mapping just as was done by during
-        // the simulated instance ensure, then call
-        // [`instance_issue_disk_snapshot_request`] as the snapshot logic is the
-        // same.
+        // Perform the disk id -> region id mapping just as is done by during
+        // the simulated instance ensure.
         let inner = self.inner.lock().unwrap();
+
         let volume_construction_request =
             &inner.volumes.get(&volume_id).unwrap().vcr;
 
-        self.sled_agent
-            .map_disk_ids_to_region_ids(volume_construction_request)?;
+        self.simulated_upstairs.map_id_to_vcr(
+            volume_id.parse().unwrap(),
+            volume_construction_request,
+        );
 
-        self.sled_agent
-            .instance_issue_disk_snapshot_request(
-                PropolisUuid::new_v4(), // instance id, not used by function
-                volume_id.parse().unwrap(),
-                snapshot_id.parse().unwrap(),
-            )
+        self.simulated_upstairs
+            .snapshot(volume_id.parse().unwrap(), snapshot_id.parse().unwrap())
             .map_err(|e| HttpError::for_internal_error(e.to_string()))
     }
 
@@ -2007,8 +2038,12 @@ pub struct PantryServer {
 }
 
 impl PantryServer {
-    pub fn new(log: Logger, ip: IpAddr, sled_agent: Arc<SledAgent>) -> Self {
-        let pantry = Arc::new(Pantry::new(sled_agent));
+    pub fn new(
+        log: Logger,
+        ip: IpAddr,
+        simulated_upstairs: Arc<SimulatedUpstairs>,
+    ) -> Self {
+        let pantry = Arc::new(Pantry::new(simulated_upstairs));
 
         let server = dropshot::ServerBuilder::new(
             super::http_entrypoints_pantry::api(),
