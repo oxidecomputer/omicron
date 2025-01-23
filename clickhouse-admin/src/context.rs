@@ -25,7 +25,7 @@ pub struct KeeperServerContext {
     clickward: Clickward,
     clickhouse_cli: ClickhouseCli,
     log: Logger,
-    pub generation: Mutex<Option<Generation>>,
+    pub generation: std::sync::Mutex<Option<Generation>>,
 }
 
 impl KeeperServerContext {
@@ -45,7 +45,7 @@ impl KeeperServerContext {
         // If there is already a configuration file with a generation number we'll
         // use that. Otherwise, we set the generation number to None.
         let gen = read_generation_from_file(config_path)?;
-        let generation = Mutex::new(gen);
+        let generation = std::sync::Mutex::new(gen);
         Ok(Self { clickward, clickhouse_cli, log, generation })
     }
 
@@ -61,8 +61,8 @@ impl KeeperServerContext {
         &self.log
     }
 
-    pub async fn generation(&self) -> Option<Generation> {
-        *self.generation.lock().await
+    pub fn generation(&self) -> Option<Generation> {
+        *self.generation.lock().unwrap()
     }
 }
 
@@ -72,7 +72,7 @@ pub struct ServerContext {
     oximeter_client: OximeterClient,
     initialization_lock: Arc<Mutex<()>>,
     log: Logger,
-    pub generation: Mutex<Option<Generation>>,
+    pub generation: std::sync::Mutex<Option<Generation>>,
 }
 
 impl ServerContext {
@@ -97,7 +97,7 @@ impl ServerContext {
         // If there is already a configuration file with a generation number we'll
         // use that. Otherwise, we set the generation number to None.
         let gen = read_generation_from_file(config_path)?;
-        let generation = Mutex::new(gen);
+        let generation = std::sync::Mutex::new(gen);
         Ok(Self {
             clickhouse_cli,
             clickward,
@@ -129,7 +129,7 @@ impl ServerContext {
     }
 
     pub async fn generation(&self) -> Option<Generation> {
-        *self.generation.lock().await
+        *self.generation.lock().unwrap()
     }
 }
 

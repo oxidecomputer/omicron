@@ -68,7 +68,7 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
 
         // We want to update the generation number only if the config file has been
         // generated successfully.
-        *ctx.generation.lock().await = Some(incoming_generation);
+        *ctx.generation.lock().unwrap() = Some(incoming_generation);
 
         // Once we have generated the client we can safely enable the clickhouse_server service
         let fmri = "svc:/oxide/clickhouse_server:default".to_string();
@@ -173,7 +173,7 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
     ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError> {
         let ctx = rqctx.context();
         let keeper = body.into_inner();
-        let current_generation = ctx.generation().await;
+        let current_generation = ctx.generation();
         let incoming_generation = keeper.generation();
 
         // If the incoming generation number is lower, then we have a problem.
@@ -192,7 +192,7 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
 
         // We want to update the generation number only if the config file has been
         // generated successfully.
-        *ctx.generation.lock().await = Some(incoming_generation);
+        *ctx.generation.lock().unwrap() = Some(incoming_generation);
 
         // Once we have generated the client we can safely enable the clickhouse_keeper service
         let fmri = "svc:/oxide/clickhouse_keeper:default".to_string();
@@ -205,7 +205,7 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Generation>, HttpError> {
         let ctx = rqctx.context();
-        let gen = match ctx.generation().await {
+        let gen = match ctx.generation() {
             Some(g) => g,
             None => {
                 return Err(HttpError::for_client_error(
