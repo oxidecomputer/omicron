@@ -7006,19 +7006,18 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn webhook_create(
         rqctx: RequestContext<Self::Context>,
-        _params: TypedBody<params::WebhookCreate>,
+        params: TypedBody<params::WebhookCreate>,
     ) -> Result<HttpResponseCreated<views::Webhook>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
+            let params = params.into_inner();
 
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-
-            Err(nexus
-                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
-                .await
-                .into())
+            let receiver =
+                nexus.webhook_receiver_create(&opctx, params).await?;
+            Ok(HttpResponseCreated(views::Webhook::try_from(webhook)?))
         };
         apictx
             .context
