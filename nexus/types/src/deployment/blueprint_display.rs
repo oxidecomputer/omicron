@@ -200,6 +200,7 @@ pub trait BpTableData {
 }
 
 /// A table specific to a sled resource, such as a zone or disk.
+#[derive(Debug)]
 pub struct BpTable {
     table_name: &'static str,
     column_names: &'static [&'static str],

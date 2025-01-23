@@ -738,6 +738,7 @@ impl From<ClickhouseClusterConfigDiffTablesForSingleBlueprint>
 /// A printable representation of the difference between two
 /// `ClickhouseClusterConfig` tables or a `ClickhouseClusterConfig` table and
 /// its inventory representation.
+#[derive(Debug)]
 pub struct ClickhouseClusterConfigDiffTables {
     pub metadata: KvListWithHeading,
     pub keepers: BpTable,
@@ -871,6 +872,7 @@ impl ClickhouseClusterConfigDiffTables {
     }
 }
 /// Tables for added sleds in a blueprint diff
+#[derive(Debug)]
 pub struct SledTables {
     pub disks: Option<BpTable>,
     pub datasets: Option<BpTable>,
@@ -899,7 +901,7 @@ impl std::fmt::Display for SledTables {
 }
 
 /// Printable output derived from a `BlueprintDiff`
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct BpDiffPrintable {
     pub errors: Vec<String>,
     pub warnings: Vec<String>,
@@ -1140,7 +1142,7 @@ fn zones_row(state: BpDiffState, zone: &BlueprintZoneConfig) -> BpTableRow {
 /// Wrapper to allow a [`BlueprintDiff`] to be displayed.
 ///
 /// Returned by [`BlueprintDiff::display()`].
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 #[must_use = "this struct does nothing unless displayed"]
 pub struct BlueprintDiffDisplay<'diff> {
     pub diff: &'diff BlueprintDiff<'diff>,
@@ -1160,8 +1162,8 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
     /// before and after should be that can only be wrong if we have a bug
     /// constructing the diff.
     fn sled_state_unchanged(&self, sled_id: &SledUuid) -> String {
-        let before = self.diff.before_state.get(sled_id);
-        let after = self.diff.after_state.get(sled_id);
+        let before = self.diff.before.sled_state.get(sled_id);
+        let after = self.diff.after.sled_state.get(sled_id);
         if before == after {
             after
                 .map(|s| s.to_string())
@@ -1174,8 +1176,8 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
         }
     }
     fn sled_state_added(&self, sled_id: &SledUuid) -> String {
-        let before = self.diff.before_state.get(sled_id);
-        let after = self.diff.after_state.get(sled_id);
+        let before = self.diff.before.sled_state.get(sled_id);
+        let after = self.diff.after.sled_state.get(sled_id);
         if before.is_none() {
             after
                 .map(|s| format!("{s}"))
@@ -1188,8 +1190,8 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
         }
     }
     fn sled_state_removed(&self, sled_id: &SledUuid) -> String {
-        let before = self.diff.before_state.get(sled_id);
-        let after = self.diff.after_state.get(sled_id);
+        let before = self.diff.before.sled_state.get(sled_id);
+        let after = self.diff.after.sled_state.get(sled_id);
         if after.is_none() {
             before
                 .map(|s| format!("was {s}"))
@@ -1202,8 +1204,8 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
         }
     }
     fn sled_state_modified(&self, sled_id: &SledUuid) -> String {
-        let before = self.diff.before_state.get(sled_id);
-        let after = self.diff.after_state.get(sled_id);
+        let before = self.diff.before.sled_state.get(sled_id);
+        let after = self.diff.after.sled_state.get(sled_id);
         match (before, after) {
             (Some(before), Some(after)) if before != after => {
                 format!("{before} -> {after}")
@@ -1315,12 +1317,12 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
         }
 
         // Write out metadata diff table
-        for table in self.printable.metadata {
+        for table in &self.printable.metadata {
             writeln!(f, "{}", table)?;
         }
 
         // Write out clickhouse cluster diff tables
-        if let Some(tables) = self.printable.clickhouse_cluster_config {
+        if let Some(tables) = &self.printable.clickhouse_cluster_config {
             writeln!(f, "{}", tables.metadata)?;
             writeln!(f, "{}", tables.keepers)?;
             if let Some(servers) = &tables.servers {

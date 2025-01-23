@@ -18,6 +18,7 @@ use crate::inventory::Collection;
 pub use crate::inventory::SourceNatConfig;
 pub use crate::inventory::ZpoolName;
 use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
+use blueprint_differ::BlueprintDiffer;
 use diffus::Diffus;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
@@ -34,7 +35,6 @@ use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::BlueprintUuid;
-use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -286,28 +286,12 @@ impl Blueprint {
     ///
     /// The argument provided is the "before" side, and `self` is the "after"
     /// side.
-    pub fn diff_since_blueprint(&self, before: &Blueprint) -> BlueprintDiff {
-        BlueprintDiff::new(
-            DiffBeforeMetadata::Blueprint(Box::new(before.metadata())),
-            DiffBeforeClickhouseClusterConfig::from(before),
-            before.sled_state.clone(),
-            before
-                .blueprint_zones
-                .iter()
-                .map(|(sled_id, zones)| (*sled_id, zones.clone()))
-                .collect(),
-            before
-                .blueprint_disks
-                .iter()
-                .map(|(sled_id, disks)| (*sled_id, disks.clone()))
-                .collect(),
-            before
-                .blueprint_datasets
-                .iter()
-                .map(|(sled_id, datasets)| (*sled_id, datasets.clone()))
-                .collect(),
-            &self,
-        )
+    pub fn diff_since_blueprint<'e>(
+        &'e self,
+        before: &'e Blueprint,
+    ) -> BlueprintDiff<'e> {
+        let differ = BlueprintDiffer::new(before, self);
+        differ.diff()
     }
 
     /// Return a struct that can be displayed to present information about the
