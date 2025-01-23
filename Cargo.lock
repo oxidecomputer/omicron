@@ -7027,6 +7027,7 @@ dependencies = [
  "hickory-resolver",
  "http",
  "http-body-util",
+ "httpmock",
  "httptest",
  "hubtools",
  "hyper",

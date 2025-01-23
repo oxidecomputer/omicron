@@ -11,6 +11,7 @@ use nexus_db_queries::db::datastore::webhook_delivery::DeliveryAttemptState;
 use nexus_db_queries::db::model::{
     SqlU8, WebhookDeliveryAttempt, WebhookDeliveryResult, WebhookReceiver,
 };
+use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::{
@@ -18,8 +19,10 @@ use nexus_types::internal_api::background::{
 };
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{
-    OmicronZoneUuid, WebhookDeliveryUuid, WebhookEventUuid, WebhookReceiverUuid,
+    GenericUuid, OmicronZoneUuid, WebhookDeliveryUuid, WebhookEventUuid,
+    WebhookReceiverUuid,
 };
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::task::JoinSet;
@@ -122,32 +125,47 @@ impl WebhookDeliverator {
         Self { datastore, nexus_id, lease_timeout, client }
     }
 
+    const MAX_CONCURRENT_RXS: NonZeroU32 = {
+        match NonZeroU32::new(8) {
+            Some(nz) => nz,
+            None => unreachable!(),
+        }
+    };
+
     async fn actually_activate(
         &mut self,
         opctx: &OpContext,
         status: &mut WebhookDeliveratorStatus,
     ) -> Result<(), Error> {
-        let rxs = self.datastore.webhook_rx_list(&opctx).await?;
         let mut tasks = JoinSet::new();
-        for rx in rxs {
-            let opctx = opctx.child(maplit::btreemap! {
-                "receiver_id".to_string() => rx.id().to_string(),
-                "receiver_name".to_string() => rx.name().to_string(),
-            });
-            let deliverator = self.clone();
-            tasks.spawn(async move {
-                let rx_id = rx.id();
-                let status = deliverator.rx_deliver(&opctx, rx).await;
-                (rx_id, status)
-            });
-        }
+        let mut paginator = Paginator::new(Self::MAX_CONCURRENT_RXS);
+        while let Some(p) = paginator.next() {
+            let rxs = self
+                .datastore
+                .webhook_rx_list(&opctx, &p.current_pagparams())
+                .await?;
+            paginator = p.found_batch(&rxs, &|rx| rx.id().into_untyped_uuid());
 
-        while let Some(result) = tasks.join_next().await {
-            let (rx_id, rx_status) = result.expect(
+            for rx in rxs {
+                let opctx = opctx.child(maplit::btreemap! {
+                    "receiver_id".to_string() => rx.id().to_string(),
+                    "receiver_name".to_string() => rx.name().to_string(),
+                });
+                let deliverator = self.clone();
+                tasks.spawn(async move {
+                    let rx_id = rx.id();
+                    let status = deliverator.rx_deliver(&opctx, rx).await;
+                    (rx_id, status)
+                });
+            }
+
+            while let Some(result) = tasks.join_next().await {
+                let (rx_id, rx_status) = result.expect(
                 "delivery tasks should not be canceled, and nexus is compiled \
                 with `panic=\"abort\"`, so they will not have panicked",
             );
-            status.by_rx.insert(rx_id, rx_status);
+                status.by_rx.insert(rx_id, rx_status);
+            }
         }
 
         Ok(())

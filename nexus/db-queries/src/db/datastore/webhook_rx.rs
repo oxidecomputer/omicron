@@ -21,6 +21,7 @@ use crate::db::model::WebhookRxEventGlob;
 use crate::db::model::WebhookRxSecret;
 use crate::db::model::WebhookRxSubscription;
 use crate::db::model::WebhookSubscriptionKind;
+use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
 use crate::db::schema::webhook_receiver::dsl as rx_dsl;
 use crate::db::schema::webhook_rx_event_glob::dsl as glob_dsl;
@@ -32,10 +33,12 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_types::external_api::params;
 use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
 use omicron_uuid_kinds::{GenericUuid, WebhookReceiverUuid};
+use uuid::Uuid;
 
 impl DataStore {
     pub async fn webhook_rx_create(
@@ -440,10 +443,11 @@ impl DataStore {
     pub async fn webhook_rx_list(
         &self,
         opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<WebhookReceiver> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        rx_dsl::webhook_receiver
+        paginated(rx_dsl::webhook_receiver, rx_dsl::id, pagparams)
             .filter(rx_dsl::time_deleted.is_null())
             .select(WebhookReceiver::as_select())
             .load_async::<WebhookReceiver>(&*conn)

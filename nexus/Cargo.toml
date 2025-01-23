@@ -163,6 +163,7 @@ hickory-resolver.workspace = true
 tufaceous.workspace = true
 tufaceous-lib.workspace = true
 httptest.workspace = true
+httpmock.workspace = true
 strum.workspace = true
 
 [[bench]]
