@@ -55,7 +55,10 @@ impl SimulatedUpstairs {
         volume_construction_request: &VolumeConstructionRequest,
     ) {
         let mut inner = self.inner.lock().unwrap();
-        // XXX what if existing entry? assert?
+
+        // VCR changes occur all the time due to read-only parent removal and
+        // the various replacements. Unconditionally overwrite the previously
+        // stored VCR here.
         inner.id_to_vcr.insert(id, volume_construction_request.clone());
 
         info!(self.log, "mapped vcr with id {id}");
