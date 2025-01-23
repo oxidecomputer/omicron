@@ -28,7 +28,8 @@ use super::{
 use diffus::{edit::Edit, Diffable};
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::{ByteCount, Generation};
-use omicron_common::disk::{CompressionAlgorithm, DiskIdentity};
+use omicron_common::api::internal::shared::DatasetKind;
+use omicron_common::disk::{CompressionAlgorithm, DatasetName, DiskIdentity};
 use omicron_uuid_kinds::{BlueprintUuid, DatasetUuid, SledUuid};
 use omicron_uuid_kinds::{OmicronZoneUuid, PhysicalDiskUuid};
 use parse_display::IntoResult;
@@ -37,11 +38,11 @@ use std::fmt;
 
 use crate::deployment::blueprint_display::BpClickhouseKeepersTableSchema;
 use crate::deployment::{
-    BlueprintDatasetConfig, BlueprintDatasetsConfig, BlueprintMetadata,
-    BlueprintPhysicalDiskConfig, BlueprintPhysicalDisksConfig,
-    BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
-    BlueprintZonesConfig, CollectionDatasetIdentifier, DiffBeforeMetadata,
-    ZoneSortKey, ZpoolName,
+    unwrap_or_none, BlueprintDatasetConfig, BlueprintDatasetsConfig,
+    BlueprintMetadata, BlueprintPhysicalDiskConfig,
+    BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
+    BlueprintZoneDisposition, BlueprintZoneType, BlueprintZonesConfig,
+    CollectionDatasetIdentifier, DiffBeforeMetadata, ZoneSortKey, ZpoolName,
 };
 use crate::external_api::views::SledState;
 
@@ -54,7 +55,8 @@ pub enum DiffValue<'e, T> {
 pub struct ModifiedZone<'e> {
     disposition: DiffValue<'e, BlueprintZoneDisposition>,
     filesystem_pool: DiffValue<'e, Option<ZpoolName>>,
-    zone_type: DiffValue<'e, BlueprintZoneType>,
+    // zone_type is not allowed to change
+    zone_type: &'e BlueprintZoneType,
 }
 
 impl<'e> ModifiedZone<'e> {
@@ -67,7 +69,7 @@ impl<'e> ModifiedZone<'e> {
         ModifiedZone {
             disposition: DiffValue::Unchanged(&before.disposition),
             filesystem_pool: DiffValue::Unchanged(&before.filesystem_pool),
-            zone_type: DiffValue::Unchanged(&before.zone_type),
+            zone_type: &before.zone_type,
         }
     }
 }
@@ -88,6 +90,10 @@ impl<'e> ModifiedDisk<'e> {
 }
 
 pub struct ModifiedDataset<'e> {
+    // The pool is not allowed to change
+    pool: &'e ZpoolName,
+    // The kind is not allowed to change
+    kind: &'e DatasetKind,
     disposition: DiffValue<'e, BlueprintDatasetDisposition>,
     quota: DiffValue<'e, Option<ByteCount>>,
     reservation: DiffValue<'e, Option<ByteCount>>,
@@ -102,6 +108,8 @@ impl<'e> ModifiedDataset<'e> {
     /// update the value.
     pub fn new(before: &'e BlueprintDatasetConfig) -> ModifiedDataset<'e> {
         ModifiedDataset {
+            pool: &before.pool,
+            kind: &before.kind,
             disposition: DiffValue::Unchanged(&before.disposition),
             quota: DiffValue::Unchanged(&before.quota),
             reservation: DiffValue::Unchanged(&before.reservation),
@@ -131,19 +139,169 @@ pub struct ModifiedSled<'e> {
 }
 
 impl<'e> ModifiedSled<'e> {
-    fn disks_table(&self) -> Option<BpTable> {
-        todo!()
-    }
+    /// Collate all data from each category to produce a single table.
+    ///
+    /// The order is:
+    ///
+    /// 1. Unchanged (if `show_unchanged` flag is set)
+    /// 2. Removed
+    /// 3. Added
+    ///
+    /// The idea behind the order is to (a) group all changes together
+    /// and (b) put changes towards the bottom, so people have to scroll
+    /// back less.
+    ///
+    /// Note that we don't currently show modified disks for backwards
+    /// compatibility, but that is easily added.
+    fn disks_table(&self, show_unchanged: bool) -> Option<BpTable> {
+        let DiffValue::Change(generation) = self.disks_generation else {
+            return None;
+        };
+        let generation = BpGeneration::Diff {
+            before: Some(*generation.before),
+            after: Some(*generation.after),
+        };
 
-    fn datasets_table(&self) -> Option<BpTable> {
-        todo!()
+        let mut rows = vec![];
+
+        // Unchanged
+        if show_unchanged {
+            rows.extend(
+                self.disks_unchanged
+                    .iter()
+                    .map(|disk| disks_row(BpDiffState::Unchanged, disk)),
+            );
+        }
+
+        // Removed
+        rows.extend(
+            self.disks_removed
+                .iter()
+                .map(|disk| disks_row(BpDiffState::Removed, disk)),
+        );
+
+        // Added
+        rows.extend(
+            self.zones_inserted
+                .iter()
+                .map(|zone| zones_row(BpDiffState::Added, zone)),
+        );
+
+        if rows.is_empty() {
+            return None;
+        }
+
+        Some(BpTable::new(BpPhysicalDisksTableSchema {}, generation, rows))
     }
 
     /// Collate all data from each category to produce a single table.
     ///
     /// The order is:
     ///
-    /// 1. Unchanged (if unchanged flag is set)
+    /// 1. Unchanged (if `show_unchanged` flag is set)
+    /// 2. Removed
+    /// 3. Modified
+    /// 4. Added
+    ///
+    /// The idea behind the order is to (a) group all changes together
+    /// and (b) put changes towards the bottom, so people have to scroll
+    /// back less.
+    fn datasets_table(&self, show_unchanged: bool) -> Option<BpTable> {
+        let DiffValue::Change(generation) = self.datasets_generation else {
+            return None;
+        };
+        let generation = BpGeneration::Diff {
+            before: Some(*generation.before),
+            after: Some(*generation.after),
+        };
+
+        let mut rows = vec![];
+
+        // Unchanged
+        if show_unchanged {
+            rows.extend(self.datasets_unchanged.iter().map(|dataset| {
+                BpTableRow::from_strings(
+                    BpDiffState::Unchanged,
+                    dataset.as_strings(),
+                )
+            }));
+        }
+
+        // Modified
+        rows.extend(self.datasets_modified.iter().map(
+            |(dataset_id, modified_dataset)| {
+                let mut columns = vec![];
+
+                columns.push(BpTableColumn::Value(
+                    DatasetName::new(
+                        modified_dataset.pool.clone(),
+                        modified_dataset.kind.clone(),
+                    )
+                    .full_name(),
+                ));
+
+                columns.push(BpTableColumn::Value(dataset_id.to_string()));
+
+                match &modified_dataset.quota {
+                    DiffValue::Unchanged(quota) => columns
+                        .push(BpTableColumn::Value(unwrap_or_none(quota))),
+                    DiffValue::Change(change) => {
+                        columns.push(BpTableColumn::Diff {
+                            before: unwrap_or_none(change.before),
+                            after: unwrap_or_none(change.after),
+                        })
+                    }
+                }
+
+                match &modified_dataset.reservation {
+                    DiffValue::Unchanged(reservation) => columns.push(
+                        BpTableColumn::Value(unwrap_or_none(reservation)),
+                    ),
+                    DiffValue::Change(change) => {
+                        columns.push(BpTableColumn::Diff {
+                            before: unwrap_or_none(change.before),
+                            after: unwrap_or_none(change.after),
+                        })
+                    }
+                }
+
+                match &modified_dataset.compression {
+                    DiffValue::Unchanged(compression) => columns
+                        .push(BpTableColumn::Value(compression.to_string())),
+                    DiffValue::Change(change) => {
+                        columns.push(BpTableColumn::Diff {
+                            before: change.before.to_string(),
+                            after: change.after.to_string(),
+                        })
+                    }
+                }
+
+                todo!()
+            },
+        ));
+
+        // Removed
+        rows.extend(self.datasets_removed.iter().map(|dataset| {
+            BpTableRow::from_strings(BpDiffState::Removed, dataset.as_strings())
+        }));
+
+        // Added
+        rows.extend(self.datasets_inserted.iter().map(|dataset| {
+            BpTableRow::from_strings(BpDiffState::Added, dataset.as_strings())
+        }));
+
+        if rows.is_empty() {
+            return None;
+        }
+
+        Some(BpTable::new(BpDatasetsTableSchema {}, generation, rows))
+    }
+
+    /// Collate all data from each category to produce a single table.
+    ///
+    /// The order is:
+    ///
+    /// 1. Unchanged (if `show_unchanged` flag is set)
     /// 2. Removed
     /// 3. Modified
     /// 4. Added
@@ -152,12 +310,12 @@ impl<'e> ModifiedSled<'e> {
     /// and (b) put changes towards the bottom, so people have to scroll
     /// back less.
     fn zones_table(&self, show_unchanged: bool) -> Option<BpTable> {
-        let DiffValue::Change(zones_generation) = self.zones_generation else {
+        let DiffValue::Change(generation) = self.zones_generation else {
             return None;
         };
         let generation = BpGeneration::Diff {
-            before: Some(*zones_generation.before),
-            after: Some(*zones_generation.after),
+            before: Some(*generation.before),
+            after: Some(*generation.after),
         };
 
         let mut rows = vec![];
@@ -183,21 +341,9 @@ impl<'e> ModifiedSled<'e> {
             let mut columns = vec![];
 
             // kind
-            match &fields.zone_type {
-                DiffValue::Unchanged(zone_type) => {
-                    columns.push(BpTableColumn::Value(
-                        zone_type.kind().report_str().to_string(),
-                    ));
-                }
-                DiffValue::Change(change) => {
-                    // We don't actually allow changing zone types, but if a
-                    // change exists we'll show it.
-                    columns.push(BpTableColumn::Diff {
-                        before: change.before.kind().report_str().to_string(),
-                        after: change.after.kind().report_str().to_string(),
-                    });
-                }
-            }
+            columns.push(BpTableColumn::Value(
+                fields.zone_type.kind().report_str().to_string(),
+            ));
 
             // zone_id
             columns.push(BpTableColumn::Value(zone_id.to_string()));
@@ -216,21 +362,9 @@ impl<'e> ModifiedSled<'e> {
             }
 
             // underlay IP
-            match &fields.zone_type {
-                DiffValue::Unchanged(val) => {
-                    columns.push(BpTableColumn::Value(
-                        val.underlay_ip().to_string(),
-                    ));
-                }
-                DiffValue::Change(change) => {
-                    // We don't actually allow changing underlay IPs, but if a
-                    // change exists we'll show it.
-                    columns.push(BpTableColumn::Diff {
-                        before: change.before.underlay_ip().to_string(),
-                        after: change.after.underlay_ip().to_string(),
-                    });
-                }
-            }
+            columns.push(BpTableColumn::Value(
+                fields.zone_type.underlay_ip().to_string(),
+            ));
 
             BpTableRow::new(BpDiffState::Modified, columns)
         }));
@@ -247,20 +381,6 @@ impl<'e> ModifiedSled<'e> {
         }
 
         Some(BpTable::new(BpOmicronZonesTableSchema {}, generation, rows))
-    }
-}
-
-// TODO: This really shouldn't be a `From` impl, because we want to
-// only optionally include unchanged rows for tables.
-impl<'e> From<&ModifiedSled<'e>> for SledTables {
-    fn from(value: &ModifiedSled<'e>) -> Self {
-        /*
-        let disks = value.disks_table(false);
-        let datasets = value.datasets_table();
-        let zones = value.zones_table();
-        Self { disks, datasets, zones }
-        */
-        todo!()
     }
 }
 
