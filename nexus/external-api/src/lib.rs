@@ -67,6 +67,13 @@ pub const API_VERSION: &str = "20241204.0.0";
         allow_other_tags = false,
         policy = EndpointTagPolicy::ExactlyOne,
         tags = {
+            "affinity" = {
+                description = "Affinity groups give control over instance placement.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/affinity"
+                }
+
+            },
             "disks" = {
                 description = "Virtual disks are used to store instance-local data which includes the operating system.",
                 external_docs = {
