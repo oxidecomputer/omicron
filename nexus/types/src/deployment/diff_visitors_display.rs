@@ -7,6 +7,7 @@
 
 use super::blueprint_diff::{
     display_none_if_empty, display_optional_preserve_downgrade,
+    ClickhouseClusterConfigDiffTables,
 };
 use super::blueprint_display::{
     constants::*, linear_table_modified, linear_table_unchanged,
@@ -1326,6 +1327,7 @@ pub struct BpDiffOutput {
     pub unchanged_sleds: BTreeMap<SledUuid, SledTables>,
     pub modified_sleds: BTreeMap<SledUuid, SledTables>,
     pub metadata: Vec<KvListWithHeading>,
+    pub clickhouse_cluster_config: Option<ClickhouseClusterConfigDiffTables>,
 }
 
 impl BpDiffOutput {
@@ -1417,9 +1419,48 @@ impl BpDiffOutput {
                 })
                 .collect(),
 
-            // TODO: Fill in
-            metadata: { vec![KvListWithHeading::new()] },
+            metadata: acc.metadata.tables(show_unchanged),
+            clickhouse_cluster_config: {
+                match &acc.clickhouse_cluster_config {
+                    DiffValue::Unchanged(val) => {
+                        make_clickhouse_cluster_config_diff_tables(*val, *val)
+                    }
+                    DiffValue::Changed(Change { before, after }) => {
+                        make_clickhouse_cluster_config_diff_tables(
+                            *before, *after,
+                        )
+                    }
+                }
+            },
         }
+    }
+}
+
+// Diff's are still done manually for `ClickhouseClusterConfig`. It's relatively
+// simple compared to other diffs, but we could and probably should change to a
+// visitor/accumulator model for consistency with the rest of the code.
+pub fn make_clickhouse_cluster_config_diff_tables(
+    before: &Option<ClickhouseClusterConfig>,
+    after: &Option<ClickhouseClusterConfig>,
+) -> Option<ClickhouseClusterConfigDiffTables> {
+    match (before, after) {
+        // Before blueprint + after blueprint
+        (Some(before), Some(after)) => Some(
+            ClickhouseClusterConfigDiffTables::diff_blueprints(before, after),
+        ),
+
+        // Before blueprint only
+        (Some(before), None) => Some(
+            ClickhouseClusterConfigDiffTables::removed_from_blueprint(before),
+        ),
+
+        // After blueprint only
+        (None, Some(after)) => {
+            Some(ClickhouseClusterConfigDiffTables::added_to_blueprint(after))
+        }
+
+        // No before or after
+        (None, None) => None,
     }
 }
 
