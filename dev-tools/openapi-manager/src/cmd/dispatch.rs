@@ -66,12 +66,16 @@ pub struct DumpArgs {
     /// The directory to read generated APIs from.
     #[clap(long)]
     dir: Option<Utf8PathBuf>,
+
+    /// Git revision to look for blessed specs
+    #[clap(long)]
+    blessed_revision: Option<String>,
 }
 
 impl DumpArgs {
     fn exec(self, output: &OutputOpts) -> anyhow::Result<ExitCode> {
         let dir = Environment::new(self.dir)?;
-        dump_impl(&dir, output)?;
+        dump_impl(self.blessed_revision.as_deref(), &dir, output)?;
         Ok(ExitCode::SUCCESS)
     }
 }

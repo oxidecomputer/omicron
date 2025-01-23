@@ -3,41 +3,73 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    apis::ManagedApis,
+    apis::{ApiIdent, ManagedApis},
     cmd::output::{headers, OutputOpts, Styles},
     combined::{ApiSpecFileWhich, CheckStale},
     spec::Environment,
+    spec_files_generic::ApiSpecFile,
+    spec_files_git::{BlessedFiles, GitRevision},
     spec_files_local::LocalFiles,
     FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
 };
 use anyhow::{Context, Result};
 use owo_colors::OwoColorize;
-use std::process::ExitCode;
+use semver::Version;
+use std::{collections::BTreeMap, ops::Deref, process::ExitCode};
 
 pub(crate) fn dump_impl(
+    blessed_revision: Option<&str>,
     env: &Environment,
     output: &OutputOpts,
 ) -> anyhow::Result<()> {
     let apis = ManagedApis::all()?;
 
+    // Print information about local files
     let local_dir = &env.openapi_dir;
     println!("Loading local files from {:?}", local_dir);
     let local_files = LocalFiles::load_from_directory(&local_dir, &apis)?;
-    println!("warnings: {}", local_files.warnings.len());
-    for w in &local_files.warnings {
+    dump_structure(
+        &local_files.spec_files,
+        &local_files.errors,
+        &local_files.warnings,
+    );
+
+    if let Some(git_revision) = blessed_revision {
+        println!("Loading blessed files from revision {:?}", git_revision);
+        let revision = GitRevision::from(git_revision.to_owned());
+        let blessed = BlessedFiles::load_from_git_revision(
+            &revision,
+            &env.openapi_dir,
+            &apis,
+        )?;
+        dump_structure(&blessed.spec_files, &blessed.errors, &blessed.warnings);
+    } else {
+        println!("Blessed files skipped (no git revision specified)");
+    }
+
+    Ok(())
+}
+
+fn dump_structure<T: Deref<Target = ApiSpecFile>>(
+    spec_files: &BTreeMap<ApiIdent, BTreeMap<Version, Vec<T>>>,
+    errors: &[anyhow::Error],
+    warnings: &[anyhow::Error],
+) {
+    println!("warnings: {}", warnings.len());
+    for w in warnings {
         println!("    warn: {:#}", w);
     }
-    println!("errors: {}", local_files.errors.len());
-    for e in &local_files.errors {
+    println!("errors: {}", errors.len());
+    for e in errors {
         println!("    error: {:#}", e);
     }
 
-    for (api_ident, version_map) in &local_files.spec_files {
+    for (api_ident, version_map) in spec_files {
         println!("    API: {}", api_ident);
         for (version, files) in version_map {
             println!("        version {}:", version);
             for f in files {
-                let api_spec = &f.0;
+                let api_spec: &ApiSpecFile = f.deref();
                 println!(
                     "            file {} (v{})",
                     api_spec.spec_file_name().path(),
@@ -46,6 +78,4 @@ pub(crate) fn dump_impl(
             }
         }
     }
-
-    Ok(())
 }

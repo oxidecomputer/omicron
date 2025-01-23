@@ -16,6 +16,7 @@ mod apis;
 mod cmd;
 mod combined;
 mod spec_files_generic;
+mod spec_files_git;
 mod spec_files_local;
 mod validation;
 

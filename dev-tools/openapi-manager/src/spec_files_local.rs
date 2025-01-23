@@ -18,9 +18,6 @@ use std::collections::BTreeMap;
 /// Most validation is not done at this point.
 /// XXX-dap be more specific about what has and has not been validated at this
 /// point.
-// XXX-dap move to a separate module?
-// XXX-dap actually, maybe the thing to do here is to have one type with a
-// sentinel generic type paramter, like SpecFileContainer<Local>.
 #[derive(Debug)]
 pub struct LocalFiles {
     pub spec_files:
@@ -130,10 +127,8 @@ impl LocalFiles {
     }
 }
 
-#[derive(Debug)]
-pub struct LocalApiSpecFile(pub ApiSpecFile); // XXX-dap make non-pub
-impl From<ApiSpecFile> for LocalApiSpecFile {
-    fn from(value: ApiSpecFile) -> Self {
-        LocalApiSpecFile(value)
-    }
-}
+pub struct LocalApiSpecFile(ApiSpecFile);
+NewtypeDebug! { () pub struct LocalApiSpecFile(ApiSpecFile); }
+NewtypeDeref! { () pub struct LocalApiSpecFile(ApiSpecFile); }
+NewtypeDerefMut! { () pub struct LocalApiSpecFile(ApiSpecFile); }
+NewtypeFrom! { () pub struct LocalApiSpecFile(ApiSpecFile); }
