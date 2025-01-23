@@ -282,11 +282,26 @@ impl WebhookDeliverator {
                     sent_at: &sent_at,
                 },
             };
-            let body = match serde_json::to_vec(&payload) {
-                Ok(body) => body,
+            // TODO(eliza): signatures!
+            let request = self
+                .client
+                .post(&rx.endpoint)
+                .header(HDR_RX_ID, hdr_rx_id.clone())
+                .header(HDR_DELIVERY_ID, delivery_id.to_string())
+                .header(HDR_EVENT_ID, delivery.event_id.to_string())
+                .header(HDR_EVENT_CLASS, event_class)
+                .json(&payload)
+                // Per [RFD 538 § 4.3.2][1], a 30-second timeout is applied to
+                // each webhook delivery request.
+                //
+                // [1]: https://rfd.shared.oxide.computer/rfd/538#delivery-failure
+                .timeout(Duration::from_secs(30))
+                .build();
+            let request = match request {
+                // We couldn't construct a request for some reason! This one's
+                // our fault, so don't penalize the receiver for it.
                 Err(e) => {
-                    const MSG: &str =
-                        "failed to serialize webhook event payload";
+                    const MSG: &str = "failed to construct webhook request";
                     slog::error!(
                         &opctx.log,
                         "{MSG}";
@@ -301,23 +316,10 @@ impl WebhookDeliverator {
                         .insert(delivery_id, format!("{MSG}: {e}"));
                     continue;
                 }
+                Ok(r) => r,
             };
-            // TODO(eliza): signatures!
-            let request = self
-                .client
-                .post(&rx.endpoint)
-                .header(HDR_RX_ID, hdr_rx_id.clone())
-                .header(HDR_DELIVERY_ID, delivery_id.to_string())
-                .header(HDR_EVENT_ID, delivery.event_id.to_string())
-                .header(HDR_EVENT_CLASS, event_class)
-                .body(body)
-                // Per [RFD 538 § 4.3.2][1], a 30-second timeout is applied to
-                // each webhook delivery request.
-                //
-                // [1]: https://rfd.shared.oxide.computer/rfd/538#delivery-failure
-                .timeout(Duration::from_secs(30));
             let t0 = Instant::now();
-            let result = request.send().await;
+            let result = self.client.execute(request).await;
             let duration = t0.elapsed();
             let (delivery_result, status) = match result {
                 // Builder errors are our fault, that's weird!
