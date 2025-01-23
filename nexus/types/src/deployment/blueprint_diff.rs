@@ -1535,7 +1535,7 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
     }
 }
 
-fn display_none_if_empty(value: &str) -> &str {
+pub fn display_none_if_empty(value: &str) -> &str {
     if value.is_empty() {
         NONE_PARENS
     } else {
@@ -1543,7 +1543,7 @@ fn display_none_if_empty(value: &str) -> &str {
     }
 }
 
-fn display_optional_preserve_downgrade(
+pub fn display_optional_preserve_downgrade(
     value: &Option<CockroachDbPreserveDowngrade>,
 ) -> String {
     match value {

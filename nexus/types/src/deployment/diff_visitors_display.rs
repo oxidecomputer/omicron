@@ -5,6 +5,9 @@
 //! An implementation of a `VisitBlueprint` visitor that is used to construct
 //! displayable output.
 
+use super::blueprint_diff::{
+    display_none_if_empty, display_optional_preserve_downgrade,
+};
 use super::blueprint_display::{
     constants::*, linear_table_modified, linear_table_unchanged,
     BpClickhouseServersTableSchema, BpDatasetsTableSchema, BpDiffState,
@@ -49,7 +52,7 @@ use crate::external_api::views::SledState;
 /// A single value in a diff.
 pub enum DiffValue<'e, T> {
     Unchanged(&'e T),
-    Change(Change<'e, T>),
+    Changed(Change<'e, T>),
 }
 
 pub struct ModifiedZone<'e> {
@@ -139,6 +142,14 @@ pub struct ModifiedSled<'e> {
 }
 
 impl<'e> ModifiedSled<'e> {
+    pub fn tables(&self, show_unchanged: bool) -> SledTables {
+        SledTables {
+            disks: self.disks_table(show_unchanged),
+            datasets: self.datasets_table(show_unchanged),
+            zones: self.zones_table(show_unchanged),
+        }
+    }
+
     /// Collate all data from each category to produce a single table.
     ///
     /// The order is:
@@ -154,7 +165,7 @@ impl<'e> ModifiedSled<'e> {
     /// Note that we don't currently show modified disks for backwards
     /// compatibility, but that is easily added.
     fn disks_table(&self, show_unchanged: bool) -> Option<BpTable> {
-        let DiffValue::Change(generation) = self.disks_generation else {
+        let DiffValue::Changed(generation) = self.disks_generation else {
             return None;
         };
         let generation = BpGeneration::Diff {
@@ -207,7 +218,7 @@ impl<'e> ModifiedSled<'e> {
     /// and (b) put changes towards the bottom, so people have to scroll
     /// back less.
     fn datasets_table(&self, show_unchanged: bool) -> Option<BpTable> {
-        let DiffValue::Change(generation) = self.datasets_generation else {
+        let DiffValue::Changed(generation) = self.datasets_generation else {
             return None;
         };
         let generation = BpGeneration::Diff {
@@ -245,7 +256,7 @@ impl<'e> ModifiedSled<'e> {
                 match &modified_dataset.quota {
                     DiffValue::Unchanged(quota) => columns
                         .push(BpTableColumn::Value(unwrap_or_none(quota))),
-                    DiffValue::Change(change) => {
+                    DiffValue::Changed(change) => {
                         columns.push(BpTableColumn::Diff {
                             before: unwrap_or_none(change.before),
                             after: unwrap_or_none(change.after),
@@ -257,7 +268,7 @@ impl<'e> ModifiedSled<'e> {
                     DiffValue::Unchanged(reservation) => columns.push(
                         BpTableColumn::Value(unwrap_or_none(reservation)),
                     ),
-                    DiffValue::Change(change) => {
+                    DiffValue::Changed(change) => {
                         columns.push(BpTableColumn::Diff {
                             before: unwrap_or_none(change.before),
                             after: unwrap_or_none(change.after),
@@ -268,7 +279,7 @@ impl<'e> ModifiedSled<'e> {
                 match &modified_dataset.compression {
                     DiffValue::Unchanged(compression) => columns
                         .push(BpTableColumn::Value(compression.to_string())),
-                    DiffValue::Change(change) => {
+                    DiffValue::Changed(change) => {
                         columns.push(BpTableColumn::Diff {
                             before: change.before.to_string(),
                             after: change.after.to_string(),
@@ -310,7 +321,7 @@ impl<'e> ModifiedSled<'e> {
     /// and (b) put changes towards the bottom, so people have to scroll
     /// back less.
     fn zones_table(&self, show_unchanged: bool) -> Option<BpTable> {
-        let DiffValue::Change(generation) = self.zones_generation else {
+        let DiffValue::Changed(generation) = self.zones_generation else {
             return None;
         };
         let generation = BpGeneration::Diff {
@@ -353,7 +364,7 @@ impl<'e> ModifiedSled<'e> {
                 DiffValue::Unchanged(val) => {
                     columns.push(BpTableColumn::Value(val.to_string()));
                 }
-                DiffValue::Change(change) => {
+                DiffValue::Changed(change) => {
                     columns.push(BpTableColumn::Diff {
                         before: change.before.to_string(),
                         after: change.after.to_string(),
@@ -447,7 +458,7 @@ impl<'e> MetadataDiff<'e> {
         let blueprint_id = if before.id == after.id {
             DiffValue::Unchanged(&before.id)
         } else {
-            DiffValue::Change(Change { before: &before.id, after: &after.id })
+            DiffValue::Changed(Change { before: &before.id, after: &after.id })
         };
         MetadataDiff {
             blueprint_id,
@@ -469,6 +480,105 @@ impl<'e> MetadataDiff<'e> {
             creator: DiffValue::Unchanged(&before.creator),
             comment: DiffValue::Unchanged(&before.comment),
         }
+    }
+
+    /// Return displayable tables
+    //
+    // The current format is backwards compatible for now
+    pub fn tables(&self, show_unchanged: bool) -> Vec<KvListWithHeading> {
+        let mut tables = vec![];
+
+        // Cockroach related data
+        let mut crdb_rows = vec![];
+        match &self.cockroachdb_fingerprint {
+            DiffValue::Unchanged(val) => {
+                if show_unchanged {
+                    crdb_rows.push(KvPair::new(
+                        BpDiffState::Unchanged,
+                        COCKROACHDB_FINGERPRINT,
+                        linear_table_unchanged(&display_none_if_empty(val)),
+                    ))
+                }
+            }
+            DiffValue::Changed(change) => crdb_rows.push(KvPair::new(
+                BpDiffState::Modified,
+                COCKROACHDB_FINGERPRINT,
+                linear_table_modified(
+                    &display_none_if_empty(change.before),
+                    &display_none_if_empty(change.after),
+                ),
+            )),
+        }
+
+        match &self.cockroachdb_setting_preserve_downgrade {
+            DiffValue::Unchanged(val) => {
+                if show_unchanged {
+                    crdb_rows.push(KvPair::new(
+                        BpDiffState::Unchanged,
+                        COCKROACHDB_PRESERVE_DOWNGRADE,
+                        linear_table_unchanged(
+                            &display_optional_preserve_downgrade(&Some(**val)),
+                        ),
+                    ))
+                }
+            }
+            DiffValue::Changed(change) => crdb_rows.push(KvPair::new(
+                BpDiffState::Modified,
+                COCKROACHDB_PRESERVE_DOWNGRADE,
+                linear_table_modified(
+                    &display_optional_preserve_downgrade(&Some(*change.before)),
+                    &display_optional_preserve_downgrade(&Some(*change.after)),
+                ),
+            )),
+        }
+
+        if !crdb_rows.is_empty() {
+            tables.push(KvListWithHeading::new(COCKROACHDB_HEADING, crdb_rows));
+        }
+
+        // Rest of metadata (Just DNS for backwards compatibility for now)
+        let mut metadata_rows = vec![];
+
+        match &self.internal_dns_version {
+            DiffValue::Unchanged(val) => {
+                if show_unchanged {
+                    metadata_rows.push(KvPair::new(
+                        BpDiffState::Unchanged,
+                        INTERNAL_DNS_VERSION,
+                        linear_table_unchanged(val),
+                    ))
+                }
+            }
+            DiffValue::Changed(change) => metadata_rows.push(KvPair::new(
+                BpDiffState::Modified,
+                INTERNAL_DNS_VERSION,
+                linear_table_modified(change.before, change.after),
+            )),
+        }
+
+        match &self.external_dns_version {
+            DiffValue::Unchanged(val) => {
+                if show_unchanged {
+                    metadata_rows.push(KvPair::new(
+                        BpDiffState::Unchanged,
+                        EXTERNAL_DNS_VERSION,
+                        linear_table_unchanged(val),
+                    ))
+                }
+            }
+            DiffValue::Changed(change) => metadata_rows.push(KvPair::new(
+                BpDiffState::Modified,
+                EXTERNAL_DNS_VERSION,
+                linear_table_modified(change.before, change.after),
+            )),
+        }
+
+        if !metadata_rows.is_empty() {
+            tables
+                .push(KvListWithHeading::new(METADATA_HEADING, metadata_rows));
+        }
+
+        tables
     }
 }
 
@@ -620,7 +730,7 @@ impl<'e> VisitBlueprint<'e> for BlueprintDiffer<'e> {
             .modified_sleds
             .entry(sled_id)
             .or_insert(ModifiedSled::new(&self.before, sled_id));
-        s.sled_state = DiffValue::Change(change);
+        s.sled_state = DiffValue::Changed(change);
     }
 
     fn visit_parent_blueprint_id_change(
@@ -628,7 +738,7 @@ impl<'e> VisitBlueprint<'e> for BlueprintDiffer<'e> {
         _ctx: &mut BpVisitorContext,
         change: Change<'e, Option<BlueprintUuid>>,
     ) {
-        self.acc.metadata.parent_blueprint_id = DiffValue::Change(change);
+        self.acc.metadata.parent_blueprint_id = DiffValue::Changed(change);
     }
 
     fn visit_internal_dns_version_change(
@@ -636,7 +746,7 @@ impl<'e> VisitBlueprint<'e> for BlueprintDiffer<'e> {
         _ctx: &mut BpVisitorContext,
         change: Change<'e, Generation>,
     ) {
-        self.acc.metadata.internal_dns_version = DiffValue::Change(change);
+        self.acc.metadata.internal_dns_version = DiffValue::Changed(change);
     }
 
     fn visit_external_dns_version_change(
@@ -644,7 +754,7 @@ impl<'e> VisitBlueprint<'e> for BlueprintDiffer<'e> {
         _ctx: &mut BpVisitorContext,
         change: Change<'e, Generation>,
     ) {
-        self.acc.metadata.external_dns_version = DiffValue::Change(change);
+        self.acc.metadata.external_dns_version = DiffValue::Changed(change);
     }
 
     fn visit_cockroachdb_fingerprint_change(
@@ -652,7 +762,7 @@ impl<'e> VisitBlueprint<'e> for BlueprintDiffer<'e> {
         _ctx: &mut BpVisitorContext,
         change: Change<'e, String>,
     ) {
-        self.acc.metadata.cockroachdb_fingerprint = DiffValue::Change(change);
+        self.acc.metadata.cockroachdb_fingerprint = DiffValue::Changed(change);
     }
 
     fn visit_cockroachdb_setting_preserve_downgrade_change(
@@ -661,7 +771,7 @@ impl<'e> VisitBlueprint<'e> for BlueprintDiffer<'e> {
         change: Change<'e, CockroachDbPreserveDowngrade>,
     ) {
         self.acc.metadata.cockroachdb_setting_preserve_downgrade =
-            DiffValue::Change(change);
+            DiffValue::Changed(change);
     }
 
     fn visit_creator_change(
@@ -669,7 +779,7 @@ impl<'e> VisitBlueprint<'e> for BlueprintDiffer<'e> {
         _ctx: &mut BpVisitorContext,
         change: Change<'e, String>,
     ) {
-        self.acc.metadata.creator = DiffValue::Change(change);
+        self.acc.metadata.creator = DiffValue::Changed(change);
     }
 
     fn visit_comment_change(
@@ -677,7 +787,7 @@ impl<'e> VisitBlueprint<'e> for BlueprintDiffer<'e> {
         _ctx: &mut BpVisitorContext,
         change: Change<'e, String>,
     ) {
-        self.acc.metadata.comment = DiffValue::Change(change);
+        self.acc.metadata.comment = DiffValue::Changed(change);
     }
 
     fn visit_clickhouse_cluster_config_change(
@@ -686,7 +796,7 @@ impl<'e> VisitBlueprint<'e> for BlueprintDiffer<'e> {
         change: Change<'e, Option<ClickhouseClusterConfig>>,
     ) {
         // TODO: Change this once we have a visitor for `ClickhouseClusterconfig`
-        self.acc.clickhouse_cluster_config = DiffValue::Change(change);
+        self.acc.clickhouse_cluster_config = DiffValue::Changed(change);
     }
 }
 
@@ -708,7 +818,7 @@ impl<'e> VisitBlueprintZonesConfig<'e> for BlueprintDiffer<'e> {
             .modified_sleds
             .entry(sled_id)
             .or_insert(ModifiedSled::new(&self.before, sled_id));
-        s.zones_generation = DiffValue::Change(change);
+        s.zones_generation = DiffValue::Changed(change);
     }
 
     fn visit_zones_insert(
@@ -807,7 +917,7 @@ impl<'e> VisitBlueprintZonesConfig<'e> for BlueprintDiffer<'e> {
         // Safety: We guarantee a `visit_zone_change` callback fired and
         // created the `ModifiedZone` entry.
         s.zones_modified.get_mut(&zone_id).unwrap().disposition =
-            DiffValue::Change(change);
+            DiffValue::Changed(change);
     }
 
     fn visit_zone_filesystem_pool_change(
@@ -838,7 +948,7 @@ impl<'e> VisitBlueprintZonesConfig<'e> for BlueprintDiffer<'e> {
         // Safety: We guarantee a `visit_zone_change` callback fired and
         // created the `ModifiedZone` entry.
         s.zones_modified.get_mut(&zone_id).unwrap().filesystem_pool =
-            DiffValue::Change(change);
+            DiffValue::Changed(change);
     }
 
     fn visit_zone_zone_type_change(
@@ -860,14 +970,10 @@ impl<'e> VisitBlueprintZonesConfig<'e> for BlueprintDiffer<'e> {
             return;
         };
 
-        // Safety: We guarantee a `visit_zone_change` callback fired and
-        // created the `ModifiedSled` entry if it didn't exist.
-        let s = self.acc.modified_sleds.get_mut(&sled_id).unwrap();
-
-        // Safety: We guarantee a `visit_zone_change` callback fired and
-        // created the `ModifiedZone` entry.
-        s.zones_modified.get_mut(&zone_id).unwrap().zone_type =
-            DiffValue::Change(change);
+        self.acc.errors.push(format!(
+            "Zone type not allowed to change. before: {:?}, after: {:?}",
+            change.before, change.after
+        ));
     }
 }
 impl<'e> VisitBlueprintPhysicalDisksConfig<'e> for BlueprintDiffer<'e> {
@@ -888,7 +994,7 @@ impl<'e> VisitBlueprintPhysicalDisksConfig<'e> for BlueprintDiffer<'e> {
             .modified_sleds
             .entry(sled_id)
             .or_insert(ModifiedSled::new(&self.before, sled_id));
-        s.disks_generation = DiffValue::Change(change);
+        s.disks_generation = DiffValue::Changed(change);
     }
 
     fn visit_disks_insert(
@@ -987,7 +1093,7 @@ impl<'e> VisitBlueprintPhysicalDisksConfig<'e> for BlueprintDiffer<'e> {
         // Safety: We guarantee a `visit_disk_change` callback fired and
         // created the `ModifiedZone` entry.
         s.disks_modified.get_mut(&disk_id).unwrap().disposition =
-            DiffValue::Change(change);
+            DiffValue::Changed(change);
     }
 }
 impl<'e> VisitBlueprintDatasetsConfig<'e> for BlueprintDiffer<'e> {
@@ -1008,7 +1114,7 @@ impl<'e> VisitBlueprintDatasetsConfig<'e> for BlueprintDiffer<'e> {
             .modified_sleds
             .entry(sled_id)
             .or_insert(ModifiedSled::new(&self.before, sled_id));
-        s.datasets_generation = DiffValue::Change(change);
+        s.datasets_generation = DiffValue::Changed(change);
     }
 
     fn visit_datasets_insert(
@@ -1107,7 +1213,7 @@ impl<'e> VisitBlueprintDatasetsConfig<'e> for BlueprintDiffer<'e> {
         // Safety: We guarantee a `visit_dataset_change` callback fired and
         // created the `ModifiedDataset` entry.
         s.datasets_modified.get_mut(&dataset_id).unwrap().disposition =
-            DiffValue::Change(change);
+            DiffValue::Changed(change);
     }
 
     fn visit_dataset_quota_change(
@@ -1137,7 +1243,7 @@ impl<'e> VisitBlueprintDatasetsConfig<'e> for BlueprintDiffer<'e> {
         // Safety: We guarantee a `visit_dataset_change` callback fired and
         // created the `ModifiedDataset` entry.
         s.datasets_modified.get_mut(&dataset_id).unwrap().quota =
-            DiffValue::Change(change);
+            DiffValue::Changed(change);
     }
 
     fn visit_dataset_reservation_change(
@@ -1168,7 +1274,7 @@ impl<'e> VisitBlueprintDatasetsConfig<'e> for BlueprintDiffer<'e> {
         // Safety: We guarantee a `visit_dataset_change` callback fired and
         // created the `ModifiedDataset` entry.
         s.datasets_modified.get_mut(&dataset_id).unwrap().reservation =
-            DiffValue::Change(change);
+            DiffValue::Changed(change);
     }
 
     fn visit_dataset_compression_change(
@@ -1199,7 +1305,7 @@ impl<'e> VisitBlueprintDatasetsConfig<'e> for BlueprintDiffer<'e> {
         // Safety: We guarantee a `visit_dataset_change` callback fired and
         // created the `ModifiedDataset` entry.
         s.datasets_modified.get_mut(&dataset_id).unwrap().compression =
-            DiffValue::Change(change);
+            DiffValue::Changed(change);
     }
 }
 
@@ -1219,14 +1325,15 @@ pub struct BpDiffOutput {
     pub removed_sleds: BTreeMap<SledUuid, SledTables>,
     pub unchanged_sleds: BTreeMap<SledUuid, SledTables>,
     pub modified_sleds: BTreeMap<SledUuid, SledTables>,
+    pub metadata: Vec<KvListWithHeading>,
 }
 
-impl<'e> From<&BpDiffAccumulator<'e>> for BpDiffOutput {
-    fn from(value: &BpDiffAccumulator<'e>) -> Self {
+impl BpDiffOutput {
+    pub fn new(acc: &BpDiffAccumulator, show_unchanged: bool) -> BpDiffOutput {
         BpDiffOutput {
-            errors: value.errors.clone(),
-            warnings: value.warnings.clone(),
-            added_sleds: value
+            errors: acc.errors.clone(),
+            warnings: acc.warnings.clone(),
+            added_sleds: acc
                 .added_sleds
                 .iter()
                 .map(|(sled_id, insert)| {
@@ -1249,7 +1356,7 @@ impl<'e> From<&BpDiffAccumulator<'e>> for BpDiffOutput {
                     )
                 })
                 .collect(),
-            removed_sleds: value
+            removed_sleds: acc
                 .removed_sleds
                 .iter()
                 .map(|(sled_id, remove)| {
@@ -1272,34 +1379,46 @@ impl<'e> From<&BpDiffAccumulator<'e>> for BpDiffOutput {
                     )
                 })
                 .collect(),
-            unchanged_sleds: value
-                .unchanged_sleds
-                .iter()
-                .map(|sled_id| {
-                    (
-                        *sled_id,
-                        SledTables {
-                            disks: disks_table(
-                                BpDiffState::Unchanged,
-                                value.before.blueprint_disks.get(sled_id),
-                            ),
-                            datasets: datasets_table(
-                                BpDiffState::Unchanged,
-                                value.before.blueprint_datasets.get(sled_id),
-                            ),
-                            zones: zones_table(
-                                BpDiffState::Unchanged,
-                                value.before.blueprint_zones.get(sled_id),
-                            ),
-                        },
-                    )
-                })
-                .collect(),
-            modified_sleds: value
+            unchanged_sleds: {
+                if show_unchanged {
+                    acc.unchanged_sleds
+                        .iter()
+                        .map(|sled_id| {
+                            (
+                                *sled_id,
+                                SledTables {
+                                    disks: disks_table(
+                                        BpDiffState::Unchanged,
+                                        acc.before.blueprint_disks.get(sled_id),
+                                    ),
+                                    datasets: datasets_table(
+                                        BpDiffState::Unchanged,
+                                        acc.before
+                                            .blueprint_datasets
+                                            .get(sled_id),
+                                    ),
+                                    zones: zones_table(
+                                        BpDiffState::Unchanged,
+                                        acc.before.blueprint_zones.get(sled_id),
+                                    ),
+                                },
+                            )
+                        })
+                        .collect()
+                } else {
+                    BTreeMap::new()
+                }
+            },
+            modified_sleds: acc
                 .modified_sleds
                 .iter()
-                .map(|(sled_id, modified)| (*sled_id, modified.into()))
+                .map(|(sled_id, modified)| {
+                    (*sled_id, modified.tables(show_unchanged))
+                })
                 .collect(),
+
+            // TODO: Fill in
+            metadata: { vec![KvListWithHeading::new()] },
         }
     }
 }
