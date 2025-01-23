@@ -571,7 +571,7 @@ mod test {
             sim::SimMode::Auto,
             None,
             None,
-            Some(vec![]),
+            sim::ZpoolConfig::None,
         );
 
         let agent =

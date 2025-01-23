@@ -1751,7 +1751,7 @@ pub async fn start_sled_agent(
         sim_mode,
         Some(nexus_address),
         Some(update_directory),
-        None,
+        sim::ZpoolConfig::None,
     );
     let server =
         sim::Server::start(&config, &log, true, simulated_upstairs, sled_index)
