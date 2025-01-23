@@ -570,6 +570,7 @@ mod test {
             let sled = SledUpdate::new(
                 *self.sled.as_untyped_uuid(),
                 "[::1]:0".parse().unwrap(),
+                0,
                 SledBaseboard {
                     serial_number: format!(
                         "test-{}",

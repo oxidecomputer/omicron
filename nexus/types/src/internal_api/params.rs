@@ -36,6 +36,9 @@ pub struct SledAgentInfo {
     /// The address of the sled agent's API endpoint
     pub sa_address: SocketAddrV6,
 
+    /// The port of the Repo Depot API endpoint, on the same IP as `sa_address`
+    pub repo_depot_port: u16,
+
     /// Describes the responsibilities of the sled
     pub role: SledRole,
 

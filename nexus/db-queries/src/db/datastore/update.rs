@@ -12,18 +12,20 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::error::{public_error_from_diesel, ErrorHandler};
 use crate::db::model::SemverVersion;
+use crate::db::pagination::paginated;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use nexus_db_model::{ArtifactHash, TufArtifact, TufRepo, TufRepoDescription};
 use omicron_common::api::external::{
-    self, CreateResult, LookupResult, LookupType, ResourceType,
-    TufRepoInsertStatus,
+    self, CreateResult, DataPageParams, ListResultVec, LookupResult,
+    LookupType, ResourceType, TufRepoInsertStatus,
 };
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
 use swrite::{swrite, SWrite};
+use uuid::Uuid;
 
 /// The return value of [`DataStore::update_tuf_repo_insert`].
 ///
@@ -139,6 +141,23 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         Ok(TufRepoDescription { repo, artifacts })
+    }
+
+    /// Returns the list of all TUF repo artifacts known to the system.
+    pub async fn update_tuf_artifact_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<TufArtifact> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        use db::schema::tuf_artifact::dsl;
+
+        paginated(dsl::tuf_artifact, dsl::id, pagparams)
+            .select(TufArtifact::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }
 

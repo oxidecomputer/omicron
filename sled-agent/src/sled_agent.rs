@@ -585,11 +585,16 @@ impl SledAgent {
             )
             .await?;
 
+        let repo_depot = ArtifactStore::new(&log, storage_manager.clone())
+            .start(sled_address, &config.dropshot)
+            .await?;
+
         // Spawn a background task for managing notifications to nexus
         // about this sled-agent.
         let nexus_notifier_input = NexusNotifierInput {
             sled_id: request.body.id,
             sled_address: get_sled_address(request.body.subnet),
+            repo_depot_port: repo_depot.local_addr().port(),
             nexus_client: nexus_client.clone(),
             hardware: long_running_task_handles.hardware_manager.clone(),
             vmm_reservoir_manager: vmm_reservoir_manager.clone(),
@@ -610,10 +615,6 @@ impl SledAgent {
             metrics_manager.request_queue(),
             log.new(o!("component" => "ProbeManager")),
         );
-
-        let repo_depot = ArtifactStore::new(&log, storage_manager.clone())
-            .start(sled_address, &config.dropshot)
-            .await?;
 
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {

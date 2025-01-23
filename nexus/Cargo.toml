@@ -7,6 +7,10 @@ license = "MPL-2.0"
 [lints]
 workspace = true
 
+[features]
+# Set by omicron-package based on the target configuration.
+rack-topology-single-sled = []
+
 [build-dependencies]
 omicron-rpaths.workspace = true
 

@@ -770,6 +770,7 @@ mod tests {
                 let sled = SledUpdate::new(
                     sled_id.into_untyped_uuid(),
                     "[::1]:0".parse().unwrap(),
+                    0,
                     SledBaseboard {
                         serial_number: format!("test-{sled_id}"),
                         part_number: "test-sled".to_string(),

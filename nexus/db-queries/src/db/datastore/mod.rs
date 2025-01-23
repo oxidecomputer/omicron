@@ -473,6 +473,7 @@ mod test {
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::external_api::params;
     use nexus_types::silo::DEFAULT_SILO_ID;
+    use omicron_common::address::REPO_DEPOT_PORT;
     use omicron_common::api::external::{
         ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
@@ -719,12 +720,14 @@ mod test {
             0,
             0,
         );
+        let bogus_repo_depot_port = 8081;
         let rack_id = Uuid::new_v4();
         let sled_id = SledUuid::new_v4();
 
         let sled_update = SledUpdate::new(
             sled_id.into_untyped_uuid(),
             bogus_addr,
+            bogus_repo_depot_port,
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id,
@@ -1727,6 +1730,7 @@ mod test {
         let sled1 = db::model::SledUpdate::new(
             sled1_id,
             addr1,
+            REPO_DEPOT_PORT,
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id,
@@ -1739,6 +1743,7 @@ mod test {
         let sled2 = db::model::SledUpdate::new(
             sled2_id,
             addr2,
+            REPO_DEPOT_PORT,
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id,

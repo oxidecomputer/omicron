@@ -51,6 +51,9 @@ use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
+use nexus_types::internal_api::background::TufArtifactReplicationCounters;
+use nexus_types::internal_api::background::TufArtifactReplicationRequest;
+use nexus_types::internal_api::background::TufArtifactReplicationStatus;
 use nexus_types::inventory::BaseboardId;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
@@ -942,6 +945,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "service_firewall_rule_propagation" => {
             print_task_service_firewall_rule_propagation(details);
+        }
+        "tuf_artifact_replication" => {
+            print_task_tuf_artifact_replication(details);
         }
         _ => {
             println!(
@@ -2022,6 +2028,69 @@ fn print_task_service_firewall_rule_propagation(details: &serde_json::Value) {
             eprintln!("    unexpected return value from task: {:?}", val)
         }
     };
+}
+
+fn print_task_tuf_artifact_replication(details: &serde_json::Value) {
+    fn print_counters(counters: TufArtifactReplicationCounters) {
+        const ROWS: &[&str] = &[
+            "list ok:",
+            "list err:",
+            "put ok:",
+            "put err:",
+            "copy ok:",
+            "copy err:",
+            "delete ok:",
+            "delete err:",
+        ];
+        const WIDTH: usize = const_max_len(ROWS);
+
+        for (label, value) in ROWS.iter().zip([
+            counters.list_ok,
+            counters.list_err,
+            counters.put_ok,
+            counters.put_err,
+            counters.copy_ok,
+            counters.copy_err,
+            counters.delete_ok,
+            counters.delete_err,
+        ]) {
+            println!("      {label:<WIDTH$} {value:>3}");
+        }
+    }
+
+    match serde_json::from_value::<TufArtifactReplicationStatus>(
+        details.clone(),
+    ) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            println!("    request ringbuf:");
+            for TufArtifactReplicationRequest {
+                time,
+                target_sled,
+                operation,
+                error,
+            } in status.request_debug_ringbuf.iter()
+            {
+                println!("      - target sled: {target_sled}");
+                println!("        operation: {operation:?}");
+                println!(
+                    "        at: {}",
+                    time.to_rfc3339_opts(SecondsFormat::Secs, true)
+                );
+                if let Some(error) = error {
+                    println!("        error: {error}")
+                }
+            }
+            println!("    last run:");
+            print_counters(status.last_run_counters);
+            println!("    lifetime:");
+            print_counters(status.lifetime_counters);
+            println!("    local repos: {}", status.local_repos);
+        }
+    }
 }
 
 /// Summarizes an `ActivationReason`
