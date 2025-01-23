@@ -21,10 +21,34 @@ use diesel::prelude::*;
 use diesel::result::OptionalExtension;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::WebhookDispatched;
+use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
-use omicron_uuid_kinds::{GenericUuid, WebhookReceiverUuid};
+use omicron_uuid_kinds::{GenericUuid, WebhookEventUuid, WebhookReceiverUuid};
 
 impl DataStore {
+    pub async fn webhook_event_create(
+        &self,
+        opctx: &OpContext,
+        id: WebhookEventUuid,
+        event_class: String,
+        event: serde_json::Value,
+    ) -> CreateResult<WebhookEvent> {
+        let conn = self.pool_connection_authorized(&opctx).await?;
+        let now =
+            diesel::dsl::now.into_sql::<diesel::pg::sql_types::Timestamptz>();
+        diesel::insert_into(event_dsl::webhook_event)
+            .values((
+                event_dsl::event_class.eq(event_class),
+                event_dsl::id.eq(id.into_untyped_uuid()),
+                event_dsl::time_created.eq(now),
+                event_dsl::event.eq(event),
+            ))
+            .returning(WebhookEvent::as_returning())
+            .get_result_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     pub async fn webhook_event_dispatch_next(
         &self,
         opctx: &OpContext,
@@ -48,7 +72,8 @@ impl DataStore {
                     .order_by(event_dsl::time_created.asc())
                     .limit(1)
                     .for_update()
-                    .skip_locked()
+                    // TODO(eliza): AGH SKIP LOCKED IS NOT IMPLEMENTED IN CRDB...
+                    // .skip_locked()
                     .select(WebhookEvent::as_select())
                     .get_result_async(&conn)
                     .await

@@ -4708,6 +4708,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_receiver (
     probes_enabled BOOL NOT NULL
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_webhook_rxs_by_id
+ON omicron.public.webhook_receiver (id)
+WHERE
+    time_deleted IS NULL;
+
 CREATE TABLE IF NOT EXISTS omicron.public.webhook_rx_secret (
     -- UUID of the webhook receiver (foreign key into
     -- `omicron.public.webhook_rx`)

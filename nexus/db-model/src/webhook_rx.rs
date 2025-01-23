@@ -12,7 +12,6 @@ use crate::Generation;
 use crate::WebhookDelivery;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
-use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{

@@ -1,0 +1,5 @@
+{
+    "rust-analyzer.check.features": [],
+    "rust-analyzer.check.command": "check",
+    "rust-analyzer.completion.autoimport.enable": false
+}

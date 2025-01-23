@@ -6389,7 +6389,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let receiver =
                 nexus.webhook_receiver_create(&opctx, params).await?;
-            Ok(HttpResponseCreated(views::Webhook::try_from(webhook)?))
+            Ok(HttpResponseCreated(views::Webhook::try_from(receiver)?))
         };
         apictx
             .context

@@ -6,10 +6,13 @@
 
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::db::model::WebhookEvent;
 use nexus_db_queries::db::model::WebhookReceiverConfig;
 use nexus_types::external_api::params;
 use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
+use omicron_uuid_kinds::WebhookEventUuid;
 use omicron_uuid_kinds::WebhookReceiverUuid;
 
 pub const EVENT_CLASSES: &[&str] = &["test"];
@@ -36,6 +39,40 @@ impl super::Nexus {
     ) -> CreateResult<WebhookReceiverConfig> {
         // TODO(eliza): validate endpoint URI; reject underlay network IPs for
         // SSRF prevention...
-        self.datastore().webhook_rx_create(&opctx, params, event_classes).await
+        self.datastore().webhook_rx_create(&opctx, params, EVENT_CLASSES).await
+    }
+
+    pub async fn webhook_event_publish(
+        &self,
+        opctx: &OpContext,
+        event_class: String,
+        event: serde_json::Value,
+    ) -> Result<WebhookEvent, Error> {
+        if !EVENT_CLASSES.contains(&event_class.as_str()) {
+            return Err(Error::InternalError {
+                internal_message: format!(
+                    "unknown webhook event class {event_class:?}"
+                ),
+            });
+        }
+
+        let id = WebhookEventUuid::new_v4();
+        let event = self
+            .datastore()
+            .webhook_event_create(opctx, id, event_class, event)
+            .await?;
+        slog::debug!(
+            &opctx.log,
+            "published webhook event";
+            "event_id" => ?id,
+            "event_class" => ?event.event_class,
+            "time_created" => ?event.time_created,
+        );
+
+        // Once the event has been isnerted, activate the dispatcher task to
+        // ensure its propagated to receivers.
+        self.background_tasks.task_webhook_dispatcher.activate();
+
+        Ok(event)
     }
 }
