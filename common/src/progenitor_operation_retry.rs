@@ -19,11 +19,11 @@ pub enum ProgenitorOperationRetryError<E> {
     Gone,
 
     /// Attempting to check if the retry loop should be stopped failed
-    #[error("failed to determine whether remote server is gone: {0}")]
+    #[error("failed to determine whether remote server is gone")]
     GoneCheckError(#[source] Error),
 
     /// The retry loop progenitor operation saw a permanent client error
-    #[error("permanent error: {0}")]
+    #[error("permanent error")]
     ProgenitorError(#[source] progenitor_client::Error<E>),
 }
 
