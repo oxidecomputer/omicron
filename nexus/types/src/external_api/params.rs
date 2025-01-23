@@ -10,12 +10,11 @@ use base64::Engine;
 use chrono::{DateTime, Utc};
 use http::Uri;
 use omicron_common::api::external::{
-    AddressLotKind, AffinityGroupMember, AffinityPolicy, AllowedSourceIps,
-    AntiAffinityGroupMember, BfdMode, BgpPeer, ByteCount, FailureDomain,
-    Hostname, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    InstanceAutoRestartPolicy, InstanceCpuCount, LinkFec, LinkSpeed, Name,
-    NameOrId, PaginationOrder, RouteDestination, RouteTarget, SemverVersion,
-    TxEqConfig, UserId,
+    AddressLotKind, AffinityPolicy, AllowedSourceIps, BfdMode, BgpPeer,
+    ByteCount, FailureDomain, Hostname, IdentityMetadataCreateParams,
+    IdentityMetadataUpdateParams, InstanceAutoRestartPolicy, InstanceCpuCount,
+    LinkFec, LinkSpeed, Name, NameOrId, PaginationOrder, RouteDestination,
+    RouteTarget, SemverVersion, TxEqConfig, UserId,
 };
 use omicron_common::disk::DiskVariant;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
@@ -821,16 +820,16 @@ pub struct AffinityGroupCreate {
     pub failure_domain: FailureDomain,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct AffinityGroupMemberPath {
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct AffinityInstanceGroupMemberPath {
     pub affinity_group: NameOrId,
-    pub member: AffinityGroupMember,
+    pub instance: Uuid,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct AntiAffinityGroupMemberPath {
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct AntiAffinityInstanceGroupMemberPath {
     pub anti_affinity_group: NameOrId,
-    pub member: AntiAffinityGroupMember,
+    pub instance: Uuid,
 }
 
 /// Create-time parameters for an `AntiAffinityGroup`

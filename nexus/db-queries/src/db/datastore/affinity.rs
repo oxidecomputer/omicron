@@ -1077,10 +1077,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn affinity_group_membership_add_list_remove() {
+    async fn affinity_group_member_instanceship_add_list_remove() {
         // Setup
-        let logctx =
-            dev::test_setup_log("affinity_group_membership_add_list_remove");
+        let logctx = dev::test_setup_log(
+            "affinity_group_member_instanceship_add_list_remove",
+        );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -1166,10 +1167,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn affinity_group_membership_add_remove_instance_with_vmm() {
+    async fn affinity_group_member_instanceship_add_remove_instance_with_vmm() {
         // Setup
         let logctx = dev::test_setup_log(
-            "affinity_group_membership_add_remove_instance_with_vmm",
+            "affinity_group_member_instanceship_add_remove_instance_with_vmm",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
@@ -1432,10 +1433,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn affinity_group_membership_for_deleted_objects() {
+    async fn affinity_group_member_instanceship_for_deleted_objects() {
         // Setup
         let logctx = dev::test_setup_log(
-            "affinity_group_membership_for_deleted_objects",
+            "affinity_group_member_instanceship_for_deleted_objects",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
@@ -1588,10 +1589,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn affinity_group_membership_idempotency() {
+    async fn affinity_group_member_instanceship_idempotency() {
         // Setup
         let logctx = dev::test_setup_log(
-            "affinity_group_membership_for_deleted_objects",
+            "affinity_group_member_instanceship_for_deleted_objects",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());

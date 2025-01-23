@@ -2565,7 +2565,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             };
             let group_lookup =
                 nexus.affinity_group_lookup(&opctx, group_selector)?;
-            let affinity_group_members = nexus
+            let affinity_group_member_instances = nexus
                 .affinity_group_member_list(
                     &opctx,
                     &group_lookup,
@@ -2574,7 +2574,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .await?;
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
-                affinity_group_members,
+                affinity_group_member_instances,
                 &marker_for_id,
             )?))
         };
@@ -2585,10 +2585,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn affinity_group_member_add(
+    async fn affinity_group_member_instance_add(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::OptionalProjectSelector>,
-        path_params: Path<params::AffinityGroupMemberPath>,
+        path_params: Path<params::AffinityInstanceGroupMemberPath>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -2603,8 +2603,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             };
             let group_lookup =
                 nexus.affinity_group_lookup(&opctx, group_selector)?;
+            let instance = AffinityGroupMember::Instance(path.instance);
             nexus
-                .affinity_group_member_add(&opctx, &group_lookup, path.member)
+                .affinity_group_member_add(&opctx, &group_lookup, instance)
                 .await?;
             Ok(HttpResponseUpdatedNoContent {})
         };
@@ -2615,10 +2616,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn affinity_group_member_delete(
+    async fn affinity_group_member_instance_delete(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::OptionalProjectSelector>,
-        path_params: Path<params::AffinityGroupMemberPath>,
+        path_params: Path<params::AffinityInstanceGroupMemberPath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -2633,12 +2634,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             };
             let group_lookup =
                 nexus.affinity_group_lookup(&opctx, group_selector)?;
+            let instance = AffinityGroupMember::Instance(path.instance);
             nexus
-                .affinity_group_member_delete(
-                    &opctx,
-                    &group_lookup,
-                    path.member,
-                )
+                .affinity_group_member_delete(&opctx, &group_lookup, instance)
                 .await?;
             Ok(HttpResponseDeleted())
         };
@@ -2785,10 +2783,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn anti_affinity_group_member_add(
+    async fn anti_affinity_group_member_instance_add(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::OptionalProjectSelector>,
-        path_params: Path<params::AntiAffinityGroupMemberPath>,
+        path_params: Path<params::AntiAffinityInstanceGroupMemberPath>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -2803,12 +2801,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             };
             let group_lookup =
                 nexus.anti_affinity_group_lookup(&opctx, group_selector)?;
+            let instance = AntiAffinityGroupMember::Instance(path.instance);
             nexus
-                .anti_affinity_group_member_add(
-                    &opctx,
-                    &group_lookup,
-                    path.member,
-                )
+                .anti_affinity_group_member_add(&opctx, &group_lookup, instance)
                 .await?;
             Ok(HttpResponseUpdatedNoContent {})
         };
@@ -2819,10 +2814,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn anti_affinity_group_member_delete(
+    async fn anti_affinity_group_member_instance_delete(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::OptionalProjectSelector>,
-        path_params: Path<params::AntiAffinityGroupMemberPath>,
+        path_params: Path<params::AntiAffinityInstanceGroupMemberPath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -2837,11 +2832,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
             };
             let group_lookup =
                 nexus.anti_affinity_group_lookup(&opctx, group_selector)?;
+            let instance = AntiAffinityGroupMember::Instance(path.instance);
             nexus
                 .anti_affinity_group_member_delete(
                     &opctx,
                     &group_lookup,
-                    path.member,
+                    instance,
                 )
                 .await?;
             Ok(HttpResponseDeleted())
