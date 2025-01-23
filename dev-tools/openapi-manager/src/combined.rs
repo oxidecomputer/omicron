@@ -243,7 +243,7 @@ impl<'a> CombinedApiVersion<'a> {
         let summary = DocumentSummary::new(&openapi);
 
         let api_spec = ApiSpecFile::for_contents(
-            self.spec_file_name,
+            self.spec_file_name.clone(),
             openapi,
             freshly_generated,
         )?;

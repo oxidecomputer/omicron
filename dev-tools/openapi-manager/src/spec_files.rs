@@ -19,12 +19,14 @@ use thiserror::Error;
 /// XXX-dap be more specific about what has and has not been validated at this
 /// point.
 // XXX-dap move to a separate module?
+// XXX-dap actually, maybe the thing to do here is to have one type with a
+// sentinel generic type paramter, like SpecFileContainer<Local>.
 #[derive(Debug)]
 pub struct LocalFiles {
-    spec_files:
+    pub spec_files:
         BTreeMap<ApiIdent, BTreeMap<semver::Version, Vec<LocalApiSpecFile>>>,
-    errors: Vec<anyhow::Error>,
-    warnings: Vec<anyhow::Error>,
+    pub errors: Vec<anyhow::Error>,
+    pub warnings: Vec<anyhow::Error>,
 }
 
 impl LocalFiles {
@@ -129,7 +131,7 @@ impl LocalFiles {
 }
 
 #[derive(Debug)]
-pub struct LocalApiSpecFile(ApiSpecFile);
+pub struct LocalApiSpecFile(pub ApiSpecFile); // XXX-dap make non-pub
 impl From<ApiSpecFile> for LocalApiSpecFile {
     fn from(value: ApiSpecFile) -> Self {
         LocalApiSpecFile(value)
@@ -274,6 +276,7 @@ impl ApiSpecFileName {
 #[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
 enum ApiSpecFileNameKind {
     Lockstep,
+    // XXX-dap label -> hash, and it should be validated
     Versioned { version: semver::Version, label: String },
 }
 
@@ -298,54 +301,37 @@ pub struct ApiSpecFile {
 }
 
 impl ApiSpecFile {
-    fn load(
-        name: ApiSpecFileName,
-        path: &Utf8Path,
+    pub fn for_contents(
+        spec_file_name: ApiSpecFileName,
+        openapi: OpenAPI,
+        contents_buf: Vec<u8>,
     ) -> anyhow::Result<ApiSpecFile> {
-        let contents_buf = fs_err::read(path)
-            .with_context(|| format!("read file {:?}", path))?;
-        let contents: OpenAPI = serde_json::from_slice(&contents_buf)
-            .with_context(|| format!("parse file {:?}", path))?;
         let parsed_version: semver::Version =
-            contents.info.version.parse().with_context(|| {
-                format!("version in {:?} was not a semver", path)
+            openapi.info.version.parse().with_context(|| {
+                format!(
+                    "file {:?}: parsing version from generated spec",
+                    spec_file_name.path()
+                )
             })?;
 
-        if let ApiSpecFileNameKind::Versioned { version, label: _ } = &name.kind
+        if let ApiSpecFileNameKind::Versioned { version, label: _ } =
+            &spec_file_name.kind
         {
             if *version != parsed_version {
                 bail!(
                     "file {:?}: version in the file ({:?}) differs from \
                      the one in the filename",
-                    path,
+                    spec_file_name.path(),
                     parsed_version
                 );
             }
         }
 
         Ok(ApiSpecFile {
-            name,
-            contents: DebugIgnore(contents),
-            contents_buf: DebugIgnore(contents_buf),
-            version: parsed_version,
-        })
-    }
-
-    pub fn for_contents(
-        spec_file_name: &ApiSpecFileName,
-        openapi: OpenAPI,
-        contents_buf: Vec<u8>,
-    ) -> anyhow::Result<ApiSpecFile> {
-        let version: semver::Version = openapi
-            .info
-            .version
-            .parse()
-            .context("parsing version from generated spec")?;
-        Ok(ApiSpecFile {
-            name: spec_file_name.clone(),
+            name: spec_file_name,
             contents: DebugIgnore(openapi),
             contents_buf: DebugIgnore(contents_buf),
-            version,
+            version: parsed_version,
         })
     }
 
@@ -404,7 +390,9 @@ impl<'a> ApiSpecFilesBuilder<'a> {
                 None
             }
             Err(error @ BadLockstepFileName::NotLockstep) => {
-                self.load_error(anyhow!(error));
+                self.load_error(
+                    anyhow!(error).context(format!("file {:?}", basename)),
+                );
                 None
             }
             Ok(file_name) => Some(file_name),
@@ -451,7 +439,7 @@ impl<'a> ApiSpecFilesBuilder<'a> {
         let maybe_file = serde_json::from_slice(&contents)
             .with_context(|| format!("parse {:?}", file_name.path()))
             .and_then(|parsed| {
-                ApiSpecFile::for_contents(&file_name, parsed, contents)
+                ApiSpecFile::for_contents(file_name, parsed, contents)
             });
         match maybe_file {
             Ok(file) => {

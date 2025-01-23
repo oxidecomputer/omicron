@@ -10,8 +10,8 @@ use clap::{Args, Parser, Subcommand};
 
 use crate::{
     cmd::{
-        check::check_impl, generate::generate_impl, list::list_impl,
-        new_check::new_check_impl, output::OutputOpts,
+        check::check_impl, dump::dump_impl, generate::generate_impl,
+        list::list_impl, new_check::new_check_impl, output::OutputOpts,
     },
     spec::Environment,
 };
@@ -31,6 +31,7 @@ pub struct App {
 impl App {
     pub fn exec(self) -> Result<ExitCode> {
         match self.command {
+            Command::Dump(args) => args.exec(&self.output_opts),
             Command::List(args) => args.exec(&self.output_opts),
             Command::Generate(args) => args.exec(&self.output_opts),
             Command::Check(args) => args.exec(&self.output_opts),
@@ -41,6 +42,9 @@ impl App {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Dump debug information about everything the tool knows
+    Dump(DumpArgs),
+
     /// List managed APIs.
     ///
     /// Returns information purely from code without consulting JSON files on
@@ -55,6 +59,21 @@ pub enum Command {
 
     /// Check that APIs are up-to-date.
     NewCheck(NewCheckArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct DumpArgs {
+    /// The directory to read generated APIs from.
+    #[clap(long)]
+    dir: Option<Utf8PathBuf>,
+}
+
+impl DumpArgs {
+    fn exec(self, output: &OutputOpts) -> anyhow::Result<ExitCode> {
+        let dir = Environment::new(self.dir)?;
+        dump_impl(&dir, output)?;
+        Ok(ExitCode::SUCCESS)
+    }
 }
 
 #[derive(Debug, Args)]
