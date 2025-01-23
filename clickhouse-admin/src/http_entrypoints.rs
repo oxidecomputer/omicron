@@ -57,9 +57,14 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         // file generation.
         if let Some(current) = current_generation {
             if current > incoming_generation {
-                return Err(HttpError::for_internal_error(
-                    "current generation is greater than incoming generation"
-                        .to_string(),
+                return Err(HttpError::for_client_error(
+                    Some(String::from("Conflict")),
+                    StatusCode::CONFLICT,
+                    format!(
+                        "current generation '{}' is greater than incoming generation '{}'",
+                        current,
+                        incoming_generation,
+                    )
                 ));
             }
         };
@@ -181,9 +186,14 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
         // file generation.
         if let Some(current) = current_generation {
             if current > incoming_generation {
-                return Err(HttpError::for_internal_error(
-                    "current generation is greater than incoming generation"
-                        .to_string(),
+                return Err(HttpError::for_client_error(
+                    Some(String::from("Conflict")),
+                    StatusCode::CONFLICT,
+                    format!(
+                        "current generation '{}' is greater than incoming generation '{}'",
+                        current,
+                        incoming_generation,
+                    )
                 ));
             }
         };
