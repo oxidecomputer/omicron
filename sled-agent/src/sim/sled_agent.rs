@@ -174,7 +174,7 @@ impl SledAgent {
             updates: UpdateManager::new(config.updates.clone()),
             nexus_address,
             nexus_client,
-            simulated_upstairs: simulated_upstairs.clone(),
+            simulated_upstairs,
             v2p_mappings: Mutex::new(HashSet::new()),
             external_ips: Mutex::new(HashMap::new()),
             vpc_routes: Mutex::new(HashMap::new()),
