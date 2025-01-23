@@ -42,10 +42,10 @@ pub struct BlueprintDiff<'e> {
     pub after: &'e Blueprint,
     pub errors: Vec<String>,
     pub warnings: Vec<String>,
-    pub added_sleds: BTreeMap<SledUuid, SledInsert<'e>>,
-    pub removed_sleds: BTreeMap<SledUuid, SledRemove<'e>>,
-    pub unchanged_sleds: BTreeSet<SledUuid>,
-    pub modified_sleds: BTreeMap<SledUuid, ModifiedSled<'e>>,
+    pub sleds_added: BTreeMap<SledUuid, SledInsert<'e>>,
+    pub sleds_removed: BTreeMap<SledUuid, SledRemove<'e>>,
+    pub sleds_unchanged: BTreeSet<SledUuid>,
+    pub sleds_modified: BTreeMap<SledUuid, ModifiedSled<'e>>,
     pub metadata: MetadataDiff<'e>,
 
     // TODO: Change once we have a visitor for `ClickhouseClusterConfig`
@@ -63,10 +63,10 @@ impl<'e> BlueprintDiff<'e> {
             after,
             errors: vec![],
             warnings: vec![],
-            added_sleds: BTreeMap::new(),
-            removed_sleds: BTreeMap::new(),
-            unchanged_sleds: BTreeSet::new(),
-            modified_sleds: BTreeMap::new(),
+            sleds_added: BTreeMap::new(),
+            sleds_removed: BTreeMap::new(),
+            sleds_unchanged: BTreeSet::new(),
+            sleds_modified: BTreeMap::new(),
             metadata: MetadataDiff::new(before, after),
             clickhouse_cluster_config: DiffValue::Unchanged(
                 &before.clickhouse_cluster_config,
@@ -88,9 +88,9 @@ impl<'e> BlueprintDiff<'e> {
         // Any changes to physical disks, datasets, or zones would be reflected
         // in `self.sleds_modified`, `self.sleds_added`, or
         // `self.sleds_removed`.
-        if !self.modified_sleds.is_empty()
-            || !self.added_sleds.is_empty()
-            || !self.removed_sleds.is_empty()
+        if !self.sleds_modified.is_empty()
+            || !self.sleds_added.is_empty()
+            || !self.sleds_removed.is_empty()
         {
             return true;
         }
@@ -919,7 +919,7 @@ impl BpDiffPrintable {
             errors: acc.errors.clone(),
             warnings: acc.warnings.clone(),
             sleds_added: acc
-                .added_sleds
+                .sleds_added
                 .iter()
                 .map(|(sled_id, insert)| {
                     (
@@ -942,7 +942,7 @@ impl BpDiffPrintable {
                 })
                 .collect(),
             sleds_removed: acc
-                .removed_sleds
+                .sleds_removed
                 .iter()
                 .map(|(sled_id, remove)| {
                     (
@@ -966,7 +966,7 @@ impl BpDiffPrintable {
                 .collect(),
             sleds_unchanged: {
                 if show_unchanged {
-                    acc.unchanged_sleds
+                    acc.sleds_unchanged
                         .iter()
                         .map(|sled_id| {
                             (
@@ -995,7 +995,7 @@ impl BpDiffPrintable {
                 }
             },
             sleds_modified: acc
-                .modified_sleds
+                .sleds_modified
                 .iter()
                 .map(|(sled_id, modified)| {
                     (*sled_id, modified.tables(show_unchanged))
@@ -1299,9 +1299,9 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
         if !self.printable.warnings.is_empty() {
             writeln!(f, "WARNINGS:")?;
             for err in &self.printable.errors {
-                writeln!(f, "{err}");
+                writeln!(f, "{err}")?;
             }
-            writeln!(f, "");
+            writeln!(f, "")?;
         }
 
         // Write out errors.
@@ -1311,7 +1311,7 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
         if !self.printable.errors.is_empty() {
             writeln!(f, "ERRORS:")?;
             for err in &self.printable.errors {
-                writeln!(f, "{err}");
+                writeln!(f, "{err}")?;
             }
             writeln!(f, "")?;
         }

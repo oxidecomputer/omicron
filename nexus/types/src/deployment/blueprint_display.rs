@@ -128,6 +128,7 @@ impl fmt::Display for BpGeneration {
     }
 }
 
+#[derive(Debug)]
 pub enum BpTableColumn {
     Value(String),
     Diff { before: String, after: String },
@@ -168,6 +169,7 @@ impl BpTableColumn {
 }
 
 /// A row in a [`BpTable`]
+#[derive(Debug)]
 pub struct BpTableRow {
     state: BpDiffState,
     columns: Vec<BpTableColumn>,

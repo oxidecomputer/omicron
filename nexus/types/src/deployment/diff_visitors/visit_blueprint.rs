@@ -53,15 +53,28 @@ impl<'e> SledRemove<'e> {
     }
 }
 
+/// Allow default implementations for types.
+impl<'e> VisitBlueprintDatasetsConfig<'e> for () {}
+impl<'e> VisitBlueprintPhysicalDisksConfig<'e> for () {}
+impl<'e> VisitBlueprintZonesConfig<'e> for () {}
+
 /// A trait to visit a [`Blueprint`]
 pub trait VisitBlueprint<'e> {
-    type ZonesVisitor: VisitBlueprintZonesConfig<'e>;
-    type DisksVisitor: VisitBlueprintPhysicalDisksConfig<'e>;
-    type DatasetsVisitor: VisitBlueprintDatasetsConfig<'e>;
-
-    fn zones_visitor(&mut self) -> &mut Self::ZonesVisitor;
-    fn disks_visitor(&mut self) -> &mut Self::DisksVisitor;
-    fn datasets_visitor(&mut self) -> &mut Self::DatasetsVisitor;
+    fn zones_visitor(
+        &mut self,
+    ) -> Option<&mut impl VisitBlueprintZonesConfig<'e>> {
+        Option::<&mut ()>::None
+    }
+    fn disks_visitor(
+        &mut self,
+    ) -> Option<&mut impl VisitBlueprintPhysicalDisksConfig<'e>> {
+        Option::<&mut ()>::None
+    }
+    fn datasets_visitor(
+        &mut self,
+    ) -> Option<&mut impl VisitBlueprintDatasetsConfig<'e>> {
+        Option::<&mut ()>::None
+    }
 
     fn visit_blueprint(
         &mut self,
@@ -266,7 +279,9 @@ pub fn visit_blueprint<'e, V>(
                         });
                 }
                 map::Edit::Change { diff, .. } => {
-                    v.zones_visitor().visit_zones_edit(ctx, diff);
+                    if let Some(v) = v.zones_visitor() {
+                        v.visit_zones_edit(ctx, diff);
+                    }
                     // Clean up any removes related to sled_state. See the
                     // comment in the `diff.sled_state` clause.
                     sled_removes.remove(sled_id);
@@ -320,7 +335,9 @@ pub fn visit_blueprint<'e, V>(
                         });
                 }
                 map::Edit::Change { diff, .. } => {
-                    v.disks_visitor().visit_disks_edit(ctx, diff);
+                    if let Some(v) = v.disks_visitor() {
+                        v.visit_disks_edit(ctx, diff);
+                    }
                     // Clean up any removes related to sled_state. See the
                     // comment in the `diff.sled_state` clause.
                     sled_removes.remove(sled_id);
@@ -374,7 +391,9 @@ pub fn visit_blueprint<'e, V>(
                         });
                 }
                 map::Edit::Change { diff, .. } => {
-                    v.datasets_visitor().visit_datasets_edit(ctx, diff);
+                    if let Some(v) = v.datasets_visitor() {
+                        v.visit_datasets_edit(ctx, diff);
+                    }
                     // Clean up any removes related to sled_state. See the
                     // comment in the `diff.sled_state` clause.
                     sled_removes.remove(sled_id);

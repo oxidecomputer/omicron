@@ -1876,7 +1876,6 @@ pub mod test {
     use nexus_reconfigurator_blippy::Blippy;
     use nexus_reconfigurator_blippy::BlippyReportSortKey;
     use nexus_types::deployment::BlueprintDatasetDisposition;
-    use nexus_types::deployment::BlueprintDiffer;
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::OmicronZoneNetworkResources;
     use nexus_types::external_api::views::SledPolicy;
@@ -2004,30 +2003,6 @@ pub mod test {
         verify_blueprint(&blueprint3);
         let diff = blueprint3.diff_since_blueprint(&blueprint2);
         println!("expecting new NTP and Crucible zones:\n{}", diff.display());
-        {
-            println!("---DIFFER START---\n");
-            let differ = BlueprintDiffer::new(&blueprint2, &blueprint3);
-            let output = differ.diff();
-            println!(" ADDED SLEDS:\n");
-            for (sled_id, tables) in output.added_sleds {
-                println!("  sled {sled_id} (active):\n");
-                // Write the physical disks table if it exists
-                if let Some(table) = tables.disks {
-                    println!("{table}\n");
-                }
-
-                // Write the datasets table if it exists
-                if let Some(table) = tables.datasets {
-                    println!("{table}\n");
-                }
-
-                // Write the zones table if it exists
-                if let Some(table) = tables.zones {
-                    println!("{table}\n");
-                }
-            }
-            println!("---DIFFER END ---\n");
-        }
 
         // No sleds were changed or removed.
         assert_eq!(diff.sleds_modified.len(), 0);
@@ -2035,11 +2010,12 @@ pub mod test {
 
         // One sled was added.
         assert_eq!(diff.sleds_added.len(), 1);
-        let sled_id = diff.sleds_added.first().unwrap();
-        let new_sled_zones = diff.zones.added.get(sled_id).unwrap();
+        let (sled_id, sled_insert) =
+            diff.sleds_added.first_key_value().unwrap();
+        let new_sled_zones = sled_insert.zones.unwrap();
         assert_eq!(*sled_id, new_sled_id);
         // The generation number should be newer than the initial default.
-        assert!(new_sled_zones.generation_after.unwrap() > Generation::new());
+        assert!(new_sled_zones.generation > Generation::new());
 
         // All zones' underlay addresses ought to be on the sled's subnet.
         for z in &new_sled_zones.zones {

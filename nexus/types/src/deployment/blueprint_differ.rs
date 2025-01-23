@@ -63,15 +63,15 @@ impl<'e> BlueprintDiffer<'e> {
         // modified.
         let changed_sleds: BTreeSet<_> = self
             .diff
-            .added_sleds
+            .sleds_added
             .keys()
             .cloned()
-            .chain(self.diff.removed_sleds.keys().cloned())
-            .chain(self.diff.modified_sleds.keys().cloned())
+            .chain(self.diff.sleds_removed.keys().cloned())
+            .chain(self.diff.sleds_modified.keys().cloned())
             .collect();
 
         let before_sleds: BTreeSet<_> = self.before.sleds().collect();
-        self.diff.unchanged_sleds =
+        self.diff.sleds_unchanged =
             before_sleds.difference(&changed_sleds).cloned().collect();
 
         self.diff
@@ -79,20 +79,22 @@ impl<'e> BlueprintDiffer<'e> {
 }
 
 impl<'e> VisitBlueprint<'e> for BlueprintDiffer<'e> {
-    type ZonesVisitor = Self;
-    type DisksVisitor = Self;
-    type DatasetsVisitor = Self;
-
-    fn zones_visitor(&mut self) -> &mut Self::ZonesVisitor {
-        &mut *self
+    fn zones_visitor(
+        &mut self,
+    ) -> Option<&mut impl VisitBlueprintZonesConfig<'e>> {
+        Some(&mut *self)
     }
 
-    fn disks_visitor(&mut self) -> &mut Self::DisksVisitor {
-        &mut *self
+    fn disks_visitor(
+        &mut self,
+    ) -> Option<&mut impl VisitBlueprintPhysicalDisksConfig<'e>> {
+        Some(&mut *self)
     }
 
-    fn datasets_visitor(&mut self) -> &mut Self::DatasetsVisitor {
-        &mut *self
+    fn datasets_visitor(
+        &mut self,
+    ) -> Option<&mut impl VisitBlueprintDatasetsConfig<'e>> {
+        Some(&mut *self)
     }
 
     fn visit_sled_insert(
@@ -107,7 +109,7 @@ impl<'e> VisitBlueprint<'e> for BlueprintDiffer<'e> {
             return;
         };
 
-        self.diff.added_sleds.insert(sled_id, node);
+        self.diff.sleds_added.insert(sled_id, node);
     }
 
     fn visit_sled_remove(
@@ -122,7 +124,7 @@ impl<'e> VisitBlueprint<'e> for BlueprintDiffer<'e> {
             return;
         };
 
-        self.diff.removed_sleds.insert(sled_id, node);
+        self.diff.sleds_removed.insert(sled_id, node);
     }
 
     fn visit_sled_state_change(
@@ -138,7 +140,7 @@ impl<'e> VisitBlueprint<'e> for BlueprintDiffer<'e> {
         };
         let s = self
             .diff
-            .modified_sleds
+            .sleds_modified
             .entry(sled_id)
             .or_insert(ModifiedSled::new(&self.before, sled_id));
         s.sled_state = DiffValue::Changed(change);
@@ -226,7 +228,7 @@ impl<'e> VisitBlueprintZonesConfig<'e> for BlueprintDiffer<'e> {
         };
         let s = self
             .diff
-            .modified_sleds
+            .sleds_modified
             .entry(sled_id)
             .or_insert(ModifiedSled::new(&self.before, sled_id));
         s.zones_generation = DiffValue::Changed(change);
@@ -245,7 +247,7 @@ impl<'e> VisitBlueprintZonesConfig<'e> for BlueprintDiffer<'e> {
         };
         let s = self
             .diff
-            .modified_sleds
+            .sleds_modified
             .entry(sled_id)
             .or_insert(ModifiedSled::new(&self.before, sled_id));
         s.zones_inserted.insert(node.clone());
@@ -264,7 +266,7 @@ impl<'e> VisitBlueprintZonesConfig<'e> for BlueprintDiffer<'e> {
         };
         let s = self
             .diff
-            .modified_sleds
+            .sleds_modified
             .entry(sled_id)
             .or_insert(ModifiedSled::new(&self.before, sled_id));
         s.zones_removed.insert(node.clone());
@@ -288,7 +290,7 @@ impl<'e> VisitBlueprintZonesConfig<'e> for BlueprintDiffer<'e> {
 
         let s = self
             .diff
-            .modified_sleds
+            .sleds_modified
             .entry(sled_id)
             .or_insert(ModifiedSled::new(&self.before, sled_id));
         s.zones_modified
@@ -323,7 +325,7 @@ impl<'e> VisitBlueprintZonesConfig<'e> for BlueprintDiffer<'e> {
 
         // Safety: We guarantee a `visit_zone_change` callback fired and
         // created the `ModifiedSled` entry if it didn't exist.
-        let s = self.diff.modified_sleds.get_mut(&sled_id).unwrap();
+        let s = self.diff.sleds_modified.get_mut(&sled_id).unwrap();
 
         // Safety: We guarantee a `visit_zone_change` callback fired and
         // created the `ModifiedZone` entry.
@@ -354,7 +356,7 @@ impl<'e> VisitBlueprintZonesConfig<'e> for BlueprintDiffer<'e> {
 
         // Safety: We guarantee a `visit_zone_change` callback fired and
         // created the `ModifiedSled` entry if it didn't exist.
-        let s = self.diff.modified_sleds.get_mut(&sled_id).unwrap();
+        let s = self.diff.sleds_modified.get_mut(&sled_id).unwrap();
 
         // Safety: We guarantee a `visit_zone_change` callback fired and
         // created the `ModifiedZone` entry.
@@ -388,7 +390,7 @@ impl<'e> VisitBlueprintPhysicalDisksConfig<'e> for BlueprintDiffer<'e> {
         };
         let s = self
             .diff
-            .modified_sleds
+            .sleds_modified
             .entry(sled_id)
             .or_insert(ModifiedSled::new(&self.before, sled_id));
         s.disks_generation = DiffValue::Changed(change);
@@ -407,7 +409,7 @@ impl<'e> VisitBlueprintPhysicalDisksConfig<'e> for BlueprintDiffer<'e> {
         };
         let s = self
             .diff
-            .modified_sleds
+            .sleds_modified
             .entry(sled_id)
             .or_insert(ModifiedSled::new(&self.before, sled_id));
         s.disks_inserted.insert(node.clone());
@@ -426,7 +428,7 @@ impl<'e> VisitBlueprintPhysicalDisksConfig<'e> for BlueprintDiffer<'e> {
         };
         let s = self
             .diff
-            .modified_sleds
+            .sleds_modified
             .entry(sled_id)
             .or_insert(ModifiedSled::new(&self.before, sled_id));
         s.disks_removed.insert(node.clone());
@@ -450,7 +452,7 @@ impl<'e> VisitBlueprintPhysicalDisksConfig<'e> for BlueprintDiffer<'e> {
 
         let s = self
             .diff
-            .modified_sleds
+            .sleds_modified
             .entry(sled_id)
             .or_insert(ModifiedSled::new(&self.before, sled_id));
         s.disks_modified
@@ -485,7 +487,7 @@ impl<'e> VisitBlueprintPhysicalDisksConfig<'e> for BlueprintDiffer<'e> {
 
         // Safety: We guarantee a `visit_disk_change` callback fired and
         // created the `ModifiedSled` entry if it didn't exist.
-        let s = self.diff.modified_sleds.get_mut(&sled_id).unwrap();
+        let s = self.diff.sleds_modified.get_mut(&sled_id).unwrap();
 
         // Safety: We guarantee a `visit_disk_change` callback fired and
         // created the `ModifiedZone` entry.
@@ -508,7 +510,7 @@ impl<'e> VisitBlueprintDatasetsConfig<'e> for BlueprintDiffer<'e> {
         };
         let s = self
             .diff
-            .modified_sleds
+            .sleds_modified
             .entry(sled_id)
             .or_insert(ModifiedSled::new(&self.before, sled_id));
         s.datasets_generation = DiffValue::Changed(change);
@@ -527,7 +529,7 @@ impl<'e> VisitBlueprintDatasetsConfig<'e> for BlueprintDiffer<'e> {
         };
         let s = self
             .diff
-            .modified_sleds
+            .sleds_modified
             .entry(sled_id)
             .or_insert(ModifiedSled::new(&self.before, sled_id));
         s.datasets_inserted.insert(node.clone());
@@ -546,7 +548,7 @@ impl<'e> VisitBlueprintDatasetsConfig<'e> for BlueprintDiffer<'e> {
         };
         let s = self
             .diff
-            .modified_sleds
+            .sleds_modified
             .entry(sled_id)
             .or_insert(ModifiedSled::new(&self.before, sled_id));
         s.datasets_removed.insert(node.clone());
@@ -570,7 +572,7 @@ impl<'e> VisitBlueprintDatasetsConfig<'e> for BlueprintDiffer<'e> {
 
         let s = self
             .diff
-            .modified_sleds
+            .sleds_modified
             .entry(sled_id)
             .or_insert(ModifiedSled::new(&self.before, sled_id));
         s.datasets_modified
@@ -605,7 +607,7 @@ impl<'e> VisitBlueprintDatasetsConfig<'e> for BlueprintDiffer<'e> {
 
         // Safety: We guarantee a `visit_dataset_change` callback fired and
         // created the `ModifiedSled` entry if it didn't exist.
-        let s = self.diff.modified_sleds.get_mut(&sled_id).unwrap();
+        let s = self.diff.sleds_modified.get_mut(&sled_id).unwrap();
 
         // Safety: We guarantee a `visit_dataset_change` callback fired and
         // created the `ModifiedDataset` entry.
@@ -635,7 +637,7 @@ impl<'e> VisitBlueprintDatasetsConfig<'e> for BlueprintDiffer<'e> {
 
         // Safety: We guarantee a `visit_dataset_change` callback fired and
         // created the `ModifiedSled` entry if it didn't exist.
-        let s = self.diff.modified_sleds.get_mut(&sled_id).unwrap();
+        let s = self.diff.sleds_modified.get_mut(&sled_id).unwrap();
 
         // Safety: We guarantee a `visit_dataset_change` callback fired and
         // created the `ModifiedDataset` entry.
@@ -666,7 +668,7 @@ impl<'e> VisitBlueprintDatasetsConfig<'e> for BlueprintDiffer<'e> {
 
         // Safety: We guarantee a `visit_dataset_change` callback fired and
         // created the `ModifiedSled` entry if it didn't exist.
-        let s = self.diff.modified_sleds.get_mut(&sled_id).unwrap();
+        let s = self.diff.sleds_modified.get_mut(&sled_id).unwrap();
 
         // Safety: We guarantee a `visit_dataset_change` callback fired and
         // created the `ModifiedDataset` entry.
@@ -697,7 +699,7 @@ impl<'e> VisitBlueprintDatasetsConfig<'e> for BlueprintDiffer<'e> {
 
         // Safety: We guarantee a `visit_dataset_change` callback fired and
         // created the `ModifiedSled` entry if it didn't exist.
-        let s = self.diff.modified_sleds.get_mut(&sled_id).unwrap();
+        let s = self.diff.sleds_modified.get_mut(&sled_id).unwrap();
 
         // Safety: We guarantee a `visit_dataset_change` callback fired and
         // created the `ModifiedDataset` entry.
