@@ -22,6 +22,8 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SupportBundleUuid;
+use omicron_uuid_kinds::TufArtifactKind;
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
 use uuid::Uuid;
@@ -390,6 +392,11 @@ impl<'a> LookupPath<'a> {
         PhysicalDisk::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    /// Select a resource of type SupportBundle, identified by its id
+    pub fn support_bundle(self, id: SupportBundleUuid) -> SupportBundle<'a> {
+        SupportBundle::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
     pub fn silo_image_id(self, id: Uuid) -> SiloImage<'a> {
         SiloImage::PrimaryKey(Root { lookup_root: self }, id)
     }
@@ -446,18 +453,11 @@ impl<'a> LookupPath<'a> {
 
     /// Select a resource of type UpdateArtifact, identified by its
     /// `(name, version, kind)` tuple
-    pub fn tuf_artifact_tuple(
+    pub fn tuf_artifact_id(
         self,
-        name: impl Into<String>,
-        version: db::model::SemverVersion,
-        kind: impl Into<String>,
+        id: TypedUuid<TufArtifactKind>,
     ) -> TufArtifact<'a> {
-        TufArtifact::PrimaryKey(
-            Root { lookup_root: self },
-            name.into(),
-            version,
-            kind.into(),
-        )
+        TufArtifact::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type UserBuiltin, identified by its `name`
@@ -879,6 +879,15 @@ lookup_resource! {
 }
 
 lookup_resource! {
+    name = "SupportBundle",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [ { column_name = "id", uuid_kind = SupportBundleKind } ]
+}
+
+lookup_resource! {
     name = "TufRepo",
     ancestors = [],
     // TODO: should this have TufArtifact as a child? This is a many-many
@@ -895,11 +904,7 @@ lookup_resource! {
     children = [],
     lookup_by_name = false,
     soft_deletes = false,
-    primary_key_columns = [
-        { column_name = "name", rust_type = String },
-        { column_name = "version", rust_type = db::model::SemverVersion },
-        { column_name = "kind", rust_type = String },
-    ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = TufArtifactKind } ]
 }
 
 lookup_resource! {

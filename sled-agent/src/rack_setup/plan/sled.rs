@@ -26,7 +26,7 @@ pub struct Plan {
 }
 
 impl Plan {
-    pub async fn create(
+    pub fn create(
         log: &Logger,
         config: &Config,
         bootstrap_addrs: BTreeSet<Ipv6Addr>,

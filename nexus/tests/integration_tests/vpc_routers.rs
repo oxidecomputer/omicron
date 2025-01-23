@@ -537,7 +537,7 @@ async fn test_vpc_routers_custom_delivered_to_instance(
         instances.push(instance);
     }
 
-    let sled_agent = &cptestctx.sled_agent.sled_agent;
+    let sled_agent = cptestctx.first_sled_agent();
 
     // Create some routers!
     let mut routers = vec![];

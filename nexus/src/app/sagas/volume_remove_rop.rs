@@ -8,18 +8,19 @@ use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::authn;
 use nexus_db_queries::db;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::VolumeConstructionRequest;
+use sled_agent_client::VolumeConstructionRequest;
 use steno::{ActionError, Node};
-use uuid::Uuid;
 
 // Volume remove read only parent saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
-    pub volume_id: Uuid,
+    pub volume_id: VolumeUuid,
 }
 
 // Volume remove_read_only_parent saga: actions
@@ -71,7 +72,7 @@ impl NexusSaga for SagaVolumeRemoveROP {
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, SagaInitError> {
         // Generate the temp volume ID this saga will use.
-        let temp_volume_id = Uuid::new_v4();
+        let temp_volume_id = VolumeUuid::new_v4();
         // Generate the params for the subsaga called at the end.
         let subsaga_params = sagas::volume_delete::Params {
             serialized_authn: params.serialized_authn.clone(),
@@ -129,12 +130,12 @@ async fn svr_create_temp_volume(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
 
-    let temp_volume_id = sagactx.lookup::<Uuid>("temp_volume_id")?;
+    let temp_volume_id = sagactx.lookup::<VolumeUuid>("temp_volume_id")?;
 
     // Create the crucible VolumeConstructionRequest which we use
     // for the temporary volume.
     let volume_construction_request = VolumeConstructionRequest::Volume {
-        id: temp_volume_id,
+        id: *temp_volume_id.as_untyped_uuid(),
         block_size: 512,
         sub_volumes: vec![],
         read_only_parent: None,
@@ -162,7 +163,7 @@ async fn svr_create_temp_volume_undo(
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
 
-    let temp_volume_id = sagactx.lookup::<Uuid>("temp_volume_id")?;
+    let temp_volume_id = sagactx.lookup::<VolumeUuid>("temp_volume_id")?;
 
     osagactx
         .datastore()
@@ -178,7 +179,7 @@ async fn svr_remove_read_only_parent(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
-    let temp_volume_id = sagactx.lookup::<uuid::Uuid>("temp_volume_id")?;
+    let temp_volume_id = sagactx.lookup::<VolumeUuid>("temp_volume_id")?;
 
     osagactx
         .datastore()

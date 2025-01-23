@@ -74,6 +74,23 @@
         }
       }
     },
+    "/init": {
+      "put": {
+        "summary": "Idempotently initialize a replicated ClickHouse cluster database.",
+        "operationId": "init_db",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/timeseries/{table}/{metric}/avg": {
       "get": {
         "summary": "Retrieve time series from the system database.",
@@ -616,7 +633,7 @@
         "type": "object",
         "properties": {
           "time": {
-            "$ref": "#/components/schemas/Timestamp"
+            "type": "string"
           },
           "value": {
             "type": "number",
@@ -626,17 +643,6 @@
         "required": [
           "time",
           "value"
-        ]
-      },
-      "Timestamp": {
-        "anyOf": [
-          {
-            "type": "string",
-            "format": "date-time"
-          },
-          {
-            "type": "string"
-          }
         ]
       },
       "SystemTable": {

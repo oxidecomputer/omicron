@@ -44,17 +44,29 @@
 //! In the current implementation, we use long-lived random tokens,
 //! but that may change in the future.
 
-use crate::external_api::device_auth::DeviceAccessTokenResponse;
+use dropshot::{Body, HttpError};
+use http::{header, Response, StatusCode};
 use nexus_db_queries::authn::{Actor, Reason};
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::{DeviceAccessToken, DeviceAuthRequest};
 
+use nexus_types::external_api::params::DeviceAccessTokenRequest;
+use nexus_types::external_api::views;
 use omicron_common::api::external::{CreateResult, Error};
 
 use chrono::Utc;
+use serde::Serialize;
 use uuid::Uuid;
+
+#[derive(Debug)]
+pub enum DeviceAccessTokenResponse {
+    Granted(DeviceAccessToken),
+    Pending,
+    #[allow(dead_code)]
+    Denied,
+}
 
 impl super::Nexus {
     /// Start a device authorization grant flow.
@@ -88,7 +100,7 @@ impl super::Nexus {
                 .fetch()
                 .await?;
 
-        let (.., authz_user) = LookupPath::new(opctx, &self.datastore())
+        let (.., authz_user) = LookupPath::new(opctx, &self.db_datastore)
             .silo_user_id(silo_user_id)
             .lookup_for(authz::Action::CreateChild)
             .await?;
@@ -179,5 +191,78 @@ impl super::Nexus {
         let silo_id = db_silo_user.silo_id;
 
         Ok(Actor::SiloUser { silo_user_id, silo_id })
+    }
+
+    pub(crate) async fn device_access_token(
+        &self,
+        opctx: &OpContext,
+        params: DeviceAccessTokenRequest,
+    ) -> Result<Response<Body>, HttpError> {
+        // RFC 8628 §3.4
+        if params.grant_type != "urn:ietf:params:oauth:grant-type:device_code" {
+            return self.build_oauth_response(
+                StatusCode::BAD_REQUEST,
+                &serde_json::json!({
+                    "error": "unsupported_grant_type"
+                }),
+            );
+        }
+
+        // RFC 8628 §3.5
+        use DeviceAccessTokenResponse::*;
+        match self
+            .device_access_token_fetch(
+                &opctx,
+                params.client_id,
+                params.device_code,
+            )
+            .await
+        {
+            Ok(response) => match response {
+                Granted(token) => self.build_oauth_response(
+                    StatusCode::OK,
+                    &views::DeviceAccessTokenGrant::from(token),
+                ),
+                Pending => self.build_oauth_response(
+                    StatusCode::BAD_REQUEST,
+                    &serde_json::json!({
+                        "error": "authorization_pending"
+                    }),
+                ),
+                Denied => self.build_oauth_response(
+                    StatusCode::BAD_REQUEST,
+                    &serde_json::json!({
+                        "error": "access_denied"
+                    }),
+                ),
+            },
+            Err(error) => self.build_oauth_response(
+                StatusCode::BAD_REQUEST,
+                &serde_json::json!({
+                    "error": "invalid_request",
+                    "error_description": format!("{}", error),
+                }),
+            ),
+        }
+    }
+
+    /// OAuth 2.0 error responses use 400 (Bad Request) with specific `error`
+    /// parameter values to indicate protocol errors (see RFC 6749 §5.2).
+    /// This is different from Dropshot's error `message` parameter, so we
+    /// need a custom response builder.
+    pub(crate) fn build_oauth_response<T>(
+        &self,
+        status: StatusCode,
+        body: &T,
+    ) -> Result<Response<Body>, HttpError>
+    where
+        T: ?Sized + Serialize,
+    {
+        let body = serde_json::to_string(body)
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        Ok(Response::builder()
+            .status(status)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(body.into())?)
     }
 }

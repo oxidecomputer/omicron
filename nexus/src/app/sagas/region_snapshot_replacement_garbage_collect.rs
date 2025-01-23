@@ -31,6 +31,7 @@ use super::{
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::volume_delete;
 use crate::app::{authn, db};
+use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
@@ -45,7 +46,7 @@ pub(crate) struct Params {
     /// The fake volume created for the snapshot that was replaced
     // Note: this is only required in the params to build the volume-delete sub
     // saga
-    pub old_snapshot_volume_id: Uuid,
+    pub old_snapshot_volume_id: VolumeUuid,
     pub request: db::model::RegionSnapshotReplacement,
 }
 
@@ -219,8 +220,10 @@ pub(crate) mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
     use omicron_uuid_kinds::DatasetUuid;
-    use sled_agent_client::types::CrucibleOpts;
-    use sled_agent_client::types::VolumeConstructionRequest;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::VolumeUuid;
+    use sled_agent_client::CrucibleOpts;
+    use sled_agent_client::VolumeConstructionRequest;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -238,10 +241,10 @@ pub(crate) mod test {
         );
 
         // Manually insert required records
-        let old_snapshot_volume_id = Uuid::new_v4();
+        let old_snapshot_volume_id = VolumeUuid::new_v4();
 
         let volume_construction_request = VolumeConstructionRequest::Volume {
-            id: old_snapshot_volume_id,
+            id: *old_snapshot_volume_id.as_untyped_uuid(),
             block_size: 0,
             sub_volumes: vec![VolumeConstructionRequest::Region {
                 block_size: 0,
@@ -249,7 +252,7 @@ pub(crate) mod test {
                 extent_count: 0,
                 gen: 0,
                 opts: CrucibleOpts {
-                    id: old_snapshot_volume_id,
+                    id: *old_snapshot_volume_id.as_untyped_uuid(),
                     target: vec![
                         // if you put something here, you'll need a synthetic
                         // dataset record
@@ -282,13 +285,29 @@ pub(crate) mod test {
         );
         request.replacement_state =
             RegionSnapshotReplacementState::ReplacementDone;
-        request.old_snapshot_volume_id = Some(old_snapshot_volume_id);
+        request.old_snapshot_volume_id = Some(old_snapshot_volume_id.into());
+
+        let volume_id = VolumeUuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(),
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
 
         datastore
             .insert_region_snapshot_replacement_request_with_volume_id(
                 &opctx,
                 request.clone(),
-                Uuid::new_v4(),
+                volume_id,
             )
             .await
             .unwrap();

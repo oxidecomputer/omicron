@@ -15,7 +15,8 @@ use crate::rack_setup::{
     from_ipaddr_to_external_floating_ip,
     from_sockaddr_to_external_floating_addr,
 };
-use anyhow::anyhow;
+use crate::sim::SimulatedUpstairs;
+use anyhow::{anyhow, Context as _};
 use crucible_agent_client::types::State as RegionState;
 use illumos_utils::zpool::ZpoolName;
 use internal_dns_types::config::DnsConfigBuilder;
@@ -79,10 +80,14 @@ pub struct Server {
 }
 
 impl Server {
+    /// `sled_index` here is to provide an offset so that Crucible regions have
+    /// unique ports in tests that use multiple sled agents.
     pub async fn start(
         config: &Config,
         log: &Logger,
         wait_for_nexus: bool,
+        simulated_upstairs: &Arc<SimulatedUpstairs>,
+        sled_index: u16,
     ) -> Result<Server, anyhow::Error> {
         info!(log, "setting up sled agent server");
 
@@ -100,6 +105,8 @@ impl Server {
             sa_log,
             config.nexus_address,
             Arc::clone(&nexus_client),
+            simulated_upstairs.clone(),
+            sled_index,
         )
         .await;
 
@@ -188,23 +195,19 @@ impl Server {
             let vendor = "synthetic-vendor".to_string();
             let serial = format!("synthetic-serial-{zpool_id}");
             let model = "synthetic-model".to_string();
-            sled_agent
-                .create_external_physical_disk(
-                    physical_disk_id,
-                    DiskIdentity {
-                        vendor: vendor.clone(),
-                        serial: serial.clone(),
-                        model: model.clone(),
-                    },
-                )
-                .await;
+            sled_agent.create_external_physical_disk(
+                physical_disk_id,
+                DiskIdentity {
+                    vendor: vendor.clone(),
+                    serial: serial.clone(),
+                    model: model.clone(),
+                },
+            );
 
-            sled_agent
-                .create_zpool(zpool_id, physical_disk_id, zpool.size)
-                .await;
+            sled_agent.create_zpool(zpool_id, physical_disk_id, zpool.size);
             let dataset_id = DatasetUuid::new_v4();
             let address =
-                sled_agent.create_crucible_dataset(zpool_id, dataset_id).await;
+                sled_agent.create_crucible_dataset(zpool_id, dataset_id);
 
             datasets.push(NexusTypes::DatasetCreateRequest {
                 zpool_id: zpool_id.into_untyped_uuid(),
@@ -218,10 +221,8 @@ impl Server {
             // Whenever Nexus tries to allocate a region, it should complete
             // immediately. What efficiency!
             let crucible =
-                sled_agent.get_crucible_dataset(zpool_id, dataset_id).await;
-            crucible
-                .set_create_callback(Box::new(|_| RegionState::Created))
-                .await;
+                sled_agent.get_crucible_dataset(zpool_id, dataset_id);
+            crucible.set_create_callback(Box::new(|_| RegionState::Created))
         }
 
         Ok(Server {
@@ -239,9 +240,8 @@ impl Server {
         let pantry_server = PantryServer::new(
             self.log.new(o!("kind" => "pantry")),
             self.config.storage.ip,
-            self.sled_agent.clone(),
-        )
-        .await;
+            self.sled_agent.simulated_upstairs.clone(),
+        );
         self.pantry_server = Some(pantry_server);
         self.pantry_server.as_ref().unwrap()
     }
@@ -331,7 +331,9 @@ pub async fn run_standalone_server(
     }
 
     // Start the sled agent
-    let mut server = Server::start(config, &log, true).await?;
+    let simulated_upstairs = Arc::new(SimulatedUpstairs::new(log.clone()));
+    let mut server =
+        Server::start(config, &log, true, &simulated_upstairs, 0).await?;
     info!(log, "sled agent started successfully");
 
     // Start the Internal DNS server
@@ -370,7 +372,7 @@ pub async fn run_standalone_server(
     dns.initialize_with_config(&log, &dns_config).await?;
     let internal_dns_version = dns_config.generation;
 
-    let all_u2_zpools = server.sled_agent.get_zpools().await;
+    let all_u2_zpools = server.sled_agent.get_zpools();
     let get_random_zpool = || {
         use rand::seq::SliceRandom;
         let pool = all_u2_zpools
@@ -516,12 +518,12 @@ pub async fn run_standalone_server(
     };
 
     let mut datasets = vec![];
-    let physical_disks = server.sled_agent.get_all_physical_disks().await;
-    let zpools = server.sled_agent.get_zpools().await;
+    let physical_disks = server.sled_agent.get_all_physical_disks();
+    let zpools = server.sled_agent.get_zpools();
     for zpool in &zpools {
         let zpool_id = ZpoolUuid::from_untyped_uuid(zpool.id);
         for (dataset_id, address) in
-            server.sled_agent.get_crucible_datasets(zpool_id).await
+            server.sled_agent.get_crucible_datasets(zpool_id)
         {
             datasets.push(NexusTypes::DatasetCreateRequest {
                 zpool_id: zpool.id,
@@ -540,7 +542,7 @@ pub async fn run_standalone_server(
     };
 
     let omicron_physical_disks_config =
-        server.sled_agent.omicron_physical_disks_list().await?;
+        server.sled_agent.omicron_physical_disks_list()?;
     let mut sled_configs = BTreeMap::new();
     sled_configs.insert(
         config.id,
@@ -559,16 +561,18 @@ pub async fn run_standalone_server(
                     })
                     .collect(),
             },
-            datasets: server.sled_agent.datasets_config_list().await?,
+            datasets: server.sled_agent.datasets_config_list()?,
             zones,
         },
     );
 
+    let blueprint = build_initial_blueprint_from_sled_configs(
+        &sled_configs,
+        internal_dns_version,
+    )
+    .context("could not construct initial blueprint")?;
     let rack_init_request = NexusTypes::RackInitializationRequest {
-        blueprint: build_initial_blueprint_from_sled_configs(
-            &sled_configs,
-            internal_dns_version,
-        ),
+        blueprint,
         physical_disks,
         zpools,
         datasets,

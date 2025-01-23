@@ -174,7 +174,7 @@ impl RegionReplacementDriver {
             };
 
         for request in done_replacements {
-            let Some(old_region_volume_id) = request.old_region_volume_id
+            let Some(old_region_volume_id) = request.old_region_volume_id()
             else {
                 // This state is illegal!
                 let s = format!(
@@ -252,12 +252,13 @@ mod test {
     use nexus_db_model::UpstairsRepairType;
     use nexus_test_utils_macros::nexus_test;
     use omicron_uuid_kinds::DatasetUuid;
-    use omicron_uuid_kinds::DownstairsRegionKind;
+    use omicron_uuid_kinds::DownstairsRegionUuid;
     use omicron_uuid_kinds::GenericUuid;
-    use omicron_uuid_kinds::TypedUuid;
-    use omicron_uuid_kinds::UpstairsKind;
-    use omicron_uuid_kinds::UpstairsRepairKind;
-    use omicron_uuid_kinds::UpstairsSessionKind;
+    use omicron_uuid_kinds::UpstairsRepairUuid;
+    use omicron_uuid_kinds::UpstairsSessionUuid;
+    use omicron_uuid_kinds::UpstairsUuid;
+    use omicron_uuid_kinds::VolumeUuid;
+    use sled_agent_client::VolumeConstructionRequest;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -286,7 +287,21 @@ mod test {
         // state Running.
         let region_id = Uuid::new_v4();
         let new_region_id = Uuid::new_v4();
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(),
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
 
         let request = {
             let mut request = RegionReplacement::new(region_id, volume_id);
@@ -339,7 +354,7 @@ mod test {
         // Insert some region records
         let old_region = {
             let dataset_id = DatasetUuid::new_v4();
-            let volume_id = Uuid::new_v4();
+            let volume_id = VolumeUuid::new_v4();
             Region::new(
                 dataset_id,
                 volume_id,
@@ -353,7 +368,7 @@ mod test {
 
         let new_region = {
             let dataset_id = DatasetUuid::new_v4();
-            let volume_id = Uuid::new_v4();
+            let volume_id = VolumeUuid::new_v4();
             Region::new(
                 dataset_id,
                 volume_id,
@@ -382,6 +397,20 @@ mod test {
                 .unwrap();
         }
 
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                old_region.volume_id(),
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(),
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
         // Add a region replacement request for that region, and change it to
         // state ReplacementDone. Set the new_region_id to the region created
         // above.
@@ -390,7 +419,7 @@ mod test {
                 RegionReplacement::new(old_region.id(), old_region.volume_id());
             request.replacement_state = RegionReplacementState::ReplacementDone;
             request.new_region_id = Some(new_region.id());
-            request.old_region_volume_id = Some(Uuid::new_v4());
+            request.old_region_volume_id = Some(VolumeUuid::new_v4().into());
             request
         };
 
@@ -438,7 +467,7 @@ mod test {
         // Insert some region records
         let old_region = {
             let dataset_id = DatasetUuid::new_v4();
-            let volume_id = Uuid::new_v4();
+            let volume_id = VolumeUuid::new_v4();
             Region::new(
                 dataset_id,
                 volume_id,
@@ -452,7 +481,7 @@ mod test {
 
         let new_region = {
             let dataset_id = DatasetUuid::new_v4();
-            let volume_id = Uuid::new_v4();
+            let volume_id = VolumeUuid::new_v4();
             Region::new(
                 dataset_id,
                 volume_id,
@@ -481,6 +510,20 @@ mod test {
                 .unwrap();
         }
 
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                old_region.volume_id(),
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(),
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
         // Add a region replacement request for that region, and change it to
         // state Running. Set the new_region_id to the region created above.
         let request = {
@@ -488,7 +531,7 @@ mod test {
                 RegionReplacement::new(old_region.id(), old_region.volume_id());
             request.replacement_state = RegionReplacementState::Running;
             request.new_region_id = Some(new_region.id());
-            request.old_region_volume_id = Some(Uuid::new_v4());
+            request.old_region_volume_id = Some(VolumeUuid::new_v4().into());
             request
         };
 
@@ -522,17 +565,11 @@ mod test {
                     &opctx,
                     UpstairsRepairNotification::new(
                         Utc::now(), // client time
-                        TypedUuid::<UpstairsRepairKind>::from_untyped_uuid(
-                            Uuid::new_v4(),
-                        ),
+                        UpstairsRepairUuid::new_v4(),
                         UpstairsRepairType::Live,
-                        TypedUuid::<UpstairsKind>::from_untyped_uuid(
-                            Uuid::new_v4(),
-                        ),
-                        TypedUuid::<UpstairsSessionKind>::from_untyped_uuid(
-                            Uuid::new_v4(),
-                        ),
-                        TypedUuid::<DownstairsRegionKind>::from_untyped_uuid(
+                        UpstairsUuid::new_v4(),
+                        UpstairsSessionUuid::new_v4(),
+                        DownstairsRegionUuid::from_untyped_uuid(
                             new_region.id(),
                         ), // downstairs that was repaired
                         "[fd00:1122:3344:101::2]:12345".parse().unwrap(),
@@ -587,7 +624,7 @@ mod test {
         // Insert some region records
         let old_region = {
             let dataset_id = DatasetUuid::new_v4();
-            let volume_id = Uuid::new_v4();
+            let volume_id = VolumeUuid::new_v4();
             Region::new(
                 dataset_id,
                 volume_id,
@@ -601,7 +638,7 @@ mod test {
 
         let new_region = {
             let dataset_id = DatasetUuid::new_v4();
-            let volume_id = Uuid::new_v4();
+            let volume_id = VolumeUuid::new_v4();
             Region::new(
                 dataset_id,
                 volume_id,
@@ -629,6 +666,20 @@ mod test {
                 .await
                 .unwrap();
         }
+
+        datastore
+            .volume_create(nexus_db_model::Volume::new(
+                old_region.volume_id(),
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(),
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
 
         // Add a region replacement request for that region, and change it to
         // state Running. Set the new_region_id to the region created above.
@@ -670,17 +721,11 @@ mod test {
                     &opctx,
                     UpstairsRepairNotification::new(
                         Utc::now(), // client time
-                        TypedUuid::<UpstairsRepairKind>::from_untyped_uuid(
-                            Uuid::new_v4(),
-                        ),
+                        UpstairsRepairUuid::new_v4(),
                         UpstairsRepairType::Live,
-                        TypedUuid::<UpstairsKind>::from_untyped_uuid(
-                            Uuid::new_v4(),
-                        ),
-                        TypedUuid::<UpstairsSessionKind>::from_untyped_uuid(
-                            Uuid::new_v4(),
-                        ),
-                        TypedUuid::<DownstairsRegionKind>::from_untyped_uuid(
+                        UpstairsUuid::new_v4(),
+                        UpstairsSessionUuid::new_v4(),
+                        DownstairsRegionUuid::from_untyped_uuid(
                             new_region.id(),
                         ), // downstairs that was repaired
                         "[fd00:1122:3344:101::2]:12345".parse().unwrap(),

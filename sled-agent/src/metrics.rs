@@ -528,7 +528,7 @@ fn start_producer_server(
             interval: METRIC_COLLECTION_INTERVAL,
         },
         registration_address,
-        request_body_max_bytes: METRIC_REQUEST_MAX_SIZE,
+        default_request_body_max_bytes: METRIC_REQUEST_MAX_SIZE,
         log: LogConfig::Logger(log),
     };
     ProducerServer::start(&config).map_err(Error::ProducerServer)

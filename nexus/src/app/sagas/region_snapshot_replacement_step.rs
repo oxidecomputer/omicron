@@ -56,13 +56,14 @@ use crate::app::db::lookup::LookupPath;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use nexus_db_model::VmmState;
-use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::VolumeUuid;
 use propolis_client::types::ReplaceResult;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::CrucibleOpts;
-use sled_agent_client::types::VolumeConstructionRequest;
+use sled_agent_client::CrucibleOpts;
+use sled_agent_client::VolumeConstructionRequest;
 use std::net::SocketAddrV6;
 use steno::ActionError;
 use steno::Node;
@@ -279,7 +280,7 @@ async fn rssrs_create_fake_volume(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
 
-    let new_volume_id = sagactx.lookup::<Uuid>("new_volume_id")?;
+    let new_volume_id = sagactx.lookup::<VolumeUuid>("new_volume_id")?;
 
     // Create a fake volume record for the old snapshot target. This will be
     // deleted after region snapshot replacement step saga has finished, and the
@@ -287,7 +288,7 @@ async fn rssrs_create_fake_volume(
     // here, it will be replaced by `volume_replace_snapshot`.
 
     let volume_construction_request = VolumeConstructionRequest::Volume {
-        id: new_volume_id,
+        id: *new_volume_id.as_untyped_uuid(),
         block_size: 0,
         sub_volumes: vec![VolumeConstructionRequest::Region {
             block_size: 0,
@@ -295,7 +296,7 @@ async fn rssrs_create_fake_volume(
             extent_count: 0,
             gen: 0,
             opts: CrucibleOpts {
-                id: new_volume_id,
+                id: *new_volume_id.as_untyped_uuid(),
                 target: vec![],
                 lossy: false,
                 flush_timeout: None,
@@ -333,7 +334,7 @@ async fn rssrs_create_fake_volume_undo(
 
     // Delete the fake volume.
 
-    let new_volume_id = sagactx.lookup::<Uuid>("new_volume_id")?;
+    let new_volume_id = sagactx.lookup::<VolumeUuid>("new_volume_id")?;
     osagactx.datastore().volume_hard_delete(new_volume_id).await?;
 
     Ok(())
@@ -348,7 +349,7 @@ async fn rsrss_replace_snapshot_in_volume(
 
     let replace_params = sagactx.lookup::<ReplaceParams>("replace_params")?;
 
-    let new_volume_id = sagactx.lookup::<Uuid>("new_volume_id")?;
+    let new_volume_id = sagactx.lookup::<VolumeUuid>("new_volume_id")?;
 
     // `volume_replace_snapshot` will swap the old snapshot for the new region.
     // No repair or reconcilation needs to occur after this.
@@ -356,7 +357,7 @@ async fn rsrss_replace_snapshot_in_volume(
     let volume_replace_snapshot_result = osagactx
         .datastore()
         .volume_replace_snapshot(
-            VolumeWithTarget(params.request.volume_id),
+            VolumeWithTarget(params.request.volume_id()),
             ExistingTarget(replace_params.old_snapshot_address),
             ReplacementTarget(replace_params.new_region_address),
             VolumeToDelete(new_volume_id),
@@ -375,7 +376,8 @@ async fn rsrss_replace_snapshot_in_volume(
             // with the saga.
         }
 
-        VolumeReplaceResult::ExistingVolumeDeleted => {
+        VolumeReplaceResult::ExistingVolumeSoftDeleted
+        | VolumeReplaceResult::ExistingVolumeHardDeleted => {
             // Proceed with the saga but skip the notification step.
         }
     }
@@ -392,7 +394,7 @@ async fn rsrss_replace_snapshot_in_volume_undo(
 
     let replace_params = sagactx.lookup::<ReplaceParams>("replace_params")?;
 
-    let new_volume_id = sagactx.lookup::<Uuid>("new_volume_id")?;
+    let new_volume_id = sagactx.lookup::<VolumeUuid>("new_volume_id")?;
 
     // It's ok if this function returned ExistingVolumeDeleted, don't cause the
     // saga to get stuck unwinding!
@@ -400,7 +402,7 @@ async fn rsrss_replace_snapshot_in_volume_undo(
     let volume_replace_snapshot_result = osagactx
         .datastore()
         .volume_replace_snapshot(
-            VolumeWithTarget(params.request.volume_id),
+            VolumeWithTarget(params.request.volume_id()),
             ExistingTarget(replace_params.new_region_address),
             ReplacementTarget(replace_params.old_snapshot_address),
             VolumeToDelete(new_volume_id),
@@ -423,6 +425,20 @@ async fn rsrss_notify_upstairs(
     let params = sagactx.saga_params::<Params>()?;
     let log = sagactx.user_data().log();
 
+    // If the associated volume was deleted, then skip this notification step as
+    // there is no Upstairs to talk to. Continue with the saga to transition the
+    // step request to Complete, and then perform the associated clean up.
+
+    let volume_replace_snapshot_result = sagactx
+        .lookup::<VolumeReplaceResult>("volume_replace_snapshot_result")?;
+    if matches!(
+        volume_replace_snapshot_result,
+        VolumeReplaceResult::ExistingVolumeSoftDeleted
+            | VolumeReplaceResult::ExistingVolumeHardDeleted
+    ) {
+        return Ok(());
+    }
+
     // Make an effort to notify a Propolis if one was booted for this volume.
     // This is best effort: if there is a failure, this saga will unwind and be
     // triggered again for the same request. If there is no Propolis booted for
@@ -435,7 +451,7 @@ async fn rsrss_notify_upstairs(
 
     let Some(disk) = osagactx
         .datastore()
-        .disk_for_volume_id(params.request.volume_id)
+        .disk_for_volume_id(params.request.volume_id())
         .await
         .map_err(ActionError::action_failed)?
     else {
@@ -474,7 +490,7 @@ async fn rsrss_notify_upstairs(
         "volume associated with disk attached to instance with vmm in \
         state {state}";
         "request id" => %params.request.id,
-        "volume id" => %params.request.volume_id,
+        "volume id" => %params.request.volume_id(),
         "disk id" => ?disk.id(),
         "instance id" => ?instance_id,
         "vmm id" => ?vmm.id,
@@ -504,7 +520,7 @@ async fn rsrss_notify_upstairs(
 
     let new_volume_vcr = match osagactx
         .datastore()
-        .volume_get(params.request.volume_id)
+        .volume_get(params.request.volume_id())
         .await
         .map_err(ActionError::action_failed)?
     {
@@ -534,17 +550,19 @@ async fn rsrss_notify_upstairs(
         log,
         "sending replacement request for disk volume to propolis";
         "request id" => %params.request.id,
-        "volume id" => %params.request.volume_id,
+        "volume id" => %params.request.volume_id(),
         "disk id" => ?disk.id(),
         "instance id" => ?instance_id,
         "vmm id" => ?vmm.id,
     );
 
+    // N.B. The ID passed to this request must match the disk backend ID that
+    // sled agent supplies to Propolis when it creates the instance. Currently,
+    // sled agent uses the disk ID as the backend ID.
     let result = client
         .instance_issue_crucible_vcr_request()
         .id(disk.id())
         .body(propolis_client::types::InstanceVcrReplace {
-            name: disk.name().to_string(),
             vcr_json: new_volume_vcr,
         })
         .send()
@@ -566,7 +584,7 @@ async fn rsrss_notify_upstairs(
         log,
         "saw replace result {replace_result:?}";
         "request id" => %params.request.id,
-        "volume id" => %params.request.volume_id,
+        "volume id" => %params.request.volume_id(),
         "disk id" => ?disk.id(),
         "instance id" => ?instance_id,
         "vmm id" => ?vmm.id,
@@ -615,7 +633,7 @@ async fn rsrss_update_request_record(
     );
 
     let saga_id = sagactx.lookup::<Uuid>("saga_id")?;
-    let new_volume_id = sagactx.lookup::<Uuid>("new_volume_id")?;
+    let new_volume_id = sagactx.lookup::<VolumeUuid>("new_volume_id")?;
 
     // Update the request record to 'Completed' and clear the operating saga id.
     // There is no undo step for this, it should succeed idempotently.

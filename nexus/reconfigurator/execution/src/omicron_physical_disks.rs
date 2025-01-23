@@ -162,10 +162,12 @@ mod test {
     use omicron_common::disk::DiskManagementStatus;
     use omicron_common::disk::DisksManagementResult;
     use omicron_common::disk::OmicronPhysicalDisksConfig;
+    use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
+    use omicron_uuid_kinds::VolumeUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::BTreeMap;
     use std::net::SocketAddr;
@@ -178,7 +180,7 @@ mod test {
     fn create_blueprint(
         blueprint_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
     ) -> (BlueprintTarget, Blueprint) {
-        let id = Uuid::new_v4();
+        let id = BlueprintUuid::new_v4();
         (
             BlueprintTarget {
                 target_id: id,
@@ -249,7 +251,7 @@ mod test {
         fn make_disks() -> BlueprintPhysicalDisksConfig {
             BlueprintPhysicalDisksConfig {
                 generation: Generation::new().next(),
-                disks: vec![BlueprintPhysicalDiskConfig {
+                disks: [BlueprintPhysicalDiskConfig {
                     disposition: BlueprintPhysicalDiskDisposition::InService,
                     identity: DiskIdentity {
                         vendor: "test-vendor".to_string(),
@@ -258,7 +260,9 @@ mod test {
                     },
                     id: PhysicalDiskUuid::new_v4(),
                     pool_id: ZpoolUuid::new_v4(),
-                }],
+                }]
+                .into_iter()
+                .collect(),
             }
         }
 
@@ -453,7 +457,7 @@ mod test {
         // There isn't a great API to insert regions (we normally allocate!)
         // so insert the record manually here.
         let region = {
-            let volume_id = Uuid::new_v4();
+            let volume_id = VolumeUuid::new_v4();
             Region::new(
                 dataset.id(),
                 volume_id,

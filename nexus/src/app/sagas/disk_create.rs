@@ -17,13 +17,14 @@ use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::VolumeUuid;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::{CrucibleOpts, VolumeConstructionRequest};
-use std::collections::VecDeque;
+use sled_agent_client::{CrucibleOpts, VolumeConstructionRequest};
 use std::convert::TryFrom;
 use std::net::SocketAddrV6;
+use std::{collections::VecDeque, net::SocketAddr};
 use steno::ActionError;
 use steno::Node;
 use uuid::Uuid;
@@ -137,7 +138,7 @@ async fn sdc_create_disk_record(
     // We admittedly reference the volume before it has been allocated,
     // but this should be acceptable because the disk remains in a "Creating"
     // state until the saga has completed.
-    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
+    let volume_id = sagactx.lookup::<VolumeUuid>("volume_id")?;
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &params.serialized_authn,
@@ -237,7 +238,7 @@ async fn sdc_alloc_regions(
 ) -> Result<Vec<(db::model::Dataset, db::model::Region)>, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
+    let volume_id = sagactx.lookup::<VolumeUuid>("volume_id")?;
 
     // Ensure the disk is backed by appropriate regions.
     //
@@ -389,13 +390,13 @@ async fn sdc_regions_ensure(
                     log,
                     "grabbing snapshot {} volume {}",
                     db_snapshot.id(),
-                    db_snapshot.volume_id,
+                    db_snapshot.volume_id(),
                 );
 
                 let volume = osagactx
                     .datastore()
                     .volume_checkout(
-                        db_snapshot.volume_id,
+                        db_snapshot.volume_id(),
                         db::datastore::VolumeCheckoutReason::ReadOnlyCopy,
                     )
                     .await
@@ -435,13 +436,13 @@ async fn sdc_regions_ensure(
                     log,
                     "grabbing image {} volume {}",
                     image.id(),
-                    image.volume_id
+                    image.volume_id(),
                 );
 
                 let volume = osagactx
                     .datastore()
                     .volume_checkout(
-                        image.volume_id,
+                        image.volume_id(),
                         db::datastore::VolumeCheckoutReason::ReadOnlyCopy,
                     )
                     .await
@@ -506,7 +507,7 @@ async fn sdc_regions_ensure(
                                     )),
                                 )
                             })
-                            .map(|addr| addr.to_string())
+                            .map(SocketAddr::V6)
                     })
                     .collect::<Result<Vec<_>, ActionError>>()?,
 
@@ -612,7 +613,7 @@ async fn sdc_create_volume_record(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
 
-    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
+    let volume_id = sagactx.lookup::<VolumeUuid>("volume_id")?;
     let volume_data = sagactx.lookup::<String>("regions_ensure")?;
 
     let volume = db::model::Volume::new(volume_id, volume_data);
@@ -631,7 +632,7 @@ async fn sdc_create_volume_record_undo(
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
 
-    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
+    let volume_id = sagactx.lookup::<VolumeUuid>("volume_id")?;
 
     // Depending on the read only parent, there will some read only resources
     // used, however this saga tracks them all.
@@ -1034,15 +1035,12 @@ pub(crate) mod test {
         true
     }
 
-    async fn no_regions_ensured(
-        sled_agent: &SledAgent,
-        test: &DiskTest<'_>,
-    ) -> bool {
+    fn no_regions_ensured(sled_agent: &SledAgent, test: &DiskTest<'_>) -> bool {
         for zpool in test.zpools() {
             for dataset in &zpool.datasets {
                 let crucible_dataset =
-                    sled_agent.get_crucible_dataset(zpool.id, dataset.id).await;
-                if !crucible_dataset.is_empty().await {
+                    sled_agent.get_crucible_dataset(zpool.id, dataset.id);
+                if !crucible_dataset.is_empty() {
                     return false;
                 }
             }
@@ -1054,7 +1052,7 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
         test: &DiskTest<'_>,
     ) {
-        let sled_agent = &cptestctx.sled_agent.sled_agent;
+        let sled_agent = cptestctx.first_sled_agent();
         let datastore = cptestctx.server.server_context().nexus.datastore();
 
         crate::app::sagas::test_helpers::assert_no_failed_undo_steps(
@@ -1073,7 +1071,7 @@ pub(crate) mod test {
                 .await
         );
         assert!(no_region_allocations_exist(datastore, &test).await);
-        assert!(no_regions_ensured(&sled_agent, &test).await);
+        assert!(no_regions_ensured(&sled_agent, &test));
 
         assert!(test.crucible_resources_deleted().await);
     }

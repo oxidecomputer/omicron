@@ -35,17 +35,18 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::VolumeUuid;
 use slog::Logger;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 pub enum RegionAllocationFor {
     /// Allocate region(s) for a disk volume
-    DiskVolume { volume_id: Uuid },
+    DiskVolume { volume_id: VolumeUuid },
 
     /// Allocate region(s) for a snapshot volume, which may have read-only
     /// targets.
-    SnapshotVolume { volume_id: Uuid, snapshot_id: Uuid },
+    SnapshotVolume { volume_id: VolumeUuid, snapshot_id: Uuid },
 }
 
 /// Describe the region(s) to be allocated
@@ -64,12 +65,12 @@ pub enum RegionAllocationParameters<'a> {
 
 impl DataStore {
     pub(super) fn get_allocated_regions_query(
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
     ) -> impl RunnableQuery<(Dataset, Region)> {
         use db::schema::dataset::dsl as dataset_dsl;
         use db::schema::region::dsl as region_dsl;
         region_dsl::region
-            .filter(region_dsl::volume_id.eq(volume_id))
+            .filter(region_dsl::volume_id.eq(to_db_typed_uuid(volume_id)))
             .inner_join(
                 dataset_dsl::dataset
                     .on(region_dsl::dataset_id.eq(dataset_dsl::id)),
@@ -84,7 +85,7 @@ impl DataStore {
     /// may be used in a context where the disk is being deleted.
     pub async fn get_allocated_regions(
         &self,
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
     ) -> Result<Vec<(Dataset, Region)>, Error> {
         Self::get_allocated_regions_query(volume_id)
             .get_results_async::<(Dataset, Region)>(
@@ -170,9 +171,7 @@ impl DataStore {
         let size = size.to_bytes();
 
         // allocate enough extents to fit all the disk blocks, rounding up.
-        let extent_count = size / Self::EXTENT_SIZE
-            + ((size % Self::EXTENT_SIZE) + Self::EXTENT_SIZE - 1)
-                / Self::EXTENT_SIZE;
+        let extent_count = size.div_ceil(Self::EXTENT_SIZE);
 
         (blocks_per_extent, extent_count)
     }
@@ -184,7 +183,7 @@ impl DataStore {
     pub async fn disk_region_allocate(
         &self,
         opctx: &OpContext,
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
         disk_source: &params::DiskSource,
         size: external::ByteCount,
         allocation_strategy: &RegionAllocationStrategy,
@@ -422,8 +421,8 @@ impl DataStore {
         }
     }
 
-    /// Find regions on expunged disks
-    pub async fn find_regions_on_expunged_physical_disks(
+    /// Find read/write regions on expunged disks
+    pub async fn find_read_write_regions_on_expunged_physical_disks(
         &self,
         opctx: &OpContext,
     ) -> LookupResult<Vec<Region>> {
@@ -450,6 +449,8 @@ impl DataStore {
                     ))
                     .select(dataset_dsl::id)
             ))
+            // only return read-write regions here
+            .filter(region_dsl::read_only.eq(false))
             .select(Region::as_select())
             .load_async(&*conn)
             .await
@@ -545,6 +546,42 @@ impl DataStore {
         }
 
         Ok(records)
+    }
+
+    /// Find regions not on expunged disks that match a volume id
+    pub async fn find_non_expunged_regions(
+        &self,
+        opctx: &OpContext,
+        volume_id: VolumeUuid,
+    ) -> LookupResult<Vec<Region>> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::physical_disk::dsl as physical_disk_dsl;
+        use db::schema::region::dsl as region_dsl;
+        use db::schema::zpool::dsl as zpool_dsl;
+
+        region_dsl::region
+            .filter(region_dsl::dataset_id.eq_any(
+                dataset_dsl::dataset
+                    .filter(dataset_dsl::time_deleted.is_null())
+                    .filter(dataset_dsl::pool_id.eq_any(
+                        zpool_dsl::zpool
+                            .filter(zpool_dsl::time_deleted.is_null())
+                            .filter(zpool_dsl::physical_disk_id.eq_any(
+                                physical_disk_dsl::physical_disk
+                                    .filter(physical_disk_dsl::disk_policy.eq(PhysicalDiskPolicy::InService))
+                                    .select(physical_disk_dsl::id)
+                            ))
+                            .select(zpool_dsl::id)
+                    ))
+                    .select(dataset_dsl::id)
+            ))
+            .filter(region_dsl::volume_id.eq(to_db_typed_uuid(volume_id)))
+            .select(Region::as_select())
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }
 

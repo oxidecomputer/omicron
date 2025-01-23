@@ -50,11 +50,11 @@ external_dns_servers = ["1.1.1.1", "9.9.9.9"]
 # available port) because the test suite will be running many servers
 # concurrently.
 bind_address = "127.0.0.1:0"
-request_body_max_bytes = 8388608
+default_request_body_max_bytes = 1048576
 
 [deployment.dropshot_internal]
 bind_address = "127.0.0.1:0"
-request_body_max_bytes = 8388608
+default_request_body_max_bytes = 1048576
 
 #
 # NOTE: for the test suite, the internal DNS address will be replaced with one
@@ -104,11 +104,15 @@ phantom_disks.period_secs = 30
 physical_disk_adoption.period_secs = 30
 # Disable automatic disk adoption to avoid interfering with tests.
 physical_disk_adoption.disable = true
+# Set this to a value that's so high as to not fire during tests unless
+# explicitly requested.
+support_bundle_collector.period_secs = 999999
 decommissioned_disk_cleaner.period_secs = 60
 # Disable disk decommissioning cleanup to avoid interfering with tests.
 decommissioned_disk_cleaner.disable = true
 blueprints.period_secs_load = 100
 blueprints.period_secs_execute = 600
+blueprints.period_secs_rendezvous = 600
 blueprints.period_secs_collect_crdb_node_ids = 600
 sync_service_zone_nat.period_secs = 30
 switch_port_settings_manager.period_secs = 30

@@ -7,6 +7,7 @@ use atomicwrites::AtomicFile;
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use derive_more::{Add, AddAssign, Display, From};
+use diffus::Diffus;
 use itertools::Itertools;
 use omicron_common::api::external::Generation;
 use schemars::{
@@ -56,6 +57,7 @@ pub const OXIMETER_CLUSTER: &str = "oximeter_cluster";
     JsonSchema,
     Serialize,
     Deserialize,
+    Diffus,
 )]
 pub struct KeeperId(pub u64);
 
@@ -75,6 +77,7 @@ pub struct KeeperId(pub u64);
     JsonSchema,
     Serialize,
     Deserialize,
+    Diffus,
 )]
 pub struct ServerId(pub u64);
 
@@ -1200,7 +1203,7 @@ pub enum Timestamp {
 #[derive(Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct SystemTimeSeries {
-    pub time: Timestamp,
+    pub time: String,
     pub value: f64,
     // TODO: Would be really nice to have an enum with possible units (s, ms, bytes)
     // Not sure if I can even add this, the system tables don't mention units at all.
@@ -2099,15 +2102,15 @@ snapshot_storage_disk=LocalSnapshotDisk
 
         let expected = vec![
             SystemTimeSeries {
-                time: crate::Timestamp::Unix("1732494720".to_string()),
+                time: "1732494720".to_string(),
                 value: 110220450825.75238,
             },
             SystemTimeSeries {
-                time: crate::Timestamp::Unix("1732494840".to_string()),
+                time: "1732494840".to_string(),
                 value: 110339992917.33331,
             },
             SystemTimeSeries {
-                time: crate::Timestamp::Unix("1732494960".to_string()),
+                time: "1732494960".to_string(),
                 value: 110421854037.33331,
             },
         ];
@@ -2127,21 +2130,15 @@ snapshot_storage_disk=LocalSnapshotDisk
 
         let expected = vec![
             SystemTimeSeries {
-                time: crate::Timestamp::Utc(
-                    "2024-11-25T00:34:00Z".parse::<DateTime<Utc>>().unwrap(),
-                ),
+                time: "2024-11-25T00:34:00Z".to_string(),
                 value: 110220450825.75238,
             },
             SystemTimeSeries {
-                time: crate::Timestamp::Utc(
-                    "2024-11-25T00:35:00Z".parse::<DateTime<Utc>>().unwrap(),
-                ),
+                time: "2024-11-25T00:35:00Z".to_string(),
                 value: 110339992917.33331,
             },
             SystemTimeSeries {
-                time: crate::Timestamp::Utc(
-                    "2024-11-25T00:36:00Z".parse::<DateTime<Utc>>().unwrap(),
-                ),
+                time: "2024-11-25T00:36:00Z".to_string(),
                 value: 110421854037.33331,
             },
         ];
@@ -2176,7 +2173,7 @@ snapshot_storage_disk=LocalSnapshotDisk
 
         assert_eq!(
             format!("{}", root_cause),
-           "data did not match any variant of untagged enum Timestamp at line 1 column 12",
+           "invalid type: integer `2024`, expected a string at line 1 column 12",
         );
     }
 }

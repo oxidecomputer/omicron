@@ -41,11 +41,13 @@ use omicron_common::{
 };
 use omicron_uuid_kinds::{
     DemoSagaUuid, DownstairsKind, PropolisUuid, SledUuid, TypedUuid,
-    UpstairsKind, UpstairsRepairKind,
+    UpstairsKind, UpstairsRepairKind, VolumeUuid,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+const RACK_INITIALIZATION_REQUEST_MAX_BYTES: usize = 10 * 1024 * 1024;
 
 #[dropshot::api_description]
 pub trait NexusInternalApi {
@@ -92,6 +94,7 @@ pub trait NexusInternalApi {
     #[endpoint {
         method = PUT,
         path = "/racks/{rack_id}/initialization-complete",
+        request_body_max_bytes = RACK_INITIALIZATION_REQUEST_MAX_BYTES,
     }]
     async fn rack_initialization_complete(
         rqctx: RequestContext<Self::Context>,
@@ -567,7 +570,7 @@ pub struct DiskPathParam {
 /// Path parameters for Volume requests (internal API)
 #[derive(Deserialize, JsonSchema)]
 pub struct VolumePathParam {
-    pub volume_id: Uuid,
+    pub volume_id: VolumeUuid,
 }
 
 /// Path parameters for Rack requests.

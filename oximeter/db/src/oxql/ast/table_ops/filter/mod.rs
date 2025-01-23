@@ -12,6 +12,7 @@ use crate::oxql::ast::literal::Literal;
 use crate::oxql::ast::logical_op::LogicalOp;
 use crate::oxql::ast::table_ops::limit::Limit;
 use crate::oxql::ast::table_ops::limit::LimitKind;
+use crate::oxql::schema::TableSchema;
 use crate::oxql::Error;
 use crate::shells::special_idents;
 use chrono::DateTime;
@@ -27,6 +28,9 @@ use oxql_types::Timeseries;
 use regex::Regex;
 use std::collections::BTreeSet;
 use std::fmt;
+use std::time::Duration;
+
+pub(crate) mod visit;
 
 /// An AST node for the `filter` table operation.
 ///
@@ -78,6 +82,105 @@ impl Filter {
         let mut out = vec![];
         self.flatten_disjunctions_inner(&mut out);
         out
+    }
+
+    // Recursively apply the visitor to all the filter nodes in self.
+    fn visit_fields<V>(&self, visitor: &V) -> Result<Option<V::Output>, Error>
+    where
+        V: visit::Visit,
+    {
+        match &self.expr {
+            FilterExpr::Simple(simple) => {
+                visitor.visit_simple(self.negated, &simple)
+            }
+            FilterExpr::Compound(compound) => {
+                let left = compound.left.visit_fields(visitor)?;
+                let right = compound.right.visit_fields(visitor)?;
+                let out = match (left, right) {
+                    (None, None) => None,
+                    (None, Some(single)) | (Some(single), None) => Some(single),
+                    (Some(left), Some(right)) => Some(visitor.combine(
+                        self.negated,
+                        left,
+                        right,
+                        compound.op,
+                    )),
+                };
+                Ok(out)
+            }
+        }
+    }
+
+    /// Remove any predicates on the datum of a table.
+    pub fn remove_datum(
+        &self,
+        schema: &TableSchema,
+    ) -> Result<Option<Self>, Error> {
+        let visitor = visit::RemoveDatum { schema };
+        self.visit_fields(&visitor)
+    }
+
+    /// Remove any predicates _not_ on the datum of a table.
+    pub fn only_datum(
+        &self,
+        schema: &TableSchema,
+    ) -> Result<Option<Self>, Error> {
+        let visitor = visit::OnlyDatum { schema };
+        self.visit_fields(&visitor)
+    }
+
+    /// Restrict predicates so that they apply only to the schema's fields.
+    pub fn restrict_to_fields(
+        &self,
+        schema: &TableSchema,
+    ) -> Result<Option<Self>, Error> {
+        let visitor = visit::RestrictToFields { schema };
+        self.visit_fields(&visitor)
+    }
+
+    /// Restrict predicates so that they apply only to the schema's
+    /// measurements.
+    pub fn restrict_to_measurements(
+        &self,
+        schema: &TableSchema,
+    ) -> Result<Option<Self>, Error> {
+        anyhow::ensure!(
+            schema.n_dims() == 1,
+            "Rewriting measurement filters is only valid \
+            for 1-dimensional tables"
+        );
+        let visitor = visit::RestrictToMeasurements { schema };
+        self.visit_fields(&visitor)
+    }
+
+    /// Rewrite predicates so that they apply only to the schema's field tables.
+    ///
+    /// This returns the _database_ filters that can be applied in a `WHERE`
+    /// clause to implement the corresponding filter.
+    pub fn rewrite_for_field_tables(
+        &self,
+        schema: &TableSchema,
+    ) -> Result<Option<String>, Error> {
+        let visitor = visit::RewriteForFieldTables { schema };
+        self.visit_fields(&visitor)
+    }
+
+    /// Rewrite predicates so that they apply only to the schema's measurement
+    /// table.
+    ///
+    /// This returns the _database_ filters that can be applied in a `WHERE`
+    /// clause to implement the corresponding filter.
+    pub fn rewrite_for_measurement_table(
+        &self,
+        schema: &TableSchema,
+    ) -> Result<Option<String>, Error> {
+        anyhow::ensure!(
+            schema.n_dims() == 1,
+            "Rewriting measurement filters is only valid \
+            for 1-dimensional tables"
+        );
+        let visitor = visit::RewriteForMeasurementTable { schema };
+        self.visit_fields(&visitor)
     }
 
     fn flatten_disjunctions_inner(&self, dis: &mut Vec<Self>) {
@@ -231,6 +334,11 @@ impl Filter {
         Ok(Self { negated: self.negated, ..new })
     }
 
+    // Helper method to combine this filter with another, using an AND operator.
+    pub(crate) fn and(&self, other: &Filter) -> Self {
+        self.merge(other, LogicalOp::And)
+    }
+
     // Merge this filter with another one, using the provided operator.
     pub(crate) fn merge(&self, other: &Filter, op: LogicalOp) -> Self {
         Self {
@@ -301,7 +409,7 @@ impl Filter {
 
         // There are extra, implied names that depend on the data type of the
         // timeseries itself, check those as well.
-        let extras = implicit_field_names(first_timeseries);
+        let extras = implicit_field_names_for_timeseries(first_timeseries);
         let ident_names = self.ident_names();
         let not_valid = ident_names
             .iter()
@@ -483,21 +591,51 @@ impl Filter {
             }
         }
     }
+
+    /// Shift timestamps in any filters forward or backwards by this period,
+    /// depending on the direction implied by their comparison.
+    ///
+    /// E.g., `timestamp > t0` is shifted _backwards_ by `period`, so that it
+    /// ensures it captures `t0 - period`.
+    pub(crate) fn shift_timestamp_by(&self, period: Duration) -> Self {
+        let visitor = visit::ShiftTimestamps { period };
+        self.visit_fields(&visitor).unwrap().unwrap()
+    }
 }
 
 /// Return the names of the implicit fields / columns that a filter can apply
 /// to, based on the metric types of the contained data points.
-fn implicit_field_names(
+fn implicit_field_names_for_timeseries(
     first_timeseries: &Timeseries,
+) -> BTreeSet<&'static str> {
+    let type_info = first_timeseries
+        .points
+        .metric_types()
+        .zip(first_timeseries.points.data_types());
+    implicit_field_names_for_types(type_info)
+}
+
+/// Return the implicit field names a filter can apply to, from the given table
+/// schema.
+pub fn implicit_field_names_for_table_schema(
+    schema: &TableSchema,
+) -> BTreeSet<&'static str> {
+    implicit_field_names_for_types(
+        schema
+            .metric_types
+            .iter()
+            .copied()
+            .zip(schema.data_types.iter().copied()),
+    )
+}
+
+fn implicit_field_names_for_types(
+    type_info: impl Iterator<Item = (MetricType, DataType)>,
 ) -> BTreeSet<&'static str> {
     let mut out = BTreeSet::new();
 
     // Everything has a timestamp!
     out.insert(special_idents::TIMESTAMP);
-    let type_info = first_timeseries
-        .points
-        .metric_types()
-        .zip(first_timeseries.points.data_types());
     for (metric_type, data_type) in type_info {
         match (metric_type, data_type) {
             // Scalar gauges.
@@ -1160,6 +1298,8 @@ mod tests {
     use std::time::Duration;
     use uuid::Uuid;
 
+    use super::implicit_field_names_for_types;
+
     #[test]
     fn test_atom_filter_double_points() {
         let start_times = None;
@@ -1380,5 +1520,47 @@ mod tests {
         assert!(
             msg.contains(r#"timeseries fields: {"datum", "foo", "timestamp"}"#)
         );
+    }
+
+    #[test]
+    fn test_implicit_field_names_for_types() {
+        // Test all gauges
+        for dt in [
+            DataType::Integer,
+            DataType::Double,
+            DataType::Boolean,
+            DataType::String,
+        ] {
+            let ty = &[(MetricType::Gauge, dt)];
+            let names = implicit_field_names_for_types(ty.iter().copied());
+            assert_eq!(
+                names.iter().cloned().collect::<Vec<_>>(),
+                ["datum", "timestamp"],
+            );
+        }
+
+        // All cumulatives and delta scalars have a start time too.
+        for dt in [DataType::Integer, DataType::Double] {
+            for mt in [MetricType::Cumulative, MetricType::Delta] {
+                let ty = &[(mt, dt)];
+                let names = implicit_field_names_for_types(ty.iter().copied());
+                assert_eq!(
+                    names.iter().cloned().collect::<Vec<_>>(),
+                    ["datum", "start_time", "timestamp"],
+                );
+            }
+        }
+
+        // All histograms have...stuff.
+        for dt in [DataType::IntegerDistribution, DataType::DoubleDistribution]
+        {
+            let ty = &[(MetricType::Cumulative, dt)];
+            let names = implicit_field_names_for_types(ty.iter().copied());
+            for name in
+                ["bins", "counts", "min", "max", "start_time", "timestamp"]
+            {
+                assert!(names.contains(name));
+            }
+        }
     }
 }

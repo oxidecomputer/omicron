@@ -193,6 +193,9 @@ impl From<Error> for omicron_common::api::external::Error {
 // Provide a more specific HTTP error for some sled agent errors.
 impl From<Error> for dropshot::HttpError {
     fn from(err: Error) -> Self {
+        use dropshot::ClientErrorStatusCode;
+        use dropshot::ErrorStatusCode;
+
         const NO_SUCH_INSTANCE: &str = "NO_SUCH_INSTANCE";
         const INSTANCE_CHANNEL_FULL: &str = "INSTANCE_CHANNEL_FULL";
         match err {
@@ -210,25 +213,32 @@ impl From<Error> for dropshot::HttpError {
                         )
                     }
                     crate::instance::Error::Propolis(propolis_error) => {
-                        // Work around dropshot#693: HttpError::for_status
-                        // only accepts client errors and asserts on server
-                        // errors, so convert server errors by hand.
-                        match propolis_error.status() {
-                                None => HttpError::for_internal_error(
-                                    propolis_error.to_string(),
-                                ),
-
-                                Some(status_code) if status_code.is_client_error() => {
-                                    HttpError::for_status(None, status_code)
-                                },
-
-                                Some(status_code) => match status_code {
-                                    http::status::StatusCode::SERVICE_UNAVAILABLE =>
-                                        HttpError::for_unavail(None, propolis_error.to_string()),
-                                    _ =>
-                                        HttpError::for_internal_error(propolis_error.to_string()),
-                                }
+                        if let Some(status_code) =
+                            propolis_error.status().and_then(|status| {
+                                ErrorStatusCode::try_from(status).ok()
+                            })
+                        {
+                            if let Ok(status_code) =
+                                status_code.as_client_error()
+                            {
+                                return HttpError::for_client_error_with_status(
+                                    None,
+                                    status_code,
+                                );
                             }
+
+                            if status_code
+                                == ErrorStatusCode::SERVICE_UNAVAILABLE
+                            {
+                                return HttpError::for_unavail(
+                                    None,
+                                    propolis_error.to_string(),
+                                );
+                            }
+                        }
+                        HttpError::for_internal_error(
+                            propolis_error.to_string(),
+                        )
                     }
                     crate::instance::Error::Transition(omicron_error) => {
                         // Preserve the status associated with the wrapped
@@ -239,7 +249,7 @@ impl From<Error> for dropshot::HttpError {
                     crate::instance::Error::Terminating => {
                         HttpError::for_client_error(
                             Some(NO_SUCH_INSTANCE.to_string()),
-                            http::StatusCode::GONE,
+                            ClientErrorStatusCode::GONE,
                             instance_error.to_string(),
                         )
                     }
@@ -267,7 +277,7 @@ impl From<Error> for dropshot::HttpError {
                 BundleError::InstanceTerminating => {
                     HttpError::for_client_error(
                         Some(NO_SUCH_INSTANCE.to_string()),
-                        http::StatusCode::GONE,
+                        ClientErrorStatusCode::GONE,
                         inner.to_string(),
                     )
                 }
@@ -962,12 +972,21 @@ impl SledAgent {
                 continue;
             };
 
-            // First, ensure the dataset exists
-            let dataset_id = zone.id.into_untyped_uuid();
-            self.inner
-                .storage
-                .upsert_filesystem(dataset_id, dataset_name)
-                .await?;
+            // NOTE: This code will be deprecated by https://github.com/oxidecomputer/omicron/pull/7160
+            //
+            // However, we need to ensure that all blueprints have datasets
+            // within them before we can remove this back-fill.
+            //
+            // Therefore, we do something hairy here: We ensure the filesystem
+            // exists, but don't specify any dataset UUID value.
+            //
+            // This means that:
+            // - If the dataset exists and has a UUID, this will be a no-op
+            // - If the dataset doesn't exist, it'll be created without its
+            // oxide:uuid zfs property set
+            // - If a subsequent call to "datasets_ensure" tries to set a UUID,
+            // it should be able to get set (once).
+            self.inner.storage.upsert_filesystem(None, dataset_name).await?;
         }
 
         self.inner
@@ -1378,6 +1397,24 @@ impl SledAgent {
         &self,
     ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
         sled_diagnostics::dladm_info().await
+    }
+
+    pub(crate) async fn support_pargs_info(
+        &self,
+    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+        sled_diagnostics::pargs_oxide_processes(&self.log).await
+    }
+
+    pub(crate) async fn support_pstack_info(
+        &self,
+    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+        sled_diagnostics::pstack_oxide_processes(&self.log).await
+    }
+
+    pub(crate) async fn support_pfiles_info(
+        &self,
+    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+        sled_diagnostics::pfiles_oxide_processes(&self.log).await
     }
 }
 
