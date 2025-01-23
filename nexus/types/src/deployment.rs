@@ -52,10 +52,10 @@ use strum::EnumIter;
 use strum::IntoEnumIterator;
 
 mod blueprint_diff;
+mod blueprint_differ;
 mod blueprint_display;
 mod clickhouse;
 pub mod diff_visitors;
-pub mod diff_visitors_display;
 pub mod execution;
 pub mod id_map;
 mod network_resources;
