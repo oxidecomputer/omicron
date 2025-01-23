@@ -31,6 +31,7 @@ use omicron_common::api::external::{ByteCount, Generation};
 use omicron_common::disk::{CompressionAlgorithm, DiskIdentity};
 use omicron_uuid_kinds::{BlueprintUuid, DatasetUuid, SledUuid};
 use omicron_uuid_kinds::{OmicronZoneUuid, PhysicalDiskUuid};
+use parse_display::IntoResult;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -129,8 +130,136 @@ pub struct ModifiedSled<'e> {
     datasets_modified: BTreeMap<DatasetUuid, ModifiedDataset<'e>>,
 }
 
+impl<'e> ModifiedSled<'e> {
+    fn disks_table(&self) -> Option<BpTable> {
+        todo!()
+    }
+
+    fn datasets_table(&self) -> Option<BpTable> {
+        todo!()
+    }
+
+    /// Collate all data from each category to produce a single table.
+    ///
+    /// The order is:
+    ///
+    /// 1. Unchanged (if unchanged flag is set)
+    /// 2. Removed
+    /// 3. Modified
+    /// 4. Added
+    ///
+    /// The idea behind the order is to (a) group all changes together
+    /// and (b) put changes towards the bottom, so people have to scroll
+    /// back less.
+    fn zones_table(&self, show_unchanged: bool) -> Option<BpTable> {
+        let DiffValue::Change(zones_generation) = self.zones_generation else {
+            return None;
+        };
+        let generation = BpGeneration::Diff {
+            before: Some(*zones_generation.before),
+            after: Some(*zones_generation.after),
+        };
+
+        let mut rows = vec![];
+
+        // Unchanged
+        if show_unchanged {
+            rows.extend(
+                self.zones_unchanged
+                    .iter()
+                    .map(|zone| zones_row(BpDiffState::Unchanged, zone)),
+            );
+        }
+
+        // Removed
+        rows.extend(
+            self.zones_removed
+                .iter()
+                .map(|zone| zones_row(BpDiffState::Removed, zone)),
+        );
+
+        // Modified
+        rows.extend(self.zones_modified.iter().map(|(zone_id, fields)| {
+            let mut columns = vec![];
+
+            // kind
+            match &fields.zone_type {
+                DiffValue::Unchanged(zone_type) => {
+                    columns.push(BpTableColumn::Value(
+                        zone_type.kind().report_str().to_string(),
+                    ));
+                }
+                DiffValue::Change(change) => {
+                    // We don't actually allow changing zone types, but if a
+                    // change exists we'll show it.
+                    columns.push(BpTableColumn::Diff {
+                        before: change.before.kind().report_str().to_string(),
+                        after: change.after.kind().report_str().to_string(),
+                    });
+                }
+            }
+
+            // zone_id
+            columns.push(BpTableColumn::Value(zone_id.to_string()));
+
+            // disposition
+            match &fields.disposition {
+                DiffValue::Unchanged(val) => {
+                    columns.push(BpTableColumn::Value(val.to_string()));
+                }
+                DiffValue::Change(change) => {
+                    columns.push(BpTableColumn::Diff {
+                        before: change.before.to_string(),
+                        after: change.after.to_string(),
+                    });
+                }
+            }
+
+            // underlay IP
+            match &fields.zone_type {
+                DiffValue::Unchanged(val) => {
+                    columns.push(BpTableColumn::Value(
+                        val.underlay_ip().to_string(),
+                    ));
+                }
+                DiffValue::Change(change) => {
+                    // We don't actually allow changing underlay IPs, but if a
+                    // change exists we'll show it.
+                    columns.push(BpTableColumn::Diff {
+                        before: change.before.underlay_ip().to_string(),
+                        after: change.after.underlay_ip().to_string(),
+                    });
+                }
+            }
+
+            BpTableRow::new(BpDiffState::Modified, columns)
+        }));
+
+        // Added
+        rows.extend(
+            self.zones_inserted
+                .iter()
+                .map(|zone| zones_row(BpDiffState::Added, zone)),
+        );
+
+        if rows.is_empty() {
+            return None;
+        }
+
+        Some(BpTable::new(BpOmicronZonesTableSchema {}, generation, rows))
+    }
+}
+
+// TODO: This really shouldn't be a `From` impl, because we want to
+// only optionally include unchanged rows for tables.
 impl<'e> From<&ModifiedSled<'e>> for SledTables {
     fn from(value: &ModifiedSled<'e>) -> Self {
+        /*
+        let disks = value.disks_table(false);
+        let datasets = value.datasets_table();
+        let zones = value.zones_table();
+        Self { disks, datasets, zones }
+        */
         todo!()
     }
 }
@@ -1064,16 +1193,7 @@ fn disks_table(
         let rows = disks_config
             .disks
             .iter()
-            .map(|d| {
-                BpTableRow::from_strings(
-                    state,
-                    vec![
-                        d.identity.vendor.clone(),
-                        d.identity.model.clone(),
-                        d.identity.serial.clone(),
-                    ],
-                )
-            })
+            .map(|disk| disks_row(state, disk))
             .collect();
         BpTable::new(
             BpPhysicalDisksTableSchema {},
@@ -1081,6 +1201,20 @@ fn disks_table(
             rows,
         )
     })
+}
+
+fn disks_row(
+    state: BpDiffState,
+    disk: &BlueprintPhysicalDiskConfig,
+) -> BpTableRow {
+    BpTableRow::from_strings(
+        state,
+        vec![
+            disk.identity.vendor.clone(),
+            disk.identity.model.clone(),
+            disk.identity.serial.clone(),
+        ],
+    )
 }
 
 /// Create a `BpTable` from a `BlueprintDatasetsConfig`
@@ -1120,17 +1254,7 @@ fn zones_table(
         let rows = zones_config
             .zones
             .iter()
-            .map(|zone| {
-                BpTableRow::from_strings(
-                    state,
-                    vec![
-                        zone.kind().report_str().to_string(),
-                        zone.id().to_string(),
-                        zone.disposition.to_string(),
-                        zone.underlay_ip().to_string(),
-                    ],
-                )
-            })
+            .map(|zone| zones_row(state, zone))
             .collect();
         BpTable::new(
             BpOmicronZonesTableSchema {},
@@ -1138,4 +1262,16 @@ fn zones_table(
             rows,
         )
     })
+}
+
+fn zones_row(state: BpDiffState, zone: &BlueprintZoneConfig) -> BpTableRow {
+    BpTableRow::from_strings(
+        state,
+        vec![
+            zone.kind().report_str().to_string(),
+            zone.id().to_string(),
+            zone.disposition.to_string(),
+            zone.underlay_ip().to_string(),
+        ],
+    )
 }
