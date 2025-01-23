@@ -13,19 +13,20 @@ use crate::{
     FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
 };
 use anyhow::{Context, Result};
+use camino::Utf8Path;
 use owo_colors::OwoColorize;
 use semver::Version;
 use std::{collections::BTreeMap, ops::Deref, process::ExitCode};
 
 pub(crate) fn dump_impl(
     blessed_revision: Option<&str>,
-    env: &Environment,
+    directory: &Utf8Path,
     output: &OutputOpts,
 ) -> anyhow::Result<()> {
     let apis = ManagedApis::all()?;
 
     // Print information about local files
-    let local_dir = &env.openapi_dir;
+    let local_dir = directory;
     println!("Loading local files from {:?}", local_dir);
     let local_files = LocalFiles::load_from_directory(&local_dir, &apis)?;
     dump_structure(
@@ -37,11 +38,8 @@ pub(crate) fn dump_impl(
     if let Some(git_revision) = blessed_revision {
         println!("Loading blessed files from revision {:?}", git_revision);
         let revision = GitRevision::from(git_revision.to_owned());
-        let blessed = BlessedFiles::load_from_git_revision(
-            &revision,
-            &env.openapi_dir,
-            &apis,
-        )?;
+        let blessed =
+            BlessedFiles::load_from_git_revision(&revision, local_dir, &apis)?;
         dump_structure(&blessed.spec_files, &blessed.errors, &blessed.warnings);
     } else {
         println!("Blessed files skipped (no git revision specified)");

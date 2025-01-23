@@ -52,8 +52,41 @@ impl BlessedFiles {
     ) -> anyhow::Result<BlessedFiles> {
         // XXX-dap how do we ensure this is a relative path from the root of the
         // workspace
+        let mut api_files = ApiSpecFilesBuilder::new(apis);
         let files_found = git_ls_tree(&commit, directory)?;
-        todo!();
+        for f in files_found {
+            // We should be looking at either a single-component path
+            // ("api.json") or a file inside one level of directory hierarhcy
+            // ("api/api-1.2.3-hash.json").  Figure out which case we're in.
+            let parts: Vec<_> = f.iter().collect();
+            if parts.is_empty() || parts.len() > 2 {
+                api_files.load_error(anyhow!(
+                    "path {:?}: can't understand this path name",
+                    f
+                ));
+                continue;
+            }
+
+            // Read the contents.
+            let contents = git_show_file(commit, &directory.join(&f))?;
+            if parts.len() == 1 {
+                if let Some(file_name) = api_files.lockstep_file_name(parts[0])
+                {
+                    api_files.load_contents(file_name, contents);
+                }
+            } else if parts.len() == 2 {
+                if let Some(ident) = api_files.versioned_directory(parts[0]) {
+                    if let Some(file_name) =
+                        api_files.versioned_file_name(&ident, parts[1])
+                    {
+                        api_files.load_contents(file_name, contents);
+                    }
+                }
+            }
+        }
+
+        let (spec_files, errors, warnings) = api_files.into_parts();
+        Ok(BlessedFiles { spec_files, errors, warnings })
     }
 }
 
@@ -127,8 +160,37 @@ fn git_ls_tree(
         .arg("-r")
         .arg("-z")
         .arg("--name-only")
+        .arg("--full-tree")
         .arg(revision.as_str())
         .arg(&directory);
+    let label = cmd_label(&cmd);
     let stdout = do_run(&mut cmd)?;
-    Ok(stdout.trim().split("\0").map(Utf8PathBuf::from).collect())
+    Ok(stdout
+        .trim()
+        .split("\0")
+        .filter(|s| !s.is_empty())
+        .map(|path| {
+            let found_path = Utf8PathBuf::from(path);
+            let Ok(relative) = found_path.strip_prefix(directory) else {
+                bail!(
+                "git ls-tree unexpectedly returned a path that did not start \
+                 with {:?}: {:?} (cmd: {})",
+                directory,
+                found_path,
+                label,
+            );
+            };
+            Ok(relative.to_owned())
+        })
+        .collect::<Result<Vec<_>, _>>()?)
+}
+
+fn git_show_file(
+    revision: &GitRevision,
+    path: &Utf8Path,
+) -> anyhow::Result<Vec<u8>> {
+    let mut cmd = git_start();
+    cmd.arg("show").arg(format!("{}:{}", revision, path));
+    let stdout = do_run(&mut cmd)?;
+    Ok(stdout.into_bytes())
 }

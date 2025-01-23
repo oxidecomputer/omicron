@@ -74,7 +74,10 @@ pub struct DumpArgs {
 
 impl DumpArgs {
     fn exec(self, output: &OutputOpts) -> anyhow::Result<ExitCode> {
-        let dir = Environment::new(self.dir)?;
+        // XXX-dap This thing always canonicalizes the path, but that's not what
+        // I want when I go looking for it in the Git history.
+        // let dir = Environment::new(self.dir)?;
+        let dir = self.dir.unwrap_or_else(|| Utf8PathBuf::from("openapi"));
         dump_impl(self.blessed_revision.as_deref(), &dir, output)?;
         Ok(ExitCode::SUCCESS)
     }
