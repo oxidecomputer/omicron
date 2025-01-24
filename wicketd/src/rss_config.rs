@@ -35,7 +35,7 @@ use std::mem;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use thiserror::Error;
-use wicket_common::inventory::RackV1Inventory;
+use wicket_common::inventory::MgsV1Inventory;
 use wicket_common::inventory::SpType;
 use wicket_common::rack_setup::BgpAuthKey;
 use wicket_common::rack_setup::BgpAuthKeyId;
@@ -114,7 +114,7 @@ impl CurrentRssConfig {
 
     pub(crate) fn update_with_inventory_and_bootstrap_peers(
         &mut self,
-        inventory: &RackV1Inventory,
+        inventory: &MgsV1Inventory,
         bootstrap_peers: &BootstrapPeers,
         log: &slog::Logger,
     ) {

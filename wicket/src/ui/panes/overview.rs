@@ -22,12 +22,21 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 use ratatui::Frame;
+use transceiver_controller::message::ExtendedStatus;
+use transceiver_controller::ApplicationDescriptor;
+use transceiver_controller::CmisDatapath;
+use transceiver_controller::Datapath;
+use transceiver_controller::PowerMode;
+use transceiver_controller::PowerState;
+use transceiver_controller::ReceiverPower;
+use transceiver_controller::SffComplianceCode;
 use wicket_common::inventory::RotState;
 use wicket_common::inventory::SpComponentCaboose;
 use wicket_common::inventory::SpComponentInfo;
 use wicket_common::inventory::SpComponentPresence;
 use wicket_common::inventory::SpIgnition;
 use wicket_common::inventory::SpState;
+use wicket_common::inventory::Transceiver;
 
 enum PopupKind {
     Ignition,
@@ -1115,6 +1124,144 @@ fn inventory_description(component: &Component) -> Text {
         }
     }
 
+    // If this is a switch, describe any transceivers.
+    if let Component::Switch { transceivers, .. } = component {
+        // blank line separator
+        spans.push(Line::default());
+
+        let mut label = vec![Span::styled("Transceivers: ", label_style)];
+        if transceivers.is_empty() {
+            label.push(Span::styled("None", warn_style));
+            spans.push(label.into());
+        } else {
+            spans.push(label.into());
+            for transceiver in transceivers {
+                // Top-level bullet for the port itself. We're not sure what
+                // details we can print about the transceiver yet.
+                spans.push(
+                    vec![
+                        bullet(),
+                        Span::styled(&transceiver.port, label_style),
+                    ]
+                    .into(),
+                );
+
+                // Now print as much of the details for this transceiver as we
+                // can.
+                spans.push(
+                    vec![
+                        nest_bullet(),
+                        Span::styled("Vendor: ", label_style),
+                        Span::styled(&transceiver.vendor.vendor.name, ok_style),
+                    ]
+                    .into(),
+                );
+                spans.push(
+                    vec![
+                        nest_bullet(),
+                        Span::styled("Model: ", label_style),
+                        Span::styled(&transceiver.vendor.vendor.part, ok_style),
+                    ]
+                    .into(),
+                );
+                spans.push(
+                    vec![
+                        nest_bullet(),
+                        Span::styled("Serial: ", label_style),
+                        Span::styled(
+                            &transceiver.vendor.vendor.serial,
+                            ok_style,
+                        ),
+                    ]
+                    .into(),
+                );
+                spans.push(
+                    vec![
+                        nest_bullet(),
+                        Span::styled("Management interface: ", label_style),
+                        Span::styled(
+                            transceiver.vendor.identifier.to_string(),
+                            ok_style,
+                        ),
+                    ]
+                    .into(),
+                );
+
+                let (media_type_style, media_type) =
+                    extract_media_type(&transceiver.datapath);
+                spans.push(
+                    vec![
+                        nest_bullet(),
+                        Span::styled("Media type: ", label_style),
+                        Span::styled(media_type, media_type_style),
+                    ]
+                    .into(),
+                );
+
+                let (fpga_power_style, fpga_power) =
+                    format_transceiver_status(&transceiver.status);
+                spans.push(
+                    vec![
+                        nest_bullet(),
+                        Span::styled("Power at FPGA: ", label_style),
+                        Span::styled(fpga_power, fpga_power_style),
+                    ]
+                    .into(),
+                );
+
+                let (module_power_style, module_power) =
+                    format_transceiver_power_state(&transceiver.power);
+                spans.push(
+                    vec![
+                        nest_bullet(),
+                        Span::styled("Power at module: ", label_style),
+                        Span::styled(module_power, module_power_style),
+                    ]
+                    .into(),
+                );
+
+                let (temp_style, temp) = format_transceiver_temperature(
+                    &transceiver.monitors.temperature,
+                );
+                spans.push(
+                    vec![
+                        nest_bullet(),
+                        Span::styled("Temperature: ", label_style),
+                        Span::styled(temp, temp_style),
+                    ]
+                    .into(),
+                );
+
+                let (voltage_style, voltage) = format_transceiver_voltage(
+                    &transceiver.monitors.supply_voltage,
+                );
+                spans.push(
+                    vec![
+                        nest_bullet(),
+                        Span::styled("Voltage: ", label_style),
+                        Span::styled(voltage, voltage_style),
+                    ]
+                    .into(),
+                );
+
+                let n_lanes = n_expected_lanes(transceiver);
+                let mut line = vec![nest_bullet()];
+                line.extend(format_transceiver_receive_power(
+                    n_lanes,
+                    transceiver.monitors.receiver_power.as_deref(),
+                ));
+                spans.push(line.into());
+
+                let mut line = vec![nest_bullet()];
+                line.extend(format_transceiver_transmit_power(
+                    n_lanes,
+                    transceiver.monitors.transmitter_power.as_deref(),
+                ));
+                spans.push(line.into());
+            }
+        }
+    };
+
     Text::from(spans)
 }
 
@@ -1178,4 +1325,231 @@ fn append_caboose(
     let mut version_spans =
         vec![prefix.clone(), Span::styled("Version: ", label_style)];
     version_spans.push(Span::styled(version, ok_style));
+}
+
+// Print relevant transceiver status bits.
+//
+// We know the transceiver is present by construction, so print the power state
+// and any faults.
+fn format_transceiver_status(status: &ExtendedStatus) -> (Style, String) {
+    if status.contains(ExtendedStatus::ENABLED) {
+        if status.contains(ExtendedStatus::POWER_GOOD) {
+            return (style::text_success(), String::from("Enabled"));
+        }
+        let message = if status.contains(ExtendedStatus::FAULT_POWER_TIMEOUT) {
+            String::from("Timeout fault")
+        } else if status.contains(ExtendedStatus::FAULT_POWER_LOST) {
+            String::from("Power lost")
+        } else if status.contains(ExtendedStatus::DISABLED_BY_SP) {
+            String::from("Disabled by SP")
+        } else {
+            format!("Unknown: {}", status)
+        };
+        (style::text_failure(), message)
+    } else {
+        (style::text_warning(), String::from("Disabled"))
+    }
+}
+
+fn format_transceiver_power_state(power: &PowerMode) -> (Style, String) {
+    let style = match power.state {
+        PowerState::Off => style::text_warning(),
+        PowerState::Low => style::text_warning(),
+        PowerState::High => style::text_success(),
+    };
+    (
+        style,
+        format!(
+            "{}{}",
+            power.state,
+            if matches!(power.software_override, Some(true)) {
+                " (Software override)"
+            } else {
+                ""
+            }
+        ),
+    )
+}
+
+fn format_transceiver_temperature(maybe_temp: &Option<f32>) -> (Style, String) {
+    const MIN_WARNING_TEMP: f32 = 15.0;
+    const MAX_WARNING_TEMP: f32 = 50.0;
+    match maybe_temp {
+        Some(t) => {
+            let temp = format!("{t:0.2} °C");
+            let style = if *t < MIN_WARNING_TEMP || *t > MAX_WARNING_TEMP {
+                style::text_warning()
+            } else {
+                style::text_success()
+            };
+            (style, temp)
+        }
+        None => (style::text_dim(), String::from("Unavailable")),
+    }
+}
+
+fn format_transceiver_voltage(maybe_voltage: &Option<f32>) -> (Style, String) {
+    const MIN_WARNING_VOLTAGE: f32 = 3.0;
+    const MAX_WARNING_VOLTAGE: f32 = 3.7;
+    match maybe_voltage {
+        Some(v) => {
+            let voltage = format!("{v:0.2} V");
+            let style = if *v < MIN_WARNING_VOLTAGE || *v > MAX_WARNING_VOLTAGE
+            {
+                style::text_warning()
+            } else {
+                style::text_success()
+            };
+            (style, voltage)
+        }
+        None => (style::text_dim(), String::from("Unavailable")),
+    }
+}
+
+fn format_transceiver_receive_power(
+    n_lanes: Option<usize>,
+    receiver_power: Option<&[ReceiverPower]>,
+) -> Vec<Span> {
+    const MIN_WARNING_POWER: f32 = 0.5;
+    const MAX_WARNING_POWER: f32 = 2.5;
+    let mut out = Vec::new();
+    if let Some(pow) = receiver_power {
+        if !pow.is_empty() {
+            // Push the label itself.
+            let kind = if matches!(&pow[0], ReceiverPower::Average(_)) {
+                "Avg"
+            } else {
+                "Peak-to-peak"
+            };
+            let label = format!("Rx power (mW, {}): [", kind);
+            out.push(Span::styled(label, style::text_label()));
+
+            // Push each Rx power measurement, styling it if it's above the
+            // limit.
+            let n_lanes = n_lanes.unwrap_or(pow.len());
+            for (lane, meas) in pow[..n_lanes].iter().enumerate() {
+                let style = if meas.value() < MIN_WARNING_POWER
+                    || meas.value() > MAX_WARNING_POWER
+                {
+                    style::text_warning()
+                } else {
+                    style::text_success()
+                };
+                let measurement = format!("{:0.3}", meas.value());
+                out.push(Span::styled(measurement, style));
+                if lane < n_lanes - 1 {
+                    out.push(Span::styled(", ", style::text_label()));
+                }
+            }
+            out.push(Span::styled("]", style::text_label()));
+            return out;
+        }
+    }
+    out.push(Span::styled("Rx power: ", style::text_label()));
+    out.push(Span::styled("Unavailable", style::text_dim()));
+    out
+}
+
+fn format_transceiver_transmit_power(
+    n_lanes: Option<usize>,
+    transmitter_power: Option<&[f32]>,
+) -> Vec<Span> {
+    const MIN_WARNING_POWER: f32 = 0.5;
+    const MAX_WARNING_POWER: f32 = 2.5;
+    if let Some(pow) = transmitter_power {
+        if !pow.is_empty() {
+            let mut out =
+                vec![Span::styled("Tx power (mW): [", style::text_label())];
+            let n_lanes = n_lanes.unwrap_or(pow.len());
+            for (lane, meas) in pow[..n_lanes].iter().enumerate() {
+                let style =
+                    if *meas < MIN_WARNING_POWER || *meas > MAX_WARNING_POWER {
+                        style::text_warning()
+                    } else {
+                        style::text_success()
+                    };
+                let measurement = format!("{:0.3}", meas);
+                out.push(Span::styled(measurement, style));
+                if lane < n_lanes - 1 {
+                    out.push(Span::styled(", ", style::text_label()));
+                }
+            }
+            out.push(Span::styled("]", style::text_label()));
+            return out;
+        }
+    }
+    vec![
+        Span::styled("Tx power (mW): ", style::text_label()),
+        Span::styled("Unavailable", style::text_dim()),
+    ]
+}
+
+fn extract_media_type(datapath: &Datapath) -> (Style, String) {
+    match datapath {
+        Datapath::Cmis { datapaths, .. } => {
+            let Some(media_type) = datapaths.values().next().map(|p| {
+                let CmisDatapath { application, .. } = p;
+                let ApplicationDescriptor { media_id, .. } = application;
+                media_id.to_string()
+            }) else {
+                return (style::text_warning(), String::from("Unknown"));
+            };
+            (style::text_success(), media_type)
+        }
+        Datapath::Sff8636 { specification, .. } => {
+            (style::text_success(), specification.to_string())
+        }
+    }
+}
+
+/// Return the number of expected media lanes in the transceiver.
+///
+/// If we aren't sure, return `None`.
+fn n_expected_lanes(tr: &Transceiver) -> Option<usize> {
+    match &tr.datapath {
+        Datapath::Cmis { datapaths, .. } => datapaths
+            .values()
+            .next()
+            .map(|CmisDatapath { lane_status, .. }| lane_status.len())
+            .or(Some(4)),
+        Datapath::Sff8636 { specification, .. } => match specification {
+            SffComplianceCode::Extended(code) => {
+                use transceiver_controller::ExtendedSpecificationComplianceCode::*;
+                match code {
+                    Id100GBaseSr4 => Some(4),
+                    Id100GBaseLr4 => Some(4),
+                    Id100GBCwdm4 => Some(4),
+                    Id100GBaseCr4 => Some(4),
+                    Id100GSwdm4 => Some(4),
+                    Id100GBaseFr1 => Some(1),
+                    Id100GBaseLr1 => Some(1),
+                    Id200GBaseFr4 => Some(4),
+                    Id200GBaseLr4 => Some(4),
+                    Id400GBaseDr4 => Some(4),
+                    Id100GPam4BiDi => Some(2),
+                    Unspecified | Id100GAoc5en5 | Id100GBaseEr4
+                    | Id100GBaseSr10 | Id100GPsm4 | Id100GAcc | Obsolete
+                    | Id25GBaseCrS | Id25GBaseCrN | Id10MbEth
+                    | Id40GBaseEr4 | Id4x10GBaseSr | Id40GPsm4
+                    | IdG959p1i12d1 | IdG959p1s12d2 | IdG9592p1l1d1
+                    | Id10GBaseT | Id100GClr4 | Id100GAoc10en12
+                    | Id100GAcc10en12 | Id100GeDwdm2 | Id100GWdm
+                    | Id10GBaseTSr | Id5GBaseT | Id2p5GBaseT | Id40GSwdm4
+                    | Id10GBaseBr | Id25GBaseBr | Id50GBaseBr | Id4wdm10
+                    | Id4wdm20 | Id4wdm40 | Id100GBaseDr | Id100GFr
+                    | Id100GLr | Id100GBaseSr1 | Id100GBaseVr1
+                    | Id100GBaseSr12 | Id100GBaseVr12 | Id100GLr120Caui4
+                    | Id100GLr130Caui4 | Id100GLr140Caui4 | Id100GLr120
+                    | Id100GLr130 | Id100GLr140 | IdAcc50GAUI10en6
+                    | IdAcc50GAUI10en62 | IdAcc50GAUI2p6en4
+                    | IdAcc50GAUI2p6en41 | Id100GBaseCr1 | Id50GBaseCr
+                    | Id50GBaseSr | Id50GBaseFr | Id50GBaseEr | Id200GPsm4
+                    | Id50GBaseLr | Id400GBaseFr4 | Id400GBaseLr4
+                    | Id400GGLr410 | Id400GBaseZr | Id256GfcSw4 | Id64Gfc
+                    | Id128Gfc | Reserved(_) => None,
+                }
+            }
+            SffComplianceCode::Ethernet(_) => None,
+        },
+    }
 }

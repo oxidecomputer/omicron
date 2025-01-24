@@ -7,7 +7,7 @@ use humantime::format_rfc3339;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 use wicket_common::inventory::RackV1Inventory;
 use wicket_common::update_events::EventReport;
 use wicketd_client::types::{
@@ -36,7 +36,7 @@ pub enum Event {
     Term(Cmd),
 
     /// An Inventory Update Event
-    Inventory { inventory: RackV1Inventory, mgs_last_seen: Duration },
+    Inventory { inventory: RackV1Inventory },
 
     /// TUF repo artifacts unpacked by wicketd, and event reports
     ArtifactsAndEventReports {

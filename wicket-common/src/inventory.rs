@@ -9,13 +9,31 @@ pub use gateway_client::types::{
     SpComponentPresence, SpIdentifier, SpIgnition, SpIgnitionSystemType,
     SpState, SpType,
 };
+use omicron_common::api::external::SwitchLocation;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, time::Duration};
 
 /// The current state of the v1 Rack as known to wicketd
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "inventory", rename_all = "snake_case")]
+#[serde(tag = "rack_inventory", rename_all = "snake_case")]
 pub struct RackV1Inventory {
+    pub mgs: Option<MgsV1InventorySnapshot>,
+    pub transceivers: Option<TransceiverInventorySnapshot>,
+}
+
+/// The state of the v1 Rack as known to MGS at a given time.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "mgs_inventory_snapshot", rename_all = "snake_case")]
+pub struct MgsV1InventorySnapshot {
+    pub inventory: MgsV1Inventory,
+    pub last_seen: Duration,
+}
+
+/// The current state of the v1 Rack as known to MGS
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "mgs_inventory", rename_all = "snake_case")]
+pub struct MgsV1Inventory {
     pub sps: Vec<SpInventory>,
 }
 
@@ -60,4 +78,25 @@ pub struct RotInventory {
     // `None` indicates we don't need to read
     pub caboose_stage0: Option<Option<SpComponentCaboose>>,
     pub caboose_stage0next: Option<Option<SpComponentCaboose>>,
+}
+
+/// A snapshot of the transceiver inventory at a given time.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[serde(tag = "transceiver_inventory_snapshot", rename_all = "snake_case")]
+pub struct TransceiverInventorySnapshot {
+    /// The transceivers in each switch.
+    pub inventory: HashMap<SwitchLocation, Vec<Transceiver>>,
+    pub last_seen: Duration,
+}
+
+/// A transceiver in the switch's front ports.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[serde(tag = "transceiver", rename_all = "snake_case")]
+pub struct Transceiver {
+    pub port: String,
+    pub status: transceiver_controller::message::ExtendedStatus,
+    pub power: transceiver_controller::PowerMode,
+    pub vendor: transceiver_controller::VendorInfo,
+    pub datapath: transceiver_controller::Datapath,
+    pub monitors: transceiver_controller::Monitors,
 }

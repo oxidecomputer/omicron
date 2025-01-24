@@ -820,6 +820,56 @@
           }
         ]
       },
+      "ApplicationDescriptor": {
+        "description": "An Application Descriptor describes the supported datapath configurations.\n\nThis is a CMIS-specific concept. It's used for modules to advertise how it can be used by the host. Each application describes the host-side electrical interface; the media-side interface; the number of lanes required; etc.\n\nHost-side software can select one of these applications to instruct the module to use a specific set of lanes, with the interface on either side of the module.",
+        "type": "object",
+        "properties": {
+          "host_id": {
+            "description": "The electrical interface with the host side.",
+            "type": "string"
+          },
+          "host_lane_assignment_options": {
+            "description": "The lanes on the host-side supporting this application.\n\nThis is a bit mask with a 1 identifying the lowest lane in a consecutive group of lanes to which the application can be assigned. This must be used with the `host_lane_count`. For example a value of `0b0000_0001` with a host lane count of 4 indicates that the first 4 lanes may be used in this application.\n\nAn application may support starting from multiple lanes.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "host_lane_count": {
+            "description": "The number of host-side lanes.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "media_id": {
+            "description": "The interface, optical or copper, with the media side.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MediaInterfaceId"
+              }
+            ]
+          },
+          "media_lane_assignment_options": {
+            "description": "The lanes on the media-side supporting this application.\n\nSee `host_lane_assignment_options` for details.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "media_lane_count": {
+            "description": "The number of media-side lanes.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "host_id",
+          "host_lane_assignment_options",
+          "host_lane_count",
+          "media_id",
+          "media_lane_assignment_options",
+          "media_lane_count"
+        ]
+      },
       "ArtifactHashId": {
         "description": "A hash-based identifier for an artifact.\n\nSome places, e.g. the installinator, request artifacts by hash rather than by name and version. This type indicates that.",
         "type": "object",
@@ -865,6 +915,156 @@
           "name",
           "version"
         ]
+      },
+      "Aux1Monitor": {
+        "description": "The first auxlliary CMIS monitor.",
+        "oneOf": [
+          {
+            "description": "The monitored property is custom, i.e., part-specific.",
+            "type": "object",
+            "properties": {
+              "custom": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "minimum": 0
+                },
+                "minItems": 2,
+                "maxItems": 2
+              }
+            },
+            "required": [
+              "custom"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "The current of the laser thermoelectric cooler.\n\nFor actively-cooled laser systems, this specifies the percentage of the maximum current the thermoelectric cooler supports. If the percentage is positive, the cooler is heating the laser. If negative, the cooler is cooling the laser.",
+            "type": "object",
+            "properties": {
+              "tec_current": {
+                "type": "number",
+                "format": "float"
+              }
+            },
+            "required": [
+              "tec_current"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "Aux2Monitor": {
+        "description": "The second auxlliary CMIS monitor.",
+        "oneOf": [
+          {
+            "description": "The temperature of the laser itself (degrees C).",
+            "type": "object",
+            "properties": {
+              "laser_temperature": {
+                "type": "number",
+                "format": "float"
+              }
+            },
+            "required": [
+              "laser_temperature"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "The current of the laser thermoelectric cooler.\n\nFor actively-cooled laser systems, this specifies the percentage of the maximum current the thermoelectric cooler supports. If the percentage is positive, the cooler is heating the laser. If negative, the cooler is cooling the laser.",
+            "type": "object",
+            "properties": {
+              "tec_current": {
+                "type": "number",
+                "format": "float"
+              }
+            },
+            "required": [
+              "tec_current"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "Aux3Monitor": {
+        "description": "The third auxlliary CMIS monitor.",
+        "oneOf": [
+          {
+            "description": "The temperature of the laser itself (degrees C).",
+            "type": "object",
+            "properties": {
+              "laser_temperature": {
+                "type": "number",
+                "format": "float"
+              }
+            },
+            "required": [
+              "laser_temperature"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "Measured voltage of an additional power supply (Volts).",
+            "type": "object",
+            "properties": {
+              "additional_supply_voltage": {
+                "type": "number",
+                "format": "float"
+              }
+            },
+            "required": [
+              "additional_supply_voltage"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "AuxMonitors": {
+        "description": "Auxlliary monitored values for CMIS modules.",
+        "type": "object",
+        "properties": {
+          "aux1": {
+            "nullable": true,
+            "description": "Auxlliary monitor 1, either a custom value or TEC current.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Aux1Monitor"
+              }
+            ]
+          },
+          "aux2": {
+            "nullable": true,
+            "description": "Auxlliary monitor 1, either laser temperature or TEC current.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Aux2Monitor"
+              }
+            ]
+          },
+          "aux3": {
+            "nullable": true,
+            "description": "Auxlliary monitor 1, either laser temperature or additional supply voltage.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Aux3Monitor"
+              }
+            ]
+          },
+          "custom": {
+            "nullable": true,
+            "description": "A custom monitor. The value here is entirely vendor- and part-specific, so the part's data sheet must be consulted. The value may be either a signed or unsigned 16-bit integer, and so is included as raw bytes.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        }
       },
       "Baseboard": {
         "description": "Describes properties that should uniquely identify a Gimlet.",
@@ -1251,6 +1451,135 @@
           "no_update_data"
         ]
       },
+      "CmisDatapath": {
+        "description": "A datapath in a CMIS module.\n\nIn contrast to SFF-8636, CMIS makes first-class the concept of a datapath: a set of lanes and all the associated machinery involved in the transfer of data. This includes:\n\n- The \"application descriptor\" which is the host and media interfaces, and the lanes on each side used to transfer data; - The state of the datapath in a well-defined finite state machine (see CMIS 5.0 section 6.3.3); - The flags indicating how the datapath components are operating, such as receiving an input Rx signal or whether the transmitter is disabled.",
+        "type": "object",
+        "properties": {
+          "application": {
+            "description": "The application descriptor for this datapath.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ApplicationDescriptor"
+              }
+            ]
+          },
+          "lane_status": {
+            "description": "The status bits for each lane in the datapath.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CmisLaneStatus"
+            }
+          }
+        },
+        "required": [
+          "application",
+          "lane_status"
+        ]
+      },
+      "CmisLaneStatus": {
+        "description": "The status of a single CMIS lane.\n\nIf any particular control or status value is unsupported by a module, it is `None`.",
+        "type": "object",
+        "properties": {
+          "rx_auto_squelch_disable": {
+            "nullable": true,
+            "description": "Whether the host-side has disabled the Rx auto-squelch.\n\nThe module can implement automatic squelching of the Rx output, if the media-side input signal isn't valid. This indicates whether the host has disabled such a setting.",
+            "type": "boolean"
+          },
+          "rx_lol": {
+            "nullable": true,
+            "description": "Media-side loss of lock flag.\n\nThis is true if the module is not able to extract a clock signal from the media-side signal (usually optical).",
+            "type": "boolean"
+          },
+          "rx_los": {
+            "nullable": true,
+            "description": "Media-side loss of signal flag.\n\nThis is true if there is no detected input signal from the media-side (usually optical).",
+            "type": "boolean"
+          },
+          "rx_output_enabled": {
+            "nullable": true,
+            "description": "Whether the Rx output is enabled.\n\nThe host may control this to disable the electrical output from the module to the host.",
+            "type": "boolean"
+          },
+          "rx_output_polarity": {
+            "nullable": true,
+            "description": "The Rx output polarity.\n\nThis indicates a host-side control that flips the polarity of the host-side output signal.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LanePolarity"
+              }
+            ]
+          },
+          "rx_output_status": {
+            "description": "Status of host-side Rx output.\n\nThis indicates whether the Rx output is sending a valid signal to the host. Note that this is `Invalid` if the output is either muted (such as squelched) or explicitly disabled.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OutputStatus"
+              }
+            ]
+          },
+          "state": {
+            "description": "The datapath state of this lane.\n\nSee CMIS 5.0 section 8.9.1 for details.",
+            "type": "string"
+          },
+          "tx_adaptive_eq_fail": {
+            "nullable": true,
+            "description": "A failure in the Tx adaptive input equalization.",
+            "type": "boolean"
+          },
+          "tx_auto_squelch_disable": {
+            "nullable": true,
+            "description": "Whether the host-side has disabled the Tx auto-squelch.\n\nThe module can implement automatic squelching of the Tx output, if the host-side input signal isn't valid. This indicates whether the host has disabled such a setting.",
+            "type": "boolean"
+          },
+          "tx_failure": {
+            "nullable": true,
+            "description": "General Tx failure flag.\n\nThis indicates that an internal and unspecified malfunction has occurred on the Tx lane.",
+            "type": "boolean"
+          },
+          "tx_force_squelch": {
+            "nullable": true,
+            "description": "Whether the host-side has force-squelched the Tx output.\n\nThis indicates that the host can _force_ squelching the output if the signal is not valid.",
+            "type": "boolean"
+          },
+          "tx_input_polarity": {
+            "nullable": true,
+            "description": "The Tx input polarity.\n\nThis indicates a host-side control that flips the polarity of the host-side input signal.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LanePolarity"
+              }
+            ]
+          },
+          "tx_lol": {
+            "nullable": true,
+            "description": "Host-side loss of lock flag.\n\nThis is true if the module is not able to extract a clock signal from the host-side electrical signal.",
+            "type": "boolean"
+          },
+          "tx_los": {
+            "nullable": true,
+            "description": "Host-side loss of signal flag.\n\nThis is true if there is no detected electrical signal from the host-side serdes.",
+            "type": "boolean"
+          },
+          "tx_output_enabled": {
+            "nullable": true,
+            "description": "Whether the Tx output is enabled.",
+            "type": "boolean"
+          },
+          "tx_output_status": {
+            "description": "Status of media-side Tx output.\n\nThis indicates whether the Rx output is sending a valid signal to the media itself. Note that this is `Invalid` if the output is either muted (such as squelched) or explicitly disabled.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OutputStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "rx_output_status",
+          "state",
+          "tx_output_status"
+        ]
+      },
       "CurrentRssUserConfig": {
         "type": "object",
         "properties": {
@@ -1351,6 +1680,83 @@
           "bgp_auth_keys",
           "num_external_certificates",
           "recovery_silo_password_set"
+        ]
+      },
+      "Datapath": {
+        "description": "Information about a transceiver's datapath.\n\nThis includes state related to the low-level eletrical and optical path through which bits flow. This includes flags like loss-of-signal / loss-of-lock; transmitter enablement state; and equalization parameters.",
+        "oneOf": [
+          {
+            "description": "A number of datapaths in a CMIS module.\n\nCMIS modules may have a large number of supported configurations of their various lanes, each called an \"application\". These are described by the `ApplicationDescriptor` type, which mirrors CMIS 5.0 table 8-18. Each descriptor is identified by an \"Application Selector Code\", which is just its index in the section of the memory map describing them.\n\nEach lane can be used in zero or more applications, however, it may exist in at most one application at a time. These active applications, of which there may be more than one, are keyed by their codes in the contained mapping.",
+            "type": "object",
+            "properties": {
+              "cmis": {
+                "type": "object",
+                "properties": {
+                  "connector": {
+                    "description": "The type of free-side connector",
+                    "type": "string"
+                  },
+                  "datapaths": {
+                    "description": "Mapping from \"application selector\" ID to its datapath information.\n\nThe datapath inclues the lanes used; host electrical interface; media interface; and a lot more about the state of the path.",
+                    "type": "object",
+                    "additionalProperties": {
+                      "$ref": "#/components/schemas/CmisDatapath"
+                    }
+                  },
+                  "supported_lanes": {
+                    "description": "A bit mask with a 1 in bit `i` if the `i`th lane is supported.",
+                    "type": "integer",
+                    "format": "uint8",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "connector",
+                  "datapaths",
+                  "supported_lanes"
+                ]
+              }
+            },
+            "required": [
+              "cmis"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "Datapath state about each lane in an SFF-8636 module.",
+            "type": "object",
+            "properties": {
+              "sff8636": {
+                "type": "object",
+                "properties": {
+                  "connector": {
+                    "description": "The type of a media-side connector.\n\nThese values come from SFF-8024 Rev 4.10 Table 4-3.",
+                    "type": "string"
+                  },
+                  "lanes": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Sff8636Datapath"
+                    },
+                    "minItems": 4,
+                    "maxItems": 4
+                  },
+                  "specification": {
+                    "$ref": "#/components/schemas/SffComplianceCode"
+                  }
+                },
+                "required": [
+                  "connector",
+                  "lanes",
+                  "specification"
+                ]
+              }
+            },
+            "required": [
+              "sff8636"
+            ],
+            "additionalProperties": false
+          }
         ]
       },
       "Duration": {
@@ -1465,6 +1871,11 @@
           "step_events"
         ]
       },
+      "ExtendedStatus": {
+        "type": "integer",
+        "format": "uint32",
+        "minimum": 0
+      },
       "GetArtifactsAndEventReportsResponse": {
         "description": "The response to a `get_artifacts` call: the system version, and the list of all artifacts currently held by wicketd.",
         "type": "object",
@@ -1570,14 +1981,10 @@
                 "properties": {
                   "inventory": {
                     "$ref": "#/components/schemas/RackV1Inventory"
-                  },
-                  "mgs_last_seen": {
-                    "$ref": "#/components/schemas/Duration"
                   }
                 },
                 "required": [
-                  "inventory",
-                  "mgs_last_seen"
+                  "inventory"
                 ]
               },
               "type": {
@@ -1782,6 +2189,14 @@
           "last"
         ]
       },
+      "LanePolarity": {
+        "description": "The polarity of a transceiver lane.",
+        "type": "string",
+        "enum": [
+          "normal",
+          "flipped"
+        ]
+      },
       "LldpAdminStatus": {
         "description": "To what extent should this port participate in LLDP",
         "type": "string",
@@ -1843,6 +2258,189 @@
           "status"
         ]
       },
+      "MediaInterfaceId": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "description": "Media interface ID for multi-mode fiber media.\n\nSee SFF-8024 Table 4-6.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "mmf"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "description": "Media interface ID for single-mode fiber.\n\nSee SFF-8024 Table 4-7.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "smf"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "description": "Media interface ID for passive copper cables.\n\nSee SFF-8024 Table 4-8.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "passive_copper"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "description": "Media interface ID for active cable assemblies.\n\nSee SFF-8024 Table 4-9.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "active_cable"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "description": "Media interface ID for BASE-T.\n\nSee SFF-8024 Table 4-10.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "base_t"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          }
+        ]
+      },
+      "MgsV1Inventory": {
+        "description": "The current state of the v1 Rack as known to MGS",
+        "type": "object",
+        "properties": {
+          "sps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpInventory"
+            }
+          }
+        },
+        "required": [
+          "sps"
+        ]
+      },
+      "MgsV1InventorySnapshot": {
+        "description": "The state of the v1 Rack as known to MGS at a given time.",
+        "type": "object",
+        "properties": {
+          "inventory": {
+            "$ref": "#/components/schemas/MgsV1Inventory"
+          },
+          "last_seen": {
+            "$ref": "#/components/schemas/Duration"
+          }
+        },
+        "required": [
+          "inventory",
+          "last_seen"
+        ]
+      },
+      "Monitors": {
+        "description": "Free-side device monitoring information.\n\nNote that all values are optional, as some specifications do not require that modules implement monitoring of those values.",
+        "type": "object",
+        "properties": {
+          "aux_monitors": {
+            "nullable": true,
+            "description": "Auxiliary monitoring values.\n\nThese are only available on CMIS-compatible transceivers, e.g., QSFP-DD.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AuxMonitors"
+              }
+            ]
+          },
+          "receiver_power": {
+            "nullable": true,
+            "description": "The measured input optical power (milliwatts);\n\nNote that due to a limitation in the SFF-8636 specification, it's possible for receiver power to be zero. See [`ReceiverPower`] for details.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReceiverPower"
+            }
+          },
+          "supply_voltage": {
+            "nullable": true,
+            "description": "The measured input supply voltage (Volts).",
+            "type": "number",
+            "format": "float"
+          },
+          "temperature": {
+            "nullable": true,
+            "description": "The measured cage temperature (degrees C);",
+            "type": "number",
+            "format": "float"
+          },
+          "transmitter_bias_current": {
+            "nullable": true,
+            "description": "The output laser bias current (milliamps).",
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            }
+          },
+          "transmitter_power": {
+            "nullable": true,
+            "description": "The measured output optical power (milliwatts).",
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            }
+          }
+        }
+      },
       "Name": {
         "title": "A name unique within the parent collection",
         "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
@@ -1855,6 +2453,24 @@
         "title": "A password hash in PHC string format",
         "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
         "type": "string"
+      },
+      "Oui": {
+        "description": "An Organization Unique Identifier.",
+        "type": "array",
+        "items": {
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0
+        },
+        "minItems": 3,
+        "maxItems": 3
+      },
+      "OutputStatus": {
+        "type": "string",
+        "enum": [
+          "valid",
+          "invalid"
+        ]
       },
       "PortFec": {
         "description": "Switchport FEC options",
@@ -1880,6 +2496,28 @@
           "speed400_g"
         ]
       },
+      "PowerMode": {
+        "description": "The power mode of a module.",
+        "type": "object",
+        "properties": {
+          "software_override": {
+            "nullable": true,
+            "description": "Whether the module is configured for software override of power control.\n\nIf the module is in `PowerState::Off`, this can't be determined, and `None` is returned.",
+            "type": "boolean"
+          },
+          "state": {
+            "description": "The actual power state.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PowerState2"
+              }
+            ]
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
       "PowerState": {
         "description": "See RFD 81.\n\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"See RFD 81.\\n\\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.\", \"type\": \"string\", \"enum\": [ \"A0\", \"A1\", \"A2\" ] } ``` </details>",
         "type": "string",
@@ -1887,6 +2525,32 @@
           "A0",
           "A1",
           "A2"
+        ]
+      },
+      "PowerState2": {
+        "description": "An allowed power state for the module.",
+        "oneOf": [
+          {
+            "description": "A module is entirely powered off, using the EFuse.",
+            "type": "string",
+            "enum": [
+              "off"
+            ]
+          },
+          {
+            "description": "Power is enabled to the module, but module remains in low-power mode.\n\nIn this state, modules will not establish a link or transmit traffic, but they may be managed and queried for information through their memory maps.",
+            "type": "string",
+            "enum": [
+              "low"
+            ]
+          },
+          {
+            "description": "The module is in high-power mode.\n\nNote that additional configuration may be required to correctly configure the module, such as described in SFF-8636 rev 2.10a table 6-10, and that the _host side_ is responsible for ensuring that the relevant configuration is applied.",
+            "type": "string",
+            "enum": [
+              "high"
+            ]
+          }
         ]
       },
       "PreflightUplinkCheckOptions": {
@@ -2863,15 +3527,55 @@
         "description": "The current state of the v1 Rack as known to wicketd",
         "type": "object",
         "properties": {
-          "sps": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SpInventory"
-            }
+          "mgs": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MgsV1InventorySnapshot"
+              }
+            ]
+          },
+          "transceivers": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TransceiverInventorySnapshot"
+              }
+            ]
           }
-        },
-        "required": [
-          "sps"
+        }
+      },
+      "ReceiverPower": {
+        "description": "Measured receiver optical power.\n\nThe SFF specifications allow for devices to monitor input optical power in several ways. It may either be an average power, over some unspecified time, or a peak-to-peak power. The latter is often abbreviated OMA, for Optical Modulation Amplitude. Again the time interval for peak-to-peak measurments are not specified.\n\nDetails -------\n\nThe SFF-8636 specification has an unfortunate limitation. There is no separate advertisement for whether a module supports measurements of receiver power. Instead, the _kind_ of measurement is advertised. The _same bit value_ could mean that either a peak-to-peak measurement is supported, or the measurements are not supported at all. Thus values of `PeakToPeak(0.0)` may mean that power measurements are not supported.",
+        "oneOf": [
+          {
+            "description": "The measurement is represents average optical power, in mW.",
+            "type": "object",
+            "properties": {
+              "average": {
+                "type": "number",
+                "format": "float"
+              }
+            },
+            "required": [
+              "average"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "The measurement represents a peak-to-peak, in mW.",
+            "type": "object",
+            "properties": {
+              "peak_to_peak": {
+                "type": "number",
+                "format": "float"
+              }
+            },
+            "required": [
+              "peak_to_peak"
+            ],
+            "additionalProperties": false
+          }
         ]
       },
       "RotImageError": {
@@ -3417,6 +4121,102 @@
             "type": "string",
             "enum": [
               "added"
+            ]
+          }
+        ]
+      },
+      "Sff8636Datapath": {
+        "description": "The datapath of an SFF-8636 module.\n\nThis describes the state of a single lane in an SFF module. It includes information about input and output signals, faults, and controls.",
+        "type": "object",
+        "properties": {
+          "rx_cdr_enabled": {
+            "description": "Media-side transmit Clock and Data Recovery (CDR) enable status.\n\nCDR is the process by which the module enages an internal retimer function, through which the module attempts to recovery a clock signal directly from the input bitstream.",
+            "type": "boolean"
+          },
+          "rx_lol": {
+            "description": "Media-side loss of lock flag.\n\nThis is true if the module is not able to extract a clock signal from the media-side signal (usually optical).",
+            "type": "boolean"
+          },
+          "rx_los": {
+            "description": "Media-side loss of signal flag.\n\nThis is true if there is no detected input signal from the media-side (usually optical).",
+            "type": "boolean"
+          },
+          "tx_adaptive_eq_fault": {
+            "description": "Flag indicating a fault in adaptive transmit equalization.",
+            "type": "boolean"
+          },
+          "tx_cdr_enabled": {
+            "description": "Host-side transmit Clock and Data Recovery (CDR) enable status.\n\nCDR is the process by which the module enages an internal retimer function, through which the module attempts to recovery a clock signal directly from the input bitstream.",
+            "type": "boolean"
+          },
+          "tx_enabled": {
+            "description": "Software control of output transmitter.",
+            "type": "boolean"
+          },
+          "tx_fault": {
+            "description": "Flag indicating a fault in the transmitter and/or laser.",
+            "type": "boolean"
+          },
+          "tx_lol": {
+            "description": "Host-side loss of lock flag.\n\nThis is true if the module is not able to extract a clock signal from the host-side electrical signal.",
+            "type": "boolean"
+          },
+          "tx_los": {
+            "description": "Host-side loss of signal flag.\n\nThis is true if there is no detected electrical signal from the host-side serdes.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rx_cdr_enabled",
+          "rx_lol",
+          "rx_los",
+          "tx_adaptive_eq_fault",
+          "tx_cdr_enabled",
+          "tx_enabled",
+          "tx_fault",
+          "tx_lol",
+          "tx_los"
+        ]
+      },
+      "SffComplianceCode": {
+        "description": "The compliance code for an SFF-8636 module.\n\nThese values record a specification compliance code, from SFF-8636 Table 6-17, or an extended specification compliance code, from SFF-8024 Table 4-4.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "description": "Extended electrical or optical interface codes",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "extended"
+                ]
+              }
+            },
+            "required": [
+              "code",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "description": "The Ethernet specification implemented by a module.",
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ethernet"
+                ]
+              }
+            },
+            "required": [
+              "code",
+              "type"
             ]
           }
         ]
@@ -5991,6 +6791,61 @@
           }
         ]
       },
+      "Transceiver": {
+        "description": "A transceiver in the switch's front ports.",
+        "type": "object",
+        "properties": {
+          "datapath": {
+            "$ref": "#/components/schemas/Datapath"
+          },
+          "monitors": {
+            "$ref": "#/components/schemas/Monitors"
+          },
+          "port": {
+            "type": "string"
+          },
+          "power": {
+            "$ref": "#/components/schemas/PowerMode"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExtendedStatus"
+          },
+          "vendor": {
+            "$ref": "#/components/schemas/VendorInfo"
+          }
+        },
+        "required": [
+          "datapath",
+          "monitors",
+          "port",
+          "power",
+          "status",
+          "vendor"
+        ]
+      },
+      "TransceiverInventorySnapshot": {
+        "description": "A snapshot of the transceiver inventory at a given time.",
+        "type": "object",
+        "properties": {
+          "inventory": {
+            "description": "The transceivers in each switch.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Transceiver"
+              }
+            }
+          },
+          "last_seen": {
+            "$ref": "#/components/schemas/Duration"
+          }
+        },
+        "required": [
+          "inventory",
+          "last_seen"
+        ]
+      },
       "TxEqConfig": {
         "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",
         "type": "object",
@@ -6734,6 +7589,60 @@
           "switch1"
         ],
         "additionalProperties": false
+      },
+      "Vendor": {
+        "description": "Vendor-specific information about a transceiver module.",
+        "type": "object",
+        "properties": {
+          "date": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "oui": {
+            "$ref": "#/components/schemas/Oui"
+          },
+          "part": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "oui",
+          "part",
+          "revision",
+          "serial"
+        ]
+      },
+      "VendorInfo": {
+        "description": "The vendor information for a transceiver module.",
+        "type": "object",
+        "properties": {
+          "identifier": {
+            "description": "The SFF-8024 identifier.",
+            "type": "string"
+          },
+          "vendor": {
+            "description": "The vendor information.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Vendor"
+              }
+            ]
+          }
+        },
+        "required": [
+          "identifier",
+          "vendor"
+        ]
       },
       "IgnitionCommand": {
         "description": "Ignition command.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Ignition command.\", \"type\": \"string\", \"enum\": [ \"power_on\", \"power_off\", \"power_reset\" ] } ``` </details>",

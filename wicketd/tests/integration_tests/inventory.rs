@@ -36,20 +36,27 @@ async fn test_inventory() {
                     // Ensure that the SP state is populated -- if it's not,
                     // then the `configured-bootstrap-sleds` command below
                     // might return an empty list.
-                    let sp_state_none: Vec<_> = inventory
-                        .sps
-                        .iter()
-                        .filter(|sp| sp.state.is_none())
-                        .collect();
-                    if sp_state_none.is_empty() {
-                        break inventory;
+                    if let Some(mgs) = inventory.mgs {
+                        let sp_state_none: Vec<_> = mgs
+                            .inventory
+                            .sps
+                            .iter()
+                            .filter(|sp| sp.state.is_none())
+                            .collect();
+                        if sp_state_none.is_empty() {
+                            break mgs.inventory;
+                        }
+                        warn!(
+                            wicketd_testctx.log(),
+                            "SP state not yet populated for some SPs, retrying";
+                            "sps" => ?sp_state_none
+                        )
+                    } else {
+                        warn!(
+                            wicketd_testctx.log(),
+                            "MGS-derived inventory not yet populated, retrying"
+                        );
                     }
-
-                    warn!(
-                        wicketd_testctx.log(),
-                        "SP state not yet populated for some SPs, retrying";
-                        "sps" => ?sp_state_none
-                    )
                 }
                 GetInventoryResponse::Unavailable => {}
             }
