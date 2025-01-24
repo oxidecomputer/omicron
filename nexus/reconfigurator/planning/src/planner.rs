@@ -811,6 +811,7 @@ mod test {
     use nexus_types::deployment::CockroachDbClusterVersion;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use nexus_types::deployment::CockroachDbSettings;
+    use nexus_types::deployment::DiffValue;
     use nexus_types::deployment::SledDisk;
     use nexus_types::external_api::views::PhysicalDiskPolicy;
     use nexus_types::external_api::views::PhysicalDiskState;
@@ -873,16 +874,8 @@ mod test {
         assert_eq!(diff.sleds_added.len(), 0);
         assert_eq!(diff.sleds_removed.len(), 0);
         assert_eq!(diff.sleds_modified.len(), 0);
-        assert_eq!(diff.zones.added.len(), 0);
-        assert_eq!(diff.zones.removed.len(), 0);
-        assert_eq!(diff.zones.modified.len(), 0);
-        assert_eq!(diff.zones.errors.len(), 0);
-        assert_eq!(diff.physical_disks.added.len(), 0);
-        assert_eq!(diff.physical_disks.removed.len(), 0);
-        assert_eq!(diff.datasets.added.len(), 0);
-        assert_eq!(diff.datasets.removed.len(), 0);
-        assert_eq!(diff.datasets.modified.len(), 0);
-        assert_eq!(diff.datasets.unchanged.len(), 3);
+        assert_eq!(diff.sleds_unchanged.len(), 3);
+        assert!(!diff.has_changes());
         verify_blueprint(&blueprint2);
 
         // Now add a new sled.
@@ -915,17 +908,20 @@ mod test {
             &diff.display().to_string(),
         );
         assert_eq!(diff.sleds_added.len(), 1);
-        assert_eq!(diff.physical_disks.added.len(), 1);
-        assert_eq!(diff.datasets.added.len(), 1);
-        let sled_id = *diff.sleds_added.first().unwrap();
-        let sled_zones = diff.zones.added.get(&sled_id).unwrap();
+        let (sled_id, sled_added) = diff.sleds_added.first_key_value().unwrap();
+        assert_eq!(sled_added.disks.unwrap().disks.len(), 1);
+        assert_eq!(sled_added.datasets.unwrap().datasets.len(), 1);
+        let sled_zones = sled_added.zones.unwrap();
         // We have defined elsewhere that the first generation contains no
         // zones.  So the first one with zones must be newer.  See
         // OmicronZonesConfig::INITIAL_GENERATION.
-        assert!(sled_zones.generation_after.unwrap() > Generation::new());
-        assert_eq!(sled_id, new_sled_id);
+        assert!(sled_zones.generation > Generation::new());
+        assert_eq!(*sled_id, new_sled_id);
         assert_eq!(sled_zones.zones.len(), 1);
-        assert!(matches!(sled_zones.zones[0].kind(), ZoneKind::InternalNtp));
+        assert!(matches!(
+            sled_zones.zones.first().unwrap().kind(),
+            ZoneKind::InternalNtp
+        ));
         assert_eq!(diff.sleds_removed.len(), 0);
         assert_eq!(diff.sleds_modified.len(), 0);
         verify_blueprint(&blueprint3);
@@ -993,20 +989,21 @@ mod test {
         assert_eq!(diff.sleds_added.len(), 0);
         assert_eq!(diff.sleds_removed.len(), 0);
         assert_eq!(diff.sleds_modified.len(), 1);
-        let sled_id = diff.sleds_modified.first().unwrap();
+        let (sled_id, modified_sled) =
+            diff.sleds_modified.first_key_value().unwrap();
         assert_eq!(*sled_id, new_sled_id);
         // No removed or modified zones on this sled
-        assert!(!diff.zones.removed.contains_key(sled_id));
-        assert!(!diff.zones.modified.contains_key(sled_id));
+        assert!(modified_sled.zones_removed.is_empty());
+        assert!(modified_sled.zones_modified.is_empty());
         // 10 crucible zones addeed
-        let zones_added = diff.zones.added.get(sled_id).unwrap();
-        assert_eq!(
-            zones_added.generation_after.unwrap(),
-            zones_added.generation_before.unwrap().next()
-        );
+        let zones_added = &modified_sled.zones_inserted;
+        let DiffValue::Changed(changed) = modified_sled.zones_generation else {
+            panic!("Expected zones generation to change");
+        };
+        assert_eq!(*changed.after, changed.before.next());
 
-        assert_eq!(zones_added.zones.len(), 10);
-        for zone in &zones_added.zones {
+        assert_eq!(zones_added.len(), 10);
+        for zone in zones_added {
             if zone.kind() != ZoneKind::Crucible {
                 panic!("unexpectedly added a non-Crucible zone: {zone:?}");
             }

@@ -104,6 +104,7 @@ use blueprint_display::{
 use id_map::{IdMap, IdMappable};
 
 pub use blueprint_diff::BlueprintDiff;
+pub use blueprint_diff::DiffValue;
 
 /// Describes a complete set of software and configuration for the system
 // Blueprints are a fundamental part of how the system modifies itself.  Each
