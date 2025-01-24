@@ -7511,7 +7511,6 @@ dependencies = [
  "indicatif",
  "inout",
  "itertools 0.10.5",
- "itertools 0.12.1",
  "lalrpop-util",
  "lazy_static",
  "libc",
