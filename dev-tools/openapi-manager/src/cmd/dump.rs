@@ -6,9 +6,10 @@ use crate::{
     apis::{ApiIdent, ManagedApis},
     cmd::output::{headers, OutputOpts, Styles},
     combined::{ApiSpecFileWhich, CheckStale},
+    git::GitRevision,
     spec::Environment,
+    spec_files_blessed::BlessedFiles,
     spec_files_generic::ApiSpecFile,
-    spec_files_git::{BlessedFiles, GitRevision},
     spec_files_local::LocalFiles,
     FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
 };
