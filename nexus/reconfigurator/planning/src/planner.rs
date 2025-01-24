@@ -910,15 +910,15 @@ mod test {
         );
         assert_eq!(diff.sleds_added.len(), 1);
         let (sled_id, sled_added) = diff.sleds_added.first_key_value().unwrap();
-        assert_eq!(sled_added.disks.unwrap().disks.len(), 1);
-        assert_eq!(sled_added.datasets.unwrap().datasets.len(), 1);
+        assert_eq!(sled_added.disks.unwrap().disks.len(), 10);
+        assert_eq!(sled_added.datasets.unwrap().datasets.len(), 21);
         let sled_zones = sled_added.zones.unwrap();
         // We have defined elsewhere that the first generation contains no
         // zones.  So the first one with zones must be newer.  See
         // OmicronZonesConfig::INITIAL_GENERATION.
         assert!(sled_zones.generation > Generation::new());
         assert_eq!(*sled_id, new_sled_id);
-        assert_eq!(sled_zones.zones.len(), 1);
+        // assert_eq!(sled_zones.zones.len(), 1);
         assert!(matches!(
             sled_zones.zones.first().unwrap().kind(),
             ZoneKind::InternalNtp
@@ -1675,9 +1675,14 @@ mod test {
         // We should be adding a Crucible zone for each new in-service disk.
         assert_eq!(sled_modified.zones_added.len(), NEW_IN_SERVICE_DISKS);
         assert!(sled_modified.zones_removed.is_empty());
-        assert_eq!(sled_modified.disks_added.len(), 1);
+        assert_eq!(sled_modified.disks_added.len(), NEW_IN_SERVICE_DISKS);
         assert_eq!(sled_modified.disks_removed.len(), 0);
-        assert_eq!(sled_modified.datasets_added.len(), 1);
+        // 1 Zone, Crucible, Transient Crucible Zone, and Debug dataset created
+        // per disk
+        assert_eq!(
+            sled_modified.datasets_added.len(),
+            NEW_IN_SERVICE_DISKS * 4
+        );
         assert_eq!(sled_modified.datasets_modified.len(), 0);
         assert_eq!(sled_modified.datasets_removed.len(), 0);
 

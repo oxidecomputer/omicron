@@ -1121,11 +1121,9 @@ fn disks_table(
     disks: Option<&BlueprintPhysicalDisksConfig>,
 ) -> Option<BpTable> {
     disks.map(|disks_config| {
-        let rows = disks_config
-            .disks
-            .iter()
-            .map(|disk| disks_row(state, disk))
-            .collect();
+        let mut disks: Vec<_> = disks_config.disks.iter().cloned().collect();
+        disks.sort_unstable_by(|a, b| a.identity.cmp(&b.identity));
+        let rows = disks.iter().map(|disk| disks_row(state, disk)).collect();
         BpTable::new(
             BpPhysicalDisksTableSchema {},
             disks_config.generation.into(),
