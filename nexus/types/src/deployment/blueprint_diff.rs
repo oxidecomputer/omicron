@@ -236,37 +236,56 @@ impl<'e> ModifiedSled<'e> {
     /// Note that we don't currently show modified disks for backwards
     /// compatibility, but that is easily added.
     fn disks_table(&self, show_unchanged: bool) -> Option<BpTable> {
-        let DiffValue::Changed(generation) = self.disks_generation else {
-            return None;
-        };
-        let generation = BpGeneration::Diff {
-            before: Some(*generation.before),
-            after: Some(*generation.after),
+        let generation = match self.disks_generation {
+            DiffValue::Unchanged(generation) => {
+                // Backwards compatibility:. If the generation doesn't change, we shouldn't
+                // have any modifications. However, we currently delete disks when a sled is
+                // expunged, rather than marking them expunged and bumping their generation.
+                //
+                // We indicate this deletion by having `after` set to None.
+                if self.disks_removed.is_empty() {
+                    BpGeneration::Diff {
+                        before: Some(*generation),
+                        after: Some(*generation),
+                    }
+                } else {
+                    BpGeneration::Diff {
+                        before: Some(*generation),
+                        after: None,
+                    }
+                }
+            }
+            DiffValue::Changed(generation) => BpGeneration::Diff {
+                before: Some(*generation.before),
+                after: Some(*generation.after),
+            },
         };
 
         let mut rows = vec![];
 
         // Unchanged
+        let mut disks: Vec<_> = self.disks_unchanged.iter().cloned().collect();
+        disks.sort_unstable_by(|a, b| a.identity.cmp(&b.identity));
         if show_unchanged {
             rows.extend(
-                self.disks_unchanged
+                disks
                     .iter()
                     .map(|disk| disks_row(BpDiffState::Unchanged, disk)),
             );
         }
 
         // Removed
+        let mut disks: Vec<_> = self.disks_removed.iter().cloned().collect();
+        disks.sort_unstable_by(|a, b| a.identity.cmp(&b.identity));
         rows.extend(
-            self.disks_removed
-                .iter()
-                .map(|disk| disks_row(BpDiffState::Removed, disk)),
+            disks.iter().map(|disk| disks_row(BpDiffState::Removed, disk)),
         );
 
         // Added
+        let mut disks: Vec<_> = self.disks_added.iter().cloned().collect();
+        disks.sort_unstable_by(|a, b| a.identity.cmp(&b.identity));
         rows.extend(
-            self.disks_added
-                .iter()
-                .map(|disk| disks_row(BpDiffState::Added, disk)),
+            disks.iter().map(|disk| disks_row(BpDiffState::Added, disk)),
         );
 
         if rows.is_empty() {
@@ -289,19 +308,41 @@ impl<'e> ModifiedSled<'e> {
     /// and (b) put changes towards the bottom, so people have to scroll
     /// back less.
     fn datasets_table(&self, show_unchanged: bool) -> Option<BpTable> {
-        let DiffValue::Changed(generation) = self.datasets_generation else {
-            return None;
-        };
-        let generation = BpGeneration::Diff {
-            before: Some(*generation.before),
-            after: Some(*generation.after),
+        let generation = match self.datasets_generation {
+            DiffValue::Unchanged(generation) => {
+                // Backwards compatibility:. If the generation doesn't change, we shouldn't
+                // have any modifications. However, we currently delete datasets when a sled is
+                // expunged, rather than marking them expunged and bumping their generation.
+                //
+                // We indicate this deletion by having `after` set to None.
+                if self.datasets_removed.is_empty() {
+                    BpGeneration::Diff {
+                        before: Some(*generation),
+                        after: Some(*generation),
+                    }
+                } else {
+                    BpGeneration::Diff {
+                        before: Some(*generation),
+                        after: None,
+                    }
+                }
+            }
+            DiffValue::Changed(generation) => BpGeneration::Diff {
+                before: Some(*generation.before),
+                after: Some(*generation.after),
+            },
         };
 
         let mut rows = vec![];
 
         // Unchanged
+        let mut datasets: Vec<_> =
+            self.datasets_unchanged.iter().cloned().collect();
+        datasets.sort_unstable_by(|d1, d2| {
+            (&d1.kind, &d1.pool).cmp(&(&d2.kind, &d2.pool))
+        });
         if show_unchanged {
-            rows.extend(self.datasets_unchanged.iter().map(|dataset| {
+            rows.extend(datasets.into_iter().map(|dataset| {
                 BpTableRow::from_strings(
                     BpDiffState::Unchanged,
                     dataset.as_strings(),
@@ -310,7 +351,11 @@ impl<'e> ModifiedSled<'e> {
         }
 
         // Modified
-        rows.extend(self.datasets_modified.iter().map(
+        let mut datasets: Vec<(_, _)> = self.datasets_modified.iter().collect();
+        datasets.sort_unstable_by(|d1, d2| {
+            (&d1.1.kind, &d1.1.pool).cmp(&(&d2.1.kind, &d2.1.pool))
+        });
+        rows.extend(datasets.into_iter().map(
             |(dataset_id, modified_dataset)| {
                 let mut columns = vec![];
 
@@ -363,12 +408,22 @@ impl<'e> ModifiedSled<'e> {
         ));
 
         // Removed
-        rows.extend(self.datasets_removed.iter().map(|dataset| {
+        let mut datasets: Vec<_> =
+            self.datasets_removed.iter().cloned().collect();
+        datasets.sort_unstable_by(|d1, d2| {
+            (&d1.kind, &d1.pool).cmp(&(&d2.kind, &d2.pool))
+        });
+        rows.extend(datasets.iter().map(|dataset| {
             BpTableRow::from_strings(BpDiffState::Removed, dataset.as_strings())
         }));
 
         // Added
-        rows.extend(self.datasets_added.iter().map(|dataset| {
+        let mut datasets: Vec<_> =
+            self.datasets_added.iter().cloned().collect();
+        datasets.sort_unstable_by(|d1, d2| {
+            (&d1.kind, &d1.pool).cmp(&(&d2.kind, &d2.pool))
+        });
+        rows.extend(datasets.iter().map(|dataset| {
             BpTableRow::from_strings(BpDiffState::Added, dataset.as_strings())
         }));
 
@@ -425,7 +480,12 @@ impl<'e> ModifiedSled<'e> {
         );
 
         // Modified
-        rows.extend(self.zones_modified.iter().map(|(zone_id, fields)| {
+        let mut zones: Vec<(_, _)> = self.zones_modified.iter().collect();
+        zones.sort_unstable_by(|z1, z2| {
+            (&z1.1.zone_type.kind(), &z1.0)
+                .cmp(&(&z2.1.zone_type.kind(), &z2.0))
+        });
+        rows.extend(zones.iter().map(|(zone_id, fields)| {
             let mut columns = vec![];
 
             // kind
@@ -1259,9 +1319,10 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
             for (sled_id, tables) in &self.printable.sleds_unchanged {
                 writeln!(
                     f,
-                    "  sled {sled_id} ({}):\n{tables}",
+                    "  sled {sled_id} ({}):\n",
                     self.sled_state_unchanged(sled_id)
                 )?;
+                write!(f, "{tables}")?;
             }
         }
 
@@ -1271,9 +1332,10 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
             for (sled_id, tables) in &self.printable.sleds_removed {
                 writeln!(
                     f,
-                    "  sled {sled_id} ({}):\n{tables}",
+                    "  sled {sled_id} ({}):\n",
                     self.sled_state_removed(sled_id)
                 )?;
+                write!(f, "{tables}")?;
             }
         }
 
@@ -1283,9 +1345,10 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
             for (sled_id, tables) in &self.printable.sleds_modified {
                 writeln!(
                     f,
-                    "  sled {sled_id} ({}):\n{tables}",
+                    "  sled {sled_id} ({}):\n",
                     self.sled_state_modified(sled_id)
                 )?;
+                write!(f, "{tables}")?;
             }
         }
 
@@ -1295,9 +1358,10 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
             for (sled_id, tables) in &self.printable.sleds_added {
                 writeln!(
                     f,
-                    "  sled {sled_id} ({}):\n{tables}",
+                    "  sled {sled_id} ({}):\n",
                     self.sled_state_added(sled_id)
                 )?;
+                write!(f, "{tables}")?;
             }
         }
 

@@ -15,7 +15,7 @@ use super::diff_visitors::visit_blueprint::{
 use super::diff_visitors::visit_blueprint_datasets_config::VisitBlueprintDatasetsConfig;
 use super::diff_visitors::visit_blueprint_physical_disks_config::VisitBlueprintPhysicalDisksConfig;
 use super::diff_visitors::visit_blueprint_zones_config::VisitBlueprintZonesConfig;
-pub use super::diff_visitors::{BpVisitorContext, Change};
+use super::diff_visitors::{BpVisitorContext, Change};
 use super::{
     Blueprint, BlueprintDatasetDisposition, BlueprintPhysicalDiskDisposition,
     ClickhouseClusterConfig, CockroachDbPreserveDowngrade,
@@ -433,7 +433,7 @@ impl<'e> VisitBlueprintPhysicalDisksConfig<'e> for BlueprintDiffer<'e> {
             .or_insert(ModifiedSled::new(&self.before, sled_id));
         s.disks_removed.insert(node.clone());
 
-        // Remove this zone from the unchanged disks to compensate for
+        // Remove this disk from the unchanged disks to compensate for
         // constructor initialization.
         s.disks_unchanged.remove(&node.id);
     }
@@ -458,7 +458,7 @@ impl<'e> VisitBlueprintPhysicalDisksConfig<'e> for BlueprintDiffer<'e> {
         s.disks_modified
             .insert(change.before.id, ModifiedDisk::new(&change.before));
 
-        // At least one of the fields for this zone is going to change in a
+        // At least one of the fields for this disk is going to change in a
         // follow up callback, so we want to remove it from the unchanged disks
         // to compensate for constructor initialization.
         s.disks_unchanged.remove(&change.before.id);
@@ -553,7 +553,7 @@ impl<'e> VisitBlueprintDatasetsConfig<'e> for BlueprintDiffer<'e> {
             .or_insert(ModifiedSled::new(&self.before, sled_id));
         s.datasets_removed.insert(node.clone());
 
-        // Remove this zone from the unchanged datasets to compensate
+        // Remove this dataset from the unchanged datasets to compensate
         // for constructor initialization.
         s.datasets_unchanged.remove(&node.id);
     }

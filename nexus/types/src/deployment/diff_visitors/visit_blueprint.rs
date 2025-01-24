@@ -21,7 +21,7 @@ use crate::{
 use diffus::edit::{map, Edit};
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::BlueprintUuid;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// State and Resources for an inserted sled
 #[derive(Debug, Clone, Copy)]
@@ -203,9 +203,46 @@ pub fn visit_blueprint<'e, V>(
 ) where
     V: VisitBlueprint<'e> + ?Sized,
 {
-    let Edit::Change { diff, .. } = node else {
+    let Edit::Change { before, after, diff } = node else {
         return;
     };
+
+    // Due to the fact that we have 4 different maps keyed by sled_id, we can
+    // only determine additions and removals easily by using the `before` and
+    // `after` blueprints explicitly. This will be unnecessary once these maps
+    // are collapsed.
+    //
+    // See https://github.com/oxidecomputer/omicron/issues/7078
+    let before_sleds: BTreeSet<_> = before
+        .sled_state
+        .keys()
+        .chain(before.blueprint_zones.keys())
+        .chain(before.blueprint_disks.keys())
+        .chain(before.blueprint_datasets.keys())
+        .collect();
+    let after_sleds: BTreeSet<_> = after
+        .sled_state
+        .keys()
+        .chain(after.blueprint_zones.keys())
+        .chain(after.blueprint_disks.keys())
+        .chain(after.blueprint_datasets.keys())
+        .collect();
+    let all_sleds: BTreeSet<_> =
+        before_sleds.union(&after_sleds).map(|&sled_id| *sled_id).collect();
+
+    // All sleds that have state, zones, disks or datasets in `after_*`, but not
+    // `before_*` have been added.
+    let sled_ids_added: BTreeSet<_> = after_sleds
+        .difference(&before_sleds)
+        .map(|&sled_id| *sled_id)
+        .collect();
+
+    // All sleds that have state, zones, disks or datasets in `before_*`, but not
+    // `after_*` have been removed.
+    let sled_ids_removed: BTreeSet<_> = before_sleds
+        .difference(&after_sleds)
+        .map(|&sled_id| *sled_id)
+        .collect();
 
     let mut sled_inserts = BTreeMap::new();
     let mut sled_removes = BTreeMap::new();
@@ -226,10 +263,10 @@ pub fn visit_blueprint<'e, V>(
                     // or not the sled was present in the `PlanningInput`).
                     // However, we may still have entries in `zones`, `disks`,
                     // or `datasets`  that haven't been fully cleaned up yet.
-                    //
-                    // In the case that we do still have entries in the other maps
-                    // we'll delete this entry from `sled_removes` below.
-                    sled_removes.insert(*sled_id, SledRemove::new(sled_state));
+                    if sled_ids_removed.contains(sled_id) {
+                        sled_removes
+                            .insert(*sled_id, SledRemove::new(sled_state));
+                    }
                 }
                 map::Edit::Change { before, after, .. } => {
                     v.visit_sled_state_change(ctx, Change::new(before, after));
@@ -263,34 +300,29 @@ pub fn visit_blueprint<'e, V>(
                         });
                 }
                 map::Edit::Remove(zones) => {
-                    sled_removes
-                        .entry(*sled_id)
-                        .and_modify(|e| e.zones = Some(*zones))
-                        .or_insert_with(|| {
-                            // This is a a workaround, where in some cases we have removed
-                            // the sled-state from the blueprint before any other sled resources.
-                            //
-                            // We backfill the sled state so we can create a proper
-                            // `SledRemove` entry.
-                            let mut remove =
-                                SledRemove::new(SledState::Decommissioned);
-                            remove.zones = Some(zones);
-                            remove
-                        });
+                    if sled_ids_removed.contains(sled_id) {
+                        sled_removes
+                            .entry(*sled_id)
+                            .and_modify(|e| e.zones = Some(*zones))
+                            .or_insert_with(|| {
+                                // This is a a workaround, where in some cases we have removed
+                                // the sled-state from the blueprint before any other sled resources.
+                                //
+                                // We backfill the sled state so we can create a proper
+                                // `SledRemove` entry.
+                                let mut remove =
+                                    SledRemove::new(SledState::Decommissioned);
+                                remove.zones = Some(zones);
+                                remove
+                            });
+                    }
                 }
                 map::Edit::Change { diff, .. } => {
                     if let Some(v) = v.zones_visitor() {
                         v.visit_zones_edit(ctx, diff);
                     }
-                    // Clean up any removes related to sled_state. See the
-                    // comment in the `diff.sled_state` clause.
-                    sled_removes.remove(sled_id);
                 }
-                map::Edit::Copy(_) => {
-                    // Clean up any removes related to sled_state. See the
-                    // comment in the `diff.sled_state` clause.
-                    sled_removes.remove(sled_id);
-                }
+                map::Edit::Copy(_) => {}
             }
         }
         ctx.sled_id = None;
@@ -319,34 +351,38 @@ pub fn visit_blueprint<'e, V>(
                         });
                 }
                 map::Edit::Remove(disks) => {
-                    sled_removes
-                        .entry(*sled_id)
-                        .and_modify(|e| e.disks = Some(*disks))
-                        .or_insert_with(|| {
-                            // This is a a workaround, where in some cases we have removed
-                            // the sled-state from the blueprint before any other sled resources.
-                            //
-                            // We backfill the sled state so we can create a proper
-                            // `SledRemove` entry.
-                            let mut remove =
-                                SledRemove::new(SledState::Decommissioned);
-                            remove.disks = Some(disks);
-                            remove
-                        });
+                    if !sled_ids_removed.contains(sled_id) {
+                        // Backwards compatibility. We shouldn't be removing
+                        // datasets until we remove the sled. They should just be
+                        // marked expunged.
+                        if let Some(v) = v.disks_visitor() {
+                            for disk in &disks.disks {
+                                v.visit_disks_remove(ctx, disk);
+                            }
+                        }
+                    } else {
+                        sled_removes
+                            .entry(*sled_id)
+                            .and_modify(|e| e.disks = Some(*disks))
+                            .or_insert_with(|| {
+                                // This is a a workaround, where in some cases we have removed
+                                // the sled-state from the blueprint before any other sled resources.
+                                //
+                                // We backfill the sled state so we can create a proper
+                                // `SledRemove` entry.
+                                let mut remove =
+                                    SledRemove::new(SledState::Decommissioned);
+                                remove.disks = Some(disks);
+                                remove
+                            });
+                    }
                 }
                 map::Edit::Change { diff, .. } => {
                     if let Some(v) = v.disks_visitor() {
                         v.visit_disks_edit(ctx, diff);
                     }
-                    // Clean up any removes related to sled_state. See the
-                    // comment in the `diff.sled_state` clause.
-                    sled_removes.remove(sled_id);
                 }
-                map::Edit::Copy(_) => {
-                    // Clean up any removes related to sled_state. See the
-                    // comment in the `diff.sled_state` clause.
-                    sled_removes.remove(sled_id);
-                }
+                map::Edit::Copy(_) => {}
             }
         }
         ctx.sled_id = None;
@@ -375,34 +411,38 @@ pub fn visit_blueprint<'e, V>(
                         });
                 }
                 map::Edit::Remove(datasets) => {
-                    sled_removes
-                        .entry(*sled_id)
-                        .and_modify(|e| e.datasets = Some(*datasets))
-                        .or_insert_with(|| {
-                            // This is a a workaround, where in some cases we have removed
-                            // the sled-state from the blueprint before any other sled resources.
-                            //
-                            // We backfill the sled state so we can create a proper
-                            // `SledRemove` entry.
-                            let mut remove =
-                                SledRemove::new(SledState::Decommissioned);
-                            remove.datasets = Some(datasets);
-                            remove
-                        });
+                    // Backwards compatibility: We shouldn't be removing
+                    // datasets until we remove the sled. They should just be
+                    // marked expunged.
+                    if !sled_ids_removed.contains(sled_id) {
+                        if let Some(v) = v.datasets_visitor() {
+                            for dataset in &datasets.datasets {
+                                v.visit_datasets_remove(ctx, dataset);
+                            }
+                        }
+                    } else {
+                        sled_removes
+                            .entry(*sled_id)
+                            .and_modify(|e| e.datasets = Some(*datasets))
+                            .or_insert_with(|| {
+                                // This is a a workaround, where in some cases we have removed
+                                // the sled-state from the blueprint before any other sled resources.
+                                //
+                                // We backfill the sled state so we can create a proper
+                                // `SledRemove` entry.
+                                let mut remove =
+                                    SledRemove::new(SledState::Decommissioned);
+                                remove.datasets = Some(datasets);
+                                remove
+                            });
+                    }
                 }
                 map::Edit::Change { diff, .. } => {
                     if let Some(v) = v.datasets_visitor() {
                         v.visit_datasets_edit(ctx, diff);
                     }
-                    // Clean up any removes related to sled_state. See the
-                    // comment in the `diff.sled_state` clause.
-                    sled_removes.remove(sled_id);
                 }
-                map::Edit::Copy(_) => {
-                    // Clean up any removes related to sled_state. See the
-                    // comment in the `diff.sled_state` clause.
-                    sled_removes.remove(sled_id);
-                }
+                map::Edit::Copy(_) => {}
             }
         }
         ctx.sled_id = None;
