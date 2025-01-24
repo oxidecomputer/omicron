@@ -151,7 +151,9 @@ impl From<params::AffinityGroupUpdate> for AffinityGroupUpdate {
     }
 }
 
-#[derive(Queryable, Insertable, Clone, Debug, Resource, Selectable)]
+#[derive(
+    Queryable, Insertable, Clone, Debug, Resource, Selectable, PartialEq,
+)]
 #[diesel(table_name = anti_affinity_group)]
 pub struct AntiAffinityGroup {
     #[diesel(embed)]

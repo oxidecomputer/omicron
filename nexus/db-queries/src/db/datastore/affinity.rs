@@ -911,6 +911,30 @@ mod tests {
         datastore.affinity_group_create(&opctx, &authz_project, group).await
     }
 
+    // Helper function for creating an anti-affinity group with
+    // arbitrary configuration.
+    async fn create_anti_affinity_group(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        authz_project: &authz::Project,
+        name: &str,
+    ) -> CreateResult<AntiAffinityGroup> {
+        let group = AntiAffinityGroup::new(
+            authz_project.id(),
+            params::AntiAffinityGroupCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: name.parse().unwrap(),
+                    description: "".to_string(),
+                },
+                policy: external::AffinityPolicy::Fail,
+                failure_domain: external::FailureDomain::Sled,
+            },
+        );
+        datastore
+            .anti_affinity_group_create(&opctx, &authz_project, group)
+            .await
+    }
+
     // Helper function for creating an instance without a VMM.
     async fn create_instance_record(
         opctx: &OpContext,
@@ -1053,6 +1077,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn anti_affinity_groups_are_project_scoped() {
+        // Setup
+        let logctx =
+            dev::test_setup_log("anti_affinity_groups_are_project_scoped");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let (authz_project, _) =
+            create_project(&opctx, &datastore, "my-project").await;
+
+        let (authz_other_project, _) =
+            create_project(&opctx, &datastore, "my-other-project").await;
+
+        let pagparams_id = DataPageParams {
+            marker: None,
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        };
+        let pagbyid = PaginatedBy::Id(pagparams_id);
+
+        // To start: No groups exist
+        let groups = datastore
+            .anti_affinity_group_list(&opctx, &authz_project, &pagbyid)
+            .await
+            .unwrap();
+        assert!(groups.is_empty());
+
+        // Create a group
+        let group = create_anti_affinity_group(
+            &opctx,
+            &datastore,
+            &authz_project,
+            "my-group",
+        )
+        .await
+        .unwrap();
+
+        // Now when we list groups, we'll see the one we created.
+        let groups = datastore
+            .anti_affinity_group_list(&opctx, &authz_project, &pagbyid)
+            .await
+            .unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0], group);
+
+        // This group won't appear in the other project
+        let groups = datastore
+            .anti_affinity_group_list(&opctx, &authz_other_project, &pagbyid)
+            .await
+            .unwrap();
+        assert!(groups.is_empty());
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn affinity_groups_prevent_project_deletion() {
         // Setup
         let logctx =
@@ -1091,6 +1173,73 @@ mod tests {
             .await
             .unwrap();
         datastore.affinity_group_delete(&opctx, &authz_group).await.unwrap();
+
+        // When the group was created, it bumped the rcgen in the project. If we
+        // have an old view of the project, we expect a "concurrent
+        // modification" error.
+        let err = datastore
+            .project_delete(&opctx, &authz_project, &project)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("concurrent modification"), "{err:?}");
+
+        // If we update rcgen, however, and the group has been deleted,
+        // we can successfully delete the project.
+        project.rcgen = project.rcgen.next().into();
+        datastore
+            .project_delete(&opctx, &authz_project, &project)
+            .await
+            .unwrap();
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn anti_affinity_groups_prevent_project_deletion() {
+        // Setup
+        let logctx = dev::test_setup_log(
+            "anti_affinity_groups_prevent_project_deletion",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a project and a group
+        let (authz_project, mut project) =
+            create_project(&opctx, &datastore, "my-project").await;
+        let group = create_anti_affinity_group(
+            &opctx,
+            &datastore,
+            &authz_project,
+            "my-group",
+        )
+        .await
+        .unwrap();
+
+        // If we try to delete the project, we'll fail.
+        let err = datastore
+            .project_delete(&opctx, &authz_project, &project)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::InvalidRequest { .. }));
+        assert!(
+            err.to_string().contains(
+                "project to be deleted contains an anti affinity group"
+            ),
+            "{err:?}"
+        );
+
+        // Delete the group, then try to delete the project again.
+        let (.., authz_group) = LookupPath::new(opctx, datastore)
+            .anti_affinity_group_id(group.id())
+            .lookup_for(authz::Action::Delete)
+            .await
+            .unwrap();
+        datastore
+            .anti_affinity_group_delete(&opctx, &authz_group)
+            .await
+            .unwrap();
 
         // When the group was created, it bumped the rcgen in the project. If we
         // have an old view of the project, we expect a "concurrent
@@ -1178,11 +1327,87 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn affinity_group_member_instanceship_add_list_remove() {
+    async fn anti_affinity_group_names_are_unique_in_project() {
         // Setup
         let logctx = dev::test_setup_log(
-            "affinity_group_member_instanceship_add_list_remove",
+            "anti_affinity_group_names_are_unique_in_project",
         );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create two projects
+        let (authz_project1, _) =
+            create_project(&opctx, &datastore, "my-project-1").await;
+        let (authz_project2, _) =
+            create_project(&opctx, &datastore, "my-project-2").await;
+
+        // We can create a group wiht the same name in different projects
+        let group = create_anti_affinity_group(
+            &opctx,
+            &datastore,
+            &authz_project1,
+            "my-group",
+        )
+        .await
+        .unwrap();
+        create_anti_affinity_group(
+            &opctx,
+            &datastore,
+            &authz_project2,
+            "my-group",
+        )
+        .await
+        .unwrap();
+
+        // If we try to create a new group with the same name in the same
+        // project, we'll see an error.
+        let err = create_anti_affinity_group(
+            &opctx,
+            &datastore,
+            &authz_project1,
+            "my-group",
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(&err, Error::ObjectAlreadyExists {
+            type_name,
+            object_name,
+        } if *type_name == ResourceType::AntiAffinityGroup &&
+         *object_name == "my-group"),
+            "Unexpected error: {err:?}"
+        );
+
+        // If we delete the group from the project, we can re-use the name.
+        let (.., authz_group) = LookupPath::new(opctx, datastore)
+            .anti_affinity_group_id(group.id())
+            .lookup_for(authz::Action::Delete)
+            .await
+            .unwrap();
+        datastore
+            .anti_affinity_group_delete(&opctx, &authz_group)
+            .await
+            .unwrap();
+
+        create_anti_affinity_group(
+            &opctx,
+            &datastore,
+            &authz_project1,
+            "my-group",
+        )
+        .await
+        .expect("Should have been able to re-use name after deletion");
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn affinity_group_membership_add_list_remove() {
+        // Setup
+        let logctx =
+            dev::test_setup_log("affinity_group_membership_add_list_remove");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -1268,10 +1493,100 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn affinity_group_member_instanceship_add_remove_instance_with_vmm() {
+    async fn anti_affinity_group_membership_add_list_remove() {
         // Setup
         let logctx = dev::test_setup_log(
-            "affinity_group_member_instanceship_add_remove_instance_with_vmm",
+            "anti_affinity_group_membership_add_list_remove",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a project and a group
+        let (authz_project, ..) =
+            create_project(&opctx, &datastore, "my-project").await;
+        let group = create_anti_affinity_group(
+            &opctx,
+            &datastore,
+            &authz_project,
+            "my-group",
+        )
+        .await
+        .unwrap();
+
+        let (.., authz_group) = LookupPath::new(opctx, datastore)
+            .anti_affinity_group_id(group.id())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .unwrap();
+
+        // A new group should have no members
+        let pagparams_id = DataPageParams {
+            marker: None,
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        };
+        let pagbyid = PaginatedBy::Id(pagparams_id);
+        let members = datastore
+            .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .await
+            .unwrap();
+        assert!(members.is_empty());
+
+        // Create an instance without a VMM.
+        let instance = create_instance_record(
+            &opctx,
+            &datastore,
+            &authz_project,
+            "my-instance",
+        )
+        .await;
+
+        // Add the instance as a member to the group
+        datastore
+            .anti_affinity_group_member_add(
+                &opctx,
+                &authz_group,
+                external::AntiAffinityGroupMember::Instance(instance.id()),
+            )
+            .await
+            .unwrap();
+
+        // We should now be able to list the new member
+        let members = datastore
+            .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .await
+            .unwrap();
+        assert_eq!(members.len(), 1);
+        assert_eq!(
+            external::AntiAffinityGroupMember::Instance(instance.id()),
+            members[0].clone().into()
+        );
+
+        // We can delete the member and observe an empty member list
+        datastore
+            .anti_affinity_group_member_delete(
+                &opctx,
+                &authz_group,
+                external::AntiAffinityGroupMember::Instance(instance.id()),
+            )
+            .await
+            .unwrap();
+        let members = datastore
+            .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .await
+            .unwrap();
+        assert!(members.is_empty());
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn affinity_group_membership_add_remove_instance_with_vmm() {
+        // Setup
+        let logctx = dev::test_setup_log(
+            "affinity_group_membership_add_remove_instance_with_vmm",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
@@ -1383,6 +1698,121 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn anti_affinity_group_membership_add_remove_instance_with_vmm() {
+        // Setup
+        let logctx = dev::test_setup_log(
+            "anti_affinity_group_membership_add_remove_instance_with_vmm",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a project and a group
+        let (authz_project, ..) =
+            create_project(&opctx, &datastore, "my-project").await;
+        let group = create_anti_affinity_group(
+            &opctx,
+            &datastore,
+            &authz_project,
+            "my-group",
+        )
+        .await
+        .unwrap();
+
+        let (.., authz_group) = LookupPath::new(opctx, datastore)
+            .anti_affinity_group_id(group.id())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .unwrap();
+
+        // A new group should have no members
+        let pagparams_id = DataPageParams {
+            marker: None,
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        };
+        let pagbyid = PaginatedBy::Id(pagparams_id);
+        let members = datastore
+            .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .await
+            .unwrap();
+        assert!(members.is_empty());
+
+        // Create an instance with a VMM.
+        let instance = create_instance_record(
+            &opctx,
+            &datastore,
+            &authz_project,
+            "my-instance",
+        )
+        .await;
+        set_instance_state_running(&datastore, instance.id()).await;
+
+        // Cannot add the instance to the group while it's running.
+        let err = datastore
+            .anti_affinity_group_member_add(
+                &opctx,
+                &authz_group,
+                external::AntiAffinityGroupMember::Instance(instance.id()),
+            )
+            .await
+            .expect_err(
+                "Shouldn't be able to add running instances to anti-affinity groups",
+            );
+        assert!(matches!(err, Error::InvalidRequest { .. }));
+        assert!(
+            err.to_string().contains(
+                "Instance cannot be added to anti-affinity group in state"
+            ),
+            "{err:?}"
+        );
+
+        // If we stop the instance, we can add it to the group.
+        set_instance_state_stopped(&datastore, instance.id()).await;
+        datastore
+            .anti_affinity_group_member_add(
+                &opctx,
+                &authz_group,
+                external::AntiAffinityGroupMember::Instance(instance.id()),
+            )
+            .await
+            .unwrap();
+
+        // Now we can set the instance state to "running" once more.
+        set_instance_state_running(&datastore, instance.id()).await;
+
+        // We should now be able to list the new member
+        let members = datastore
+            .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .await
+            .unwrap();
+        assert_eq!(members.len(), 1);
+        assert_eq!(
+            external::AntiAffinityGroupMember::Instance(instance.id()),
+            members[0].clone().into()
+        );
+
+        // We can delete the member and observe an empty member list -- even
+        // though it's running!
+        datastore
+            .anti_affinity_group_member_delete(
+                &opctx,
+                &authz_group,
+                external::AntiAffinityGroupMember::Instance(instance.id()),
+            )
+            .await
+            .unwrap();
+        let members = datastore
+            .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .await
+            .unwrap();
+        assert!(members.is_empty());
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn affinity_group_delete_group_deletes_members() {
         // Setup
         let logctx =
@@ -1444,6 +1874,81 @@ mod tests {
         // Confirm that no instance members exist
         let members = datastore
             .affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .await
+            .unwrap();
+        assert!(members.is_empty());
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn anti_affinity_group_delete_group_deletes_members() {
+        // Setup
+        let logctx = dev::test_setup_log(
+            "anti_affinity_group_delete_group_deletes_members",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a project and a group
+        let (authz_project, ..) =
+            create_project(&opctx, &datastore, "my-project").await;
+        let group = create_anti_affinity_group(
+            &opctx,
+            &datastore,
+            &authz_project,
+            "my-group",
+        )
+        .await
+        .unwrap();
+
+        let (.., authz_group) = LookupPath::new(opctx, datastore)
+            .anti_affinity_group_id(group.id())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .unwrap();
+
+        // A new group should have no members
+        let pagparams_id = DataPageParams {
+            marker: None,
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        };
+        let pagbyid = PaginatedBy::Id(pagparams_id);
+        let members = datastore
+            .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .await
+            .unwrap();
+        assert!(members.is_empty());
+
+        // Create an instance without a VMM, add it to the group.
+        let instance = create_instance_record(
+            &opctx,
+            &datastore,
+            &authz_project,
+            "my-instance",
+        )
+        .await;
+        datastore
+            .anti_affinity_group_member_add(
+                &opctx,
+                &authz_group,
+                external::AntiAffinityGroupMember::Instance(instance.id()),
+            )
+            .await
+            .unwrap();
+
+        // Delete the group
+        datastore
+            .anti_affinity_group_delete(&opctx, &authz_group)
+            .await
+            .unwrap();
+
+        // Confirm that no instance members exist
+        let members = datastore
+            .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
             .await
             .unwrap();
         assert!(members.is_empty());
@@ -1534,10 +2039,90 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn affinity_group_member_instanceship_for_deleted_objects() {
+    async fn anti_affinity_group_delete_instance_deletes_membership() {
         // Setup
         let logctx = dev::test_setup_log(
-            "affinity_group_member_instanceship_for_deleted_objects",
+            "anti_affinity_group_delete_instance_deletes_membership",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a project and a group
+        let (authz_project, ..) =
+            create_project(&opctx, &datastore, "my-project").await;
+        let group = create_anti_affinity_group(
+            &opctx,
+            &datastore,
+            &authz_project,
+            "my-group",
+        )
+        .await
+        .unwrap();
+
+        let (.., authz_group) = LookupPath::new(opctx, datastore)
+            .anti_affinity_group_id(group.id())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .unwrap();
+
+        // A new group should have no members
+        let pagparams_id = DataPageParams {
+            marker: None,
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        };
+        let pagbyid = PaginatedBy::Id(pagparams_id);
+        let members = datastore
+            .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .await
+            .unwrap();
+        assert!(members.is_empty());
+
+        // Create an instance without a VMM, add it to the group.
+        let instance = create_instance_record(
+            &opctx,
+            &datastore,
+            &authz_project,
+            "my-instance",
+        )
+        .await;
+        datastore
+            .anti_affinity_group_member_add(
+                &opctx,
+                &authz_group,
+                external::AntiAffinityGroupMember::Instance(instance.id()),
+            )
+            .await
+            .unwrap();
+
+        // Delete the instance
+        let (.., authz_instance) = LookupPath::new(opctx, datastore)
+            .instance_id(instance.id())
+            .lookup_for(authz::Action::Delete)
+            .await
+            .unwrap();
+        datastore
+            .project_delete_instance(&opctx, &authz_instance)
+            .await
+            .unwrap();
+
+        // Confirm that no instance members exist
+        let members = datastore
+            .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .await
+            .unwrap();
+        assert!(members.is_empty());
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn affinity_group_membership_for_deleted_objects() {
+        // Setup
+        let logctx = dev::test_setup_log(
+            "affinity_group_membership_for_deleted_objects",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
@@ -1690,10 +2275,166 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn affinity_group_member_instanceship_idempotency() {
+    async fn anti_affinity_group_membership_for_deleted_objects() {
         // Setup
         let logctx = dev::test_setup_log(
-            "affinity_group_member_instanceship_for_deleted_objects",
+            "anti_affinity_group_membership_for_deleted_objects",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a project and a group
+        let (authz_project, ..) =
+            create_project(&opctx, &datastore, "my-project").await;
+
+        struct TestArgs {
+            // Does the group exist?
+            group: bool,
+            // Does the instance exist?
+            instance: bool,
+        }
+
+        let args = [
+            TestArgs { group: false, instance: false },
+            TestArgs { group: true, instance: false },
+            TestArgs { group: false, instance: true },
+        ];
+
+        for arg in args {
+            // Create an anti-affinity group, and maybe delete it.
+            let group = create_anti_affinity_group(
+                &opctx,
+                &datastore,
+                &authz_project,
+                "my-group",
+            )
+            .await
+            .unwrap();
+
+            let (.., authz_group) = LookupPath::new(opctx, datastore)
+                .anti_affinity_group_id(group.id())
+                .lookup_for(authz::Action::Modify)
+                .await
+                .unwrap();
+
+            if !arg.group {
+                datastore
+                    .anti_affinity_group_delete(&opctx, &authz_group)
+                    .await
+                    .unwrap();
+            }
+
+            // Create an instance, and maybe delete it.
+            let instance = create_instance_record(
+                &opctx,
+                &datastore,
+                &authz_project,
+                "my-instance",
+            )
+            .await;
+            let (.., authz_instance) = LookupPath::new(opctx, datastore)
+                .instance_id(instance.id())
+                .lookup_for(authz::Action::Modify)
+                .await
+                .unwrap();
+            if !arg.instance {
+                datastore
+                    .project_delete_instance(&opctx, &authz_instance)
+                    .await
+                    .unwrap();
+            }
+
+            // Try to add the instance to the group.
+            //
+            // Expect to see specific errors, depending on whether or not the
+            // group/instance exist.
+            let err = datastore
+                .anti_affinity_group_member_add(
+                    &opctx,
+                    &authz_group,
+                    external::AntiAffinityGroupMember::Instance(instance.id()),
+                )
+                .await
+                .expect_err("Should have failed");
+
+            match (arg.group, arg.instance) {
+                (false, _) => {
+                    assert!(
+                        matches!(err, Error::ObjectNotFound {
+                        type_name, ..
+                    } if type_name == ResourceType::AntiAffinityGroup),
+                        "{err:?}"
+                    );
+                }
+                (true, false) => {
+                    assert!(
+                        matches!(err, Error::ObjectNotFound {
+                        type_name, ..
+                    } if type_name == ResourceType::Instance),
+                        "{err:?}"
+                    );
+                }
+                (true, true) => {
+                    panic!("If both exist, we won't throw an error")
+                }
+            }
+
+            // Do the same thing, but for group membership removal.
+            let err = datastore
+                .anti_affinity_group_member_delete(
+                    &opctx,
+                    &authz_group,
+                    external::AntiAffinityGroupMember::Instance(instance.id()),
+                )
+                .await
+                .expect_err("Should have failed");
+            match (arg.group, arg.instance) {
+                (false, _) => {
+                    assert!(
+                        matches!(err, Error::ObjectNotFound {
+                        type_name, ..
+                    } if type_name == ResourceType::AntiAffinityGroup),
+                        "{err:?}"
+                    );
+                }
+                (true, false) => {
+                    assert!(
+                        matches!(err, Error::ObjectNotFound {
+                        type_name, ..
+                    } if type_name == ResourceType::Instance),
+                        "{err:?}"
+                    );
+                }
+                (true, true) => {
+                    panic!("If both exist, we won't throw an error")
+                }
+            }
+
+            // Cleanup, if we actually created anything.
+            if arg.instance {
+                datastore
+                    .project_delete_instance(&opctx, &authz_instance)
+                    .await
+                    .unwrap();
+            }
+            if arg.group {
+                datastore
+                    .anti_affinity_group_delete(&opctx, &authz_group)
+                    .await
+                    .unwrap();
+            }
+        }
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn affinity_group_membership_idempotency() {
+        // Setup
+        let logctx = dev::test_setup_log(
+            "affinity_group_membership_for_deleted_objects",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
@@ -1789,7 +2530,103 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    // TODO:
-    // - [ ] THESE ARE ALL AFFINITY. Add equivalent anti-affinity tests for
-    // each.
+    #[tokio::test]
+    async fn anti_affinity_group_membership_idempotency() {
+        // Setup
+        let logctx = dev::test_setup_log(
+            "anti_affinity_group_membership_for_deleted_objects",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a project and a group
+        let (authz_project, ..) =
+            create_project(&opctx, &datastore, "my-project").await;
+        let group = create_anti_affinity_group(
+            &opctx,
+            &datastore,
+            &authz_project,
+            "my-group",
+        )
+        .await
+        .unwrap();
+        let (.., authz_group) = LookupPath::new(opctx, datastore)
+            .anti_affinity_group_id(group.id())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .unwrap();
+
+        // Create an instance
+        let instance = create_instance_record(
+            &opctx,
+            &datastore,
+            &authz_project,
+            "my-instance",
+        )
+        .await;
+
+        // Add the instance to the group
+        datastore
+            .anti_affinity_group_member_add(
+                &opctx,
+                &authz_group,
+                external::AntiAffinityGroupMember::Instance(instance.id()),
+            )
+            .await
+            .unwrap();
+
+        // Add the instance to the group again
+        datastore
+            .anti_affinity_group_member_add(
+                &opctx,
+                &authz_group,
+                external::AntiAffinityGroupMember::Instance(instance.id()),
+            )
+            .await
+            .unwrap();
+
+        // We should still only observe a single member in the group.
+        //
+        // Two calls to "anti_affinity_group_member_add" should be the same
+        // as a single call.
+        let pagparams_id = DataPageParams {
+            marker: None,
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        };
+        let pagbyid = PaginatedBy::Id(pagparams_id);
+        let members = datastore
+            .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .await
+            .unwrap();
+        assert_eq!(members.len(), 1);
+
+        // We should be able to delete the membership idempotently.
+        datastore
+            .anti_affinity_group_member_delete(
+                &opctx,
+                &authz_group,
+                external::AntiAffinityGroupMember::Instance(instance.id()),
+            )
+            .await
+            .unwrap();
+        datastore
+            .anti_affinity_group_member_delete(
+                &opctx,
+                &authz_group,
+                external::AntiAffinityGroupMember::Instance(instance.id()),
+            )
+            .await
+            .unwrap();
+
+        let members = datastore
+            .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .await
+            .unwrap();
+        assert!(members.is_empty());
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
 }
