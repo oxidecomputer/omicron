@@ -16,6 +16,14 @@ use std::net::{Ipv6Addr, SocketAddrV6};
 use std::path::PathBuf;
 use wicketd::{Config, Server, SmfConfigValues};
 
+// Default CLI argument for taking to `dpd`
+const DEFAULT_DPD_ADDRESS: SocketAddrV6 = SocketAddrV6::new(
+    std::net::Ipv6Addr::LOCALHOST,
+    omicron_common::address::DENDRITE_PORT,
+    0,
+    0,
+);
+
 #[derive(Debug, Parser)]
 #[clap(name = "wicketd", about = "See README.adoc for more information")]
 enum Args {
@@ -35,6 +43,10 @@ enum Args {
         /// The address (expected to be on localhost) for MGS
         #[clap(long, action)]
         mgs_address: SocketAddrV6,
+
+        /// The address (expected to be on localhost) for `dpd`
+        #[clap(long, action, default_value_t = DEFAULT_DPD_ADDRESS)]
+        dpd_address: SocketAddrV6,
 
         /// The address (expected to be on localhost) on which we'll serve a TCP
         /// proxy to Nexus's "techport external" API
@@ -86,6 +98,7 @@ async fn do_run() -> Result<(), CmdError> {
             address,
             artifact_address,
             mgs_address,
+            dpd_address,
             nexus_proxy_address,
             baseboard_file,
             read_smf_config,
@@ -129,6 +142,7 @@ async fn do_run() -> Result<(), CmdError> {
                 address,
                 artifact_address,
                 mgs_address,
+                dpd_address,
                 nexus_proxy_address,
                 baseboard,
                 rack_subnet,

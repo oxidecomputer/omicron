@@ -5,6 +5,7 @@
 //! User provided dropshot server context
 
 use crate::bootstrap_addrs::BootstrapPeers;
+use crate::dendrite::DpdHandle;
 use crate::preflight_check::PreflightCheckerHandler;
 use crate::rss_config::CurrentRssConfig;
 use crate::update_tracker::UpdateTracker;
@@ -27,6 +28,7 @@ pub struct ServerContext {
     pub(crate) bind_address: SocketAddrV6,
     pub mgs_handle: MgsHandle,
     pub mgs_client: gateway_client::Client,
+    pub dpd_handle: DpdHandle,
     pub(crate) log: slog::Logger,
     /// Our cached copy of what MGS's `/local/switch-id` endpoint returns; it
     /// identifies whether we're connected to switch 0 or 1 and cannot change

@@ -118,6 +118,8 @@ impl Rack<'_> {
         if presence == ComponentPresence::Present {
             for x in inner.left()..inner.right() {
                 for y in inner.top()..inner.bottom() {
+                    // TODO(ben): It would be very spiffy to show the actual
+                    // present transceivers here
                     buf[(x, y)].set_symbol("❒");
                 }
             }

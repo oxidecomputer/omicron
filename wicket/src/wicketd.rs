@@ -499,10 +499,12 @@ impl WicketdManager {
                         GetInventoryResponse::Response {
                             inventory,
                             mgs_last_seen,
+                            dpd_last_seen,
                         } => {
                             let _ = tx.send(Event::Inventory {
                                 inventory,
                                 mgs_last_seen,
+                                dpd_last_seen,
                             });
                         }
                         GetInventoryResponse::Unavailable => {

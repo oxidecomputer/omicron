@@ -13,7 +13,7 @@ use std::fmt::Display;
 use std::iter::Iterator;
 use wicket_common::inventory::{
     RackV1Inventory, RotInventory, RotSlot, SpComponentCaboose,
-    SpComponentInfo, SpIgnition, SpState, SpType,
+    SpComponentInfo, SpIgnition, SpState, SpType, Transceiver,
 };
 
 pub static ALL_COMPONENT_IDS: Lazy<Vec<ComponentId>> = Lazy::new(|| {
@@ -51,7 +51,7 @@ impl Inventory {
     ) -> anyhow::Result<()> {
         let mut new_inventory = Inventory::default();
 
-        for sp in inventory.sps {
+        for sp in inventory.mgs_inventory.sps {
             let i = sp.id.slot;
             let type_ = sp.id.type_;
             let sp = Sp {
@@ -67,7 +67,9 @@ impl Inventory {
             let id = ComponentId::from_sp_type_and_slot(type_, i)?;
             let component = match type_ {
                 SpType::Sled => Component::Sled(sp),
-                SpType::Switch => Component::Switch(sp),
+                SpType::Switch => {
+                    Component::Switch { sp, transceivers: Vec::new() }
+                }
                 SpType::Power => Component::Psc(sp),
             };
 
@@ -129,7 +131,7 @@ impl Sp {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Component {
     Sled(Sp),
-    Switch(Sp),
+    Switch { sp: Sp, transceivers: Vec<Transceiver> },
     Psc(Sp),
 }
 
@@ -145,7 +147,7 @@ impl Component {
     pub fn sp(&self) -> &Sp {
         match self {
             Component::Sled(sp) => sp,
-            Component::Switch(sp) => sp,
+            Component::Switch { sp, .. } => sp,
             Component::Psc(sp) => sp,
         }
     }

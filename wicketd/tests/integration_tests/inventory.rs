@@ -37,6 +37,7 @@ async fn test_inventory() {
                     // then the `configured-bootstrap-sleds` command below
                     // might return an empty list.
                     let sp_state_none: Vec<_> = inventory
+                        .mgs_inventory
                         .sps
                         .iter()
                         .filter(|sp| sp.state.is_none())
@@ -66,7 +67,7 @@ async fn test_inventory() {
     info!(wicketd_testctx.log(), "inventory returned"; "inventory" => ?inventory);
 
     // 4 SPs attached to the inventory.
-    assert_eq!(inventory.sps.len(), 4);
+    assert_eq!(inventory.mgs_inventory.sps.len(), 4);
 
     // Test CLI with JSON output
     {

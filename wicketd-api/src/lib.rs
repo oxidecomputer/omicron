@@ -456,7 +456,15 @@ pub struct GetInventoryParams {
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case", tag = "type", content = "data")]
 pub enum GetInventoryResponse {
-    Response { inventory: RackV1Inventory, mgs_last_seen: Duration },
+    // TODO(ben): Want to report either one of these if we have it, even if we
+    // fail to reach the other. We should make each component of the
+    // `RackV1Inventory` an enum like this for the MGS-specific and
+    // `dpd`-specific data.
+    Response {
+        inventory: RackV1Inventory,
+        mgs_last_seen: Duration,
+        dpd_last_seen: Duration,
+    },
     Unavailable,
 }
 

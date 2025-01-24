@@ -16,6 +16,15 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "inventory", rename_all = "snake_case")]
 pub struct RackV1Inventory {
+    #[serde(flatten)]
+    pub mgs_inventory: MgsV1Inventory,
+    pub transceivers: Vec<Transceiver>,
+}
+
+/// The current state of the v1 Rack as known to MGS
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "inventory", rename_all = "snake_case")]
+pub struct MgsV1Inventory {
     pub sps: Vec<SpInventory>,
 }
 
@@ -60,4 +69,13 @@ pub struct RotInventory {
     // `None` indicates we don't need to read
     pub caboose_stage0: Option<Option<SpComponentCaboose>>,
     pub caboose_stage0next: Option<Option<SpComponentCaboose>>,
+}
+
+/// A transceiver in the switch's front ports.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[serde(tag = "transceiver", rename_all = "snake_case")]
+pub struct Transceiver {
+    // TODO(ben) Make strong type
+    pub port: String,
+    // TODO(ben): Include status, vendor info, power, datapath
 }

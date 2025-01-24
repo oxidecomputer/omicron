@@ -1568,6 +1568,9 @@
               "data": {
                 "type": "object",
                 "properties": {
+                  "dpd_last_seen": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
                   "inventory": {
                     "$ref": "#/components/schemas/RackV1Inventory"
                   },
@@ -1576,6 +1579,7 @@
                   }
                 },
                 "required": [
+                  "dpd_last_seen",
                   "inventory",
                   "mgs_last_seen"
                 ]
@@ -2868,10 +2872,17 @@
             "items": {
               "$ref": "#/components/schemas/SpInventory"
             }
+          },
+          "transceivers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Transceiver"
+            }
           }
         },
         "required": [
-          "sps"
+          "sps",
+          "transceivers"
         ]
       },
       "RotImageError": {
@@ -5989,6 +6000,18 @@
               "message"
             ]
           }
+        ]
+      },
+      "Transceiver": {
+        "description": "A transceiver in the switch's front ports.",
+        "type": "object",
+        "properties": {
+          "port": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "port"
         ]
       },
       "TxEqConfig": {
