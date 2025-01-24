@@ -52,38 +52,28 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         body: TypedBody<ServerConfigurableSettings>,
     ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError> {
         let ctx = rqctx.context();
-        let replica_server = body.into_inner();
-        let mut current_generation = ctx.generation.lock().unwrap();
-        let incoming_generation = replica_server.generation();
+        let replica_settings = body.into_inner();
 
-        // If the incoming generation number is lower, then we have a problem.
-        // We should return an error instead of silently skipping the configuration
-        // file generation.
-        if let Some(current) = *current_generation {
-            if current > incoming_generation {
-                return Err(HttpError::for_client_error(
-                    Some(String::from("Conflict")),
-                    StatusCode::CONFLICT,
-                    format!(
-                        "current generation '{}' is greater than incoming generation '{}'",
-                        current,
-                        incoming_generation,
-                    )
-                ));
-            }
-        };
+        let (response_tx, response_rx) = oneshot::channel();
+        ctx.tx
+            .send(ClickhouseAdminServerRequest::GenerateConfig {
+                ctx: ctx.clone(),
+                replica_settings,
+                response: response_tx,
+            })
+            .await
+            .map_err(|e| {
+                HttpError::for_internal_error(format!(
+                    "failure to send request: {e}"
+                ))
+            })?;
+        let result = response_rx.await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failure to receive response: {e}"
+            ))
+        })??;
 
-        let output = ctx.clickward().generate_server_config(replica_server)?;
-
-        // We want to update the generation number only if the config file has been
-        // generated successfully.
-        *current_generation = Some(incoming_generation);
-
-        // Once we have generated the client we can safely enable the clickhouse_server service
-        let fmri = "svc:/oxide/clickhouse_server:default".to_string();
-        Svcadm::enable_service(fmri)?;
-
-        Ok(HttpResponseCreated(output))
+        Ok(HttpResponseCreated(result))
     }
 
     async fn generation(
@@ -92,6 +82,8 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         let ctx = rqctx.context();
 
         // TODO: Remove? this is only for testing
+        // It's not really necessary to use a separate tokio task to check the
+        // generation number?
         let (response_tx, response_rx) = oneshot::channel();
         ctx.tx
             .send(ClickhouseAdminServerRequest::Generation {
@@ -99,15 +91,15 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
                 response: response_tx,
             })
             .await
-            .map_err(|_| {
-                HttpError::for_internal_error(
-                    "SENDER: change error before committing".to_string(),
-                )
+            .map_err(|e| {
+                HttpError::for_internal_error(format!(
+                    "failure to send request: {e}"
+                ))
             })?;
-        let result = response_rx.await.map_err(|_| {
-            HttpError::for_internal_error(
-                "RESPONSE: change error before committing".to_string(),
-            )
+        let result = response_rx.await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failure to receive response: {e}"
+            ))
         })?;
 
         let gen = match result {

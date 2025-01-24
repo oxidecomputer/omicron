@@ -7,9 +7,13 @@ use crate::{ClickhouseCli, Clickward};
 use anyhow::{anyhow, bail, Result};
 use camino::Utf8PathBuf;
 use clickhouse_admin_types::{
-    CLICKHOUSE_KEEPER_CONFIG_DIR, CLICKHOUSE_KEEPER_CONFIG_FILE,
-    CLICKHOUSE_SERVER_CONFIG_DIR, CLICKHOUSE_SERVER_CONFIG_FILE,
+    ReplicaConfig, ServerConfigurableSettings, CLICKHOUSE_KEEPER_CONFIG_DIR,
+    CLICKHOUSE_KEEPER_CONFIG_FILE, CLICKHOUSE_SERVER_CONFIG_DIR,
+    CLICKHOUSE_SERVER_CONFIG_FILE,
 };
+use dropshot::HttpError;
+use http::StatusCode;
+use illumos_utils::svcadm::Svcadm;
 use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use omicron_common::api::external::Generation;
 use oximeter_db::Client as OximeterClient;
@@ -19,7 +23,7 @@ use std::io::{BufRead, BufReader};
 use std::net::SocketAddrV6;
 use std::str::FromStr;
 use std::sync::Arc;
-// TODO: Remove usage of tokio task
+// TODO: Remove usage of tokio Mutex
 use tokio::sync::{mpsc, mpsc::Receiver, oneshot, Mutex};
 use tokio::task::JoinHandle;
 
@@ -72,6 +76,7 @@ pub struct ServerContext {
     clickhouse_cli: ClickhouseCli,
     clickward: Clickward,
     oximeter_client: OximeterClient,
+    // TODO: Remove this lock
     initialization_lock: Arc<Mutex<()>>,
     log: Logger,
     pub generation: std::sync::Mutex<Option<Generation>>,
@@ -121,6 +126,44 @@ impl ServerContext {
         })
     }
 
+    pub fn generate_config_and_enable_svc(
+        &self,
+        replica_settings: ServerConfigurableSettings,
+    ) -> Result<ReplicaConfig, HttpError> {
+        let mut current_generation = self.generation.lock().unwrap();
+        let incoming_generation = replica_settings.generation();
+
+        // If the incoming generation number is lower, then we have a problem.
+        // We should return an error instead of silently skipping the configuration
+        // file generation.
+        if let Some(current) = *current_generation {
+            if current > incoming_generation {
+                return Err(HttpError::for_client_error(
+                    Some(String::from("Conflict")),
+                    StatusCode::CONFLICT,
+                    format!(
+                        "current generation '{}' is greater than incoming generation '{}'",
+                        current,
+                        incoming_generation,
+                    )
+                ));
+            }
+        };
+
+        let output =
+            self.clickward().generate_server_config(replica_settings)?;
+
+        // We want to update the generation number only if the config file has been
+        // generated successfully.
+        *current_generation = Some(incoming_generation);
+
+        // Once we have generated the client we can safely enable the clickhouse_server service
+        let fmri = "svc:/oxide/clickhouse_server:default".to_string();
+        Svcadm::enable_service(fmri)?;
+
+        Ok(output)
+    }
+
     pub fn clickhouse_cli(&self) -> &ClickhouseCli {
         &self.clickhouse_cli
     }
@@ -147,14 +190,15 @@ impl ServerContext {
 }
 
 pub enum ClickhouseAdminServerRequest {
+    // TODO: Remove this one, just using it for testing
     Generation {
         ctx: Arc<ServerContext>,
         response: oneshot::Sender<Option<Generation>>,
     },
     GenerateConfig {
-        // TODO: Unsure how to make this retrieve data from the API call?
-        // will leave as string for now
-        response: oneshot::Sender<String>,
+        ctx: Arc<ServerContext>,
+        replica_settings: ServerConfigurableSettings,
+        response: oneshot::Sender<Result<ReplicaConfig, HttpError>>,
     },
 }
 
@@ -168,11 +212,14 @@ async fn long_running_task(
                 // TODO: Just use `let _` instead of returning an error?
                 response.send(result).expect("OHNOOHNO");
             }
-            ClickhouseAdminServerRequest::GenerateConfig { response } => {
-                // TODO: Unsure how to make this retrieve data from the API call?
-                response
-                    .send("Generating config and enabling service".to_string())
-                    .expect("failed to send value to channel");
+            ClickhouseAdminServerRequest::GenerateConfig {
+                ctx,
+                replica_settings,
+                response,
+            } => {
+                let result =
+                    ctx.generate_config_and_enable_svc(replica_settings);
+                response.send(result).expect("failed to send value to channel");
             }
         }
     }
