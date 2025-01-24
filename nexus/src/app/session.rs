@@ -46,26 +46,12 @@ impl super::Nexus {
             .await;
 
         match fetch_result {
-            Err(e) => {
-                match e {
-                    Error::ObjectNotFound { type_name: _, lookup_type: _ } => {
-                        // if the silo user was deleted, they're not allowed to
-                        // log in :)
-                        return Ok(false);
-                    }
-
-                    _ => {
-                        return Err(e);
-                    }
-                }
-            }
-
-            Ok(_) => {
-                // they're allowed
-            }
+            // if the silo user was deleted, they're not allowed to log in :)
+            Err(Error::ObjectNotFound { .. }) => Ok(false),
+            Err(e) => Err(e),
+            // they're allowed
+            Ok(_) => Ok(true),
         }
-
-        Ok(true)
     }
 
     pub(crate) async fn session_create(

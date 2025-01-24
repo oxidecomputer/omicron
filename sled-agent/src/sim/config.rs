@@ -78,27 +78,41 @@ pub struct Config {
     pub hardware: ConfigHardware,
 }
 
+pub enum ZpoolConfig {
+    /// Don't create anything by default.
+    None,
+
+    /// Create 10 virtual U.2s, each with 1 TB of storage.
+    TenVirtualU2s,
+}
+
 impl Config {
     pub fn for_testing(
         id: SledUuid,
         sim_mode: SimMode,
         nexus_address: Option<SocketAddr>,
         update_directory: Option<&Utf8Path>,
-        zpools: Option<Vec<ConfigZpool>>,
+        zpool_config: ZpoolConfig,
     ) -> Config {
         // This IP range is guaranteed by RFC 6666 to discard traffic.
         // For tests that don't use a Nexus, we use this address to simulate a
         // non-functioning Nexus.
         let nexus_address =
             nexus_address.unwrap_or_else(|| "[100::1]:12345".parse().unwrap());
+
         // If the caller doesn't care to provide a directory in which to put
         // updates, make up a path that doesn't exist.
         let update_directory =
             update_directory.unwrap_or_else(|| "/nonexistent".into());
-        let zpools = zpools.unwrap_or_else(|| {
-            // By default, create 10 "virtual" U.2s, with 1 TB of storage.
-            vec![ConfigZpool { size: 1 << 40 }; 10]
-        });
+
+        let zpools = match zpool_config {
+            ZpoolConfig::None => vec![],
+
+            ZpoolConfig::TenVirtualU2s => {
+                vec![ConfigZpool { size: 1 << 40 }; 10]
+            }
+        };
+
         Config {
             id,
             sim_mode,

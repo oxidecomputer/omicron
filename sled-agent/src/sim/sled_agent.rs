@@ -14,6 +14,7 @@ use super::storage::Storage;
 use crate::artifact_store::ArtifactStore;
 use crate::nexus::NexusClient;
 use crate::sim::simulatable::Simulatable;
+use crate::sim::SimulatedUpstairs;
 use crate::support_bundle::storage::SupportBundleQueryType;
 use crate::updates::UpdateManager;
 use anyhow::bail;
@@ -52,7 +53,7 @@ use propolis_client::{
         Board, Chipset, ComponentV0, InstanceInitializationMethod,
         InstanceSpecV0, SerialPort, SerialPortNumber,
     },
-    Client as PropolisClient, VolumeConstructionRequest,
+    Client as PropolisClient,
 };
 use range_requests::PotentialRange;
 use sled_agent_api::SupportBundleMetadata;
@@ -65,9 +66,8 @@ use sled_agent_types::instance::{
     VmmStateRequested, VmmUnregisterResponse,
 };
 use slog::Logger;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -91,7 +91,7 @@ pub struct SledAgent {
     updates: UpdateManager,
     nexus_address: SocketAddr,
     pub nexus_client: Arc<NexusClient>,
-    disk_id_to_region_ids: Mutex<HashMap<String, Vec<Uuid>>>,
+    pub simulated_upstairs: Arc<SimulatedUpstairs>,
     pub v2p_mappings: Mutex<HashSet<VirtualNetworkInterfaceHost>>,
     mock_propolis: futures::lock::Mutex<
         Option<(propolis_mock_server::Server, PropolisClient)>,
@@ -108,45 +108,6 @@ pub struct SledAgent {
     pub log: Logger,
 }
 
-fn extract_targets_from_volume_construction_request(
-    vcr: &VolumeConstructionRequest,
-) -> Result<Vec<SocketAddr>, std::net::AddrParseError> {
-    // A snapshot is simply a flush with an extra parameter, and flushes are
-    // only sent to sub volumes, not the read only parent. Flushes are only
-    // processed by regions, so extract each region that would be affected by a
-    // flush.
-
-    let mut res = vec![];
-    let mut parts: VecDeque<&VolumeConstructionRequest> = VecDeque::new();
-    parts.push_back(&vcr);
-
-    while let Some(vcr_part) = parts.pop_front() {
-        match vcr_part {
-            VolumeConstructionRequest::Volume { sub_volumes, .. } => {
-                for sub_volume in sub_volumes {
-                    parts.push_back(sub_volume);
-                }
-            }
-
-            VolumeConstructionRequest::Url { .. } => {
-                // noop
-            }
-
-            VolumeConstructionRequest::Region { opts, .. } => {
-                for target in &opts.target {
-                    res.push(*target);
-                }
-            }
-
-            VolumeConstructionRequest::File { .. } => {
-                // noop
-            }
-        }
-    }
-
-    Ok(res)
-}
-
 impl SledAgent {
     // TODO-cleanup should this instantiate the NexusClient it needs?
     // Should it take a Config object instead of separate id, sim_mode, etc?
@@ -156,6 +117,8 @@ impl SledAgent {
         log: Logger,
         nexus_address: SocketAddr,
         nexus_client: Arc<NexusClient>,
+        simulated_upstairs: Arc<SimulatedUpstairs>,
+        sled_index: u16,
     ) -> Arc<SledAgent> {
         let id = config.id;
         let sim_mode = config.sim_mode;
@@ -184,9 +147,13 @@ impl SledAgent {
 
         let storage = Storage::new(
             id.into_untyped_uuid(),
+            sled_index,
             config.storage.ip,
             storage_log,
         );
+
+        simulated_upstairs.register_storage(id, &storage);
+
         let artifacts =
             ArtifactStore::new(&log, SimArtifactStorage::new(storage.clone()));
 
@@ -207,7 +174,7 @@ impl SledAgent {
             updates: UpdateManager::new(config.updates.clone()),
             nexus_address,
             nexus_client,
-            disk_id_to_region_ids: Mutex::new(HashMap::new()),
+            simulated_upstairs,
             v2p_mappings: Mutex::new(HashSet::new()),
             external_ips: Mutex::new(HashMap::new()),
             vpc_routes: Mutex::new(HashMap::new()),
@@ -222,56 +189,6 @@ impl SledAgent {
             log,
             bootstore_network_config,
         })
-    }
-
-    /// Map disk id to regions for later lookup
-    ///
-    /// Crucible regions are returned with a port number, and volume
-    /// construction requests contain a single Nexus region (which points to
-    /// three crucible regions). Extract the region addresses, lookup the region
-    /// from the port and pair disk id with region ids. This map is referred to
-    /// later when making snapshots.
-    pub fn map_disk_ids_to_region_ids(
-        &self,
-        volume_construction_request: &VolumeConstructionRequest,
-    ) -> Result<(), Error> {
-        let disk_id = match volume_construction_request {
-            VolumeConstructionRequest::Volume { id, .. } => id,
-
-            _ => {
-                panic!("root of volume construction request not a volume!");
-            }
-        };
-
-        let targets = extract_targets_from_volume_construction_request(
-            &volume_construction_request,
-        )
-        .map_err(|e| {
-            Error::invalid_request(&format!("bad socketaddr: {e:?}"))
-        })?;
-
-        let mut region_ids = Vec::new();
-
-        let storage = self.storage.lock();
-        for target in targets {
-            let region = storage
-                .get_region_for_port(target.port())
-                .ok_or_else(|| {
-                    Error::internal_error(&format!(
-                        "no region for port {}",
-                        target.port()
-                    ))
-                })?;
-
-            let region_id = Uuid::from_str(&region.id.0).unwrap();
-            region_ids.push(region_id);
-        }
-
-        let mut disk_id_to_region_ids =
-            self.disk_id_to_region_ids.lock().unwrap();
-        disk_id_to_region_ids.insert(disk_id.to_string(), region_ids.clone());
-
-        Ok(())
     }
 
     /// Idempotently ensures that the given API Instance (described by
@@ -419,7 +336,7 @@ impl SledAgent {
 
         for disk_request in &hardware.disks {
             let vcr = serde_json::from_str(&disk_request.vcr_json.0)?;
-            self.map_disk_ids_to_region_ids(&vcr)?;
+            self.simulated_upstairs.map_id_to_vcr(disk_request.disk_id, &vcr);
         }
 
         let mut routes = self.vpc_routes.lock().unwrap();
@@ -650,6 +567,10 @@ impl SledAgent {
         self.storage.lock().insert_zpool(id, physical_disk_id, size);
     }
 
+    pub fn has_zpool(&self, id: ZpoolUuid) -> bool {
+        self.storage.lock().has_zpool(id)
+    }
+
     /// Adds a Crucible Dataset within a zpool.
     pub fn create_crucible_dataset(
         &self,
@@ -683,37 +604,7 @@ impl SledAgent {
         disk_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
-        // In order to fulfill the snapshot request, emulate creating snapshots
-        // for each region that makes up the disk. Use the disk_id_to_region_ids
-        // map to perform lookup based on this function's disk id argument.
-
-        let disk_id_to_region_ids = self.disk_id_to_region_ids.lock().unwrap();
-        let region_ids = disk_id_to_region_ids.get(&disk_id.to_string());
-
-        let region_ids = region_ids.ok_or_else(|| {
-            Error::not_found_by_id(ResourceType::Disk, &disk_id)
-        })?;
-
-        info!(self.log, "disk id {} region ids are {:?}", disk_id, region_ids);
-
-        let storage = self.storage.lock();
-
-        for region_id in region_ids {
-            let crucible_data = storage.get_dataset_for_region(*region_id);
-
-            if let Some(crucible_data) = crucible_data {
-                crucible_data
-                    .create_snapshot(*region_id, snapshot_id)
-                    .map_err(|e| Error::internal_error(&e.to_string()))?;
-            } else {
-                return Err(Error::not_found_by_id(
-                    ResourceType::Disk,
-                    &disk_id,
-                ));
-            }
-        }
-
-        Ok(())
+        self.simulated_upstairs.snapshot(disk_id, snapshot_id)
     }
 
     pub fn set_virtual_nic_host(

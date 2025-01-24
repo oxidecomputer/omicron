@@ -264,7 +264,7 @@ pub fn load_test_config() -> NexusConfig {
 
 pub async fn test_setup<N: NexusServer>(
     test_name: &str,
-    extra_sled_agents: usize,
+    extra_sled_agents: u16,
 ) -> ControlPlaneTestContext<N> {
     let mut config = load_test_config();
     test_setup_with_config::<N>(
@@ -354,6 +354,8 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
 
     pub silo_name: Option<Name>,
     pub user_name: Option<UserId>,
+
+    pub simulated_upstairs: Arc<sim::SimulatedUpstairs>,
 }
 
 type StepInitFn<'a, N> = Box<
@@ -366,6 +368,10 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
     pub fn new(test_name: &'a str, config: &'a mut NexusConfig) -> Self {
         let start_time = chrono::Utc::now();
         let logctx = LogContext::new(test_name, &config.pkg.log);
+
+        let simulated_upstairs_log = logctx.log.new(o!(
+            "component" => "omicron_sled_agent::sim::SimulatedUpstairs",
+        ));
 
         Self {
             config,
@@ -395,6 +401,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             blueprint_zones: Vec::new(),
             silo_name: None,
             user_name: None,
+            simulated_upstairs: Arc::new(sim::SimulatedUpstairs::new(
+                simulated_upstairs_log,
+            )),
         }
     }
 
@@ -1025,6 +1034,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
     pub async fn start_sled(
         &mut self,
         sled_id: SledUuid,
+        sled_index: u16,
         sim_mode: sim::SimMode,
     ) {
         let nexus_address =
@@ -1038,8 +1048,10 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             )),
             nexus_address,
             sled_id,
+            sled_index,
             tempdir.path(),
             sim_mode,
+            &self.simulated_upstairs,
         )
         .await
         .expect("Failed to start sled agent");
@@ -1122,6 +1134,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
     pub async fn extra_sled_agent(
         &mut self,
         sled_id: SledUuid,
+        sled_index: u16,
         sim_mode: sim::SimMode,
     ) {
         let nexus_address =
@@ -1135,8 +1148,10 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             )),
             nexus_address,
             sled_id,
+            sled_index,
             tempdir.path(),
             sim_mode,
+            &self.simulated_upstairs,
         )
         .await
         .expect("Failed to start sled agent");
@@ -1373,7 +1388,7 @@ enum PopulateCrdb {
 #[cfg(feature = "omicron-dev")]
 pub async fn omicron_dev_setup_with_config<N: NexusServer>(
     config: &mut NexusConfig,
-    extra_sled_agents: usize,
+    extra_sled_agents: u16,
 ) -> Result<ControlPlaneTestContext<N>> {
     let builder =
         ControlPlaneTestContextBuilder::<N>::new("omicron-dev", config);
@@ -1410,7 +1425,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
     config: &mut NexusConfig,
     sim_mode: sim::SimMode,
     initial_cert: Option<Certificate>,
-    extra_sled_agents: usize,
+    extra_sled_agents: u16,
 ) -> ControlPlaneTestContext<N> {
     let builder = ControlPlaneTestContextBuilder::<N>::new(test_name, config);
     setup_with_config_impl(
@@ -1428,7 +1443,7 @@ async fn setup_with_config_impl<N: NexusServer>(
     populate: PopulateCrdb,
     sim_mode: sim::SimMode,
     initial_cert: Option<Certificate>,
-    extra_sled_agents: usize,
+    extra_sled_agents: u16,
 ) -> ControlPlaneTestContext<N> {
     const STEP_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -1571,7 +1586,11 @@ async fn setup_with_config_impl<N: NexusServer>(
                 "start_sled1",
                 Box::new(move |builder| {
                     builder
-                        .start_sled(SLED_AGENT_UUID.parse().unwrap(), sim_mode)
+                        .start_sled(
+                            SLED_AGENT_UUID.parse().unwrap(),
+                            0,
+                            sim_mode,
+                        )
                         .boxed()
                 }),
             )],
@@ -1588,6 +1607,7 @@ async fn setup_with_config_impl<N: NexusServer>(
                         builder
                             .start_sled(
                                 SLED_AGENT2_UUID.parse().unwrap(),
+                                1,
                                 sim_mode,
                             )
                             .boxed()
@@ -1598,14 +1618,18 @@ async fn setup_with_config_impl<N: NexusServer>(
             .await;
     }
 
-    for _ in 1..extra_sled_agents {
+    for index in 1..extra_sled_agents {
         builder
             .init_with_steps(
                 vec![(
                     "add_extra_sled_agent",
                     Box::new(move |builder| {
                         builder
-                            .extra_sled_agent(SledUuid::new_v4(), sim_mode)
+                            .extra_sled_agent(
+                                SledUuid::new_v4(),
+                                index.checked_add(1).unwrap(),
+                                sim_mode,
+                            )
                             .boxed()
                     }),
                 )],
@@ -1659,23 +1683,30 @@ async fn setup_with_config_impl<N: NexusServer>(
     builder.build()
 }
 
+/// Starts a simulated sled agent
+///
+/// Note: you should probably use the `extra_sled_agents` macro parameter on
+/// `nexus_test` instead!
 pub async fn start_sled_agent(
     log: Logger,
     nexus_address: SocketAddr,
     id: SledUuid,
+    sled_index: u16,
     update_directory: &Utf8Path,
     sim_mode: sim::SimMode,
+    simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
 ) -> Result<sim::Server, String> {
     let config = sim::Config::for_testing(
         id,
         sim_mode,
         Some(nexus_address),
         Some(update_directory),
-        None,
+        sim::ZpoolConfig::None,
     );
-    let server = sim::Server::start(&config, &log, true)
-        .await
-        .map_err(|e| e.to_string())?;
+    let server =
+        sim::Server::start(&config, &log, true, simulated_upstairs, sled_index)
+            .await
+            .map_err(|e| e.to_string())?;
     Ok(server)
 }
 
