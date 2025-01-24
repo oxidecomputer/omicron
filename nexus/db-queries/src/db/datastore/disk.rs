@@ -19,6 +19,7 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::model::Disk;
 use crate::db::model::DiskRuntimeState;
 use crate::db::model::DiskUpdate;
@@ -45,6 +46,7 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::VolumeUuid;
 use ref_cast::RefCast;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
@@ -824,13 +826,13 @@ impl DataStore {
 
     pub async fn disk_for_volume_id(
         &self,
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
     ) -> LookupResult<Option<Disk>> {
         let conn = self.pool_connection_unauthorized().await?;
 
         use db::schema::disk::dsl;
         dsl::disk
-            .filter(dsl::volume_id.eq(volume_id))
+            .filter(dsl::volume_id.eq(to_db_typed_uuid(volume_id)))
             .select(Disk::as_select())
             .first_async(&*conn)
             .await
@@ -881,7 +883,7 @@ mod tests {
                 Disk::new(
                     Uuid::new_v4(),
                     authz_project.id(),
-                    Uuid::new_v4(),
+                    VolumeUuid::new_v4(),
                     params::DiskCreate {
                         identity: external::IdentityMetadataCreateParams {
                             name: "first-post".parse().unwrap(),

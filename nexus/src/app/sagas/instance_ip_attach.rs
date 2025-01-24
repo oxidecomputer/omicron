@@ -338,7 +338,7 @@ pub(crate) mod test {
         create_project,
     };
     use nexus_test_utils_macros::nexus_test;
-    use omicron_common::api::external::SimpleIdentity;
+    use omicron_common::api::external::SimpleIdentityOrName;
     use sled_agent_types::instance::InstanceExternalIpBody;
 
     type ControlPlaneTestContext =

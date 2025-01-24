@@ -57,6 +57,17 @@ use sled_agent_types::{
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use uuid::Uuid;
 
+// Host OS images are just over 800 MiB currently; set this to 2 GiB to give
+// some breathing room.
+const HOST_OS_IMAGE_MAX_BYTES: usize = 2 * 1024 * 1024 * 1024;
+// The largest TUF repository artifact is in fact the host OS image. (TODO: or
+// at least, it will be when we split up the composite control plane artifact;
+// tracked by issue #4411.)
+const UPDATE_ARTIFACT_MAX_BYTES: usize = HOST_OS_IMAGE_MAX_BYTES;
+// TODO This was the previous API-wide max; what is the largest support bundle
+// we expect to need to store?
+const SUPPORT_BUNDLE_MAX_BYTES: usize = 2 * 1024 * 1024 * 1024;
+
 #[dropshot::api_description]
 pub trait SledAgentApi {
     type Context;
@@ -173,7 +184,8 @@ pub trait SledAgentApi {
     /// Create a support bundle within a particular dataset
     #[endpoint {
         method = POST,
-        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}"
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}",
+        request_body_max_bytes = SUPPORT_BUNDLE_MAX_BYTES,
     }]
     async fn support_bundle_create(
         rqctx: RequestContext<Self::Context>,
@@ -419,7 +431,8 @@ pub trait SledAgentApi {
 
     #[endpoint {
         method = PUT,
-        path = "/artifacts/{sha256}"
+        path = "/artifacts/{sha256}",
+        request_body_max_bytes = UPDATE_ARTIFACT_MAX_BYTES,
     }]
     async fn artifact_put(
         rqctx: RequestContext<Self::Context>,
@@ -542,6 +555,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = POST,
         path = "/boot-disk/{boot_disk}/os/write",
+        request_body_max_bytes = HOST_OS_IMAGE_MAX_BYTES,
     }]
     async fn host_os_write_start(
         rqctx: RequestContext<Self::Context>,
