@@ -227,15 +227,6 @@ pub fn visit_blueprint<'e, V>(
         .chain(after.blueprint_disks.keys())
         .chain(after.blueprint_datasets.keys())
         .collect();
-    let all_sleds: BTreeSet<_> =
-        before_sleds.union(&after_sleds).map(|&sled_id| *sled_id).collect();
-
-    // All sleds that have state, zones, disks or datasets in `after_*`, but not
-    // `before_*` have been added.
-    let sled_ids_added: BTreeSet<_> = after_sleds
-        .difference(&before_sleds)
-        .map(|&sled_id| *sled_id)
-        .collect();
 
     // All sleds that have state, zones, disks or datasets in `before_*`, but not
     // `after_*` have been removed.

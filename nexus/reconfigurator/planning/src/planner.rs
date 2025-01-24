@@ -1055,7 +1055,7 @@ mod test {
             1
         );
 
-        // Now run the planner.  It should add additional Nexus zones to the
+        // Now run the planner. It should add additional Nexus zones to the
         // one sled we have.
         let mut builder = input.into_builder();
         builder.policy_mut().target_nexus_zone_count = 5;
@@ -1090,7 +1090,7 @@ mod test {
         assert_eq!(modified_sled.zones_modified.len(), 0);
         assert_eq!(modified_sled.disks_added.len(), 0);
         assert_eq!(modified_sled.disks_removed.len(), 0);
-        assert_eq!(modified_sled.datasets_added.len(), 1);
+        assert_eq!(modified_sled.datasets_added.len(), 4);
         assert_eq!(modified_sled.datasets_modified.len(), 0);
         assert_eq!(modified_sled.datasets_removed.len(), 0);
 
