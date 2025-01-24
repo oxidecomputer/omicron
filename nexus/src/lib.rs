@@ -26,6 +26,7 @@ use dropshot::ConfigDropshot;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 use nexus_config::NexusConfig;
+use nexus_db_model::RendezvousDebugDataset;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
@@ -42,7 +43,10 @@ use omicron_common::api::internal::shared::{
 };
 use omicron_common::disk::DatasetKind;
 use omicron_common::FileKv;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::GenericUuid as _;
+use omicron_uuid_kinds::ZpoolUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_producer::Server as ProducerServer;
 use slog::Logger;
@@ -362,6 +366,7 @@ impl nexus_test_interface::NexusServer for Server {
             .unwrap();
 
         let zpool_id = zpool.id;
+        let is_debug_dataset = kind == DatasetKind::Debug;
 
         self.apictx.context.nexus.upsert_zpool(&opctx, zpool).await.unwrap();
 
@@ -371,6 +376,29 @@ impl nexus_test_interface::NexusServer for Server {
             .upsert_dataset(dataset_id, zpool_id, kind, address)
             .await
             .unwrap();
+
+        // If any tests want debug datasets, manually insert them into the
+        // blueprint rendezvous table with a fake blueprint ID.
+        //
+        // This is making the mess of test-utils / blueprint / dataset
+        // integration worse
+        // (https://github.com/oxidecomputer/omicron/issues/7081).
+        if is_debug_dataset {
+            self.apictx
+                .context
+                .nexus
+                .datastore()
+                .debug_dataset_insert_if_not_exists(
+                    &opctx,
+                    RendezvousDebugDataset::new(
+                        dataset_id,
+                        ZpoolUuid::from_untyped_uuid(zpool_id),
+                        BlueprintUuid::new_v4(),
+                    ),
+                )
+                .await
+                .unwrap();
+        }
     }
 
     async fn inventory_collect_and_get_latest_collection(
@@ -441,7 +469,7 @@ fn start_producer_server(
         // Some(_) here prevents DNS resolution, using our own address to
         // register.
         registration_address: Some(nexus_addr),
-        request_body_max_bytes: 1024 * 1024 * 10,
+        default_request_body_max_bytes: 1024 * 1024 * 10,
         log: oximeter_producer::LogConfig::Logger(
             log.new(o!("component" => "nexus-producer-server")),
         ),

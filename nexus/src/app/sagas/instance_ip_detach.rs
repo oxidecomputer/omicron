@@ -298,7 +298,7 @@ pub(crate) mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_instance;
     use nexus_test_utils_macros::nexus_test;
-    use omicron_common::api::external::{Name, SimpleIdentity};
+    use omicron_common::api::external::{Name, SimpleIdentityOrName};
     use std::sync::Arc;
 
     type ControlPlaneTestContext =

@@ -12,10 +12,10 @@ use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
 use display_error_chain::DisplayErrorChain;
 use dropshot::{
-    ApiDescription, Body, FreeformBody, HttpError, HttpResponseAccepted,
-    HttpResponseCreated, HttpResponseDeleted, HttpResponseHeaders,
-    HttpResponseOk, HttpResponseUpdatedNoContent, Path, Query, RequestContext,
-    StreamingBody, TypedBody,
+    ApiDescription, Body, ErrorStatusCode, FreeformBody, HttpError,
+    HttpResponseAccepted, HttpResponseCreated, HttpResponseDeleted,
+    HttpResponseHeaders, HttpResponseOk, HttpResponseUpdatedNoContent, Path,
+    Query, RequestContext, StreamingBody, TypedBody,
 };
 use nexus_sled_agent_shared::inventory::{
     Inventory, OmicronZonesConfig, SledRole,
@@ -805,10 +805,11 @@ impl SledAgentApi for SledAgentImpl {
         .map_err(|e| {
             let message = format!("Failed to add sled to rack cluster: {e}");
             HttpError {
-                status_code: http::StatusCode::INTERNAL_SERVER_ERROR,
+                status_code: ErrorStatusCode::INTERNAL_SERVER_ERROR,
                 error_code: None,
                 external_message: message.clone(),
                 internal_message: message,
+                headers: None,
             }
         })?;
         Ok(HttpResponseUpdatedNoContent())
@@ -856,19 +857,21 @@ impl SledAgentApi for SledAgentImpl {
                     DisplayErrorChain::new(&err)
                 );
                 return Err(HttpError {
-                    status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                    status_code: ErrorStatusCode::SERVICE_UNAVAILABLE,
                     error_code: None,
                     external_message: message.clone(),
                     internal_message: message,
+                    headers: None,
                 });
             }
             None => {
                 let message = format!("no disk found for slot {boot_disk:?}",);
                 return Err(HttpError {
-                    status_code: http::StatusCode::SERVICE_UNAVAILABLE,
+                    status_code: ErrorStatusCode::SERVICE_UNAVAILABLE,
                     error_code: None,
                     external_message: message.clone(),
                     internal_message: message,
+                    headers: None,
                 });
             }
         };

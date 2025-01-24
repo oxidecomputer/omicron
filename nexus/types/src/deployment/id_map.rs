@@ -98,6 +98,10 @@ impl<T: IdMappable> IdMap<T> {
         self.inner.get_mut(key).map(RefMut::new)
     }
 
+    pub fn contains_key(&self, key: &T::Id) -> bool {
+        self.inner.contains_key(key)
+    }
+
     pub fn keys(&self) -> btree_map::Keys<'_, T::Id, T> {
         self.inner.keys()
     }

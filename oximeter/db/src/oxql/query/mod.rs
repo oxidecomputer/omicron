@@ -6,6 +6,8 @@
 
 // Copyright 2024 Oxide Computer Company
 
+use std::collections::BTreeSet;
+
 use super::ast::ident::Ident;
 use super::ast::logical_op::LogicalOp;
 use super::ast::table_ops::filter::CompoundFilter;
@@ -34,15 +36,15 @@ pub struct Query {
 impl Query {
     /// Construct a query written in OxQL.
     pub fn new(query: impl AsRef<str>) -> Result<Self, Error> {
-        let raw = query.as_ref().trim();
+        let query = query.as_ref().trim();
         const MAX_LEN: usize = 4096;
         anyhow::ensure!(
-            raw.len() <= MAX_LEN,
+            query.len() <= MAX_LEN,
             "Queries must be <= {} characters",
             MAX_LEN,
         );
-        let parsed = grammar::query_parser::query(raw)
-            .map_err(|e| fmt_parse_error(raw, e))?;
+        let parsed = grammar::query_parser::query(query)
+            .map_err(|e| fmt_parse_error(query, e))?;
 
         // Fetch the latest query end time referred to in the parsed query, or
         // use now if there isn't one.
@@ -349,6 +351,16 @@ impl Query {
 
     pub(crate) fn split(&self) -> SplitQuery {
         self.parsed.split(self.end_time)
+    }
+
+    /// Return the set of all timeseries names referred to by the query.
+    pub(crate) fn all_timeseries_names(&self) -> BTreeSet<&TimeseriesName> {
+        self.parsed.all_timeseries_names()
+    }
+
+    /// Return the parsed query AST node.
+    pub(crate) fn parsed_query(&self) -> &QueryNode {
+        &self.parsed
     }
 }
 

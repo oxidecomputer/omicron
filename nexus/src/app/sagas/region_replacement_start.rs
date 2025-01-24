@@ -56,6 +56,8 @@ use crate::app::RegionAllocationStrategy;
 use crate::app::{authn, db};
 use nexus_db_queries::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::CrucibleOpts;
@@ -405,7 +407,7 @@ async fn srrs_new_region_ensure_undo(
 
 async fn srrs_get_old_region_volume_id(
     sagactx: NexusActionContext,
-) -> Result<Uuid, ActionError> {
+) -> Result<VolumeUuid, ActionError> {
     // Save the region's original volume ID, because we'll be altering it and
     // need the original
 
@@ -502,7 +504,7 @@ async fn srrs_replace_region_in_volume(
         .await
         .map_err(ActionError::action_failed)?;
 
-    let new_volume_id = sagactx.lookup::<Uuid>("new_volume_id")?;
+    let new_volume_id = sagactx.lookup::<VolumeUuid>("new_volume_id")?;
     let old_region_address =
         sagactx.lookup::<SocketAddrV6>("old_region_address")?;
 
@@ -523,7 +525,7 @@ async fn srrs_replace_region_in_volume(
 
     // If this node is rerun, the forward action will have overwritten
     // db_region's volume id, so get the cached copy.
-    let old_volume_id = sagactx.lookup::<Uuid>("old_region_volume_id")?;
+    let old_volume_id = sagactx.lookup::<VolumeUuid>("old_region_volume_id")?;
 
     info!(
         log,
@@ -602,7 +604,7 @@ async fn srrs_replace_region_in_volume_undo(
         .await
         .map_err(ActionError::action_failed)?;
 
-    let new_volume_id = sagactx.lookup::<Uuid>("new_volume_id")?;
+    let new_volume_id = sagactx.lookup::<VolumeUuid>("new_volume_id")?;
     let old_region_address =
         sagactx.lookup::<SocketAddrV6>("old_region_address")?;
 
@@ -621,7 +623,7 @@ async fn srrs_replace_region_in_volume_undo(
 
     // The forward action will have overwritten db_region's volume id, so get
     // the cached copy.
-    let old_volume_id = sagactx.lookup::<Uuid>("old_region_volume_id")?;
+    let old_volume_id = sagactx.lookup::<VolumeUuid>("old_region_volume_id")?;
 
     info!(
         log,
@@ -670,7 +672,7 @@ async fn srrs_create_fake_volume(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
 
-    let new_volume_id = sagactx.lookup::<Uuid>("new_volume_id")?;
+    let new_volume_id = sagactx.lookup::<VolumeUuid>("new_volume_id")?;
     let old_region_address =
         sagactx.lookup::<SocketAddrV6>("old_region_address")?;
 
@@ -679,7 +681,7 @@ async fn srrs_create_fake_volume(
     // finished.
 
     let volume_construction_request = VolumeConstructionRequest::Volume {
-        id: new_volume_id,
+        id: *new_volume_id.as_untyped_uuid(),
         block_size: 0,
         sub_volumes: vec![VolumeConstructionRequest::Region {
             block_size: 0,
@@ -687,7 +689,7 @@ async fn srrs_create_fake_volume(
             extent_count: 0,
             gen: 0,
             opts: CrucibleOpts {
-                id: new_volume_id,
+                id: *new_volume_id.as_untyped_uuid(),
                 target: vec![old_region_address.into()],
                 lossy: false,
                 flush_timeout: None,
@@ -725,7 +727,7 @@ async fn srrs_create_fake_volume_undo(
 
     // Delete the fake volume.
 
-    let new_volume_id = sagactx.lookup::<Uuid>("new_volume_id")?;
+    let new_volume_id = sagactx.lookup::<VolumeUuid>("new_volume_id")?;
     osagactx.datastore().volume_hard_delete(new_volume_id).await?;
 
     Ok(())
@@ -749,7 +751,7 @@ async fn srrs_update_request_record(
         )?;
     let new_region_id = new_dataset_and_region.1.id();
 
-    let old_region_volume_id = sagactx.lookup::<Uuid>("new_volume_id")?;
+    let old_region_volume_id = sagactx.lookup::<VolumeUuid>("new_volume_id")?;
 
     // Now that the region has been ensured and the construction request has
     // been updated, update the replacement request record to 'Running' and
@@ -793,6 +795,7 @@ pub(crate) mod test {
     use nexus_types::identity::Asset;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_uuid_kinds::DatasetUuid;
+    use omicron_uuid_kinds::VolumeUuid;
     use sled_agent_client::VolumeConstructionRequest;
     use uuid::Uuid;
 
@@ -832,7 +835,7 @@ pub(crate) mod test {
             .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
 
         let allocated_regions =
-            datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+            datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
         assert_eq!(allocated_regions.len(), 3);
 
         // Replace one of the disk's regions
@@ -844,7 +847,7 @@ pub(crate) mod test {
             id: Uuid::new_v4(),
             request_time: Utc::now(),
             old_region_id: region_to_replace.id(),
-            volume_id: region_to_replace.volume_id(),
+            volume_id: region_to_replace.volume_id().into(),
             old_region_volume_id: None,
             new_region_id: None,
             replacement_state: RegionReplacementState::Requested,
@@ -881,7 +884,7 @@ pub(crate) mod test {
 
         // Validate number of regions for disk didn't change
         let allocated_regions =
-            datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+            datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
         assert_eq!(allocated_regions.len(), 3);
 
         // Validate that one of the regions for the disk is the new one
@@ -895,7 +898,7 @@ pub(crate) mod test {
         let old_region =
             datastore.get_region(region_to_replace.id()).await.unwrap();
         let new_volume_id =
-            output.lookup_node_output::<Uuid>("new_volume_id").unwrap();
+            output.lookup_node_output::<VolumeUuid>("new_volume_id").unwrap();
         assert_eq!(old_region.volume_id(), new_volume_id);
     }
 
@@ -933,7 +936,7 @@ pub(crate) mod test {
         let regions = vec![
             Region::new(
                 datasets[0].id(),
-                Uuid::new_v4(),
+                VolumeUuid::new_v4(),
                 512_i64.try_into().unwrap(),
                 10,
                 10,
@@ -942,7 +945,7 @@ pub(crate) mod test {
             ),
             Region::new(
                 datasets[1].id(),
-                Uuid::new_v4(),
+                VolumeUuid::new_v4(),
                 512_i64.try_into().unwrap(),
                 10,
                 10,
@@ -951,7 +954,7 @@ pub(crate) mod test {
             ),
             Region::new(
                 datasets[2].id(),
-                Uuid::new_v4(),
+                VolumeUuid::new_v4(),
                 512_i64.try_into().unwrap(),
                 10,
                 10,
@@ -960,7 +963,7 @@ pub(crate) mod test {
             ),
             Region::new(
                 datasets[3].id(),
-                Uuid::new_v4(),
+                VolumeUuid::new_v4(),
                 512_i64.try_into().unwrap(),
                 10,
                 10,
@@ -1157,7 +1160,7 @@ pub(crate) mod test {
             .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
 
         let allocated_regions =
-            datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+            datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
         assert_eq!(allocated_regions.len(), 3);
 
         let region_to_replace: &Region = &allocated_regions[0].1;
@@ -1166,7 +1169,7 @@ pub(crate) mod test {
             id: Uuid::new_v4(),
             request_time: Utc::now(),
             old_region_id: region_to_replace.id(),
-            volume_id: region_to_replace.volume_id(),
+            volume_id: region_to_replace.volume_id().into(),
             old_region_volume_id: None,
             new_region_id: None,
             replacement_state: RegionReplacementState::Requested,
@@ -1232,7 +1235,7 @@ pub(crate) mod test {
             .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
 
         let allocated_regions =
-            datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+            datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
         assert_eq!(allocated_regions.len(), 3);
 
         let region_to_replace: &Region = &allocated_regions[0].1;
@@ -1241,7 +1244,7 @@ pub(crate) mod test {
             id: Uuid::new_v4(),
             request_time: Utc::now(),
             old_region_id: region_to_replace.id(),
-            volume_id: region_to_replace.volume_id(),
+            volume_id: region_to_replace.volume_id().into(),
             old_region_volume_id: None,
             new_region_id: None,
             replacement_state: RegionReplacementState::Requested,

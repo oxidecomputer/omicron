@@ -327,7 +327,7 @@ bootstrap-agent-api = { path = "sled-agent/bootstrap-agent-api" }
 bootstrap-agent-client = { path = "clients/bootstrap-agent-client" }
 buf-list = { version = "1.0.3", features = ["tokio1"] }
 byteorder = "1.5.0"
-bytes = "1.8.0"
+bytes = "1.9.0"
 camino = { version = "1.1", features = ["serde1"] }
 camino-tempfile = "1.1.1"
 cancel-safe-futures = "0.1.5"
@@ -335,7 +335,7 @@ cargo_metadata = "0.18.1"
 chacha20poly1305 = "0.10.1"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
-chrono-tz = "0.10.0"
+chrono-tz = "0.10.1"
 ciborium = "0.2.2"
 clap = { version = "4.5", features = ["cargo", "derive", "env", "wrap_help"] }
 clickana = { path = "dev-tools/clickana" }
@@ -380,13 +380,13 @@ dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { path = "clients/dpd-client" }
-dropshot = { version = "0.13.0", features = [ "usdt-probes" ] }
+dropshot = { version = "0.15.1", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.17"
 either = "1.13.0"
 expectorate = "1.1.0"
 fatfs = "0.3.6"
 filetime = "0.2.25"
-flate2 = "1.0.34"
+flate2 = "1.0.35"
 float-ord = "0.3.2"
 flume = "0.11.1"
 foreign-types = "0.3.2"
@@ -413,10 +413,10 @@ headers = "0.4.0"
 heck = "0.5"
 hex = "0.4.3"
 hex-literal = "0.4.1"
-hickory-client = "0.24.1"
-hickory-proto = "0.24.1"
-hickory-resolver = "0.24.1"
-hickory-server = "0.24.1"
+hickory-client = "0.24.2"
+hickory-proto = "0.24.2"
+hickory-resolver = "0.24.2"
+hickory-server = "0.24.2"
 highway = "1.2.0"
 hkdf = "0.12.4"
 http = "1.1.0"
@@ -427,10 +427,10 @@ httpmock = "0.8.0-alpha.1"
 httptest = "0.16.1"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
 humantime = "2.1.0"
-hyper = "1.4.1"
+hyper = "1.5.2"
 hyper-util = "0.1.10"
 hyper-rustls = "0.26.0"
-hyper-staticfile = "0.10.0"
+hyper-staticfile = "0.10.1"
 illumos-utils = { path = "illumos-utils" }
 iana-time-zone = "0.1.61"
 indent_write = "2.2.0"
@@ -457,6 +457,7 @@ libfalcon = { git = "https://github.com/oxidecomputer/falcon", branch = "main" }
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
 linear-map = "1.2.0"
 live-tests-macros = { path = "live-tests/macros" }
+lldpd-client = { git = "https://github.com/oxidecomputer/lldp" }
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 mockall = "0.13"
@@ -650,6 +651,7 @@ tar = "0.4"
 tempfile = "3.10"
 term = "0.7"
 termios = "0.3"
+termtree = "0.5.1"
 textwrap = "0.16.1"
 test-strategy = "0.3.1"
 thiserror = "1.0"
@@ -672,7 +674,7 @@ update-common = { path = "update-common" }
 update-engine = { path = "update-engine" }
 url = "2.5.3"
 usdt = "0.5.0"
-uuid = { version = "1.10.0", features = ["serde", "v4"] }
+uuid = { version = "1.12.0", features = ["serde", "v4"] }
 uzers = "0.12"
 walkdir = "2.5"
 whoami = "1.5"

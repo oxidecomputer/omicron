@@ -31,8 +31,6 @@ mod datasets;
 mod disks;
 mod zones;
 
-pub(crate) use self::datasets::DatasetIdsBackfillFromDb;
-
 pub use self::datasets::DatasetsEditError;
 pub use self::datasets::MultipleDatasetsOfKind;
 pub use self::disks::DisksEditError;
@@ -125,16 +123,10 @@ impl SledEditor {
         zones: BlueprintZonesConfig,
         disks: BlueprintPhysicalDisksConfig,
         datasets: BlueprintDatasetsConfig,
-        preexisting_dataset_ids: DatasetIdsBackfillFromDb,
     ) -> Result<Self, SledInputError> {
         match state {
             SledState::Active => {
-                let inner = ActiveSledEditor::new(
-                    zones,
-                    disks,
-                    datasets,
-                    preexisting_dataset_ids,
-                )?;
+                let inner = ActiveSledEditor::new(zones, disks, datasets)?;
                 Ok(Self(InnerSledEditor::Active(inner)))
             }
             SledState::Decommissioned => {
@@ -150,12 +142,8 @@ impl SledEditor {
         }
     }
 
-    pub fn for_new_active(
-        preexisting_dataset_ids: DatasetIdsBackfillFromDb,
-    ) -> Self {
-        Self(InnerSledEditor::Active(ActiveSledEditor::new_empty(
-            preexisting_dataset_ids,
-        )))
+    pub fn for_new_active() -> Self {
+        Self(InnerSledEditor::Active(ActiveSledEditor::new_empty()))
     }
 
     pub fn finalize(self) -> EditedSled {
@@ -191,9 +179,7 @@ impl SledEditor {
                 // below, we'll be left in the active state with an empty sled
                 // editor), but omicron in general is not panic safe and aborts
                 // on panic. Plus `finalize()` should never panic.
-                let mut stolen = ActiveSledEditor::new_empty(
-                    DatasetIdsBackfillFromDb::empty(),
-                );
+                let mut stolen = ActiveSledEditor::new_empty();
                 mem::swap(editor, &mut stolen);
 
                 let mut finalized = stolen.finalize();
@@ -316,22 +302,19 @@ impl ActiveSledEditor {
         zones: BlueprintZonesConfig,
         disks: BlueprintPhysicalDisksConfig,
         datasets: BlueprintDatasetsConfig,
-        preexisting_dataset_ids: DatasetIdsBackfillFromDb,
     ) -> Result<Self, SledInputError> {
         Ok(Self {
             zones: zones.into(),
             disks: disks.try_into()?,
-            datasets: DatasetsEditor::new(datasets, preexisting_dataset_ids)?,
+            datasets: DatasetsEditor::new(datasets)?,
         })
     }
 
-    pub fn new_empty(
-        preexisting_dataset_ids: DatasetIdsBackfillFromDb,
-    ) -> Self {
+    pub fn new_empty() -> Self {
         Self {
             zones: ZonesEditor::empty(),
             disks: DisksEditor::empty(),
-            datasets: DatasetsEditor::empty(preexisting_dataset_ids),
+            datasets: DatasetsEditor::empty(),
         }
     }
 

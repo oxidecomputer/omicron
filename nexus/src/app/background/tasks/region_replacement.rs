@@ -197,7 +197,7 @@ impl BackgroundTask for RegionReplacementDetector {
 
                 let volume_deleted = match self
                     .datastore
-                    .volume_deleted(request.volume_id)
+                    .volume_deleted(request.volume_id())
                     .await
                 {
                     Ok(volume_deleted) => volume_deleted,
@@ -205,7 +205,7 @@ impl BackgroundTask for RegionReplacementDetector {
                     Err(e) => {
                         let s = format!(
                             "error checking if volume id {} was deleted: {e}",
-                            request.volume_id,
+                            request.volume_id(),
                         );
                         error!(&log, "{s}");
 
@@ -226,7 +226,7 @@ impl BackgroundTask for RegionReplacementDetector {
                         &log,
                         "request {} volume {} was soft or hard deleted!",
                         request_id,
-                        request.volume_id,
+                        request.volume_id(),
                     );
 
                     let result = self
@@ -306,6 +306,7 @@ mod test {
     use nexus_db_model::RegionReplacement;
     use nexus_db_model::Volume;
     use nexus_test_utils_macros::nexus_test;
+    use omicron_uuid_kinds::VolumeUuid;
     use sled_agent_client::CrucibleOpts;
     use sled_agent_client::VolumeConstructionRequest;
     use uuid::Uuid;
@@ -333,13 +334,13 @@ mod test {
         assert_eq!(result, json!(RegionReplacementStatus::default()));
 
         // Add a region replacement request for a fake region
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
 
         datastore
             .volume_create(nexus_db_model::Volume::new(
                 volume_id,
                 serde_json::to_string(&VolumeConstructionRequest::Volume {
-                    id: volume_id,
+                    id: Uuid::new_v4(),
                     block_size: 512,
                     sub_volumes: vec![],
                     read_only_parent: None,
@@ -358,7 +359,7 @@ mod test {
             .unwrap();
 
         let volume_construction_request = VolumeConstructionRequest::Volume {
-            id: volume_id,
+            id: *volume_id.as_untyped_uuid(),
             block_size: 0,
             sub_volumes: vec![VolumeConstructionRequest::Region {
                 block_size: 0,
@@ -366,7 +367,7 @@ mod test {
                 extent_count: 0,
                 gen: 0,
                 opts: CrucibleOpts {
-                    id: volume_id,
+                    id: Uuid::new_v4(),
                     target: vec![
                         // if you put something here, you'll need a synthetic
                         // dataset record
