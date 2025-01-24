@@ -718,7 +718,7 @@ dependencies = [
  "bitflags 2.6.0",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "log",
@@ -1559,6 +1559,22 @@ checksum = "cbf2150cce219b664a8a70df7a1f933836724b503f8a413af9365b4dcc4d90b8"
 dependencies = [
  "lazy_static",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "common"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/lldp#ce952e61f444119a2a9fe0d5c5c3db96daf70d96"
+dependencies = [
+ "anyhow",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+ "slog-async",
+ "slog-bunyan",
+ "slog-term",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -5118,7 +5134,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -5291,6 +5307,23 @@ dependencies = [
  "omicron-workspace-hack",
  "quote",
  "syn 2.0.96",
+]
+
+[[package]]
+name = "lldpd-client"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/lldp#ce952e61f444119a2a9fe0d5c5c3db96daf70d96"
+dependencies = [
+ "chrono",
+ "common",
+ "futures",
+ "progenitor 0.8.0",
+ "reqwest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+ "uuid",
 ]
 
 [[package]]
@@ -6991,6 +7024,7 @@ dependencies = [
  "internal-dns-types",
  "ipnetwork",
  "itertools 0.13.0",
+ "lldpd-client",
  "macaddr",
  "mg-admin-client",
  "nexus-auth",
@@ -7477,7 +7511,6 @@ dependencies = [
  "indicatif",
  "inout",
  "itertools 0.10.5",
- "itertools 0.12.1",
  "lalrpop-util",
  "lazy_static",
  "libc",
@@ -13393,7 +13426,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
