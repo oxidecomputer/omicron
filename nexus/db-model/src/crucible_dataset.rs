@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 /// Database representation of a Crucible dataset's live information.
 ///
-/// This includes the socket address of the Crucible downstairs that owns this
+/// This includes the socket address of the Crucible agent that owns this
 /// dataset and the amount of space used.
 #[derive(
     Queryable,

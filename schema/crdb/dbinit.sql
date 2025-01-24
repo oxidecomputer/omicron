@@ -559,6 +559,11 @@ CREATE TYPE IF NOT EXISTS omicron.public.dataset_kind AS ENUM (
 /*
  * Table tracking the contact information and size used by datasets associated
  * with Crucible zones.
+ *
+ * This is a Reconfigurator rendezvous table: it reflects resources that
+ * Reconfigurator has ensured exist. It is always possible that a resource
+ * chosen from this table could be deleted after it's selected, but any
+ * non-deleted row in this table is guaranteed to have been created.
  */
 CREATE TABLE IF NOT EXISTS omicron.public.crucible_dataset (
     /* Identity metadata (asset) */
@@ -573,12 +578,19 @@ CREATE TABLE IF NOT EXISTS omicron.public.crucible_dataset (
 
     /*
      * Contact information for the dataset: socket address of the Crucible
-     * downstairs service that owns this dataset
+     * agent service that owns this dataset
      */
     ip INET NOT NULL,
     port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
 
-    /* An upper bound on the amount of space that might be in-use */
+    /*
+     * An upper bound on the amount of space that might be in-use
+     *
+     * This field is owned by Nexus. When a new row is inserted during the
+     * Reconfigurator rendezvous process, this field is set to 0. Reconfigurator
+     * otherwise ignores this field. It's updated by Nexus as region allocations
+     * and deletions are performed using this dataset.
+     */
     size_used INT NOT NULL
 );
 
