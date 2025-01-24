@@ -446,7 +446,7 @@ const HDR_RX_ID: HeaderName = HeaderName::from_static("x-oxide-webhook-id");
 const HDR_EVENT_ID: HeaderName = HeaderName::from_static("x-oxide-event-id");
 const HDR_EVENT_CLASS: HeaderName =
     HeaderName::from_static("x-oxide-event-class");
-const HDR_SIG: HeaderName = HeaderName::from_static("x-oxide-signature");
+// const HDR_SIG: HeaderName = HeaderName::from_static("x-oxide-signature");
 
 #[derive(serde::Serialize, Debug)]
 struct Payload<'a> {

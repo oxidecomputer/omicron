@@ -15,7 +15,8 @@ use omicron_common::api::external::LookupResult;
 use omicron_uuid_kinds::WebhookEventUuid;
 use omicron_uuid_kinds::WebhookReceiverUuid;
 
-pub const EVENT_CLASSES: &[&str] = &["test"];
+pub const EVENT_CLASSES: &[&str] =
+    &["test", "test.foo", "test.foo.bar", "test.foo.baz", "test.bar"];
 
 impl super::Nexus {
     pub async fn webhook_receiver_config_fetch(
