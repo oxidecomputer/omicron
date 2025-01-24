@@ -4815,6 +4815,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
     -- fields we can only fill in after the operation
     resource_id UUID,
     time_completed TIMESTAMPTZ,
+    http_status_code INT4,
     error_code STRING,
     error_message STRING,
     -- this stuff avoids table scans when filtering and sorting by timestamp
@@ -4849,6 +4850,7 @@ SELECT
     access_method,
     resource_id,
     time_completed,
+    http_status_code,
     error_code,
     error_message
 FROM audit_log

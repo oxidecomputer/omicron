@@ -11393,6 +11393,12 @@
             "nullable": true,
             "type": "string"
           },
+          "http_status_code": {
+            "description": "HTTP status code",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
           "id": {
             "description": "Unique identifier for the audit log entry",
             "type": "string",
@@ -11416,10 +11422,6 @@
             "type": "string",
             "format": "uuid"
           },
-          "resource_type": {
-            "description": "Resource type",
-            "type": "string"
-          },
           "source_ip": {
             "description": "IP address that made the request",
             "type": "string"
@@ -11436,11 +11438,11 @@
           }
         },
         "required": [
+          "http_status_code",
           "id",
           "operation_id",
           "request_id",
           "request_uri",
-          "resource_type",
           "source_ip",
           "time_completed",
           "timestamp"

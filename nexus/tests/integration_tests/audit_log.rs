@@ -141,17 +141,17 @@ async fn test_audit_log_login_local(ctx: &ControlPlaneTestContext) {
     assert_eq!(e1.request_uri, "/v1/login/test-silo/local");
     assert_eq!(e1.operation_id, "login_local");
     assert_eq!(e1.source_ip, "127.0.0.1");
+    assert_eq!(e1.http_status_code, 401);
     assert!(e1.timestamp >= t1 && e1.timestamp <= t2);
     assert!(e1.time_completed > e1.timestamp);
-    // TODO: assert error result
 
     // Verify second entry (successful login)
     assert_eq!(e2.request_uri, "/v1/login/test-silo/local");
     assert_eq!(e2.operation_id, "login_local");
     assert_eq!(e2.source_ip, "127.0.0.1");
+    assert_eq!(e2.http_status_code, 204);
     assert!(e2.timestamp >= t2 && e2.timestamp <= t3);
     assert!(e2.time_completed > e2.timestamp);
-    // TODO: assert success result
 
     // Time filtering works
     let audit_log = fetch_log(client, t2, Some(t2)).await;

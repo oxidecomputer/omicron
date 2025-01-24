@@ -5,6 +5,7 @@
 // Copyright 2025 Oxide Computer Company
 
 use crate::schema::{audit_log, audit_log_complete};
+use crate::SqlU16;
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use nexus_types::external_api::views;
@@ -71,6 +72,7 @@ pub struct AuditLogEntry {
     // Fields that are not present on init
     /// Time log entry was completed with info about result of operation
     pub time_completed: DateTime<Utc>,
+    pub http_status_code: SqlU16,
 
     // Error information if the action failed
     pub error_code: Option<String>,
@@ -108,11 +110,15 @@ impl AuditLogEntryInit {
 #[diesel(table_name = audit_log)]
 pub struct AuditLogCompletion {
     pub time_completed: DateTime<Utc>,
+    pub http_status_code: SqlU16,
 }
 
 impl AuditLogCompletion {
-    pub fn new() -> Self {
-        Self { time_completed: Utc::now() }
+    pub fn new(http_status_code: u16) -> Self {
+        Self {
+            time_completed: Utc::now(),
+            http_status_code: SqlU16(http_status_code),
+        }
     }
 }
 
@@ -138,6 +144,7 @@ impl From<AuditLogEntry> for views::AuditLogEntry {
             actor_silo_id: entry.actor_silo_id,
             access_method: entry.access_method,
             time_completed: entry.time_completed,
+            http_status_code: entry.http_status_code.0,
             error_code: entry.error_code,
             error_message: entry.error_message,
         }

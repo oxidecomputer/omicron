@@ -873,7 +873,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             }
             .await;
 
-            let _ = nexus.audit_log_entry_complete(&opctx, &audit).await;
+            let _ =
+                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
             result
         };
         apictx
@@ -6672,7 +6673,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             }
             .await;
 
-            let _ = nexus.audit_log_entry_complete(&opctx, &audit).await;
+            let _ =
+                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
 
             result
         };
@@ -6742,7 +6744,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 Ok(response)
             }
             .await;
-            let _ = nexus.audit_log_entry_complete(&opctx, &audit).await;
+            let _ =
+                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
             result
         };
         apictx

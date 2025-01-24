@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use chrono::{DateTime, Utc};
-use dropshot::RequestContext;
+use dropshot::{HttpError, HttpResponse, RequestContext};
 use nexus_db_model::{AuditLogCompletion, AuditLogEntry, AuditLogEntryInit};
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::{
@@ -48,12 +48,18 @@ impl super::Nexus {
     }
 
     // set duration and result on an existing entry
-    pub(crate) async fn audit_log_entry_complete(
+    pub(crate) async fn audit_log_entry_complete<R: HttpResponse>(
         &self,
         opctx: &OpContext,
         entry: &AuditLogEntryInit,
+        result: &Result<R, HttpError>,
     ) -> UpdateResult<()> {
-        let update = AuditLogCompletion::new();
+        let status_code = match result {
+            Ok(response) => response.status_code(),
+            Err(error) => error.status_code.as_status(),
+        }
+        .as_u16();
+        let update = AuditLogCompletion::new(status_code);
         self.db_datastore.audit_log_entry_complete(opctx, &entry, update).await
     }
 }

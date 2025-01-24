@@ -1061,6 +1061,9 @@ pub struct AuditLogEntry {
     /// Time operation completed
     pub time_completed: DateTime<Utc>,
 
+    /// HTTP status code
+    pub http_status_code: u16,
+
     /// Error information if the action failed
     pub error_code: Option<String>,
     pub error_message: Option<String>,

@@ -154,7 +154,7 @@ mod tests {
 
         let t1 = Utc::now();
 
-        let completion = AuditLogCompletion::new();
+        let completion = AuditLogCompletion::new(201);
         datastore
             .audit_log_entry_complete(opctx, &entry1, completion)
             .await
@@ -187,7 +187,7 @@ mod tests {
         assert_eq!(audit_log[0].request_id, "req-1");
 
         // now complete entry2
-        let completion = AuditLogCompletion::new();
+        let completion = AuditLogCompletion::new(204);
         datastore
             .audit_log_entry_complete(opctx, &entry2.clone(), completion)
             .await
@@ -202,7 +202,9 @@ mod tests {
             .expect("retrieve audit log");
         assert_eq!(audit_log.len(), 2);
         assert_eq!(audit_log[0].request_id, "req-1");
+        assert_eq!(audit_log[0].http_status_code.0, 201);
         assert_eq!(audit_log[1].request_id, "req-2");
+        assert_eq!(audit_log[1].http_status_code.0, 204);
 
         // Only get first entry
         let audit_log = datastore
@@ -254,7 +256,7 @@ mod tests {
             None,
             None,
         );
-        let completion = AuditLogCompletion::new();
+        let completion = AuditLogCompletion::new(201);
 
         let id1 = "1710a22e-b29b-4cfc-9e79-e8c93be187d7";
         let id2 = "5d25e766-e026-44b4-8b42-5f90f43c26bc";

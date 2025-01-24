@@ -11,6 +11,7 @@ SELECT
     access_method,
     resource_id,
     time_completed,
+    http_status_code,
     error_code,
     error_message
 FROM audit_log

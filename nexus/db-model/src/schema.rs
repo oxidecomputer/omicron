@@ -2144,6 +2144,7 @@ table! {
         access_method -> Nullable<Text>,
         resource_id -> Nullable<Uuid>,
         time_completed -> Nullable<Timestamptz>,
+        http_status_code -> Nullable<Int4>, // SqlU16
         error_code -> Nullable<Text>,
         error_message -> Nullable<Text>
     }
@@ -2162,6 +2163,7 @@ table! {
         access_method -> Nullable<Text>,
         resource_id -> Nullable<Uuid>,
         time_completed -> Timestamptz,
+        http_status_code -> Int4, // SqlU16
         error_code -> Nullable<Text>,
         error_message -> Nullable<Text>
     }
