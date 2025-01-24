@@ -27,7 +27,6 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
-use futures::FutureExt;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -35,7 +34,6 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
-use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use uuid::Uuid;
@@ -71,31 +69,6 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })
-    }
-
-    pub async fn crucible_dataset_upsert_if_blueprint_is_current_target(
-        &self,
-        opctx: &OpContext,
-        bp_id: BlueprintUuid,
-        dataset: CrucibleDataset,
-    ) -> CreateResult<CrucibleDataset> {
-        let conn = self.pool_connection_unauthorized().await?;
-
-        self.transaction_if_current_blueprint_is(
-            &conn,
-            "dataset_upsert_if_blueprint_is_current_target",
-            opctx,
-            bp_id,
-            |conn| {
-                let dataset = dataset.clone();
-                async move {
-                    Self::crucible_dataset_upsert_on_connection(&conn, dataset)
-                        .await
-                }
-                .boxed()
-            },
-        )
-        .await
     }
 
     async fn crucible_dataset_upsert_on_connection(
@@ -277,15 +250,12 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::db::datastore::test::bp_insert_and_make_target;
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::Generation;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
-    use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
@@ -414,70 +384,6 @@ mod test {
             datastore.crucible_dataset_list_all_batched(opctx).await.unwrap(),
             expected_datasets,
         );
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    fn new_dataset_on(zpool_id: ZpoolUuid) -> CrucibleDataset {
-        CrucibleDataset::new(
-            DatasetUuid::new_v4(),
-            *zpool_id.as_untyped_uuid(),
-            "[::1]:0".parse().unwrap(),
-        )
-    }
-
-    #[tokio::test]
-    async fn test_upsert_while_blueprint_changes() {
-        let logctx = dev::test_setup_log("upsert_while_blueprint_changes");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        let (sled_id, zpool_id) =
-            create_sled_and_zpool(&datastore, opctx).await;
-
-        // The datastore methods don't actually read the blueprint, but they do
-        // guard against concurrent changes to the current target.
-        //
-        // We can test behavior by swapping between empty blueprints.
-        let bp0 = BlueprintBuilder::build_empty_with_sleds(
-            [sled_id].into_iter(),
-            "test",
-        );
-        bp_insert_and_make_target(&opctx, &datastore, &bp0).await;
-
-        let bp1 = {
-            let mut bp1 = bp0.clone();
-            bp1.id = BlueprintUuid::new_v4();
-            bp1.parent_blueprint_id = Some(bp0.id);
-            bp1
-        };
-        bp_insert_and_make_target(&opctx, &datastore, &bp1).await;
-
-        let old_blueprint_id = bp0.id;
-        let current_blueprint_id = bp1.id;
-
-        // Upsert referencing old blueprint: Error
-        datastore
-            .crucible_dataset_upsert_if_blueprint_is_current_target(
-                &opctx,
-                old_blueprint_id,
-                new_dataset_on(zpool_id),
-            )
-            .await
-            .expect_err(
-                "Shouldn't be able to insert referencing old blueprint",
-            );
-
-        // Upsert referencing current blueprint: OK
-        datastore
-            .crucible_dataset_upsert_if_blueprint_is_current_target(
-                &opctx,
-                current_blueprint_id,
-                new_dataset_on(zpool_id),
-            )
-            .await
-            .expect("Should be able to insert while blueprint is active");
 
         db.terminate().await;
         logctx.cleanup_successful();
