@@ -891,6 +891,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "blueprint_loader" => {
             print_task_blueprint_loader(details);
         }
+        "blueprint_rendezvous" => {
+            print_task_blueprint_rendezvous(details);
+        }
         "dns_config_external" | "dns_config_internal" => {
             print_task_dns_config(details);
         }
@@ -1108,6 +1111,54 @@ fn print_task_blueprint_loader(details: &serde_json::Value) {
                 humantime::format_rfc3339_millis(status.time_created.into())
             );
             println!("    status:           {}", status.status);
+        }
+    }
+}
+
+fn print_task_blueprint_rendezvous(details: &serde_json::Value) {
+    #[derive(Deserialize)]
+    struct CrucibleDatasetStats {
+        num_inserted: usize,
+        num_already_exist: usize,
+        num_not_in_inventory: usize,
+    }
+
+    #[derive(Deserialize)]
+    struct Stats {
+        crucible_dataset: CrucibleDatasetStats,
+    }
+
+    #[derive(Deserialize)]
+    struct BlueprintRendezvousStatus {
+        blueprint_id: Uuid,
+        inventory_collection_id: Uuid,
+        stats: Stats,
+    }
+
+    match serde_json::from_value::<BlueprintRendezvousStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            println!("    target blueprint:     {}", status.blueprint_id);
+            println!(
+                "    inventory collection: {}",
+                status.inventory_collection_id
+            );
+            println!("    crucible_dataset rendezvous counts:");
+            println!(
+                "        num_inserted:         {}",
+                status.stats.crucible_dataset.num_inserted
+            );
+            println!(
+                "        num_already_exist:    {}",
+                status.stats.crucible_dataset.num_already_exist
+            );
+            println!(
+                "        num_not_in_inventory: {}",
+                status.stats.crucible_dataset.num_not_in_inventory
+            );
         }
     }
 }
