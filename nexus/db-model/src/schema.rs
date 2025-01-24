@@ -2078,6 +2078,7 @@ allow_tables_to_appear_in_same_query!(
     affinity_group_instance_membership,
     bp_omicron_zone,
     bp_target,
+    rendezvous_debug_dataset,
     dataset,
     disk,
     image,

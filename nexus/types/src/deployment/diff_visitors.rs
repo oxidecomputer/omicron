@@ -6,11 +6,14 @@
 //!
 //! Modelled after [`syn::visit`](https://docs.rs/syn/1/syn/visit).
 
+pub mod visit_blueprint_datasets_config;
 pub mod visit_blueprint_physical_disks_config;
 pub mod visit_blueprint_zones_config;
 
 use diffus::edit::enm;
-use omicron_uuid_kinds::{OmicronZoneUuid, PhysicalDiskUuid, SledUuid};
+use omicron_uuid_kinds::{
+    DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid, SledUuid,
+};
 
 use super::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
@@ -23,6 +26,7 @@ pub struct BpVisitorContext {
     pub sled_id: Option<SledUuid>,
     pub zone_id: Option<OmicronZoneUuid>,
     pub disk_id: Option<PhysicalDiskUuid>,
+    pub dataset_id: Option<DatasetUuid>,
 }
 
 #[derive(Debug, Clone, Copy)]

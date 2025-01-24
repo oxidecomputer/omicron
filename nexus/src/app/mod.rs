@@ -64,6 +64,8 @@ mod instance;
 mod instance_network;
 mod internet_gateway;
 mod ip_pool;
+mod lldp;
+mod login;
 mod metrics;
 mod network_interface;
 pub(crate) mod oximeter;
@@ -996,6 +998,14 @@ impl Nexus {
         dpd_clients(resolver, &self.log).await
     }
 
+    pub(crate) async fn lldpd_clients(
+        &self,
+        rack_id: Uuid,
+    ) -> Result<HashMap<SwitchLocation, lldpd_client::Client>, String> {
+        let resolver = self.resolver();
+        lldpd_clients(resolver, rack_id, &self.log).await
+    }
+
     pub(crate) async fn mg_clients(
         &self,
     ) -> Result<HashMap<SwitchLocation, mg_admin_client::Client>, String> {
@@ -1067,6 +1077,31 @@ pub(crate) async fn dpd_clients(
                 client_state,
             );
             (*location, dpd_client)
+        })
+        .collect();
+    Ok(clients)
+}
+
+// We currently ignore the rack_id argument here, as the shared
+// switch_zone_address_mappings function doesn't allow filtering on the rack ID.
+// Since we only have a single rack, this is OK for now.
+// TODO: https://github.com/oxidecomputer/omicron/issues/1276
+pub(crate) async fn lldpd_clients(
+    resolver: &internal_dns_resolver::Resolver,
+    _rack_id: Uuid,
+    log: &slog::Logger,
+) -> Result<HashMap<SwitchLocation, lldpd_client::Client>, String> {
+    let mappings = switch_zone_address_mappings(resolver, log).await?;
+    let log = log.new(o!( "component" => "LldpdClient"));
+    let port = lldpd_client::default_port();
+    let clients: HashMap<SwitchLocation, lldpd_client::Client> = mappings
+        .iter()
+        .map(|(location, addr)| {
+            let lldpd_client = lldpd_client::Client::new(
+                &format!("http://[{addr}]:{port}"),
+                log.clone(),
+            );
+            (*location, lldpd_client)
         })
         .collect();
     Ok(clients)

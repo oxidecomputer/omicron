@@ -11,6 +11,7 @@ use crate::app::sagas::SagaInitError;
 use nexus_db_queries::authn;
 use nexus_db_queries::db;
 use omicron_common::api::external::DiskState;
+use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
@@ -24,7 +25,7 @@ pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub project_id: Uuid,
     pub disk_id: Uuid,
-    pub volume_id: Uuid,
+    pub volume_id: VolumeUuid,
 }
 
 // disk delete saga: actions
@@ -242,7 +243,7 @@ pub(crate) mod test {
             serialized_authn: Serialized::for_opctx(&opctx),
             project_id,
             disk_id: disk.id(),
-            volume_id: disk.volume_id,
+            volume_id: disk.volume_id(),
         };
         nexus.sagas.saga_execute::<SagaDiskDelete>(params).await.unwrap();
     }
@@ -264,7 +265,7 @@ pub(crate) mod test {
             serialized_authn: Serialized::for_opctx(&opctx),
             project_id,
             disk_id: disk.id(),
-            volume_id: disk.volume_id,
+            volume_id: disk.volume_id(),
         };
         let dag = create_saga_dag::<SagaDiskDelete>(params).unwrap();
         crate::app::sagas::test_helpers::actions_succeed_idempotently(

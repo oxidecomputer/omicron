@@ -19,7 +19,7 @@ use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::params::RouterRouteUpdate;
-use omicron_common::api::external::SimpleIdentity;
+use omicron_common::api::external::SimpleIdentityOrName;
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
     RouteDestination, RouteTarget, RouterRoute, RouterRouteKind,

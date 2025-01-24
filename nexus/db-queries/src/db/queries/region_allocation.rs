@@ -15,6 +15,8 @@ use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use nexus_config::RegionAllocationStrategy;
 use omicron_common::api::external;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::VolumeUuid;
 
 type AllColumnsOfRegion = AllColumnsOf<schema::region::table>;
 type AllColumnsOfDataset = AllColumnsOf<schema::dataset::table>;
@@ -85,7 +87,7 @@ pub struct RegionParameters {
 /// layers of the hierarchy). If that volume has region snapshots in the region
 /// set, a `snapshot_id` should be supplied matching those entries.
 pub fn allocation_query(
-    volume_id: uuid::Uuid,
+    volume_id: VolumeUuid,
     snapshot_id: Option<uuid::Uuid>,
     params: RegionParameters,
     allocation_strategy: &RegionAllocationStrategy,
@@ -124,7 +126,7 @@ pub fn allocation_query(
   old_regions AS (
     SELECT ").sql(AllColumnsOfRegion::with_prefix("region")).sql("
     FROM region WHERE (region.volume_id = ").param().sql(")),")
-    .bind::<sql_types::Uuid, _>(volume_id)
+    .bind::<sql_types::Uuid, _>(*volume_id.as_untyped_uuid())
 
     // Calculates the old size being used by zpools under consideration as targets for region
     // allocation.
@@ -160,6 +162,27 @@ pub fn allocation_query(
       ),")
     };
 
+    // If `distinct_sleds` is selected, then take note of the sleds used by
+    // existing allocations, and filter those out later. This step is required
+    // when taking an existing allocation of regions and increasing the
+    // redundancy in order to _not_ allocate to sleds already used.
+
+    let builder = if distinct_sleds {
+        builder.sql(
+            "
+        existing_sleds AS (
+          SELECT
+            zpool.sled_id as id
+          FROM
+            zpool
+          WHERE
+            zpool.id = ANY(SELECT pool_id FROM existing_zpools)
+        ),",
+        )
+    } else {
+        builder
+    };
+
     // Identifies zpools with enough space for region allocation, that are not
     // currently used by this Volume's existing regions.
     //
@@ -192,17 +215,18 @@ pub fn allocation_query(
       AND physical_disk.disk_policy = 'in_service'
       AND physical_disk.disk_state = 'active'
       AND NOT(zpool.id = ANY(SELECT existing_zpools.pool_id FROM existing_zpools))
-    )"
+    "
     ).bind::<sql_types::BigInt, _>(size_delta as i64);
 
     let builder = if distinct_sleds {
         builder
-            .sql("ORDER BY zpool.sled_id, md5((CAST(zpool.id as BYTEA) || ")
+            .sql("AND NOT(sled.id = ANY(SELECT existing_sleds.id FROM existing_sleds)))
+            ORDER BY zpool.sled_id, md5((CAST(zpool.id as BYTEA) || ")
             .param()
             .sql("))")
             .bind::<sql_types::Bytea, _>(seed.clone())
     } else {
-        builder
+        builder.sql(")")
     }
     .sql("),");
 
@@ -265,7 +289,7 @@ pub fn allocation_query(
       SELECT COUNT(*) FROM old_regions
     ))
   ),")
-    .bind::<sql_types::Uuid, _>(volume_id)
+    .bind::<sql_types::Uuid, _>(*volume_id.as_untyped_uuid())
     .bind::<sql_types::BigInt, _>(params.block_size as i64)
     .bind::<sql_types::BigInt, _>(params.blocks_per_extent as i64)
     .bind::<sql_types::BigInt, _>(params.extent_count as i64)
@@ -418,7 +442,7 @@ mod test {
     // how the output SQL has been altered.
     #[tokio::test]
     async fn expectorate_query() {
-        let volume_id = Uuid::nil();
+        let volume_id = VolumeUuid::nil();
         let params = RegionParameters {
             block_size: 512,
             blocks_per_extent: 4,
@@ -509,7 +533,7 @@ mod test {
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
         let params = RegionParameters {
             block_size: 512,
             blocks_per_extent: 4,

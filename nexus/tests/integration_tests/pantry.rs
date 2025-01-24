@@ -216,8 +216,7 @@ async fn bulk_write_bytes(client: &ClientTestContext) {
     let bulk_write_url =
         format!("/v1/disks/{}/bulk-write?project={}", DISK_NAME, PROJECT_NAME,);
 
-    // Use 4 MiB chunk size so this test won't take a long time. Requires
-    // setting request_body_max_bytes accordingly!
+    // Use 4 MiB chunk size so this test won't take a long time.
     const CHUNK_SIZE: u64 = 4096 * 1024;
 
     for block in 0..8 {

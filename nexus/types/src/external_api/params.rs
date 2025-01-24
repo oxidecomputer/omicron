@@ -2086,6 +2086,19 @@ pub struct SwitchPortApplySettings {
     pub port_settings: NameOrId,
 }
 
+/// Select an LLDP endpoint by rack/switch/port
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct LldpPortPathSelector {
+    /// A rack id to use when selecting switch ports.
+    pub rack_id: Uuid,
+
+    /// A switch location to use when selecting switch ports.
+    pub switch_location: Name,
+
+    /// A name to use when selecting switch ports.
+    pub port: Name,
+}
+
 // IMAGES
 
 /// The source of the underlying image.

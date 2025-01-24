@@ -59,7 +59,7 @@ use std::num::NonZeroU32;
 use uuid::Uuid;
 
 use super::SimpleIdentity;
-use super::UuidIdentity;
+use super::SimpleIdentityOrName;
 
 // General pagination infrastructure
 
@@ -140,8 +140,8 @@ pub fn marker_for_name<S, T: ObjectIdentity>(_: &S, t: &T) -> Name {
 /// Marker function that extracts the "id" from an object
 ///
 /// This is intended for use with [`ScanById::results_page`] with objects that
-/// impl [`UuidIdentity`].
-pub fn marker_for_id<S, T: UuidIdentity>(_: &S, t: &T) -> Uuid {
+/// impl [`ObjectIdentity`].
+pub fn marker_for_id<S, T: SimpleIdentity>(_: &S, t: &T) -> Uuid {
     t.id()
 }
 
@@ -150,7 +150,7 @@ pub fn marker_for_id<S, T: UuidIdentity>(_: &S, t: &T) -> Uuid {
 ///
 /// This is intended for use with [`ScanByNameOrId::results_page`] with objects
 /// that impl [`ObjectIdentity`].
-pub fn marker_for_name_or_id<T: SimpleIdentity, Selector>(
+pub fn marker_for_name_or_id<T: SimpleIdentityOrName, Selector>(
     scan: &ScanByNameOrId<Selector>,
     item: &T,
 ) -> NameOrId {

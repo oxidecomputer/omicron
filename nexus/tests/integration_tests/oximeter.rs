@@ -35,13 +35,13 @@ async fn test_oximeter_database_records(context: &ControlPlaneTestContext) {
     let actual_id = result[0].get::<&str, Uuid>("id");
     assert_eq!(
         actual_id,
-        nexus_test_utils::OXIMETER_UUID.parse().unwrap(),
+        nexus_test_utils::OXIMETER_UUID.parse::<Uuid>().unwrap(),
         "Oximeter ID does not match the ID returned from the database"
     );
 
     // Kind of silly, but let's wait until the producer is actually registered
     // with Oximeter.
-    let producer_id = nexus_test_utils::PRODUCER_UUID.parse().unwrap();
+    let producer_id: Uuid = nexus_test_utils::PRODUCER_UUID.parse().unwrap();
     wait_for_producer(&context.oximeter, producer_id).await;
 
     // Verify that the producer lives in the DB.
@@ -66,7 +66,7 @@ async fn test_oximeter_database_records(context: &ControlPlaneTestContext) {
         .expect("The database doesn't contain a record of our producer");
     assert_eq!(
         actual_oximeter_id,
-        nexus_test_utils::OXIMETER_UUID.parse().unwrap(),
+        nexus_test_utils::OXIMETER_UUID.parse::<Uuid>().unwrap(),
         "Producer's oximeter ID returned from the database does not match the expected ID"
     );
 }

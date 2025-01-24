@@ -454,8 +454,13 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
                 }
             }
             None => {
-                // TODO-john Add a Severity::BackwardsCompatibility and note the
-                // missing filesystem pool
+                blippy.push_sled_note(
+                    sled_id,
+                    Severity::BackwardsCompatibility,
+                    SledKind::ZoneMissingFilesystemPool {
+                        zone: zone_config.clone(),
+                    },
+                );
             }
         }
 

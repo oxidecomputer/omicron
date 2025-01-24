@@ -5,7 +5,7 @@
 //! Handler functions (entrypoints) for external HTTP APIs
 
 use super::{
-    console_api, device_auth, params,
+    console_api, params,
     views::{
         self, Certificate, FloatingIp, Group, IdentityProvider, Image, IpPool,
         IpPoolRange, PhysicalDisk, Project, Rack, Role, Silo, SiloQuotas,
@@ -13,10 +13,10 @@ use super::{
         Utilization, Vpc, VpcRouter, VpcSubnet,
     },
 };
-use crate::{
-    app::support_bundles::SupportBundleQueryType, context::ApiContext,
-    external_api::shared,
-};
+use crate::app::external_endpoints::authority_for_request;
+use crate::app::support_bundles::SupportBundleQueryType;
+use crate::context::ApiContext;
+use crate::external_api::shared;
 use dropshot::Body;
 use dropshot::EmptyScanParams;
 use dropshot::HttpError;
@@ -31,12 +31,14 @@ use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use dropshot::WhichPage;
+use dropshot::{http_response_found, http_response_see_other};
 use dropshot::{ApiDescription, StreamingBody};
 use dropshot::{HttpResponseAccepted, HttpResponseFound, HttpResponseSeeOther};
 use dropshot::{HttpResponseCreated, HttpResponseHeaders};
 use dropshot::{WebsocketChannelResult, WebsocketConnection};
-use http::Response;
+use http::{header, Response, StatusCode};
 use ipnetwork::IpNetwork;
+use nexus_db_queries::authn::external::session_cookie::{self, SessionStore};
 use nexus_db_queries::authz;
 use nexus_db_queries::db;
 use nexus_db_queries::db::identity::Resource;
@@ -83,6 +85,8 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::LldpLinkConfig;
+use omicron_common::api::external::LldpNeighbor;
 use omicron_common::api::external::LoopbackAddress;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Probe;
@@ -3691,6 +3695,107 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn networking_switch_port_lldp_config_view(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortPathSelector>,
+        query_params: Query<params::SwitchPortSelector>,
+    ) -> Result<HttpResponseOk<LldpLinkConfig>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let settings = nexus
+                .lldp_config_get(
+                    &opctx,
+                    query.rack_id,
+                    query.switch_location,
+                    path.port,
+                )
+                .await?;
+            Ok(HttpResponseOk(settings))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_lldp_config_update(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortPathSelector>,
+        query_params: Query<params::SwitchPortSelector>,
+        config: TypedBody<LldpLinkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = rqctx.context();
+        let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let config = config.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            nexus
+                .lldp_config_update(
+                    &opctx,
+                    query.rack_id,
+                    query.switch_location,
+                    path.port,
+                    config,
+                )
+                .await?;
+            Ok(HttpResponseUpdatedNoContent {})
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_lldp_neighbors(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::LldpPortPathSelector>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<LldpNeighbor>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let query = query_params.into_inner();
+            let path = path_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let limit = pag_params.limit.into();
+            let prev = pag_params.marker.cloned();
+
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let neighbors = nexus
+                .lldp_neighbors_get(
+                    &opctx,
+                    &prev,
+                    limit,
+                    path.rack_id,
+                    &path.switch_location,
+                    &path.port,
+                )
+                .await?;
+
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                neighbors,
+                &marker_for_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn networking_bgp_config_create(
         rqctx: RequestContext<ApiContext>,
         config: TypedBody<params::BgpConfigCreate>,
@@ -7104,10 +7209,16 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn login_saml_begin(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::LoginToProviderPathParam>,
-        query_params: Query<params::LoginUrlQuery>,
+        _path_params: Path<params::LoginToProviderPathParam>,
+        _query_params: Query<params::LoginUrlQuery>,
     ) -> Result<Response<Body>, HttpError> {
-        console_api::login_saml_begin(rqctx, path_params, query_params).await
+        let apictx = rqctx.context();
+        let handler = async { console_api::serve_console_index(&rqctx).await };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn login_saml_redirect(
@@ -7115,7 +7226,30 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::LoginToProviderPathParam>,
         query_params: Query<params::LoginUrlQuery>,
     ) -> Result<HttpResponseFound, HttpError> {
-        console_api::login_saml_redirect(rqctx, path_params, query_params).await
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path_params = path_params.into_inner();
+            let query_params = query_params.into_inner();
+
+            // Use opctx_external_authn because this request will be
+            // unauthenticated.
+            let opctx = nexus.opctx_external_authn();
+
+            nexus
+                .login_saml_redirect(
+                    &opctx,
+                    &path_params.silo_name.into(),
+                    &path_params.provider_name.into(),
+                    query_params.redirect_uri,
+                )
+                .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn login_saml(
@@ -7123,15 +7257,59 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::LoginToProviderPathParam>,
         body_bytes: dropshot::UntypedBody,
     ) -> Result<HttpResponseSeeOther, HttpError> {
-        console_api::login_saml(rqctx, path_params, body_bytes).await
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path_params = path_params.into_inner();
+
+            // By definition, this request is not authenticated.  These operations
+            // happen using the Nexus "external authentication" context, which we
+            // keep specifically for this purpose.
+            let opctx = nexus.opctx_external_authn();
+
+            let (session, next_url) = nexus
+                .login_saml(
+                    opctx,
+                    body_bytes,
+                    &path_params.silo_name.into(),
+                    &path_params.provider_name.into(),
+                )
+                .await?;
+
+            let mut response = http_response_see_other(next_url)?;
+            {
+                let headers = response.headers_mut();
+                let cookie = session_cookie::session_cookie_header_value(
+                    &session.token,
+                    // use absolute timeout even though session might idle out first.
+                    // browser expiration is mostly for convenience, as the API will
+                    // reject requests with an expired session regardless
+                    apictx.context.session_absolute_timeout(),
+                    apictx.context.external_tls_enabled,
+                )?;
+                headers.append(header::SET_COOKIE, cookie);
+            }
+            Ok(response)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn login_local_begin(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::LoginPath>,
-        query_params: Query<params::LoginUrlQuery>,
+        _path_params: Path<params::LoginPath>,
+        _query_params: Query<params::LoginUrlQuery>,
     ) -> Result<Response<Body>, HttpError> {
-        console_api::login_local_begin(rqctx, path_params, query_params).await
+        let apictx = rqctx.context();
+        let handler = async { console_api::serve_console_index(&rqctx).await };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn login_local(
@@ -7140,7 +7318,45 @@ impl NexusExternalApi for NexusExternalApiImpl {
         credentials: TypedBody<params::UsernamePasswordCredentials>,
     ) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError>
     {
-        console_api::login_local(rqctx, path_params, credentials).await
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let credentials = credentials.into_inner();
+            let silo = path.silo_name.into();
+
+            // By definition, this request is not authenticated.  These operations
+            // happen using the Nexus "external authentication" context, which we
+            // keep specifically for this purpose.
+            let opctx = nexus.opctx_external_authn();
+            let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
+            let user =
+                nexus.login_local(&opctx, &silo_lookup, credentials).await?;
+
+            let session = nexus.create_session(opctx, user).await?;
+            let mut response = HttpResponseHeaders::new_unnamed(
+                HttpResponseUpdatedNoContent(),
+            );
+
+            {
+                let headers = response.headers_mut();
+                let cookie = session_cookie::session_cookie_header_value(
+                    &session.token,
+                    // use absolute timeout even though session might idle out first.
+                    // browser expiration is mostly for convenience, as the API will
+                    // reject requests with an expired session regardless
+                    apictx.context.session_absolute_timeout(),
+                    apictx.context.external_tls_enabled,
+                )?;
+                headers.append(header::SET_COOKIE, cookie);
+            }
+            Ok(response)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn logout(
@@ -7148,111 +7364,241 @@ impl NexusExternalApi for NexusExternalApiImpl {
         cookies: Cookies,
     ) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError>
     {
-        console_api::logout(rqctx, cookies).await
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await;
+            let token = cookies.get(session_cookie::SESSION_COOKIE_COOKIE_NAME);
+
+            if let Ok(opctx) = opctx {
+                if let Some(token) = token {
+                    nexus.session_hard_delete(&opctx, token.value()).await?;
+                }
+            }
+
+            // If user's session was already expired, they failed auth and their
+            // session was automatically deleted by the auth scheme. If they have no
+            // session (e.g., they cleared their cookies while sitting on the page)
+            // they will also fail auth.
+
+            // Even if the user failed auth, we don't want to send them back a 401
+            // like we would for a normal request. They are in fact logged out like
+            // they intended, and we should send the standard success response.
+
+            let mut response = HttpResponseHeaders::new_unnamed(
+                HttpResponseUpdatedNoContent(),
+            );
+            {
+                let headers = response.headers_mut();
+                headers.append(
+                    header::SET_COOKIE,
+                    session_cookie::clear_session_cookie_header_value(
+                        apictx.context.external_tls_enabled,
+                    )?,
+                );
+            };
+
+            Ok(response)
+        };
+
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn login_begin(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::LoginUrlQuery>,
     ) -> Result<HttpResponseFound, HttpError> {
-        console_api::login_begin(rqctx, query_params).await
+        let apictx = rqctx.context();
+        let handler = async {
+            let query = query_params.into_inner();
+            let login_url =
+                console_api::get_login_url(&rqctx, query.redirect_uri).await?;
+            http_response_found(login_url)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn console_projects(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::RestPathParam>,
+        _path_params: Path<params::RestPathParam>,
     ) -> Result<Response<Body>, HttpError> {
-        console_api::console_projects(rqctx, path_params).await
+        console_api::console_index_or_login_redirect(rqctx).await
     }
 
     async fn console_settings_page(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::RestPathParam>,
+        _path_params: Path<params::RestPathParam>,
     ) -> Result<Response<Body>, HttpError> {
-        console_api::console_settings_page(rqctx, path_params).await
+        console_api::console_index_or_login_redirect(rqctx).await
     }
 
     async fn console_system_page(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::RestPathParam>,
+        _path_params: Path<params::RestPathParam>,
     ) -> Result<Response<Body>, HttpError> {
-        console_api::console_system_page(rqctx, path_params).await
+        console_api::console_index_or_login_redirect(rqctx).await
     }
 
     async fn console_lookup(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::RestPathParam>,
+        _path_params: Path<params::RestPathParam>,
     ) -> Result<Response<Body>, HttpError> {
-        console_api::console_lookup(rqctx, path_params).await
+        console_api::console_index_or_login_redirect(rqctx).await
     }
 
     async fn console_root(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<Response<Body>, HttpError> {
-        console_api::console_root(rqctx).await
+        console_api::console_index_or_login_redirect(rqctx).await
     }
 
     async fn console_projects_new(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<Response<Body>, HttpError> {
-        console_api::console_projects_new(rqctx).await
+        console_api::console_index_or_login_redirect(rqctx).await
     }
 
     async fn console_silo_images(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<Response<Body>, HttpError> {
-        console_api::console_silo_images(rqctx).await
+        console_api::console_index_or_login_redirect(rqctx).await
     }
 
     async fn console_silo_utilization(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<Response<Body>, HttpError> {
-        console_api::console_silo_utilization(rqctx).await
+        console_api::console_index_or_login_redirect(rqctx).await
     }
 
     async fn console_silo_access(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<Response<Body>, HttpError> {
-        console_api::console_silo_access(rqctx).await
+        console_api::console_index_or_login_redirect(rqctx).await
     }
 
     async fn asset(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::RestPathParam>,
     ) -> Result<Response<Body>, HttpError> {
-        console_api::asset(rqctx, path_params).await
+        let apictx = rqctx.context();
+        let handler = async { console_api::asset(&rqctx, path_params).await };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
+
+    // Entrypoints for the OAuth 2.0 Device Authorization Grant flow.
+    //
+    // These are endpoints used by the API client per se (e.g., the CLI),
+    // *not* the user of that client (e.g., an Oxide rack operator). They
+    // are for requesting access tokens that will be managed and used by
+    // the client to make other API requests.
 
     async fn device_auth_request(
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<params::DeviceAuthRequest>,
     ) -> Result<Response<Body>, HttpError> {
-        device_auth::device_auth_request(rqctx, params).await
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let params = params.into_inner();
+        let handler = async {
+            let opctx = nexus.opctx_external_authn();
+            let authority = authority_for_request(&rqctx.request);
+            let host = match &authority {
+                Ok(host) => host.as_str(),
+                Err(error) => {
+                    return nexus.build_oauth_response(
+                        StatusCode::BAD_REQUEST,
+                        &serde_json::json!({
+                            "error": "invalid_request",
+                            "error_description": error,
+                        }),
+                    )
+                }
+            };
+
+            let model = nexus
+                .device_auth_request_create(&opctx, params.client_id)
+                .await?;
+            nexus.build_oauth_response(
+                StatusCode::OK,
+                &model.into_response(rqctx.server.using_tls(), host),
+            )
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn device_auth_verify(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<Response<Body>, HttpError> {
-        device_auth::device_auth_verify(rqctx).await
+        console_api::console_index_or_login_redirect(rqctx).await
     }
 
     async fn device_auth_success(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<Response<Body>, HttpError> {
-        device_auth::device_auth_success(rqctx).await
+        console_api::console_index_or_login_redirect(rqctx).await
     }
 
     async fn device_auth_confirm(
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<params::DeviceAuthVerify>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        device_auth::device_auth_confirm(rqctx, params).await
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let params = params.into_inner();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let &actor = opctx.authn.actor_required().internal_context(
+                "creating new device auth session for current user",
+            )?;
+            let _token = nexus
+                .device_auth_request_verify(
+                    &opctx,
+                    params.user_code,
+                    actor.actor_id(),
+                )
+                .await?;
+            Ok(HttpResponseUpdatedNoContent())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn device_access_token(
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<params::DeviceAccessTokenRequest>,
     ) -> Result<Response<Body>, HttpError> {
-        device_auth::device_access_token(rqctx, params.into_inner()).await
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx = nexus.opctx_external_authn();
+            let params = params.into_inner();
+            nexus.device_access_token(&opctx, params).await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 }

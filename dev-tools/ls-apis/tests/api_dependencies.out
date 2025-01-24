@@ -51,6 +51,9 @@ Management Gateway Service (client: gateway-client)
 Wicketd Installinator (client: installinator-client)
     consumed by: installinator (omicron/installinator) via 1 path
 
+LLDP daemon (client: lldpd-client)
+    consumed by: omicron-nexus (omicron/nexus) via 1 path
+
 Maghemite MG Admin (client: mg-admin-client)
     consumed by: omicron-nexus (omicron/nexus) via 1 path
     consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path

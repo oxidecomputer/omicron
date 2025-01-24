@@ -25,6 +25,13 @@ use openapiv3::OpenAPI;
 
 pub const API_VERSION: &str = "20241204.0.0";
 
+const MIB: usize = 1024 * 1024;
+const GIB: usize = 1024 * MIB;
+const DISK_BULK_WRITE_MAX_BYTES: usize = 8 * MIB;
+// Full release repositories are currently (Dec 2024) 1.8 GiB and are likely to
+// continue growing.
+const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
+
 // API ENDPOINT FUNCTION NAMING CONVENTIONS
 //
 // Generally, HTTP resources are grouped within some collection. For a
@@ -1040,6 +1047,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/disks/{disk}/bulk-write",
         tags = ["disks"],
+        request_body_max_bytes = DISK_BULK_WRITE_MAX_BYTES,
     }]
     async fn disk_bulk_write_import(
         rqctx: RequestContext<Self::Context>,
@@ -1702,6 +1710,43 @@ pub trait NexusExternalApi {
         path_params: Path<params::SwitchPortPathSelector>,
         query_params: Query<params::SwitchPortSelector>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Fetch the LLDP configuration for a switch port
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/switch-port/{port}/lldp/config",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_lldp_config_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortPathSelector>,
+        query_params: Query<params::SwitchPortSelector>,
+    ) -> Result<HttpResponseOk<LldpLinkConfig>, HttpError>;
+
+    /// Update the LLDP configuration for a switch port
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/hardware/switch-port/{port}/lldp/config",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_lldp_config_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortPathSelector>,
+        query_params: Query<params::SwitchPortSelector>,
+        config: TypedBody<LldpLinkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Fetch the LLDP neighbors seen on a switch port
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/hardware/rack-switch-port/{rack_id}/{switch_location}/{port}/lldp/neighbors",
+        tags = ["system/networking"],
+    }]
+    async fn networking_switch_port_lldp_neighbors(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::LldpPortPathSelector>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<LldpNeighbor>>, HttpError>;
 
     /// Create new BGP configuration
     #[endpoint {
@@ -2820,6 +2865,7 @@ pub trait NexusExternalApi {
         path = "/v1/system/update/repository",
         tags = ["system/update"],
         unpublished = true,
+        request_body_max_bytes = PUT_UPDATE_REPOSITORY_MAX_BYTES,
     }]
     async fn system_update_put_repository(
         rqctx: RequestContext<Self::Context>,
@@ -3249,6 +3295,11 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseFound, HttpError>;
 
     // Console API: Pages
+    //
+    // Dropshot does not have route match ranking and does not allow overlapping
+    // route definitions, so we cannot use a catchall `/*` route for console pages
+    // because it would overlap with the API routes definitions. So instead we have
+    // to manually define more specific routes.
 
     #[endpoint {
         method = GET,

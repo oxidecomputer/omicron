@@ -92,6 +92,7 @@ use super::tasks::abandoned_vmm_reaper;
 use super::tasks::bfd;
 use super::tasks::blueprint_execution;
 use super::tasks::blueprint_load;
+use super::tasks::blueprint_rendezvous;
 use super::tasks::crdb_node_id_collector;
 use super::tasks::decommissioned_disk_cleaner;
 use super::tasks::dns_config;
@@ -156,6 +157,7 @@ pub struct BackgroundTasks {
     pub task_phantom_disks: Activator,
     pub task_blueprint_loader: Activator,
     pub task_blueprint_executor: Activator,
+    pub task_blueprint_rendezvous: Activator,
     pub task_crdb_node_id_collector: Activator,
     pub task_service_zone_nat_tracker: Activator,
     pub task_switch_port_settings_manager: Activator,
@@ -243,6 +245,7 @@ impl BackgroundTasksInitializer {
             task_phantom_disks: Activator::new(),
             task_blueprint_loader: Activator::new(),
             task_blueprint_executor: Activator::new(),
+            task_blueprint_rendezvous: Activator::new(),
             task_crdb_node_id_collector: Activator::new(),
             task_service_zone_nat_tracker: Activator::new(),
             task_switch_port_settings_manager: Activator::new(),
@@ -311,6 +314,7 @@ impl BackgroundTasksInitializer {
             task_phantom_disks,
             task_blueprint_loader,
             task_blueprint_executor,
+            task_blueprint_rendezvous,
             task_crdb_node_id_collector,
             task_service_zone_nat_tracker,
             task_switch_port_settings_manager,
@@ -491,19 +495,15 @@ impl BackgroundTasksInitializer {
             period: config.blueprints.period_secs_collect_crdb_node_ids,
             task_impl: Box::new(crdb_node_id_collector),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![Box::new(rx_blueprint)],
+            watchers: vec![Box::new(rx_blueprint.clone())],
             activator: task_crdb_node_id_collector,
         });
 
         // Background task: inventory collector
         //
-        // This currently depends on the "output" of the blueprint executor in
+        // This depends on the "output" of the blueprint executor in
         // order to automatically trigger inventory collection whenever the
-        // blueprint executor runs.  In the limit, this could become a problem
-        // because the blueprint executor might also depend indirectly on the
-        // inventory collector.  In that case, we could expose `Activator`s to
-        // one or both of these tasks to directly activate the other precisely
-        // when needed.  But for now, this works.
+        // blueprint executor runs.
         let inventory_watcher = {
             let collector = inventory_collection::InventoryCollector::new(
                 datastore.clone(),
@@ -563,8 +563,26 @@ impl BackgroundTasksInitializer {
                 ),
             ),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![Box::new(inventory_watcher)],
+            watchers: vec![Box::new(inventory_watcher.clone())],
             activator: task_physical_disk_adoption,
+        });
+
+        driver.register(TaskDefinition {
+            name: "blueprint_rendezvous",
+            description:
+                "reconciles blueprints and inventory collection, updating \
+                 Reconfigurator-owned rendezvous tables that other subsystems \
+                 consume",
+            period: config.blueprints.period_secs_rendezvous,
+            task_impl: Box::new(
+                blueprint_rendezvous::BlueprintRendezvous::new(
+                    datastore.clone(),
+                    rx_blueprint.clone(),
+                ),
+            ),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![Box::new(inventory_watcher.clone())],
+            activator: task_blueprint_rendezvous,
         });
 
         driver.register(TaskDefinition {
@@ -1123,7 +1141,7 @@ pub mod test {
             },
             &dropshot::ConfigDropshot {
                 bind_address: "[::1]:0".parse().unwrap(),
-                request_body_max_bytes: 8 * 1024,
+                default_request_body_max_bytes: 8 * 1024,
                 default_handler_task_mode: HandlerTaskMode::Detached,
                 log_headers: vec![],
             },

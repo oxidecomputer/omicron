@@ -125,7 +125,7 @@ async fn main() -> anyhow::Result<()> {
     let config = Config {
         server_info,
         registration_address: Some(args.nexus),
-        request_body_max_bytes: 2048,
+        default_request_body_max_bytes: 2048,
         log,
     };
     let server = Server::with_registry(registry, &config)
