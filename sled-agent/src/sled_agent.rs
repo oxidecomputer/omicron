@@ -193,6 +193,9 @@ impl From<Error> for omicron_common::api::external::Error {
 // Provide a more specific HTTP error for some sled agent errors.
 impl From<Error> for dropshot::HttpError {
     fn from(err: Error) -> Self {
+        use dropshot::ClientErrorStatusCode;
+        use dropshot::ErrorStatusCode;
+
         const NO_SUCH_INSTANCE: &str = "NO_SUCH_INSTANCE";
         const INSTANCE_CHANNEL_FULL: &str = "INSTANCE_CHANNEL_FULL";
         match err {
@@ -210,25 +213,32 @@ impl From<Error> for dropshot::HttpError {
                         )
                     }
                     crate::instance::Error::Propolis(propolis_error) => {
-                        // Work around dropshot#693: HttpError::for_status
-                        // only accepts client errors and asserts on server
-                        // errors, so convert server errors by hand.
-                        match propolis_error.status() {
-                                None => HttpError::for_internal_error(
-                                    propolis_error.to_string(),
-                                ),
-
-                                Some(status_code) if status_code.is_client_error() => {
-                                    HttpError::for_status(None, status_code)
-                                },
-
-                                Some(status_code) => match status_code {
-                                    http::status::StatusCode::SERVICE_UNAVAILABLE =>
-                                        HttpError::for_unavail(None, propolis_error.to_string()),
-                                    _ =>
-                                        HttpError::for_internal_error(propolis_error.to_string()),
-                                }
+                        if let Some(status_code) =
+                            propolis_error.status().and_then(|status| {
+                                ErrorStatusCode::try_from(status).ok()
+                            })
+                        {
+                            if let Ok(status_code) =
+                                status_code.as_client_error()
+                            {
+                                return HttpError::for_client_error_with_status(
+                                    None,
+                                    status_code,
+                                );
                             }
+
+                            if status_code
+                                == ErrorStatusCode::SERVICE_UNAVAILABLE
+                            {
+                                return HttpError::for_unavail(
+                                    None,
+                                    propolis_error.to_string(),
+                                );
+                            }
+                        }
+                        HttpError::for_internal_error(
+                            propolis_error.to_string(),
+                        )
                     }
                     crate::instance::Error::Transition(omicron_error) => {
                         // Preserve the status associated with the wrapped
@@ -239,7 +249,7 @@ impl From<Error> for dropshot::HttpError {
                     crate::instance::Error::Terminating => {
                         HttpError::for_client_error(
                             Some(NO_SUCH_INSTANCE.to_string()),
-                            http::StatusCode::GONE,
+                            ClientErrorStatusCode::GONE,
                             instance_error.to_string(),
                         )
                     }
@@ -267,7 +277,7 @@ impl From<Error> for dropshot::HttpError {
                 BundleError::InstanceTerminating => {
                     HttpError::for_client_error(
                         Some(NO_SUCH_INSTANCE.to_string()),
-                        http::StatusCode::GONE,
+                        ClientErrorStatusCode::GONE,
                         inner.to_string(),
                     )
                 }

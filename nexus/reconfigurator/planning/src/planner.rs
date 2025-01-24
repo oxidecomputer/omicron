@@ -1644,13 +1644,13 @@ mod test {
         for _ in 0..NEW_IN_SERVICE_DISKS {
             sled_details.resources.zpools.insert(
                 ZpoolUuid::from(zpool_rng.next()),
-                (new_sled_disk(PhysicalDiskPolicy::InService), vec![]),
+                new_sled_disk(PhysicalDiskPolicy::InService),
             );
         }
         for _ in 0..NEW_EXPUNGED_DISKS {
             sled_details.resources.zpools.insert(
                 ZpoolUuid::from(zpool_rng.next()),
-                (new_sled_disk(PhysicalDiskPolicy::Expunged), vec![]),
+                new_sled_disk(PhysicalDiskPolicy::Expunged),
             );
         }
 
@@ -1812,7 +1812,7 @@ mod test {
             }
         }
         let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
-        let (_, (disk, _datasets)) = sled_details
+        let (_, disk) = sled_details
             .resources
             .zpools
             .iter_mut()
@@ -1976,7 +1976,7 @@ mod test {
         // For that pool, find the physical disk behind it, and mark it
         // expunged.
         let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
-        let (disk, _datasets) = sled_details
+        let disk = sled_details
             .resources
             .zpools
             .get_mut(&pool_to_expunge.id())

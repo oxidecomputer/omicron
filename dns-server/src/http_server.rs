@@ -64,19 +64,21 @@ impl From<UpdateError> for dropshot::HttpError {
         let message = format!("{:#}", error);
         match &error {
             UpdateError::BadUpdateGeneration { .. } => dropshot::HttpError {
-                status_code: http::StatusCode::CONFLICT,
+                status_code: dropshot::ErrorStatusCode::CONFLICT,
                 error_code: Some(String::from(
                     ERROR_CODE_BAD_UPDATE_GENERATION,
                 )),
                 external_message: message.clone(),
                 internal_message: message,
+                headers: None,
             },
 
             UpdateError::UpdateInProgress { .. } => dropshot::HttpError {
-                status_code: http::StatusCode::CONFLICT,
+                status_code: dropshot::ErrorStatusCode::CONFLICT,
                 error_code: Some(String::from(ERROR_CODE_UPDATE_IN_PROGRESS)),
                 external_message: message.clone(),
                 internal_message: message,
+                headers: None,
             },
 
             UpdateError::InternalError(_) => {

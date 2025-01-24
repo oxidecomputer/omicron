@@ -11,6 +11,7 @@ use crate::db;
 use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::model::RegionSnapshot;
 use crate::db::model::RegionSnapshotReplacement;
 use crate::db::model::RegionSnapshotReplacementState;
@@ -25,6 +26,7 @@ use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::VolumeUuid;
 use uuid::Uuid;
 
 #[must_use]
@@ -37,6 +39,9 @@ pub enum InsertStepResult {
     /// volume id, so no new record is inserted.
     AlreadyHandled { existing_step_id: Uuid },
 }
+
+pub struct NewRegionVolumeId(pub VolumeUuid);
+pub struct OldSnapshotVolumeId(pub VolumeUuid);
 
 impl DataStore {
     /// Create and insert a region snapshot replacement request for a
@@ -79,7 +84,7 @@ impl DataStore {
         self.insert_region_snapshot_replacement_request_with_volume_id(
             opctx,
             request,
-            db_snapshot.volume_id,
+            db_snapshot.volume_id(),
         )
         .await
     }
@@ -90,7 +95,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         request: RegionSnapshotReplacement,
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
     ) -> Result<(), Error> {
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -352,8 +357,8 @@ impl DataStore {
         region_snapshot_replacement_id: Uuid,
         operating_saga_id: Uuid,
         new_region_id: Uuid,
-        new_region_volume_id: Uuid,
-        old_snapshot_volume_id: Uuid,
+        new_region_volume_id: NewRegionVolumeId,
+        old_snapshot_volume_id: OldSnapshotVolumeId,
     ) -> Result<(), Error> {
         use db::schema::region_snapshot_replacement::dsl;
         let updated = diesel::update(dsl::region_snapshot_replacement)
@@ -366,9 +371,11 @@ impl DataStore {
             .set((
                 dsl::replacement_state
                     .eq(RegionSnapshotReplacementState::ReplacementDone),
-                dsl::old_snapshot_volume_id.eq(Some(old_snapshot_volume_id)),
+                dsl::old_snapshot_volume_id
+                    .eq(Some(to_db_typed_uuid(old_snapshot_volume_id.0))),
                 dsl::new_region_id.eq(Some(new_region_id)),
-                dsl::new_region_volume_id.eq(Some(new_region_volume_id)),
+                dsl::new_region_volume_id
+                    .eq(Some(to_db_typed_uuid(new_region_volume_id.0))),
                 dsl::operating_saga_id.eq(Option::<Uuid>::None),
             ))
             .check_if_exists::<RegionSnapshotReplacement>(
@@ -387,10 +394,10 @@ impl DataStore {
                         && record.replacement_state
                             == RegionSnapshotReplacementState::ReplacementDone
                         && record.new_region_id == Some(new_region_id)
-                        && record.new_region_volume_id
-                            == Some(new_region_volume_id)
-                        && record.old_snapshot_volume_id
-                            == Some(old_snapshot_volume_id)
+                        && record.new_region_volume_id()
+                            == Some(new_region_volume_id.0)
+                        && record.old_snapshot_volume_id()
+                            == Some(old_snapshot_volume_id.0)
                     {
                         Ok(())
                     } else {
@@ -839,7 +846,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         request_id: Uuid,
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
     ) -> Result<InsertStepResult, Error> {
         let request = RegionSnapshotReplacementStep::new(request_id, volume_id);
 
@@ -872,7 +879,10 @@ impl DataStore {
                 // the same step being inserted with the same volume id.
 
                 let maybe_record = dsl::region_snapshot_replacement_step
-                    .filter(dsl::old_snapshot_volume_id.eq(request.volume_id))
+                    .filter(
+                        dsl::old_snapshot_volume_id
+                            .eq(to_db_typed_uuid(request.volume_id())),
+                    )
                     .get_result_async::<RegionSnapshotReplacementStep>(&conn)
                     .await
                     .optional()?;
@@ -887,7 +897,10 @@ impl DataStore {
                 // snapshot replacement step for it in a non-complete state.
 
                 let maybe_record = dsl::region_snapshot_replacement_step
-                    .filter(dsl::volume_id.eq(request.volume_id))
+                    .filter(
+                        dsl::volume_id
+                            .eq(to_db_typed_uuid(request.volume_id())),
+                    )
                     .get_result_async::<RegionSnapshotReplacementStep>(&conn)
                     .await
                     .optional()?;
@@ -918,7 +931,7 @@ impl DataStore {
                 Self::volume_repair_insert_in_txn(
                     &conn,
                     err,
-                    request.volume_id,
+                    request.volume_id(),
                     request.id,
                 )
                 .await?;
@@ -1104,7 +1117,7 @@ impl DataStore {
         opctx: &OpContext,
         region_snapshot_replacement_step_id: Uuid,
         operating_saga_id: Uuid,
-        old_snapshot_volume_id: Uuid,
+        old_snapshot_volume_id: VolumeUuid,
     ) -> Result<(), Error> {
         type TxnError = TransactionError<Error>;
 
@@ -1145,7 +1158,7 @@ impl DataStore {
                             ),
                             dsl::operating_saga_id.eq(Option::<Uuid>::None),
                             dsl::old_snapshot_volume_id
-                                .eq(old_snapshot_volume_id),
+                                .eq(to_db_typed_uuid(old_snapshot_volume_id)),
                         ))
                         .check_if_exists::<RegionSnapshotReplacementStep>(
                             region_snapshot_replacement_step_id,
@@ -1371,6 +1384,7 @@ mod test {
     use crate::db::pub_test_utils::TestDatabase;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::DatasetUuid;
+    use omicron_uuid_kinds::VolumeUuid;
     use sled_agent_client::VolumeConstructionRequest;
 
     #[tokio::test]
@@ -1387,7 +1401,7 @@ mod test {
         let region_2_id = Uuid::new_v4();
         let snapshot_2_id = Uuid::new_v4();
 
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
 
         datastore
             .volume_create(nexus_db_model::Volume::new(
@@ -1447,7 +1461,7 @@ mod test {
 
         let region_2_id = Uuid::new_v4();
 
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
 
         datastore
             .volume_create(nexus_db_model::Volume::new(
@@ -1497,7 +1511,7 @@ mod test {
         let region_id = Uuid::new_v4();
         let snapshot_id = Uuid::new_v4();
 
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
 
         datastore
             .volume_create(nexus_db_model::Volume::new(
@@ -1545,7 +1559,7 @@ mod test {
 
         // Insert some replacement steps, and make sure counting works
 
-        let step_volume_id = Uuid::new_v4();
+        let step_volume_id = VolumeUuid::new_v4();
 
         datastore
             .volume_create(nexus_db_model::Volume::new(
@@ -1592,7 +1606,7 @@ mod test {
             1,
         );
 
-        let step_volume_id = Uuid::new_v4();
+        let step_volume_id = VolumeUuid::new_v4();
 
         datastore
             .volume_create(nexus_db_model::Volume::new(
@@ -1642,7 +1656,7 @@ mod test {
             1,
         );
 
-        let step_volume_id = Uuid::new_v4();
+        let step_volume_id = VolumeUuid::new_v4();
 
         datastore
             .volume_create(nexus_db_model::Volume::new(
@@ -1708,7 +1722,7 @@ mod test {
         // Ensure that only one non-complete replacement step can be inserted
         // per volume.
 
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
 
         datastore
             .volume_create(nexus_db_model::Volume::new(
@@ -1782,7 +1796,7 @@ mod test {
                 &opctx,
                 first_request_id,
                 saga_id,
-                Uuid::new_v4(), // old_snapshot_volume_id
+                VolumeUuid::new_v4(), // old_snapshot_volume_id
             )
             .await
             .unwrap();
@@ -1818,7 +1832,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
 
         datastore
             .volume_create(nexus_db_model::Volume::new(
@@ -1858,7 +1872,7 @@ mod test {
             .unwrap()
             .is_empty());
 
-        let step_volume_id = Uuid::new_v4();
+        let step_volume_id = VolumeUuid::new_v4();
 
         datastore
             .volume_create(nexus_db_model::Volume::new(
@@ -1885,7 +1899,7 @@ mod test {
 
         assert!(matches!(result, InsertStepResult::Inserted { .. }));
 
-        let step_volume_id = Uuid::new_v4();
+        let step_volume_id = VolumeUuid::new_v4();
 
         datastore
             .volume_create(nexus_db_model::Volume::new(
@@ -1939,8 +1953,8 @@ mod test {
         // replacement step.
 
         let request_id = Uuid::new_v4();
-        let volume_id = Uuid::new_v4();
-        let old_snapshot_volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
+        let old_snapshot_volume_id = VolumeUuid::new_v4();
 
         datastore
             .volume_create(nexus_db_model::Volume::new(
@@ -1973,7 +1987,7 @@ mod test {
         let mut step =
             RegionSnapshotReplacementStep::new(request_id, volume_id);
         step.replacement_state = RegionSnapshotReplacementStepState::Complete;
-        step.old_snapshot_volume_id = Some(old_snapshot_volume_id);
+        step.old_snapshot_volume_id = Some(old_snapshot_volume_id.into());
 
         let first_step_id = step.id;
 
@@ -2017,13 +2031,13 @@ mod test {
         // Assert that a region snapshot replacement step cannot be performed on
         // a volume if region replacement is occurring for that volume.
 
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
 
         datastore
             .volume_create(nexus_db_model::Volume::new(
                 volume_id,
                 serde_json::to_string(&VolumeConstructionRequest::Volume {
-                    id: volume_id,
+                    id: Uuid::new_v4(),
                     block_size: 512,
                     sub_volumes: vec![],
                     read_only_parent: None,

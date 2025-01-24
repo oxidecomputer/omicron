@@ -171,16 +171,17 @@ impl LatencyTracker {
         let latency = start.elapsed();
         let status_code = match &result {
             Ok(response) => response.status_code(),
-            Err(ref e) => e.status_code,
+            Err(ref e) => e.status_code.as_status(),
         };
-        if let Err(e) = self.update(&context.operation_id, status_code, latency)
+        if let Err(e) =
+            self.update(&context.endpoint.operation_id, status_code, latency)
         {
             slog::error!(
                 &context.log,
                 "error instrumenting dropshot handler";
                 "error" => ?e,
                 "status_code" => status_code.as_u16(),
-                "operation_id" => &context.operation_id,
+                "operation_id" => &context.endpoint.operation_id,
                 "remote_addr" => context.request.remote_addr(),
                 "latency" => ?latency,
             );
