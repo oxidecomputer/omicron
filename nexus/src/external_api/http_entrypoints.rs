@@ -2597,15 +2597,29 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let path = path_params.into_inner();
             let query = query_params.into_inner();
+
+            // Select group
             let group_selector = params::AffinityGroupSelector {
                 affinity_group: path.affinity_group,
-                project: query.project,
+                project: query.project.clone(),
             };
             let group_lookup =
                 nexus.affinity_group_lookup(&opctx, group_selector)?;
-            let instance = AffinityGroupMember::Instance(path.instance);
+
+            // Select instance
+            let instance_selector = params::InstanceSelector {
+                project: query.project,
+                instance: path.instance,
+            };
+            let instance_lookup =
+                nexus.instance_lookup(&opctx, instance_selector)?;
+
             nexus
-                .affinity_group_member_add(&opctx, &group_lookup, instance)
+                .affinity_group_member_add(
+                    &opctx,
+                    &group_lookup,
+                    &instance_lookup,
+                )
                 .await?;
             Ok(HttpResponseUpdatedNoContent {})
         };
@@ -2628,15 +2642,28 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let path = path_params.into_inner();
             let query = query_params.into_inner();
+
+            // Select group
             let group_selector = params::AffinityGroupSelector {
                 affinity_group: path.affinity_group,
-                project: query.project,
+                project: query.project.clone(),
             };
             let group_lookup =
                 nexus.affinity_group_lookup(&opctx, group_selector)?;
-            let instance = AffinityGroupMember::Instance(path.instance);
+
+            // Select instance
+            let instance_selector = params::InstanceSelector {
+                project: query.project,
+                instance: path.instance,
+            };
+            let instance_lookup =
+                nexus.instance_lookup(&opctx, instance_selector)?;
             nexus
-                .affinity_group_member_delete(&opctx, &group_lookup, instance)
+                .affinity_group_member_delete(
+                    &opctx,
+                    &group_lookup,
+                    &instance_lookup,
+                )
                 .await?;
             Ok(HttpResponseDeleted())
         };
@@ -2795,15 +2822,29 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let path = path_params.into_inner();
             let query = query_params.into_inner();
+
+            // Select group
             let group_selector = params::AntiAffinityGroupSelector {
                 anti_affinity_group: path.anti_affinity_group,
-                project: query.project,
+                project: query.project.clone(),
             };
             let group_lookup =
                 nexus.anti_affinity_group_lookup(&opctx, group_selector)?;
-            let instance = AntiAffinityGroupMember::Instance(path.instance);
+
+            // Select instance
+            let instance_selector = params::InstanceSelector {
+                project: query.project,
+                instance: path.instance,
+            };
+            let instance_lookup =
+                nexus.instance_lookup(&opctx, instance_selector)?;
+
             nexus
-                .anti_affinity_group_member_add(&opctx, &group_lookup, instance)
+                .anti_affinity_group_member_add(
+                    &opctx,
+                    &group_lookup,
+                    &instance_lookup,
+                )
                 .await?;
             Ok(HttpResponseUpdatedNoContent {})
         };
@@ -2826,18 +2867,28 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let path = path_params.into_inner();
             let query = query_params.into_inner();
+
+            // Select group
             let group_selector = params::AntiAffinityGroupSelector {
                 anti_affinity_group: path.anti_affinity_group,
-                project: query.project,
+                project: query.project.clone(),
             };
             let group_lookup =
                 nexus.anti_affinity_group_lookup(&opctx, group_selector)?;
-            let instance = AntiAffinityGroupMember::Instance(path.instance);
+
+            // Select instance
+            let instance_selector = params::InstanceSelector {
+                project: query.project,
+                instance: path.instance,
+            };
+            let instance_lookup =
+                nexus.instance_lookup(&opctx, instance_selector)?;
+
             nexus
                 .anti_affinity_group_member_delete(
                     &opctx,
                     &group_lookup,
-                    instance,
+                    &instance_lookup,
                 )
                 .await?;
             Ok(HttpResponseDeleted())

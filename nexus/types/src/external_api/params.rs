@@ -823,13 +823,13 @@ pub struct AffinityGroupCreate {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AffinityInstanceGroupMemberPath {
     pub affinity_group: NameOrId,
-    pub instance: Uuid,
+    pub instance: NameOrId,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AntiAffinityInstanceGroupMemberPath {
     pub anti_affinity_group: NameOrId,
-    pub instance: Uuid,
+    pub instance: NameOrId,
 }
 
 /// Create-time parameters for an `AntiAffinityGroup`

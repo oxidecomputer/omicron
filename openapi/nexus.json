@@ -940,8 +940,7 @@
             "name": "instance",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/NameOrId"
             }
           }
         ],
@@ -985,8 +984,7 @@
             "name": "instance",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/NameOrId"
             }
           }
         ],
@@ -1260,8 +1258,7 @@
             "name": "instance",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/NameOrId"
             }
           }
         ],
@@ -1305,8 +1302,7 @@
             "name": "instance",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/NameOrId"
             }
           }
         ],
