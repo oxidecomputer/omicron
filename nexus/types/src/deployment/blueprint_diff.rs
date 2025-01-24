@@ -403,7 +403,7 @@ impl<'e> ModifiedSled<'e> {
                     }
                 }
 
-                todo!()
+                BpTableRow::new(BpDiffState::Modified, columns)
             },
         ));
 
@@ -447,12 +447,14 @@ impl<'e> ModifiedSled<'e> {
     /// and (b) put changes towards the bottom, so people have to scroll
     /// back less.
     fn zones_table(&self, show_unchanged: bool) -> Option<BpTable> {
-        let DiffValue::Changed(generation) = self.zones_generation else {
-            return None;
-        };
-        let generation = BpGeneration::Diff {
-            before: Some(*generation.before),
-            after: Some(*generation.after),
+        let generation = match self.zones_generation {
+            DiffValue::Unchanged(generation) => {
+                BpGeneration::Value(*generation)
+            }
+            DiffValue::Changed(generation) => BpGeneration::Diff {
+                before: Some(*generation.before),
+                after: Some(*generation.after),
+            },
         };
 
         let mut rows = vec![];
