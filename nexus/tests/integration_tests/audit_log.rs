@@ -70,7 +70,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     // TODO: would be nice to test a request with a different method
     assert_eq!(e1.access_method, Some("spoof".to_string()));
     assert!(e1.timestamp >= t1 && e1.timestamp <= t2);
-    assert!(e1.time_completed.unwrap() > e1.timestamp);
+    assert!(e1.time_completed > e1.timestamp);
     assert_eq!(e1.actor_id, Some(USER_TEST_PRIVILEGED.id()));
     assert_eq!(e1.actor_silo_id, Some(DEFAULT_SILO_ID));
 
@@ -80,7 +80,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     assert_eq!(e2.resource_type, "");
     assert_eq!(e2.access_method, Some("spoof".to_string()));
     assert!(e2.timestamp >= t2 && e2.timestamp <= t3);
-    assert!(e2.time_completed.unwrap() > e2.timestamp);
+    assert!(e2.time_completed > e2.timestamp);
     assert_eq!(e2.actor_id, Some(USER_TEST_PRIVILEGED.id()));
     assert_eq!(e2.actor_silo_id, Some(DEFAULT_SILO_ID));
 

@@ -4,6 +4,7 @@ use crate::db;
 use crate::db::error::public_error_from_diesel;
 use crate::db::model::AuditLogCompletion;
 use crate::db::model::AuditLogEntry;
+use crate::db::model::AuditLogEntryInit;
 use crate::db::pagination::paginated_multicolumn;
 use crate::{context::OpContext, db::error::ErrorHandler};
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -29,16 +30,16 @@ impl DataStore {
     ) -> ListResultVec<db::model::AuditLogEntry> {
         opctx.authorize(authz::Action::ListChildren, &authz::AUDIT_LOG).await?;
 
-        use db::schema::audit_log;
+        use db::schema::audit_log_complete;
         let query = paginated_multicolumn(
-            audit_log::table,
-            (audit_log::timestamp, audit_log::id),
+            audit_log_complete::table,
+            (audit_log_complete::time_completed, audit_log_complete::id),
             pagparams,
         )
-        .filter(audit_log::timestamp.ge(start_time));
+        .filter(audit_log_complete::time_completed.ge(start_time));
         // TODO: confirm and document exclusive/inclusive behavior
         let query = if let Some(end) = end_time {
-            query.filter(audit_log::timestamp.lt(end))
+            query.filter(audit_log_complete::time_completed.lt(end))
         } else {
             query
         };
@@ -52,8 +53,8 @@ impl DataStore {
     pub async fn audit_log_entry_init(
         &self,
         opctx: &OpContext,
-        entry: AuditLogEntry,
-    ) -> CreateResult<AuditLogEntry> {
+        entry: AuditLogEntryInit,
+    ) -> CreateResult<AuditLogEntryInit> {
         use db::schema::audit_log;
         opctx.authorize(authz::Action::CreateChild, &authz::AUDIT_LOG).await?;
 
@@ -61,7 +62,7 @@ impl DataStore {
 
         diesel::insert_into(audit_log::table)
             .values(entry)
-            .returning(AuditLogEntry::as_returning())
+            .returning(AuditLogEntryInit::as_returning())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
@@ -79,7 +80,7 @@ impl DataStore {
     pub async fn audit_log_entry_complete(
         &self,
         opctx: &OpContext,
-        entry: &AuditLogEntry,
+        entry: &AuditLogEntryInit,
         completion: AuditLogCompletion,
     ) -> UpdateResult<()> {
         use db::schema::audit_log;
@@ -115,7 +116,7 @@ mod tests {
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
         };
-        let t0: DateTime<Utc> = Utc::now();
+        let t0 = Utc::now();
         let t_future: DateTime<Utc> = "2099-01-01T00:00:00Z".parse().unwrap();
 
         let audit_log = datastore
@@ -130,7 +131,7 @@ mod tests {
             .expect("retrieve empty audit log");
         assert_eq!(audit_log.len(), 0);
 
-        let entry1 = AuditLogEntry::new(
+        let entry1 = AuditLogEntryInit::new(
             "req-1".to_string(),
             "project_create".to_string(),
             "https://omicron.com/projects".to_string(),
@@ -146,14 +147,22 @@ mod tests {
 
         // inserting the same entry again blows up
         let conflict = datastore
-            .audit_log_entry_init(opctx, entry1)
+            .audit_log_entry_init(opctx, entry1.clone())
             .await
             .expect_err("inserting same entry again should error");
         assert_matches!(conflict, Error::ObjectAlreadyExists { .. });
 
         let t1 = Utc::now();
 
-        let entry2 = AuditLogEntry::new(
+        let completion = AuditLogCompletion::new();
+        datastore
+            .audit_log_entry_complete(opctx, &entry1, completion)
+            .await
+            .expect("complete audit log entry");
+
+        let t2 = Utc::now();
+
+        let entry2 = AuditLogEntryInit::new(
             "req-2".to_string(),
             "project_delete".to_string(),
             "https://omicron.com/projects/123".to_string(),
@@ -162,10 +171,29 @@ mod tests {
             None,
             None,
         );
-        datastore
+        let entry2 = datastore
             .audit_log_entry_init(opctx, entry2.clone())
             .await
             .expect("init second audit log entry");
+
+        let t3 = Utc::now();
+
+        // before entry2 is completed, it doesn't come back in the list
+        let audit_log = datastore
+            .audit_log_list(opctx, &pagparams, t0, None)
+            .await
+            .expect("retrieve audit log");
+        assert_eq!(audit_log.len(), 1);
+        assert_eq!(audit_log[0].request_id, "req-1");
+
+        // now complete entry2
+        let completion = AuditLogCompletion::new();
+        datastore
+            .audit_log_entry_complete(opctx, &entry2.clone(), completion)
+            .await
+            .expect("complete audit log entry");
+
+        let t4 = Utc::now();
 
         // get both entries
         let audit_log = datastore
@@ -178,19 +206,27 @@ mod tests {
 
         // Only get first entry
         let audit_log = datastore
-            .audit_log_list(opctx, &pagparams, t0, Some(t1))
+            .audit_log_list(opctx, &pagparams, t1, Some(t2))
             .await
             .expect("retrieve first audit log entry");
         assert_eq!(audit_log.len(), 1);
         assert_eq!(audit_log[0].request_id, "req-1");
+        assert!(
+            audit_log[0].time_completed > t1
+                && audit_log[0].time_completed < t2
+        );
 
         // Only get second entry
         let audit_log = datastore
-            .audit_log_list(opctx, &pagparams, t1, None)
+            .audit_log_list(opctx, &pagparams, t2, None)
             .await
             .expect("retrieve second audit log entry");
         assert_eq!(audit_log.len(), 1);
         assert_eq!(audit_log[0].request_id, "req-2");
+        assert!(
+            audit_log[0].time_completed > t3
+                && audit_log[0].time_completed < t4
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -209,7 +245,7 @@ mod tests {
 
         let t0 = Utc::now();
 
-        let base = AuditLogEntry::new(
+        let base = AuditLogEntryInit::new(
             "req-1".to_string(),
             "project_create".to_string(),
             "https://omicron.com/projects".to_string(),
@@ -218,6 +254,7 @@ mod tests {
             None,
             None,
         );
+        let completion = AuditLogCompletion::new();
 
         let id1 = "1710a22e-b29b-4cfc-9e79-e8c93be187d7";
         let id2 = "5d25e766-e026-44b4-8b42-5f90f43c26bc";
@@ -227,11 +264,16 @@ mod tests {
         // funky order so we can feel really good about the sort order being correct
         for id in [id4, id1, id3, id2] {
             let entry =
-                AuditLogEntry { id: id.parse().unwrap(), ..base.clone() };
-            datastore
+                AuditLogEntryInit { id: id.parse().unwrap(), ..base.clone() };
+            let entry = datastore
                 .audit_log_entry_init(opctx, entry)
                 .await
                 .expect("init entry");
+            // they all get the same completion time
+            datastore
+                .audit_log_entry_complete(opctx, &entry, completion.clone())
+                .await
+                .expect("complete entry");
         }
 
         let pagparams = DataPageParams {

@@ -4823,8 +4823,38 @@ CREATE TABLE IF NOT EXISTS audit_log (
     -- https://www.cockroachlabs.com/docs/v22.1/performance-best-practices-overview#use-multi-column-primary-keys
     -- https://www.cockroachlabs.com/docs/v22.1/hash-sharded-indexes#create-a-table-with-a-hash-sharded-secondary-index
     PRIMARY KEY (id, timestamp),
-    INDEX (timestamp) USING HASH
+    INDEX (timestamp) USING HASH,
+    INDEX (time_completed) USING HASH
 );
+
+-- View of audit log entries that have been "completed". This lets us treat that
+-- subset of rows as its own table in the data model code. Completing an entry
+-- means updating the entry after an operation is complete with the result of
+-- the operation. Because we do not intend to fail or roll back the operation
+-- if the completion write fails (while we do abort if the audit log entry
+-- initialization call fails), it is always possible (though rare) that there
+-- will be some incomplete entries remaining for operations that have in fact
+-- completed. We intend to complete those periodically with some kind of job
+-- and most likely mark them with a special third status that is neither success
+-- nor failure.
+CREATE VIEW audit_log_complete AS
+SELECT 
+    id,
+    timestamp,
+    request_id,
+    request_uri,
+    operation_id,
+    source_ip,
+    resource_type,
+    actor_id,
+    actor_silo_id,
+    access_method,
+    resource_id,
+    time_completed,
+    error_code,
+    error_message
+FROM audit_log
+WHERE time_completed IS NOT NULL;
 
 /*
  * Keep this at the end of file so that the database does not contain a version

@@ -22,5 +22,6 @@ CREATE TABLE IF NOT EXISTS audit_log (
     -- https://www.cockroachlabs.com/docs/v22.1/performance-best-practices-overview#use-multi-column-primary-keys
     -- https://www.cockroachlabs.com/docs/v22.1/hash-sharded-indexes#create-a-table-with-a-hash-sharded-secondary-index
     PRIMARY KEY (id, timestamp),
-    INDEX (timestamp) USING HASH
+    INDEX (timestamp) USING HASH,
+    INDEX (time_completed) USING HASH
 );

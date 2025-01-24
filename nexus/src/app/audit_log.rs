@@ -4,7 +4,7 @@
 
 use chrono::{DateTime, Utc};
 use dropshot::RequestContext;
-use nexus_db_model::{AuditLogCompletion, AuditLogEntry};
+use nexus_db_model::{AuditLogCompletion, AuditLogEntry, AuditLogEntryInit};
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::{
     CreateResult, DataPageParams, ListResultVec, UpdateResult,
@@ -40,9 +40,9 @@ impl super::Nexus {
         // might be better to extract the relevant fields at the call site. still
         // would want a helper to avoid duplication
         rqctx: &RequestContext<ApiContext>,
-    ) -> CreateResult<AuditLogEntry> {
+    ) -> CreateResult<AuditLogEntryInit> {
         let actor = opctx.authn.actor();
-        let entry = AuditLogEntry::new(
+        let entry = AuditLogEntryInit::new(
             rqctx.request_id.clone(),
             rqctx.endpoint.operation_id.clone(),
             rqctx.request.uri().to_string(),
@@ -59,7 +59,7 @@ impl super::Nexus {
         /* id, duration, result */
         &self,
         opctx: &OpContext,
-        entry: &AuditLogEntry,
+        entry: &AuditLogEntryInit,
     ) -> UpdateResult<()> {
         let update = AuditLogCompletion::new();
         self.db_datastore.audit_log_entry_complete(opctx, &entry, update).await

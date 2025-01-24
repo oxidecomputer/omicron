@@ -4,7 +4,7 @@
 
 // Copyright 2025 Oxide Computer Company
 
-use crate::schema::audit_log;
+use crate::schema::{audit_log, audit_log_complete};
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use nexus_types::external_api::views;
@@ -12,19 +12,15 @@ use uuid::Uuid;
 
 #[derive(Queryable, Insertable, Selectable, Clone, Debug)]
 #[diesel(table_name = audit_log)]
-pub struct AuditLogEntry {
+pub struct AuditLogEntryInit {
     pub id: Uuid,
     pub timestamp: DateTime<Utc>,
     pub request_id: String,
-    // TODO: this isn't in the RFD but it seems nice to have
-    pub request_uri: String,
-
     /// The API endpoint being logged, e.g., `project_create`
+    pub request_uri: String,
     pub operation_id: String,
-
     pub source_ip: String,
     pub resource_type: String,
-
     // TODO: we probably want a dedicated enum for these columns and for that
     // we need a fancier set of columns. For example, we may want to initialize
     // the row with a _potential_ actor (probably a different field), like the
@@ -37,8 +33,30 @@ pub struct AuditLogEntry {
     pub actor_id: Option<Uuid>,
     pub actor_silo_id: Option<Uuid>,
 
+    // TODO: fancier type for access method capturing possibility of login
+    // attempts. might make sense to roll this all into the actor enum because
+    // we have an access method if and only if we have an actor (I think)
     /// API token or session cookie. Optional because it will not be defined
     /// on unauthenticated requests like login attempts.
+    pub access_method: Option<String>,
+}
+
+// TODO: doc comments
+// TODO: figure out how this relates to the other struct. currently we're not
+// retrieving partial entries at all, but I think we will probably want to have
+// that capability
+#[derive(Queryable, Selectable, Clone, Debug)]
+#[diesel(table_name = audit_log_complete)]
+pub struct AuditLogEntry {
+    pub id: Uuid,
+    pub timestamp: DateTime<Utc>,
+    pub request_id: String,
+    pub request_uri: String,
+    pub operation_id: String,
+    pub source_ip: String,
+    pub resource_type: String,
+    pub actor_id: Option<Uuid>,
+    pub actor_silo_id: Option<Uuid>,
     pub access_method: Option<String>,
 
     // TODO: RFD 523 says: "Additionally, the response (or error) data should be
@@ -52,9 +70,9 @@ pub struct AuditLogEntry {
     // operation, we have not yet resolved the resource selector to an ID
     pub resource_id: Option<Uuid>,
 
-    // Fields that are optional because they get filled in after the action completes
+    // Fields that are not present on init
     /// Time log entry was completed with info about result of operation
-    pub time_completed: Option<DateTime<Utc>>,
+    pub time_completed: DateTime<Utc>,
 
     // Error information if the action failed
     pub error_code: Option<String>,
@@ -64,7 +82,7 @@ pub struct AuditLogEntry {
     // pub success_response: Option<Value>,
 }
 
-impl AuditLogEntry {
+impl AuditLogEntryInit {
     pub fn new(
         request_id: String,
         operation_id: String,
@@ -87,17 +105,11 @@ impl AuditLogEntry {
 
             // TODO: actually get all these values
             resource_type: String::new(),
-
-            // fields that can only be filled in after the operation
-            resource_id: None,
-            time_completed: None,
-            error_code: None,
-            error_message: None,
         }
     }
 }
 
-#[derive(AsChangeset)]
+#[derive(AsChangeset, Clone)]
 #[diesel(table_name = audit_log)]
 pub struct AuditLogCompletion {
     pub time_completed: DateTime<Utc>,
@@ -108,9 +120,6 @@ impl AuditLogCompletion {
         Self { time_completed: Utc::now() }
     }
 }
-
-// TODO: Add a struct representing only the fields set at log entry init time,
-// use as an arg to the datastore init function to make misuse harder
 
 // TODO: AuditLogActor
 // pub enum AuditLogActor {

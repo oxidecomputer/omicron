@@ -1060,9 +1060,8 @@ pub struct AuditLogEntry {
     /// Resource identifier
     pub resource_id: Option<Uuid>,
 
-    // TODO: document that we paginate by time_completed once that change is made
     /// Time operation completed
-    pub time_completed: Option<DateTime<Utc>>,
+    pub time_completed: DateTime<Utc>,
 
     /// Error information if the action failed
     pub error_code: Option<String>,
