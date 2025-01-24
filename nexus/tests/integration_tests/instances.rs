@@ -8,15 +8,14 @@ use super::external_ips::floating_ip_get;
 use super::external_ips::get_floating_ip_by_id_url;
 use super::metrics::{get_latest_silo_metric, get_latest_system_metric};
 
-use camino::Utf8Path;
 use http::method::Method;
 use http::StatusCode;
 use itertools::Itertools;
+use nexus_auth::authz::Action;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
-use nexus_test_interface::NexusServer;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -36,7 +35,6 @@ use nexus_test_utils::resource_helpers::object_delete_error;
 use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::DiskTest;
-use nexus_test_utils::start_sled_agent;
 use nexus_test_utils::wait_for_producer;
 use nexus_types::external_api::params::SshKeyCreate;
 use nexus_types::external_api::shared::IpKind;
@@ -93,7 +91,6 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::shared::SiloRole;
-use omicron_sled_agent::sim;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::poll::CondCheckError;
 
@@ -597,7 +594,7 @@ async fn test_instances_create_reboot_halt(
     .unwrap();
 }
 
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_instance_start_creates_networking_state(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -606,27 +603,8 @@ async fn test_instance_start_creates_networking_state(
     let nexus = &apictx.nexus;
     let instance_name = "series-of-tubes";
 
-    // Add some additional sleds that can receive V2P mappings.
-    let nsleds = 3;
-    let mut additional_sleds = Vec::with_capacity(nsleds);
-    for _ in 0..nsleds {
-        let sa_id = SledUuid::new_v4();
-        let log =
-            cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
-        let addr = cptestctx.server.get_http_server_internal_address().await;
-        let update_directory = Utf8Path::new("/should/not/be/used");
-        additional_sleds.push(
-            start_sled_agent(
-                log,
-                addr,
-                sa_id,
-                &update_directory,
-                sim::SimMode::Explicit,
-            )
-            .await
-            .unwrap(),
-        );
-    }
+    // This test requires some additional sleds that can receive V2P mappings.
+    let additional_sleds: Vec<_> = cptestctx.extra_sled_agents().collect();
 
     create_project_and_pool(&client).await;
     let instance_url = get_instance_url(instance_name);
@@ -709,7 +687,7 @@ async fn test_instance_start_creates_networking_state(
     assert!(checked);
 }
 
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 1)]
 async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     use nexus_db_model::Migration;
     use omicron_common::api::internal::nexus::MigrationState;
@@ -747,20 +725,9 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     let nexus = &apictx.nexus;
     let instance_name = "bird-ecology";
 
-    // Create a second sled to migrate to/from.
-    let default_sled_id: SledUuid =
-        nexus_test_utils::SLED_AGENT_UUID.parse().unwrap();
-    let update_dir = Utf8Path::new("/should/be/unused");
-    let other_sled_id = SledUuid::new_v4();
-    let _other_sa = nexus_test_utils::start_sled_agent(
-        cptestctx.logctx.log.new(o!("sled_id" => other_sled_id.to_string())),
-        cptestctx.server.get_http_server_internal_address().await,
-        other_sled_id,
-        &update_dir,
-        sim::SimMode::Explicit,
-    )
-    .await
-    .unwrap();
+    // Get the second sled to migrate to/from.
+    let default_sled_id = cptestctx.first_sled_id();
+    let other_sled_id = cptestctx.second_sled_id();
 
     create_project_and_pool(&client).await;
     let instance_url = get_instance_url(instance_name);
@@ -921,7 +888,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(migration.source_state, MigrationState::Completed.into());
 }
 
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_instance_migrate_v2p_and_routes(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -934,25 +901,8 @@ async fn test_instance_migrate_v2p_and_routes(
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
     let instance_name = "desert-locust";
 
-    // Create some test sleds.
-    let nsleds = 3;
-    let mut other_sleds = Vec::with_capacity(nsleds);
-    for _ in 0..nsleds {
-        let sa_id = SledUuid::new_v4();
-        let log = cptestctx.logctx.log.new(o!("sled_id" => sa_id.to_string()));
-        let update_dir = Utf8Path::new("/should/be/unused");
-        let sa = nexus_test_utils::start_sled_agent(
-            log,
-            cptestctx.server.get_http_server_internal_address().await,
-            sa_id,
-            &update_dir,
-            omicron_sled_agent::sim::SimMode::Explicit,
-        )
-        .await
-        .unwrap();
-
-        other_sleds.push((sa_id, sa));
-    }
+    // Get the extra test sleds.
+    let other_sleds: Vec<_> = cptestctx.extra_sled_agents().collect();
 
     // Set up the project and test instance.
     create_project_and_pool(client).await;
@@ -1005,14 +955,14 @@ async fn test_instance_migrate_v2p_and_routes(
         .sled_id;
 
     let mut sled_agents = vec![cptestctx.first_sled_agent().clone()];
-    sled_agents.extend(other_sleds.iter().map(|tup| tup.1.sled_agent.clone()));
+    sled_agents.extend(other_sleds.iter().map(|tup| tup.sled_agent.clone()));
     for sled_agent in &sled_agents {
         assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni).await;
     }
 
     let testctx_sled_id = cptestctx.first_sled_agent().id;
     let dst_sled_id = if original_sled_id == testctx_sled_id {
-        other_sleds[0].0
+        other_sleds[0].sled_agent.id
     } else {
         testctx_sled_id
     };
@@ -1273,20 +1223,41 @@ async fn test_instance_failed_by_instance_watcher_can_be_restarted(
 }
 
 // Verified that instances currently on Expunged sleds are marked as failed.
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 1)]
 async fn test_instance_failed_when_on_expunged_sled(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    create_project_and_pool(&client).await;
+
+    // Make sure all instances allocate to the first sled - make the second sled
+    // agent non-provisionable.
+    let (authz_sled, ..) = LookupPath::new(&opctx, datastore)
+        .sled_id(cptestctx.second_sled_id().into_untyped_uuid())
+        .lookup_for(Action::Modify)
+        .await
+        .expect("lookup authz_sled");
+
+    datastore
+        .sled_set_provision_policy(
+            &opctx,
+            &authz_sled,
+            views::SledProvisionPolicy::NonProvisionable,
+        )
+        .await
+        .expect("set sled provision policy");
+
+    // Create and start the test instances.
     let instance1_name = "romeo";
     let instance2_name = "juliet";
     let instance3_name = "mercutio";
 
-    create_project_and_pool(&client).await;
-
-    // Create and start the test instances.
     let mk_instance =
         |name: &'static str, auto_restart: InstanceAutoRestartPolicy| async move {
             let instance_url = get_instance_url(name);
@@ -1318,6 +1289,7 @@ async fn test_instance_failed_when_on_expunged_sled(
 
             instance_id
         };
+
     // We are going to manually attempt to delete/restart these instances when
     // they go to `Failed`, so don't allow them to reincarnate.
     let instance1_id =
@@ -1328,23 +1300,20 @@ async fn test_instance_failed_when_on_expunged_sled(
         mk_instance(instance3_name, InstanceAutoRestartPolicy::BestEffort)
             .await;
 
-    // Create a second sled for instances on the Expunged sled to be assigned
-    // to.
-    let default_sled_id: SledUuid =
-        nexus_test_utils::SLED_AGENT_UUID.parse().unwrap();
-    let update_dir = Utf8Path::new("/should/be/unused");
-    let other_sled_id = SledUuid::new_v4();
-    let _other_sa = nexus_test_utils::start_sled_agent(
-        cptestctx.logctx.log.new(o!("sled_id" => other_sled_id.to_string())),
-        cptestctx.server.get_http_server_internal_address().await,
-        other_sled_id,
-        &update_dir,
-        sim::SimMode::Explicit,
-    )
-    .await
-    .unwrap();
+    // Set the second sled to provisionable now that the instances have all been
+    // created
+
+    datastore
+        .sled_set_provision_policy(
+            &opctx,
+            &authz_sled,
+            views::SledProvisionPolicy::Provisionable,
+        )
+        .await
+        .expect("set sled provision policy");
 
     // Expunge the sled
+    let default_sled_id = cptestctx.first_sled_id();
     slog::info!(
         &cptestctx.logctx.log,
         "expunging sled";
@@ -1749,7 +1718,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     assert_metrics(cptestctx, project_id, 0, 0, 0).await;
 }
 
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 1)]
 async fn test_instance_metrics_with_migration(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -1766,20 +1735,9 @@ async fn test_instance_metrics_with_migration(
     )
     .await;
 
-    // Create a second sled to migrate to/from.
-    let default_sled_id: SledUuid =
-        nexus_test_utils::SLED_AGENT_UUID.parse().unwrap();
-    let update_dir = Utf8Path::new("/should/be/unused");
-    let other_sled_id = SledUuid::new_v4();
-    let _other_sa = nexus_test_utils::start_sled_agent(
-        cptestctx.logctx.log.new(o!("sled_id" => other_sled_id.to_string())),
-        cptestctx.server.get_http_server_internal_address().await,
-        other_sled_id,
-        &update_dir,
-        sim::SimMode::Explicit,
-    )
-    .await
-    .unwrap();
+    // Use the second sled to migrate to/from.
+    let default_sled_id = cptestctx.first_sled_id();
+    let other_sled_id = cptestctx.second_sled_id();
 
     let project = create_project_and_pool(&client).await;
     let project_id = project.identity.id;
@@ -1844,6 +1802,7 @@ async fn test_instance_metrics_with_migration(
         default_sled_id
     };
 
+    // instance is already running on destination sled
     let migrate_url =
         format!("/instances/{}/migrate", &instance_id.to_string());
     let _ = NexusRequest::new(
@@ -6160,33 +6119,14 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
 }
 
 /// Test that appropriate OPTE V2P mappings are created and deleted.
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     create_project_and_pool(client).await;
 
-    // Add a few more sleds
-    let nsleds = 3;
-    let mut additional_sleds = Vec::with_capacity(nsleds);
-    for _ in 0..nsleds {
-        let sa_id = SledUuid::new_v4();
-        let log =
-            cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
-        let addr = cptestctx.server.get_http_server_internal_address().await;
-        let update_directory = Utf8Path::new("/should/not/be/used");
-        additional_sleds.push(
-            start_sled_agent(
-                log,
-                addr,
-                sa_id,
-                &update_directory,
-                sim::SimMode::Explicit,
-            )
-            .await
-            .unwrap(),
-        );
-    }
+    // This test requires some additional sleds that can receive V2P mappings.
+    let additional_sleds: Vec<_> = cptestctx.extra_sled_agents().collect();
 
     // Create an instance.
     let instance_name = "test-instance";

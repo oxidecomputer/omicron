@@ -77,6 +77,7 @@ impl Workspaces {
                 )])),
             ),
             ("maghemite", "mg-admin-client", None),
+            ("lldp", "lldpd-client", None),
         ]
         .into_iter()
         .map(|(repo, omicron_pkg, extra_features)| {

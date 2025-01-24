@@ -90,7 +90,7 @@ pub(crate) async fn call_pantry_attach_for_disk(
     let disk_volume = nexus
         .datastore()
         .volume_checkout(
-            disk.volume_id,
+            disk.volume_id(),
             db::datastore::VolumeCheckoutReason::Pantry,
         )
         .await
@@ -99,7 +99,7 @@ pub(crate) async fn call_pantry_attach_for_disk(
     info!(
         log,
         "sending attach for disk {disk_id} volume {} to endpoint {endpoint}",
-        disk.volume_id,
+        disk.volume_id(),
     );
 
     let volume_construction_request: VolumeConstructionRequest =

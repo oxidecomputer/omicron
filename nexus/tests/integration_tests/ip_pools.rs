@@ -58,7 +58,7 @@ use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
-use omicron_common::api::external::SimpleIdentity;
+use omicron_common::api::external::SimpleIdentityOrName;
 use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
 use omicron_nexus::TestInterfaces;
 use omicron_uuid_kinds::GenericUuid;

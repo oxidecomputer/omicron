@@ -108,7 +108,7 @@ use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
 use omicron_common::{
     api::external, progenitor_operation_retry::ProgenitorOperationRetry,
 };
-use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid};
+use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid, VolumeUuid};
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use serde::Deserialize;
 use serde::Serialize;
@@ -392,7 +392,7 @@ async fn ssc_take_volume_lock(
 
     osagactx
         .datastore()
-        .volume_repair_lock(&opctx, disk.volume_id, lock_id)
+        .volume_repair_lock(&opctx, disk.volume_id(), lock_id)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -418,7 +418,7 @@ async fn ssc_take_volume_lock_undo(
 
     osagactx
         .datastore()
-        .volume_repair_unlock(&opctx, disk.volume_id, lock_id)
+        .volume_repair_unlock(&opctx, disk.volume_id(), lock_id)
         .await?;
 
     Ok(())
@@ -430,7 +430,7 @@ async fn ssc_alloc_regions(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let destination_volume_id =
-        sagactx.lookup::<Uuid>("destination_volume_id")?;
+        sagactx.lookup::<VolumeUuid>("destination_volume_id")?;
 
     // Ensure the destination volume is backed by appropriate regions.
     //
@@ -500,7 +500,7 @@ async fn ssc_regions_ensure(
     let osagactx = sagactx.user_data();
     let log = osagactx.log();
     let destination_volume_id =
-        sagactx.lookup::<Uuid>("destination_volume_id")?;
+        sagactx.lookup::<VolumeUuid>("destination_volume_id")?;
 
     let datasets_and_regions = osagactx
         .nexus()
@@ -520,7 +520,7 @@ async fn ssc_regions_ensure(
     // Create volume construction request
     let mut rng = StdRng::from_entropy();
     let volume_construction_request = VolumeConstructionRequest::Volume {
-        id: destination_volume_id,
+        id: *destination_volume_id.as_untyped_uuid(),
         block_size,
         sub_volumes: vec![VolumeConstructionRequest::Region {
             block_size,
@@ -528,7 +528,7 @@ async fn ssc_regions_ensure(
             extent_count,
             gen: 1,
             opts: CrucibleOpts {
-                id: destination_volume_id,
+                id: *destination_volume_id.as_untyped_uuid(),
                 target: datasets_and_regions
                     .iter()
                     .map(|(dataset, region)| {
@@ -613,7 +613,7 @@ async fn ssc_create_destination_volume_record(
     let osagactx = sagactx.user_data();
 
     let destination_volume_id =
-        sagactx.lookup::<Uuid>("destination_volume_id")?;
+        sagactx.lookup::<VolumeUuid>("destination_volume_id")?;
 
     let destination_volume_data = sagactx.lookup::<String>("regions_ensure")?;
 
@@ -636,7 +636,7 @@ async fn ssc_create_destination_volume_record_undo(
     let osagactx = sagactx.user_data();
 
     let destination_volume_id =
-        sagactx.lookup::<Uuid>("destination_volume_id")?;
+        sagactx.lookup::<VolumeUuid>("destination_volume_id")?;
 
     // This saga contains what is necessary to clean up the destination volume
     // resources. It's safe here to perform a volume hard delete without
@@ -644,7 +644,7 @@ async fn ssc_create_destination_volume_record_undo(
     // guaranteed to never have read only resources that require that
     // accounting.
 
-    info!(log, "hard deleting volume {}", destination_volume_id,);
+    info!(log, "hard deleting volume {}", destination_volume_id);
 
     osagactx.datastore().volume_hard_delete(destination_volume_id).await?;
 
@@ -667,9 +667,9 @@ async fn ssc_create_snapshot_record(
     // We admittedly reference the volume(s) before they have been allocated,
     // but this should be acceptable because the snapshot remains in a
     // "Creating" state until the saga has completed.
-    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
+    let volume_id = sagactx.lookup::<VolumeUuid>("volume_id")?;
     let destination_volume_id =
-        sagactx.lookup::<Uuid>("destination_volume_id")?;
+        sagactx.lookup::<VolumeUuid>("destination_volume_id")?;
 
     info!(log, "grabbing disk by name {}", params.create_params.disk);
 
@@ -689,8 +689,8 @@ async fn ssc_create_snapshot_record(
 
         project_id: params.project_id,
         disk_id: disk.id(),
-        volume_id,
-        destination_volume_id,
+        volume_id: volume_id.into(),
+        destination_volume_id: destination_volume_id.into(),
 
         gen: db::model::Generation::new(),
         state: db::model::SnapshotState::Creating,
@@ -914,7 +914,7 @@ async fn ssc_send_snapshot_request_to_sled_agent_undo(
         .fetch()
         .await?;
     let datasets_and_regions =
-        osagactx.datastore().get_allocated_regions(disk.volume_id).await?;
+        osagactx.datastore().get_allocated_regions(disk.volume_id()).await?;
 
     // ... and instruct each of those regions to delete the snapshot.
     for (dataset, region) in datasets_and_regions {
@@ -1262,7 +1262,7 @@ async fn ssc_call_pantry_snapshot_for_disk_undo(
         .fetch()
         .await?;
     let datasets_and_regions =
-        osagactx.datastore().get_allocated_regions(disk.volume_id).await?;
+        osagactx.datastore().get_allocated_regions(disk.volume_id()).await?;
 
     // ... and instruct each of those regions to delete the snapshot.
     for (dataset, region) in datasets_and_regions {
@@ -1408,7 +1408,7 @@ async fn ssc_start_running_snapshot(
     // region information to the new running snapshot information.
     let datasets_and_regions = osagactx
         .datastore()
-        .get_allocated_regions(disk.volume_id)
+        .get_allocated_regions(disk.volume_id())
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -1499,7 +1499,7 @@ async fn ssc_start_running_snapshot_undo(
         .await?;
 
     let datasets_and_regions =
-        osagactx.datastore().get_allocated_regions(disk.volume_id).await?;
+        osagactx.datastore().get_allocated_regions(disk.volume_id()).await?;
 
     // ... and instruct each of those regions to delete the running snapshot.
     for (dataset, region) in datasets_and_regions {
@@ -1528,7 +1528,7 @@ async fn ssc_create_volume_record(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
-    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
+    let volume_id = sagactx.lookup::<VolumeUuid>("volume_id")?;
 
     // For a snapshot, copy the volume construction request at the time the
     // snapshot was taken.
@@ -1546,7 +1546,7 @@ async fn ssc_create_volume_record(
     let disk_volume = osagactx
         .datastore()
         .volume_checkout(
-            disk.volume_id,
+            disk.volume_id(),
             db::datastore::VolumeCheckoutReason::CopyAndModify,
         )
         .await
@@ -1604,7 +1604,7 @@ async fn ssc_create_volume_record_undo(
 ) -> Result<(), anyhow::Error> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
-    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
+    let volume_id = sagactx.lookup::<VolumeUuid>("volume_id")?;
 
     // `volume_create` will increase the resource count for read only resources
     // in a volume, which there are guaranteed to be for snapshot volumes.
@@ -1678,7 +1678,7 @@ async fn ssc_release_volume_lock(
 
     osagactx
         .datastore()
-        .volume_repair_unlock(&opctx, disk.volume_id, lock_id)
+        .volume_repair_unlock(&opctx, disk.volume_id(), lock_id)
         .await
         .map_err(ActionError::action_failed)?;
 

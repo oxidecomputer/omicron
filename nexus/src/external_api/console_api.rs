@@ -9,34 +9,17 @@
 //! these routes directly from the external API.
 
 use crate::context::ApiContext;
-use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::Body;
-use dropshot::{
-    http_response_found, http_response_see_other, HttpError, HttpResponseFound,
-    HttpResponseHeaders, HttpResponseSeeOther, HttpResponseUpdatedNoContent,
-    Path, Query, RequestContext,
-};
+use dropshot::{HttpError, Path, RequestContext};
 use futures::TryStreamExt;
-use http::{header, HeaderName, HeaderValue, Response, StatusCode};
+use http::{HeaderName, HeaderValue, Response, StatusCode};
 use nexus_db_model::AuthenticationMode;
-use nexus_db_queries::authn::silos::IdentityProviderType;
-use nexus_db_queries::context::OpContext;
-use nexus_db_queries::{
-    authn::external::session_cookie::{
-        clear_session_cookie_header_value, session_cookie_header_value,
-        SessionStore, SESSION_COOKIE_COOKIE_NAME,
-    },
-    db::identity::Asset,
-};
-use nexus_types::authn::cookies::Cookies;
 use nexus_types::external_api::params::{self, RelativeUri};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{DataPageParams, Error, NameOrId};
 use once_cell::sync::Lazy;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use serde_urlencoded;
 use std::collections::HashMap;
 use std::num::NonZeroU32;
@@ -180,299 +163,10 @@ use tokio_util::codec::{BytesCodec, FramedRead};
 //
 //   /logout/{silo_name}/{provider_name}
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RelayState {
-    pub redirect_uri: Option<RelativeUri>,
-}
-
-impl RelayState {
-    pub fn to_encoded(&self) -> Result<String, anyhow::Error> {
-        Ok(base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            serde_json::to_string(&self).context("encoding relay state")?,
-        ))
-    }
-
-    pub fn from_encoded(encoded: String) -> Result<Self, anyhow::Error> {
-        serde_json::from_str(
-            &String::from_utf8(
-                base64::Engine::decode(
-                    &base64::engine::general_purpose::STANDARD,
-                    encoded,
-                )
-                .context("base64 decoding relay state")?,
-            )
-            .context("creating relay state string")?,
-        )
-        .context("json from relay state string")
-    }
-}
-
-pub(crate) async fn login_saml_begin(
-    rqctx: RequestContext<ApiContext>,
-    _path_params: Path<params::LoginToProviderPathParam>,
-    _query_params: Query<params::LoginUrlQuery>,
-) -> Result<Response<Body>, HttpError> {
-    serve_console_index(rqctx).await
-}
-
-pub(crate) async fn login_saml_redirect(
-    rqctx: RequestContext<ApiContext>,
-    path_params: Path<params::LoginToProviderPathParam>,
-    query_params: Query<params::LoginUrlQuery>,
-) -> Result<HttpResponseFound, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.context.nexus;
-        let path_params = path_params.into_inner();
-
-        // Use opctx_external_authn because this request will be
-        // unauthenticated.
-        let opctx = nexus.opctx_external_authn();
-
-        let (.., identity_provider) = nexus
-            .datastore()
-            .identity_provider_lookup(
-                &opctx,
-                &path_params.silo_name.into(),
-                &path_params.provider_name.into(),
-            )
-            .await?;
-
-        match identity_provider {
-            IdentityProviderType::Saml(saml_identity_provider) => {
-                // Relay state is sent to the IDP, to be sent back to the SP
-                // after a successful login.
-                let redirect_uri = query_params.into_inner().redirect_uri;
-                let relay_state =
-                    RelayState { redirect_uri }.to_encoded().map_err(|e| {
-                        HttpError::for_internal_error(format!(
-                            "encoding relay state failed: {}",
-                            e
-                        ))
-                    })?;
-
-                let sign_in_url = saml_identity_provider
-                    .sign_in_url(Some(relay_state))
-                    .map_err(|e| {
-                        HttpError::for_internal_error(e.to_string())
-                    })?;
-
-                http_response_found(sign_in_url)
-            }
-        }
-    };
-
-    apictx
-        .context
-        .external_latencies
-        .instrument_dropshot_handler(&rqctx, handler)
-        .await
-}
-
-pub(crate) async fn login_saml(
-    rqctx: RequestContext<ApiContext>,
-    path_params: Path<params::LoginToProviderPathParam>,
-    body_bytes: dropshot::UntypedBody,
-) -> Result<HttpResponseSeeOther, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.context.nexus;
-        let path_params = path_params.into_inner();
-
-        // By definition, this request is not authenticated.  These operations
-        // happen using the Nexus "external authentication" context, which we
-        // keep specifically for this purpose.
-        let opctx = nexus.opctx_external_authn();
-
-        let (authz_silo, db_silo, identity_provider) = nexus
-            .datastore()
-            .identity_provider_lookup(
-                &opctx,
-                &path_params.silo_name.into(),
-                &path_params.provider_name.into(),
-            )
-            .await?;
-
-        let (authenticated_subject, relay_state_string) =
-            match identity_provider {
-                IdentityProviderType::Saml(saml_identity_provider) => {
-                    let body_bytes = body_bytes.as_str()?;
-                    saml_identity_provider.authenticated_subject(
-                        &body_bytes,
-                        nexus.samael_max_issue_delay(),
-                    )?
-                }
-            };
-
-        // We used to return an internal server error if we failed to parse the
-        // relay state from the IDP. Since an IDP can technically put anything
-        // it wants here it's better to ignore the parse error and continue on
-        // with the login flow.
-        let relay_state =
-            relay_state_string.and_then(|v| RelayState::from_encoded(v).ok());
-
-        let user = nexus
-            .silo_user_from_authenticated_subject(
-                &opctx,
-                &authz_silo,
-                &db_silo,
-                &authenticated_subject,
-            )
-            .await?;
-
-        let session = create_session(opctx, apictx, user).await?;
-        let next_url = relay_state
-            .and_then(|r| r.redirect_uri)
-            .map(|u| u.to_string())
-            .unwrap_or_else(|| "/".to_string());
-        let mut response = http_response_see_other(next_url)?;
-
-        {
-            let headers = response.headers_mut();
-            let cookie = session_cookie_header_value(
-                &session.token,
-                // use absolute timeout even though session might idle out first.
-                // browser expiration is mostly for convenience, as the API will
-                // reject requests with an expired session regardless
-                apictx.context.session_absolute_timeout(),
-                apictx.context.external_tls_enabled,
-            )?;
-            headers.append(header::SET_COOKIE, cookie);
-        }
-        Ok(response)
-    };
-    apictx
-        .context
-        .external_latencies
-        .instrument_dropshot_handler(&rqctx, handler)
-        .await
-}
-
-pub(crate) async fn login_local_begin(
-    rqctx: RequestContext<ApiContext>,
-    _path_params: Path<params::LoginPath>,
-    _query_params: Query<params::LoginUrlQuery>,
-) -> Result<Response<Body>, HttpError> {
-    // TODO: figure out why instrumenting doesn't work
-    // let apictx = rqctx.context();
-    // let handler = async { serve_console_index(rqctx.context()).await };
-    // apictx.context.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-    serve_console_index(rqctx).await
-}
-
-pub(crate) async fn login_local(
-    rqctx: RequestContext<ApiContext>,
-    path_params: Path<params::LoginPath>,
-    credentials: dropshot::TypedBody<params::UsernamePasswordCredentials>,
-) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.context.nexus;
-        let path = path_params.into_inner();
-        let credentials = credentials.into_inner();
-        let silo = path.silo_name.into();
-
-        // By definition, this request is not authenticated.  These operations
-        // happen using the Nexus "external authentication" context, which we
-        // keep specifically for this purpose.
-        let opctx = nexus.opctx_external_authn();
-        let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
-        let user = nexus.login_local(&opctx, &silo_lookup, credentials).await?;
-
-        let session = create_session(opctx, apictx, user).await?;
-        let mut response =
-            HttpResponseHeaders::new_unnamed(HttpResponseUpdatedNoContent());
-
-        {
-            let headers = response.headers_mut();
-            let cookie = session_cookie_header_value(
-                &session.token,
-                // use absolute timeout even though session might idle out first.
-                // browser expiration is mostly for convenience, as the API will
-                // reject requests with an expired session regardless
-                apictx.context.session_absolute_timeout(),
-                apictx.context.external_tls_enabled,
-            )?;
-            headers.append(header::SET_COOKIE, cookie);
-        }
-        Ok(response)
-    };
-    apictx
-        .context
-        .external_latencies
-        .instrument_dropshot_handler(&rqctx, handler)
-        .await
-}
-
-async fn create_session(
-    opctx: &OpContext,
-    apictx: &ApiContext,
-    user: Option<nexus_db_queries::db::model::SiloUser>,
-) -> Result<nexus_db_queries::db::model::ConsoleSession, HttpError> {
-    let nexus = &apictx.context.nexus;
-    let session = match user {
-        Some(user) => nexus.session_create(&opctx, user.id()).await?,
-        None => Err(Error::Unauthenticated {
-            internal_message: String::from(
-                "no matching user found or credentials were not valid",
-            ),
-        })?,
-    };
-    Ok(session)
-}
-
-pub(crate) async fn logout(
-    rqctx: RequestContext<ApiContext>,
-    cookies: Cookies,
-) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.context.nexus;
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await;
-        let token = cookies.get(SESSION_COOKIE_COOKIE_NAME);
-
-        if let Ok(opctx) = opctx {
-            if let Some(token) = token {
-                nexus.session_hard_delete(&opctx, token.value()).await?;
-            }
-        }
-
-        // If user's session was already expired, they failed auth and their
-        // session was automatically deleted by the auth scheme. If they have no
-        // session (e.g., they cleared their cookies while sitting on the page)
-        // they will also fail auth.
-
-        // Even if the user failed auth, we don't want to send them back a 401
-        // like we would for a normal request. They are in fact logged out like
-        // they intended, and we should send the standard success response.
-
-        let mut response =
-            HttpResponseHeaders::new_unnamed(HttpResponseUpdatedNoContent());
-        {
-            let headers = response.headers_mut();
-            headers.append(
-                header::SET_COOKIE,
-                clear_session_cookie_header_value(
-                    apictx.context.external_tls_enabled,
-                )?,
-            );
-        };
-
-        Ok(response)
-    };
-
-    apictx
-        .context
-        .external_latencies
-        .instrument_dropshot_handler(&rqctx, handler)
-        .await
-}
-
 /// Generate URI to the appropriate login form for this Silo. Optional
 /// `redirect_uri` represents the URL to send the user back to after successful
 /// login, and is included in `state` query param if present
-async fn get_login_url(
+pub(crate) async fn get_login_url(
     rqctx: &RequestContext<ApiContext>,
     redirect_uri: Option<RelativeUri>,
 ) -> Result<String, Error> {
@@ -535,15 +229,41 @@ async fn get_login_url(
     })
 }
 
-pub(crate) async fn login_begin(
+/// Serve console index if the user is authenticated, otherwise redirect to a
+/// login URL for the silo. Note that this function includes instrumentation,
+/// so it should only be called at top level in a handler definition.
+pub(crate) async fn console_index_or_login_redirect(
     rqctx: RequestContext<ApiContext>,
-    query_params: Query<params::LoginUrlQuery>,
-) -> Result<HttpResponseFound, HttpError> {
+) -> Result<Response<Body>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
-        let query = query_params.into_inner();
-        let login_url = get_login_url(&rqctx, query.redirect_uri).await?;
-        http_response_found(login_url)
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await;
+
+        // if authed, serve console index.html with JS bundle in script tag
+        if let Ok(opctx) = opctx {
+            if opctx.authn.actor().is_some() {
+                return serve_console_index(&rqctx).await;
+            }
+        }
+
+        // otherwise redirect to idp
+
+        // Put the current URI in the query string to redirect back to after login.
+        let redirect_uri = rqctx
+            .request
+            .uri()
+            .path_and_query()
+            .map(|p| p.to_string().parse::<RelativeUri>())
+            .transpose()
+            .map_err(|e| {
+                HttpError::for_internal_error(format!("parsing URI: {}", e))
+            })?;
+        let login_url = get_login_url(&rqctx, redirect_uri).await?;
+
+        Ok(Response::builder()
+            .status(StatusCode::FOUND)
+            .header(http::header::LOCATION, login_url)
+            .body("".into())?)
     };
     apictx
         .context
@@ -551,75 +271,6 @@ pub(crate) async fn login_begin(
         .instrument_dropshot_handler(&rqctx, handler)
         .await
 }
-
-pub(crate) async fn console_index_or_login_redirect(
-    rqctx: RequestContext<ApiContext>,
-) -> Result<Response<Body>, HttpError> {
-    let opctx = crate::context::op_context_for_external_api(&rqctx).await;
-
-    // if authed, serve console index.html with JS bundle in script tag
-    if let Ok(opctx) = opctx {
-        if opctx.authn.actor().is_some() {
-            return serve_console_index(rqctx).await;
-        }
-    }
-
-    // otherwise redirect to idp
-
-    // Put the current URI in the query string to redirect back to after login.
-    let redirect_uri = rqctx
-        .request
-        .uri()
-        .path_and_query()
-        .map(|p| p.to_string().parse::<RelativeUri>())
-        .transpose()
-        .map_err(|e| {
-            HttpError::for_internal_error(format!("parsing URI: {}", e))
-        })?;
-    let login_url = get_login_url(&rqctx, redirect_uri).await?;
-
-    Ok(Response::builder()
-        .status(StatusCode::FOUND)
-        .header(http::header::LOCATION, login_url)
-        .body("".into())?)
-}
-
-// Dropshot does not have route match ranking and does not allow overlapping
-// route definitions, so we cannot use a catchall `/*` route for console pages
-// because it would overlap with the API routes definitions. So instead we have
-// to manually define more specific routes.
-
-macro_rules! console_page {
-    ($name:ident) => {
-        pub(crate) async fn $name(
-            rqctx: RequestContext<ApiContext>,
-        ) -> Result<Response<Body>, HttpError> {
-            console_index_or_login_redirect(rqctx).await
-        }
-    };
-}
-
-// only difference is the _path_params arg
-macro_rules! console_page_wildcard {
-    ($name:ident) => {
-        pub(crate) async fn $name(
-            rqctx: RequestContext<ApiContext>,
-            _path_params: Path<params::RestPathParam>,
-        ) -> Result<Response<Body>, HttpError> {
-            console_index_or_login_redirect(rqctx).await
-        }
-    };
-}
-
-console_page_wildcard!(console_projects);
-console_page_wildcard!(console_settings_page);
-console_page_wildcard!(console_system_page);
-console_page_wildcard!(console_lookup);
-console_page!(console_root);
-console_page!(console_projects_new);
-console_page!(console_silo_images);
-console_page!(console_silo_utilization);
-console_page!(console_silo_access);
 
 /// Check if `gzip` is listed in the request's `Accept-Encoding` header.
 fn accept_gz(header_value: &str) -> bool {
@@ -683,7 +334,7 @@ const WEB_SECURITY_HEADERS: [(HeaderName, HeaderValue); 3] = [
 /// file is present in the directory and `gzip` is listed in the request's
 /// `Accept-Encoding` header.
 async fn serve_static(
-    rqctx: RequestContext<ApiContext>,
+    rqctx: &RequestContext<ApiContext>,
     path: &Utf8Path,
     cache_control: HeaderValue,
 ) -> Result<Response<Body>, HttpError> {
@@ -752,7 +403,7 @@ async fn serve_static(
 /// `/assets/../../../etc/passwd`). This is tested in the `console_api`
 /// integration tests
 pub(crate) async fn asset(
-    rqctx: RequestContext<ApiContext>,
+    rqctx: &RequestContext<ApiContext>,
     path_params: Path<params::RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
     // asset URLs contain hashes, so cache for 1 year
@@ -765,8 +416,11 @@ pub(crate) async fn asset(
 }
 
 /// Serve `<static_dir>/index.html` via [`serve_static`]. Disallow caching.
+/// Does not include instrumentation logic because this is used directly in some
+/// endpoints and indirectly in others, and the latter have their own top-level
+/// instrumentation call.
 pub(crate) async fn serve_console_index(
-    rqctx: RequestContext<ApiContext>,
+    rqctx: &RequestContext<ApiContext>,
 ) -> Result<Response<Body>, HttpError> {
     // do not cache this response in browser
     const CACHE_CONTROL: HeaderValue = HeaderValue::from_static("no-store");

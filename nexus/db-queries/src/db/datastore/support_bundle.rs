@@ -11,8 +11,7 @@ use crate::db;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::lookup::LookupPath;
-use crate::db::model::Dataset;
-use crate::db::model::DatasetKind;
+use crate::db::model::RendezvousDebugDataset;
 use crate::db::model::SupportBundle;
 use crate::db::model::SupportBundleState;
 use crate::db::pagination::paginated;
@@ -21,7 +20,6 @@ use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use futures::FutureExt;
-use nexus_types::identity::Asset;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -31,7 +29,6 @@ use omicron_common::api::external::LookupResult;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
-use omicron_uuid_kinds::ZpoolUuid;
 use uuid::Uuid;
 
 const CANNOT_ALLOCATE_ERR_MSG: &'static str =
@@ -93,21 +90,20 @@ impl DataStore {
                 let err = err.clone();
 
                 async move {
-                    use db::schema::dataset::dsl as dataset_dsl;
+                    use db::schema::rendezvous_debug_dataset::dsl as dataset_dsl;
                     use db::schema::support_bundle::dsl as support_bundle_dsl;
 
                     // Observe all "non-deleted, debug datasets".
                     //
                     // Return the first one we find that doesn't already
                     // have a support bundle allocated to it.
-                    let free_dataset = dataset_dsl::dataset
-                        .filter(dataset_dsl::time_deleted.is_null())
-                        .filter(dataset_dsl::kind.eq(DatasetKind::Debug))
+                    let free_dataset = dataset_dsl::rendezvous_debug_dataset
+                        .filter(dataset_dsl::time_tombstoned.is_null())
                         .left_join(support_bundle_dsl::support_bundle.on(
                             dataset_dsl::id.eq(support_bundle_dsl::dataset_id),
                         ))
                         .filter(support_bundle_dsl::dataset_id.is_null())
-                        .select(Dataset::as_select())
+                        .select(RendezvousDebugDataset::as_select())
                         .first_async(&conn)
                         .await
                         .optional()?;
@@ -129,7 +125,7 @@ impl DataStore {
 
                     let bundle = SupportBundle::new(
                         reason_for_creation,
-                        ZpoolUuid::from_untyped_uuid(dataset.pool_id),
+                        dataset.pool_id(),
                         dataset.id(),
                         this_nexus_id,
                     );
@@ -499,6 +495,7 @@ mod test {
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
     use rand::Rng;
 
     fn authz_support_bundle_from_id(
@@ -569,6 +566,7 @@ mod test {
             opctx: &OpContext,
         ) {
             let rack_id = Uuid::new_v4();
+            let blueprint_id = BlueprintUuid::new_v4();
             let sled = SledUpdate::new(
                 *self.sled.as_untyped_uuid(),
                 "[::1]:0".parse().unwrap(),
@@ -601,18 +599,17 @@ mod test {
                 datastore
                     .zpool_insert(opctx, zpool)
                     .await
-                    .expect("failed to upsert zpool");
+                    .expect("inserted zpool");
 
-                let dataset = Dataset::new(
+                let dataset = RendezvousDebugDataset::new(
                     pool.dataset,
-                    pool.pool.into_untyped_uuid(),
-                    None,
-                    DebugDatasetKind,
+                    pool.pool,
+                    blueprint_id,
                 );
                 datastore
-                    .dataset_upsert(dataset)
+                    .debug_dataset_insert_if_not_exists(opctx, dataset)
                     .await
-                    .expect("failed to upsert dataset");
+                    .expect("inserted debug dataset");
             }
         }
     }
