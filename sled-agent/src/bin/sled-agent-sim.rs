@@ -18,7 +18,7 @@ use omicron_common::cmd::CmdError;
 use omicron_sled_agent::sim::RssArgs;
 use omicron_sled_agent::sim::{
     run_standalone_server, Config, ConfigHardware, ConfigStorage, ConfigZpool,
-    SimMode,
+    SimMode, ZpoolConfig,
 };
 use omicron_uuid_kinds::SledUuid;
 use sled_hardware_types::Baseboard;
@@ -122,7 +122,7 @@ async fn do_run() -> Result<(), CmdError> {
             args.sim_mode,
             Some(args.nexus_addr),
             Some(tmp.path()),
-            None,
+            ZpoolConfig::TenVirtualU2s,
         )
     };
 

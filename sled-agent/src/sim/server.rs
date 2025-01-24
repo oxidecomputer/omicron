@@ -15,6 +15,7 @@ use crate::rack_setup::{
     from_ipaddr_to_external_floating_ip,
     from_sockaddr_to_external_floating_addr,
 };
+use crate::sim::SimulatedUpstairs;
 use anyhow::{anyhow, Context as _};
 use crucible_agent_client::types::State as RegionState;
 use illumos_utils::zpool::ZpoolName;
@@ -79,10 +80,14 @@ pub struct Server {
 }
 
 impl Server {
+    /// `sled_index` here is to provide an offset so that Crucible regions have
+    /// unique ports in tests that use multiple sled agents.
     pub async fn start(
         config: &Config,
         log: &Logger,
         wait_for_nexus: bool,
+        simulated_upstairs: &Arc<SimulatedUpstairs>,
+        sled_index: u16,
     ) -> Result<Server, anyhow::Error> {
         info!(log, "setting up sled agent server");
 
@@ -100,6 +105,8 @@ impl Server {
             sa_log,
             config.nexus_address,
             Arc::clone(&nexus_client),
+            simulated_upstairs.clone(),
+            sled_index,
         )
         .await;
 
@@ -235,7 +242,7 @@ impl Server {
         let pantry_server = PantryServer::new(
             self.log.new(o!("kind" => "pantry")),
             self.config.storage.ip,
-            self.sled_agent.clone(),
+            self.sled_agent.simulated_upstairs.clone(),
         );
         self.pantry_server = Some(pantry_server);
         self.pantry_server.as_ref().unwrap()
@@ -326,7 +333,9 @@ pub async fn run_standalone_server(
     }
 
     // Start the sled agent
-    let mut server = Server::start(config, &log, true).await?;
+    let simulated_upstairs = Arc::new(SimulatedUpstairs::new(log.clone()));
+    let mut server =
+        Server::start(config, &log, true, &simulated_upstairs, 0).await?;
     info!(log, "sled agent started successfully");
 
     // Start the Internal DNS server

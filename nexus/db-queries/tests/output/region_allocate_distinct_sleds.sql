@@ -36,6 +36,15 @@ WITH
       FROM
         dataset INNER JOIN old_regions ON old_regions.dataset_id = dataset.id
     ),
+  existing_sleds
+    AS (
+      SELECT
+        zpool.sled_id AS id
+      FROM
+        zpool
+      WHERE
+        zpool.id = ANY (SELECT pool_id FROM existing_zpools)
+    ),
   candidate_zpools
     AS (
       SELECT
@@ -64,6 +73,7 @@ WITH
         AND physical_disk.disk_policy = 'in_service'
         AND physical_disk.disk_state = 'active'
         AND NOT (zpool.id = ANY (SELECT existing_zpools.pool_id FROM existing_zpools))
+        AND NOT (sled.id = ANY (SELECT existing_sleds.id FROM existing_sleds))
       ORDER BY
         zpool.sled_id, md5(CAST(zpool.id AS BYTES) || $3)
     ),
