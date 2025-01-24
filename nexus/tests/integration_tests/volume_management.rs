@@ -16,7 +16,7 @@ use http::method::Method;
 use http::StatusCode;
 use nexus_config::RegionAllocationStrategy;
 use nexus_db_model::to_db_typed_uuid;
-use nexus_db_model::Dataset;
+use nexus_db_model::CrucibleDataset;
 use nexus_db_model::RegionSnapshotReplacement;
 use nexus_db_model::RegionSnapshotReplacementState;
 use nexus_db_model::Volume;
@@ -6439,13 +6439,13 @@ async fn test_proper_region_sled_redundancy(
         for (_, region) in &datasets_and_regions {
             let sled_id = {
                 let dataset = {
-                    use db::schema::dataset::dsl;
-                    dsl::dataset
+                    use db::schema::crucible_dataset::dsl;
+                    dsl::crucible_dataset
                         .filter(
                             dsl::id.eq(to_db_typed_uuid(region.dataset_id())),
                         )
-                        .select(Dataset::as_select())
-                        .get_result_async::<Dataset>(&*conn)
+                        .select(CrucibleDataset::as_select())
+                        .get_result_async::<CrucibleDataset>(&*conn)
                         .await
                         .unwrap()
                 };
