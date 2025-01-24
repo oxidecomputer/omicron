@@ -362,7 +362,7 @@ mod tests {
         );
 
         // Create another zpool on one of the sleds, so we can add new
-        // zones that use it.
+        // datasets that use it.
         let new_zpool_id = ZpoolUuid::new_v4();
         for &sled_id in collection.sled_agents.keys().take(1) {
             let zpool = Zpool::new(
@@ -376,43 +376,29 @@ mod tests {
                 .expect("failed to upsert zpool");
         }
 
-        // Call `ensure_crucible_dataset_records_exist` again, adding new
-        // datasets.
-        //
-        // It should only insert these new zones.
-        let new_zones = [
-            BlueprintDatasetConfig {
-                disposition: BlueprintDatasetDisposition::InService,
-                id: DatasetUuid::new_v4(),
-                pool: ZpoolName::new_external(new_zpool_id),
-                kind: DatasetKind::Crucible,
-                address: Some("[::1]:0".parse().unwrap()),
-                quota: None,
-                reservation: None,
-                compression: CompressionAlgorithm::Off,
-            },
-            BlueprintDatasetConfig {
-                disposition: BlueprintDatasetDisposition::InService,
-                id: DatasetUuid::new_v4(),
-                pool: ZpoolName::new_external(new_zpool_id),
-                kind: DatasetKind::Crucible,
-                address: Some("[::1]:0".parse().unwrap()),
-                quota: None,
-                reservation: None,
-                compression: CompressionAlgorithm::Off,
-            },
-        ];
+        // Call `ensure_crucible_dataset_records_exist` again, adding a new
+        // Crucible dataset onto the new zpool we just added.
+        let new_dataset = BlueprintDatasetConfig {
+            disposition: BlueprintDatasetDisposition::InService,
+            id: DatasetUuid::new_v4(),
+            pool: ZpoolName::new_external(new_zpool_id),
+            kind: DatasetKind::Crucible,
+            address: Some("[::1]:0".parse().unwrap()),
+            quota: None,
+            reservation: None,
+            compression: CompressionAlgorithm::Off,
+        };
 
         let EnsureDatasetsResult { inserted, updated, removed } =
             ensure_crucible_dataset_records_exist(
                 opctx,
                 datastore,
                 blueprint.id,
-                all_datasets.iter().chain(&new_zones),
+                all_datasets.iter().chain(Some(&new_dataset)),
             )
             .await
             .expect("failed to ensure datasets");
-        assert_eq!(inserted, 2);
+        assert_eq!(inserted, 1);
         assert_eq!(updated, 0);
         assert_eq!(removed, 0);
         assert_eq!(
@@ -421,7 +407,7 @@ mod tests {
                 .await
                 .unwrap()
                 .len(),
-            nzones_with_durable_datasets + 2,
+            nzones_with_durable_datasets + 1,
         );
     }
 
