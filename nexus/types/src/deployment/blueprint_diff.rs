@@ -14,8 +14,9 @@ use super::diff_visitors::visit_blueprint::{SledInsert, SledRemove};
 use super::diff_visitors::Change;
 use super::id_map::IdMap;
 use super::{
-    Blueprint, BlueprintDatasetDisposition, BlueprintPhysicalDiskDisposition,
-    ClickhouseClusterConfig, CockroachDbPreserveDowngrade,
+    zone_sort_key, Blueprint, BlueprintDatasetDisposition,
+    BlueprintPhysicalDiskDisposition, ClickhouseClusterConfig,
+    CockroachDbPreserveDowngrade,
 };
 use crate::deployment::blueprint_display::BpClickhouseKeepersTableSchema;
 use crate::deployment::{
@@ -263,9 +264,9 @@ impl<'e> ModifiedSled<'e> {
 
         // Added
         rows.extend(
-            self.zones_added
+            self.disks_added
                 .iter()
-                .map(|zone| zones_row(BpDiffState::Added, zone)),
+                .map(|disk| disks_row(BpDiffState::Added, disk)),
         );
 
         if rows.is_empty() {
@@ -402,17 +403,23 @@ impl<'e> ModifiedSled<'e> {
         let mut rows = vec![];
 
         // Unchanged
+        let mut zones_unchanged: Vec<_> =
+            self.zones_unchanged.iter().cloned().collect();
+        zones_unchanged.sort_unstable_by_key(zone_sort_key);
         if show_unchanged {
             rows.extend(
-                self.zones_unchanged
+                zones_unchanged
                     .iter()
                     .map(|zone| zones_row(BpDiffState::Unchanged, zone)),
             );
         }
 
         // Removed
+        let mut zones_removed: Vec<_> =
+            self.zones_removed.iter().cloned().collect();
+        zones_removed.sort_unstable_by_key(zone_sort_key);
         rows.extend(
-            self.zones_removed
+            zones_removed
                 .iter()
                 .map(|zone| zones_row(BpDiffState::Removed, zone)),
         );
@@ -451,10 +458,11 @@ impl<'e> ModifiedSled<'e> {
         }));
 
         // Added
+        let mut zones_added: Vec<_> =
+            self.zones_added.iter().cloned().collect();
+        zones_added.sort_unstable_by_key(zone_sort_key);
         rows.extend(
-            self.zones_added
-                .iter()
-                .map(|zone| zones_row(BpDiffState::Added, zone)),
+            zones_added.iter().map(|zone| zones_row(BpDiffState::Added, zone)),
         );
 
         if rows.is_empty() {
@@ -1114,11 +1122,9 @@ fn zones_table(
     zones: Option<&BlueprintZonesConfig>,
 ) -> Option<BpTable> {
     zones.map(|zones_config| {
-        let rows = zones_config
-            .zones
-            .iter()
-            .map(|zone| zones_row(state, zone))
-            .collect();
+        let mut zones: Vec<_> = zones_config.zones.iter().cloned().collect();
+        zones.sort_unstable_by_key(zone_sort_key);
+        let rows = zones.iter().map(|zone| zones_row(state, zone)).collect();
         BpTable::new(
             BpOmicronZonesTableSchema {},
             zones_config.generation.into(),
