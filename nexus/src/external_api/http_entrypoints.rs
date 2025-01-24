@@ -2778,6 +2778,38 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn affinity_group_update(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AffinityGroupPath>,
+        updated_group: TypedBody<params::AffinityGroupUpdate>,
+    ) -> Result<HttpResponseOk<views::AffinityGroup>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let updates = updated_group.into_inner();
+            let query = query_params.into_inner();
+            let group_selector = params::AffinityGroupSelector {
+                project: query.project,
+                affinity_group: path.affinity_group,
+            };
+            let group_lookup =
+                nexus.affinity_group_lookup(&opctx, group_selector)?;
+            let affinity_group = nexus
+                .affinity_group_update(&opctx, &group_lookup, &updates)
+                .await?;
+            Ok(HttpResponseOk(affinity_group))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn affinity_group_delete(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::OptionalProjectSelector>,
@@ -3077,6 +3109,38 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?;
             Ok(HttpResponseCreated(anti_affinity_group))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn anti_affinity_group_update(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AntiAffinityGroupPath>,
+        updated_group: TypedBody<params::AntiAffinityGroupUpdate>,
+    ) -> Result<HttpResponseOk<views::AntiAffinityGroup>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let updates = updated_group.into_inner();
+            let query = query_params.into_inner();
+            let group_selector = params::AntiAffinityGroupSelector {
+                project: query.project,
+                anti_affinity_group: path.anti_affinity_group,
+            };
+            let group_lookup =
+                nexus.anti_affinity_group_lookup(&opctx, group_selector)?;
+            let anti_affinity_group = nexus
+                .anti_affinity_group_update(&opctx, &group_lookup, &updates)
+                .await?;
+            Ok(HttpResponseOk(anti_affinity_group))
         };
         apictx
             .context

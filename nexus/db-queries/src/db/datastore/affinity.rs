@@ -16,8 +16,10 @@ use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
 use crate::db::model::AffinityGroup;
 use crate::db::model::AffinityGroupInstanceMembership;
+use crate::db::model::AffinityGroupUpdate;
 use crate::db::model::AntiAffinityGroup;
 use crate::db::model::AntiAffinityGroupInstanceMembership;
+use crate::db::model::AntiAffinityGroupUpdate;
 use crate::db::model::InstanceState;
 use crate::db::model::Name;
 use crate::db::model::Project;
@@ -34,6 +36,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::UpdateResult;
 use omicron_uuid_kinds::AffinityGroupUuid;
 use omicron_uuid_kinds::AntiAffinityGroupUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -162,6 +165,30 @@ impl DataStore {
         Ok(anti_affinity_group)
     }
 
+    pub async fn affinity_group_update(
+        &self,
+        opctx: &OpContext,
+        authz_affinity_group: &authz::AffinityGroup,
+        updates: AffinityGroupUpdate,
+    ) -> UpdateResult<AffinityGroup> {
+        opctx.authorize(authz::Action::Modify, authz_affinity_group).await?;
+
+        use db::schema::affinity_group::dsl;
+        diesel::update(dsl::affinity_group)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(authz_affinity_group.id()))
+            .set(updates)
+            .returning(AffinityGroup::as_returning())
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_affinity_group),
+                )
+            })
+    }
+
     pub async fn affinity_group_delete(
         &self,
         opctx: &OpContext,
@@ -220,6 +247,32 @@ impl DataStore {
                 public_error_from_diesel(e, ErrorHandler::Server)
             })?;
         Ok(())
+    }
+
+    pub async fn anti_affinity_group_update(
+        &self,
+        opctx: &OpContext,
+        authz_anti_affinity_group: &authz::AntiAffinityGroup,
+        updates: AntiAffinityGroupUpdate,
+    ) -> UpdateResult<AntiAffinityGroup> {
+        opctx
+            .authorize(authz::Action::Modify, authz_anti_affinity_group)
+            .await?;
+
+        use db::schema::anti_affinity_group::dsl;
+        diesel::update(dsl::anti_affinity_group)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(authz_anti_affinity_group.id()))
+            .set(updates)
+            .returning(AntiAffinityGroup::as_returning())
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_anti_affinity_group),
+                )
+            })
     }
 
     pub async fn anti_affinity_group_delete(

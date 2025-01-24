@@ -20,6 +20,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::UpdateResult;
 
 impl super::Nexus {
     pub fn affinity_group_lookup<'a>(
@@ -174,6 +175,38 @@ impl super::Nexus {
             )
             .await
             .map(Into::into)
+    }
+
+    pub(crate) async fn affinity_group_update(
+        &self,
+        opctx: &OpContext,
+        group_lookup: &lookup::AffinityGroup<'_>,
+        updates: &params::AffinityGroupUpdate,
+    ) -> UpdateResult<views::AffinityGroup> {
+        let (.., authz_group) =
+            group_lookup.lookup_for(authz::Action::Modify).await?;
+        self.db_datastore
+            .affinity_group_update(opctx, &authz_group, updates.clone().into())
+            .await
+            .map(|g| g.into())
+    }
+
+    pub(crate) async fn anti_affinity_group_update(
+        &self,
+        opctx: &OpContext,
+        group_lookup: &lookup::AntiAffinityGroup<'_>,
+        updates: &params::AntiAffinityGroupUpdate,
+    ) -> UpdateResult<views::AntiAffinityGroup> {
+        let (.., authz_group) =
+            group_lookup.lookup_for(authz::Action::Modify).await?;
+        self.db_datastore
+            .anti_affinity_group_update(
+                opctx,
+                &authz_group,
+                updates.clone().into(),
+            )
+            .await
+            .map(|g| g.into())
     }
 
     pub(crate) async fn affinity_group_delete(

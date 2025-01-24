@@ -7,11 +7,13 @@
 //! Database representation of affinity and anti-affinity groups
 
 use super::impl_enum_type;
+use super::Name;
 use crate::schema::affinity_group;
 use crate::schema::affinity_group_instance_membership;
 use crate::schema::anti_affinity_group;
 use crate::schema::anti_affinity_group_instance_membership;
 use crate::typed_uuid::DbTypedUuid;
+use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
@@ -130,6 +132,25 @@ impl From<AffinityGroup> for views::AffinityGroup {
     }
 }
 
+/// Describes a set of updates for the [`AffinityGroup`] model.
+#[derive(AsChangeset)]
+#[diesel(table_name = affinity_group)]
+pub struct AffinityGroupUpdate {
+    pub name: Option<Name>,
+    pub description: Option<String>,
+    pub time_modified: DateTime<Utc>,
+}
+
+impl From<params::AffinityGroupUpdate> for AffinityGroupUpdate {
+    fn from(params: params::AffinityGroupUpdate) -> Self {
+        Self {
+            name: params.identity.name.map(Name),
+            description: params.identity.description,
+            time_modified: Utc::now(),
+        }
+    }
+}
+
 #[derive(Queryable, Insertable, Clone, Debug, Resource, Selectable)]
 #[diesel(table_name = anti_affinity_group)]
 pub struct AntiAffinityGroup {
@@ -170,6 +191,25 @@ impl From<AntiAffinityGroup> for views::AntiAffinityGroup {
             identity,
             policy: group.policy.into(),
             failure_domain: group.failure_domain.into(),
+        }
+    }
+}
+
+/// Describes a set of updates for the [`AntiAffinityGroup`] model.
+#[derive(AsChangeset)]
+#[diesel(table_name = anti_affinity_group)]
+pub struct AntiAffinityGroupUpdate {
+    pub name: Option<Name>,
+    pub description: Option<String>,
+    pub time_modified: DateTime<Utc>,
+}
+
+impl From<params::AntiAffinityGroupUpdate> for AntiAffinityGroupUpdate {
+    fn from(params: params::AntiAffinityGroupUpdate) -> Self {
+        Self {
+            name: params.identity.name.map(Name),
+            description: params.identity.description,
+            time_modified: Utc::now(),
         }
     }
 }

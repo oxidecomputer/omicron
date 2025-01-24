@@ -820,6 +820,13 @@ pub struct AffinityGroupCreate {
     pub failure_domain: FailureDomain,
 }
 
+/// Updateable properties of an `AffinityGroup`
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AffinityGroupUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AffinityInstanceGroupMemberPath {
     pub affinity_group: NameOrId,
@@ -840,6 +847,13 @@ pub struct AntiAffinityGroupCreate {
 
     pub policy: AffinityPolicy,
     pub failure_domain: FailureDomain,
+}
+
+/// Updateable properties of an `AntiAffinityGroup`
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AntiAffinityGroupUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
 }
 
 #[derive(Deserialize, JsonSchema, Clone)]

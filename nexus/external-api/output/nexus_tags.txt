@@ -7,6 +7,7 @@ affinity_group_member_instance_add       POST     /v1/affinity-groups/{affinity_
 affinity_group_member_instance_delete    DELETE   /v1/affinity-groups/{affinity_group}/members/instance/{instance}
 affinity_group_member_instance_view      GET      /v1/affinity-groups/{affinity_group}/members/instance/{instance}
 affinity_group_member_list               GET      /v1/affinity-groups/{affinity_group}/members
+affinity_group_update                    PUT      /v1/affinity-groups/{affinity_group}
 affinity_group_view                      GET      /v1/affinity-groups/{affinity_group}
 anti_affinity_group_create               POST     /v1/anti-affinity-groups
 anti_affinity_group_delete               DELETE   /v1/anti-affinity-groups/{anti_affinity_group}
@@ -15,6 +16,7 @@ anti_affinity_group_member_instance_add  POST     /v1/anti-affinity-groups/{anti
 anti_affinity_group_member_instance_delete DELETE   /v1/anti-affinity-groups/{anti_affinity_group}/members/instance/{instance}
 anti_affinity_group_member_instance_view GET      /v1/anti-affinity-groups/{anti_affinity_group}/members/instance/{instance}
 anti_affinity_group_member_list          GET      /v1/anti-affinity-groups/{anti_affinity_group}/members
+anti_affinity_group_update               PUT      /v1/anti-affinity-groups/{anti_affinity_group}
 anti_affinity_group_view                 GET      /v1/anti-affinity-groups/{anti_affinity_group}
 
 API operations found with tag "disks"

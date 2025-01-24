@@ -1341,6 +1341,19 @@ pub trait NexusExternalApi {
         new_affinity_group_params: TypedBody<params::AffinityGroupCreate>,
     ) -> Result<HttpResponseCreated<views::AffinityGroup>, HttpError>;
 
+    /// Update an affinity group
+    #[endpoint {
+        method = PUT,
+        path = "/v1/affinity-groups/{affinity_group}",
+        tags = ["affinity"],
+    }]
+    async fn affinity_group_update(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AffinityGroupPath>,
+        updated_group: TypedBody<params::AffinityGroupUpdate>,
+    ) -> Result<HttpResponseOk<views::AffinityGroup>, HttpError>;
+
     /// Delete an affinity group
     #[endpoint {
         method = DELETE,
@@ -1435,6 +1448,19 @@ pub trait NexusExternalApi {
         query_params: Query<params::ProjectSelector>,
         new_affinity_group_params: TypedBody<params::AntiAffinityGroupCreate>,
     ) -> Result<HttpResponseCreated<views::AntiAffinityGroup>, HttpError>;
+
+    /// Update an anti-affinity group
+    #[endpoint {
+        method = PUT,
+        path = "/v1/anti-affinity-groups/{anti_affinity_group}",
+        tags = ["affinity"],
+    }]
+    async fn anti_affinity_group_update(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AntiAffinityGroupPath>,
+        updated_group: TypedBody<params::AntiAffinityGroupUpdate>,
+    ) -> Result<HttpResponseOk<views::AntiAffinityGroup>, HttpError>;
 
     /// Delete an anti-affinity group
     #[endpoint {
