@@ -1,7 +1,7 @@
-CREATE TABLE IF NOT EXISTS omicron.public.affinity_group_instance_membership (
-    group_id UUID,
-    instance_id UUID,
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_affinity_group_by_project ON omicron.public.affinity_group (
+    project_id,
+    name
+) WHERE
+    time_deleted IS NULL;
 
-    PRIMARY KEY (group_id, instance_id);
-);
 

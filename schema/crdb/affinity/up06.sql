@@ -1,7 +1,4 @@
-CREATE TABLE IF NOT EXISTS omicron.public.anti_affinity_group_instance_membership (
-    group_id UUID,
-    instance_id UUID,
-
-    PRIMARY KEY (group_id, instance_id);
+CREATE INDEX IF NOT EXISTS lookup_affinity_group_instance_membership_by_instance ON omicron.public.affinity_group_instance_membership (
+    instance_id
 );
 

@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS omicron.public.affinity_group_instance_membership (
+CREATE TABLE IF NOT EXISTS omicron.public.anti_affinity_group_instance_membership (
     group_id UUID NOT NULL,
     instance_id UUID NOT NULL,
 
