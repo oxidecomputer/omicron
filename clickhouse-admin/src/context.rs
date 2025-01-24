@@ -128,7 +128,7 @@ impl ServerContext {
         &self.log
     }
 
-    pub async fn generation(&self) -> Option<Generation> {
+    pub fn generation(&self) -> Option<Generation> {
         *self.generation.lock().unwrap()
     }
 }
