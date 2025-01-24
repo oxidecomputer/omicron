@@ -92,7 +92,7 @@ impl BlueprintRendezvous {
 
         // Return the result as a `serde_json::Value`
         match result {
-            Ok(()) => json!({}),
+            Ok(stats) => json!({ "stats": stats }),
             Err(err) => json!({ "error":
                 format!("rendezvous reconciliation failed: {err:#}"),
             }),

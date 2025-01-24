@@ -6192,6 +6192,7 @@ dependencies = [
  "omicron-workspace-hack",
  "pq-sys",
  "proptest",
+ "serde",
  "slog",
  "test-strategy",
  "tokio",

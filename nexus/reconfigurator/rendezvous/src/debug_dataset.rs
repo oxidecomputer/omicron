@@ -112,6 +112,9 @@ pub(crate) async fn reconcile_debug_datasets(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests::u32_to_id;
+    use crate::tests::ArbitraryDisposition;
+    use crate::tests::DatasetPrep;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
@@ -119,40 +122,8 @@ mod tests {
     use nexus_types::inventory::ZpoolName;
     use omicron_common::disk::CompressionAlgorithm;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::{GenericUuid, TypedUuid, TypedUuidKind};
     use proptest::prelude::*;
     use proptest::proptest;
-    use test_strategy::Arbitrary;
-    use uuid::Uuid;
-
-    // Helpers to describe how a dataset should be prepared for the proptest
-    // below.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Arbitrary)]
-    enum ArbitraryDisposition {
-        InService,
-        Expunged,
-    }
-
-    impl From<ArbitraryDisposition> for BlueprintDatasetDisposition {
-        fn from(value: ArbitraryDisposition) -> Self {
-            match value {
-                ArbitraryDisposition::InService => Self::InService,
-                ArbitraryDisposition::Expunged => Self::Expunged,
-            }
-        }
-    }
-
-    #[derive(Debug, Clone, Copy, Arbitrary)]
-    struct DatasetPrep {
-        disposition: ArbitraryDisposition,
-        in_inventory: bool,
-        in_database: bool,
-    }
-
-    fn u32_to_id<T: TypedUuidKind>(n: u32) -> TypedUuid<T> {
-        let untyped = Uuid::from_u128(u128::from(n));
-        TypedUuid::from_untyped_uuid(untyped)
-    }
 
     async fn proptest_do_prep(
         opctx: &OpContext,
