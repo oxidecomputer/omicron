@@ -340,6 +340,54 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    pub async fn affinity_group_member_view(
+        &self,
+        opctx: &OpContext,
+        authz_affinity_group: &authz::AffinityGroup,
+        member: external::AffinityGroupMember,
+    ) -> Result<external::AffinityGroupMember, Error> {
+        opctx.authorize(authz::Action::Read, authz_affinity_group).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let instance_id = match member {
+            external::AffinityGroupMember::Instance(id) => id,
+        };
+
+        use db::schema::affinity_group_instance_membership::dsl;
+        dsl::affinity_group_instance_membership
+            .filter(dsl::group_id.eq(authz_affinity_group.id()))
+            .filter(dsl::instance_id.eq(instance_id))
+            .select(AffinityGroupInstanceMembership::as_select())
+            .get_result_async(&*conn)
+            .await
+            .map(|m| m.into())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn anti_affinity_group_member_view(
+        &self,
+        opctx: &OpContext,
+        authz_anti_affinity_group: &authz::AntiAffinityGroup,
+        member: external::AntiAffinityGroupMember,
+    ) -> Result<external::AntiAffinityGroupMember, Error> {
+        opctx.authorize(authz::Action::Read, authz_anti_affinity_group).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let instance_id = match member {
+            external::AntiAffinityGroupMember::Instance(id) => id,
+        };
+
+        use db::schema::anti_affinity_group_instance_membership::dsl;
+        dsl::anti_affinity_group_instance_membership
+            .filter(dsl::group_id.eq(authz_anti_affinity_group.id()))
+            .filter(dsl::instance_id.eq(instance_id))
+            .select(AntiAffinityGroupInstanceMembership::as_select())
+            .get_result_async(&*conn)
+            .await
+            .map(|m| m.into())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     pub async fn affinity_group_member_add(
         &self,
         opctx: &OpContext,

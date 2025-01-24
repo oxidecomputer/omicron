@@ -803,6 +803,89 @@
         "tags": [
           "affinity"
         ],
+        "summary": "Fetch an affinity group",
+        "operationId": "affinity_group_view",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "affinity_group",
+            "description": "Name or ID of the affinity group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AffinityGroup"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "affinity"
+        ],
+        "summary": "Delete an affinity group",
+        "operationId": "affinity_group_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "affinity_group",
+            "description": "Name or ID of the affinity group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/affinity-groups/{affinity_group}/members": {
+      "get": {
+        "tags": [
+          "affinity"
+        ],
         "summary": "List members of an affinity group",
         "operationId": "affinity_group_member_list",
         "parameters": [
@@ -872,13 +955,15 @@
         "x-dropshot-pagination": {
           "required": []
         }
-      },
-      "delete": {
+      }
+    },
+    "/v1/affinity-groups/{affinity_group}/members/instance/{instance}": {
+      "get": {
         "tags": [
           "affinity"
         ],
-        "summary": "Delete an affinity group",
-        "operationId": "affinity_group_delete",
+        "summary": "Fetch an affinity group member",
+        "operationId": "affinity_group_member_instance_view",
         "parameters": [
           {
             "in": "query",
@@ -891,7 +976,14 @@
           {
             "in": "path",
             "name": "affinity_group",
-            "description": "Name or ID of the affinity group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -899,8 +991,15 @@
           }
         ],
         "responses": {
-          "204": {
-            "description": "successful deletion"
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AffinityGroupMember"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -909,9 +1008,7 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      }
-    },
-    "/v1/affinity-groups/{affinity_group}/instance/{instance}": {
+      },
       "post": {
         "tags": [
           "affinity"
@@ -1121,6 +1218,89 @@
         "tags": [
           "affinity"
         ],
+        "summary": "Fetch an anti-affinity group",
+        "operationId": "anti_affinity_group_view",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "anti_affinity_group",
+            "description": "Name or ID of the anti affinity group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AntiAffinityGroup"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "affinity"
+        ],
+        "summary": "Delete an anti-affinity group",
+        "operationId": "anti_affinity_group_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "anti_affinity_group",
+            "description": "Name or ID of the anti affinity group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/anti-affinity-groups/{anti_affinity_group}/members": {
+      "get": {
+        "tags": [
+          "affinity"
+        ],
         "summary": "List members of an anti-affinity group",
         "operationId": "anti_affinity_group_member_list",
         "parameters": [
@@ -1190,13 +1370,15 @@
         "x-dropshot-pagination": {
           "required": []
         }
-      },
-      "delete": {
+      }
+    },
+    "/v1/anti-affinity-groups/{anti_affinity_group}/members/instance/{instance}": {
+      "get": {
         "tags": [
           "affinity"
         ],
-        "summary": "Delete an anti-affinity group",
-        "operationId": "anti_affinity_group_delete",
+        "summary": "Fetch an anti-affinity group member",
+        "operationId": "anti_affinity_group_member_instance_view",
         "parameters": [
           {
             "in": "query",
@@ -1209,7 +1391,14 @@
           {
             "in": "path",
             "name": "anti_affinity_group",
-            "description": "Name or ID of the anti affinity group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -1217,8 +1406,15 @@
           }
         ],
         "responses": {
-          "204": {
-            "description": "successful deletion"
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AntiAffinityGroupMember"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1227,9 +1423,7 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      }
-    },
-    "/v1/anti-affinity-groups/{anti_affinity_group}/instance/{instance}": {
+      },
       "post": {
         "tags": [
           "affinity"
