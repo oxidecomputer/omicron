@@ -39,6 +39,7 @@ enum MgsRequest {
     GetInventory {
         #[allow(dead_code)]
         etag: Option<String>,
+        // TODO(ben): This should return the MGS-specific inventory response
         reply_tx:
             oneshot::Sender<Result<GetInventoryResponse, GetInventoryError>>,
         force_refresh: Vec<SpIdentifier>,
@@ -82,6 +83,8 @@ impl MgsHandle {
         }
     }
 
+    // TODO(ben): this needs to return just the SPs or a new
+    // `GetMgsInventoryResponse`. Same for above method.
     pub async fn get_inventory_refreshing_sps(
         &self,
         force_refresh: Vec<SpIdentifier>,

@@ -451,6 +451,7 @@ pub struct GetInventoryParams {
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case", tag = "type", content = "data")]
 pub enum GetInventoryResponse {
+    // TODO(ben): Add `dpd_last_seen` here.
     Response { inventory: RackV1Inventory, mgs_last_seen: Duration },
     Unavailable,
 }

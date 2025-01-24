@@ -17,6 +17,15 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "inventory", rename_all = "snake_case")]
 pub struct RackV1Inventory {
     pub sps: Vec<SpInventory>,
+    // TODO(ben) Add the transceivers here.
+    //
+    // This should be a list of:
+    //
+    // - port (either in-line, or keyed on this)
+    // - overall state (supported, faulted, etc)
+    // - power state and tx/rx power
+    // - datapath state
+    // - vendor info
 }
 
 /// SP-related data
