@@ -9,7 +9,7 @@ use syn::{parse_macro_input, ItemFn, Token};
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub(crate) enum NexusTestArg {
     ServerUnderTest(syn::Path),
-    ExtraSledAgents(usize),
+    ExtraSledAgents(u16),
 }
 
 impl syn::parse::Parse for NexusTestArg {
@@ -24,7 +24,7 @@ impl syn::parse::Parse for NexusTestArg {
 
         if name.is_ident("extra_sled_agents") {
             let value: syn::LitInt = input.parse()?;
-            let value = value.base10_parse::<usize>()?;
+            let value = value.base10_parse::<u16>()?;
             return Ok(Self::ExtraSledAgents(value));
         }
 
@@ -91,7 +91,7 @@ pub fn nexus_test(attrs: TokenStream, input: TokenStream) -> TokenStream {
 
     let mut which_nexus =
         syn::parse_str::<syn::Path>("::omicron_nexus::Server").unwrap();
-    let mut extra_sled_agents: usize = 0;
+    let mut extra_sled_agents: u16 = 0;
 
     for arg in nexus_test_args.0 {
         match arg {

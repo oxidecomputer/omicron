@@ -21,7 +21,6 @@
 # Progenitor clients or APIs, so they're left out to avoid needing to create and
 # process clones of these repos:
 #
-# - lldp
 # - pumpkind
 # - thundermuffin
 #
@@ -74,6 +73,7 @@ packages = [
     # switch zone
     "ddmd",
     "dpd",
+    "lldpd",
     "mgd",
     "omicron-gateway",
     "tfportd",
@@ -269,6 +269,13 @@ to `dpd`. The `dpd` API is a auto-generated from it's OpenAPI specification \
 and exists as a client library within omicron. This is because the Dendrite \
 repo is not currently open source.
 """
+
+[[apis]]
+client_package_name = "lldpd-client"
+label = "LLDP daemon"
+server_package_name = "lldpd"
+versioned_how = "server"
+notes = "The LLDP daemon runs in the switch zone and is deployed next to dpd."
 
 [[apis]]
 client_package_name = "gateway-client"

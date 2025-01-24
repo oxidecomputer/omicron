@@ -4,9 +4,12 @@
 
 use super::impl_enum_type;
 use crate::schema::region_replacement;
+use crate::typed_uuid::DbTypedUuid;
 use crate::Region;
 use chrono::DateTime;
 use chrono::Utc;
+use omicron_uuid_kinds::VolumeKind;
+use omicron_uuid_kinds::VolumeUuid;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -144,10 +147,10 @@ pub struct RegionReplacement {
     pub old_region_id: Uuid,
 
     /// The volume whose region is being replaced
-    pub volume_id: Uuid,
+    pub volume_id: DbTypedUuid<VolumeKind>,
 
     /// A synthetic volume that only is used to later delete the old region
-    pub old_region_volume_id: Option<Uuid>,
+    pub old_region_volume_id: Option<DbTypedUuid<VolumeKind>>,
 
     /// The new region that will be used to replace the old one
     pub new_region_id: Option<Uuid>,
@@ -162,16 +165,24 @@ impl RegionReplacement {
         Self::new(region.id(), region.volume_id())
     }
 
-    pub fn new(old_region_id: Uuid, volume_id: Uuid) -> Self {
+    pub fn new(old_region_id: Uuid, volume_id: VolumeUuid) -> Self {
         Self {
             id: Uuid::new_v4(),
             request_time: Utc::now(),
             old_region_id,
-            volume_id,
+            volume_id: volume_id.into(),
             old_region_volume_id: None,
             new_region_id: None,
             replacement_state: RegionReplacementState::Requested,
             operating_saga_id: None,
         }
+    }
+
+    pub fn volume_id(&self) -> VolumeUuid {
+        self.volume_id.into()
+    }
+
+    pub fn old_region_volume_id(&self) -> Option<VolumeUuid> {
+        self.old_region_volume_id.map(|u| u.into())
     }
 }

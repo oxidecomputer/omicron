@@ -9,10 +9,10 @@ use nexus_test_utils::assert_same_items;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{create_silo, object_create};
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::shared::RelayState;
 use nexus_types::external_api::views::{self, Silo};
 use nexus_types::external_api::{params, shared};
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_nexus::external_api::console_api;
 use omicron_nexus::TestInterfaces;
 
 use base64::Engine;
@@ -1324,7 +1324,7 @@ async fn test_post_saml_response_with_relay_state(
                 saml_response: base64::engine::general_purpose::STANDARD
                     .encode(SAML_RESPONSE),
                 relay_state: Some(
-                    console_api::RelayState {
+                    RelayState {
                         redirect_uri: Some(
                             "/some/actual/nexus/url".parse().unwrap(),
                         ),

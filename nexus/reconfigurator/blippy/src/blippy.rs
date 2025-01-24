@@ -29,13 +29,17 @@ pub struct Note {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
-    /// Indicator of a serious problem that means the blueprint is invalid.
+    /// Indicates an issue with a blueprint that should be corrected by a future
+    /// planning run.
+    BackwardsCompatibility,
+    /// Indicates a serious problem that means the blueprint is invalid.
     Fatal,
 }
 
 impl fmt::Display for Severity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Severity::BackwardsCompatibility => write!(f, "BACKCOMPAT"),
             Severity::Fatal => write!(f, "FATAL"),
         }
     }
@@ -149,6 +153,8 @@ pub enum SledKind {
     ZpoolMissingZoneRootDataset { zpool: ZpoolUuid },
     /// A zone's filesystem dataset is missing from `blueprint_datasets`.
     ZoneMissingFilesystemDataset { zone: BlueprintZoneConfig },
+    /// A zone's filesystem pool value is missing from `blueprint_datasets`.
+    ZoneMissingFilesystemPool { zone: BlueprintZoneConfig },
     /// A zone's durable dataset is missing from `blueprint_datasets`.
     ZoneMissingDurableDataset { zone: BlueprintZoneConfig },
     /// A zone's durable dataset and transient root dataset are on different
@@ -305,6 +311,15 @@ impl fmt::Display for SledKind {
                 write!(
                     f,
                     "in-service zone's filesytem dataset is missing: {:?} {}",
+                    zone.zone_type.kind(),
+                    zone.id,
+                )
+            }
+            SledKind::ZoneMissingFilesystemPool { zone } => {
+                write!(
+                    f,
+                    "in-service zone's filesytem pool property is missing: \
+                     {:?} {}",
                     zone.zone_type.kind(),
                     zone.id,
                 )

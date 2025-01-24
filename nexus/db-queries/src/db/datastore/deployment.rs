@@ -2118,20 +2118,16 @@ mod tests {
             .map(|i| {
                 (
                     ZpoolUuid::new_v4(),
-                    (
-                        SledDisk {
-                            disk_identity: DiskIdentity {
-                                vendor: String::from("v"),
-                                serial: format!("s-{i}"),
-                                model: String::from("m"),
-                            },
-                            disk_id: PhysicalDiskUuid::new_v4(),
-                            policy: PhysicalDiskPolicy::InService,
-                            state: PhysicalDiskState::Active,
+                    SledDisk {
+                        disk_identity: DiskIdentity {
+                            vendor: String::from("v"),
+                            serial: format!("s-{i}"),
+                            model: String::from("m"),
                         },
-                        // Datasets
-                        vec![],
-                    ),
+                        disk_id: PhysicalDiskUuid::new_v4(),
+                        policy: PhysicalDiskPolicy::InService,
+                        state: PhysicalDiskState::Active,
+                    },
                 )
             })
             .collect();
