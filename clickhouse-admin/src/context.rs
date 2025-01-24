@@ -105,7 +105,6 @@ impl ServerContext {
         let gen = read_generation_from_file(config_path)?;
         let generation = std::sync::Mutex::new(gen);
 
-        // our main code: one time up front, create the channel we use to talk to the inner task and spawn that task
         // TODO: change the buffer size. Use that flume bounded channel thing?
         let (inner_tx, inner_rx) = mpsc::channel(10);
         let init_task_handle = tokio::spawn(long_running_task(inner_rx));
@@ -159,14 +158,16 @@ pub enum ClickhouseAdminServerRequest {
     },
 }
 
-async fn long_running_task(mut incoming: Receiver<ClickhouseAdminServerRequest>) {
+async fn long_running_task(
+    mut incoming: Receiver<ClickhouseAdminServerRequest>,
+) {
     while let Some(request) = incoming.recv().await {
         match request {
             ClickhouseAdminServerRequest::Generation { ctx, response } => {
                 let result = ctx.generation();
                 // TODO: Just use `let _` instead of returning an error?
                 response.send(result).expect("OHNOOHNO");
-            },
+            }
             ClickhouseAdminServerRequest::GenerateConfig { response } => {
                 // TODO: Unsure how to make this retrieve data from the API call?
                 response
