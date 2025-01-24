@@ -2,7 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::context::{KeeperServerContext, ServerContext, SingleServerContext};
+use crate::context::{
+    KeeperServerContext, Req, ServerContext, SingleServerContext,
+};
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::{
     ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
@@ -20,6 +22,7 @@ use omicron_common::api::external::Generation;
 use oximeter_db::OXIMETER_VERSION;
 use slog::info;
 use std::sync::Arc;
+use tokio::sync::oneshot;
 
 pub fn clickhouse_admin_server_api() -> ApiDescription<Arc<ServerContext>> {
     clickhouse_admin_server_api_mod::api_description::<ClickhouseAdminServerImpl>()
@@ -86,6 +89,27 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Generation>, HttpError> {
         let ctx = rqctx.context();
+
+        // TODO: Remove, this is only for testing
+        let (response_tx, response_rx) = oneshot::channel();
+        ctx.tx
+            .send(Req::DoSomeThing {
+                data: "I am the DATA!".to_string(),
+                response: response_tx,
+            })
+            .await
+            .map_err(|_| {
+                HttpError::for_internal_error(
+                    "SENDER: change error before committing".to_string(),
+                )
+            })?;
+        let result = response_rx.await.map_err(|_| {
+            HttpError::for_internal_error(
+                "RESPONSE: change error before committing".to_string(),
+            )
+        })?;
+        println!("I DID IT! {result}");
+
         let gen = match ctx.generation() {
             Some(g) => g,
             None => {

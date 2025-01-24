@@ -7,9 +7,11 @@ use crate::{ClickhouseCli, Clickward};
 use anyhow::{anyhow, bail, Result};
 use camino::Utf8PathBuf;
 use clickhouse_admin_types::{
+    ReplicaConfig,
     CLICKHOUSE_KEEPER_CONFIG_DIR, CLICKHOUSE_KEEPER_CONFIG_FILE,
     CLICKHOUSE_SERVER_CONFIG_DIR, CLICKHOUSE_SERVER_CONFIG_FILE,
 };
+use dropshot::{HttpError, HttpResponseCreated};
 use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use omicron_common::api::external::Generation;
 use oximeter_db::Client as OximeterClient;
@@ -19,7 +21,9 @@ use std::io::{BufRead, BufReader};
 use std::net::SocketAddrV6;
 use std::str::FromStr;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+// TODO: Remove usage of tokio task
+use tokio::sync::{mpsc, mpsc::Receiver, oneshot, Mutex};
+use tokio::task::JoinHandle;
 
 pub struct KeeperServerContext {
     clickward: Clickward,
@@ -73,6 +77,10 @@ pub struct ServerContext {
     initialization_lock: Arc<Mutex<()>>,
     log: Logger,
     pub generation: std::sync::Mutex<Option<Generation>>,
+
+    // TODO: Does this need to be pub?
+    pub init_task_handle: JoinHandle<()>,
+    pub tx: mpsc::Sender<Req>,
 }
 
 impl ServerContext {
@@ -98,6 +106,17 @@ impl ServerContext {
         // use that. Otherwise, we set the generation number to None.
         let gen = read_generation_from_file(config_path)?;
         let generation = std::sync::Mutex::new(gen);
+
+        // our main code: one time up front, create the channel we use to talk to the inner task and spawn that task
+        //let (inner_tx, inner_rx) = mpsc::channel(N); // picking N here can be hard // Use inner_rx for the future
+        //  let thing = Req::DoSomeThing {
+        //          data: "I did a thinks".to_string(),
+        //          response:
+        //  };
+        // TODO: change the buffer size. Use that flume bounded channel thing?
+        let (inner_tx, inner_rx) = mpsc::channel(10);
+        let init_task_handle = tokio::spawn(long_running_task(inner_rx));
+
         Ok(Self {
             clickhouse_cli,
             clickward,
@@ -105,6 +124,8 @@ impl ServerContext {
             initialization_lock: Arc::new(Mutex::new(())),
             log,
             generation,
+            init_task_handle,
+            tx: inner_tx,
         })
     }
 
@@ -131,6 +152,41 @@ impl ServerContext {
     pub fn generation(&self) -> Option<Generation> {
         *self.generation.lock().unwrap()
     }
+}
+
+// TODO: Should I have different enums for endpoints that require a task? like init and db gen?
+pub enum Req {
+    DoSomeThing {
+        // any inputs from us the task needs
+        data: String,
+        // a oneshot channel the task uses to send us the result of our request
+        // this is the result of SomeThing
+        response: oneshot::Sender<String>,
+    },
+  //  GenerateConfig {
+  //      response: oneshot::Sender<Result<HttpResponseCreated<ReplicaConfig>, HttpError>>,
+  //  },
+}
+
+// the long-lived task: loop over incoming requests and handle them
+async fn long_running_task(mut incoming: Receiver<Req>) {
+    // run until the sending half of `incoming` is dropped
+    while let Some(request) = incoming.recv().await {
+        match request {
+            Req::DoSomeThing { data, response } => {
+                let result = do_some_thing(data);
+                response.send(result).expect("OHNOOHNO");
+            },
+         //   Req::GenerateConfig { response } => {
+         //       let result =
+         //   }
+        }
+    }
+}
+
+fn do_some_thing(data: String) -> String {
+    println!("Inside the long running task: {data}");
+    data
 }
 
 pub struct SingleServerContext {
