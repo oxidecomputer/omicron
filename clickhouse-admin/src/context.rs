@@ -7,11 +7,9 @@ use crate::{ClickhouseCli, Clickward};
 use anyhow::{anyhow, bail, Result};
 use camino::Utf8PathBuf;
 use clickhouse_admin_types::{
-    ReplicaConfig,
     CLICKHOUSE_KEEPER_CONFIG_DIR, CLICKHOUSE_KEEPER_CONFIG_FILE,
     CLICKHOUSE_SERVER_CONFIG_DIR, CLICKHOUSE_SERVER_CONFIG_FILE,
 };
-use dropshot::{HttpError, HttpResponseCreated};
 use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use omicron_common::api::external::Generation;
 use oximeter_db::Client as OximeterClient;
@@ -80,7 +78,7 @@ pub struct ServerContext {
 
     // TODO: Does this need to be pub?
     pub init_task_handle: JoinHandle<()>,
-    pub tx: mpsc::Sender<Req>,
+    pub tx: mpsc::Sender<ClickhouseAdminServerRequest>,
 }
 
 impl ServerContext {
@@ -108,11 +106,6 @@ impl ServerContext {
         let generation = std::sync::Mutex::new(gen);
 
         // our main code: one time up front, create the channel we use to talk to the inner task and spawn that task
-        //let (inner_tx, inner_rx) = mpsc::channel(N); // picking N here can be hard // Use inner_rx for the future
-        //  let thing = Req::DoSomeThing {
-        //          data: "I did a thinks".to_string(),
-        //          response:
-        //  };
         // TODO: change the buffer size. Use that flume bounded channel thing?
         let (inner_tx, inner_rx) = mpsc::channel(10);
         let init_task_handle = tokio::spawn(long_running_task(inner_rx));
@@ -154,39 +147,34 @@ impl ServerContext {
     }
 }
 
-// TODO: Should I have different enums for endpoints that require a task? like init and db gen?
-pub enum Req {
-    DoSomeThing {
-        // any inputs from us the task needs
-        data: String,
-        // a oneshot channel the task uses to send us the result of our request
-        // this is the result of SomeThing
+pub enum ClickhouseAdminServerRequest {
+    Generation {
+        ctx: Arc<ServerContext>,
+        response: oneshot::Sender<Option<Generation>>,
+    },
+    GenerateConfig {
+        // TODO: Unsure how to make this retrieve data from the API call?
+        // will leave as string for now
         response: oneshot::Sender<String>,
     },
-  //  GenerateConfig {
-  //      response: oneshot::Sender<Result<HttpResponseCreated<ReplicaConfig>, HttpError>>,
-  //  },
 }
 
-// the long-lived task: loop over incoming requests and handle them
-async fn long_running_task(mut incoming: Receiver<Req>) {
-    // run until the sending half of `incoming` is dropped
+async fn long_running_task(mut incoming: Receiver<ClickhouseAdminServerRequest>) {
     while let Some(request) = incoming.recv().await {
         match request {
-            Req::DoSomeThing { data, response } => {
-                let result = do_some_thing(data);
+            ClickhouseAdminServerRequest::Generation { ctx, response } => {
+                let result = ctx.generation();
+                // TODO: Just use `let _` instead of returning an error?
                 response.send(result).expect("OHNOOHNO");
             },
-         //   Req::GenerateConfig { response } => {
-         //       let result =
-         //   }
+            ClickhouseAdminServerRequest::GenerateConfig { response } => {
+                // TODO: Unsure how to make this retrieve data from the API call?
+                response
+                    .send("Generating config and enabling service".to_string())
+                    .expect("failed to send value to channel");
+            }
         }
     }
-}
-
-fn do_some_thing(data: String) -> String {
-    println!("Inside the long running task: {data}");
-    data
 }
 
 pub struct SingleServerContext {

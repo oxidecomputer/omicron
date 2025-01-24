@@ -3,7 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::context::{
-    KeeperServerContext, Req, ServerContext, SingleServerContext,
+    ClickhouseAdminServerRequest, KeeperServerContext, ServerContext,
+    SingleServerContext,
 };
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::{
@@ -90,11 +91,11 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
     ) -> Result<HttpResponseOk<Generation>, HttpError> {
         let ctx = rqctx.context();
 
-        // TODO: Remove, this is only for testing
+        // TODO: Remove? this is only for testing
         let (response_tx, response_rx) = oneshot::channel();
         ctx.tx
-            .send(Req::DoSomeThing {
-                data: "I am the DATA!".to_string(),
+            .send(ClickhouseAdminServerRequest::Generation {
+                ctx: ctx.clone(),
                 response: response_tx,
             })
             .await
@@ -108,9 +109,8 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
                 "RESPONSE: change error before committing".to_string(),
             )
         })?;
-        println!("I DID IT! {result}");
 
-        let gen = match ctx.generation() {
+        let gen = match result {
             Some(g) => g,
             None => {
                 return Err(HttpError::for_client_error(
