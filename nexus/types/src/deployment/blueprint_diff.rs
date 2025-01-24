@@ -101,7 +101,7 @@ impl<'e> BlueprintDiff<'e> {
 }
 
 /// A single value in a diff.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum DiffValue<'e, T> {
     Unchanged(&'e T),
     Changed(Change<'e, T>),
@@ -121,7 +121,7 @@ impl<'e, T> DiffValue<'e, T> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ModifiedZone<'e> {
     pub disposition: DiffValue<'e, BlueprintZoneDisposition>,
     pub filesystem_pool: DiffValue<'e, Option<ZpoolName>>,
@@ -144,7 +144,7 @@ impl<'e> ModifiedZone<'e> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ModifiedDisk<'e> {
     pub disposition: DiffValue<'e, BlueprintPhysicalDiskDisposition>,
 }
@@ -160,7 +160,7 @@ impl<'e> ModifiedDisk<'e> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ModifiedDataset<'e> {
     // The pool is not allowed to change
     pub pool: &'e ZpoolName,
@@ -191,21 +191,21 @@ impl<'e> ModifiedDataset<'e> {
 }
 
 /// All modifications of a sled that we track for purposes of diff display output
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ModifiedSled<'e> {
     pub sled_state: DiffValue<'e, SledState>,
     pub zones_generation: DiffValue<'e, Generation>,
-    pub zones_inserted: IdMap<BlueprintZoneConfig>,
+    pub zones_added: IdMap<BlueprintZoneConfig>,
     pub zones_removed: IdMap<BlueprintZoneConfig>,
     pub zones_unchanged: IdMap<BlueprintZoneConfig>,
     pub zones_modified: BTreeMap<OmicronZoneUuid, ModifiedZone<'e>>,
     pub disks_generation: DiffValue<'e, Generation>,
-    pub disks_inserted: IdMap<BlueprintPhysicalDiskConfig>,
+    pub disks_added: IdMap<BlueprintPhysicalDiskConfig>,
     pub disks_removed: IdMap<BlueprintPhysicalDiskConfig>,
     pub disks_unchanged: IdMap<BlueprintPhysicalDiskConfig>,
     pub disks_modified: BTreeMap<PhysicalDiskUuid, ModifiedDisk<'e>>,
     pub datasets_generation: DiffValue<'e, Generation>,
-    pub datasets_inserted: IdMap<BlueprintDatasetConfig>,
+    pub datasets_added: IdMap<BlueprintDatasetConfig>,
     pub datasets_removed: IdMap<BlueprintDatasetConfig>,
     pub datasets_unchanged: IdMap<BlueprintDatasetConfig>,
     pub datasets_modified: BTreeMap<DatasetUuid, ModifiedDataset<'e>>,
@@ -263,7 +263,7 @@ impl<'e> ModifiedSled<'e> {
 
         // Added
         rows.extend(
-            self.zones_inserted
+            self.zones_added
                 .iter()
                 .map(|zone| zones_row(BpDiffState::Added, zone)),
         );
@@ -367,7 +367,7 @@ impl<'e> ModifiedSled<'e> {
         }));
 
         // Added
-        rows.extend(self.datasets_inserted.iter().map(|dataset| {
+        rows.extend(self.datasets_added.iter().map(|dataset| {
             BpTableRow::from_strings(BpDiffState::Added, dataset.as_strings())
         }));
 
@@ -452,7 +452,7 @@ impl<'e> ModifiedSled<'e> {
 
         // Added
         rows.extend(
-            self.zones_inserted
+            self.zones_added
                 .iter()
                 .map(|zone| zones_row(BpDiffState::Added, zone)),
         );
@@ -483,17 +483,17 @@ impl<'e> ModifiedSled<'e> {
                     .unwrap_or(&SledState::Decommissioned),
             ),
             zones_generation: DiffValue::Unchanged(&zones_cfg.generation),
-            zones_inserted: IdMap::new(),
+            zones_added: IdMap::new(),
             zones_removed: IdMap::new(),
             zones_unchanged: zones_cfg.zones.clone(),
             zones_modified: BTreeMap::new(),
             disks_generation: DiffValue::Unchanged(&disks_cfg.generation),
-            disks_inserted: IdMap::new(),
+            disks_added: IdMap::new(),
             disks_removed: IdMap::new(),
             disks_unchanged: disks_cfg.disks.clone(),
             disks_modified: BTreeMap::new(),
             datasets_generation: DiffValue::Unchanged(&datasets_cfg.generation),
-            datasets_inserted: IdMap::new(),
+            datasets_added: IdMap::new(),
             datasets_removed: IdMap::new(),
             datasets_unchanged: datasets_cfg.datasets.clone(),
             datasets_modified: BTreeMap::new(),

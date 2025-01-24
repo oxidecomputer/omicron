@@ -17,8 +17,6 @@ use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::diff_visitors::visit_blueprint::VisitBlueprint;
-use nexus_types::deployment::diff_visitors::visit_blueprint_datasets_config::VisitBlueprintDatasetsConfig;
-use nexus_types::deployment::diff_visitors::visit_blueprint_physical_disks_config::VisitBlueprintPhysicalDisksConfig;
 use nexus_types::deployment::diff_visitors::visit_blueprint_zones_config::VisitBlueprintZonesConfig;
 use nexus_types::deployment::BpVisitorContext;
 use nexus_types::deployment::{BlueprintZoneConfig, SledFilter};
@@ -106,11 +104,11 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     // in `TestVisitor`.
     let diff = blueprint1.diff(&blueprint2);
     let mut ctx = BpVisitorContext::default();
-    let visitor = TestVisitor::default();
+    let mut visitor = TestVisitor::default();
     visitor.visit_blueprint(&mut ctx, diff);
-    let (modified_sled_id, added_zone) =
+    let (modified_sled_id, new_zone) =
         visitor.added_zones.iter().next().expect("at least one added zone");
-    assert_eq(*modified_sled_id, sled_id);
+    assert_eq!(*modified_sled_id, sled_id);
     assert_eq!(new_zone.kind(), ZoneKind::Nexus);
     let new_zone_addr = new_zone.underlay_ip();
     let new_zone_sockaddr =

@@ -15,7 +15,7 @@ use super::diff_visitors::visit_blueprint::{
 use super::diff_visitors::visit_blueprint_datasets_config::VisitBlueprintDatasetsConfig;
 use super::diff_visitors::visit_blueprint_physical_disks_config::VisitBlueprintPhysicalDisksConfig;
 use super::diff_visitors::visit_blueprint_zones_config::VisitBlueprintZonesConfig;
-use super::diff_visitors::{BpVisitorContext, Change};
+pub use super::diff_visitors::{BpVisitorContext, Change};
 use super::{
     Blueprint, BlueprintDatasetDisposition, BlueprintPhysicalDiskDisposition,
     ClickhouseClusterConfig, CockroachDbPreserveDowngrade,
@@ -250,7 +250,7 @@ impl<'e> VisitBlueprintZonesConfig<'e> for BlueprintDiffer<'e> {
             .sleds_modified
             .entry(sled_id)
             .or_insert(ModifiedSled::new(&self.before, sled_id));
-        s.zones_inserted.insert(node.clone());
+        s.zones_added.insert(node.clone());
     }
 
     fn visit_zones_remove(
@@ -412,7 +412,7 @@ impl<'e> VisitBlueprintPhysicalDisksConfig<'e> for BlueprintDiffer<'e> {
             .sleds_modified
             .entry(sled_id)
             .or_insert(ModifiedSled::new(&self.before, sled_id));
-        s.disks_inserted.insert(node.clone());
+        s.disks_added.insert(node.clone());
     }
 
     fn visit_disks_remove(
@@ -532,7 +532,7 @@ impl<'e> VisitBlueprintDatasetsConfig<'e> for BlueprintDiffer<'e> {
             .sleds_modified
             .entry(sled_id)
             .or_insert(ModifiedSled::new(&self.before, sled_id));
-        s.datasets_inserted.insert(node.clone());
+        s.datasets_added.insert(node.clone());
     }
 
     fn visit_datasets_remove(
