@@ -9,6 +9,7 @@ use crate::{
     git::GitRevision,
     spec::Environment,
     spec_files_blessed::BlessedFiles,
+    spec_files_generated::GeneratedFiles,
     spec_files_generic::ApiSpecFile,
     spec_files_local::LocalFiles,
     FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
@@ -26,7 +27,7 @@ pub(crate) fn dump_impl(
 ) -> anyhow::Result<()> {
     let apis = ManagedApis::all()?;
 
-    // Print information about local files
+    // Print information about local files.
     let local_dir = directory;
     println!("Loading local files from {:?}", local_dir);
     let local_files = LocalFiles::load_from_directory(&local_dir, &apis)?;
@@ -36,6 +37,7 @@ pub(crate) fn dump_impl(
         &local_files.warnings,
     );
 
+    // Print information about what we found in Git.
     if let Some(git_revision) = blessed_revision {
         println!("Loading blessed files from revision {:?}", git_revision);
         let revision = GitRevision::from(git_revision.to_owned());
@@ -45,6 +47,15 @@ pub(crate) fn dump_impl(
     } else {
         println!("Blessed files skipped (no git revision specified)");
     }
+
+    // Print information about generated files.
+    println!("Generating specs from API definitions");
+    let generated = GeneratedFiles::generate(&apis)?;
+    dump_structure(
+        &generated.spec_files,
+        &generated.errors,
+        &generated.warnings,
+    );
 
     Ok(())
 }

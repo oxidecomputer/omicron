@@ -10,9 +10,9 @@ use crate::{
     git::{git_ls_tree, git_merge_base_head, git_show_file, GitRevision},
     spec_files_generic::{ApiSpecFile, ApiSpecFilesBuilder},
 };
-use anyhow::{anyhow, bail, Context};
-use camino::{Utf8Path, Utf8PathBuf};
-use std::{collections::BTreeMap, process::Command};
+use anyhow::anyhow;
+use camino::Utf8Path;
+use std::collections::BTreeMap;
 
 /// Container for "blessed" OpenAPI spec files, found in Git
 ///

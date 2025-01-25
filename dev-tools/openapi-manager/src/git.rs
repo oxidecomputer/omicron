@@ -5,7 +5,7 @@
 //! Helpers for accessing data from git
 //! XXX-dap TODO-doc needs update
 
-use anyhow::{anyhow, bail, Context};
+use anyhow::{bail, Context};
 use camino::{Utf8Path, Utf8PathBuf};
 use std::process::Command;
 

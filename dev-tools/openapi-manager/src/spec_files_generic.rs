@@ -5,7 +5,7 @@
 //! Working with OpenAPI specification files in the repository
 //! XXX-dap TODO-doc needs update
 
-use crate::apis::{ApiIdent, ManagedApis};
+use crate::apis::{ApiIdent, ManagedApi, ManagedApis};
 use anyhow::{anyhow, bail, Context};
 use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
@@ -117,6 +117,24 @@ impl ApiSpecFileName {
         }
 
         Ok(ApiSpecFileName { ident, kind: ApiSpecFileNameKind::Lockstep })
+    }
+
+    pub fn for_lockstep(api: &ManagedApi) -> ApiSpecFileName {
+        ApiSpecFileName {
+            ident: api.ident().clone(),
+            kind: ApiSpecFileNameKind::Lockstep,
+        }
+    }
+
+    pub fn for_versioned(
+        api: &ManagedApi,
+        version: semver::Version,
+        label: String,
+    ) -> ApiSpecFileName {
+        ApiSpecFileName {
+            ident: api.ident().clone(),
+            kind: ApiSpecFileNameKind::Versioned { version, label },
+        }
     }
 
     pub fn ident(&self) -> &ApiIdent {

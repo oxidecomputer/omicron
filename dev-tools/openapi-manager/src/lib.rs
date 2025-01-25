@@ -17,6 +17,7 @@ mod cmd;
 mod combined;
 mod git;
 mod spec_files_blessed;
+mod spec_files_generated;
 mod spec_files_generic;
 mod spec_files_local;
 mod validation;
