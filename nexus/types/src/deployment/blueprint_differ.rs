@@ -393,7 +393,7 @@ impl<'e> VisitBlueprintPhysicalDisksConfig<'e> for BlueprintDiffer<'e> {
             .sleds_modified
             .entry(sled_id)
             .or_insert(ModifiedSled::new(&self.before, sled_id));
-        s.disks_generation = DiffValue::Changed(change);
+        s.disks_generation = Some(DiffValue::Changed(change));
     }
 
     fn visit_disks_insert(
@@ -513,7 +513,7 @@ impl<'e> VisitBlueprintDatasetsConfig<'e> for BlueprintDiffer<'e> {
             .sleds_modified
             .entry(sled_id)
             .or_insert(ModifiedSled::new(&self.before, sled_id));
-        s.datasets_generation = DiffValue::Changed(change);
+        s.datasets_generation = Some(DiffValue::Changed(change));
     }
 
     fn visit_datasets_insert(

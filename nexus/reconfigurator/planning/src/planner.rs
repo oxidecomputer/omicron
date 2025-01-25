@@ -1861,7 +1861,7 @@ mod test {
 
         // The disposition has changed from `InService` to `Expunged` for the 4
         // datasets on this sled.
-        assert_eq!(sled_modified.datasets_modified.len(), 1);
+        assert_eq!(sled_modified.datasets_modified.len(), 4);
         // We don't know the expected name, other than the fact it's a crucible zone
         let test_transient_zone_kind = DatasetKind::TransientZone {
             name: "some-crucible-zone-name".to_string(),
@@ -2015,7 +2015,7 @@ mod test {
         // removing the NTP zone, we should add a new one.
         assert_eq!(sled_modified.zones_added.len(), 1);
         assert_eq!(sled_modified.zones_removed.len(), 0);
-        assert_eq!(sled_modified.zones_modified.len(), 1);
+        assert_eq!(sled_modified.zones_modified.len(), 6);
 
         let added_zone = sled_modified.zones_added.iter().next().unwrap();
         assert_eq!(added_zone.kind(), ZoneKind::InternalNtp);
@@ -2305,10 +2305,6 @@ mod test {
     ) {
         assert!(
             !diff.sleds_added.contains_key(&expunged_sled_id),
-            "for {desc}, no zones should have been added to blueprint"
-        );
-        assert!(
-            !diff.sleds_modified.contains_key(&expunged_sled_id),
             "for {desc}, no zones should have been added to blueprint"
         );
 

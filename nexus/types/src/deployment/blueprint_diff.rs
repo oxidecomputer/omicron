@@ -200,12 +200,20 @@ pub struct ModifiedSled<'e> {
     pub zones_removed: IdMap<BlueprintZoneConfig>,
     pub zones_unchanged: IdMap<BlueprintZoneConfig>,
     pub zones_modified: BTreeMap<OmicronZoneUuid, ModifiedZone<'e>>,
-    pub disks_generation: DiffValue<'e, Generation>,
+
+    // Backwards Compatibility: Disks can be removed from a decommissioned
+    // sled and then the planner may remove or modify a zone. We should prune
+    // `blueprint_disks`, blueprint_datasets`, and `blueprint_zones` together.
+    pub disks_generation: Option<DiffValue<'e, Generation>>,
     pub disks_added: IdMap<BlueprintPhysicalDiskConfig>,
     pub disks_removed: IdMap<BlueprintPhysicalDiskConfig>,
     pub disks_unchanged: IdMap<BlueprintPhysicalDiskConfig>,
     pub disks_modified: BTreeMap<PhysicalDiskUuid, ModifiedDisk<'e>>,
-    pub datasets_generation: DiffValue<'e, Generation>,
+
+    // Backwards Compatibility: Datasets can be removed from a decommissioned
+    // sled and then the planner may remove or modify a zone. We should prune
+    // `blueprint_disks`, blueprint_datasets`, and `blueprint_zones` together.
+    pub datasets_generation: Option<DiffValue<'e, Generation>>,
     pub datasets_added: IdMap<BlueprintDatasetConfig>,
     pub datasets_removed: IdMap<BlueprintDatasetConfig>,
     pub datasets_unchanged: IdMap<BlueprintDatasetConfig>,
@@ -236,7 +244,10 @@ impl<'e> ModifiedSled<'e> {
     /// Note that we don't currently show modified disks for backwards
     /// compatibility, but that is easily added.
     fn disks_table(&self, show_unchanged: bool) -> Option<BpTable> {
-        let generation = match self.disks_generation {
+        let Some(diff) = &self.disks_generation else {
+            return None;
+        };
+        let generation = match *diff {
             DiffValue::Unchanged(generation) => {
                 // Backwards compatibility:. If the generation doesn't change, we shouldn't
                 // have any modifications. However, we currently delete disks when a sled is
@@ -308,7 +319,10 @@ impl<'e> ModifiedSled<'e> {
     /// and (b) put changes towards the bottom, so people have to scroll
     /// back less.
     fn datasets_table(&self, show_unchanged: bool) -> Option<BpTable> {
-        let generation = match self.datasets_generation {
+        let Some(diff) = &self.datasets_generation else {
+            return None;
+        };
+        let generation = match *diff {
             DiffValue::Unchanged(generation) => {
                 // Backwards compatibility:. If the generation doesn't change, we shouldn't
                 // have any modifications. However, we currently delete datasets when a sled is
@@ -543,8 +557,8 @@ impl<'e> ModifiedSled<'e> {
     /// do the same for unchanged zones, disks, and datasets.
     pub fn new(before: &'e Blueprint, sled_id: SledUuid) -> ModifiedSled<'e> {
         let zones_cfg = before.blueprint_zones.get(&sled_id).unwrap();
-        let disks_cfg = before.blueprint_disks.get(&sled_id).unwrap();
-        let datasets_cfg = before.blueprint_datasets.get(&sled_id).unwrap();
+        let disks_cfg = before.blueprint_disks.get(&sled_id);
+        let datasets_cfg = before.blueprint_datasets.get(&sled_id);
         ModifiedSled {
             sled_state: DiffValue::Unchanged(
                 before
@@ -557,15 +571,24 @@ impl<'e> ModifiedSled<'e> {
             zones_removed: IdMap::new(),
             zones_unchanged: zones_cfg.zones.clone(),
             zones_modified: BTreeMap::new(),
-            disks_generation: DiffValue::Unchanged(&disks_cfg.generation),
+            // Backwards compat: See note in the field definition
+            disks_generation: disks_cfg
+                .map(|c| DiffValue::Unchanged(&c.generation)),
             disks_added: IdMap::new(),
             disks_removed: IdMap::new(),
-            disks_unchanged: disks_cfg.disks.clone(),
+            // Backwards compat: See note in the field definition
+            disks_unchanged: disks_cfg
+                .map(|c| c.disks.clone())
+                .unwrap_or(IdMap::new()),
             disks_modified: BTreeMap::new(),
-            datasets_generation: DiffValue::Unchanged(&datasets_cfg.generation),
+            // Backwards compat: See note in the field definition
+            datasets_generation: datasets_cfg
+                .map(|c| DiffValue::Unchanged(&c.generation)),
             datasets_added: IdMap::new(),
             datasets_removed: IdMap::new(),
-            datasets_unchanged: datasets_cfg.datasets.clone(),
+            datasets_unchanged: datasets_cfg
+                .map(|c| c.datasets.clone())
+                .unwrap_or(IdMap::new()),
             datasets_modified: BTreeMap::new(),
         }
     }
