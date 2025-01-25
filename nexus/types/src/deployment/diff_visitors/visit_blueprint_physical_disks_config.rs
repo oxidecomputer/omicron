@@ -8,7 +8,8 @@ use super::Change;
 use crate::deployment::{
     BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
     BlueprintPhysicalDisksConfig, BpVisitorContext, DiskIdentity,
-    EditedBlueprintPhysicalDiskConfig, ZpoolUuid,
+    EditedBlueprintPhysicalDiskConfig, EditedBlueprintPhysicalDisksConfig,
+    ZpoolUuid,
 };
 use diffus::edit::{map, Edit};
 use omicron_common::api::external::Generation;
@@ -23,7 +24,16 @@ pub trait VisitBlueprintPhysicalDisksConfig<'e> {
         visit_root(self, ctx, node);
     }
 
-    /// A change to `BlueprintZonesConfig::generation`
+    /// An alternate top-level call for use by wrapper visitors
+    fn visit_disks_edit(
+        &mut self,
+        ctx: &mut BpVisitorContext,
+        node: &EditedBlueprintPhysicalDisksConfig<'e>,
+    ) {
+        visit_disks_edit(self, ctx, node);
+    }
+
+    /// A change to `BlueprintPhysicalDisksConfig::generation`
     fn visit_generation_change(
         &mut self,
         _ctx: &mut BpVisitorContext,
@@ -110,30 +120,40 @@ pub fn visit_root<'e, V>(
     V: VisitBlueprintPhysicalDisksConfig<'e> + ?Sized,
 {
     if let Edit::Change { diff, .. } = node {
-        if let Edit::Change { diff, .. } = diff.generation {
-            v.visit_generation_change(ctx, diff.into());
-        }
+        v.visit_disks_edit(ctx, &diff);
+    }
+}
 
-        if let Edit::Change { diff, .. } = diff.disks {
-            for (&disk_id, edit) in &diff {
-                ctx.disk_id = Some(*disk_id);
-                match edit {
-                    map::Edit::Copy(_) => {}
-                    map::Edit::Insert(disk_config) => {
-                        v.visit_disks_insert(ctx, disk_config);
-                    }
-                    map::Edit::Remove(disk_config) => {
-                        v.visit_disks_remove(ctx, disk_config);
-                    }
-                    map::Edit::Change { before, after, diff } => {
-                        v.visit_disk_change(ctx, Change::new(before, after));
-                        v.visit_disk_edit(ctx, diff);
-                    }
+pub fn visit_disks_edit<'e, V>(
+    v: &mut V,
+    ctx: &mut BpVisitorContext,
+    node: &EditedBlueprintPhysicalDisksConfig<'e>,
+) where
+    V: VisitBlueprintPhysicalDisksConfig<'e> + ?Sized,
+{
+    if let Edit::Change { diff, .. } = node.generation {
+        v.visit_generation_change(ctx, diff.into());
+    }
+
+    if let Edit::Change { diff, .. } = &node.disks {
+        for (&disk_id, edit) in diff {
+            ctx.disk_id = Some(*disk_id);
+            match edit {
+                map::Edit::Copy(_) => {}
+                map::Edit::Insert(disk_config) => {
+                    v.visit_disks_insert(ctx, disk_config);
+                }
+                map::Edit::Remove(disk_config) => {
+                    v.visit_disks_remove(ctx, disk_config);
+                }
+                map::Edit::Change { before, after, diff } => {
+                    v.visit_disk_change(ctx, Change::new(before, after));
+                    v.visit_disk_edit(ctx, &diff);
                 }
             }
-            // Reset the context
-            ctx.disk_id = None;
         }
+        // Reset the context
+        ctx.disk_id = None;
     }
 }
 

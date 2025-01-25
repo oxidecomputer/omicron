@@ -6934,6 +6934,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_matches",
+ "diffus",
  "dropshot 0.15.1",
  "futures",
  "internal-dns-resolver",

@@ -7,6 +7,7 @@ mod common;
 use anyhow::Context;
 use common::reconfigurator::blueprint_edit_current_target;
 use common::LiveTestContext;
+use diffus::Diffable;
 use futures::TryStreamExt;
 use live_tests_macros::live_test;
 use nexus_client::types::Saga;
@@ -15,13 +16,41 @@ use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_sled_agent_shared::inventory::ZoneKind;
-use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::diff_visitors::visit_blueprint::VisitBlueprint;
+use nexus_types::deployment::diff_visitors::visit_blueprint_zones_config::VisitBlueprintZonesConfig;
+use nexus_types::deployment::BpVisitorContext;
+use nexus_types::deployment::{BlueprintZoneConfig, SledFilter};
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_uuid_kinds::SledUuid;
 use slog::{debug, info};
 use std::net::SocketAddrV6;
 use std::time::Duration;
+
+// A visitor that is used to capture changes to a blueprint used by this test
+#[derive(Default)]
+pub struct TestVisitor {
+    pub added_zones: Vec<(SledUuid, BlueprintZoneConfig)>,
+}
+
+impl<'e> VisitBlueprint<'e> for TestVisitor {
+    fn zones_visitor(
+        &mut self,
+    ) -> Option<&mut impl VisitBlueprintZonesConfig<'e>> {
+        Some(&mut *self)
+    }
+}
+
+impl<'e> VisitBlueprintZonesConfig<'e> for TestVisitor {
+    fn visit_zones_insert(
+        &mut self,
+        ctx: &mut nexus_types::deployment::BpVisitorContext,
+        node: &BlueprintZoneConfig,
+    ) {
+        self.added_zones.push((ctx.sled_id.unwrap(), node.clone()));
+    }
+}
 
 // TODO-coverage This test could check other stuff:
 //
@@ -71,16 +100,15 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     .expect("editing blueprint to add zone");
 
     // Figure out which zone is new and make a new client for it.
-    let diff = blueprint2.diff_since_blueprint(&blueprint1);
-    let new_zone = diff
-        .zones
-        .added
-        .values()
-        .next()
-        .expect("at least one sled with added zones")
-        .zones
-        .first()
-        .expect("at least one added zone on that sled");
+    // Utilize diffus directly rather than our wrapper to capture  the changes
+    // in `TestVisitor`.
+    let diff = blueprint1.diff(&blueprint2);
+    let mut ctx = BpVisitorContext::default();
+    let mut visitor = TestVisitor::default();
+    visitor.visit_blueprint(&mut ctx, diff);
+    let (modified_sled_id, new_zone) =
+        visitor.added_zones.iter().next().expect("at least one added zone");
+    assert_eq!(*modified_sled_id, sled_id);
     assert_eq!(new_zone.kind(), ZoneKind::Nexus);
     let new_zone_addr = new_zone.underlay_ip();
     let new_zone_sockaddr =

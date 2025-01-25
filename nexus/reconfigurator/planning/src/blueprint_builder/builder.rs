@@ -2010,11 +2010,12 @@ pub mod test {
 
         // One sled was added.
         assert_eq!(diff.sleds_added.len(), 1);
-        let sled_id = diff.sleds_added.first().unwrap();
-        let new_sled_zones = diff.zones.added.get(sled_id).unwrap();
+        let (sled_id, sled_insert) =
+            diff.sleds_added.first_key_value().unwrap();
+        let new_sled_zones = sled_insert.zones.unwrap();
         assert_eq!(*sled_id, new_sled_id);
         // The generation number should be newer than the initial default.
-        assert!(new_sled_zones.generation_after.unwrap() > Generation::new());
+        assert!(new_sled_zones.generation > Generation::new());
 
         // All zones' underlay addresses ought to be on the sled's subnet.
         for z in &new_sled_zones.zones {
