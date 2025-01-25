@@ -370,7 +370,7 @@ impl<'e> VisitBlueprintZonesConfig<'e> for BlueprintDiffer<'e> {
         change: Change<'e, BlueprintZoneType>,
     ) {
         self.diff.errors.push(format!(
-            "Zone type not allowed to change. before: {:?}, after: {:?}",
+            "Zone type not allowed to change. before: {:#?}, after: {:#?}",
             change.before, change.after
         ));
     }
