@@ -187,7 +187,7 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
 
   sled 68d24ac5-f341-49ea-a92a-0381b52ab387 (was active):
 
-    omicron zones from generation 2:
+    omicron zones at generation 2:
     ---------------------------------------------------------------------------------------------
     zone type         zone id                                disposition   underlay IP           
     ---------------------------------------------------------------------------------------------
@@ -298,6 +298,8 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
 -   crucible          0e8e9f2d-291d-47fc-ba0f-84cb50e713fd   in service     fd00:1122:3344:105::2c
 *   crucible          0ce2b998-f5ad-4dc5-b2ec-5250a308506d   - in service   fd00:1122:3344:105::25
      └─                                                      + quiesced                           
+*   internal_ntp      b0a48e5a-e2bd-46b2-9bc6-8babbbdc0adc   in service     fd00:1122:3344:105::21
+*   nexus             88602518-f176-49a1-af12-02fac36214c3   in service     fd00:1122:3344:105::22
 
 
   sled 48d95fef-bc9f-4f50-9a53-1e075836291d (decommissioned):
@@ -323,66 +325,8 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
 
 
 ERRORS:
-
-  sled 2d1cb4f2-cf44-40fc-b118-85036eb732a9
-
-    zone diff errors: before gen 2, after gen 2
-
-      zone id: 88602518-f176-49a1-af12-02fac36214c3
-      reason: mismatched underlay IP: before: fd00:1122:3344:105::22, after: fd01:1122:3344:105::22
-mismatched zone type: after: Nexus(
-    Nexus {
-        internal_address: [fd01:1122:3344:105::22]:12221,
-        external_ip: OmicronZoneExternalFloatingIp {
-            id: cc0d03f3-64b0-45c2-8fff-08f77c993590 (external_ip),
-            ip: 192.0.2.2,
-        },
-        nic: NetworkInterface {
-            id: 3eadc40f-d6ec-4bd0-8824-9dc47ca61302,
-            kind: Service {
-                id: 88602518-f176-49a1-af12-02fac36214c3,
-            },
-            name: Name(
-                "nexus-88602518-f176-49a1-af12-02fac36214c3",
-            ),
-            ip: 172.30.2.5,
-            mac: MacAddr(
-                MacAddr6(
-                    [
-                        168,
-                        64,
-                        37,
-                        255,
-                        128,
-                        0,
-                    ],
-                ),
-            ),
-            subnet: V4(
-                Ipv4Net {
-                    addr: 172.30.2.0,
-                    width: 24,
-                },
-            ),
-            vni: Vni(
-                100,
-            ),
-            primary: true,
-            slot: 0,
-            transit_ips: [],
-        },
-        external_tls: false,
-        external_dns_servers: [],
-    },
-)
-
-      zone id: b0a48e5a-e2bd-46b2-9bc6-8babbbdc0adc
-      reason: mismatched underlay IP: before: fd00:1122:3344:105::21, after: fd01:1122:3344:105::21
-mismatched zone type: after: InternalNtp(
-    InternalNtp {
-        address: [fd01:1122:3344:105::21]:123,
-    },
-)
+Zone type not allowed to change. before: Nexus(Nexus { internal_address: [fd00:1122:3344:105::22]:12221, external_ip: OmicronZoneExternalFloatingIp { id: cc0d03f3-64b0-45c2-8fff-08f77c993590 (external_ip), ip: 192.0.2.2 }, nic: NetworkInterface { id: 3eadc40f-d6ec-4bd0-8824-9dc47ca61302, kind: Service { id: 88602518-f176-49a1-af12-02fac36214c3 }, name: Name("nexus-88602518-f176-49a1-af12-02fac36214c3"), ip: 172.30.2.5, mac: MacAddr(MacAddr6([168, 64, 37, 255, 128, 0])), subnet: V4(Ipv4Net { addr: 172.30.2.0, width: 24 }), vni: Vni(100), primary: true, slot: 0, transit_ips: [] }, external_tls: false, external_dns_servers: [] }), after: Nexus(Nexus { internal_address: [fd01:1122:3344:105::22]:12221, external_ip: OmicronZoneExternalFloatingIp { id: cc0d03f3-64b0-45c2-8fff-08f77c993590 (external_ip), ip: 192.0.2.2 }, nic: NetworkInterface { id: 3eadc40f-d6ec-4bd0-8824-9dc47ca61302, kind: Service { id: 88602518-f176-49a1-af12-02fac36214c3 }, name: Name("nexus-88602518-f176-49a1-af12-02fac36214c3"), ip: 172.30.2.5, mac: MacAddr(MacAddr6([168, 64, 37, 255, 128, 0])), subnet: V4(Ipv4Net { addr: 172.30.2.0, width: 24 }), vni: Vni(100), primary: true, slot: 0, transit_ips: [] }, external_tls: false, external_dns_servers: [] })
+Zone type not allowed to change. before: InternalNtp(InternalNtp { address: [fd00:1122:3344:105::21]:123 }), after: InternalNtp(InternalNtp { address: [fd01:1122:3344:105::21]:123 })
 
  COCKROACHDB SETTINGS:
     state fingerprint:::::::::::::::::   (none) (unchanged)
