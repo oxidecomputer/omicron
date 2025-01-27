@@ -348,6 +348,10 @@ task: "physical_disk_adoption"
     ensure new physical disks are automatically marked in-service
 
 
+task: "read_only_region_replacement_start"
+    detect if read-only regions need replacement and begin the process
+
+
 task: "region_replacement"
     detects if a region requires replacing and begins the process
 
@@ -623,6 +627,14 @@ task: "physical_disk_adoption"
   last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: task disabled
+
+task: "read_only_region_replacement_start"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total requests created ok: 0
+    errors: 0
 
 task: "region_replacement"
   configured period: every <REDACTED_DURATION>m
@@ -1114,6 +1126,14 @@ task: "physical_disk_adoption"
   last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: task disabled
+
+task: "read_only_region_replacement_start"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total requests created ok: 0
+    errors: 0
 
 task: "region_replacement"
   configured period: every <REDACTED_DURATION>m

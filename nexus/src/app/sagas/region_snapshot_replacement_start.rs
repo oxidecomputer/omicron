@@ -62,6 +62,7 @@ use crate::app::sagas::common_storage::find_only_new_region;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::RegionAllocationStrategy;
 use crate::app::{authn, db};
+use nexus_db_model::ReadOnlyTargetReplacement;
 use nexus_db_queries::db::datastore::NewRegionVolumeId;
 use nexus_db_queries::db::datastore::OldSnapshotVolumeId;
 use nexus_types::identity::Resource;
@@ -95,6 +96,9 @@ declare_saga_actions! {
     SET_SAGA_ID -> "unused_1" {
         + rsrss_set_saga_id
         - rsrss_set_saga_id_undo
+    }
+    GET_REQUEST_SNAPSHOT_AND_REGION_ID -> "snapshot_and_region_id" {
+        + rsrss_get_snapshot_and_region_id
     }
     GET_CLONE_SOURCE -> "clone_source" {
         + rsrss_get_clone_source
@@ -202,6 +206,7 @@ impl NexusSaga for SagaRegionSnapshotReplacementStart {
         ));
 
         builder.append(set_saga_id_action());
+        builder.append(get_request_snapshot_and_region_id_action());
         builder.append(get_clone_source_action());
         builder.append(get_alloc_region_params_action());
         builder.append(alloc_new_region_action());
@@ -280,6 +285,61 @@ enum CloneSource {
     Region { region_id: Uuid },
 }
 
+async fn rsrss_get_snapshot_and_region_id(
+    sagactx: NexusActionContext,
+) -> Result<(Uuid, Uuid), ActionError> {
+    let params = sagactx.saga_params::<Params>()?;
+    let osagactx = sagactx.user_data();
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let (snapshot_id, region_id) = match params.request.replacement_type() {
+        ReadOnlyTargetReplacement::RegionSnapshot {
+            region_id,
+            snapshot_id,
+            ..
+        } => (snapshot_id, region_id),
+
+        ReadOnlyTargetReplacement::ReadOnlyRegion { region_id } => {
+            let Some(region) = osagactx
+                .datastore()
+                .get_region_optional(region_id)
+                .await
+                .map_err(ActionError::action_failed)?
+            else {
+                return Err(ActionError::action_failed(Error::internal_error(
+                    &format!("region {region_id} deleted"),
+                )));
+            };
+
+            let maybe_snapshot = osagactx
+                .datastore()
+                .find_snapshot_by_volume_id(&opctx, region.volume_id())
+                .await
+                .map_err(ActionError::action_failed)?;
+
+            match maybe_snapshot {
+                Some(snapshot) => (snapshot.id(), region.id()),
+
+                None => {
+                    return Err(ActionError::action_failed(
+                        Error::internal_error(&format!(
+                            "region {} volume {} deleted",
+                            region.id(),
+                            region.volume_id(),
+                        )),
+                    ));
+                }
+            }
+        }
+    };
+
+    Ok((snapshot_id, region_id))
+}
+
 async fn rsrss_get_clone_source(
     sagactx: NexusActionContext,
 ) -> Result<CloneSource, ActionError> {
@@ -323,6 +383,9 @@ async fn rsrss_get_clone_source(
     // reason behind this. The region snapshots and read-only regions will have
     // identical contents.
 
+    let (snapshot_id, _) =
+        sagactx.lookup::<(Uuid, Uuid)>("snapshot_and_region_id")?;
+
     // First, try to select another region snapshot that's part of this
     // snapshot.
 
@@ -333,27 +396,38 @@ async fn rsrss_get_clone_source(
 
     let mut non_expunged_region_snapshots = osagactx
         .datastore()
-        .find_non_expunged_region_snapshots(
-            &opctx,
-            params.request.old_snapshot_id,
-        )
+        .find_non_expunged_region_snapshots(&opctx, snapshot_id)
         .await
         .map_err(ActionError::action_failed)?;
 
-    // Filter out the request's region snapshot - if there are no other
-    // candidates, this could be chosen later in this function.
+    // Filter out the request's region snapshot, if appropriate - if there are
+    // no other candidates, this could be chosen later in this function, but it
+    // may be experiencing problems and shouldn't be the first choice for a
+    // clone source.
 
-    non_expunged_region_snapshots.retain(|rs| {
-        !(rs.dataset_id == params.request.old_dataset_id
-            && rs.region_id == params.request.old_region_id
-            && rs.snapshot_id == params.request.old_snapshot_id)
-    });
+    match params.request.replacement_type() {
+        ReadOnlyTargetReplacement::RegionSnapshot {
+            dataset_id,
+            region_id,
+            snapshot_id,
+        } => {
+            non_expunged_region_snapshots.retain(|rs| {
+                !(rs.dataset_id == dataset_id
+                    && rs.region_id == region_id
+                    && rs.snapshot_id == snapshot_id)
+            });
+        }
+
+        ReadOnlyTargetReplacement::ReadOnlyRegion { .. } => {
+            // no-op
+        }
+    }
 
     if let Some(candidate) = non_expunged_region_snapshots.pop() {
         info!(
             log,
             "found another non-expunged region snapshot";
-            "snapshot_id" => %params.request.old_snapshot_id,
+            "snapshot_id" => %snapshot_id,
             "dataset_id" => %candidate.dataset_id,
             "region_id" => %candidate.region_id,
         );
@@ -370,22 +444,19 @@ async fn rsrss_get_clone_source(
     info!(
         log,
         "no region snapshot clone source candidates";
-        "snapshot_id" => %params.request.old_snapshot_id,
+        "snapshot_id" => %snapshot_id,
     );
 
     // Look up the existing snapshot
     let maybe_db_snapshot = osagactx
         .datastore()
-        .snapshot_get(&opctx, params.request.old_snapshot_id)
+        .snapshot_get(&opctx, snapshot_id)
         .await
         .map_err(ActionError::action_failed)?;
 
     let Some(db_snapshot) = maybe_db_snapshot else {
         return Err(ActionError::action_failed(Error::internal_error(
-            &format!(
-                "snapshot {} was hard deleted!",
-                params.request.old_snapshot_id
-            ),
+            &format!("snapshot {} was hard deleted!", snapshot_id),
         )));
     };
 
@@ -395,11 +466,23 @@ async fn rsrss_get_clone_source(
         .await
         .map_err(ActionError::action_failed)?;
 
+    // Filter out the request's region, if appropriate.
+
+    match params.request.replacement_type() {
+        ReadOnlyTargetReplacement::RegionSnapshot { .. } => {
+            // no-op
+        }
+
+        ReadOnlyTargetReplacement::ReadOnlyRegion { region_id } => {
+            non_expunged_read_only_regions.retain(|r| r.id() != region_id);
+        }
+    }
+
     if let Some(candidate) = non_expunged_read_only_regions.pop() {
         info!(
             log,
             "found region clone source candidate";
-            "snapshot_id" => %params.request.old_snapshot_id,
+            "snapshot_id" => %snapshot_id,
             "dataset_id" => %candidate.dataset_id(),
             "region_id" => %candidate.id(),
         );
@@ -408,26 +491,69 @@ async fn rsrss_get_clone_source(
     }
 
     // If no other non-expunged region snapshot or read-only region exists, then
-    // check if the request's region snapshot is non-expunged. This will use the
-    // region snapshot that is being replaced as a clone source, which may not
-    // work if there's a problem with that region snapshot that this replacement
-    // request is meant to fix!
+    // check if the request's read-only target is non-expunged. This will use
+    // the region snapshot or read-only region that is being replaced as a clone
+    // source, which may not work if there's a problem with it that this
+    // replacement request is meant to fix!
 
-    let request_dataset_on_in_service_physical_disk = osagactx
-        .datastore()
-        .crucible_dataset_physical_disk_in_service(
-            params.request.old_dataset_id.into(),
-        )
-        .await
-        .map_err(ActionError::action_failed)?;
+    match params.request.replacement_type() {
+        ReadOnlyTargetReplacement::RegionSnapshot {
+            dataset_id,
+            region_id,
+            ..
+        } => {
+            let request_dataset_on_in_service_physical_disk = osagactx
+                .datastore()
+                .crucible_dataset_physical_disk_in_service(dataset_id.into())
+                .await
+                .map_err(ActionError::action_failed)?;
 
-    if request_dataset_on_in_service_physical_disk {
-        // If the request region snapshot's dataset has not been expunged, it
-        // can be used
-        return Ok(CloneSource::RegionSnapshot {
-            dataset_id: params.request.old_dataset_id.into(),
-            region_id: params.request.old_region_id,
-        });
+            if request_dataset_on_in_service_physical_disk {
+                // If the request region snapshot's dataset has not been
+                // expunged, it can be used
+
+                info!(
+                    log,
+                    "using request region snapshot as clone source candidate"
+                );
+
+                return Ok(CloneSource::RegionSnapshot {
+                    dataset_id: dataset_id.into(),
+                    region_id,
+                });
+            }
+        }
+
+        ReadOnlyTargetReplacement::ReadOnlyRegion { region_id } => {
+            let Some(region) = osagactx
+                .datastore()
+                .get_region_optional(region_id)
+                .await
+                .map_err(ActionError::action_failed)?
+            else {
+                return Err(ActionError::action_failed(Error::internal_error(
+                    &format!("region {region_id} deleted"),
+                )));
+            };
+
+            let request_dataset_on_in_service_physical_disk = osagactx
+                .datastore()
+                .crucible_dataset_physical_disk_in_service(region.dataset_id())
+                .await
+                .map_err(ActionError::action_failed)?;
+
+            if request_dataset_on_in_service_physical_disk {
+                // If the request read-only region's dataset has not been
+                // expunged, it can be used.
+
+                info!(
+                    log,
+                    "using request read-only region as clone source candidate"
+                );
+
+                return Ok(CloneSource::Region { region_id });
+            }
+        }
     }
 
     // If all targets of a Volume::Region are on expunged datasets, then the
@@ -435,7 +561,7 @@ async fn rsrss_get_clone_source(
 
     return Err(ActionError::action_failed(format!(
         "no clone source candidate for {}!",
-        params.request.old_snapshot_id,
+        snapshot_id,
     )));
 }
 
@@ -462,25 +588,26 @@ async fn rsrss_get_alloc_region_params(
     );
 
     // Look up the existing snapshot
+
+    let (snapshot_id, region_id) =
+        sagactx.lookup::<(Uuid, Uuid)>("snapshot_and_region_id")?;
+
     let maybe_db_snapshot = osagactx
         .datastore()
-        .snapshot_get(&opctx, params.request.old_snapshot_id)
+        .snapshot_get(&opctx, snapshot_id)
         .await
         .map_err(ActionError::action_failed)?;
 
     let Some(db_snapshot) = maybe_db_snapshot else {
         return Err(ActionError::action_failed(Error::internal_error(
-            &format!(
-                "snapshot {} was hard deleted!",
-                params.request.old_snapshot_id
-            ),
+            &format!("snapshot {} was hard deleted!", snapshot_id),
         )));
     };
 
     // Find the region to replace
     let db_region = osagactx
         .datastore()
-        .get_region(params.request.old_region_id)
+        .get_region(region_id)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -613,7 +740,6 @@ async fn rsrss_new_region_ensure(
     (nexus_db_model::CrucibleDataset, crucible_agent_client::types::Region),
     ActionError,
 > {
-    let params = sagactx.saga_params::<Params>()?;
     let osagactx = sagactx.user_data();
     let log = osagactx.log();
 
@@ -622,24 +748,22 @@ async fn rsrss_new_region_ensure(
             "new_dataset_and_region",
         )?;
 
+    let (snapshot_id, _) =
+        sagactx.lookup::<(Uuid, Uuid)>("snapshot_and_region_id")?;
     let clone_source = sagactx.lookup::<CloneSource>("clone_source")?;
 
     let mut source_repair_addr: SocketAddrV6 = match clone_source {
         CloneSource::RegionSnapshot { dataset_id, region_id } => {
             let region_snapshot = osagactx
                 .datastore()
-                .region_snapshot_get(
-                    dataset_id,
-                    region_id,
-                    params.request.old_snapshot_id,
-                )
+                .region_snapshot_get(dataset_id, region_id, snapshot_id)
                 .await
                 .map_err(ActionError::action_failed)?;
 
             let Some(region_snapshot) = region_snapshot else {
                 return Err(ActionError::action_failed(format!(
                     "region snapshot {} {} {} deleted!",
-                    dataset_id, region_id, params.request.old_snapshot_id,
+                    dataset_id, region_id, snapshot_id,
                 )));
             };
 
@@ -813,19 +937,19 @@ async fn rsrss_get_old_snapshot_volume_id(
         &params.serialized_authn,
     );
 
+    let (snapshot_id, _) =
+        sagactx.lookup::<(Uuid, Uuid)>("snapshot_and_region_id")?;
+
     // Look up the existing snapshot
     let maybe_db_snapshot = osagactx
         .datastore()
-        .snapshot_get(&opctx, params.request.old_snapshot_id)
+        .snapshot_get(&opctx, snapshot_id)
         .await
         .map_err(ActionError::action_failed)?;
 
     let Some(db_snapshot) = maybe_db_snapshot else {
         return Err(ActionError::action_failed(Error::internal_error(
-            &format!(
-                "snapshot {} was hard deleted!",
-                params.request.old_snapshot_id
-            ),
+            &format!("snapshot {} was hard deleted!", snapshot_id),
         )));
     };
 
@@ -906,7 +1030,7 @@ async fn rsrss_create_fake_volume_undo(
 #[derive(Debug)]
 struct ReplaceParams {
     old_volume_id: VolumeUuid,
-    old_snapshot_address: SocketAddrV6,
+    old_target_address: SocketAddrV6,
     new_region_address: SocketAddrV6,
     new_volume_id: VolumeUuid,
 }
@@ -919,36 +1043,19 @@ async fn get_replace_params(
 
     let new_volume_id = sagactx.lookup::<VolumeUuid>("new_volume_id")?;
 
-    let region_snapshot = osagactx
+    let Some(old_target_address) = osagactx
         .datastore()
-        .region_snapshot_get(
-            params.request.old_dataset_id.into(),
-            params.request.old_region_id,
-            params.request.old_snapshot_id,
-        )
+        .read_only_target_addr(&params.request)
         .await
-        .map_err(ActionError::action_failed)?;
-
-    let Some(region_snapshot) = region_snapshot else {
+        .map_err(ActionError::action_failed)?
+    else {
+        // This is ok - the next background task invocation will move the
+        // request state forward appropriately.
         return Err(ActionError::action_failed(format!(
-            "region snapshot {} {} {} deleted!",
-            params.request.old_dataset_id,
-            params.request.old_region_id,
-            params.request.old_snapshot_id,
+            "request {} target deleted!",
+            params.request.id,
         )));
     };
-
-    let old_snapshot_address: SocketAddrV6 =
-        match region_snapshot.snapshot_addr.parse() {
-            Ok(addr) => addr,
-
-            Err(e) => {
-                return Err(ActionError::action_failed(format!(
-                    "parsing {} as SocketAddrV6 failed: {e}",
-                    region_snapshot.snapshot_addr,
-                )));
-            }
-        };
 
     let (new_dataset, ensured_region) =
         sagactx.lookup::<(
@@ -971,7 +1078,7 @@ async fn get_replace_params(
     // will swap the existing and replacement target
     Ok(ReplaceParams {
         old_volume_id,
-        old_snapshot_address,
+        old_target_address,
         new_region_address,
         new_volume_id,
     })
@@ -988,7 +1095,7 @@ async fn rsrss_replace_snapshot_in_volume(
     info!(
         log,
         "replacing {} with {} in volume {}",
-        replacement_params.old_snapshot_address,
+        replacement_params.old_target_address,
         replacement_params.new_region_address,
         replacement_params.old_volume_id,
     );
@@ -999,7 +1106,7 @@ async fn rsrss_replace_snapshot_in_volume(
         .datastore()
         .volume_replace_snapshot(
             VolumeWithTarget(replacement_params.old_volume_id),
-            ExistingTarget(replacement_params.old_snapshot_address),
+            ExistingTarget(replacement_params.old_target_address),
             ReplacementTarget(replacement_params.new_region_address),
             VolumeToDelete(replacement_params.new_volume_id),
         )
@@ -1049,7 +1156,7 @@ async fn rsrss_replace_snapshot_in_volume_undo(
     info!(
         log,
         "undo: replacing {} with {} in volume {}",
-        replacement_params.old_snapshot_address,
+        replacement_params.old_target_address,
         replacement_params.new_region_address,
         replacement_params.old_volume_id,
     );
@@ -1065,7 +1172,7 @@ async fn rsrss_replace_snapshot_in_volume_undo(
         .volume_replace_snapshot(
             VolumeWithTarget(replacement_params.old_volume_id),
             ExistingTarget(replacement_params.new_region_address),
-            ReplacementTarget(replacement_params.old_snapshot_address),
+            ReplacementTarget(replacement_params.old_target_address),
             VolumeToDelete(replacement_params.new_volume_id),
         )
         .await?;

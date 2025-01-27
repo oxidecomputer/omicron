@@ -202,37 +202,29 @@ impl RegionSnapshotReplacementDetector {
         for request in requests {
             let request_id = request.id;
 
-            // If the region snapshot is gone, then there are no more references
-            // in any volume, and the whole region snapshot replacement can be
-            // fast-tracked to Complete.
+            // If the region snapshot or read-only region is gone, then there
+            // are no more references in any volume, and the whole region
+            // snapshot replacement can be fast-tracked to Complete.
 
-            let maybe_region_snapshot = match self
-                .datastore
-                .region_snapshot_get(
-                    request.old_dataset_id.into(),
-                    request.old_region_id,
-                    request.old_snapshot_id,
-                )
-                .await
-            {
-                Ok(maybe_region_snapshot) => maybe_region_snapshot,
+            let deleted =
+                match self.datastore.read_only_target_deleted(&request).await {
+                    Ok(deleted) => deleted,
 
-                Err(e) => {
-                    let s = format!("query for region snapshot failed: {e}");
+                    Err(e) => {
+                        let s = format!(
+                            "error querying for read-only target deletion: {e}",
+                        );
+                        error!(
+                            &log,
+                            "{s}";
+                            "request_id" => %request_id,
+                        );
+                        status.errors.push(s);
+                        continue;
+                    }
+                };
 
-                    error!(
-                        &log,
-                        "{s}";
-                        "request.snapshot_id" => %request.old_snapshot_id,
-                        "request.region_id" => %request.old_region_id,
-                        "request.dataset_id" => %request.old_dataset_id,
-                    );
-                    status.errors.push(s);
-                    return;
-                }
-            };
-
-            if maybe_region_snapshot.is_none() {
+            if deleted {
                 match self
                     .datastore
                     .set_region_snapshot_replacement_complete_from_requested(
@@ -277,13 +269,7 @@ impl RegionSnapshotReplacementDetector {
                         {request_id}"
                     );
 
-                    info!(
-                        &log,
-                        "{s}";
-                        "request.snapshot_id" => %request.old_snapshot_id,
-                        "request.region_id" => %request.old_region_id,
-                        "request.dataset_id" => %request.old_dataset_id,
-                    );
+                    info!(&log, "{s}");
                     status.start_invoked_ok.push(s);
                 }
 
@@ -293,13 +279,7 @@ impl RegionSnapshotReplacementDetector {
                         {request_id} failed: {e}",
                     );
 
-                    error!(
-                        &log,
-                        "{s}";
-                        "request.snapshot_id" => %request.old_snapshot_id,
-                        "request.region_id" => %request.old_region_id,
-                        "request.dataset_id" => %request.old_dataset_id,
-                    );
+                    error!(&log, "{s}");
                     status.errors.push(s);
                 }
             }
@@ -342,6 +322,7 @@ mod test {
     use nexus_db_model::BlockSize;
     use nexus_db_model::Generation;
     use nexus_db_model::PhysicalDiskPolicy;
+    use nexus_db_model::ReadOnlyTargetReplacement;
     use nexus_db_model::RegionSnapshot;
     use nexus_db_model::RegionSnapshotReplacement;
     use nexus_db_model::Snapshot;
@@ -404,8 +385,11 @@ mod test {
 
         datastore.region_snapshot_create(region_snapshot).await.unwrap();
 
-        let request =
-            RegionSnapshotReplacement::new(dataset_id, region_id, snapshot_id);
+        let request = RegionSnapshotReplacement::new_from_region_snapshot(
+            dataset_id,
+            region_id,
+            snapshot_id,
+        );
 
         let request_id = request.id;
 
@@ -625,12 +609,21 @@ mod test {
             .await
             .unwrap();
 
-        assert_eq!(request.old_snapshot_id, snapshot_id);
-        assert_eq!(request.old_region_id, region_id);
+        let ReadOnlyTargetReplacement::RegionSnapshot {
+            dataset_id: replacement_dataset_id,
+            region_id: replacement_region_id,
+            snapshot_id: replacement_snapshot_id,
+        } = request.replacement_type()
+        else {
+            panic!("wrong type!");
+        };
+
+        assert_eq!(replacement_snapshot_id, snapshot_id);
+        assert_eq!(replacement_region_id, region_id);
 
         let dataset_id =
             dataset_to_zpool.get(&first_zpool.id.to_string()).unwrap();
-        assert_eq!(&request.old_dataset_id.to_string(), dataset_id);
+        assert_eq!(&replacement_dataset_id.to_string(), dataset_id);
     }
 
     #[nexus_test(server = crate::Server)]
@@ -681,8 +674,11 @@ mod test {
             .await
             .unwrap();
 
-        let request =
-            RegionSnapshotReplacement::new(dataset_id, region_id, snapshot_id);
+        let request = RegionSnapshotReplacement::new_from_region_snapshot(
+            dataset_id,
+            region_id,
+            snapshot_id,
+        );
 
         let request_id = request.id;
 

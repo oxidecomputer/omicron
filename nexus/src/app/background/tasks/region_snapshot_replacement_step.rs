@@ -202,65 +202,42 @@ impl RegionSnapshotReplacementFindAffected {
         };
 
         for request in requests {
-            // Find all volumes that reference the replaced snapshot
-            let region_snapshot = match self
-                .datastore
-                .region_snapshot_get(
-                    request.old_dataset_id.into(),
-                    request.old_region_id,
-                    request.old_snapshot_id,
-                )
-                .await
-            {
-                Ok(Some(region_snapshot)) => region_snapshot,
+            // Find all volumes that reference the replaced read-only target
+            let target_addr =
+                match self.datastore.read_only_target_addr(&request).await {
+                    Ok(Some(address)) => address,
 
-                Ok(None) => {
-                    // If the associated region snapshot was deleted, then there
-                    // are no more volumes that reference it. This is not an
-                    // error! Continue processing the other requests.
-                    let s = format!(
-                        "region snapshot {} {} {} not found",
-                        request.old_dataset_id,
-                        request.old_region_id,
-                        request.old_snapshot_id,
-                    );
-                    info!(&log, "{s}");
+                    Ok(None) => {
+                        // If the associated region snapshot or read-only region was
+                        // deleted, then there are no more volumes that reference
+                        // it. This is not an error! Continue processing the other
+                        // requests.
+                        let s = format!(
+                            "read-only target for {} not found",
+                            request.id,
+                        );
+                        info!(&log, "{s}");
 
-                    continue;
-                }
+                        continue;
+                    }
 
-                Err(e) => {
-                    let s = format!(
-                        "error querying for region snapshot {} {} {}: {e}",
-                        request.old_dataset_id,
-                        request.old_region_id,
-                        request.old_snapshot_id,
-                    );
-                    error!(&log, "{s}");
-                    status.errors.push(s);
+                    Err(e) => {
+                        let s = format!(
+                            "error querying for read-only target address: {e}",
+                        );
+                        error!(&log, "{s}"; "request_id" => %request.id);
+                        status.errors.push(s);
 
-                    continue;
-                }
-            };
-
-            let snapshot_addr = match region_snapshot.snapshot_addr.parse() {
-                Ok(addr) => addr,
-
-                Err(e) => {
-                    let s = format!(
-                        "region snapshot addr {} could not be parsed: {e}",
-                        region_snapshot.snapshot_addr,
-                    );
-                    error!(&log, "{s}");
-                    status.errors.push(s);
-
-                    continue;
-                }
-            };
+                        continue;
+                    }
+                };
 
             let volumes = match self
                 .datastore
-                .find_volumes_referencing_socket_addr(&opctx, snapshot_addr)
+                .find_volumes_referencing_socket_addr(
+                    &opctx,
+                    target_addr.into(),
+                )
                 .await
             {
                 Ok(volumes) => volumes,
@@ -293,16 +270,16 @@ impl RegionSnapshotReplacementFindAffected {
                 // step records are created for some volume id, and a null old
                 // snapshot volume id:
                 //
-                //   volume_id: references snapshot_addr
+                //   volume_id: references target_addr
                 //   old_snapshot_volume_id: null
                 //
                 // The region snapshot replacement step saga will create a
-                // volume to stash the reference to snapshot_addr, and then call
-                // `volume_replace_snapshot`. This will swap snapshot_addr
+                // volume to stash the reference to target_addr, and then call
+                // `volume_replace_snapshot`. This will swap target_addr
                 // reference into the old snapshot volume for later deletion:
                 //
-                //   volume_id: does _not_ reference snapshot_addr anymore
-                //   old_snapshot_volume_id: now references snapshot_addr
+                //   volume_id: does _not_ reference target_addr anymore
+                //   old_snapshot_volume_id: now references target_addr
                 //
                 // If `find_volumes_referencing_socket_addr` is executed before
                 // that volume is deleted, it will return the old snapshot
@@ -312,8 +289,8 @@ impl RegionSnapshotReplacementFindAffected {
                 // Allowing a region snapshot replacement step record to be
                 // created in this case would mean that (depending on when the
                 // functions execute), an indefinite amount of work would be
-                // created, continually "moving" the snapshot_addr from
-                // temporary volume to temporary volume.
+                // created, continually "moving" the target_addr from temporary
+                // volume to temporary volume.
                 //
                 // If the volume was soft deleted, then skip making a step for
                 // it.
@@ -674,8 +651,11 @@ mod test {
 
         datastore.region_snapshot_create(fake_region_snapshot).await.unwrap();
 
-        let request =
-            RegionSnapshotReplacement::new(dataset_id, region_id, snapshot_id);
+        let request = RegionSnapshotReplacement::new_from_region_snapshot(
+            dataset_id,
+            region_id,
+            snapshot_id,
+        );
 
         let request_id = request.id;
 

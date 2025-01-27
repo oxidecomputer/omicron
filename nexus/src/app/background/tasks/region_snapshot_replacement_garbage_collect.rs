@@ -97,13 +97,7 @@ impl RegionSnapshotReplacementGarbageCollect {
                         ok for {request_id}"
                     );
 
-                    info!(
-                        &log,
-                        "{s}";
-                        "request.snapshot_id" => %request.old_snapshot_id,
-                        "request.region_id" => %request.old_region_id,
-                        "request.dataset_id" => %request.old_dataset_id,
-                    );
+                    info!(&log, "{s}");
                     status.garbage_collect_requested.push(s);
                 }
 
@@ -112,13 +106,7 @@ impl RegionSnapshotReplacementGarbageCollect {
                         "sending region snapshot replacement garbage collect \
                         request failed: {e}",
                     );
-                    error!(
-                        &log,
-                        "{s}";
-                        "request.snapshot_id" => %request.old_snapshot_id,
-                        "request.region_id" => %request.old_region_id,
-                        "request.dataset_id" => %request.old_dataset_id,
-                    );
+                    error!(&log, "{s}");
                     status.errors.push(s);
                 }
             }
@@ -190,7 +178,7 @@ mod test {
 
         // Add two region snapshot requests that need garbage collection
 
-        let mut request = RegionSnapshotReplacement::new(
+        let mut request = RegionSnapshotReplacement::new_from_region_snapshot(
             DatasetUuid::new_v4(),
             Uuid::new_v4(),
             Uuid::new_v4(),
@@ -224,7 +212,7 @@ mod test {
             .await
             .unwrap();
 
-        let mut request = RegionSnapshotReplacement::new(
+        let mut request = RegionSnapshotReplacement::new_from_region_snapshot(
             DatasetUuid::new_v4(),
             Uuid::new_v4(),
             Uuid::new_v4(),

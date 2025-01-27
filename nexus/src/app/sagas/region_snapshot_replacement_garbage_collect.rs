@@ -278,7 +278,7 @@ pub(crate) mod test {
             .await
             .unwrap();
 
-        let mut request = RegionSnapshotReplacement::new(
+        let mut request = RegionSnapshotReplacement::new_from_region_snapshot(
             DatasetUuid::new_v4(),
             Uuid::new_v4(),
             Uuid::new_v4(),

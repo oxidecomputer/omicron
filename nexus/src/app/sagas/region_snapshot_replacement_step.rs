@@ -200,7 +200,7 @@ async fn rsrss_set_saga_id_undo(
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ReplaceParams {
-    old_snapshot_address: SocketAddrV6,
+    old_target_address: SocketAddrV6,
     new_region_address: SocketAddrV6,
 }
 
@@ -227,36 +227,19 @@ async fn rsrss_create_replace_params(
         .await
         .map_err(ActionError::action_failed)?;
 
-    let region_snapshot = osagactx
+    let Some(old_target_address) = osagactx
         .datastore()
-        .region_snapshot_get(
-            region_snapshot_replace_request.old_dataset_id.into(),
-            region_snapshot_replace_request.old_region_id,
-            region_snapshot_replace_request.old_snapshot_id,
-        )
+        .read_only_target_addr(&region_snapshot_replace_request)
         .await
-        .map_err(ActionError::action_failed)?;
-
-    let Some(region_snapshot) = region_snapshot else {
+        .map_err(ActionError::action_failed)?
+    else {
+        // This is ok - the next background task invocation will move the
+        // request state forward appropriately.
         return Err(ActionError::action_failed(format!(
-            "region snapshot {} {} {} deleted!",
-            region_snapshot_replace_request.old_dataset_id,
-            region_snapshot_replace_request.old_region_id,
-            region_snapshot_replace_request.old_snapshot_id,
+            "request {} target deleted!",
+            region_snapshot_replace_request.id,
         )));
     };
-
-    let old_snapshot_address: SocketAddrV6 =
-        match region_snapshot.snapshot_addr.parse() {
-            Ok(addr) => addr,
-
-            Err(e) => {
-                return Err(ActionError::action_failed(format!(
-                    "parsing {} as SocketAddrV6 failed: {e}",
-                    region_snapshot.snapshot_addr,
-                )));
-            }
-        };
 
     let Some(new_region_id) = region_snapshot_replace_request.new_region_id
     else {
@@ -272,7 +255,7 @@ async fn rsrss_create_replace_params(
         .await
         .map_err(ActionError::action_failed)?;
 
-    Ok(ReplaceParams { old_snapshot_address, new_region_address })
+    Ok(ReplaceParams { old_target_address, new_region_address })
 }
 
 async fn rssrs_create_fake_volume(
@@ -358,7 +341,7 @@ async fn rsrss_replace_snapshot_in_volume(
         .datastore()
         .volume_replace_snapshot(
             VolumeWithTarget(params.request.volume_id()),
-            ExistingTarget(replace_params.old_snapshot_address),
+            ExistingTarget(replace_params.old_target_address),
             ReplacementTarget(replace_params.new_region_address),
             VolumeToDelete(new_volume_id),
         )
@@ -404,7 +387,7 @@ async fn rsrss_replace_snapshot_in_volume_undo(
         .volume_replace_snapshot(
             VolumeWithTarget(params.request.volume_id()),
             ExistingTarget(replace_params.new_region_address),
-            ReplacementTarget(replace_params.old_snapshot_address),
+            ReplacementTarget(replace_params.old_target_address),
             VolumeToDelete(new_volume_id),
         )
         .await?;

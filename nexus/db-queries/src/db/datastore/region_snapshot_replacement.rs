@@ -12,6 +12,8 @@ use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::to_db_typed_uuid;
+use crate::db::model::ReadOnlyTargetReplacement;
+use crate::db::model::ReadOnlyTargetReplacementType;
 use crate::db::model::RegionSnapshot;
 use crate::db::model::RegionSnapshotReplacement;
 use crate::db::model::RegionSnapshotReplacementState;
@@ -27,6 +29,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::VolumeUuid;
+use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 #[must_use]
@@ -67,12 +70,17 @@ impl DataStore {
         opctx: &OpContext,
         request: RegionSnapshotReplacement,
     ) -> Result<(), Error> {
+        let ReadOnlyTargetReplacement::RegionSnapshot { snapshot_id, .. } =
+            request.replacement_type()
+        else {
+            return Err(Error::internal_error(
+                "wrong read-only target replacement type",
+            ));
+        };
+
         // Note: if `LookupPath` is used here, it will not be able to retrieve
         // deleted snapshots
-        let db_snapshot = match self
-            .snapshot_get(opctx, request.old_snapshot_id)
-            .await?
-        {
+        let db_snapshot = match self.snapshot_get(opctx, snapshot_id).await? {
             Some(db_snapshot) => db_snapshot,
             None => {
                 return Err(Error::internal_error(
@@ -170,6 +178,10 @@ impl DataStore {
             .filter(dsl::old_dataset_id.eq(region_snapshot.dataset_id))
             .filter(dsl::old_region_id.eq(region_snapshot.region_id))
             .filter(dsl::old_snapshot_id.eq(region_snapshot.snapshot_id))
+            .filter(
+                dsl::replacement_type
+                    .eq(ReadOnlyTargetReplacementType::RegionSnapshot),
+            )
             .get_result_async::<RegionSnapshotReplacement>(
                 &*self.pool_connection_authorized(opctx).await?,
             )
@@ -1374,6 +1386,160 @@ impl DataStore {
             None => public_error_from_diesel(e, ErrorHandler::Server),
         })
     }
+
+    pub async fn read_only_target_deleted(
+        &self,
+        request: &RegionSnapshotReplacement,
+    ) -> Result<bool, Error> {
+        let deleted = match request.replacement_type() {
+            ReadOnlyTargetReplacement::RegionSnapshot {
+                dataset_id,
+                region_id,
+                snapshot_id,
+            } => self
+                .region_snapshot_get(dataset_id.into(), region_id, snapshot_id)
+                .await?
+                .is_none(),
+
+            ReadOnlyTargetReplacement::ReadOnlyRegion { region_id } => {
+                self.get_region_optional(region_id).await?.is_none()
+            }
+        };
+
+        Ok(deleted)
+    }
+
+    /// Returns Ok(Some(_)) if the read-only target exists and the target
+    /// address can be determined, Ok(None) if the read-only target does not
+    /// exist, or Err otherwise.
+    pub async fn read_only_target_addr(
+        &self,
+        request: &RegionSnapshotReplacement,
+    ) -> Result<Option<SocketAddrV6>, Error> {
+        match request.replacement_type() {
+            ReadOnlyTargetReplacement::RegionSnapshot {
+                dataset_id,
+                region_id,
+                snapshot_id,
+            } => {
+                let region_snapshot = match self
+                    .region_snapshot_get(
+                        dataset_id.into(),
+                        region_id,
+                        snapshot_id,
+                    )
+                    .await?
+                {
+                    Some(region_snapshot) => region_snapshot,
+                    None => return Ok(None),
+                };
+
+                match region_snapshot.snapshot_addr.parse() {
+                    Ok(addr) => Ok(Some(addr)),
+                    Err(e) => {
+                        Err(Error::internal_error(&format!("parse error: {e}")))
+                    }
+                }
+            }
+
+            ReadOnlyTargetReplacement::ReadOnlyRegion { region_id } => {
+                let region = match self.get_region_optional(region_id).await? {
+                    Some(region) => region,
+                    None => return Ok(None),
+                };
+
+                Ok(self.region_addr(region.id()).await?)
+            }
+        }
+    }
+
+    /// Create and insert a read-only region replacement request, returning the
+    /// ID of the request.
+    pub async fn create_read_only_region_replacement_request(
+        &self,
+        opctx: &OpContext,
+        region_id: Uuid,
+    ) -> Result<Uuid, Error> {
+        let request =
+            RegionSnapshotReplacement::new_from_read_only_region(region_id);
+        let request_id = request.id;
+
+        self.insert_read_only_region_replacement_request(opctx, request)
+            .await?;
+
+        Ok(request_id)
+    }
+
+    /// Insert a read-only region replacement request into the DB, also creating
+    /// the VolumeRepair record.
+    pub async fn insert_read_only_region_replacement_request(
+        &self,
+        opctx: &OpContext,
+        request: RegionSnapshotReplacement,
+    ) -> Result<(), Error> {
+        let ReadOnlyTargetReplacement::ReadOnlyRegion { region_id } =
+            request.replacement_type()
+        else {
+            return Err(Error::internal_error(
+                "wrong read-only target replacement type",
+            ));
+        };
+
+        let db_region = match self.get_region_optional(region_id).await? {
+            Some(db_region) => db_region,
+            None => {
+                return Err(Error::internal_error(
+                    "cannot perform read-only region replacement without \
+                    getting volume id",
+                ));
+            }
+        };
+
+        if !db_region.read_only() {
+            return Err(Error::internal_error(
+                "read-only region replacement requires read-only region",
+            ));
+        }
+
+        let maybe_snapshot = self
+            .find_snapshot_by_volume_id(&opctx, db_region.volume_id())
+            .await?;
+
+        if maybe_snapshot.is_none() {
+            return Err(Error::internal_error(
+                "read-only region replacement requires snapshot volume",
+            ));
+        }
+
+        self.insert_region_snapshot_replacement_request_with_volume_id(
+            opctx,
+            request,
+            db_region.volume_id(),
+        )
+        .await
+    }
+
+    /// Find a read-only region replacement request
+    pub async fn lookup_read_only_region_replacement_request(
+        &self,
+        opctx: &OpContext,
+        region_id: Uuid,
+    ) -> Result<Option<RegionSnapshotReplacement>, Error> {
+        use db::schema::region_snapshot_replacement::dsl;
+
+        dsl::region_snapshot_replacement
+            .filter(dsl::old_region_id.eq(region_id))
+            .filter(
+                dsl::replacement_type
+                    .eq(ReadOnlyTargetReplacementType::ReadOnlyRegion),
+            )
+            .get_result_async::<RegionSnapshotReplacement>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
 }
 
 #[cfg(test)]
@@ -1417,13 +1583,13 @@ mod test {
             .await
             .unwrap();
 
-        let request_1 = RegionSnapshotReplacement::new(
+        let request_1 = RegionSnapshotReplacement::new_from_region_snapshot(
             dataset_1_id,
             region_1_id,
             snapshot_1_id,
         );
 
-        let request_2 = RegionSnapshotReplacement::new(
+        let request_2 = RegionSnapshotReplacement::new_from_region_snapshot(
             dataset_2_id,
             region_2_id,
             snapshot_2_id,
@@ -1477,7 +1643,7 @@ mod test {
             .await
             .unwrap();
 
-        let request_1 = RegionSnapshotReplacement::new(
+        let request_1 = RegionSnapshotReplacement::new_from_region_snapshot(
             dataset_1_id,
             region_1_id,
             snapshot_1_id,
@@ -1527,8 +1693,11 @@ mod test {
             .await
             .unwrap();
 
-        let request =
-            RegionSnapshotReplacement::new(dataset_id, region_id, snapshot_id);
+        let request = RegionSnapshotReplacement::new_from_region_snapshot(
+            dataset_id,
+            region_id,
+            snapshot_id,
+        );
 
         let request_id = request.id;
 
@@ -1848,7 +2017,7 @@ mod test {
             .await
             .unwrap();
 
-        let mut request = RegionSnapshotReplacement::new(
+        let mut request = RegionSnapshotReplacement::new_from_region_snapshot(
             DatasetUuid::new_v4(),
             Uuid::new_v4(),
             Uuid::new_v4(),
