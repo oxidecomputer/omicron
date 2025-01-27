@@ -667,7 +667,7 @@ tough = { version = "0.19.0", features = [ "http" ] }
 trybuild = "1.0.101"
 tufaceous = { path = "tufaceous" }
 tufaceous-lib = { path = "tufaceous-lib" }
-tui-tree-widget = "0.22.0"
+tui-tree-widget = "0.23.0"
 typed-rng = { path = "typed-rng" }
 unicode-width = "0.1.13"
 update-common = { path = "update-common" }

@@ -1346,7 +1346,7 @@ dependencies = [
  "futures",
  "omicron-common",
  "omicron-workspace-hack",
- "ratatui 0.29.0",
+ "ratatui",
  "schemars",
  "serde_json",
  "slog",
@@ -7170,7 +7170,7 @@ dependencies = [
  "oximeter-client",
  "oximeter-db",
  "pq-sys",
- "ratatui 0.29.0",
+ "ratatui",
  "reedline",
  "serde",
  "serde_json",
@@ -7500,7 +7500,6 @@ dependencies = [
  "getrandom",
  "group",
  "hashbrown 0.15.1",
- "heck 0.4.1",
  "hex",
  "hickory-proto",
  "hmac",
@@ -9480,26 +9479,6 @@ dependencies = [
 
 [[package]]
 name = "ratatui"
-version = "0.28.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdef7f9be5c0122f890d58bdf4d964349ba6a6161f705907526d891efabba57d"
-dependencies = [
- "bitflags 2.6.0",
- "cassowary",
- "compact_str",
- "instability",
- "itertools 0.13.0",
- "lru",
- "paste",
- "strum",
- "strum_macros 0.26.4",
- "unicode-segmentation",
- "unicode-truncate",
- "unicode-width 0.1.14",
-]
-
-[[package]]
-name = "ratatui"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eabd94c2f37801c20583fc49dd5cd6b0ba68c716787c2dd6ed18571e1e63117b"
@@ -11212,7 +11191,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.96",
@@ -12446,12 +12425,12 @@ dependencies = [
 
 [[package]]
 name = "tui-tree-widget"
-version = "0.22.0"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df0b54061d997162f225bed5d2147574af0648480214759a000e33f6cea0017a"
+checksum = "fcc95ebc9c578c67223514d0e10a75c3b996d1f22dc93a4792475260f7c3c11e"
 dependencies = [
- "ratatui 0.28.1",
- "unicode-width 0.1.14",
+ "ratatui",
+ "unicode-width 0.2.0",
 ]
 
 [[package]]
@@ -13227,7 +13206,7 @@ dependencies = [
  "once_cell",
  "owo-colors",
  "proptest",
- "ratatui 0.29.0",
+ "ratatui",
  "reqwest",
  "rpassword",
  "serde",
