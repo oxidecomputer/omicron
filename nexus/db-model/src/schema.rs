@@ -2147,6 +2147,7 @@ table! {
         rx_id -> Uuid,
         glob -> Text,
         regex -> Text,
+        schema_version -> Text,
         time_created -> Timestamptz,
     }
 }

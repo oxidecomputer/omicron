@@ -7,6 +7,7 @@ use crate::schema::{
     webhook_delivery, webhook_receiver, webhook_rx_event_glob,
     webhook_rx_secret, webhook_rx_subscription,
 };
+use crate::schema_versions;
 use crate::typed_uuid::DbTypedUuid;
 use crate::Generation;
 use crate::WebhookDelivery;
@@ -163,11 +164,17 @@ pub struct WebhookRxEventGlob {
     #[diesel(embed)]
     pub glob: WebhookGlob,
     pub time_created: DateTime<Utc>,
+    pub schema_version: schema_versions::DbSemverVersion,
 }
 
 impl WebhookRxEventGlob {
     pub fn new(rx_id: WebhookReceiverUuid, glob: WebhookGlob) -> Self {
-        Self { rx_id: DbTypedUuid(rx_id), glob, time_created: Utc::now() }
+        Self {
+            rx_id: DbTypedUuid(rx_id),
+            glob,
+            time_created: Utc::now(),
+            schema_version: schema_versions::SCHEMA_VERSION.into(),
+        }
     }
 }
 #[derive(Clone, Debug)]
