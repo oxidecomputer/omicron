@@ -160,7 +160,7 @@ mod tests {
 
         // There should be no datasets initially.
         assert_eq!(
-            datastore.dataset_list_all_batched(opctx, None).await.unwrap(),
+            datastore.debug_dataset_list_all_batched(opctx).await.unwrap(),
             []
         );
 
@@ -216,7 +216,7 @@ mod tests {
 
         // There should be no datasets initially.
         assert_eq!(
-            datastore.dataset_list_all_batched(opctx, None).await.unwrap(),
+            datastore.debug_dataset_list_all_batched(opctx).await.unwrap(),
             []
         );
 
