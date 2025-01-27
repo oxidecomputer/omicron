@@ -891,6 +891,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "blueprint_loader" => {
             print_task_blueprint_loader(details);
         }
+        "decommissioned_disk_cleaner" => {
+            print_task_decommissioned_disk_cleaner(details);
+        }
         "dns_config_external" | "dns_config_internal" => {
             print_task_dns_config(details);
         }
@@ -1108,6 +1111,37 @@ fn print_task_blueprint_loader(details: &serde_json::Value) {
                 humantime::format_rfc3339_millis(status.time_created.into())
             );
             println!("    status:           {}", status.status);
+        }
+    }
+}
+
+fn print_task_decommissioned_disk_cleaner(details: &serde_json::Value) {
+    #[derive(Deserialize)]
+    struct ActivationResult {
+        error: Option<String>,
+        found: usize,
+        not_ready_to_be_deleted: usize,
+        deleted: usize,
+        error_count: usize,
+    }
+    match serde_json::from_value::<ActivationResult>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(ActivationResult {
+            error,
+            found,
+            not_ready_to_be_deleted,
+            deleted,
+            error_count,
+        }) => {
+            println!("    Decommissioned Disk Cleaner");
+            println!("      Last error: {error:?}");
+            println!("      Zpools found: {found}");
+            println!("      Zpools deleted from db: {deleted}");
+            println!("      Zpools not ready to be deleted from db: {not_ready_to_be_deleted}");
+            println!("      Zpools which failed to delete: {error_count}");
         }
     }
 }
