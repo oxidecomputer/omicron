@@ -8,6 +8,10 @@
 
 use anyhow::{bail, ensure, Context};
 use camino::Utf8Path;
+use diesel::expression::AsExpression;
+use diesel::pg::{Pg, PgValue};
+use diesel::sql_types::Text;
+use diesel::{deserialize, serialize};
 use omicron_common::api::external::SemverVersion;
 use once_cell::sync::Lazy;
 use std::collections::BTreeMap;
@@ -474,6 +478,54 @@ impl SchemaUpgradeStep {
     /// Returns the actual SQL to execute for this step
     pub fn sql(&self) -> &str {
         self.sql.as_ref()
+    }
+}
+
+/// A newtype around [`SemverVersion`] that implements the [`ToSql`] and
+/// [`FromSql`] traits, allowing it to be used as a field in a type representing
+/// a DB model.
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    PartialOrd,
+    serde::Serialize,
+    serde::Deserialize,
+    deserialize::FromSqlRow,
+    AsExpression,
+)]
+#[diesel(sql_type = Text)]
+pub struct DbSemverVersion(pub SemverVersion);
+
+impl deserialize::FromSql<Text, Pg> for DbSemverVersion {
+    fn from_sql(value: PgValue<'_>) -> deserialize::Result<Self> {
+        let version =
+            std::str::from_utf8(value.as_bytes())?.parse::<SemverVersion>()?;
+        Ok(Self(version))
+    }
+}
+
+impl serialize::ToSql<Text, Pg> for DbSemverVersion {
+    fn to_sql<'b>(
+        &'b self,
+        out: &mut serialize::Output<'b, '_, Pg>,
+    ) -> serialize::Result {
+        use std::io::Write;
+        out.write_fmt(format_args!("{}", self.0))?;
+        Ok(serialize::IsNull::No)
+    }
+}
+
+impl From<SemverVersion> for DbSemverVersion {
+    fn from(version: SemverVersion) -> Self {
+        Self(version)
+    }
+}
+
+impl From<DbSemverVersion> for SemverVersion {
+    fn from(DbSemverVersion(version): DbSemverVersion) -> Self {
+        version
     }
 }
 

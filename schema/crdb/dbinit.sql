@@ -4863,6 +4863,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_rx_event_glob (
     -- Regex used when evaluating this filter against concrete event classes.
     regex STRING(512) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
+    -- The database schema version at which this glob was last expanded.
+    --
+    -- This is used to detect when a glob must be re-processed to generate exact
+    -- subscriptions on schema changes.
+    schema_version STRING(64) NOT NULL,
 
     PRIMARY KEY (rx_id, glob)
 );
@@ -4872,6 +4877,9 @@ CREATE INDEX IF NOT EXISTS lookup_event_globs_for_webhook_rx
 ON omicron.public.webhook_rx_event_glob (
     rx_id
 );
+
+CREATE INDEX IF NOT EXISTS lookup_webhook_globs_by_schema_version
+ON omicron.public.webhook_rx_event_glob (schema_version);
 
 CREATE TABLE IF NOT EXISTS omicron.public.webhook_rx_subscription (
     -- UUID of the webhook receiver (foreign key into
