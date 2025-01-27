@@ -81,28 +81,7 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
     ) -> Result<HttpResponseOk<Generation>, HttpError> {
         let ctx = rqctx.context();
 
-        // TODO: Remove? this is only for testing
-        // It's not really necessary to use a separate tokio task to check the
-        // generation number?
-        let (response_tx, response_rx) = oneshot::channel();
-        ctx.tx
-            .send(ClickhouseAdminServerRequest::Generation {
-                ctx: ctx.clone(),
-                response: response_tx,
-            })
-            .await
-            .map_err(|e| {
-                HttpError::for_internal_error(format!(
-                    "failure to send request: {e}"
-                ))
-            })?;
-        let result = response_rx.await.map_err(|e| {
-            HttpError::for_internal_error(format!(
-                "failure to receive response: {e}"
-            ))
-        })?;
-
-        let gen = match result {
+        let gen = match ctx.generation() {
             Some(g) => g,
             None => {
                 return Err(HttpError::for_client_error(

@@ -218,11 +218,6 @@ impl ServerContext {
 }
 
 pub enum ClickhouseAdminServerRequest {
-    // TODO: Remove this one, just using it for testing
-    Generation {
-        ctx: Arc<ServerContext>,
-        response: oneshot::Sender<Option<Generation>>,
-    },
     GenerateConfig {
         ctx: Arc<ServerContext>,
         replica_settings: ServerConfigurableSettings,
@@ -239,10 +234,6 @@ async fn long_running_task(
 ) {
     while let Some(request) = incoming.recv().await {
         match request {
-            ClickhouseAdminServerRequest::Generation { ctx, response } => {
-                let result = ctx.generation();
-                response.send(result).expect("OHNOOHNO");
-            }
             ClickhouseAdminServerRequest::GenerateConfig {
                 ctx,
                 replica_settings,
