@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::context::{
-    ClickhouseAdminServerRequest, KeeperServerContext, ServerContext,
-    SingleServerContext,
+    ClickhouseAdminServerRequest, ClickhouseAdminSingleServerRequest,
+    KeeperServerContext, ServerContext, SingleServerContext,
 };
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::{
@@ -20,8 +20,6 @@ use dropshot::{
 use http::StatusCode;
 use illumos_utils::svcadm::Svcadm;
 use omicron_common::api::external::Generation;
-use oximeter_db::OXIMETER_VERSION;
-use slog::info;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
@@ -247,41 +245,23 @@ impl ClickhouseAdminSingleApi for ClickhouseAdminSingleImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let ctx = rqctx.context();
-        let log = ctx.log();
-
-        // Database initialization is idempotent, but not concurrency-safe.
-        // Use a mutex to serialize requests.
-        let lock = ctx.initialization_lock();
-        let _guard = lock.lock().await;
-
-        // Initialize the database only if it was not previously initialized.
-        // TODO: Migrate schema to newer version without wiping data.
-        let client = ctx.oximeter_client();
-        let version = client.read_latest_version().await.map_err(|e| {
+        let (response_tx, response_rx) = oneshot::channel();
+        ctx.tx
+            .send(ClickhouseAdminSingleServerRequest::DbInit {
+                ctx: ctx.clone(),
+                response: response_tx,
+            })
+            .await
+            .map_err(|e| {
+                HttpError::for_internal_error(format!(
+                    "failure to send request: {e}"
+                ))
+            })?;
+        response_rx.await.map_err(|e| {
             HttpError::for_internal_error(format!(
-                "can't read ClickHouse version: {e}",
+                "failure to receive response: {e}"
             ))
-        })?;
-        if version == 0 {
-            info!(
-                log,
-                "initializing single-node ClickHouse to version {OXIMETER_VERSION}"
-            );
-            ctx.oximeter_client()
-                .initialize_db_with_version(false, OXIMETER_VERSION)
-                .await
-                .map_err(|e| {
-                    HttpError::for_internal_error(format!(
-                        "can't initialize single-node ClickHouse \
-                         to version {OXIMETER_VERSION}: {e}",
-                    ))
-                })?;
-        } else {
-            info!(
-                log,
-                "skipping initialization of single-node ClickHouse at version {version}"
-            );
-        }
+        })??;
 
         Ok(HttpResponseUpdatedNoContent())
     }

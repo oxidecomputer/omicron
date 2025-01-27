@@ -25,8 +25,7 @@ use std::io::{BufRead, BufReader};
 use std::net::SocketAddrV6;
 use std::str::FromStr;
 use std::sync::Arc;
-// TODO: Remove usage of tokio Mutex
-use tokio::sync::{mpsc, mpsc::Receiver, oneshot, Mutex};
+use tokio::sync::{mpsc, mpsc::Receiver, oneshot};
 use tokio::task::JoinHandle;
 
 pub struct KeeperServerContext {
@@ -110,7 +109,7 @@ impl ServerContext {
 
         // TODO: change the buffer size. Use that flume bounded channel thing?
         let (inner_tx, inner_rx) = mpsc::channel(10);
-        let task_handle = tokio::spawn(long_running_task(inner_rx));
+        let task_handle = tokio::spawn(long_running_ch_server_task(inner_rx));
 
         Ok(Self {
             clickhouse_cli,
@@ -229,7 +228,7 @@ pub enum ClickhouseAdminServerRequest {
     },
 }
 
-async fn long_running_task(
+async fn long_running_ch_server_task(
     mut incoming: Receiver<ClickhouseAdminServerRequest>,
 ) {
     while let Some(request) = incoming.recv().await {
@@ -254,8 +253,9 @@ async fn long_running_task(
 pub struct SingleServerContext {
     clickhouse_cli: ClickhouseCli,
     oximeter_client: OximeterClient,
-    initialization_lock: Arc<Mutex<()>>,
     log: Logger,
+    pub task_handle: JoinHandle<()>,
+    pub tx: mpsc::Sender<ClickhouseAdminSingleServerRequest>,
 }
 
 impl SingleServerContext {
@@ -273,12 +273,48 @@ impl SingleServerContext {
         let log =
             clickhouse_cli.log.new(slog::o!("component" => "ServerContext"));
 
-        Self {
-            clickhouse_cli,
-            oximeter_client,
-            initialization_lock: Arc::new(Mutex::new(())),
-            log,
+        // TODO: change the buffer size. Use that flume bounded channel thing?
+        let (inner_tx, inner_rx) = mpsc::channel(10);
+        let task_handle =
+            tokio::spawn(long_running_ch_single_server_task(inner_rx));
+
+        Self { clickhouse_cli, oximeter_client, log, task_handle, tx: inner_tx }
+    }
+
+    pub async fn init_db(&self) -> Result<(), HttpError> {
+        let log = self.log();
+
+        // Initialize the database only if it was not previously initialized.
+        // TODO: Migrate schema to newer version without wiping data.
+        let client = self.oximeter_client();
+        let version = client.read_latest_version().await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "can't read ClickHouse version: {e}",
+            ))
+        })?;
+        if version == 0 {
+            info!(
+                log,
+                "initializing single-node ClickHouse to version {OXIMETER_VERSION}"
+            );
+            let replicated = false;
+            self.oximeter_client()
+                .initialize_db_with_version(replicated, OXIMETER_VERSION)
+                .await
+                .map_err(|e| {
+                    HttpError::for_internal_error(format!(
+                        "can't initialize single-node ClickHouse \
+                         to version {OXIMETER_VERSION}: {e}",
+                    ))
+                })?;
+        } else {
+            info!(
+                log,
+                "skipping initialization of single-node ClickHouse at version {version}"
+            );
         }
+
+        Ok(())
     }
 
     pub fn clickhouse_cli(&self) -> &ClickhouseCli {
@@ -289,12 +325,28 @@ impl SingleServerContext {
         &self.oximeter_client
     }
 
-    pub fn initialization_lock(&self) -> Arc<Mutex<()>> {
-        self.initialization_lock.clone()
-    }
-
     pub fn log(&self) -> &Logger {
         &self.log
+    }
+}
+
+pub enum ClickhouseAdminSingleServerRequest {
+    DbInit {
+        ctx: Arc<SingleServerContext>,
+        response: oneshot::Sender<Result<(), HttpError>>,
+    },
+}
+
+async fn long_running_ch_single_server_task(
+    mut incoming: Receiver<ClickhouseAdminSingleServerRequest>,
+) {
+    while let Some(request) = incoming.recv().await {
+        match request {
+            ClickhouseAdminSingleServerRequest::DbInit { ctx, response } => {
+                let result = ctx.init_db().await;
+                response.send(result).expect("failed to send value from database initialization to channel");
+            }
+        }
     }
 }
 
