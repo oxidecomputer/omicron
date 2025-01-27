@@ -255,7 +255,9 @@ impl nexus_test_interface::NexusServer for Server {
             nexus_types::internal_api::params::PhysicalDiskPutRequest,
         >,
         zpools: Vec<nexus_types::internal_api::params::ZpoolPutRequest>,
-        datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
+        crucible_datasets: Vec<
+            nexus_types::internal_api::params::CrucibleDatasetCreateRequest,
+        >,
         internal_dns_zone_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
         recovery_silo: nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
@@ -305,7 +307,7 @@ impl nexus_test_interface::NexusServer for Server {
                     blueprint,
                     physical_disks,
                     zpools,
-                    datasets,
+                    crucible_datasets,
                     internal_services_ip_pool_ranges,
                     certs,
                     internal_dns_zone_config,
@@ -366,38 +368,40 @@ impl nexus_test_interface::NexusServer for Server {
             .unwrap();
 
         let zpool_id = zpool.id;
-        let is_debug_dataset = kind == DatasetKind::Debug;
 
         self.apictx.context.nexus.upsert_zpool(&opctx, zpool).await.unwrap();
 
-        self.apictx
-            .context
-            .nexus
-            .upsert_dataset(dataset_id, zpool_id, kind, address)
-            .await
-            .unwrap();
-
-        // If any tests want debug datasets, manually insert them into the
-        // blueprint rendezvous table with a fake blueprint ID.
-        //
-        // This is making the mess of test-utils / blueprint / dataset
-        // integration worse
-        // (https://github.com/oxidecomputer/omicron/issues/7081).
-        if is_debug_dataset {
-            self.apictx
-                .context
-                .nexus
-                .datastore()
-                .debug_dataset_insert_if_not_exists(
-                    &opctx,
-                    RendezvousDebugDataset::new(
-                        dataset_id,
-                        ZpoolUuid::from_untyped_uuid(zpool_id),
-                        BlueprintUuid::new_v4(),
-                    ),
-                )
-                .await
-                .unwrap();
+        match &kind {
+            DatasetKind::Crucible => {
+                let address =
+                    address.expect("crucible datasets have addresses");
+                self.apictx
+                    .context
+                    .nexus
+                    .upsert_crucible_dataset(dataset_id, zpool_id, address)
+                    .await
+                    .unwrap();
+            }
+            DatasetKind::Debug => {
+                self.apictx
+                    .context
+                    .nexus
+                    .datastore()
+                    .debug_dataset_insert_if_not_exists(
+                        &opctx,
+                        RendezvousDebugDataset::new(
+                            dataset_id,
+                            ZpoolUuid::from_untyped_uuid(zpool_id),
+                            BlueprintUuid::new_v4(),
+                        ),
+                    )
+                    .await
+                    .unwrap();
+            }
+            _ => panic!(
+                "upsert_test_dataset does not support \
+                 datasets of kind {kind:?}"
+            ),
         }
     }
 

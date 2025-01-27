@@ -53,8 +53,6 @@ use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::external_api::views::SledState;
-use nexus_types::internal_api::params::DatasetCreateRequest;
-use nexus_types::internal_api::params::DatasetPutRequest;
 use nexus_types::internal_api::params::DnsConfigParams;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
@@ -280,7 +278,6 @@ pub async fn test_setup<N: NexusServer>(
 }
 
 struct RackInitRequestBuilder {
-    datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
     internal_dns_config: DnsConfigBuilder,
     mac_addrs: Box<dyn Iterator<Item = MacAddr> + Send>,
 }
@@ -288,7 +285,6 @@ struct RackInitRequestBuilder {
 impl RackInitRequestBuilder {
     fn new() -> Self {
         Self {
-            datasets: vec![],
             internal_dns_config: DnsConfigBuilder::new(),
             mac_addrs: Box::new(MacAddr::iter_system()),
         }
@@ -309,49 +305,13 @@ impl RackInitRequestBuilder {
             .expect("Failed to set up DNS for {kind}");
     }
 
-    // Keeps track of:
-    // - The "DatasetPutRequest" (for handoff to Nexus)
-    // - The internal DNS configuration for this service
-    fn add_dataset(
-        &mut self,
-        zone_id: OmicronZoneUuid,
-        zpool_id: ZpoolUuid,
-        dataset_id: DatasetUuid,
-        address: SocketAddrV6,
-        kind: DatasetKind,
-        service_name: ServiceName,
-    ) {
-        self.datasets.push(DatasetCreateRequest {
-            zpool_id: zpool_id.into_untyped_uuid(),
-            dataset_id,
-            request: DatasetPutRequest { address: Some(address), kind },
-        });
-        let zone = self
-            .internal_dns_config
-            .host_zone(zone_id, *address.ip())
-            .expect("Failed to set up DNS for {kind}");
-        self.internal_dns_config
-            .service_backend_zone(service_name, &zone, address.port())
-            .expect("Failed to set up DNS for {kind}");
-    }
-
     // Special handling of ClickHouse, which has multiple SRV records for its
     // single zone.
-    fn add_clickhouse_dataset(
+    fn add_clickhouse_to_dns(
         &mut self,
         zone_id: OmicronZoneUuid,
-        zpool_id: ZpoolUuid,
-        dataset_id: DatasetUuid,
         address: SocketAddrV6,
     ) {
-        self.datasets.push(DatasetCreateRequest {
-            zpool_id: zpool_id.into_untyped_uuid(),
-            dataset_id,
-            request: DatasetPutRequest {
-                address: Some(address),
-                kind: DatasetKind::Clickhouse,
-            },
-        });
         self.internal_dns_config
             .host_zone_clickhouse(zone_id, ServiceName::Clickhouse, address)
             .expect("Failed to setup ClickHouse DNS");
@@ -514,14 +474,10 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
         let zone_id = OmicronZoneUuid::new_v4();
         let zpool_id = ZpoolUuid::new_v4();
-        let dataset_id = DatasetUuid::new_v4();
         eprintln!("DB address: {}", address);
-        self.rack_init_builder.add_dataset(
+        self.rack_init_builder.add_service_to_dns(
             zone_id,
-            zpool_id,
-            dataset_id,
             address,
-            DatasetKind::Cockroach,
             ServiceName::Cockroach,
         );
         let pool_name = illumos_utils::zpool::ZpoolName::new_external(zpool_id)
@@ -555,16 +511,10 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
         let zone_id = OmicronZoneUuid::new_v4();
         let zpool_id = ZpoolUuid::new_v4();
-        let dataset_id = DatasetUuid::new_v4();
         let http_address = clickhouse.http_address();
         let http_port = http_address.port();
         let native_address = clickhouse.native_address();
-        self.rack_init_builder.add_clickhouse_dataset(
-            zone_id,
-            zpool_id,
-            dataset_id,
-            http_address,
-        );
+        self.rack_init_builder.add_clickhouse_to_dns(zone_id, http_address);
         self.clickhouse = Some(clickhouse);
 
         // NOTE: We could pass this port information via DNS, rather than

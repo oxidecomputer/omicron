@@ -5,7 +5,7 @@
 //! Implementation of queries for provisioning regions.
 
 use crate::db::column_walker::AllColumnsOf;
-use crate::db::model::{Dataset, Region};
+use crate::db::model::{CrucibleDataset, Region};
 use crate::db::raw_query_builder::{QueryBuilder, TypedSqlQuery};
 use crate::db::schema;
 use crate::db::true_or_cast_error::matches_sentinel;
@@ -19,7 +19,8 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::VolumeUuid;
 
 type AllColumnsOfRegion = AllColumnsOf<schema::region::table>;
-type AllColumnsOfDataset = AllColumnsOf<schema::dataset::table>;
+type AllColumnsOfCrucibleDataset =
+    AllColumnsOf<schema::crucible_dataset::table>;
 
 const NOT_ENOUGH_DATASETS_SENTINEL: &'static str = "Not enough datasets";
 const NOT_ENOUGH_ZPOOL_SPACE_SENTINEL: &'static str = "Not enough space";
@@ -92,7 +93,7 @@ pub fn allocation_query(
     params: RegionParameters,
     allocation_strategy: &RegionAllocationStrategy,
     redundancy: usize,
-) -> TypedSqlQuery<(SelectableSql<Dataset>, SelectableSql<Region>)> {
+) -> TypedSqlQuery<(SelectableSql<CrucibleDataset>, SelectableSql<Region>)> {
     let (seed, distinct_sleds) = {
         let (input_seed, distinct_sleds) = match allocation_strategy {
             RegionAllocationStrategy::Random { seed } => (seed, false),
@@ -133,9 +134,9 @@ pub fn allocation_query(
     .sql("
   old_zpool_usage AS (
     SELECT
-      dataset.pool_id,
-      sum(dataset.size_used) AS size_used
-    FROM dataset WHERE ((dataset.size_used IS NOT NULL) AND (dataset.time_deleted IS NULL)) GROUP BY dataset.pool_id),");
+      crucible_dataset.pool_id,
+      sum(crucible_dataset.size_used) AS size_used
+    FROM crucible_dataset WHERE ((crucible_dataset.size_used IS NOT NULL) AND (crucible_dataset.time_deleted IS NULL)) GROUP BY crucible_dataset.pool_id),");
 
     let builder = if let Some(snapshot_id) = snapshot_id {
         // Any zpool already have this volume's existing regions, or host the
@@ -143,12 +144,12 @@ pub fn allocation_query(
         builder.sql("
       existing_zpools AS ((
         SELECT
-          dataset.pool_id
+          crucible_dataset.pool_id
         FROM
-          dataset INNER JOIN old_regions ON (old_regions.dataset_id = dataset.id)
+          crucible_dataset INNER JOIN old_regions ON (old_regions.dataset_id = crucible_dataset.id)
       ) UNION (
-       select dataset.pool_id from
- dataset inner join region_snapshot on (region_snapshot.dataset_id = dataset.id)
+       select crucible_dataset.pool_id from
+ crucible_dataset inner join region_snapshot on (region_snapshot.dataset_id = crucible_dataset.id)
  where region_snapshot.snapshot_id = ").param().sql(")),")
         .bind::<sql_types::Uuid, _>(snapshot_id)
     } else {
@@ -156,9 +157,9 @@ pub fn allocation_query(
         builder.sql("
       existing_zpools AS (
         SELECT
-          dataset.pool_id
+          crucible_dataset.pool_id
         FROM
-          dataset INNER JOIN old_regions ON (old_regions.dataset_id = dataset.id)
+          crucible_dataset INNER JOIN old_regions ON (old_regions.dataset_id = crucible_dataset.id)
       ),")
     };
 
@@ -232,24 +233,15 @@ pub fn allocation_query(
 
     // Find datasets which could be used for provisioning regions.
     //
-    // We only consider datasets which are already allocated as "Crucible".
-    // This implicitly distinguishes between "M.2s" and "U.2s" -- Nexus needs to
-    // determine during dataset provisioning which devices should be considered for
-    // usage as Crucible storage.
-    //
     // We select only one dataset from each zpool.
     builder.sql("
   candidate_datasets AS (
-    SELECT DISTINCT ON (dataset.pool_id)
-      dataset.id,
-      dataset.pool_id
-    FROM (dataset INNER JOIN candidate_zpools ON (dataset.pool_id = candidate_zpools.pool_id))
-    WHERE (
-      ((dataset.time_deleted IS NULL) AND
-      (dataset.size_used IS NOT NULL)) AND
-      (dataset.kind = 'crucible')
-    )
-    ORDER BY dataset.pool_id, md5((CAST(dataset.id as BYTEA) || ").param().sql("))
+    SELECT DISTINCT ON (crucible_dataset.pool_id)
+      crucible_dataset.id,
+      crucible_dataset.pool_id
+    FROM (crucible_dataset INNER JOIN candidate_zpools ON (crucible_dataset.pool_id = candidate_zpools.pool_id))
+    WHERE (crucible_dataset.time_deleted IS NULL)
+    ORDER BY crucible_dataset.pool_id, md5((CAST(crucible_dataset.id as BYTEA) || ").param().sql("))
   ),")
     .bind::<sql_types::Bytea, _>(seed.clone())
 
@@ -305,9 +297,9 @@ pub fn allocation_query(
   proposed_dataset_changes AS (
     SELECT
       candidate_regions.dataset_id AS id,
-      dataset.pool_id AS pool_id,
+      crucible_dataset.pool_id AS pool_id,
       ((candidate_regions.block_size * candidate_regions.blocks_per_extent) * candidate_regions.extent_count) AS size_used_delta
-    FROM (candidate_regions INNER JOIN dataset ON (dataset.id = candidate_regions.dataset_id))
+    FROM (candidate_regions INNER JOIN crucible_dataset ON (crucible_dataset.id = candidate_regions.dataset_id))
   ),")
 
     // Confirms whether or not the insertion and updates should
@@ -366,18 +358,18 @@ pub fn allocation_query(
             (
               (
                SELECT
-                 dataset.pool_id
+                 crucible_dataset.pool_id
                FROM
                  candidate_regions
-                   INNER JOIN dataset ON (candidate_regions.dataset_id = dataset.id)
+                   INNER JOIN crucible_dataset ON (candidate_regions.dataset_id = crucible_dataset.id)
               )
               UNION
               (
                SELECT
-                 dataset.pool_id
+                 crucible_dataset.pool_id
                FROM
                  old_regions
-                   INNER JOIN dataset ON (old_regions.dataset_id = dataset.id)
+                   INNER JOIN crucible_dataset ON (old_regions.dataset_id = crucible_dataset.id)
               )
             )
            LIMIT 1
@@ -401,25 +393,25 @@ pub fn allocation_query(
     RETURNING ").sql(AllColumnsOfRegion::with_prefix("region")).sql("
   ),
   updated_datasets AS (
-    UPDATE dataset SET
-      size_used = (dataset.size_used + (SELECT proposed_dataset_changes.size_used_delta FROM proposed_dataset_changes WHERE (proposed_dataset_changes.id = dataset.id) LIMIT 1))
+    UPDATE crucible_dataset SET
+      size_used = (crucible_dataset.size_used + (SELECT proposed_dataset_changes.size_used_delta FROM proposed_dataset_changes WHERE (proposed_dataset_changes.id = crucible_dataset.id) LIMIT 1))
     WHERE (
-      (dataset.id = ANY(SELECT proposed_dataset_changes.id FROM proposed_dataset_changes)) AND
+      (crucible_dataset.id = ANY(SELECT proposed_dataset_changes.id FROM proposed_dataset_changes)) AND
       (SELECT do_insert.insert FROM do_insert LIMIT 1))
-    RETURNING ").sql(AllColumnsOfDataset::with_prefix("dataset")).sql("
+    RETURNING ").sql(AllColumnsOfCrucibleDataset::with_prefix("crucible_dataset")).sql("
   )
 (
   SELECT ")
-    .sql(AllColumnsOfDataset::with_prefix("dataset"))
+    .sql(AllColumnsOfCrucibleDataset::with_prefix("crucible_dataset"))
     .sql(", ")
     .sql(AllColumnsOfRegion::with_prefix("old_regions")).sql("
   FROM
-    (old_regions INNER JOIN dataset ON (old_regions.dataset_id = dataset.id))
+    (old_regions INNER JOIN crucible_dataset ON (old_regions.dataset_id = crucible_dataset.id))
 )
 UNION
 (
   SELECT ")
-    .sql(AllColumnsOfDataset::with_prefix("updated_datasets"))
+    .sql(AllColumnsOfCrucibleDataset::with_prefix("updated_datasets"))
     .sql(", ")
     .sql(AllColumnsOfRegion::with_prefix("inserted_regions")).sql("
   FROM (inserted_regions INNER JOIN updated_datasets ON (inserted_regions.dataset_id = updated_datasets.id))
