@@ -142,42 +142,23 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let ctx = rqctx.context();
-        let log = ctx.log();
-
-        // Database initialization is idempotent, but not concurrency-safe.
-        // Use a mutex to serialize requests.
-        let lock = ctx.initialization_lock();
-        let _guard = lock.lock().await;
-
-        // Initialize the database only if it was not previously initialized.
-        // TODO: Migrate schema to newer version without wiping data.
-        let client = ctx.oximeter_client();
-        let version = client.read_latest_version().await.map_err(|e| {
+        let (response_tx, response_rx) = oneshot::channel();
+        ctx.tx
+            .send(ClickhouseAdminServerRequest::DbInit {
+                ctx: ctx.clone(),
+                response: response_tx,
+            })
+            .await
+            .map_err(|e| {
+                HttpError::for_internal_error(format!(
+                    "failure to send request: {e}"
+                ))
+            })?;
+        response_rx.await.map_err(|e| {
             HttpError::for_internal_error(format!(
-                "can't read ClickHouse version: {e}",
+                "failure to receive response: {e}"
             ))
-        })?;
-        if version == 0 {
-            info!(
-                log,
-                "initializing replicated ClickHouse cluster to version {OXIMETER_VERSION}"
-            );
-            let replicated = true;
-            ctx.oximeter_client()
-                .initialize_db_with_version(replicated, OXIMETER_VERSION)
-                .await
-                .map_err(|e| {
-                    HttpError::for_internal_error(format!(
-                        "can't initialize replicated ClickHouse cluster \
-                         to version {OXIMETER_VERSION}: {e}",
-                    ))
-                })?;
-        } else {
-            info!(
-                log,
-                "skipping initialization of replicated ClickHouse cluster at version {version}"
-            );
-        }
+        })??;
 
         Ok(HttpResponseUpdatedNoContent())
     }

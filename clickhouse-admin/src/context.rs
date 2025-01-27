@@ -17,6 +17,8 @@ use illumos_utils::svcadm::Svcadm;
 use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use omicron_common::api::external::Generation;
 use oximeter_db::Client as OximeterClient;
+use oximeter_db::OXIMETER_VERSION;
+use slog::info;
 use slog::Logger;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -76,13 +78,9 @@ pub struct ServerContext {
     clickhouse_cli: ClickhouseCli,
     clickward: Clickward,
     oximeter_client: OximeterClient,
-    // TODO: Remove this lock
-    initialization_lock: Arc<Mutex<()>>,
     log: Logger,
     pub generation: std::sync::Mutex<Option<Generation>>,
-
-    // TODO: Does this need to be pub?
-    pub init_task_handle: JoinHandle<()>,
+    pub task_handle: JoinHandle<()>,
     pub tx: mpsc::Sender<ClickhouseAdminServerRequest>,
 }
 
@@ -112,16 +110,15 @@ impl ServerContext {
 
         // TODO: change the buffer size. Use that flume bounded channel thing?
         let (inner_tx, inner_rx) = mpsc::channel(10);
-        let init_task_handle = tokio::spawn(long_running_task(inner_rx));
+        let task_handle = tokio::spawn(long_running_task(inner_rx));
 
         Ok(Self {
             clickhouse_cli,
             clickward,
             oximeter_client,
-            initialization_lock: Arc::new(Mutex::new(())),
             log,
             generation,
-            init_task_handle,
+            task_handle,
             tx: inner_tx,
         })
     }
@@ -164,6 +161,41 @@ impl ServerContext {
         Ok(output)
     }
 
+    pub async fn init_db(&self) -> Result<(), HttpError> {
+        let log = self.log();
+        // Initialize the database only if it was not previously initialized.
+        // TODO: Migrate schema to newer version without wiping data.
+        let client = self.oximeter_client();
+        let version = client.read_latest_version().await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "can't read ClickHouse version: {e}",
+            ))
+        })?;
+        if version == 0 {
+            info!(
+                log,
+                "initializing replicated ClickHouse cluster to version {OXIMETER_VERSION}"
+            );
+            let replicated = true;
+            self.oximeter_client()
+                .initialize_db_with_version(replicated, OXIMETER_VERSION)
+                .await
+                .map_err(|e| {
+                    HttpError::for_internal_error(format!(
+                        "can't initialize replicated ClickHouse cluster \
+                         to version {OXIMETER_VERSION}: {e}",
+                    ))
+                })?;
+        } else {
+            info!(
+                log,
+                "skipping initialization of replicated ClickHouse cluster at version {version}"
+            );
+        }
+
+        Ok(())
+    }
+
     pub fn clickhouse_cli(&self) -> &ClickhouseCli {
         &self.clickhouse_cli
     }
@@ -174,10 +206,6 @@ impl ServerContext {
 
     pub fn oximeter_client(&self) -> &OximeterClient {
         &self.oximeter_client
-    }
-
-    pub fn initialization_lock(&self) -> Arc<Mutex<()>> {
-        self.initialization_lock.clone()
     }
 
     pub fn log(&self) -> &Logger {
@@ -200,6 +228,10 @@ pub enum ClickhouseAdminServerRequest {
         replica_settings: ServerConfigurableSettings,
         response: oneshot::Sender<Result<ReplicaConfig, HttpError>>,
     },
+    DbInit {
+        ctx: Arc<ServerContext>,
+        response: oneshot::Sender<Result<(), HttpError>>,
+    },
 }
 
 async fn long_running_task(
@@ -209,7 +241,6 @@ async fn long_running_task(
         match request {
             ClickhouseAdminServerRequest::Generation { ctx, response } => {
                 let result = ctx.generation();
-                // TODO: Just use `let _` instead of returning an error?
                 response.send(result).expect("OHNOOHNO");
             }
             ClickhouseAdminServerRequest::GenerateConfig {
@@ -219,7 +250,11 @@ async fn long_running_task(
             } => {
                 let result =
                     ctx.generate_config_and_enable_svc(replica_settings);
-                response.send(result).expect("failed to send value to channel");
+                response.send(result).expect("failed to send value from configuration generation to channel");
+            }
+            ClickhouseAdminServerRequest::DbInit { ctx, response } => {
+                let result = ctx.init_db().await;
+                response.send(result).expect("failed to send value from database initialization to channel");
             }
         }
     }
