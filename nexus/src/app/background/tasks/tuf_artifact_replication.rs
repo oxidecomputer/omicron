@@ -89,8 +89,8 @@ use crate::app::background::BackgroundTask;
 // to reduce bandwidth spikes for PUT requests; other requests should return
 // quickly.
 const MAX_REQUEST_CONCURRENCY: usize = 8;
-// The number of copies of an artifact we expect each sled to have. This is currently 2 because
-// sleds store a copy of each artifact on each M.2 device.
+// The number of copies of an artifact we expect each sled to have. This is
+// currently 2 because sleds store a copy of each artifact on each M.2 device.
 const EXPECTED_COUNT: u32 = 2;
 // How many recent requests to remember for debugging purposes. At 32 sleds
 // and 64 artifacts per repo, this is enough to remember at least the most
@@ -159,8 +159,8 @@ impl Inventory {
                     });
                 sleds_not_present.shuffle(rng);
 
-                // If we have a local copy, PUT the artifact to more sleds until we
-                // meet `MIN_SLED_REPLICATION`.
+                // If we have a local copy, PUT the artifact to more sleds until
+                // we meet `MIN_SLED_REPLICATION`.
                 let mut sled_puts = Vec::new();
                 if let Some(handle) = presence.local {
                     let count = min_sled_replication
@@ -640,8 +640,8 @@ impl ArtifactReplication {
                                 ArtifactPresence {
                                     sleds: BTreeMap::new(),
                                     local: None,
-                                    // If we're inserting, this artifact wasn't listed in the
-                                    // database.
+                                    // If we're inserting, this artifact wasn't
+                                    // listed in the database.
                                     wanted: false,
                                 }
                             });
