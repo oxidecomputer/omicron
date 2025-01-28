@@ -890,6 +890,7 @@ impl BackgroundTasksInitializer {
                 tuf_artifact_replication::ArtifactReplication::new(
                     datastore.clone(),
                     args.tuf_artifact_replication_rx,
+                    config.tuf_artifact_replication.min_sled_replication,
                 ),
             ),
             opctx: opctx.child(BTreeMap::new()),

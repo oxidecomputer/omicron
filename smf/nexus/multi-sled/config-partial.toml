@@ -74,6 +74,7 @@ region_snapshot_replacement_garbage_collection.period_secs = 30
 region_snapshot_replacement_step.period_secs = 30
 region_snapshot_replacement_finish.period_secs = 30
 tuf_artifact_replication.period_secs = 300
+tuf_artifact_replication.min_sled_replication = 3
 
 [default_region_allocation_strategy]
 # by default, allocate across 3 distinct sleds

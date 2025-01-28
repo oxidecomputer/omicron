@@ -159,6 +159,8 @@ region_snapshot_replacement_finish.period_secs = 60
 # manually to test the result of each activation, so set the activation period
 # to something we'll never see in a test run.
 tuf_artifact_replication.period_secs = 3600
+# Update integration tests are started with 4 sled agents.
+tuf_artifact_replication.min_sled_replication = 3
 
 [default_region_allocation_strategy]
 # we only have one sled in the test environment, so we need to use the

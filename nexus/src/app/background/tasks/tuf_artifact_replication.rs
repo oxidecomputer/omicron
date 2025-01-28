@@ -89,13 +89,6 @@ use crate::app::background::BackgroundTask;
 // to reduce bandwidth spikes for PUT requests; other requests should return
 // quickly.
 const MAX_REQUEST_CONCURRENCY: usize = 8;
-// The number of sleds that artifacts must be present on before the local copy
-// of artifacts is dropped. This is ignored if there are fewer than this many
-// sleds in the system.
-#[cfg(not(feature = "rack-topology-single-sled"))]
-const MIN_SLED_REPLICATION: usize = 3;
-#[cfg(feature = "rack-topology-single-sled")]
-const MIN_SLED_REPLICATION: usize = 1;
 // The number of copies of an artifact we expect each sled to have. This is currently 2 because
 // sleds store a copy of each artifact on each M.2 device.
 const EXPECTED_COUNT: u32 = 2;
@@ -150,6 +143,7 @@ impl Inventory {
         self,
         sleds: &'a [Sled],
         rng: &mut impl rand::Rng,
+        min_sled_replication: usize,
     ) -> Requests<'a> {
         let mut requests = Requests::default();
         for (hash, presence) in self.0 {
@@ -169,7 +163,7 @@ impl Inventory {
                 // meet `MIN_SLED_REPLICATION`.
                 let mut sled_puts = Vec::new();
                 if let Some(handle) = presence.local {
-                    let count = MIN_SLED_REPLICATION
+                    let count = min_sled_replication
                         .saturating_sub(sleds_present.len());
                     for _ in 0..count {
                         let Some(sled) = sleds_not_present.pop() else {
@@ -442,6 +436,7 @@ pub struct ArtifactReplication {
     datastore: Arc<DataStore>,
     local: Vec<ArtifactsWithPlan>,
     local_rx: mpsc::Receiver<ArtifactsWithPlan>,
+    min_sled_replication: usize,
     /// List of recent requests for debugging.
     request_debug_ringbuf: Arc<VecDeque<TufArtifactReplicationRequest>>,
     lifetime_counters: TufArtifactReplicationCounters,
@@ -485,8 +480,11 @@ impl BackgroundTask for ArtifactReplication {
             .await;
             self.list_and_clean_up_local_artifacts(&mut inventory);
 
-            let requests =
-                inventory.into_requests(&sleds, &mut rand::thread_rng());
+            let requests = inventory.into_requests(
+                &sleds,
+                &mut rand::thread_rng(),
+                self.min_sled_replication,
+            );
             let completed = requests
                 .into_stream(&opctx.log)
                 .buffer_unordered(MAX_REQUEST_CONCURRENCY)
@@ -511,11 +509,13 @@ impl ArtifactReplication {
     pub fn new(
         datastore: Arc<DataStore>,
         local_rx: mpsc::Receiver<ArtifactsWithPlan>,
+        min_sled_replication: usize,
     ) -> ArtifactReplication {
         ArtifactReplication {
             datastore,
             local: Vec::new(),
             local_rx,
+            min_sled_replication,
             request_debug_ringbuf: Arc::new(VecDeque::new()),
             lifetime_counters: TufArtifactReplicationCounters::default(),
         }
@@ -669,7 +669,7 @@ impl ArtifactReplication {
                     if let Some(presence) = inventory.0.get_mut(&hash_id.hash) {
                         presence.local =
                             Some(ArtifactHandle::Extracted(handle));
-                        if presence.sleds.len() < MIN_SLED_REPLICATION {
+                        if presence.sleds.len() < self.min_sled_replication {
                             keep_plan = true;
                         }
                     }
@@ -688,6 +688,8 @@ mod tests {
     use rand::{rngs::StdRng, Rng, SeedableRng};
 
     use super::*;
+
+    const MIN_SLED_REPLICATION: usize = 3;
 
     /// Create a list of `Sled`s suitable for testing
     /// `Inventory::into_requests`. Neither the `client` or `depot_base_url`
@@ -809,7 +811,11 @@ mod tests {
                 },
             );
         }
-        let requests = Inventory(inventory).into_requests(&sleds, &mut rng);
+        let requests = Inventory(inventory).into_requests(
+            &sleds,
+            &mut rng,
+            MIN_SLED_REPLICATION,
+        );
         check_consistency(&requests);
         assert_eq!(requests.put.len(), MIN_SLED_REPLICATION * 2);
         assert_eq!(requests.copy_after_put.len(), 13 * 2);
@@ -842,7 +848,11 @@ mod tests {
                 },
             );
         }
-        let requests = Inventory(inventory).into_requests(&sleds, &mut rng);
+        let requests = Inventory(inventory).into_requests(
+            &sleds,
+            &mut rng,
+            MIN_SLED_REPLICATION,
+        );
         check_consistency(&requests);
         assert_eq!(requests.put.len(), 0);
         assert_eq!(requests.copy_after_put.len(), 0);
@@ -868,7 +878,11 @@ mod tests {
                 wanted: false,
             },
         );
-        let requests = Inventory(inventory).into_requests(&sleds, &mut rng);
+        let requests = Inventory(inventory).into_requests(
+            &sleds,
+            &mut rng,
+            MIN_SLED_REPLICATION,
+        );
         check_consistency(&requests);
         assert_eq!(requests.put.len(), 0);
         assert_eq!(requests.copy_after_put.len(), 0);
@@ -905,7 +919,11 @@ mod tests {
                 wanted: true,
             },
         );
-        let requests = Inventory(inventory).into_requests(&sleds, &mut rng);
+        let requests = Inventory(inventory).into_requests(
+            &sleds,
+            &mut rng,
+            MIN_SLED_REPLICATION,
+        );
         check_consistency(&requests);
         assert_eq!(requests.put.len(), 0);
         assert_eq!(requests.copy_after_put.len(), 0);
@@ -931,7 +949,11 @@ mod tests {
                 wanted: true,
             },
         );
-        let requests = Inventory(inventory).into_requests(&sleds, &mut rng);
+        let requests = Inventory(inventory).into_requests(
+            &sleds,
+            &mut rng,
+            MIN_SLED_REPLICATION,
+        );
         check_consistency(&requests);
         assert_eq!(requests.put.len(), 0);
         assert_eq!(requests.copy_after_put.len(), 0);

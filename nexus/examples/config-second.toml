@@ -142,6 +142,7 @@ region_snapshot_replacement_garbage_collection.period_secs = 30
 region_snapshot_replacement_step.period_secs = 30
 region_snapshot_replacement_finish.period_secs = 30
 tuf_artifact_replication.period_secs = 300
+tuf_artifact_replication.min_sled_replication = 3
 
 [default_region_allocation_strategy]
 # allocate region on 3 random distinct zpools, on 3 random distinct sleds.
