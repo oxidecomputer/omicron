@@ -12,50 +12,13 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::identity::Asset;
+use nexus_types::internal_api::background::CrucibleDatasetsRendezvousStats;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid as _;
-use serde::Deserialize;
-use serde::Serialize;
 use slog::info;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-
-/// Summary of results from a single successful operation to record new Crucible
-/// datasets in the `crucible_dataset` rendezvous table.
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
-)]
-pub struct CrucibleDatasetsRendezvousStats {
-    /// Number of new Crucible datasets recorded.
-    ///
-    /// This is a count of in-service Crucible datasets that were also present
-    /// in inventory and newly-inserted into `crucible_dataset`.
-    pub num_inserted: usize,
-    /// Number of Crucible datasets that would have been inserted, except
-    /// records for them already existed.
-    pub num_already_exist: usize,
-    /// Number of Crucible datasets that the current blueprint says are
-    /// in-service, but we did not attempt to insert them because they're not
-    /// present in the latest inventory collection.
-    pub num_not_in_inventory: usize,
-}
-
-impl slog::KV for CrucibleDatasetsRendezvousStats {
-    fn serialize(
-        &self,
-        _record: &slog::Record,
-        serializer: &mut dyn slog::Serializer,
-    ) -> slog::Result {
-        let Self { num_inserted, num_already_exist, num_not_in_inventory } =
-            *self;
-        serializer.emit_usize("num_inserted".into(), num_inserted)?;
-        serializer.emit_usize("num_already_exist".into(), num_already_exist)?;
-        serializer
-            .emit_usize("num_not_in_inventory".into(), num_not_in_inventory)?;
-        Ok(())
-    }
-}
 
 pub(crate) async fn record_new_crucible_datasets(
     opctx: &OpContext,

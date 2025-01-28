@@ -12,26 +12,18 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetFilter;
+use nexus_types::internal_api::background::BlueprintRendezvousStats;
 use nexus_types::inventory::Collection;
-use serde::Deserialize;
-use serde::Serialize;
 
 mod crucible_dataset;
 mod debug_dataset;
-
-pub use crucible_dataset::CrucibleDatasetsRendezvousStats;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RendezvousStats {
-    pub crucible_dataset: CrucibleDatasetsRendezvousStats,
-}
 
 pub async fn reconcile_blueprint_rendezvous_tables(
     opctx: &OpContext,
     datastore: &DataStore,
     blueprint: &Blueprint,
     inventory: &Collection,
-) -> anyhow::Result<RendezvousStats> {
+) -> anyhow::Result<BlueprintRendezvousStats> {
     let inventory_dataset_ids = inventory
         .sled_agents
         .values()
@@ -59,7 +51,7 @@ pub async fn reconcile_blueprint_rendezvous_tables(
     )
     .await?;
 
-    Ok(RendezvousStats { crucible_dataset })
+    Ok(BlueprintRendezvousStats { crucible_dataset })
 }
 
 #[cfg(test)]

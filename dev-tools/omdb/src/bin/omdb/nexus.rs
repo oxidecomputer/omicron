@@ -42,6 +42,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::ClickhouseMode;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
+use nexus_types::internal_api::background::BlueprintRendezvousStatus;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
@@ -1116,25 +1117,6 @@ fn print_task_blueprint_loader(details: &serde_json::Value) {
 }
 
 fn print_task_blueprint_rendezvous(details: &serde_json::Value) {
-    #[derive(Deserialize)]
-    struct CrucibleDatasetStats {
-        num_inserted: usize,
-        num_already_exist: usize,
-        num_not_in_inventory: usize,
-    }
-
-    #[derive(Deserialize)]
-    struct Stats {
-        crucible_dataset: CrucibleDatasetStats,
-    }
-
-    #[derive(Deserialize)]
-    struct BlueprintRendezvousStatus {
-        blueprint_id: Uuid,
-        inventory_collection_id: Uuid,
-        stats: Stats,
-    }
-
     match serde_json::from_value::<BlueprintRendezvousStatus>(details.clone()) {
         Err(error) => eprintln!(
             "warning: failed to interpret task details: {:?}: {:?}",
