@@ -346,43 +346,61 @@ mod tests {
             for (id, prep) in prep {
                 let id: DatasetUuid = u32_to_id(id);
 
-                if prep.in_database {
-                    // The dataset was already in the database. If it was in
-                    // service, we should have noted that it already exists.
-                    if prep.disposition == ArbitraryDisposition::InService {
+                let in_db_before = prep.in_database;
+                let in_db_after = datastore_datasets.contains_key(&id);
+                let in_service =
+                    prep.disposition == ArbitraryDisposition::InService;
+                let in_inventory = prep.in_inventory;
+
+                // Validate rendezvous output
+                match (in_db_before, in_service, in_inventory) {
+                    // Datasets not in service should be skipped entirely.
+                    (_, false, _) => (),
+                    // In service but already existed
+                    (true, true, _) => {
                         expected_stats.num_already_exist += 1;
                     }
+                    // In service, not in db yet, but not in inventory
+                    (false, true, false) => {
+                        expected_stats.num_not_in_inventory += 1;
+                    }
+                    // In service, not in db yet, present in inventory
+                    (false, true, true) => {
+                        expected_stats.num_inserted += 1;
+                    }
+                }
 
+                // Validate database state
+                match (in_db_before, in_service, in_inventory) {
                     // We only add rows; if this dataset was present before, it
                     // should still be after we've executed.
-                    assert!(
-                        datastore_datasets.contains_key(&id),
-                        "existing dataset missing from database: {id}, {prep:?}"
-                    );
-                } else {
-                    // The dataset wasn't in the database to begin with.
-                    if prep.disposition != ArbitraryDisposition::InService {
-                        // If it wasn't in service, we should have ignored it.
+                    (true, _, _) => {
                         assert!(
-                            !datastore_datasets.contains_key(&id),
+                            in_db_after,
+                            "existing dataset missing from database: \
+                            {id}, {prep:?}"
+                        );
+                    }
+                    // If it wasn't in service, we shouldn't have inserted it.
+                    (false, false, _) => {
+                        assert!(
+                            !in_db_after,
                             "expunged dataset inserted: {id}, {prep:?}"
                         );
-                    } else if !prep.in_inventory {
-                        // If it wasn't in inventory, we should not have
-                        // inserted it, but should have noted that we wanted to
-                        // in the stats.
-                        expected_stats.num_not_in_inventory += 1;
+                    }
+                    // If it wasn't in inventory, we shouldn't have inserted it.
+                    (false, true, false) => {
                         assert!(
-                            !datastore_datasets.contains_key(&id),
+                            !in_db_after,
                             "dataset inserted when not in inventory: \
                              {id}, {prep:?}"
                         );
-                    } else {
-                        // It's in service and in inventory and wasn't in the
-                        // database before: we should have inserted it.
-                        expected_stats.num_inserted += 1;
+                    }
+                    // If it was in service and in inventory, we should have
+                    // inserted it.
+                    (false, true, true) => {
                         assert!(
-                            datastore_datasets.contains_key(&id),
+                            in_db_after,
                             "new dataset missing from database: {id}, {prep:?}"
                         );
                     }
