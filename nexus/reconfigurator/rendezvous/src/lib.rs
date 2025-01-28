@@ -12,8 +12,10 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetFilter;
+use nexus_types::internal_api::background::BlueprintRendezvousStats;
 use nexus_types::inventory::Collection;
 
+mod crucible_dataset;
 mod debug_dataset;
 
 pub async fn reconcile_blueprint_rendezvous_tables(
@@ -21,7 +23,13 @@ pub async fn reconcile_blueprint_rendezvous_tables(
     datastore: &DataStore,
     blueprint: &Blueprint,
     inventory: &Collection,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<BlueprintRendezvousStats> {
+    let inventory_dataset_ids = inventory
+        .sled_agents
+        .values()
+        .flat_map(|sled| sled.datasets.iter().flat_map(|d| d.id))
+        .collect();
+
     debug_dataset::reconcile_debug_datasets(
         opctx,
         datastore,
@@ -29,13 +37,56 @@ pub async fn reconcile_blueprint_rendezvous_tables(
         blueprint
             .all_omicron_datasets(BlueprintDatasetFilter::All)
             .map(|(_sled_id, dataset)| dataset),
-        &inventory
-            .sled_agents
-            .values()
-            .flat_map(|sled| sled.datasets.iter().flat_map(|d| d.id))
-            .collect(),
+        &inventory_dataset_ids,
     )
     .await?;
 
-    Ok(())
+    let crucible_dataset = crucible_dataset::record_new_crucible_datasets(
+        opctx,
+        datastore,
+        blueprint
+            .all_omicron_datasets(BlueprintDatasetFilter::All)
+            .map(|(_sled_id, dataset)| dataset),
+        &inventory_dataset_ids,
+    )
+    .await?;
+
+    Ok(BlueprintRendezvousStats { crucible_dataset })
+}
+
+#[cfg(test)]
+mod tests {
+    use nexus_types::deployment::BlueprintDatasetDisposition;
+    use omicron_uuid_kinds::{GenericUuid, TypedUuid, TypedUuidKind};
+    use test_strategy::Arbitrary;
+    use uuid::Uuid;
+
+    // Helpers to describe how a dataset should be prepared for the proptests
+    // in our dataset-syncing submodules.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Arbitrary)]
+    pub enum ArbitraryDisposition {
+        InService,
+        Expunged,
+    }
+
+    impl From<ArbitraryDisposition> for BlueprintDatasetDisposition {
+        fn from(value: ArbitraryDisposition) -> Self {
+            match value {
+                ArbitraryDisposition::InService => Self::InService,
+                ArbitraryDisposition::Expunged => Self::Expunged,
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, Arbitrary)]
+    pub struct DatasetPrep {
+        pub disposition: ArbitraryDisposition,
+        pub in_inventory: bool,
+        pub in_database: bool,
+    }
+
+    pub fn u32_to_id<T: TypedUuidKind>(n: u32) -> TypedUuid<T> {
+        let untyped = Uuid::from_u128(u128::from(n));
+        TypedUuid::from_untyped_uuid(untyped)
+    }
 }

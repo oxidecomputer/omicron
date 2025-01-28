@@ -112,6 +112,9 @@ pub(crate) async fn reconcile_debug_datasets(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests::u32_to_id;
+    use crate::tests::ArbitraryDisposition;
+    use crate::tests::DatasetPrep;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
@@ -119,40 +122,8 @@ mod tests {
     use nexus_types::inventory::ZpoolName;
     use omicron_common::disk::CompressionAlgorithm;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::{GenericUuid, TypedUuid, TypedUuidKind};
     use proptest::prelude::*;
     use proptest::proptest;
-    use test_strategy::Arbitrary;
-    use uuid::Uuid;
-
-    // Helpers to describe how a dataset should be prepared for the proptest
-    // below.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Arbitrary)]
-    enum ArbitraryDisposition {
-        InService,
-        Expunged,
-    }
-
-    impl From<ArbitraryDisposition> for BlueprintDatasetDisposition {
-        fn from(value: ArbitraryDisposition) -> Self {
-            match value {
-                ArbitraryDisposition::InService => Self::InService,
-                ArbitraryDisposition::Expunged => Self::Expunged,
-            }
-        }
-    }
-
-    #[derive(Debug, Clone, Copy, Arbitrary)]
-    struct DatasetPrep {
-        disposition: ArbitraryDisposition,
-        in_inventory: bool,
-        in_database: bool,
-    }
-
-    fn u32_to_id<T: TypedUuidKind>(n: u32) -> TypedUuid<T> {
-        let untyped = Uuid::from_u128(u128::from(n));
-        TypedUuid::from_untyped_uuid(untyped)
-    }
 
     async fn proptest_do_prep(
         opctx: &OpContext,
@@ -272,36 +243,58 @@ mod tests {
             for (id, prep) in prep {
                 let id: DatasetUuid = u32_to_id(id);
 
-                // If the dataset wasn't in the database already, we should not
-                // have inserted it if either:
-                //
-                // * it wasn't present in inventory
-                // * it was expunged (tombstoning an already-hard-deleted
-                //   dataset is a no-op)
-                if !prep.in_database && (!prep.in_inventory
-                    || prep.disposition == ArbitraryDisposition::Expunged
-                ){
-                    assert!(
-                        !datastore_datasets.contains_key(&id),
-                        "unexpected dataset present in database: \
-                        {id}, {prep:?}"
-                    );
-                    continue;
-                }
-
-                // Otherwise, we should have either inserted or attempted to
-                // update the record. Get it from the datastore and confirm that
-                // its tombstoned bit is correct based on the blueprint
-                // disposition.
-                let db = datastore_datasets
+                let in_db_before = prep.in_database;
+                let in_db_tombstoned = datastore_datasets
                     .get(&id)
-                    .expect("missing entry in database");
-                match prep.disposition {
-                    ArbitraryDisposition::InService => {
-                        assert!(!db.is_tombstoned());
+                    .map(|d| d.is_tombstoned());
+                let in_db_after = in_db_tombstoned.is_some();
+                let in_service =
+                    prep.disposition == ArbitraryDisposition::InService;
+                let in_inventory = prep.in_inventory;
+
+                // Validate database state
+                match (in_db_before, in_service, in_inventory) {
+                    // Wasn't in DB, isn't in service: should still not be in db
+                    (false, false, _) => {
+                        assert!(
+                            !in_db_after,
+                            "expunged dataset inserted: {id}, {prep:?}",
+                        );
                     }
-                    ArbitraryDisposition::Expunged => {
-                        assert!(db.is_tombstoned())
+                    // Wasn't in DB, isn't in inventory: should still not be in
+                    // db
+                    (false, true, false) => {
+                        assert!(
+                            !in_db_after,
+                            "dataset inserted but not in inventory: \
+                             {id}, {prep:?}",
+                        );
+                    }
+                    // Was in DB, expunged: should be in the DB and tombstoned
+                    (true, false, _) => {
+                        assert_eq!(
+                            in_db_tombstoned, Some(true),
+                            "expunged dataset should be tombstoned: \
+                             {id}, {prep:?}",
+                        );
+                    }
+                    // Wasn't in DB, in-service, and in inventory: should have
+                    // been added to the DB and not tombstoned
+                    (false, true, true) => {
+                        assert_eq!(
+                            in_db_tombstoned, Some(false),
+                            "in-service dataset should have been inserted: \
+                             {id}, {prep:?}",
+                        );
+                    }
+                    // Was in DB, in-service: should still be in the DB, not
+                    // tombstoned, regardless of inventory presence
+                    (true, true, _) => {
+                        assert_eq!(
+                            in_db_tombstoned, Some(false),
+                            "in-service dataset should not be tombstoned: \
+                             {id}, {prep:?}",
+                        );
                     }
                 }
             }

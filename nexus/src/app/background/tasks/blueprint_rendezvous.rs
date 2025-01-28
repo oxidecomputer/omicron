@@ -11,7 +11,10 @@ use futures::FutureExt;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_rendezvous::reconcile_blueprint_rendezvous_tables;
-use nexus_types::deployment::{Blueprint, BlueprintTarget};
+use nexus_types::{
+    deployment::{Blueprint, BlueprintTarget},
+    internal_api::background::BlueprintRendezvousStatus,
+};
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
@@ -92,7 +95,14 @@ impl BlueprintRendezvous {
 
         // Return the result as a `serde_json::Value`
         match result {
-            Ok(()) => json!({}),
+            Ok(stats) => {
+                let status = BlueprintRendezvousStatus {
+                    blueprint_id: blueprint.id,
+                    inventory_collection_id: collection.id,
+                    stats,
+                };
+                json!(status)
+            }
             Err(err) => json!({ "error":
                 format!("rendezvous reconciliation failed: {err:#}"),
             }),
