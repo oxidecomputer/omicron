@@ -210,13 +210,13 @@ impl DataStore {
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let now = Utc::now();
-        use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::crucible_dataset::dsl as dataset_dsl;
         use db::schema::zpool::dsl as zpool_dsl;
 
         let zpool_id = *zpool_id.as_untyped_uuid();
 
         // Get the IDs of all datasets to-be-deleted
-        let dataset_ids: Vec<Uuid> = dataset_dsl::dataset
+        let dataset_ids: Vec<Uuid> = dataset_dsl::crucible_dataset
             .filter(dataset_dsl::time_deleted.is_null())
             .filter(dataset_dsl::pool_id.eq(zpool_id))
             .select(dataset_dsl::id)
@@ -252,7 +252,7 @@ impl DataStore {
         }
 
         // Ensure the datasets are deleted
-        diesel::update(dataset_dsl::dataset)
+        diesel::update(dataset_dsl::crucible_dataset)
             .filter(dataset_dsl::time_deleted.is_null())
             .filter(dataset_dsl::pool_id.eq(zpool_id))
             .set(dataset_dsl::time_deleted.eq(now))

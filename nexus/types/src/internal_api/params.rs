@@ -16,12 +16,12 @@ use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Name;
 use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::api::internal::shared::AllowedSourceIps;
-use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -96,17 +96,6 @@ pub struct ZpoolPutRequest {
     pub physical_disk_id: PhysicalDiskUuid,
 }
 
-/// Describes a dataset within a pool.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct DatasetPutRequest {
-    /// Address on which a service is responding to requests for the
-    /// dataset.
-    pub address: Option<SocketAddrV6>,
-
-    /// Type of dataset being inserted.
-    pub kind: DatasetKind,
-}
-
 /// Describes the RSS allocated values for a service vnic
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, PartialEq, Eq)]
 pub struct ServiceNic {
@@ -160,10 +149,10 @@ impl fmt::Display for ServiceKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct DatasetCreateRequest {
-    pub zpool_id: Uuid,
+pub struct CrucibleDatasetCreateRequest {
+    pub zpool_id: ZpoolUuid,
     pub dataset_id: DatasetUuid,
-    pub request: DatasetPutRequest,
+    pub address: SocketAddrV6,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -177,8 +166,12 @@ pub struct RackInitializationRequest {
     /// Zpools created within the physical disks created by the control plane.
     pub zpools: Vec<ZpoolPutRequest>,
 
-    /// Datasets on the rack which have been provisioned by RSS.
-    pub datasets: Vec<DatasetCreateRequest>,
+    /// Crucible datasets on the rack which have been provisioned by RSS.
+    // TODO-cleanup This field should be removed; its contents are completely
+    // described by `blueprint`. However, removing it requires significant work
+    // in `nexus-test-utils` and friends
+    // (<https://github.com/oxidecomputer/omicron/issues/7081>).
+    pub crucible_datasets: Vec<CrucibleDatasetCreateRequest>,
     /// Ranges of the service IP pool which may be used for internal services,
     /// such as Nexus.
     pub internal_services_ip_pool_ranges: Vec<IpRange>,

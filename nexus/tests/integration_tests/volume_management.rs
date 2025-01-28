@@ -16,7 +16,7 @@ use http::method::Method;
 use http::StatusCode;
 use nexus_config::RegionAllocationStrategy;
 use nexus_db_model::to_db_typed_uuid;
-use nexus_db_model::Dataset;
+use nexus_db_model::CrucibleDataset;
 use nexus_db_model::RegionSnapshotReplacement;
 use nexus_db_model::RegionSnapshotReplacementState;
 use nexus_db_model::Volume;
@@ -4155,8 +4155,10 @@ async fn test_read_only_region_reference_counting(
     let (_, read_only_region) = &allocated_regions[0];
     assert!(read_only_region.read_only());
 
-    let db_read_only_dataset =
-        datastore.dataset_get(read_only_region.dataset_id()).await.unwrap();
+    let db_read_only_dataset = datastore
+        .crucible_dataset_get(read_only_region.dataset_id())
+        .await
+        .unwrap();
 
     // The disk-from-snap VCR should also reference that read-only region
 
@@ -6437,13 +6439,13 @@ async fn test_proper_region_sled_redundancy(
         for (_, region) in &datasets_and_regions {
             let sled_id = {
                 let dataset = {
-                    use db::schema::dataset::dsl;
-                    dsl::dataset
+                    use db::schema::crucible_dataset::dsl;
+                    dsl::crucible_dataset
                         .filter(
                             dsl::id.eq(to_db_typed_uuid(region.dataset_id())),
                         )
-                        .select(Dataset::as_select())
-                        .get_result_async::<Dataset>(&*conn)
+                        .select(CrucibleDataset::as_select())
+                        .get_result_async::<CrucibleDataset>(&*conn)
                         .await
                         .unwrap()
                 };

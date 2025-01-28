@@ -160,19 +160,27 @@ pub(crate) async fn call_pantry_detach_for_disk(
 
 pub(crate) fn find_only_new_region(
     log: &Logger,
-    existing_datasets_and_regions: Vec<(db::model::Dataset, db::model::Region)>,
-    new_datasets_and_regions: Vec<(db::model::Dataset, db::model::Region)>,
-) -> Option<(db::model::Dataset, db::model::Region)> {
+    existing_datasets_and_regions: Vec<(
+        db::model::CrucibleDataset,
+        db::model::Region,
+    )>,
+    new_datasets_and_regions: Vec<(
+        db::model::CrucibleDataset,
+        db::model::Region,
+    )>,
+) -> Option<(db::model::CrucibleDataset, db::model::Region)> {
     // Only filter on whether or not a Region is in the existing list! Datasets
     // can change values (like size_used) if this saga interleaves with other
     // saga runs of the same type.
-    let mut dataset_and_region: Vec<(db::model::Dataset, db::model::Region)> =
-        new_datasets_and_regions
-            .into_iter()
-            .filter(|(_, r)| {
-                !existing_datasets_and_regions.iter().any(|(_, er)| er == r)
-            })
-            .collect();
+    let mut dataset_and_region: Vec<(
+        db::model::CrucibleDataset,
+        db::model::Region,
+    )> = new_datasets_and_regions
+        .into_iter()
+        .filter(|(_, r)| {
+            !existing_datasets_and_regions.iter().any(|(_, er)| er == r)
+        })
+        .collect();
 
     if dataset_and_region.len() != 1 {
         error!(

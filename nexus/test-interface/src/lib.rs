@@ -70,7 +70,9 @@ pub trait NexusServer: Send + Sync + 'static {
         blueprint: Blueprint,
         physical_disks: Vec<PhysicalDiskPutRequest>,
         zpools: Vec<nexus_types::internal_api::params::ZpoolPutRequest>,
-        datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
+        datasets: Vec<
+            nexus_types::internal_api::params::CrucibleDatasetCreateRequest,
+        >,
         internal_dns_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
         recovery_silo: nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,

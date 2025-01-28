@@ -51,6 +51,8 @@ use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
+use nexus_types::internal_api::background::SupportBundleCleanupReport;
+use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
 use nexus_types::internal_api::background::TufArtifactReplicationStatus;
@@ -945,6 +947,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "service_firewall_rule_propagation" => {
             print_task_service_firewall_rule_propagation(details);
+        }
+        "support_bundle_collector" => {
+            print_task_support_bundle_collector(details);
         }
         "tuf_artifact_replication" => {
             print_task_tuf_artifact_replication(details);
@@ -2028,6 +2033,66 @@ fn print_task_service_firewall_rule_propagation(details: &serde_json::Value) {
             eprintln!("    unexpected return value from task: {:?}", val)
         }
     };
+}
+
+fn print_task_support_bundle_collector(details: &serde_json::Value) {
+    #[derive(Deserialize)]
+    struct SupportBundleCollectionStatus {
+        cleanup_report: Option<SupportBundleCleanupReport>,
+        cleanup_err: Option<String>,
+        collection_report: Option<SupportBundleCollectionReport>,
+        collection_err: Option<String>,
+    }
+
+    match serde_json::from_value::<SupportBundleCollectionStatus>(
+        details.clone(),
+    ) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(SupportBundleCollectionStatus {
+            cleanup_report,
+            cleanup_err,
+            collection_report,
+            collection_err,
+        }) => {
+            if let Some(cleanup_err) = cleanup_err {
+                println!("    failed to perform cleanup: {cleanup_err}");
+            }
+            if let Some(SupportBundleCleanupReport {
+                sled_bundles_deleted_ok,
+                sled_bundles_deleted_not_found,
+                sled_bundles_delete_failed,
+                db_destroying_bundles_removed,
+                db_failing_bundles_updated,
+            }) = cleanup_report
+            {
+                println!("    Support Bundle Cleanup Report:");
+                println!("      Bundles deleted from sleds: {sled_bundles_deleted_ok}");
+                println!("      Bundles not found on sleds: {sled_bundles_deleted_not_found}");
+                println!("      Bundles delete failed on sleds: {sled_bundles_delete_failed}");
+                println!("      Bundles deleted from database: {db_destroying_bundles_removed}");
+                println!("      Bundles marked failed in database: {db_failing_bundles_updated}");
+            }
+
+            if let Some(collection_err) = collection_err {
+                println!("    failed to perform collection: {collection_err}");
+            }
+
+            if let Some(SupportBundleCollectionReport {
+                bundle,
+                listed_in_service_sleds,
+                activated_in_db_ok,
+            }) = collection_report
+            {
+                println!("    Support Bundle Collection Report:");
+                println!("      Bundle ID: {bundle}");
+                println!("      Bundle was able to list in-service sleds: {listed_in_service_sleds}");
+                println!("      Bundle was activated in the database: {activated_in_db_ok}");
+            }
+        }
+    }
 }
 
 fn print_task_tuf_artifact_replication(details: &serde_json::Value) {

@@ -561,9 +561,15 @@ CREATE TYPE IF NOT EXISTS omicron.public.dataset_kind AS ENUM (
 );
 
 /*
- * A dataset of allocated space within a zpool.
+ * Table tracking the contact information and size used by datasets associated
+ * with Crucible zones.
+ *
+ * This is a Reconfigurator rendezvous table: it reflects resources that
+ * Reconfigurator has ensured exist. It is always possible that a resource
+ * chosen from this table could be deleted after it's selected, but any
+ * non-deleted row in this table is guaranteed to have been created.
  */
-CREATE TABLE IF NOT EXISTS omicron.public.dataset (
+CREATE TABLE IF NOT EXISTS omicron.public.crucible_dataset (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -574,56 +580,36 @@ CREATE TABLE IF NOT EXISTS omicron.public.dataset (
     /* FK into the Pool table */
     pool_id UUID NOT NULL,
 
-    /* Contact information for the dataset */
-    ip INET,
-    port INT4 CHECK (port BETWEEN 0 AND 65535),
+    /*
+     * Contact information for the dataset: socket address of the Crucible
+     * agent service that owns this dataset
+     */
+    ip INET NOT NULL,
+    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
 
-    kind omicron.public.dataset_kind NOT NULL,
-
-    /* An upper bound on the amount of space that might be in-use */
-    size_used INT,
-
-    /* Only valid if kind = zone -- the name of this zone */
-    zone_name TEXT,
-
-    quota INT8,
-    reservation INT8,
-    compression TEXT,
-
-    /* Crucible must make use of 'size_used'; other datasets manage their own storage */
-    CONSTRAINT size_used_column_set_for_crucible CHECK (
-      (kind != 'crucible') OR
-      (kind = 'crucible' AND size_used IS NOT NULL)
-    ),
-
-    CONSTRAINT ip_and_port_set_for_crucible CHECK (
-      (kind != 'crucible') OR
-      (kind = 'crucible' AND ip IS NOT NULL and port IS NOT NULL)
-    ),
-
-    CONSTRAINT zone_name_for_zone_kind CHECK (
-      (kind != 'zone') OR
-      (kind = 'zone' AND zone_name IS NOT NULL)
-    )
+    /*
+     * An upper bound on the amount of space that might be in-use
+     *
+     * This field is owned by Nexus. When a new row is inserted during the
+     * Reconfigurator rendezvous process, this field is set to 0. Reconfigurator
+     * otherwise ignores this field. It's updated by Nexus as region allocations
+     * and deletions are performed using this dataset.
+     */
+    size_used INT NOT NULL
 );
 
-/* Create an index on the size usage for Crucible's allocation */
-CREATE INDEX IF NOT EXISTS lookup_dataset_by_size_used_crucible on omicron.public.dataset (
-    size_used
-) WHERE size_used IS NOT NULL AND time_deleted IS NULL AND kind = 'crucible';
-
-/* Create an index on the size usage for any dataset */
-CREATE INDEX IF NOT EXISTS lookup_dataset_by_size_used on omicron.public.dataset (
-    size_used
-) WHERE size_used IS NOT NULL AND time_deleted IS NULL;
+/* Create an index on the size usage for any Crucible dataset */
+CREATE INDEX IF NOT EXISTS lookup_crucible_dataset_by_size_used ON
+    omicron.public.crucible_dataset (size_used)
+  WHERE time_deleted IS NULL;
 
 /* Create an index on the zpool id */
-CREATE INDEX IF NOT EXISTS lookup_dataset_by_zpool on omicron.public.dataset (
-    pool_id,
-    id
-) WHERE pool_id IS NOT NULL AND time_deleted IS NULL;
+CREATE INDEX IF NOT EXISTS lookup_crucible_dataset_by_zpool ON
+    omicron.public.crucible_dataset (pool_id, id)
+  WHERE time_deleted IS NULL;
 
-CREATE INDEX IF NOT EXISTS lookup_dataset_by_ip on omicron.public.dataset (ip);
+CREATE INDEX IF NOT EXISTS lookup_crucible_dataset_by_ip ON
+  omicron.public.crucible_dataset (ip);
 
 /*
  * A region of space allocated to Crucible Downstairs, within a dataset.
@@ -4824,7 +4810,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '121.0.0', NULL)
+    (TRUE, NOW(), NOW(), '122.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

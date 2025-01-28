@@ -40,7 +40,6 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus::Certificate;
-use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
@@ -211,13 +210,10 @@ impl Server {
             let address =
                 sled_agent.create_crucible_dataset(zpool_id, dataset_id);
 
-            datasets.push(NexusTypes::DatasetCreateRequest {
-                zpool_id: zpool_id.into_untyped_uuid(),
+            datasets.push(NexusTypes::CrucibleDatasetCreateRequest {
+                zpool_id,
                 dataset_id,
-                request: NexusTypes::DatasetPutRequest {
-                    address: Some(address.to_string()),
-                    kind: DatasetKind::Crucible,
-                },
+                address: address.to_string(),
             });
 
             // Whenever Nexus tries to allocate a region, it should complete
@@ -519,7 +515,7 @@ pub async fn run_standalone_server(
             .unwrap(),
     };
 
-    let mut datasets = vec![];
+    let mut crucible_datasets = vec![];
     let physical_disks = server.sled_agent.get_all_physical_disks();
     let zpools = server.sled_agent.get_zpools();
     for zpool in &zpools {
@@ -527,13 +523,10 @@ pub async fn run_standalone_server(
         for (dataset_id, address) in
             server.sled_agent.get_crucible_datasets(zpool_id)
         {
-            datasets.push(NexusTypes::DatasetCreateRequest {
-                zpool_id: zpool.id,
+            crucible_datasets.push(NexusTypes::CrucibleDatasetCreateRequest {
+                zpool_id,
                 dataset_id,
-                request: NexusTypes::DatasetPutRequest {
-                    address: Some(address.to_string()),
-                    kind: DatasetKind::Crucible,
-                },
+                address: address.to_string(),
             });
         }
     }
@@ -577,7 +570,7 @@ pub async fn run_standalone_server(
         blueprint,
         physical_disks,
         zpools,
-        datasets,
+        crucible_datasets,
         internal_services_ip_pool_ranges,
         certs,
         internal_dns_zone_config: dns_config,

@@ -18,7 +18,7 @@ use crate::db::error::ErrorHandler;
 use crate::db::error::MaybeRetryable::*;
 use crate::db::identity::Asset;
 use crate::db::lookup::LookupPath;
-use crate::db::model::Dataset;
+use crate::db::model::CrucibleDataset;
 use crate::db::model::IncompleteExternalIp;
 use crate::db::model::PhysicalDisk;
 use crate::db::model::Rack;
@@ -80,7 +80,7 @@ pub struct RackInit {
     pub blueprint: Blueprint,
     pub physical_disks: Vec<PhysicalDisk>,
     pub zpools: Vec<Zpool>,
-    pub datasets: Vec<Dataset>,
+    pub datasets: Vec<CrucibleDataset>,
     pub service_ip_pool_ranges: Vec<IpRange>,
     pub internal_dns: InitialDnsGroup,
     pub external_dns: InitialDnsGroup,
@@ -833,11 +833,11 @@ impl DataStore {
                     info!(log, "Inserted zpools");
 
                     for dataset in datasets {
-                        use db::schema::dataset::dsl;
+                        use db::schema::crucible_dataset::dsl;
                         let zpool_id = dataset.pool_id;
                         Zpool::insert_resource(
                             zpool_id,
-                            diesel::insert_into(dsl::dataset)
+                            diesel::insert_into(dsl::crucible_dataset)
                                 .values(dataset.clone())
                                 .on_conflict(dsl::id)
                                 .do_update()
@@ -846,7 +846,6 @@ impl DataStore {
                                     dsl::pool_id.eq(excluded(dsl::pool_id)),
                                     dsl::ip.eq(excluded(dsl::ip)),
                                     dsl::port.eq(excluded(dsl::port)),
-                                    dsl::kind.eq(excluded(dsl::kind)),
                                 )),
                         )
                         .insert_and_get_result_async(&conn)
@@ -1290,7 +1289,7 @@ mod test {
 
     fn_to_get_all!(external_ip, ExternalIp);
     fn_to_get_all!(ip_pool_range, IpPoolRange);
-    fn_to_get_all!(dataset, Dataset);
+    fn_to_get_all!(crucible_dataset, CrucibleDataset);
 
     fn random_zpool() -> ZpoolName {
         ZpoolName::new_external(ZpoolUuid::new_v4())
@@ -1657,7 +1656,7 @@ mod test {
         );
         assert_eq!(ntp2_external_ip.ip.ip(), ntp2_ip);
 
-        let observed_datasets = get_all_datasets(&datastore).await;
+        let observed_datasets = get_all_crucible_datasets(&datastore).await;
         assert!(observed_datasets.is_empty());
 
         db.terminate().await;
@@ -1912,7 +1911,7 @@ mod test {
         assert_eq!(observed_ip_pool_ranges.len(), 1);
         assert_eq!(observed_ip_pool_ranges[0].ip_pool_id, svc_pool.id());
 
-        let observed_datasets = get_all_datasets(&datastore).await;
+        let observed_datasets = get_all_crucible_datasets(&datastore).await;
         assert!(observed_datasets.is_empty());
 
         // Verify the internal and external DNS configurations.
@@ -2039,7 +2038,7 @@ mod test {
             "Invalid Request: Requested external IP address not available"
         );
 
-        assert!(get_all_datasets(&datastore).await.is_empty());
+        assert!(get_all_crucible_datasets(&datastore).await.is_empty());
         assert!(get_all_external_ips(&datastore).await.is_empty());
 
         db.terminate().await;
@@ -2186,7 +2185,7 @@ mod test {
             "Invalid Request: Requested external IP address not available",
         );
 
-        assert!(get_all_datasets(&datastore).await.is_empty());
+        assert!(get_all_crucible_datasets(&datastore).await.is_empty());
         assert!(get_all_external_ips(&datastore).await.is_empty());
 
         db.terminate().await;

@@ -54,6 +54,7 @@ use nexus_types::{
     },
 };
 use omicron_common::api::external::http_pagination::data_page_params_for;
+use omicron_common::api::external::http_pagination::marker_for_id;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
 use omicron_common::api::external::http_pagination::name_or_id_pagination;
@@ -81,6 +82,8 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::LldpLinkConfig;
+use omicron_common::api::external::LldpNeighbor;
 use omicron_common::api::external::LoopbackAddress;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Probe;
@@ -3009,6 +3012,107 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             nexus.switch_port_clear_settings(&opctx, &port, &query).await?;
             Ok(HttpResponseUpdatedNoContent {})
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_lldp_config_view(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortPathSelector>,
+        query_params: Query<params::SwitchPortSelector>,
+    ) -> Result<HttpResponseOk<LldpLinkConfig>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let settings = nexus
+                .lldp_config_get(
+                    &opctx,
+                    query.rack_id,
+                    query.switch_location,
+                    path.port,
+                )
+                .await?;
+            Ok(HttpResponseOk(settings))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_lldp_config_update(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SwitchPortPathSelector>,
+        query_params: Query<params::SwitchPortSelector>,
+        config: TypedBody<LldpLinkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = rqctx.context();
+        let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let config = config.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            nexus
+                .lldp_config_update(
+                    &opctx,
+                    query.rack_id,
+                    query.switch_location,
+                    path.port,
+                    config,
+                )
+                .await?;
+            Ok(HttpResponseUpdatedNoContent {})
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_switch_port_lldp_neighbors(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::LldpPortPathSelector>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<LldpNeighbor>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let query = query_params.into_inner();
+            let path = path_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let limit = pag_params.limit.into();
+            let prev = pag_params.marker.cloned();
+
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let neighbors = nexus
+                .lldp_neighbors_get(
+                    &opctx,
+                    &prev,
+                    limit,
+                    path.rack_id,
+                    &path.switch_location,
+                    &path.port,
+                )
+                .await?;
+
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                neighbors,
+                &marker_for_id,
+            )?))
         };
         apictx
             .context

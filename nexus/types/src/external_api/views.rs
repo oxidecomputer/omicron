@@ -15,7 +15,7 @@ use diffus::Diffus;
 use omicron_common::api::external::{
     AllowedSourceIps as ExternalAllowedSourceIps, ByteCount, Digest, Error,
     IdentityMetadata, InstanceState, Name, ObjectIdentity, RoleName,
-    SimpleIdentity,
+    SimpleIdentityOrName,
 };
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
@@ -103,7 +103,7 @@ pub struct SiloUtilization {
 // but we can't derive ObjectIdentity because this isn't a typical asset.
 // Instead we implement this new simple identity trait which is used under the
 // hood by the pagination code.
-impl SimpleIdentity for SiloUtilization {
+impl SimpleIdentityOrName for SiloUtilization {
     fn id(&self) -> Uuid {
         self.silo_id
     }

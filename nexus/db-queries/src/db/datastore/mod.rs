@@ -59,7 +59,7 @@ mod clickhouse_policy;
 mod cockroachdb_node_id;
 mod cockroachdb_settings;
 mod console_session;
-mod dataset;
+mod crucible_dataset;
 mod db_metadata;
 mod deployment;
 mod device_auth;
@@ -72,6 +72,7 @@ pub mod instance;
 mod inventory;
 mod ip_pool;
 mod ipv4_nat_entry;
+mod lldp;
 mod migration;
 mod network_interface;
 mod oximeter;
@@ -455,7 +456,7 @@ mod test {
     use crate::db::identity::Asset;
     use crate::db::lookup::LookupPath;
     use crate::db::model::{
-        BlockSize, ConsoleSession, Dataset, ExternalIp, PhysicalDisk,
+        BlockSize, ConsoleSession, CrucibleDataset, ExternalIp, PhysicalDisk,
         PhysicalDiskKind, PhysicalDiskPolicy, PhysicalDiskState, Project, Rack,
         Region, SiloUser, SledBaseboard, SledSystemHardware, SledUpdate,
         SshKey, Zpool,
@@ -477,7 +478,6 @@ mod test {
     use omicron_common::api::external::{
         ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
-    use omicron_common::api::internal::shared::DatasetKind;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::DatasetUuid;
@@ -992,8 +992,7 @@ mod test {
                 .collect()
                 .await;
 
-            let bogus_addr =
-                Some(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0));
+            let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
 
             let datasets = stream::iter(zpools)
                 .map(|zpool| {
@@ -1002,16 +1001,18 @@ mod test {
                         (0..3).map(|_| zpool).collect();
                     stream::iter(zpool_iter).then(|zpool| {
                         let dataset_id = DatasetUuid::new_v4();
-                        let dataset = Dataset::new(
+                        let dataset = CrucibleDataset::new(
                             dataset_id,
                             zpool.pool_id,
                             bogus_addr,
-                            DatasetKind::Crucible,
                         );
 
                         let datastore = datastore.clone();
                         async move {
-                            datastore.dataset_upsert(dataset).await.unwrap();
+                            datastore
+                                .crucible_dataset_upsert(dataset)
+                                .await
+                                .unwrap();
 
                             (zpool.sled_id, dataset_id)
                         }
@@ -1312,7 +1313,7 @@ mod test {
             .unwrap();
 
         // Give them a consistent order so we can easily compare them.
-        let sort_vec = |v: &mut Vec<(Dataset, Region)>| {
+        let sort_vec = |v: &mut Vec<(CrucibleDataset, Region)>| {
             v.sort_by(|(d1, r1), (d2, r2)| {
                 let order = d1.id().cmp(&d2.id());
                 match order {
@@ -1368,22 +1369,16 @@ mod test {
             .collect()
             .await;
 
-        let bogus_addr =
-            Some(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0));
+        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
 
         // 1 dataset per zpool
         stream::iter(zpool_ids.clone())
             .then(|zpool_id| {
                 let id = DatasetUuid::new_v4();
-                let dataset = Dataset::new(
-                    id,
-                    zpool_id,
-                    bogus_addr,
-                    DatasetKind::Crucible,
-                );
+                let dataset = CrucibleDataset::new(id, zpool_id, bogus_addr);
                 let datastore = datastore.clone();
                 async move {
-                    datastore.dataset_upsert(dataset).await.unwrap();
+                    datastore.crucible_dataset_upsert(dataset).await.unwrap();
                     id
                 }
             })
@@ -1468,22 +1463,16 @@ mod test {
                 .collect()
                 .await;
 
-        let bogus_addr =
-            Some(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0));
+        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
 
         // 1 dataset per zpool
         stream::iter(zpool_ids)
             .then(|zpool_id| {
                 let id = DatasetUuid::new_v4();
-                let dataset = Dataset::new(
-                    id,
-                    zpool_id,
-                    bogus_addr,
-                    DatasetKind::Crucible,
-                );
+                let dataset = CrucibleDataset::new(id, zpool_id, bogus_addr);
                 let datastore = datastore.clone();
                 async move {
-                    datastore.dataset_upsert(dataset).await.unwrap();
+                    datastore.crucible_dataset_upsert(dataset).await.unwrap();
                     id
                 }
             })
@@ -1548,15 +1537,13 @@ mod test {
                 physical_disk_id,
             )
             .await;
-            let bogus_addr =
-                Some(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0));
-            let dataset = Dataset::new(
+            let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
+            let dataset = CrucibleDataset::new(
                 DatasetUuid::new_v4(),
                 zpool_id,
                 bogus_addr,
-                DatasetKind::Crucible,
             );
-            datastore.dataset_upsert(dataset).await.unwrap();
+            datastore.crucible_dataset_upsert(dataset).await.unwrap();
             physical_disk_ids.push(physical_disk_id);
         }
 

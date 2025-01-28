@@ -427,7 +427,7 @@ fn register_dataset_records_step<'a>(
             ExecutionStepId::Ensure,
             "Ensure dataset records",
             move |_cx| async move {
-                datasets::ensure_dataset_records_exist(
+                datasets::ensure_crucible_dataset_records_exist(
                     &opctx,
                     datastore,
                     blueprint.id,
