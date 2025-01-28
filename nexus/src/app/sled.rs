@@ -26,7 +26,9 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_client::Client as SledAgentClient;
 use std::net::SocketAddrV6;
@@ -164,16 +166,16 @@ impl super::Nexus {
 
     pub(crate) async fn reserve_on_random_sled(
         &self,
-        resource_id: Uuid,
-        resource_kind: db::model::SledResourceKind,
+        instance_id: InstanceUuid,
+        propolis_id: PropolisUuid,
         resources: db::model::Resources,
         constraints: db::model::SledReservationConstraints,
     ) -> Result<db::model::SledResource, Error> {
         self.db_datastore
             .sled_reservation_create(
                 &self.opctx_alloc,
-                resource_id,
-                resource_kind,
+                instance_id,
+                propolis_id,
                 resources,
                 constraints,
             )

@@ -42,7 +42,7 @@ pub fn lookup_anti_affinity_sleds_query(
          FROM other_instances_by_policy
          JOIN sled_resource
          ON
-            sled_resource.id = other_instances_by_policy.instance_id AND
+            sled_resource.instance_id = other_instances_by_policy.instance_id AND
             sled_resource.kind = 'instance'")
      .bind::<sql_types::Uuid, _>(instance_id.into_untyped_uuid())
      .bind::<sql_types::Uuid, _>(instance_id.into_untyped_uuid())
@@ -89,7 +89,7 @@ pub fn lookup_affinity_sleds_query(
          FROM other_instances_by_policy
          JOIN sled_resource
          ON
-            sled_resource.id = other_instances_by_policy.instance_id AND
+            sled_resource.instance_id = other_instances_by_policy.instance_id AND
             sled_resource.kind = 'instance'",
         )
         .bind::<sql_types::Uuid, _>(instance_id.into_untyped_uuid())
@@ -113,6 +113,7 @@ mod test {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::AffinityGroupUuid;
     use omicron_uuid_kinds::AntiAffinityGroupUuid;
+    use omicron_uuid_kinds::PropolisUuid;
     use omicron_uuid_kinds::SledUuid;
     use uuid::Uuid;
 
@@ -271,7 +272,8 @@ mod test {
         conn: &async_bb8_diesel::Connection<crate::db::pool::DbConnection>,
     ) -> anyhow::Result<()> {
         let resource = model::SledResource::new(
-            instance_id.into_untyped_uuid(),
+            PropolisUuid::new_v4().into_untyped_uuid(),
+            Some(instance_id.into_untyped_uuid()),
             sled_id.into_untyped_uuid(),
             model::SledResourceKind::Instance,
             model::Resources::new(

@@ -213,7 +213,7 @@ CREATE INDEX IF NOT EXISTS lookup_sled_by_policy_and_state ON omicron.public.sle
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.sled_resource_kind AS ENUM (
-    -- omicron.public.instance
+    -- omicron.public.vmm ; this is called "instance" for historical reasons.
     'instance'
     -- We expect to other resource kinds here in the future; e.g., to track
     -- resources used by control plane services. For now, we only track
@@ -224,6 +224,9 @@ CREATE TYPE IF NOT EXISTS omicron.public.sled_resource_kind AS ENUM (
 CREATE TABLE IF NOT EXISTS omicron.public.sled_resource (
     -- Should match the UUID of the corresponding resource
     id UUID PRIMARY KEY,
+
+    -- The UUID of an instance, if this resource belongs to an instance.
+    instance_id UUID,
 
     -- The sled where resources are being consumed
     sled_id UUID NOT NULL,
@@ -239,6 +242,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_resource (
 
     -- Identifies the type of the resource
     kind omicron.public.sled_resource_kind NOT NULL
+
+    -- TODO Add constraint that if kind is instance, instance_id is not NULL?
+    -- Or will that break backwards compatibility?
 );
 
 -- Allow looking up all resources which reside on a sled
@@ -247,6 +253,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_resource_by_sled ON omicron.public.sled
     id
 );
 
+-- Allow looking up all resources by instance
+CREATE INDEX IF NOT EXISTS lookup_resource_by_instance ON omicron.public.sled_resource (
+    instance_id
+);
 
 -- Table of all sled subnets allocated for sleds added to an already initialized
 -- rack. The sleds in this table and their allocated subnets are created before

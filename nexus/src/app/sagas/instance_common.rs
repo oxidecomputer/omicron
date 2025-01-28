@@ -38,6 +38,7 @@ pub(super) struct VmmAndSledIds {
 /// `propolis_id`.
 pub async fn reserve_vmm_resources(
     nexus: &Nexus,
+    instance_id: InstanceUuid,
     propolis_id: PropolisUuid,
     ncpus: u32,
     guest_memory: ByteCount,
@@ -69,8 +70,8 @@ pub async fn reserve_vmm_resources(
 
     let resource = nexus
         .reserve_on_random_sled(
-            propolis_id.into_untyped_uuid(),
-            nexus_db_model::SledResourceKind::Instance,
+            instance_id,
+            propolis_id,
             resources,
             constraints,
         )

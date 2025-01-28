@@ -955,6 +955,7 @@ table! {
 table! {
     sled_resource (id) {
         id -> Uuid,
+        instance_id -> Nullable<Uuid>,
         sled_id -> Uuid,
         kind -> crate::SledResourceKindEnum,
         hardware_threads -> Int8,

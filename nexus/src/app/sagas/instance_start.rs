@@ -163,6 +163,7 @@ async fn sis_alloc_server(
 
     let resource = super::instance_common::reserve_vmm_resources(
         osagactx.nexus(),
+        InstanceUuid::from_untyped_uuid(params.db_instance.id()),
         propolis_id,
         u32::from(hardware_threads.0),
         reservoir_ram,

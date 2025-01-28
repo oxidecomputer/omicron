@@ -24,11 +24,14 @@ impl Resources {
     }
 }
 
+// TODO: MAKE THESE UUIDS STRONGLY TYPED
+
 /// Describes sled resource usage by services
 #[derive(Clone, Selectable, Queryable, Insertable, Debug)]
 #[diesel(table_name = sled_resource)]
 pub struct SledResource {
     pub id: Uuid,
+    pub instance_id: Option<Uuid>,
     pub sled_id: Uuid,
     pub kind: SledResourceKind,
 
@@ -39,10 +42,11 @@ pub struct SledResource {
 impl SledResource {
     pub fn new(
         id: Uuid,
+        instance_id: Option<Uuid>,
         sled_id: Uuid,
         kind: SledResourceKind,
         resources: Resources,
     ) -> Self {
-        Self { id, sled_id, kind, resources }
+        Self { id, instance_id, sled_id, kind, resources }
     }
 }

@@ -987,6 +987,7 @@ async fn dbinit_equals_sum_of_all_up() {
         diesel::insert_into(dsl::sled_resource)
             .values(SledResource {
                 id: Uuid::new_v4(),
+                instance_id: Some(Uuid::new_v4()),
                 sled_id: Uuid::new_v4(),
                 kind: SledResourceKind::Instance,
                 resources: Resources {

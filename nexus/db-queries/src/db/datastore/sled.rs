@@ -44,6 +44,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::HashSet;
 use std::fmt;
@@ -211,15 +212,15 @@ impl DataStore {
     pub async fn sled_reservation_create(
         &self,
         opctx: &OpContext,
-        resource_id: Uuid,
-        resource_kind: db::model::SledResourceKind,
+        instance_id: InstanceUuid,
+        propolis_id: PropolisUuid,
         resources: db::model::Resources,
         constraints: db::model::SledReservationConstraints,
     ) -> CreateResult<db::model::SledResource> {
         self.sled_reservation_create_inner(
             opctx,
-            resource_id,
-            resource_kind,
+            instance_id,
+            propolis_id,
             resources,
             constraints,
         )
@@ -247,8 +248,8 @@ impl DataStore {
     async fn sled_reservation_create_inner(
         &self,
         opctx: &OpContext,
-        resource_id: Uuid,
-        resource_kind: db::model::SledResourceKind,
+        instance_id: InstanceUuid,
+        propolis_id: PropolisUuid,
         resources: db::model::Resources,
         constraints: db::model::SledReservationConstraints,
     ) -> Result<db::model::SledResource, SledReservationTransactionError> {
@@ -266,7 +267,7 @@ impl DataStore {
                     use db::schema::sled_resource::dsl as resource_dsl;
                     // Check if resource ID already exists - if so, return it.
                     let old_resource = resource_dsl::sled_resource
-                        .filter(resource_dsl::id.eq(resource_id))
+                        .filter(resource_dsl::id.eq(*propolis_id.as_untyped_uuid()))
                         .select(SledResource::as_select())
                         .limit(1)
                         .load_async(&conn)
@@ -353,11 +354,10 @@ impl DataStore {
 
                     info!(
                         opctx.log,
-                        "found {} available sled targets", sled_targets.len();
+                        "found {} available sled targets before considering affinity", sled_targets.len();
                         "sled_ids" => ?sled_targets,
                     );
 
-                    let instance_id = InstanceUuid::from_untyped_uuid(resource_id);
                     let anti_affinity_sleds = lookup_anti_affinity_sleds_query(
                         instance_id,
                     ).get_results_async::<(AffinityPolicy, Uuid)>(&conn).await?;
@@ -457,6 +457,21 @@ impl DataStore {
                         }
                     }).collect::<HashSet<_>>();
 
+                    if !banned.is_empty() {
+                        info!(
+                            opctx.log,
+                            "affinity policy prohibits placement on {} sleds", banned.len();
+                            "banned" => ?banned,
+                        );
+                    }
+                    if !required.is_empty() {
+                        info!(
+                            opctx.log,
+                            "affinity policy requires placement on {} sleds", required.len();
+                            "required" => ?required,
+                        );
+                    }
+
                     let sled_target = if required.len() > 1 {
                         return Err(err.bail(SledReservationError::TooManyAffinityConstraints));
                     } else if let Some(required_id) = required.iter().next() {
@@ -519,9 +534,10 @@ impl DataStore {
                     // Create a SledResource record, associate it with the target
                     // sled.
                     let resource = SledResource::new(
-                        resource_id,
+                        propolis_id.into_untyped_uuid(),
+                        Some(instance_id.into_untyped_uuid()),
                         sled_target,
-                        resource_kind,
+                        db::model::SledResourceKind::Instance,
                         resources,
                     );
 
@@ -1320,8 +1336,8 @@ pub(in crate::db::datastore) mod test {
         let error = datastore
             .sled_reservation_create(
                 &opctx,
-                Uuid::new_v4(),
-                db::model::SledResourceKind::Instance,
+                InstanceUuid::new_v4(),
+                PropolisUuid::new_v4(),
                 resources.clone(),
                 constraints,
             )
@@ -1341,8 +1357,8 @@ pub(in crate::db::datastore) mod test {
             let resource = datastore
                 .sled_reservation_create(
                     &opctx,
-                    Uuid::new_v4(),
-                    db::model::SledResourceKind::Instance,
+                    InstanceUuid::new_v4(),
+                    PropolisUuid::new_v4(),
                     resources.clone(),
                     constraints,
                 )
@@ -1687,8 +1703,8 @@ pub(in crate::db::datastore) mod test {
         let result = db
             .sled_reservation_create_inner(
                 &opctx,
-                instance.id.into_untyped_uuid(),
-                db::model::SledResourceKind::Instance,
+                instance.id,
+                PropolisUuid::new_v4(),
                 instance.resources.clone(),
                 constraints.build(),
             )

@@ -28,4 +28,5 @@ SELECT
 FROM
   other_instances_by_policy
   JOIN sled_resource ON
-      sled_resource.id = other_instances_by_policy.instance_id AND sled_resource.kind = 'instance'
+      sled_resource.instance_id = other_instances_by_policy.instance_id
+      AND sled_resource.kind = 'instance'
