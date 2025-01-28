@@ -533,11 +533,10 @@ impl DataStore {
 
                     // Create a SledResource record, associate it with the target
                     // sled.
-                    let resource = SledResource::new(
+                    let resource = SledResource::new_for_vmm(
                         propolis_id.into_untyped_uuid(),
-                        Some(instance_id.into_untyped_uuid()),
+                        instance_id.into_untyped_uuid(),
                         sled_target,
-                        db::model::SledResourceKind::Instance,
                         resources,
                     );
 

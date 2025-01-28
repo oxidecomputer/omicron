@@ -6203,6 +6203,7 @@ async fn cmd_db_vmm_info(
                     rss_ram: ByteCount(rss),
                     reservoir_ram: ByteCount(reservoir),
                 },
+            instance_id: _,
         } = resource;
         const SLED_ID: &'static str = "sled ID";
         const THREADS: &'static str = "hardware threads";

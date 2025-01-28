@@ -41,13 +41,18 @@ pub struct SledResource {
 }
 
 impl SledResource {
-    pub fn new(
+    pub fn new_for_vmm(
         id: Uuid,
-        instance_id: Option<Uuid>,
+        instance_id: Uuid,
         sled_id: Uuid,
-        kind: SledResourceKind,
         resources: Resources,
     ) -> Self {
-        Self { id, instance_id, sled_id, kind, resources }
+        Self {
+            id,
+            instance_id: Some(instance_id),
+            sled_id,
+            kind: SledResourceKind::Instance,
+            resources,
+        }
     }
 }
