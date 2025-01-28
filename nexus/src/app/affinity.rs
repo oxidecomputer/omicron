@@ -314,7 +314,7 @@ impl super::Nexus {
         opctx: &OpContext,
         affinity_group_lookup: &lookup::AffinityGroup<'_>,
         instance_lookup: &lookup::Instance<'_>,
-    ) -> Result<(), Error> {
+    ) -> Result<external::AffinityGroupMember, Error> {
         let (.., authz_affinity_group) =
             affinity_group_lookup.lookup_for(authz::Action::Modify).await?;
         let (.., authz_instance) =
@@ -323,8 +323,13 @@ impl super::Nexus {
             external::AffinityGroupMember::Instance(authz_instance.id());
 
         self.db_datastore
-            .affinity_group_member_add(opctx, &authz_affinity_group, member)
-            .await
+            .affinity_group_member_add(
+                opctx,
+                &authz_affinity_group,
+                member.clone(),
+            )
+            .await?;
+        Ok(member)
     }
 
     pub(crate) async fn anti_affinity_group_member_add(
@@ -332,7 +337,7 @@ impl super::Nexus {
         opctx: &OpContext,
         anti_affinity_group_lookup: &lookup::AntiAffinityGroup<'_>,
         instance_lookup: &lookup::Instance<'_>,
-    ) -> Result<(), Error> {
+    ) -> Result<external::AntiAffinityGroupMember, Error> {
         let (.., authz_anti_affinity_group) = anti_affinity_group_lookup
             .lookup_for(authz::Action::Modify)
             .await?;
@@ -345,9 +350,10 @@ impl super::Nexus {
             .anti_affinity_group_member_add(
                 opctx,
                 &authz_anti_affinity_group,
-                member,
+                member.clone(),
             )
-            .await
+            .await?;
+        Ok(member)
     }
 
     pub(crate) async fn affinity_group_member_delete(

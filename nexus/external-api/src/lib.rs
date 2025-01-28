@@ -1323,7 +1323,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::OptionalProjectSelector>,
         path_params: Path<params::AffinityInstanceGroupMemberPath>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+    ) -> Result<HttpResponseCreated<AffinityGroupMember>, HttpError>;
 
     /// Remove a member from an affinity group
     #[endpoint {
@@ -1431,7 +1431,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::OptionalProjectSelector>,
         path_params: Path<params::AntiAffinityInstanceGroupMemberPath>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+    ) -> Result<HttpResponseCreated<AntiAffinityGroupMember>, HttpError>;
 
     /// Remove a member from an anti-affinity group
     #[endpoint {

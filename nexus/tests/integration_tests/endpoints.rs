@@ -153,6 +153,12 @@ pub static DEMO_PROJECT_URL_IMAGES: Lazy<String> =
     Lazy::new(|| format!("/v1/images?project={}", *DEMO_PROJECT_NAME));
 pub static DEMO_PROJECT_URL_INSTANCES: Lazy<String> =
     Lazy::new(|| format!("/v1/instances?project={}", *DEMO_PROJECT_NAME));
+pub static DEMO_PROJECT_URL_AFFINITY_GROUPS: Lazy<String> =
+    Lazy::new(|| format!("/v1/affinity-groups?project={}", *DEMO_PROJECT_NAME));
+pub static DEMO_PROJECT_URL_ANTI_AFFINITY_GROUPS: Lazy<String> =
+    Lazy::new(|| {
+        format!("/v1/anti-affinity-groups?project={}", *DEMO_PROJECT_NAME)
+    });
 pub static DEMO_PROJECT_URL_SNAPSHOTS: Lazy<String> =
     Lazy::new(|| format!("/v1/snapshots?project={}", *DEMO_PROJECT_NAME));
 pub static DEMO_PROJECT_URL_VPCS: Lazy<String> =
@@ -421,8 +427,6 @@ pub static DEMO_IMPORT_DISK_FINALIZE_URL: Lazy<String> = Lazy::new(|| {
 
 pub static DEMO_AFFINITY_GROUP_NAME: Lazy<Name> =
     Lazy::new(|| "demo-affinity-group".parse().unwrap());
-pub static DEMO_AFFINITY_GROUPS_URL: Lazy<String> =
-    Lazy::new(|| format!("/v1/affinity-groups?{}", *DEMO_PROJECT_SELECTOR));
 pub static DEMO_AFFINITY_GROUP_URL: Lazy<String> = Lazy::new(|| {
     format!(
         "/v1/affinity-groups/{}?{}",
@@ -440,7 +444,7 @@ pub static DEMO_AFFINITY_GROUP_INSTANCE_MEMBER_URL: Lazy<String> =
         format!(
             "/v1/affinity-groups/{}/members/instance/{}?{}",
             *DEMO_AFFINITY_GROUP_NAME,
-            *DEMO_INSTANCE_NAME,
+            *DEMO_STOPPED_INSTANCE_NAME,
             *DEMO_PROJECT_SELECTOR
         )
     });
@@ -484,7 +488,7 @@ pub static DEMO_ANTI_AFFINITY_GROUP_INSTANCE_MEMBER_URL: Lazy<String> =
         format!(
             "/v1/anti-affinity-groups/{}/members/instance/{}?{}",
             *DEMO_ANTI_AFFINITY_GROUP_NAME,
-            *DEMO_INSTANCE_NAME,
+            *DEMO_STOPPED_INSTANCE_NAME,
             *DEMO_PROJECT_SELECTOR
         )
     });
@@ -510,6 +514,8 @@ pub static DEMO_ANTI_AFFINITY_GROUP_UPDATE: Lazy<
 // Instance used for testing
 pub static DEMO_INSTANCE_NAME: Lazy<Name> =
     Lazy::new(|| "demo-instance".parse().unwrap());
+pub static DEMO_STOPPED_INSTANCE_NAME: Lazy<Name> =
+    Lazy::new(|| "demo-stopped-instance".parse().unwrap());
 pub static DEMO_INSTANCE_URL: Lazy<String> = Lazy::new(|| {
     format!("/v1/instances/{}?{}", *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR)
 });
@@ -589,6 +595,26 @@ pub static DEMO_INSTANCE_CREATE: Lazy<params::InstanceCreate> =
     Lazy::new(|| params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: DEMO_INSTANCE_NAME.clone(),
+            description: String::from(""),
+        },
+        ncpus: InstanceCpuCount(1),
+        memory: ByteCount::from_gibibytes_u32(16),
+        hostname: "demo-instance".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: Some(Vec::new()),
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![params::ExternalIpCreate::Ephemeral {
+            pool: Some(DEMO_IP_POOL_NAME.clone().into()),
+        }],
+        disks: vec![],
+        boot_disk: None,
+        start: true,
+        auto_restart_policy: Default::default(),
+    });
+pub static DEMO_STOPPED_INSTANCE_CREATE: Lazy<params::InstanceCreate> =
+    Lazy::new(|| params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DEMO_STOPPED_INSTANCE_NAME.clone(),
             description: String::from(""),
         },
         ncpus: InstanceCpuCount(1),
@@ -2030,7 +2056,7 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
         /* Affinity Groups */
 
         VerifyEndpoint {
-            url: &DEMO_AFFINITY_GROUPS_URL,
+            url: &DEMO_PROJECT_URL_AFFINITY_GROUPS,
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
 
@@ -2074,7 +2100,7 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Delete,
-                AllowedMethod::Post(serde_json::Value::Null)
+                AllowedMethod::Post(serde_json::Value::Null),
             ],
         },
 

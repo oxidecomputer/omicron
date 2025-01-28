@@ -2668,7 +2668,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::OptionalProjectSelector>,
         path_params: Path<params::AffinityInstanceGroupMemberPath>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    ) -> Result<HttpResponseCreated<AffinityGroupMember>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let opctx =
@@ -2693,14 +2693,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let instance_lookup =
                 nexus.instance_lookup(&opctx, instance_selector)?;
 
-            nexus
+            let member = nexus
                 .affinity_group_member_add(
                     &opctx,
                     &group_lookup,
                     &instance_lookup,
                 )
                 .await?;
-            Ok(HttpResponseUpdatedNoContent {})
+            Ok(HttpResponseCreated(member))
         };
         apictx
             .context
@@ -3003,7 +3003,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::OptionalProjectSelector>,
         path_params: Path<params::AntiAffinityInstanceGroupMemberPath>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    ) -> Result<HttpResponseCreated<AntiAffinityGroupMember>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let opctx =
@@ -3028,14 +3028,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let instance_lookup =
                 nexus.instance_lookup(&opctx, instance_selector)?;
 
-            nexus
+            let member = nexus
                 .anti_affinity_group_member_add(
                     &opctx,
                     &group_lookup,
                     &instance_lookup,
                 )
                 .await?;
-            Ok(HttpResponseUpdatedNoContent {})
+            Ok(HttpResponseCreated(member))
         };
         apictx
             .context

@@ -414,7 +414,15 @@ impl DataStore {
             .get_result_async(&*conn)
             .await
             .map(|m| m.into())
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::AffinityGroupMember,
+                        LookupType::by_id(instance_id),
+                    ),
+                )
+            })
     }
 
     pub async fn anti_affinity_group_member_view(
@@ -438,7 +446,15 @@ impl DataStore {
             .get_result_async(&*conn)
             .await
             .map(|m| m.into())
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::AntiAffinityGroupMember,
+                        LookupType::by_id(instance_id),
+                    ),
+                )
+            })
     }
 
     pub async fn affinity_group_member_add(
