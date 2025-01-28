@@ -18,7 +18,7 @@ use anyhow::Context;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
-use diffus::{edit, Diffable, Diffus};
+use daft::{leaf, Diff};
 use dropshot::HttpError;
 pub use dropshot::PaginationOrder;
 pub use error::*;
@@ -224,7 +224,7 @@ impl<'a> TryFrom<&DataPageParams<'a, NameOrId>> for DataPageParams<'a, Uuid> {
 )]
 #[display("{0}")]
 #[serde(try_from = "String")]
-#[derive(Diffus)]
+#[derive(Diff)]
 pub struct Name(String);
 
 /// `Name::try_from(String)` is the primary method for constructing an Name
@@ -628,7 +628,7 @@ impl JsonSchema for RoleName {
     Eq,
     PartialOrd,
     Ord,
-    Diffus,
+    Diff,
 )]
 pub struct ByteCount(u64);
 
@@ -766,23 +766,7 @@ impl From<ByteCount> for i64 {
 )]
 pub struct Generation(u64);
 
-// We have to manually implement `Diffable` because this is newtype with private
-// data, and we want to see the diff on the newtype not the inner data.
-impl<'a> Diffable<'a> for Generation {
-    type Diff = (&'a Generation, &'a Generation);
-
-    fn diff(&'a self, other: &'a Self) -> edit::Edit<'a, Self> {
-        if self == other {
-            edit::Edit::Copy(self)
-        } else {
-            edit::Edit::Change {
-                before: self,
-                after: other,
-                diff: (self, other),
-            }
-        }
-    }
-}
+leaf!(Generation);
 
 impl Generation {
     pub const fn new() -> Generation {
@@ -1972,20 +1956,7 @@ impl JsonSchema for L4PortRange {
 )]
 pub struct MacAddr(pub macaddr::MacAddr6);
 
-impl<'a> Diffable<'a> for MacAddr {
-    type Diff = (&'a Self, &'a Self);
-    fn diff(&'a self, other: &'a Self) -> edit::Edit<'a, Self> {
-        if self == other {
-            edit::Edit::Copy(self)
-        } else {
-            edit::Edit::Change {
-                before: self,
-                after: other,
-                diff: (self, other),
-            }
-        }
-    }
-}
+leaf!(MacAddr);
 
 impl MacAddr {
     // Guest MAC addresses begin with the Oxide OUI A8:40:25. Further, guest
@@ -2150,7 +2121,7 @@ impl JsonSchema for MacAddr {
     Deserialize,
     Serialize,
     JsonSchema,
-    Diffus,
+    Diff,
 )]
 pub struct Vni(u32);
 
