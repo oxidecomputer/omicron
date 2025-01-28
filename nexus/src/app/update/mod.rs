@@ -75,6 +75,14 @@ impl super::Nexus {
                 .send(artifacts_with_plan)
                 .await
                 .map_err(|err| {
+                    // In theory this should never happen; `Sender::send`
+                    // returns an error only if the receiver has hung up, and
+                    // the receiver should live for as long as Nexus does (it
+                    // belongs to the background task driver).
+                    //
+                    // If this _does_ happen, the impact is that the database
+                    // has recorded a repository for which we no longer have
+                    // the artifacts.
                     Error::internal_error(&format!(
                         "failed to send artifacts for replication: {err}"
                     ))

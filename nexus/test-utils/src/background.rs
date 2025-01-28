@@ -423,20 +423,3 @@ pub async fn run_tuf_artifact_replication_step(
     assert_eq!(status.last_run_counters.err(), 0);
     status
 }
-
-/// Run the `tuf_artifact_replication` task until the status indicates the task
-/// has stabilized: no outstanding requests, and no local repositories. Panics
-/// if the status does not change between runs.
-pub async fn run_tuf_artifact_replication_to_completion(
-    internal_client: &ClientTestContext,
-) {
-    let mut status = run_tuf_artifact_replication_step(internal_client).await;
-    while status.local_repos > 0 {
-        let new_status =
-            run_tuf_artifact_replication_step(internal_client).await;
-        if new_status == status {
-            panic!("TUF artifact replication stalled: {new_status:?}");
-        }
-        status = new_status;
-    }
-}

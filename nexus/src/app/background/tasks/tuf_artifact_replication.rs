@@ -49,16 +49,16 @@
 //! `MAX_REQUEST_CONCURRENCY`, which is intended to reduce bandwidth spikes for
 //! PUT requests.
 //!
-//! TODO: In addition to Nexus concurrency rate limits, we should also rate
-//! limit requests per second sent by Nexus, as well as limit the number of
-//! ongoing copy requests being processed at once by Sled Agent.
+//! TODO: (omicron#7400) In addition to Nexus concurrency rate limits, we should
+//! also rate limit requests per second sent by Nexus, as well as limit the
+//! number of ongoing copy requests being processed at once by Sled Agent.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::future::Future;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::Utc;
 use futures::future::BoxFuture;
 use futures::{FutureExt, Stream, StreamExt};
@@ -461,16 +461,23 @@ impl BackgroundTask for ArtifactReplication {
                 }
             }
 
-            let sleds = match self.list_sleds(opctx).await {
+            let sleds = match self
+                .list_sleds(opctx)
+                .await
+                .context("failed to list sleds")
+            {
                 Ok(sleds) => sleds,
                 Err(err) => return json!({"error": format!("{err:#}")}),
             };
             let mut counters = TufArtifactReplicationCounters::default();
-            let mut inventory =
-                match self.list_artifacts_from_database(opctx).await {
-                    Ok(inventory) => inventory,
-                    Err(err) => return json!({"error": format!("{err:#}")}),
-                };
+            let mut inventory = match self
+                .list_artifacts_from_database(opctx)
+                .await
+                .context("failed to list artifacts from database")
+            {
+                Ok(inventory) => inventory,
+                Err(err) => return json!({"error": format!("{err:#}")}),
+            };
             self.list_artifacts_on_sleds(
                 opctx,
                 &sleds,
@@ -577,16 +584,13 @@ impl ArtifactReplication {
                 .await?;
             paginator = p.found_batch(&batch, &|a| a.id.into_untyped_uuid());
             for artifact in batch {
-                // Two artifacts can have the same sha256 but all the values in
-                // this insertion step are the default value.
-                inventory.0.insert(
-                    artifact.sha256.0,
+                inventory.0.entry(artifact.sha256.0).or_insert_with(|| {
                     ArtifactPresence {
                         sleds: BTreeMap::new(),
                         local: None,
                         wanted: true,
-                    },
-                );
+                    }
+                });
             }
         }
         Ok(inventory)
@@ -612,6 +616,11 @@ impl ArtifactReplication {
             let mut error = None;
             match response {
                 Ok(response) => {
+                    info!(
+                        &opctx.log,
+                        "Successfully got artifact list";
+                        "sled" => sled.client.baseurl(),
+                    );
                     for (hash, count) in response.into_inner() {
                         let Ok(hash) = ArtifactHash::from_str(&hash) else {
                             error = Some(format!(
@@ -619,7 +628,8 @@ impl ArtifactReplication {
                             ));
                             error!(
                                 &opctx.log,
-                                "sled reported bogus artifact hash";
+                                "Failed to get artifact list: \
+                                sled reported bogus artifact hash";
                                 "sled" => sled.client.baseurl(),
                                 "bogus_hash" => hash,
                             );
