@@ -6,7 +6,8 @@
 
 use crate::helpers::sps_to_string;
 use crate::helpers::SpIdentifierDisplay;
-use crate::mgs::GetInventoryError;
+use crate::mgs::GetInventoryError as GetMgsInventoryError;
+use crate::mgs::GetInventoryResponse as GetMgsInventoryResponse;
 use crate::mgs::MgsHandle;
 use crate::mgs::ShutdownInProgress;
 use crate::SmfConfigValues;
@@ -342,23 +343,47 @@ impl WicketdApi for WicketdApiImpl {
         body_params: TypedBody<GetInventoryParams>,
     ) -> Result<HttpResponseOk<GetInventoryResponse>, HttpError> {
         let GetInventoryParams { force_refresh } = body_params.into_inner();
-        match rqctx
+
+        // Fetch the MGS-specific inventory first.
+        let (mgs_inventory, mgs_last_seen) = match rqctx
             .context()
             .mgs_handle
             .get_inventory_refreshing_sps(force_refresh)
             .await
         {
-            Ok(response) => Ok(HttpResponseOk(response)),
-            Err(GetInventoryError::InvalidSpIdentifier) => {
-                Err(HttpError::for_unavail(
+            Ok(GetMgsInventoryResponse::Response {
+                inventory,
+                mgs_last_seen,
+            }) => (inventory, mgs_last_seen),
+            Ok(GetMgsInventoryResponse::Unavailable) => {
+                return Err(HttpError::for_unavail(
+                    None,
+                    "Rack inventory not yet available".into(),
+                ));
+            }
+            Err(GetMgsInventoryError::InvalidSpIdentifier) => {
+                return Err(HttpError::for_unavail(
                     None,
                     "Invalid SP identifier in request".into(),
+                ));
+            }
+            Err(GetMgsInventoryError::ShutdownInProgress) => {
+                return Err(HttpError::for_unavail(
+                    None,
+                    "Server is shutting down".into(),
                 ))
             }
-            Err(GetInventoryError::ShutdownInProgress) => Err(
-                HttpError::for_unavail(None, "Server is shutting down".into()),
-            ),
-        }
+        };
+
+        // Fetch the transceiver information from Dendrite.
+        let transceivers = Vec::new();
+
+        let inventory = RackV1Inventory { mgs_inventory, transceivers };
+
+        Ok(HttpResponseOk(GetInventoryResponse::Response {
+            inventory,
+            mgs_last_seen,
+        }))
     }
 
     async fn put_repository(
@@ -402,7 +427,7 @@ impl WicketdApi for WicketdApiImpl {
         let mut switch_baseboard = None;
         let mut sled_id = None;
 
-        for sp in &inventory.sps {
+        for sp in &inventory.mgs_inventory.sps {
             if Some(sp.id) == switch_id {
                 switch_baseboard = sp.state.as_ref().map(|state| {
                     // TODO-correctness `new_gimlet` isn't the right name: this is a
@@ -499,7 +524,7 @@ impl WicketdApi for WicketdApiImpl {
 
         // Next, do we have the states of the target SP?
         let sp_states = match inventory {
-            GetInventoryResponse::Response { inventory, .. } => inventory
+            GetMgsInventoryResponse::Response { inventory, .. } => inventory
                 .sps
                 .into_iter()
                 .filter_map(|sp| {
@@ -514,7 +539,7 @@ impl WicketdApi for WicketdApiImpl {
                     }
                 })
                 .collect(),
-            GetInventoryResponse::Unavailable => BTreeMap::new(),
+            GetMgsInventoryResponse::Unavailable => BTreeMap::new(),
         };
 
         for target in &params.targets {
@@ -847,16 +872,23 @@ impl WicketdApi for WicketdApiImpl {
 async fn inventory_or_unavail(
     mgs_handle: &MgsHandle,
 ) -> Result<RackV1Inventory, HttpError> {
-    match mgs_handle.get_cached_inventory().await {
-        Ok(GetInventoryResponse::Response { inventory, .. }) => Ok(inventory),
-        Ok(GetInventoryResponse::Unavailable) => Err(HttpError::for_unavail(
-            None,
-            "Rack inventory not yet available".into(),
-        )),
-        Err(ShutdownInProgress) => {
-            Err(HttpError::for_unavail(None, "Server is shutting down".into()))
+    let mgs_inventory = match mgs_handle.get_cached_inventory().await {
+        Ok(GetMgsInventoryResponse::Response { inventory, .. }) => inventory,
+        Ok(GetMgsInventoryResponse::Unavailable) => {
+            return Err(HttpError::for_unavail(
+                None,
+                "Rack inventory not yet available".into(),
+            ))
         }
-    }
+        Err(ShutdownInProgress) => {
+            return Err(HttpError::for_unavail(
+                None,
+                "Server is shutting down".into(),
+            ));
+        }
+    };
+    // TODO(ben) populate transceiver inventory
+    Ok(RackV1Inventory { mgs_inventory, transceivers: Vec::new() })
 }
 
 fn http_error_from_client_error(

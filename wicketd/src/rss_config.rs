@@ -121,6 +121,7 @@ impl CurrentRssConfig {
         let bootstrap_sleds = bootstrap_peers.sleds();
 
         self.inventory = inventory
+            .mgs_inventory
             .sps
             .iter()
             .filter_map(|sp| {

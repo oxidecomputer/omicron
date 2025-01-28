@@ -444,6 +444,7 @@ pub struct GetInventoryParams {
     /// Refresh the state of these SPs from MGS prior to returning (instead of
     /// returning cached data).
     pub force_refresh: Vec<SpIdentifier>,
+    // TODO(ben) maybe add same concept for transceivers
 }
 
 /// The response to a `get_inventory` call: the inventory known to wicketd, or a
