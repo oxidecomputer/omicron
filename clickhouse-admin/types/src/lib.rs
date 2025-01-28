@@ -6,8 +6,8 @@ use anyhow::{bail, Context, Error, Result};
 use atomicwrites::AtomicFile;
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
+use daft::Diff;
 use derive_more::{Add, AddAssign, Display, From};
-use diffus::Diffus;
 use itertools::Itertools;
 use omicron_common::api::external::Generation;
 use schemars::{
@@ -57,7 +57,7 @@ pub const OXIMETER_CLUSTER: &str = "oximeter_cluster";
     JsonSchema,
     Serialize,
     Deserialize,
-    Diffus,
+    Diff,
 )]
 pub struct KeeperId(pub u64);
 
@@ -77,7 +77,7 @@ pub struct KeeperId(pub u64);
     JsonSchema,
     Serialize,
     Deserialize,
-    Diffus,
+    Diff,
 )]
 pub struct ServerId(pub u64);
 

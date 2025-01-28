@@ -6,7 +6,7 @@
 
 use anyhow::bail;
 use camino::{Utf8Path, Utf8PathBuf};
-use diffus::Diffus;
+use daft::Diff;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -175,7 +175,7 @@ impl DatasetName {
     Hash,
     PartialOrd,
     Ord,
-    Diffus,
+    Diff,
 )]
 pub struct GzipLevel(u8);
 
@@ -218,7 +218,7 @@ impl FromStr for GzipLevel {
     Hash,
     PartialOrd,
     Ord,
-    Diffus,
+    Diff,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CompressionAlgorithm {
@@ -413,7 +413,7 @@ impl DatasetsManagementResult {
     Serialize,
     Deserialize,
     JsonSchema,
-    Diffus,
+    Diff,
 )]
 pub struct DiskIdentity {
     pub vendor: String,

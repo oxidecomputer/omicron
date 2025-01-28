@@ -5,7 +5,7 @@
 use super::tri_map::TriMap;
 use super::tri_map::TriMapEntry;
 use anyhow::anyhow;
-use diffus::Diffus;
+use daft::Diff;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_uuid_kinds::ExternalIpUuid;
@@ -222,7 +222,7 @@ pub enum OmicronZoneExternalIpKey {
     JsonSchema,
     Serialize,
     Deserialize,
-    Diffus,
+    Diff,
 )]
 pub struct OmicronZoneExternalFloatingIp {
     pub id: ExternalIpUuid,
@@ -241,7 +241,7 @@ pub struct OmicronZoneExternalFloatingIp {
     JsonSchema,
     Serialize,
     Deserialize,
-    Diffus,
+    Diff,
 )]
 pub struct OmicronZoneExternalFloatingAddr {
     pub id: ExternalIpUuid,
@@ -271,7 +271,7 @@ impl OmicronZoneExternalFloatingAddr {
     JsonSchema,
     Serialize,
     Deserialize,
-    Diffus,
+    Diff,
 )]
 pub struct OmicronZoneExternalSnatIp {
     pub id: ExternalIpUuid,

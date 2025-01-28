@@ -12,9 +12,9 @@ use super::blueprint_display::{
 };
 use super::{
     zone_sort_key, Blueprint, ClickhouseClusterConfig,
-    CockroachDbPreserveDowngrade, DiffBeforeClickhouseClusterConfig,
+    CockroachDbPreserveDowngrade,
 };
-use diffus::Diffable;
+use daft::Diffable;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
@@ -808,7 +808,7 @@ pub struct BlueprintDiff {
     pub sleds_removed: BTreeSet<SledUuid>,
     pub sleds_unchanged: BTreeSet<SledUuid>,
     pub sleds_modified: BTreeSet<SledUuid>,
-    pub before_clickhouse_cluster_config: DiffBeforeClickhouseClusterConfig,
+    pub before_clickhouse_cluster_config: Option<ClickhouseClusterConfig>,
     pub after_clickhouse_cluster_config: Option<ClickhouseClusterConfig>,
 }
 
@@ -817,7 +817,7 @@ impl BlueprintDiff {
     /// data is valid.
     pub fn new(
         before_meta: DiffBeforeMetadata,
-        before_clickhouse_cluster_config: DiffBeforeClickhouseClusterConfig,
+        before_clickhouse_cluster_config: Option<ClickhouseClusterConfig>,
         before_state: BTreeMap<SledUuid, SledState>,
         before_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
         before_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
@@ -961,22 +961,8 @@ impl BlueprintDiff {
         // - there was one before and now there isn't
         // - there wasn't one before and now there is
         // - there's one both before and after and their generation has changed
-        match (
-            &self.before_clickhouse_cluster_config,
-            &self.after_clickhouse_cluster_config,
-        ) {
-            (DiffBeforeClickhouseClusterConfig::Blueprint(None), None) => false,
-            (DiffBeforeClickhouseClusterConfig::Blueprint(None), Some(_)) => {
-                true
-            }
-            (DiffBeforeClickhouseClusterConfig::Blueprint(Some(_)), None) => {
-                true
-            }
-            (
-                DiffBeforeClickhouseClusterConfig::Blueprint(Some(before)),
-                Some(after),
-            ) => before.diff(&after).is_change(),
-        }
+        self.before_clickhouse_cluster_config
+            != self.after_clickhouse_cluster_config
     }
 }
 
@@ -1469,33 +1455,26 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
             &self.diff.after_clickhouse_cluster_config,
         ) {
             // Before blueprint + after blueprint
-            (
-                DiffBeforeClickhouseClusterConfig::Blueprint(Some(before)),
-                Some(after),
-            ) => Some(ClickhouseClusterConfigDiffTables::diff_blueprints(
-                before, after,
-            )),
+            (Some(before), Some(after)) => {
+                Some(ClickhouseClusterConfigDiffTables::diff_blueprints(
+                    before, after,
+                ))
+            }
 
             // Before blueprint only
-            (
-                DiffBeforeClickhouseClusterConfig::Blueprint(Some(before)),
-                None,
-            ) => {
+            (Some(before), None) => {
                 Some(ClickhouseClusterConfigDiffTables::removed_from_blueprint(
                     before,
                 ))
             }
 
             // After blueprint only
-            (
-                DiffBeforeClickhouseClusterConfig::Blueprint(None),
-                Some(after),
-            ) => Some(ClickhouseClusterConfigDiffTables::added_to_blueprint(
-                after,
-            )),
+            (None, Some(after)) => Some(
+                ClickhouseClusterConfigDiffTables::added_to_blueprint(after),
+            ),
 
             // No before or after
-            (DiffBeforeClickhouseClusterConfig::Blueprint(None), None) => None,
+            (None, None) => None,
         }
     }
 

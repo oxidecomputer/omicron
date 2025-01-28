@@ -18,7 +18,7 @@ use crate::inventory::Collection;
 pub use crate::inventory::SourceNatConfig;
 pub use crate::inventory::ZpoolName;
 use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
-use diffus::Diffus;
+use daft::Diff;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -54,7 +54,6 @@ use strum::IntoEnumIterator;
 mod blueprint_diff;
 mod blueprint_display;
 mod clickhouse;
-pub mod diff_visitors;
 pub mod execution;
 pub mod id_map;
 mod network_resources;
@@ -63,7 +62,6 @@ mod tri_map;
 mod zone_type;
 
 pub use clickhouse::ClickhouseClusterConfig;
-pub use diff_visitors::BpVisitorContext;
 pub use network_resources::AddNetworkResourceError;
 pub use network_resources::OmicronZoneExternalFloatingAddr;
 pub use network_resources::OmicronZoneExternalFloatingIp;
@@ -142,9 +140,9 @@ pub use blueprint_diff::BlueprintDiff;
 // zones deployed on each host and some supporting configuration (e.g., DNS).
 // This is aimed at supporting add/remove sleds.  The plan is to grow this to
 // include more of the system as we support more use cases.
-#[derive(
-    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffus,
-)]
+//
+// TODO: #[derive(Diff)]
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub struct Blueprint {
     /// unique identifier for this blueprint
     pub id: BlueprintUuid,
@@ -194,7 +192,7 @@ pub struct Blueprint {
     pub clickhouse_cluster_config: Option<ClickhouseClusterConfig>,
 
     /// when this blueprint was generated (for debugging)
-    #[diffus(ignore)]
+    //#[daft(ignore)]
     pub time_created: chrono::DateTime<chrono::Utc>,
     /// identity of the component that generated the blueprint (for debugging)
     /// This would generally be the Uuid of a Nexus instance.
@@ -288,7 +286,7 @@ impl Blueprint {
     pub fn diff_since_blueprint(&self, before: &Blueprint) -> BlueprintDiff {
         BlueprintDiff::new(
             DiffBeforeMetadata::Blueprint(Box::new(before.metadata())),
-            DiffBeforeClickhouseClusterConfig::from(before),
+            before.clickhouse_cluster_config.clone(),
             before.sled_state.clone(),
             before
                 .blueprint_zones
@@ -550,7 +548,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
 ///
 /// Part of [`Blueprint`].
 #[derive(
-    Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffus,
+    Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diff,
 )]
 pub struct BlueprintZonesConfig {
     /// Generation number of this configuration.
@@ -647,7 +645,7 @@ fn zone_sort_key<T: ZoneSortKey>(z: &T) -> impl Ord {
     JsonSchema,
     Deserialize,
     Serialize,
-    Diffus,
+    Diff,
 )]
 pub struct BlueprintZoneConfig {
     /// The disposition (desired state) of this zone recorded in the blueprint.
@@ -664,12 +662,6 @@ impl IdMappable for BlueprintZoneConfig {
 
     fn id(&self) -> Self::Id {
         self.id
-    }
-}
-
-impl diffus::Same for BlueprintZoneConfig {
-    fn same(&self, other: &Self) -> bool {
-        self == other
     }
 }
 
@@ -724,7 +716,7 @@ impl From<BlueprintZoneConfig> for OmicronZoneConfig {
     Deserialize,
     Serialize,
     EnumIter,
-    Diffus,
+    Diff,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum BlueprintZoneDisposition {
@@ -868,7 +860,7 @@ pub enum BlueprintDatasetFilter {
     Deserialize,
     Serialize,
     EnumIter,
-    Diffus,
+    Diff,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum BlueprintPhysicalDiskDisposition {
@@ -901,7 +893,7 @@ impl BlueprintPhysicalDiskDisposition {
 
 /// Information about an Omicron physical disk as recorded in a bluerprint.
 #[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Diffus,
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Diff,
 )]
 pub struct BlueprintPhysicalDiskConfig {
     pub disposition: BlueprintPhysicalDiskDisposition,
@@ -914,7 +906,7 @@ pub struct BlueprintPhysicalDiskConfig {
 ///
 /// Part of [`Blueprint`].
 #[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Diffus,
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Diff,
 )]
 pub struct BlueprintPhysicalDisksConfig {
     pub generation: Generation,
@@ -926,12 +918,6 @@ impl IdMappable for BlueprintPhysicalDiskConfig {
 
     fn id(&self) -> Self::Id {
         self.id
-    }
-}
-
-impl diffus::Same for BlueprintPhysicalDiskConfig {
-    fn same(&self, other: &Self) -> bool {
-        self == other
     }
 }
 
@@ -970,7 +956,7 @@ impl From<BlueprintPhysicalDisksConfig> for OmicronPhysicalDisksConfig {
 
 /// Information about Omicron datasets as recorded in a blueprint.
 #[derive(
-    Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffus,
+    Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diff,
 )]
 pub struct BlueprintDatasetsConfig {
     pub generation: Generation,
@@ -1014,7 +1000,7 @@ impl IdMappable for BlueprintDatasetConfig {
     Deserialize,
     Serialize,
     EnumIter,
-    Diffus,
+    Diff,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum BlueprintDatasetDisposition {
@@ -1053,7 +1039,7 @@ impl BlueprintDatasetDisposition {
     JsonSchema,
     Deserialize,
     Serialize,
-    Diffus,
+    Diff,
 )]
 pub struct BlueprintDatasetConfig {
     // TODO: Display this in diffs - leave for now, for backwards compat
@@ -1177,7 +1163,7 @@ impl DiffBeforeMetadata {
 /// Data about the "before" version within a [`BlueprintDiff`]
 ///
 /// We only track keepers in inventory collections.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DiffBeforeClickhouseClusterConfig {
     Blueprint(Option<ClickhouseClusterConfig>),
 }
