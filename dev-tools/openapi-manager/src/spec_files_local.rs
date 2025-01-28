@@ -36,94 +36,15 @@ impl LocalFiles {
         dir: &Utf8Path,
         apis: &ManagedApis,
     ) -> anyhow::Result<LocalFiles> {
-        let mut api_files = ApiSpecFilesBuilder::new(apis);
-        let entry_iter = dir
-            .read_dir_utf8()
-            .with_context(|| format!("readdir {:?}", dir))?;
-        for maybe_entry in entry_iter {
-            let entry = maybe_entry
-                .with_context(|| format!("readdir {:?} entry", dir))?;
-
-            // If this entry is a file, then we'd expect it to be the JSON file
-            // for one of our lockstep APIs.  Check and see.
-            let path = entry.path();
-            let file_name = entry.file_name();
-            let file_type = entry
-                .file_type()
-                .with_context(|| format!("file type of {:?}", path))?;
-            if file_type.is_file() {
-                match fs_err::read(path) {
-                    Ok(contents) => {
-                        if let Some(file_name) =
-                            api_files.lockstep_file_name(file_name)
-                        {
-                            api_files.load_contents(file_name, contents);
-                        }
-                    }
-                    Err(error) => {
-                        api_files.load_error(anyhow!(error));
-                    }
-                };
-            } else if file_type.is_dir() {
-                LocalFiles::load_versioned_directory(
-                    &mut api_files,
-                    path,
-                    file_name,
-                );
-            } else {
-                // This is not something the tool cares about, but it's not
-                // obviously a problem, either.
-                api_files.load_warning(anyhow!(
-                    "ignored (not a file or directory): {:?}",
-                    path
-                ));
-            };
-        }
-
-        let (spec_files, errors, warnings) = api_files.into_parts();
-        Ok(LocalFiles { spec_files, errors, warnings })
+        let api_files = walk_local_directory(dir, apis)?;
+        Ok(Self::from(api_files))
     }
+}
 
-    fn load_versioned_directory(
-        api_files: &mut ApiSpecFilesBuilder,
-        path: &Utf8Path,
-        basename: &str,
-    ) {
-        let Some(ident) = api_files.versioned_directory(basename) else {
-            return;
-        };
-
-        let entries = match path
-            .read_dir_utf8()
-            .and_then(|entry_iter| entry_iter.collect::<Result<Vec<_>, _>>())
-        {
-            Ok(entries) => entries,
-            Err(error) => {
-                api_files.load_error(
-                    anyhow!(error).context(format!("readdir {:?}", path)),
-                );
-                return;
-            }
-        };
-
-        for entry in entries {
-            let file_name = entry.file_name();
-            let Some(file_name) =
-                api_files.versioned_file_name(&ident, file_name)
-            else {
-                continue;
-            };
-
-            let contents = match fs_err::read(&entry.path()) {
-                Ok(contents) => contents,
-                Err(error) => {
-                    api_files.load_error(anyhow!(error));
-                    continue;
-                }
-            };
-
-            api_files.load_contents(file_name, contents);
-        }
+impl<'a> From<ApiSpecFilesBuilder<'a>> for LocalFiles {
+    fn from(api_files: ApiSpecFilesBuilder) -> Self {
+        let (spec_files, errors, warnings) = api_files.into_parts();
+        LocalFiles { spec_files, errors, warnings }
     }
 }
 
@@ -132,3 +53,90 @@ NewtypeDebug! { () pub struct LocalApiSpecFile(ApiSpecFile); }
 NewtypeDeref! { () pub struct LocalApiSpecFile(ApiSpecFile); }
 NewtypeDerefMut! { () pub struct LocalApiSpecFile(ApiSpecFile); }
 NewtypeFrom! { () pub struct LocalApiSpecFile(ApiSpecFile); }
+
+pub fn walk_local_directory<'a>(
+    dir: &'_ Utf8Path,
+    apis: &'a ManagedApis,
+) -> anyhow::Result<ApiSpecFilesBuilder<'a>> {
+    let mut api_files = ApiSpecFilesBuilder::new(apis);
+    let entry_iter =
+        dir.read_dir_utf8().with_context(|| format!("readdir {:?}", dir))?;
+    for maybe_entry in entry_iter {
+        let entry =
+            maybe_entry.with_context(|| format!("readdir {:?} entry", dir))?;
+
+        // If this entry is a file, then we'd expect it to be the JSON file
+        // for one of our lockstep APIs.  Check and see.
+        let path = entry.path();
+        let file_name = entry.file_name();
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("file type of {:?}", path))?;
+        if file_type.is_file() {
+            match fs_err::read(path) {
+                Ok(contents) => {
+                    if let Some(file_name) =
+                        api_files.lockstep_file_name(file_name)
+                    {
+                        api_files.load_contents(file_name, contents);
+                    }
+                }
+                Err(error) => {
+                    api_files.load_error(anyhow!(error));
+                }
+            };
+        } else if file_type.is_dir() {
+            load_versioned_directory(&mut api_files, path, file_name);
+        } else {
+            // This is not something the tool cares about, but it's not
+            // obviously a problem, either.
+            api_files.load_warning(anyhow!(
+                "ignored (not a file or directory): {:?}",
+                path
+            ));
+        };
+    }
+
+    Ok(api_files)
+}
+
+fn load_versioned_directory(
+    api_files: &mut ApiSpecFilesBuilder,
+    path: &Utf8Path,
+    basename: &str,
+) {
+    let Some(ident) = api_files.versioned_directory(basename) else {
+        return;
+    };
+
+    let entries = match path
+        .read_dir_utf8()
+        .and_then(|entry_iter| entry_iter.collect::<Result<Vec<_>, _>>())
+    {
+        Ok(entries) => entries,
+        Err(error) => {
+            api_files.load_error(
+                anyhow!(error).context(format!("readdir {:?}", path)),
+            );
+            return;
+        }
+    };
+
+    for entry in entries {
+        let file_name = entry.file_name();
+        let Some(file_name) = api_files.versioned_file_name(&ident, file_name)
+        else {
+            continue;
+        };
+
+        let contents = match fs_err::read(&entry.path()) {
+            Ok(contents) => contents,
+            Err(error) => {
+                api_files.load_error(anyhow!(error));
+                continue;
+            }
+        };
+
+        api_files.load_contents(file_name, contents);
+    }
+}

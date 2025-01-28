@@ -16,6 +16,7 @@ mod apis;
 mod cmd;
 mod combined;
 mod compatibility;
+mod environment;
 mod git;
 mod spec_files_blessed;
 mod spec_files_generated;

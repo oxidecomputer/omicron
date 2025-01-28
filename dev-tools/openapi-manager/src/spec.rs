@@ -15,6 +15,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::{ApiDescription, ApiDescriptionBuildErrors, StubContext};
 use openapi_manager_types::ValidationContext;
 use openapiv3::OpenAPI;
+use crate::spec_files_blessed::BlessedFiles;
 
 /// All APIs managed by openapi-manager.
 // TODO The metadata here overlaps with metadata in api-manifest.toml.
@@ -266,7 +267,7 @@ impl<'a> ApiSpecVersion<'a> {
             .validate_json(&contents)
             .context("OpenAPI document validation failed")?;
 
-        let full_path = env.openapi_dir.join(self.file_name(&contents));
+        let full_path = env.openapi_dir().join(self.file_name(&contents));
         let openapi_doc_status = check_file(full_path, contents)?;
 
         let extra_files = validation_result
@@ -408,39 +409,7 @@ pub(crate) enum OverwriteStatus {
     Unchanged,
 }
 
-pub(crate) struct Environment {
-    pub(crate) workspace_root: Utf8PathBuf,
-    pub(crate) openapi_dir: Utf8PathBuf,
-}
-
-impl Environment {
-    pub(crate) fn new(openapi_dir: Option<Utf8PathBuf>) -> Result<Self> {
-        let mut root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        // This crate is two levels down from the root of omicron, so go up twice.
-        root.pop();
-        root.pop();
-
-        let workspace_root = root.canonicalize_utf8().with_context(|| {
-            format!("failed to canonicalize workspace root: {}", root)
-        })?;
-
-        let openapi_dir =
-            openapi_dir.unwrap_or_else(|| workspace_root.join("openapi"));
-        let openapi_dir =
-            openapi_dir.canonicalize_utf8().with_context(|| {
-                format!(
-                    "failed to canonicalize openapi directory: {}",
-                    openapi_dir
-                )
-            })?;
-
-        if !openapi_dir.is_dir() {
-            anyhow::bail!("openapi root is not a directory: {}", root);
-        }
-
-        Ok(Self { workspace_root, openapi_dir })
-    }
-}
+pub(crate) use crate::environment::Environment;
 
 /// Overwrite a file with new contents, if the contents are different.
 ///

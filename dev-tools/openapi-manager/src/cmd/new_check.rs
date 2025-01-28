@@ -39,7 +39,7 @@ pub(crate) fn new_check_impl(
     }
 
     let (combined, warnings) =
-        crate::combined::CombinedApis::load(&env.openapi_dir)?;
+        crate::combined::CombinedApis::load(env.openapi_dir())?;
     for w in warnings {
         eprintln!("warning: {:#}", w);
     }

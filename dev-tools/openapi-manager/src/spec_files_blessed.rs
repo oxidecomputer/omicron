@@ -85,7 +85,13 @@ impl BlessedFiles {
             }
         }
 
+        Ok(BlessedFiles::from(api_files))
+    }
+}
+
+impl<'a> From<ApiSpecFilesBuilder<'a>> for BlessedFiles {
+    fn from(api_files: ApiSpecFilesBuilder<'a>) -> Self {
         let (spec_files, errors, warnings) = api_files.into_parts();
-        Ok(BlessedFiles { spec_files, errors, warnings })
+        BlessedFiles { spec_files, errors, warnings }
     }
 }

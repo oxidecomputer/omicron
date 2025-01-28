@@ -61,7 +61,13 @@ impl GeneratedFiles {
             }
         }
 
+        Ok(Self::from(api_files))
+    }
+}
+
+impl<'a> From<ApiSpecFilesBuilder<'a>> for GeneratedFiles {
+    fn from(api_files: ApiSpecFilesBuilder<'a>) -> Self {
         let (spec_files, errors, warnings) = api_files.into_parts();
-        Ok(GeneratedFiles { spec_files, errors, warnings })
+        GeneratedFiles { spec_files, errors, warnings }
     }
 }
