@@ -7,6 +7,7 @@ use crate::{
     cmd::output::{headers, OutputOpts, Styles},
     combined::{ApiSpecFileWhich, CheckStale},
     git::GitRevision,
+    resolved::{Resolution, Resolved},
     spec::Environment,
     spec_files_blessed::BlessedFiles,
     spec_files_generated::GeneratedFiles,
@@ -38,15 +39,17 @@ pub(crate) fn dump_impl(
     );
 
     // Print information about what we found in Git.
-    if let Some(git_revision) = blessed_revision {
+    let blessed = if let Some(git_revision) = blessed_revision {
         println!("Loading blessed files from revision {:?}", git_revision);
         let revision = GitRevision::from(git_revision.to_owned());
         let blessed =
             BlessedFiles::load_from_git_revision(&revision, local_dir, &apis)?;
         dump_structure(&blessed.spec_files, &blessed.errors, &blessed.warnings);
+        Some(blessed)
     } else {
         println!("Blessed files skipped (no git revision specified)");
-    }
+        None
+    };
 
     // Print information about generated files.
     println!("Generating specs from API definitions");
@@ -56,6 +59,43 @@ pub(crate) fn dump_impl(
         &generated.errors,
         &generated.warnings,
     );
+
+    // Print result of resolving the differences.
+    if let Some(blessed) = blessed {
+        println!("Resolving specs");
+        let resolved = Resolved::new(&apis, &blessed, &generated, &local_files);
+        for note in resolved.notes() {
+            println!("NOTE: {}", note);
+        }
+        for problem in resolved.general_problems() {
+            println!("PROBLEM: {}", problem);
+        }
+
+        for api in apis.iter_apis() {
+            let ident = api.ident();
+            println!("    API: {}", ident);
+
+            for version in api.iter_versions_semver() {
+                print!("        version {}: ", version);
+
+                // unwrap(): there should be a resolution for every managed API
+                let resolution = resolved
+                    .resolution_for_api_version(ident, version)
+                    .unwrap();
+                match resolution {
+                    Resolution::NoProblems => println!("OK"),
+                    Resolution::Problems(problems) => {
+                        println!("ERROR");
+                        for p in problems {
+                            println!("    PROBLEM: {}\n", p);
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        println!("Not resolving specs (no git revision specified)");
+    }
 
     Ok(())
 }

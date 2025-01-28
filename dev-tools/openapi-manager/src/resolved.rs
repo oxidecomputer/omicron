@@ -201,6 +201,22 @@ impl Resolved {
 
         Resolved { notes, non_version_problems, api_results }
     }
+
+    pub fn notes(&self) -> impl Iterator<Item = &Note> + '_ {
+        self.notes.iter()
+    }
+
+    pub fn general_problems(&self) -> impl Iterator<Item = &Problem> + '_ {
+        self.non_version_problems.iter()
+    }
+
+    pub fn resolution_for_api_version(
+        &self,
+        ident: &ApiIdent,
+        version: &semver::Version,
+    ) -> Option<&Resolution> {
+        self.api_results.get(ident).and_then(|v| v.get(version))
+    }
 }
 
 fn resolve_removed_blessed_versions<'a>(
@@ -237,7 +253,7 @@ fn resolve_orphaned_local_specs<'a>(
         version_map
             .iter()
             .filter_map(move |(version, files)| match set {
-                Some(set) if set.contains(version) => {
+                Some(set) if !set.contains(version) => {
                     Some(files.iter().map(|f| f.spec_file_name()))
                 }
                 _ => None,
