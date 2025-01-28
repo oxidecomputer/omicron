@@ -2,13 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use omicron_uuid_kinds::BlueprintUuid;
+use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use uuid::Uuid;
-use omicron_uuid_kinds::BlueprintUuid;
-use omicron_uuid_kinds::CollectionUuid;
 
 /// The status of a `region_replacement` background task activation
 #[derive(Debug, Serialize, Deserialize, Default)]
