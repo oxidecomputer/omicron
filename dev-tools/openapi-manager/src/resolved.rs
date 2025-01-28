@@ -8,6 +8,8 @@ use crate::apis::ApiIdent;
 use crate::apis::ManagedApi;
 use crate::apis::ManagedApis;
 use crate::combined::DisplayableVec;
+use crate::compatibility::api_compatible;
+use crate::compatibility::OpenApiCompatibilityError;
 use crate::spec_files_blessed::BlessedApiSpecFile;
 use crate::spec_files_blessed::BlessedFiles;
 use crate::spec_files_generated::GeneratedApiSpecFile;
@@ -56,13 +58,13 @@ pub enum Problem {
     // API.  (All the others are.)
     #[error(
         "One or more local spec files were found that do not correspond to a \
-         supported version of this API: {spec_file_names:?}.  This is unusual, \
+         supported version of this API: {spec_file_names}.  This is unusual, \
          but it could happen if you created this version of the API in this \
          branch, then later changed it (maybe because you merged with upstream \
          and had to adjust the version number for your changes).  In that \
          case, this tool can remove the unused file for you."
     )]
-    LocalSpecFilesOrphaned { spec_file_names: Vec<ApiSpecFileName> },
+    LocalSpecFilesOrphaned { spec_file_names: DisplayableVec<ApiSpecFileName> },
 
     // All other problems are associated with specific supported versions of an
     // API.
@@ -77,24 +79,23 @@ pub enum Problem {
 
     #[error(
         "Found extra local file for blessed version that does not match the \
-         blessed (upstream) spec file: {spec_file_name:?}.  This can happen if \
+         blessed (upstream) spec file: {spec_file_names}.  This can happen if \
          you created this version of the API in this branch, then merged with \
          an upstream commit that also added the same version number.  In that \
          case, you likely already bumped your local version number (when you \
          merged the list of supported versions in Rust) and this file is \
          vestigial. This tool can remove the unused file for you."
     )]
-    // XXX-dap should this have a Vec<ApiSpecFileName> to be parallel with
-    // LocalVersionStale?
-    BlessedVersionExtraLocalSpec { spec_file_name: ApiSpecFileName },
+    BlessedVersionExtraLocalSpec {
+        spec_file_names: DisplayableVec<ApiSpecFileName>,
+    },
 
     #[error(
         "Spec generated from the current code is not compatible with the \
          blessed spec (from upstream)"
     )]
     BlessedVersionBroken {
-        #[source]
-        compatibility_issues: OpenApiIncompatibilityProblems,
+        compatibility_issues: DisplayableVec<OpenApiCompatibilityError>,
     },
 
     #[error(
@@ -125,11 +126,6 @@ pub enum Problem {
 
 // enum of safeties?  and each thing can have a set of safeties that enable the
 // fix?
-
-// XXX-dap
-#[derive(Debug, Error)]
-#[error("XXX-dap")] // XXX-dap
-struct OpenApiIncompatibilityProblems {}
 
 /// Resolve differences between blessed spec(s), the generated spec, and any
 /// local spec files for a given API
@@ -181,7 +177,9 @@ impl Resolved {
             resolve_orphaned_local_specs(&supported_versions_by_api, local)
                 .map(|spec_file_name| Problem::LocalSpecFilesOrphaned {
                     // XXX-dap is this just one or many?
-                    spec_file_names: vec![spec_file_name.clone()],
+                    spec_file_names: DisplayableVec(vec![
+                        spec_file_name.clone()
+                    ]),
                 })
                 .collect();
 
@@ -306,7 +304,54 @@ fn resolve_api_version_blessed(
     generated: &GeneratedApiSpecFile,
     local: &[LocalApiSpecFile],
 ) -> Resolution {
-    todo!(); // XXX-dap working here
+    let mut problems = Vec::new();
+
+    // First off, the blessed spec must be a subset of the generated one.
+    // If not, someone has made an incompatible change to the API
+    // *implementation*, such that the implementation no longer faithfully
+    // implements this older, supported version.
+    match api_compatible(blessed.openapi(), generated.openapi()) {
+        Ok(compatibility_issues) if !compatibility_issues.is_empty() => {
+            problems.push(Problem::BlessedVersionBroken {
+                compatibility_issues: DisplayableVec(compatibility_issues),
+            });
+        }
+        Ok(_) => (),
+        Err(error) => {
+            // XXX-dap make this a real Problem?
+            panic!("failed to check OpenAPI compatibility: {error:#}");
+        }
+    }
+
+    // Now, there should be at least one local spec that exactly matches the
+    // blessed one.
+    // XXX-dap this could just check hashes, once we implement that and if we're
+    // sure that it will be robust.
+    let (matching, non_matching): (Vec<_>, Vec<_>) =
+        local.iter().partition(|local| local.contents() == blessed.contents());
+    if matching.is_empty() {
+        // XXX-dap it would be weird if there were _more_ than one matching one.
+        problems.push(Problem::BlessedVersionMissingLocal {
+            spec_file_name: blessed.spec_file_name().clone(),
+        })
+    }
+    // There shouldn't be any local specs that match the same version but don't
+    // match the same contents.
+    if !non_matching.is_empty() {
+        let spec_file_names = DisplayableVec(
+            non_matching
+                .into_iter()
+                .map(|s| s.spec_file_name().clone())
+                .collect(),
+        );
+        problems.push(Problem::BlessedVersionExtraLocalSpec { spec_file_names })
+    }
+
+    if problems.is_empty() {
+        Resolution::NoProblems
+    } else {
+        Resolution::Problems(problems)
+    }
 }
 
 fn resolve_api_version_local(
@@ -315,5 +360,30 @@ fn resolve_api_version_local(
     generated: &GeneratedApiSpecFile,
     local: &[LocalApiSpecFile],
 ) -> Resolution {
-    todo!(); // XXX-dap working here
+    let mut problems = Vec::new();
+
+    let (matching, non_matching): (Vec<_>, Vec<_>) = local
+        .iter()
+        .partition(|local| local.contents() == generated.contents());
+
+    if matching.is_empty() {
+        // XXX-dap it would be weird if there were _more_ than one matching one.
+        problems.push(Problem::LocalVersionMissingLocal);
+    }
+
+    if !non_matching.is_empty() {
+        let spec_file_names = DisplayableVec(
+            non_matching
+                .into_iter()
+                .map(|s| s.spec_file_name().clone())
+                .collect(),
+        );
+        problems.push(Problem::LocalVersionStale { spec_file_names });
+    }
+
+    if problems.is_empty() {
+        Resolution::NoProblems
+    } else {
+        Resolution::Problems(problems)
+    }
 }

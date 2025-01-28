@@ -237,6 +237,10 @@ impl ApiSpecFile {
         &self.version
     }
 
+    pub fn openapi(&self) -> &OpenAPI {
+        &self.contents
+    }
+
     pub fn contents(&self) -> &[u8] {
         &self.contents_buf
     }
