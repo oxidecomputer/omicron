@@ -225,9 +225,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_resource (
     -- Should match the UUID of the corresponding resource
     id UUID PRIMARY KEY,
 
-    -- The UUID of an instance, if this resource belongs to an instance.
-    instance_id UUID,
-
     -- The sled where resources are being consumed
     sled_id UUID NOT NULL,
 
@@ -241,7 +238,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_resource (
     reservoir_ram INT8 NOT NULL,
 
     -- Identifies the type of the resource
-    kind omicron.public.sled_resource_kind NOT NULL
+    kind omicron.public.sled_resource_kind NOT NULL,
+
+    -- The UUID of an instance, if this resource belongs to an instance.
+    instance_id UUID
 
     -- TODO Add constraint that if kind is instance, instance_id is not NULL?
     -- Or will that break backwards compatibility?

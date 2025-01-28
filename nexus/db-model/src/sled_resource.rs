@@ -31,12 +31,13 @@ impl Resources {
 #[diesel(table_name = sled_resource)]
 pub struct SledResource {
     pub id: Uuid,
-    pub instance_id: Option<Uuid>,
     pub sled_id: Uuid,
-    pub kind: SledResourceKind,
 
     #[diesel(embed)]
     pub resources: Resources,
+
+    pub kind: SledResourceKind,
+    pub instance_id: Option<Uuid>,
 }
 
 impl SledResource {
