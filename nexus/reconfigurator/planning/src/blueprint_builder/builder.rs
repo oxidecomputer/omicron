@@ -513,7 +513,8 @@ impl<'a> BlueprintBuilder<'a> {
                     generation: Generation::new(),
                     datasets: IdMap::new(),
                 });
-            let editor = match state {
+
+            let mut editor = match state {
                 SledState::Active => {
                     let subnet = input
                         .sled_lookup(SledFilter::Commissioned, *sled_id)
@@ -543,6 +544,26 @@ impl<'a> BlueprintBuilder<'a> {
             .with_context(|| {
                 format!("failed to construct SledEditor for sled {sled_id}")
             })?;
+
+            // TODO-john explain this and when it goes away
+            match state {
+                SledState::Active => {
+                    let sled_inventory = inventory.sled_agents.get(sled_id);
+                    editor
+                        .backfill_zone_filesystem_pools(
+                            sled_inventory.map_or(&[], |inv| &inv.zpools),
+                            sled_inventory.map_or(&[], |inv| &inv.datasets),
+                            &log,
+                        )
+                        .with_context(|| {
+                            format!(
+                                "failed to backfill zone filesystem_pool \
+                                 values for sled {sled_id}"
+                            )
+                        })?;
+                }
+                SledState::Decommissioned => (),
+            }
 
             sled_editors.insert(*sled_id, editor);
         }
@@ -2835,6 +2856,115 @@ pub mod test {
                 assert_eq!(kind, ZoneKind::CockroachDb);
             }
             _ => panic!("unexpected error {err}"),
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_backfill_filesystem_pool() {
+        static TEST_NAME: &str =
+            "blueprint_builder_test_backfill_filesystem_pool";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Start a system that has 3 Nexus instances, each on a different sled.
+        let (example, mut parent) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .nsleds(3)
+                .nexus_count(3)
+                .build();
+        let collection = example.collection;
+        let input = example.input;
+
+        // For each of the 3 Nexus instances:
+        //
+        // 0 - remains unchanged
+        // 1 - set filesystem_pool to None (it should get filled in correctly)
+        // 2 - set filesystem_pool to Some(other_zpool) to emulate "sled-agent
+        //     restarted after our inventory collection so we backfilled the
+        //     wrong zpool and now need to try again"; it should get fixed
+        //
+        // The zone config generation on sleds 1 and 2 should get bumped. 0
+        // should remain unchanged.
+        let mut sled_ids = Vec::with_capacity(3);
+        let mut expected_filesystem_pools = Vec::with_capacity(3);
+        let mut expected_zones_config_gen = Vec::with_capacity(3);
+
+        for (sled_id, zones_config) in parent.blueprint_zones.iter_mut() {
+            let mut nexus = zones_config
+                .zones
+                .iter_mut()
+                .find(|z| z.zone_type.is_nexus())
+                .expect("should find a nexus on each sled");
+            let orig_nexus_filesystem_pool =
+                nexus.filesystem_pool.clone().expect(
+                    "nexus instances in new blueprints \
+                     should have a filesystem_pool",
+                );
+
+            match sled_ids.len() {
+                0 => {
+                    expected_zones_config_gen.push(zones_config.generation);
+                }
+                1 => {
+                    expected_zones_config_gen
+                        .push(zones_config.generation.next());
+                    nexus.filesystem_pool = None;
+                }
+                2 => {
+                    expected_zones_config_gen
+                        .push(zones_config.generation.next());
+                    let some_other_zpool_on_this_sled = parent
+                        .blueprint_disks
+                        .get(sled_id)
+                        .expect("sled should have disks")
+                        .disks
+                        .iter()
+                        .find(|disk| {
+                            disk.pool_id != orig_nexus_filesystem_pool.id()
+                        })
+                        .expect("sled should have more than one disk")
+                        .pool_id;
+                    nexus.filesystem_pool = Some(ZpoolName::new_external(
+                        some_other_zpool_on_this_sled,
+                    ));
+                }
+                _ => unreachable!("unexpected number of sleds in test"),
+            }
+            sled_ids.push(*sled_id);
+            expected_filesystem_pools.push(orig_nexus_filesystem_pool.clone());
+        }
+
+        // Create a builder and produce a new blueprint.
+        let blueprint = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &parent,
+            &input,
+            &collection,
+            "test",
+        )
+        .expect("constructed builder")
+        .build();
+
+        // Check that our backfilling was correct.
+        for (i, sled_id) in sled_ids.into_iter().enumerate() {
+            let zones_config =
+                blueprint.blueprint_zones.get(&sled_id).expect("found sled");
+            assert_eq!(
+                zones_config.generation, expected_zones_config_gen[i],
+                "unexpected generation on sled {i}"
+            );
+
+            let nexus = zones_config
+                .zones
+                .iter()
+                .find(|z| z.zone_type.is_nexus())
+                .expect("found nexus on sled");
+            assert_eq!(
+                nexus.filesystem_pool.as_ref(),
+                Some(&expected_filesystem_pools[i]),
+                "unexpected filesystem_pool on sled {i}"
+            );
         }
 
         logctx.cleanup_successful();
