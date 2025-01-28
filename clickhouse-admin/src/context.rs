@@ -78,7 +78,7 @@ pub struct ServerContext {
     oximeter_client: OximeterClient,
     log: Logger,
     pub generation: std::sync::Mutex<Option<Generation>>,
-    pub tx: mpsc::Sender<ClickhouseAdminServerRequest>,
+    pub tx: flume::Sender<ClickhouseAdminServerRequest>,
 }
 
 impl ServerContext {
@@ -106,7 +106,7 @@ impl ServerContext {
         let generation = std::sync::Mutex::new(gen);
 
         // TODO: change the buffer size. Use that flume bounded channel thing?
-        let (inner_tx, inner_rx) = mpsc::channel(10);
+        let (inner_tx, inner_rx) = flume::bounded(0);
         tokio::spawn(long_running_ch_server_task(inner_rx));
 
         Ok(Self {
@@ -226,9 +226,9 @@ pub enum ClickhouseAdminServerRequest {
 }
 
 async fn long_running_ch_server_task(
-    mut incoming: Receiver<ClickhouseAdminServerRequest>,
+    incoming: flume::Receiver<ClickhouseAdminServerRequest>,
 ) {
-    while let Some(request) = incoming.recv().await {
+    while let Ok(request) = incoming.recv_async().await {
         match request {
             ClickhouseAdminServerRequest::GenerateConfig {
                 ctx,

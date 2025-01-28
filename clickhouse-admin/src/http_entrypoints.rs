@@ -54,7 +54,7 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
 
         let (response_tx, response_rx) = oneshot::channel();
         ctx.tx
-            .send(ClickhouseAdminServerRequest::GenerateConfig {
+            .send_async(ClickhouseAdminServerRequest::GenerateConfig {
                 ctx: ctx.clone(),
                 replica_settings,
                 response: response_tx,
@@ -121,7 +121,7 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         let ctx = rqctx.context();
         let (response_tx, response_rx) = oneshot::channel();
         ctx.tx
-            .send(ClickhouseAdminServerRequest::DbInit {
+            .send_async(ClickhouseAdminServerRequest::DbInit {
                 ctx: ctx.clone(),
                 response: response_tx,
             })

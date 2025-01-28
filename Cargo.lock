@@ -6686,6 +6686,7 @@ dependencies = [
  "clickward",
  "dropshot 0.13.0",
  "expectorate",
+ "flume",
  "http",
  "illumos-utils",
  "omicron-common",
