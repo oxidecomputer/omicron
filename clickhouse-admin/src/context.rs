@@ -12,6 +12,7 @@ use clickhouse_admin_types::{
     CLICKHOUSE_SERVER_CONFIG_FILE,
 };
 use dropshot::HttpError;
+use flume::{Receiver, Sender};
 use http::StatusCode;
 use illumos_utils::svcadm::Svcadm;
 use omicron_common::address::CLICKHOUSE_TCP_PORT;
@@ -24,14 +25,14 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::net::SocketAddrV6;
 use std::str::FromStr;
-use std::sync::Arc;
-use tokio::sync::{mpsc, mpsc::Receiver, oneshot};
+use std::sync::{Arc, Mutex};
+use tokio::sync::oneshot;
 
 pub struct KeeperServerContext {
     clickward: Clickward,
     clickhouse_cli: ClickhouseCli,
     log: Logger,
-    pub generation: std::sync::Mutex<Option<Generation>>,
+    pub generation: Mutex<Option<Generation>>,
 }
 
 impl KeeperServerContext {
@@ -51,7 +52,7 @@ impl KeeperServerContext {
         // If there is already a configuration file with a generation number we'll
         // use that. Otherwise, we set the generation number to None.
         let gen = read_generation_from_file(config_path)?;
-        let generation = std::sync::Mutex::new(gen);
+        let generation = Mutex::new(gen);
         Ok(Self { clickward, clickhouse_cli, log, generation })
     }
 
@@ -77,8 +78,8 @@ pub struct ServerContext {
     clickward: Clickward,
     oximeter_client: OximeterClient,
     log: Logger,
-    pub generation: std::sync::Mutex<Option<Generation>>,
-    pub tx: flume::Sender<ClickhouseAdminServerRequest>,
+    pub generation: Mutex<Option<Generation>>,
+    pub tx: Sender<ClickhouseAdminServerRequest>,
 }
 
 impl ServerContext {
@@ -103,9 +104,10 @@ impl ServerContext {
         // If there is already a configuration file with a generation number we'll
         // use that. Otherwise, we set the generation number to None.
         let gen = read_generation_from_file(config_path)?;
-        let generation = std::sync::Mutex::new(gen);
+        let generation = Mutex::new(gen);
 
-        // TODO: change the buffer size. Use that flume bounded channel thing?
+        // We only want to handle one in flight request at a time. Reconfigurator execution will retry
+        // again later anyway. We use a flume bounded channel with a size of 0 to act as a rendezvous channel.
         let (inner_tx, inner_rx) = flume::bounded(0);
         tokio::spawn(long_running_ch_server_task(inner_rx));
 
@@ -226,7 +228,7 @@ pub enum ClickhouseAdminServerRequest {
 }
 
 async fn long_running_ch_server_task(
-    incoming: flume::Receiver<ClickhouseAdminServerRequest>,
+    incoming: Receiver<ClickhouseAdminServerRequest>,
 ) {
     while let Ok(request) = incoming.recv_async().await {
         match request {
@@ -251,7 +253,7 @@ pub struct SingleServerContext {
     clickhouse_cli: ClickhouseCli,
     oximeter_client: OximeterClient,
     log: Logger,
-    pub tx: mpsc::Sender<ClickhouseAdminSingleServerRequest>,
+    pub tx: Sender<ClickhouseAdminSingleServerRequest>,
 }
 
 impl SingleServerContext {
@@ -269,8 +271,9 @@ impl SingleServerContext {
         let log =
             clickhouse_cli.log.new(slog::o!("component" => "ServerContext"));
 
-        // TODO: change the buffer size. Use that flume bounded channel thing?
-        let (inner_tx, inner_rx) = mpsc::channel(10);
+        // We only want to handle one in flight request at a time. Reconfigurator execution will retry
+        // again later anyway. We use a flume bounded channel with a size of 0 to act as a rendezvous channel.
+        let (inner_tx, inner_rx) = flume::bounded(0);
         tokio::spawn(long_running_ch_single_server_task(inner_rx));
 
         Self { clickhouse_cli, oximeter_client, log, tx: inner_tx }
@@ -333,9 +336,9 @@ pub enum ClickhouseAdminSingleServerRequest {
 }
 
 async fn long_running_ch_single_server_task(
-    mut incoming: Receiver<ClickhouseAdminSingleServerRequest>,
+    incoming: Receiver<ClickhouseAdminSingleServerRequest>,
 ) {
-    while let Some(request) = incoming.recv().await {
+    while let Ok(request) = incoming.recv_async().await {
         match request {
             ClickhouseAdminSingleServerRequest::DbInit { ctx, response } => {
                 let result = ctx.init_db().await;

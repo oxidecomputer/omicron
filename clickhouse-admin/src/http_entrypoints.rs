@@ -247,7 +247,7 @@ impl ClickhouseAdminSingleApi for ClickhouseAdminSingleImpl {
         let ctx = rqctx.context();
         let (response_tx, response_rx) = oneshot::channel();
         ctx.tx
-            .send(ClickhouseAdminSingleServerRequest::DbInit {
+            .send_async(ClickhouseAdminSingleServerRequest::DbInit {
                 ctx: ctx.clone(),
                 response: response_tx,
             })
