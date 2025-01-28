@@ -26,7 +26,6 @@ use std::net::SocketAddrV6;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::{mpsc, mpsc::Receiver, oneshot};
-use tokio::task::JoinHandle;
 
 pub struct KeeperServerContext {
     clickward: Clickward,
@@ -79,7 +78,6 @@ pub struct ServerContext {
     oximeter_client: OximeterClient,
     log: Logger,
     pub generation: std::sync::Mutex<Option<Generation>>,
-    pub task_handle: JoinHandle<()>,
     pub tx: mpsc::Sender<ClickhouseAdminServerRequest>,
 }
 
@@ -109,7 +107,7 @@ impl ServerContext {
 
         // TODO: change the buffer size. Use that flume bounded channel thing?
         let (inner_tx, inner_rx) = mpsc::channel(10);
-        let task_handle = tokio::spawn(long_running_ch_server_task(inner_rx));
+        tokio::spawn(long_running_ch_server_task(inner_rx));
 
         Ok(Self {
             clickhouse_cli,
@@ -117,7 +115,6 @@ impl ServerContext {
             oximeter_client,
             log,
             generation,
-            task_handle,
             tx: inner_tx,
         })
     }
@@ -254,7 +251,6 @@ pub struct SingleServerContext {
     clickhouse_cli: ClickhouseCli,
     oximeter_client: OximeterClient,
     log: Logger,
-    pub task_handle: JoinHandle<()>,
     pub tx: mpsc::Sender<ClickhouseAdminSingleServerRequest>,
 }
 
@@ -275,10 +271,9 @@ impl SingleServerContext {
 
         // TODO: change the buffer size. Use that flume bounded channel thing?
         let (inner_tx, inner_rx) = mpsc::channel(10);
-        let task_handle =
-            tokio::spawn(long_running_ch_single_server_task(inner_rx));
+        tokio::spawn(long_running_ch_single_server_task(inner_rx));
 
-        Self { clickhouse_cli, oximeter_client, log, task_handle, tx: inner_tx }
+        Self { clickhouse_cli, oximeter_client, log, tx: inner_tx }
     }
 
     pub async fn init_db(&self) -> Result<(), HttpError> {
