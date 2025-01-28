@@ -5,6 +5,8 @@
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::update::ArtifactHash;
+use omicron_uuid_kinds::BlueprintUuid;
+use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use serde::Deserialize;
@@ -345,4 +347,54 @@ pub enum TufArtifactReplicationOperation {
     Put { hash: ArtifactHash },
     Copy { hash: ArtifactHash, source_sled: SledUuid },
     Delete { hash: ArtifactHash },
+}
+
+/// The status of an `blueprint_rendezvous` background task activation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlueprintRendezvousStatus {
+    /// ID of the target blueprint during this activation.
+    pub blueprint_id: BlueprintUuid,
+    /// ID of the inventory collection used by this activation.
+    pub inventory_collection_id: CollectionUuid,
+    /// Counts of operations performed.
+    pub stats: BlueprintRendezvousStats,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlueprintRendezvousStats {
+    pub crucible_dataset: CrucibleDatasetsRendezvousStats,
+}
+
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
+)]
+pub struct CrucibleDatasetsRendezvousStats {
+    /// Number of new Crucible datasets recorded.
+    ///
+    /// This is a count of in-service Crucible datasets that were also present
+    /// in inventory and newly-inserted into `crucible_dataset`.
+    pub num_inserted: usize,
+    /// Number of Crucible datasets that would have been inserted, except
+    /// records for them already existed.
+    pub num_already_exist: usize,
+    /// Number of Crucible datasets that the current blueprint says are
+    /// in-service, but we did not attempt to insert them because they're not
+    /// present in the latest inventory collection.
+    pub num_not_in_inventory: usize,
+}
+
+impl slog::KV for CrucibleDatasetsRendezvousStats {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self { num_inserted, num_already_exist, num_not_in_inventory } =
+            *self;
+        serializer.emit_usize("num_inserted".into(), num_inserted)?;
+        serializer.emit_usize("num_already_exist".into(), num_already_exist)?;
+        serializer
+            .emit_usize("num_not_in_inventory".into(), num_not_in_inventory)?;
+        Ok(())
+    }
 }
