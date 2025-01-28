@@ -30,7 +30,7 @@ pub async fn reconcile_blueprint_rendezvous_tables(
         .flat_map(|sled| sled.datasets.iter().flat_map(|d| d.id))
         .collect();
 
-    debug_dataset::reconcile_debug_datasets(
+    let debug_dataset = debug_dataset::reconcile_debug_datasets(
         opctx,
         datastore,
         blueprint.id,
@@ -51,7 +51,7 @@ pub async fn reconcile_blueprint_rendezvous_tables(
     )
     .await?;
 
-    Ok(BlueprintRendezvousStats { crucible_dataset })
+    Ok(BlueprintRendezvousStats { debug_dataset, crucible_dataset })
 }
 
 #[cfg(test)]

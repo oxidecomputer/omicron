@@ -10,6 +10,7 @@ use nexus_db_queries::db::model::RendezvousDebugDataset;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
+use nexus_types::internal_api::background::DebugDatasetsRendezvousStats;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
@@ -23,7 +24,7 @@ pub(crate) async fn reconcile_debug_datasets(
     blueprint_id: BlueprintUuid,
     blueprint_datasets: impl Iterator<Item = &BlueprintDatasetConfig>,
     inventory_datasets: &BTreeSet<DatasetUuid>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<DebugDatasetsRendezvousStats> {
     // We expect basically all executions of this task to do nothing: we're
     // activated periodically, and only do work when a dataset has been
     // newly-added or newly-expunged.
@@ -39,6 +40,8 @@ pub(crate) async fn reconcile_debug_datasets(
         .map(|d| (d.id(), d))
         .collect::<BTreeMap<_, _>>();
 
+    let mut stats = DebugDatasetsRendezvousStats::default();
+
     for dataset in blueprint_datasets.filter(|d| d.kind == DatasetKind::Debug) {
         match dataset.disposition {
             BlueprintDatasetDisposition::InService => {
@@ -46,20 +49,33 @@ pub(crate) async fn reconcile_debug_datasets(
                 // inventory (required for correctness) and isn't already
                 // present in the db (performance optimization only). Inserting
                 // an already-present row is a no-op, so it's safe to skip.
-                if inventory_datasets.contains(&dataset.id)
-                    && !existing_db_datasets.contains_key(&dataset.id)
-                {
+                if existing_db_datasets.contains_key(&dataset.id) {
+                    stats.num_already_exist += 1;
+                } else if !inventory_datasets.contains(&dataset.id) {
+                    stats.num_not_in_inventory += 1;
+                } else {
                     let db_dataset = RendezvousDebugDataset::new(
                         dataset.id,
                         dataset.pool.id(),
                         blueprint_id,
                     );
-                    datastore
+                    let did_insert = datastore
                         .debug_dataset_insert_if_not_exists(opctx, db_dataset)
                         .await
                         .with_context(|| {
                             format!("failed to insert dataset {}", dataset.id)
-                        })?;
+                        })?
+                        .is_some();
+
+                    if did_insert {
+                        stats.num_inserted += 1;
+                    } else {
+                        // This means we hit the TOCTOU race mentioned above:
+                        // when we queried the DB this row didn't exist, but
+                        // another Nexus must have beat us to actually inserting
+                        // it.
+                        stats.num_already_exist += 1;
+                    }
                 }
             }
             BlueprintDatasetDisposition::Expunged => {
@@ -81,7 +97,9 @@ pub(crate) async fn reconcile_debug_datasets(
                     .get(&dataset.id)
                     .map(|d| d.is_tombstoned())
                     .unwrap_or(false);
-                if !already_tombstoned {
+                if already_tombstoned {
+                    stats.num_already_tombstoned += 1;
+                } else {
                     if datastore
                         .debug_dataset_tombstone(
                             opctx,
@@ -96,17 +114,23 @@ pub(crate) async fn reconcile_debug_datasets(
                             )
                         })?
                     {
+                        stats.num_tombstoned += 1;
                         info!(
                             opctx.log, "tombstoned expunged dataset";
                             "dataset_id" => %dataset.id,
                         );
+                    } else {
+                        // Similar TOCTOU race lost as above; this dataset was
+                        // either already tombstoned by another racing Nexus, or
+                        // has been hard deleted.
+                        stats.num_already_tombstoned += 1;
                     }
                 }
             }
         }
     }
 
-    Ok(())
+    Ok(stats)
 }
 
 #[cfg(test)]
@@ -213,7 +237,7 @@ mod tests {
         ))| {
             let blueprint_id = BlueprintUuid::new_v4();
 
-            let datastore_datasets = runtime.block_on(async {
+            let (result_stats, datastore_datasets) = runtime.block_on(async {
                 let (blueprint_datasets, inventory_datasets) = proptest_do_prep(
                     opctx,
                     datastore,
@@ -221,7 +245,7 @@ mod tests {
                     &prep,
                 ).await;
 
-                reconcile_debug_datasets(
+                let result_stats = reconcile_debug_datasets(
                     opctx,
                     datastore,
                     blueprint_id,
@@ -231,14 +255,18 @@ mod tests {
                 .await
                 .expect("reconciled debug dataset");
 
-                 datastore
+                 let datastore_datasets = datastore
                     .debug_dataset_list_all_batched(opctx)
                     .await
                     .unwrap()
                     .into_iter()
                     .map(|d| (d.id(), d))
-                    .collect::<BTreeMap<_, _>>()
+                    .collect::<BTreeMap<_, _>>();
+
+                 (result_stats, datastore_datasets)
             });
+
+            let mut expected_stats = DebugDatasetsRendezvousStats::default();
 
             for (id, prep) in prep {
                 let id: DatasetUuid = u32_to_id(id);
@@ -251,6 +279,32 @@ mod tests {
                 let in_service =
                     prep.disposition == ArbitraryDisposition::InService;
                 let in_inventory = prep.in_inventory;
+
+                // Validate rendezvous output
+                match (in_db_before, in_service, in_inventory) {
+                    // "Not in database and expunged" is consistent with "hard
+                    // deleted", which we can't separate from "already
+                    // tombstoned".
+                    (false, false, _) => {
+                        expected_stats.num_already_tombstoned += 1;
+                    }
+                    // "In database and expunged" should result in tombstoning.
+                    (true, false, _) => {
+                        expected_stats.num_tombstoned += 1;
+                    }
+                    // In service but already existed
+                    (true, true, _) => {
+                        expected_stats.num_already_exist += 1;
+                    }
+                    // In service, not in db yet, but not in inventory
+                    (false, true, false) => {
+                        expected_stats.num_not_in_inventory += 1;
+                    }
+                    // In service, not in db yet, present in inventory
+                    (false, true, true) => {
+                        expected_stats.num_inserted += 1;
+                    }
+                }
 
                 // Validate database state
                 match (in_db_before, in_service, in_inventory) {
@@ -298,6 +352,8 @@ mod tests {
                     }
                 }
             }
+
+            assert_eq!(result_stats, expected_stats);
         });
 
         runtime.block_on(db.terminate());

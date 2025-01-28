@@ -247,6 +247,7 @@ pub struct BlueprintRendezvousStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlueprintRendezvousStats {
+    pub debug_dataset: DebugDatasetsRendezvousStats,
     pub crucible_dataset: CrucibleDatasetsRendezvousStats,
 }
 
@@ -280,6 +281,56 @@ impl slog::KV for CrucibleDatasetsRendezvousStats {
         serializer.emit_usize("num_already_exist".into(), num_already_exist)?;
         serializer
             .emit_usize("num_not_in_inventory".into(), num_not_in_inventory)?;
+        Ok(())
+    }
+}
+
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
+)]
+pub struct DebugDatasetsRendezvousStats {
+    /// Number of new Debug datasets recorded.
+    ///
+    /// This is a count of in-service Debug datasets that were also present
+    /// in inventory and newly-inserted into `rendezvous_debug_dataset`.
+    pub num_inserted: usize,
+    /// Number of Debug datasets that would have been inserted, except
+    /// records for them already existed.
+    pub num_already_exist: usize,
+    /// Number of Debug datasets that the current blueprint says are
+    /// in-service, but we did not attempt to insert them because they're not
+    /// present in the latest inventory collection.
+    pub num_not_in_inventory: usize,
+    /// Number of Debug datasets that we tombstoned based on their disposition
+    /// in the current blueprint being expunged.
+    pub num_tombstoned: usize,
+    /// Number of Debug datasets that we would have tombstoned, except they were
+    /// already tombstoned or deleted.
+    pub num_already_tombstoned: usize,
+}
+
+impl slog::KV for DebugDatasetsRendezvousStats {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self {
+            num_inserted,
+            num_already_exist,
+            num_not_in_inventory,
+            num_tombstoned,
+            num_already_tombstoned,
+        } = *self;
+        serializer.emit_usize("num_inserted".into(), num_inserted)?;
+        serializer.emit_usize("num_already_exist".into(), num_already_exist)?;
+        serializer
+            .emit_usize("num_not_in_inventory".into(), num_not_in_inventory)?;
+        serializer.emit_usize("num_tombstoned".into(), num_tombstoned)?;
+        serializer.emit_usize(
+            "num_already_tombstoned".into(),
+            num_already_tombstoned,
+        )?;
         Ok(())
     }
 }

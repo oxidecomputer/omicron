@@ -1128,6 +1128,27 @@ fn print_task_blueprint_rendezvous(details: &serde_json::Value) {
                 "    inventory collection: {}",
                 status.inventory_collection_id
             );
+            println!("    debug_dataset rendezvous counts:");
+            println!(
+                "        num_inserted:           {}",
+                status.stats.debug_dataset.num_inserted
+            );
+            println!(
+                "        num_already_exist:      {}",
+                status.stats.debug_dataset.num_already_exist
+            );
+            println!(
+                "        num_not_in_inventory:   {}",
+                status.stats.debug_dataset.num_not_in_inventory
+            );
+            println!(
+                "        num_tombstoned:         {}",
+                status.stats.debug_dataset.num_tombstoned
+            );
+            println!(
+                "        num_already_tombstoned: {}",
+                status.stats.debug_dataset.num_already_tombstoned
+            );
             println!("    crucible_dataset rendezvous counts:");
             println!(
                 "        num_inserted:         {}",
