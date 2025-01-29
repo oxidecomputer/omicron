@@ -3,8 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::context::{
-    ClickhouseAdminServerRequest, ClickhouseAdminSingleServerRequest,
-    KeeperServerContext, ServerContext, SingleServerContext,
+    ClickhouseAdminServerRequest, KeeperServerContext, ServerContext,
 };
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::{
@@ -34,8 +33,7 @@ pub fn clickhouse_admin_keeper_api() -> ApiDescription<Arc<KeeperServerContext>>
         .expect("registered entrypoints")
 }
 
-pub fn clickhouse_admin_single_api() -> ApiDescription<Arc<SingleServerContext>>
-{
+pub fn clickhouse_admin_single_api() -> ApiDescription<Arc<ServerContext>> {
     clickhouse_admin_single_api_mod::api_description::<ClickhouseAdminSingleImpl>()
         .expect("registered entrypoints")
 }
@@ -119,10 +117,12 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let ctx = rqctx.context();
+        let replicated = true;
         let (response_tx, response_rx) = oneshot::channel();
         ctx.tx
             .send_async(ClickhouseAdminServerRequest::DbInit {
                 ctx: ctx.clone(),
+                replicated,
                 response: response_tx,
             })
             .await
@@ -239,16 +239,18 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
 enum ClickhouseAdminSingleImpl {}
 
 impl ClickhouseAdminSingleApi for ClickhouseAdminSingleImpl {
-    type Context = Arc<SingleServerContext>;
+    type Context = Arc<ServerContext>;
 
     async fn init_db(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let ctx = rqctx.context();
+        let replicated = false;
         let (response_tx, response_rx) = oneshot::channel();
         ctx.tx
-            .send_async(ClickhouseAdminSingleServerRequest::DbInit {
+            .send_async(ClickhouseAdminServerRequest::DbInit {
                 ctx: ctx.clone(),
+                replicated,
                 response: response_tx,
             })
             .await

@@ -143,13 +143,17 @@ impl ServerContext {
 }
 
 pub enum ClickhouseAdminServerRequest {
+    /// Generates configuration files for a replicated cluster
     GenerateConfig {
         ctx: Arc<ServerContext>,
         replica_settings: ServerConfigurableSettings,
         response: oneshot::Sender<Result<ReplicaConfig, HttpError>>,
     },
+    /// Initiliases the oximeter database on either a single node
+    /// ClickHouse installation or a replicated cluster.
     DbInit {
         ctx: Arc<ServerContext>,
+        replicated: bool,
         response: oneshot::Sender<Result<(), HttpError>>,
     },
 }
@@ -168,8 +172,11 @@ async fn long_running_ch_server_task(
                     generate_config_and_enable_svc(ctx, replica_settings);
                 response.send(result).expect("failed to send value from configuration generation to channel");
             }
-            ClickhouseAdminServerRequest::DbInit { ctx, response } => {
-                let replicated = true;
+            ClickhouseAdminServerRequest::DbInit {
+                ctx,
+                replicated,
+                response,
+            } => {
                 let result = init_db(ctx, replicated).await;
                 response.send(result).expect("failed to send value from database initialization to channel");
             }
@@ -230,124 +237,25 @@ pub async fn init_db(
     if version == 0 {
         info!(
             log,
-            "initializing replicated ClickHouse cluster to version {OXIMETER_VERSION}"
+            "initializing oximeter database to version {OXIMETER_VERSION}"
         );
         ctx.oximeter_client()
             .initialize_db_with_version(replicated, OXIMETER_VERSION)
             .await
             .map_err(|e| {
                 HttpError::for_internal_error(format!(
-                    "can't initialize replicated ClickHouse cluster \
+                    "can't initialize oximeter database \
                      to version {OXIMETER_VERSION}: {e}",
                 ))
             })?;
     } else {
         info!(
             log,
-            "skipping initialization of replicated ClickHouse cluster at version {version}"
+            "skipping initialization of oximeter database at version {version}"
         );
     }
 
     Ok(())
-}
-
-pub struct SingleServerContext {
-    clickhouse_cli: ClickhouseCli,
-    oximeter_client: OximeterClient,
-    log: Logger,
-    pub tx: Sender<ClickhouseAdminSingleServerRequest>,
-}
-
-impl SingleServerContext {
-    pub fn new(
-        log: &Logger,
-        binary_path: Utf8PathBuf,
-        listen_address: SocketAddrV6,
-    ) -> Self {
-        let clickhouse_cli =
-            ClickhouseCli::new(binary_path, listen_address, log);
-
-        let ip = listen_address.ip();
-        let address = SocketAddrV6::new(*ip, CLICKHOUSE_TCP_PORT, 0, 0);
-        let oximeter_client = OximeterClient::new(address.into(), log);
-        let log =
-            clickhouse_cli.log.new(slog::o!("component" => "ServerContext"));
-
-        // We only want to handle one in flight request at a time. Reconfigurator execution will retry
-        // again later anyway. We use a flume bounded channel with a size of 0 to act as a rendezvous channel.
-        let (inner_tx, inner_rx) = flume::bounded(0);
-        tokio::spawn(long_running_ch_single_server_task(inner_rx));
-
-        Self { clickhouse_cli, oximeter_client, log, tx: inner_tx }
-    }
-
-    pub async fn init_db(&self) -> Result<(), HttpError> {
-        let log = self.log();
-
-        // Initialize the database only if it was not previously initialized.
-        // TODO: Migrate schema to newer version without wiping data.
-        let client = self.oximeter_client();
-        let version = client.read_latest_version().await.map_err(|e| {
-            HttpError::for_internal_error(format!(
-                "can't read ClickHouse version: {e}",
-            ))
-        })?;
-        if version == 0 {
-            info!(
-                log,
-                "initializing single-node ClickHouse to version {OXIMETER_VERSION}"
-            );
-            let replicated = false;
-            self.oximeter_client()
-                .initialize_db_with_version(replicated, OXIMETER_VERSION)
-                .await
-                .map_err(|e| {
-                    HttpError::for_internal_error(format!(
-                        "can't initialize single-node ClickHouse \
-                         to version {OXIMETER_VERSION}: {e}",
-                    ))
-                })?;
-        } else {
-            info!(
-                log,
-                "skipping initialization of single-node ClickHouse at version {version}"
-            );
-        }
-
-        Ok(())
-    }
-
-    pub fn clickhouse_cli(&self) -> &ClickhouseCli {
-        &self.clickhouse_cli
-    }
-
-    pub fn oximeter_client(&self) -> &OximeterClient {
-        &self.oximeter_client
-    }
-
-    pub fn log(&self) -> &Logger {
-        &self.log
-    }
-}
-
-pub enum ClickhouseAdminSingleServerRequest {
-    DbInit {
-        ctx: Arc<SingleServerContext>,
-        response: oneshot::Sender<Result<(), HttpError>>,
-    },
-}
-
-async fn long_running_ch_single_server_task(
-    incoming: Receiver<ClickhouseAdminSingleServerRequest>,
-) {
-    while let Ok(request) = incoming.recv_async().await {
-        match request {
-            ClickhouseAdminSingleServerRequest::DbInit { ctx, response } => {
-                let result = ctx.init_db().await;
-                response.send(result).expect("failed to send value from database initialization to channel");
-            }
-        }
-    }
 }
 
 fn read_generation_from_file(path: Utf8PathBuf) -> Result<Option<Generation>> {

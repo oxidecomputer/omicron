@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use camino::Utf8PathBuf;
-use context::{KeeperServerContext, ServerContext, SingleServerContext};
+use context::{KeeperServerContext, ServerContext};
 use dropshot::HttpServer;
 use omicron_common::FileKv;
 use slog::{debug, error, Drain};
@@ -115,7 +115,7 @@ pub async fn start_single_admin_server(
     binary_path: Utf8PathBuf,
     listen_address: SocketAddrV6,
     server_config: Config,
-) -> Result<HttpServer<Arc<SingleServerContext>>, StartError> {
+) -> Result<HttpServer<Arc<ServerContext>>, StartError> {
     let (drain, registration) = slog_dtrace::with_drain(
         server_config
             .log
@@ -134,7 +134,8 @@ pub async fn start_single_admin_server(
         }
     }
 
-    let context = SingleServerContext::new(&log, binary_path, listen_address);
+    let context = ServerContext::new(&log, binary_path, listen_address)
+        .map_err(StartError::InitializeContext)?;
     dropshot::ServerBuilder::new(
         http_entrypoints::clickhouse_admin_single_api(),
         Arc::new(context),
