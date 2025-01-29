@@ -19,6 +19,8 @@ use nexus_test_utils::resource_helpers::object_delete;
 use nexus_test_utils::resource_helpers::object_delete_error;
 use nexus_test_utils::resource_helpers::object_get;
 use nexus_test_utils::resource_helpers::object_get_error;
+use nexus_test_utils::resource_helpers::object_put;
+use nexus_test_utils::resource_helpers::object_put_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
@@ -70,6 +72,14 @@ impl<'a> ProjectScopedApiHelper<'a> {
         objects_list_page_authz(&self.client, &url).await.items
     }
 
+    async fn affinity_groups_list_expect_error(
+        &self,
+        status: StatusCode,
+    ) -> HttpErrorResponseBody {
+        let url = groups_url(GroupType::Affinity, self.project);
+        object_get_error(&self.client, &url, status).await
+    }
+
     async fn affinity_group_create(&self, group: &str) -> AffinityGroup {
         let url = groups_url(GroupType::Affinity, self.project);
         let params = affinity_group_create_params(group);
@@ -100,12 +110,51 @@ impl<'a> ProjectScopedApiHelper<'a> {
         object_get_error(&self.client, &url, status).await
     }
 
+    async fn affinity_group_update(&self, group: &str) -> AffinityGroup {
+        let url = group_url(GroupType::Affinity, self.project, group);
+        let params = affinity_group_update_params();
+        object_put(&self.client, &url, &params).await
+    }
+
+    async fn affinity_group_update_expect_error(
+        &self,
+        group: &str,
+        status: StatusCode,
+    ) -> HttpErrorResponseBody {
+        let url = group_url(GroupType::Affinity, self.project, group);
+        let params = affinity_group_update_params();
+        object_put_error(&self.client, &url, &params, status).await
+    }
+
+    async fn affinity_group_delete(&self, group: &str) {
+        let url = group_url(GroupType::Affinity, self.project, group);
+        object_delete(&self.client, &url).await
+    }
+
+    async fn affinity_group_delete_expect_error(
+        &self,
+        group: &str,
+        status: StatusCode,
+    ) -> HttpErrorResponseBody {
+        let url = group_url(GroupType::Affinity, self.project, group);
+        object_delete_error(&self.client, &url, status).await
+    }
+
     async fn affinity_group_members_list(
         &self,
         group: &str,
     ) -> Vec<AffinityGroupMember> {
         let url = group_members_url(GroupType::Affinity, self.project, group);
         objects_list_page_authz(&self.client, &url).await.items
+    }
+
+    async fn affinity_group_members_list_expect_error(
+        &self,
+        group: &str,
+        status: StatusCode,
+    ) -> HttpErrorResponseBody {
+        let url = group_members_url(GroupType::Affinity, self.project, group);
+        object_get_error(&self.client, &url, status).await
     }
 
     async fn affinity_group_member_add(
@@ -305,10 +354,17 @@ fn affinity_group_create_params(
     }
 }
 
-// Affinity group helper API helper methods
+fn affinity_group_update_params() -> params::AffinityGroupUpdate {
+    params::AffinityGroupUpdate {
+        identity: external::IdentityMetadataUpdateParams {
+            name: None,
+            description: Some("Updated description".to_string()),
+        },
+    }
+}
 
 #[nexus_test(extra_sled_agents = 2)]
-async fn test_affinity_group(cptestctx: &ControlPlaneTestContext) {
+async fn test_affinity_group_usage(cptestctx: &ControlPlaneTestContext) {
     let external_client = &cptestctx.external_client;
 
     const PROJECT_NAME: &'static str = "test-project";
@@ -425,7 +481,7 @@ async fn test_affinity_group(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_affinity_group_membership(cptestctx: &ControlPlaneTestContext) {
+async fn test_affinity_group_crud(cptestctx: &ControlPlaneTestContext) {
     let external_client = &cptestctx.external_client;
 
     const PROJECT_NAME: &'static str = "test-project";
@@ -447,7 +503,21 @@ async fn test_affinity_group_membership(cptestctx: &ControlPlaneTestContext) {
     assert!(groups.is_empty());
 
     // We can now create a group and observe it
-    let _group = project_api.affinity_group_create(GROUP_NAME).await;
+    project_api.affinity_group_create(GROUP_NAME).await;
+    let response = project_api
+        .affinity_group_create_expect_error(GROUP_NAME, StatusCode::BAD_REQUEST)
+        .await;
+    assert_eq!(
+        response.message,
+        format!("already exists: affinity-group \"{GROUP_NAME}\""),
+    );
+
+    // We can modify the group itself
+    let group = project_api.affinity_group_update(GROUP_NAME).await;
+    assert_eq!(
+        group.identity.description,
+        affinity_group_update_params().identity.description.unwrap()
+    );
 
     // List all members of the affinity group (expect nothing)
     let members = project_api.affinity_group_members_list(GROUP_NAME).await;
@@ -456,6 +526,20 @@ async fn test_affinity_group_membership(cptestctx: &ControlPlaneTestContext) {
     // Add the instance to the affinity group
     let instance_name = &instance.identity.name.to_string();
     project_api.affinity_group_member_add(GROUP_NAME, &instance_name).await;
+    let response = project_api
+        .affinity_group_member_add_expect_error(
+            GROUP_NAME,
+            &instance_name,
+            StatusCode::BAD_REQUEST,
+        )
+        .await;
+    assert_eq!(
+        response.message,
+        format!(
+            "already exists: affinity-group-member \"{}\"",
+            instance.identity.id
+        ),
+    );
 
     // List members again (expect the instance)
     let members = project_api.affinity_group_members_list(GROUP_NAME).await;
@@ -466,10 +550,15 @@ async fn test_affinity_group_membership(cptestctx: &ControlPlaneTestContext) {
 
     // Delete the member, observe that it is gone
     project_api.affinity_group_member_delete(GROUP_NAME, &instance_name).await;
+    project_api
+        .affinity_group_member_delete_expect_error(
+            GROUP_NAME,
+            &instance_name,
+            StatusCode::NOT_FOUND,
+        )
+        .await;
     let members = project_api.affinity_group_members_list(GROUP_NAME).await;
     assert_eq!(members.len(), 0);
-
-    // If we try to get the member, it will 404
     project_api
         .affinity_group_member_get_expect_error(
             GROUP_NAME,
@@ -477,4 +566,150 @@ async fn test_affinity_group_membership(cptestctx: &ControlPlaneTestContext) {
             StatusCode::NOT_FOUND,
         )
         .await;
+
+    // Delete the group, observe that it is gone
+    project_api.affinity_group_delete(GROUP_NAME).await;
+    project_api
+        .affinity_group_delete_expect_error(GROUP_NAME, StatusCode::NOT_FOUND)
+        .await;
+    project_api
+        .affinity_group_get_expect_error(GROUP_NAME, StatusCode::NOT_FOUND)
+        .await;
+    let groups = project_api.affinity_groups_list().await;
+    assert!(groups.is_empty());
+}
+
+#[nexus_test]
+async fn test_affinity_group_project_selector(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let external_client = &cptestctx.external_client;
+
+    const PROJECT_NAME: &'static str = "test-project";
+    const GROUP_NAME: &'static str = "group";
+
+    let api = ApiHelper::new(external_client);
+
+    // Create an IP pool and project that we'll use for testing.
+    create_default_ip_pool(&external_client).await;
+    api.create_project(PROJECT_NAME).await;
+
+    // All requests use the "?project={PROJECT_NAME}" query parameter
+    let project_api = api.use_project(PROJECT_NAME);
+    // All requests omit the project query parameter
+    let no_project_api = api.no_project();
+
+    let instance =
+        project_api.create_stopped_instance(&format!("test-instance")).await;
+
+    // We can only list groups within a project
+    no_project_api
+        .affinity_groups_list_expect_error(StatusCode::BAD_REQUEST)
+        .await;
+    let _groups = project_api.affinity_groups_list().await;
+
+    // We can only create a group within a project
+    no_project_api
+        .affinity_group_create_expect_error(GROUP_NAME, StatusCode::BAD_REQUEST)
+        .await;
+    let group = project_api.affinity_group_create(GROUP_NAME).await;
+
+    // Once we've created a group, we can access it by:
+    //
+    // - Project + Group Name, or
+    // - No Project + Group ID
+    //
+    // Other combinations are considered bad requests.
+    let group_id = group.identity.id.to_string();
+
+    project_api.affinity_group_get(GROUP_NAME).await;
+    no_project_api.affinity_group_get(&group_id).await;
+    project_api
+        .affinity_group_get_expect_error(&group_id, StatusCode::BAD_REQUEST)
+        .await;
+    no_project_api
+        .affinity_group_get_expect_error(GROUP_NAME, StatusCode::BAD_REQUEST)
+        .await;
+
+    // Same for listing members
+    project_api.affinity_group_members_list(GROUP_NAME).await;
+    no_project_api.affinity_group_members_list(&group_id).await;
+    project_api
+        .affinity_group_members_list_expect_error(
+            &group_id,
+            StatusCode::BAD_REQUEST,
+        )
+        .await;
+    no_project_api
+        .affinity_group_members_list_expect_error(
+            GROUP_NAME,
+            StatusCode::BAD_REQUEST,
+        )
+        .await;
+
+    // Same for updating the group
+    project_api.affinity_group_update(GROUP_NAME).await;
+    no_project_api.affinity_group_update(&group_id).await;
+    project_api
+        .affinity_group_update_expect_error(&group_id, StatusCode::BAD_REQUEST)
+        .await;
+    no_project_api
+        .affinity_group_update_expect_error(GROUP_NAME, StatusCode::BAD_REQUEST)
+        .await;
+
+    // Group Members can be added by name or UUID
+    let instance_name = instance.identity.name.as_str();
+    let instance_id = instance.identity.id.to_string();
+    project_api.affinity_group_member_add(GROUP_NAME, instance_name).await;
+    project_api.affinity_group_member_delete(GROUP_NAME, instance_name).await;
+    no_project_api.affinity_group_member_add(&group_id, &instance_id).await;
+    no_project_api.affinity_group_member_delete(&group_id, &instance_id).await;
+
+    // Trying to use UUIDs with the project selector is invalid
+    project_api
+        .affinity_group_member_add_expect_error(
+            GROUP_NAME,
+            &instance_id,
+            StatusCode::BAD_REQUEST,
+        )
+        .await;
+    project_api
+        .affinity_group_member_add_expect_error(
+            &group_id,
+            instance_name,
+            StatusCode::BAD_REQUEST,
+        )
+        .await;
+
+    // Using any names without the project selector is invalid
+    no_project_api
+        .affinity_group_member_add_expect_error(
+            GROUP_NAME,
+            &instance_id,
+            StatusCode::BAD_REQUEST,
+        )
+        .await;
+    no_project_api
+        .affinity_group_member_add_expect_error(
+            &group_id,
+            instance_name,
+            StatusCode::BAD_REQUEST,
+        )
+        .await;
+    no_project_api
+        .affinity_group_member_add_expect_error(
+            GROUP_NAME,
+            instance_name,
+            StatusCode::BAD_REQUEST,
+        )
+        .await;
+
+    // Group deletion also prevents mixing {project, ID} and {no-project, name}.
+    project_api
+        .affinity_group_delete_expect_error(&group_id, StatusCode::BAD_REQUEST)
+        .await;
+    no_project_api
+        .affinity_group_delete_expect_error(GROUP_NAME, StatusCode::BAD_REQUEST)
+        .await;
+    no_project_api.affinity_group_delete(&group_id).await;
 }

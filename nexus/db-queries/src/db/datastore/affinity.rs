@@ -545,13 +545,17 @@ impl DataStore {
                             AffinityGroupUuid::from_untyped_uuid(authz_affinity_group.id()),
                             InstanceUuid::from_untyped_uuid(instance_id),
                         ))
-                        .on_conflict((membership_dsl::group_id, membership_dsl::instance_id))
-                        .do_nothing()
                         .execute_async(&conn)
                         .await
                         .map_err(|e| {
                             err.bail_retryable_or_else(e, |e| {
-                                public_error_from_diesel(e, ErrorHandler::Server)
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Conflict(
+                                        ResourceType::AffinityGroupMember,
+                                        &instance_id.to_string(),
+                                    ),
+                                )
                             })
                         })?;
                     Ok(())
@@ -566,9 +570,6 @@ impl DataStore {
             })?;
         Ok(())
     }
-
-    // TODO: Do we need to verify removal from affinity / anti-affinity groups
-    // during instance deletion? Probably yes?
 
     pub async fn anti_affinity_group_member_add(
         &self,
@@ -652,13 +653,17 @@ impl DataStore {
                             AntiAffinityGroupUuid::from_untyped_uuid(authz_anti_affinity_group.id()),
                             InstanceUuid::from_untyped_uuid(instance_id),
                         ))
-                        .on_conflict((membership_dsl::group_id, membership_dsl::instance_id))
-                        .do_nothing()
                         .execute_async(&conn)
                         .await
                         .map_err(|e| {
                             err.bail_retryable_or_else(e, |e| {
-                                public_error_from_diesel(e, ErrorHandler::Server)
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Conflict(
+                                        ResourceType::AntiAffinityGroupMember,
+                                        &instance_id.to_string(),
+                                    ),
+                                )
                             })
                         })?;
                     Ok(())
@@ -763,7 +768,7 @@ impl DataStore {
                             })
                         })?;
 
-                    diesel::delete(membership_dsl::affinity_group_instance_membership)
+                    let rows = diesel::delete(membership_dsl::affinity_group_instance_membership)
                         .filter(membership_dsl::group_id.eq(authz_affinity_group.id()))
                         .filter(membership_dsl::instance_id.eq(instance_id))
                         .execute_async(&conn)
@@ -773,6 +778,11 @@ impl DataStore {
                                 public_error_from_diesel(e, ErrorHandler::Server)
                             })
                         })?;
+                    if rows == 0 {
+                        return Err(err.bail(LookupType::ById(instance_id).into_not_found(
+                            ResourceType::AffinityGroupMember,
+                        )));
+                    }
                     Ok(())
                 }
             })
@@ -847,7 +857,7 @@ impl DataStore {
                             })
                         })?;
 
-                    diesel::delete(membership_dsl::anti_affinity_group_instance_membership)
+                    let rows = diesel::delete(membership_dsl::anti_affinity_group_instance_membership)
                         .filter(membership_dsl::group_id.eq(authz_anti_affinity_group.id()))
                         .filter(membership_dsl::instance_id.eq(instance_id))
                         .execute_async(&conn)
@@ -857,6 +867,11 @@ impl DataStore {
                                 public_error_from_diesel(e, ErrorHandler::Server)
                             })
                         })?;
+                    if rows == 0 {
+                        return Err(err.bail(LookupType::ById(instance_id).into_not_found(
+                            ResourceType::AntiAffinityGroupMember,
+                        )));
+                    }
                     Ok(())
                 }
             })
