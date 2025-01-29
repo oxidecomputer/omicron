@@ -19,8 +19,8 @@ use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use omicron_common::api::external::Generation;
 use oximeter_db::Client as OximeterClient;
 use oximeter_db::OXIMETER_VERSION;
-use slog::{info, error};
 use slog::Logger;
+use slog::{error, info};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::net::SocketAddrV6;
@@ -76,6 +76,7 @@ impl KeeperServerContext {
 pub struct ServerContext {
     clickhouse_cli: ClickhouseCli,
     clickward: Clickward,
+
     oximeter_client: OximeterClient,
     log: Logger,
     pub generation: Mutex<Option<Generation>>,
@@ -93,6 +94,8 @@ impl ServerContext {
 
         let ip = listen_address.ip();
         let address = SocketAddrV6::new(*ip, CLICKHOUSE_TCP_PORT, 0, 0);
+        // TODO: Instead of creating OximeterClient here, pass along the `address` and create the client
+        // in self.oximeter_client. This client is not cloneable, copyable by design.
         let oximeter_client = OximeterClient::new(address.into(), log);
         let clickward = Clickward::new();
         let log = log.new(slog::o!("component" => "ServerContext"));
@@ -125,16 +128,16 @@ impl ServerContext {
         &self.clickhouse_cli
     }
 
-    pub fn clickward(&self) -> &Clickward {
-        &self.clickward
+    pub fn clickward(&self) -> Clickward {
+        self.clickward
     }
 
     pub fn oximeter_client(&self) -> &OximeterClient {
         &self.oximeter_client
     }
 
-    pub fn log(&self) -> &Logger {
-        &self.log
+    pub fn log(&self) -> Logger {
+        self.log.clone()
     }
 
     pub fn generation(&self) -> Option<Generation> {
@@ -145,14 +148,22 @@ impl ServerContext {
 pub enum ClickhouseAdminServerRequest {
     /// Generates configuration files for a replicated cluster
     GenerateConfig {
+        // TODO: Remove ctx once the generation number is handled
+        // via a watcher channel
         ctx: Arc<ServerContext>,
+        clickward: Clickward,
+        log: Logger,
         replica_settings: ServerConfigurableSettings,
         response: oneshot::Sender<Result<ReplicaConfig, HttpError>>,
     },
     /// Initiliases the oximeter database on either a single node
     /// ClickHouse installation or a replicated cluster.
     DbInit {
+        // TODO: Create oximeter client in a different way
+        // meanwhile use ctx
+        // oximeter_client: OximeterClient,
         ctx: Arc<ServerContext>,
+        log: Logger,
         replicated: bool,
         response: oneshot::Sender<Result<(), HttpError>>,
     },
@@ -165,28 +176,35 @@ async fn long_running_ch_admin_server_task(
         match request {
             ClickhouseAdminServerRequest::GenerateConfig {
                 ctx,
+                clickward,
+                log,
                 replica_settings,
                 response,
             } => {
                 // TODO: Remove clone
-                let result =
-                    generate_config_and_enable_svc(ctx.clone(), replica_settings);
+                let result = generate_config_and_enable_svc(
+                    ctx.clone(),
+                    clickward,
+                    replica_settings,
+                );
                 if let Err(e) = response.send(result) {
                     error!(
-                        &ctx.log,
+                        &log,
                         "failed to send value from configuration generation to channel: {e:?}"
                     );
                 };
             }
             ClickhouseAdminServerRequest::DbInit {
+                // oximeter_client,
                 ctx,
+                log,
                 replicated,
                 response,
             } => {
-                let result = init_db(ctx.clone(), replicated).await;
+                let result = init_db(ctx, log.clone(), replicated).await;
                 if let Err(e) = response.send(result) {
                     error!(
-                        &ctx.log,
+                        log,
                         "failed to send value from database initialization to channel: {e:?}"
                     );
                 };
@@ -197,7 +215,10 @@ async fn long_running_ch_admin_server_task(
 
 pub fn generate_config_and_enable_svc(
     // TODO: Expand ctx into separate items
+    // TODO: Send the generation number via the watcher channel first before
+    // removing ctx entirely
     ctx: Arc<ServerContext>,
+    clickward: Clickward,
     replica_settings: ServerConfigurableSettings,
 ) -> Result<ReplicaConfig, HttpError> {
     let mut current_generation = ctx.generation.lock().unwrap();
@@ -220,7 +241,7 @@ pub fn generate_config_and_enable_svc(
         }
     };
 
-    let output = ctx.clickward().generate_server_config(replica_settings)?;
+    let output = clickward.generate_server_config(replica_settings)?;
 
     // We want to update the generation number only if the config file has been
     // generated successfully.
@@ -234,11 +255,12 @@ pub fn generate_config_and_enable_svc(
 }
 
 pub async fn init_db(
-    // TODO: Expand ctx into separate items
+    // TODO: Create oximeter client in a different way
+    // meanwhile use ctx
     ctx: Arc<ServerContext>,
+    log: Logger,
     replicated: bool,
 ) -> Result<(), HttpError> {
-    let log = ctx.log();
     // Initialize the database only if it was not previously initialized.
     // TODO: Migrate schema to newer version without wiping data.
     let client = ctx.oximeter_client();

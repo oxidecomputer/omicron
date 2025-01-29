@@ -34,7 +34,7 @@ impl From<ClickwardError> for HttpError {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Clickward {}
 
 impl Clickward {
