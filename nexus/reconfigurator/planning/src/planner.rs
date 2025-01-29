@@ -1776,24 +1776,27 @@ mod test {
         .expect("failed to plan");
 
         let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        let daft_diff = blueprint1.diff(&blueprint2);
+        let summary = BlueprintDiffSummary::new(&daft_diff);
         println!("1 -> 2 (modify a dataset):\n{}", diff.display());
         assert_contents(
             "tests/output/planner_dataset_settings_modified_in_place_1_2.txt",
             &diff.display().to_string(),
         );
 
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 1);
+        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.sleds_modified.len(), 1);
 
-        assert_eq!(diff.zones.added.len(), 0);
-        assert_eq!(diff.zones.removed.len(), 0);
-        assert_eq!(diff.zones.modified.len(), 0);
-        assert_eq!(diff.physical_disks.added.len(), 0);
-        assert_eq!(diff.physical_disks.removed.len(), 0);
-        assert_eq!(diff.datasets.added.len(), 0);
-        assert_eq!(diff.datasets.removed.len(), 0);
-        assert_eq!(diff.datasets.modified.len(), 1);
+        assert_eq!(summary.total_zones_added(), 0);
+        assert_eq!(summary.total_zones_removed(), 0);
+        assert_eq!(summary.total_zones_modified(), 0);
+        assert_eq!(summary.total_disks_added(), 0);
+        assert_eq!(summary.total_disks_removed(), 0);
+        assert_eq!(summary.total_disks_modified(), 0);
+        assert_eq!(summary.total_datasets_added(), 0);
+        assert_eq!(summary.total_datasets_removed(), 0);
+        assert_eq!(summary.total_datasets_modified(), 1);
 
         logctx.cleanup_successful();
     }
@@ -1861,26 +1864,28 @@ mod test {
         .expect("failed to plan");
 
         let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        let daft_diff = blueprint1.diff(&blueprint2);
+        let summary = BlueprintDiffSummary::new(&daft_diff);
         println!("1 -> 2 (expunge a disk):\n{}", diff.display());
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 1);
+        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.sleds_modified.len(), 1);
 
         // We should be removing a single zone, associated with the Crucible
         // using that device.
-        assert_eq!(diff.zones.added.len(), 0);
-        assert_eq!(diff.zones.removed.len(), 0);
-        assert_eq!(diff.zones.modified.len(), 1);
-        assert_eq!(diff.physical_disks.added.len(), 0);
-        assert_eq!(diff.physical_disks.removed.len(), 1);
-        assert_eq!(diff.datasets.added.len(), 0);
+        assert_eq!(summary.total_zones_added(), 0);
+        assert_eq!(summary.total_zones_removed(), 0);
+        assert_eq!(summary.total_zones_modified(), 1);
+        assert_eq!(summary.total_disks_added(), 0);
+        assert_eq!(summary.total_disks_removed(), 1);
+        assert_eq!(summary.total_datasets_added(), 0);
         // NOTE: Expunging a disk doesn't immediately delete datasets; see the
         // "decommissioned_disk_cleaner" background task for more context.
-        assert_eq!(diff.datasets.removed.len(), 0);
+        assert_eq!(summary.total_datasets_removed(), 0);
 
         // The disposition has changed from `InService` to `Expunged` for the 4
         // datasets on this sled.
-        assert_eq!(diff.datasets.modified.len(), 1);
+        assert_eq!(summary.total_datasets_modified(), 4);
         // We don't know the expected name, other than the fact it's a crucible zone
         let test_transient_zone_kind = DatasetKind::TransientZone {
             name: "some-crucible-zone-name".to_string(),
@@ -1891,37 +1896,43 @@ mod test {
             DatasetKind::TransientZoneRoot,
             test_transient_zone_kind.clone(),
         ]);
-        for modified in
-            &diff.datasets.modified.first_key_value().unwrap().1.datasets
+        for (_, sled_with_modified_datasets) in
+            &daft_diff.blueprint_datasets.modified
         {
-            assert_eq!(
-                modified.before.disposition,
-                BlueprintDatasetDisposition::InService
-            );
-            assert_eq!(
-                modified.after.disposition,
-                BlueprintDatasetDisposition::Expunged
-            );
-            if let DatasetKind::TransientZone { name } = &modified.before.kind {
-                assert!(name.starts_with("oxz_crucible"));
-                assert!(expected_kinds.remove(&test_transient_zone_kind));
-            } else {
-                assert!(expected_kinds.remove(&modified.before.kind));
+            for (_, modified) in &sled_with_modified_datasets.datasets.modified
+            {
+                assert_eq!(
+                    *modified.disposition.before,
+                    BlueprintDatasetDisposition::InService
+                );
+                assert_eq!(
+                    *modified.disposition.after,
+                    BlueprintDatasetDisposition::Expunged
+                );
+                if let DatasetKind::TransientZone { name } =
+                    &modified.kind.before
+                {
+                    assert!(name.starts_with("oxz_crucible"));
+                    assert!(expected_kinds.remove(&test_transient_zone_kind));
+                } else {
+                    assert!(expected_kinds.remove(&modified.kind.before));
+                }
             }
         }
         assert!(expected_kinds.is_empty());
 
         let (_zone_id, modified_zones) =
-            diff.zones.modified.iter().next().unwrap();
-        assert_eq!(modified_zones.zones.len(), 1);
-        let modified_zone = &modified_zones.zones.first().unwrap().zone;
+            daft_diff.blueprint_zones.modified.iter().next().unwrap();
+        assert_eq!(modified_zones.zones.modified.len(), 1);
+        let (_, modified_zone) =
+            &modified_zones.zones.modified.first_key_value().unwrap();
         assert!(
-            matches!(modified_zone.kind(), ZoneKind::Crucible),
+            matches!(modified_zone.zone_type.before.kind(), ZoneKind::Crucible),
             "Expected the modified zone to be a Crucible zone, but it was: {:?}",
-            modified_zone.kind()
+            modified_zone.zone_type.before.kind()
         );
         assert_eq!(
-            modified_zone.disposition,
+            *modified_zone.disposition.after,
             BlueprintZoneDisposition::Expunged,
             "Should have expunged this zone"
         );
