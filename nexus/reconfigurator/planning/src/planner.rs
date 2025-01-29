@@ -1094,27 +1094,29 @@ mod test {
         .expect("failed to plan");
 
         let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        let daft_diff = blueprint1.diff(&blueprint2);
+        let summary = BlueprintDiffSummary::new(&daft_diff);
         println!("1 -> 2 (added additional Nexus zones):\n{}", diff.display());
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 1);
-        let changed_sled_id = diff.sleds_modified.first().unwrap();
+        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.sleds_modified.len(), 1);
+        let changed_sled_id = summary.sleds_modified.first().unwrap();
 
         assert_eq!(*changed_sled_id, sled_id);
-        assert_eq!(diff.zones.removed.len(), 0);
-        assert_eq!(diff.zones.modified.len(), 0);
-        assert_eq!(diff.physical_disks.added.len(), 0);
-        assert_eq!(diff.physical_disks.removed.len(), 0);
-        assert_eq!(diff.datasets.added.len(), 1);
-        assert_eq!(diff.datasets.modified.len(), 0);
-        assert_eq!(diff.datasets.removed.len(), 0);
-
-        let zones_added = diff.zones.added.get(changed_sled_id).unwrap();
         assert_eq!(
-            zones_added.zones.len(),
-            input.target_nexus_zone_count() - 1
+            summary
+                .datasets_on_modified_sled(&sled_id)
+                .unwrap()
+                .datasets
+                .added
+                .len(),
+            4
         );
-        for zone in &zones_added.zones {
+
+        let zones_added =
+            &summary.zones_on_modified_sled(&sled_id).unwrap().zones.added;
+        assert_eq!(zones_added.len(), input.target_nexus_zone_count() - 1);
+        for (_, zone) in zones_added {
             if zone.kind() != ZoneKind::Nexus {
                 panic!("unexpectedly added a non-Nexus zone: {zone:?}");
             }

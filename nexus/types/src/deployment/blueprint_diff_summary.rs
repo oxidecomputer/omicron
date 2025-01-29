@@ -1,6 +1,10 @@
 // TODO: Move this all to blueprint_diff.rs
 
-use super::{BlueprintDiff, BlueprintZonesConfig, BlueprintZonesConfigDiff};
+use super::{
+    BlueprintDatasetsConfig, BlueprintDatasetsConfigDiff, BlueprintDiff,
+    BlueprintPhysicalDisksConfig, BlueprintPhysicalDisksConfigDiff,
+    BlueprintZonesConfig, BlueprintZonesConfigDiff,
+};
 use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeSet;
 
@@ -222,5 +226,53 @@ impl<'a> BlueprintDiffSummary<'a> {
         sled_id: &SledUuid,
     ) -> Option<&'a BlueprintZonesConfigDiff> {
         self.diff.blueprint_zones.modified.get(sled_id)
+    }
+
+    /// Return the `BlueprintDisksConfig` for a newly added sled
+    pub fn disks_on_added_sled(
+        &self,
+        sled_id: &SledUuid,
+    ) -> Option<&'a BlueprintPhysicalDisksConfig> {
+        self.diff.blueprint_disks.added.get(sled_id).cloned()
+    }
+
+    /// Return the `BlueprintDisksConfig` for a removed sled
+    pub fn disks_on_removed_sled(
+        &self,
+        sled_id: &SledUuid,
+    ) -> Option<&'a BlueprintPhysicalDisksConfig> {
+        self.diff.blueprint_disks.added.get(sled_id).cloned()
+    }
+
+    /// Return the `BlueprintDisksConfigDiff` for a modified sled
+    pub fn disks_on_modified_sled(
+        &self,
+        sled_id: &SledUuid,
+    ) -> Option<&'a BlueprintPhysicalDisksConfigDiff> {
+        self.diff.blueprint_disks.modified.get(sled_id)
+    }
+
+    /// Return the `BlueprintDatasetsConfig` for a newly added sled
+    pub fn datasets_on_added_sled(
+        &self,
+        sled_id: &SledUuid,
+    ) -> Option<&'a BlueprintDatasetsConfig> {
+        self.diff.blueprint_datasets.added.get(sled_id).cloned()
+    }
+
+    /// Return the `BlueprintDatasetsConfig` for a removed sled
+    pub fn datasets_on_removed_sled(
+        &self,
+        sled_id: &SledUuid,
+    ) -> Option<&'a BlueprintDatasetsConfig> {
+        self.diff.blueprint_datasets.added.get(sled_id).cloned()
+    }
+
+    /// Return the `BlueprintDatasetsConfigDiff` for a modified sled
+    pub fn datasets_on_modified_sled(
+        &self,
+        sled_id: &SledUuid,
+    ) -> Option<&'a BlueprintDatasetsConfigDiff> {
+        self.diff.blueprint_datasets.modified.get(sled_id)
     }
 }
