@@ -21,13 +21,22 @@ pub enum BlessedSource {
 }
 
 impl BlessedSource {
-    fn load(&self, apis: &ManagedApis) -> anyhow::Result<BlessedFiles> {
+    pub fn load(&self, apis: &ManagedApis) -> anyhow::Result<BlessedFiles> {
         match self {
             BlessedSource::Directory { local_directory } => {
+                eprintln!(
+                    "Using blessed OpenAPI documents from {:?}",
+                    local_directory
+                );
                 let api_files = walk_local_directory(local_directory, apis)?;
                 Ok(BlessedFiles::from(api_files))
             }
             BlessedSource::GitRevisionMergeBase { revision, directory } => {
+                eprintln!(
+                    "Using blessed OpenAPI documents from git revision {:?} \
+                     path {:?}",
+                    revision, directory
+                );
                 BlessedFiles::load_from_git_parent_branch(
                     &revision, &directory, apis,
                 )
@@ -42,10 +51,17 @@ pub enum GeneratedSource {
 }
 
 impl GeneratedSource {
-    fn load(&self, apis: &ManagedApis) -> anyhow::Result<GeneratedFiles> {
+    pub fn load(&self, apis: &ManagedApis) -> anyhow::Result<GeneratedFiles> {
         match self {
-            GeneratedSource::Generated => GeneratedFiles::generate(apis),
+            GeneratedSource::Generated => {
+                eprintln!("Generating OpenAPI documents from API definitions",);
+                GeneratedFiles::generate(apis)
+            }
             GeneratedSource::Directory { local_directory } => {
+                eprintln!(
+                    "Using \"generated\" OpenAPI documents from {:?}",
+                    local_directory
+                );
                 let api_files = walk_local_directory(local_directory, apis)?;
                 Ok(GeneratedFiles::from(api_files))
             }
@@ -58,9 +74,13 @@ pub enum LocalSource {
 }
 
 impl LocalSource {
-    fn load(&self, apis: &ManagedApis) -> anyhow::Result<LocalFiles> {
+    pub fn load(&self, apis: &ManagedApis) -> anyhow::Result<LocalFiles> {
         match self {
             LocalSource::Directory { local_directory } => {
+                eprintln!(
+                    "Loading local OpenAPI documents in {:?}",
+                    local_directory
+                );
                 Ok(LocalFiles::load_from_directory(local_directory, apis)?)
             }
         }
@@ -75,14 +95,11 @@ pub(crate) struct Environment {
     /// describing external API tag configuration.
     pub(crate) workspace_root: Utf8PathBuf,
 
-    pub(crate) blessed_source: BlessedSource,
-    pub(crate) generated_source: GeneratedSource,
     pub(crate) local_source: LocalSource,
 }
 
 impl Environment {
     pub(crate) fn new(
-        // XXX-dap need to figure out what these arguments are
         openapi_dir: Option<Utf8PathBuf>,
     ) -> anyhow::Result<Self> {
         let mut workspace_root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -94,18 +111,8 @@ impl Environment {
             openapi_dir.unwrap_or_else(|| workspace_root.join("openapi"));
         let local_source =
             LocalSource::Directory { local_directory: openapi_dir };
-        let blessed_source = BlessedSource::GitRevisionMergeBase {
-            revision: GitRevision::from("main".to_string()),
-            directory: Utf8PathBuf::from("openapi"),
-        };
-        let generated_source = GeneratedSource::Generated;
 
-        Ok(Self {
-            workspace_root,
-            blessed_source,
-            generated_source,
-            local_source,
-        })
+        Ok(Self { workspace_root, local_source })
     }
 
     // XXX-dap rip out

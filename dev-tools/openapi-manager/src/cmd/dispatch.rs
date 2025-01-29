@@ -127,22 +127,20 @@ pub struct LocalSourceArgs {
 
 #[derive(Debug, Args)]
 pub struct DumpArgs {
-    /// The directory to read generated APIs from.
-    #[clap(long)]
-    dir: Option<Utf8PathBuf>,
-
-    /// Git revision to look for blessed specs
-    #[clap(long)]
-    blessed_revision: Option<String>,
+    #[clap(flatten)]
+    local: LocalSourceArgs,
+    #[clap(flatten)]
+    blessed: BlessedSourceArgs,
+    #[clap(flatten)]
+    generated: GeneratedSourceArgs,
 }
 
 impl DumpArgs {
     fn exec(self, output: &OutputOpts) -> anyhow::Result<ExitCode> {
-        // XXX-dap This thing always canonicalizes the path, but that's not what
-        // I want when I go looking for it in the Git history.
-        // let dir = Environment::new(self.dir)?;
-        let dir = self.dir.unwrap_or_else(|| Utf8PathBuf::from("openapi"));
-        dump_impl(self.blessed_revision.as_deref(), &dir, output)?;
+        let environment = Environment::new(self.local.dir)?;
+        let blessed_source = BlessedSource::try_from(self.blessed)?;
+        let generated_source = GeneratedSource::from(self.generated);
+        dump_impl(&environment, &blessed_source, &generated_source, output)?;
         Ok(ExitCode::SUCCESS)
     }
 }
