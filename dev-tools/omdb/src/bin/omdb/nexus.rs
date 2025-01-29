@@ -2165,6 +2165,9 @@ fn print_task_tuf_artifact_replication(details: &serde_json::Value) {
         ),
         Ok(status) => {
             println!("    request ringbuf:");
+            if status.request_debug_ringbuf.is_empty() {
+                println!("      [no entries]");
+            }
             for TufArtifactReplicationRequest {
                 time,
                 target_sled,
