@@ -59,6 +59,7 @@ Maghemite MG Admin (client: mg-admin-client)
     consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
 
 Nexus Internal API (client: nexus-client)
+    consumed by: crucible-pantry (crucible/pantry) via 1 path
     consumed by: dpd (dendrite/dpd) via 1 path
     consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
     consumed by: oximeter-collector (omicron/oximeter/collector) via 1 path

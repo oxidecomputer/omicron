@@ -235,7 +235,7 @@ async fn sdc_create_disk_record_undo(
 
 async fn sdc_alloc_regions(
     sagactx: NexusActionContext,
-) -> Result<Vec<(db::model::Dataset, db::model::Region)>, ActionError> {
+) -> Result<Vec<(db::model::CrucibleDataset, db::model::Region)>, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let volume_id = sagactx.lookup::<VolumeUuid>("volume_id")?;
@@ -279,7 +279,7 @@ async fn sdc_alloc_regions_undo(
     let log = osagactx.log();
 
     let region_ids = sagactx
-        .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+        .lookup::<Vec<(db::model::CrucibleDataset, db::model::Region)>>(
             "datasets_and_regions",
         )?
         .into_iter()
@@ -354,9 +354,10 @@ async fn sdc_regions_ensure(
         .nexus()
         .ensure_all_datasets_and_regions(
             &log,
-            sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
-                "datasets_and_regions",
-            )?,
+            sagactx
+                .lookup::<Vec<(db::model::CrucibleDataset, db::model::Region)>>(
+                    "datasets_and_regions",
+                )?,
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -497,19 +498,11 @@ async fn sdc_regions_ensure(
                 target: datasets_and_regions
                     .iter()
                     .map(|(dataset, region)| {
-                        dataset
-                            .address_with_port(region.port_number)
-                            .ok_or_else(|| {
-                                ActionError::action_failed(
-                                    Error::internal_error(&format!(
-                                        "missing IP address for dataset {}",
-                                        dataset.id(),
-                                    )),
-                                )
-                            })
-                            .map(SocketAddr::V6)
+                        SocketAddr::V6(
+                            dataset.address_with_port(region.port_number),
+                        )
                     })
-                    .collect::<Result<Vec<_>, ActionError>>()?,
+                    .collect::<Vec<_>>(),
 
                 lossy: false,
                 flush_timeout: None,
@@ -567,9 +560,10 @@ async fn sdc_regions_ensure_undo(
         .nexus()
         .delete_crucible_regions(
             log,
-            sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
-                "datasets_and_regions",
-            )?,
+            sagactx
+                .lookup::<Vec<(db::model::CrucibleDataset, db::model::Region)>>(
+                    "datasets_and_regions",
+                )?,
         )
         .await;
 

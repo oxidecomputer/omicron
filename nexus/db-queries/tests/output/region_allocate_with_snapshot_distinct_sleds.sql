@@ -21,28 +21,29 @@ WITH
   old_zpool_usage
     AS (
       SELECT
-        dataset.pool_id, sum(dataset.size_used) AS size_used
+        crucible_dataset.pool_id, sum(crucible_dataset.size_used) AS size_used
       FROM
-        dataset
+        crucible_dataset
       WHERE
-        (dataset.size_used IS NOT NULL) AND (dataset.time_deleted IS NULL)
+        (crucible_dataset.size_used IS NOT NULL) AND (crucible_dataset.time_deleted IS NULL)
       GROUP BY
-        dataset.pool_id
+        crucible_dataset.pool_id
     ),
   existing_zpools
     AS (
       (
         SELECT
-          dataset.pool_id
+          crucible_dataset.pool_id
         FROM
-          dataset INNER JOIN old_regions ON old_regions.dataset_id = dataset.id
+          crucible_dataset INNER JOIN old_regions ON old_regions.dataset_id = crucible_dataset.id
       )
       UNION
         (
           SELECT
-            dataset.pool_id
+            crucible_dataset.pool_id
           FROM
-            dataset INNER JOIN region_snapshot ON region_snapshot.dataset_id = dataset.id
+            crucible_dataset
+            INNER JOIN region_snapshot ON region_snapshot.dataset_id = crucible_dataset.id
           WHERE
             region_snapshot.snapshot_id = $2
         )
@@ -91,14 +92,14 @@ WITH
   candidate_datasets
     AS (
       SELECT
-        DISTINCT ON (dataset.pool_id) dataset.id, dataset.pool_id
+        DISTINCT ON (crucible_dataset.pool_id) crucible_dataset.id, crucible_dataset.pool_id
       FROM
-        dataset INNER JOIN candidate_zpools ON dataset.pool_id = candidate_zpools.pool_id
+        crucible_dataset
+        INNER JOIN candidate_zpools ON crucible_dataset.pool_id = candidate_zpools.pool_id
       WHERE
-        ((dataset.time_deleted IS NULL) AND (dataset.size_used IS NOT NULL))
-        AND dataset.kind = 'crucible'
+        crucible_dataset.time_deleted IS NULL
       ORDER BY
-        dataset.pool_id, md5(CAST(dataset.id AS BYTES) || $5)
+        crucible_dataset.pool_id, md5(CAST(crucible_dataset.id AS BYTES) || $5)
     ),
   shuffled_candidate_datasets
     AS (
@@ -134,13 +135,14 @@ WITH
     AS (
       SELECT
         candidate_regions.dataset_id AS id,
-        dataset.pool_id AS pool_id,
+        crucible_dataset.pool_id AS pool_id,
         candidate_regions.block_size
         * candidate_regions.blocks_per_extent
         * candidate_regions.extent_count
           AS size_used_delta
       FROM
-        candidate_regions INNER JOIN dataset ON dataset.id = candidate_regions.dataset_id
+        candidate_regions
+        INNER JOIN crucible_dataset ON crucible_dataset.id = candidate_regions.dataset_id
     ),
   do_insert
     AS (
@@ -193,17 +195,20 @@ WITH
                       (
                         (
                           SELECT
-                            dataset.pool_id
+                            crucible_dataset.pool_id
                           FROM
                             candidate_regions
-                            INNER JOIN dataset ON candidate_regions.dataset_id = dataset.id
+                            INNER JOIN crucible_dataset ON
+                                candidate_regions.dataset_id = crucible_dataset.id
                         )
                         UNION
                           (
                             SELECT
-                              dataset.pool_id
+                              crucible_dataset.pool_id
                             FROM
-                              old_regions INNER JOIN dataset ON old_regions.dataset_id = dataset.id
+                              old_regions
+                              INNER JOIN crucible_dataset ON
+                                  old_regions.dataset_id = crucible_dataset.id
                           )
                       )
                     LIMIT
@@ -269,55 +274,45 @@ WITH
   updated_datasets
     AS (
       UPDATE
-        dataset
+        crucible_dataset
       SET
         size_used
-          = dataset.size_used
+          = crucible_dataset.size_used
           + (
               SELECT
                 proposed_dataset_changes.size_used_delta
               FROM
                 proposed_dataset_changes
               WHERE
-                proposed_dataset_changes.id = dataset.id
+                proposed_dataset_changes.id = crucible_dataset.id
               LIMIT
                 1
             )
       WHERE
-        dataset.id = ANY (SELECT proposed_dataset_changes.id FROM proposed_dataset_changes)
+        crucible_dataset.id = ANY (SELECT proposed_dataset_changes.id FROM proposed_dataset_changes)
         AND (SELECT do_insert.insert FROM do_insert LIMIT 1)
       RETURNING
-        dataset.id,
-        dataset.time_created,
-        dataset.time_modified,
-        dataset.time_deleted,
-        dataset.rcgen,
-        dataset.pool_id,
-        dataset.ip,
-        dataset.port,
-        dataset.kind,
-        dataset.size_used,
-        dataset.zone_name,
-        dataset.quota,
-        dataset.reservation,
-        dataset.compression
+        crucible_dataset.id,
+        crucible_dataset.time_created,
+        crucible_dataset.time_modified,
+        crucible_dataset.time_deleted,
+        crucible_dataset.rcgen,
+        crucible_dataset.pool_id,
+        crucible_dataset.ip,
+        crucible_dataset.port,
+        crucible_dataset.size_used
     )
 (
   SELECT
-    dataset.id,
-    dataset.time_created,
-    dataset.time_modified,
-    dataset.time_deleted,
-    dataset.rcgen,
-    dataset.pool_id,
-    dataset.ip,
-    dataset.port,
-    dataset.kind,
-    dataset.size_used,
-    dataset.zone_name,
-    dataset.quota,
-    dataset.reservation,
-    dataset.compression,
+    crucible_dataset.id,
+    crucible_dataset.time_created,
+    crucible_dataset.time_modified,
+    crucible_dataset.time_deleted,
+    crucible_dataset.rcgen,
+    crucible_dataset.pool_id,
+    crucible_dataset.ip,
+    crucible_dataset.port,
+    crucible_dataset.size_used,
     old_regions.id,
     old_regions.time_created,
     old_regions.time_modified,
@@ -330,7 +325,7 @@ WITH
     old_regions.read_only,
     old_regions.deleting
   FROM
-    old_regions INNER JOIN dataset ON old_regions.dataset_id = dataset.id
+    old_regions INNER JOIN crucible_dataset ON old_regions.dataset_id = crucible_dataset.id
 )
 UNION
   (
@@ -343,12 +338,7 @@ UNION
       updated_datasets.pool_id,
       updated_datasets.ip,
       updated_datasets.port,
-      updated_datasets.kind,
       updated_datasets.size_used,
-      updated_datasets.zone_name,
-      updated_datasets.quota,
-      updated_datasets.reservation,
-      updated_datasets.compression,
       inserted_regions.id,
       inserted_regions.time_created,
       inserted_regions.time_modified,
