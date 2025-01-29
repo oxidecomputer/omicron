@@ -2033,29 +2033,34 @@ mod test {
         .expect("failed to plan");
 
         let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        let daft_diff = blueprint1.diff(&blueprint2);
+        let summary = BlueprintDiffSummary::new(&daft_diff);
         println!("1 -> 2 (expunge a disk):\n{}", diff.display());
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 1);
+        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.sleds_modified.len(), 1);
 
         // We should be removing all zones using this zpool. Because we're
         // removing the NTP zone, we should add a new one.
-        assert_eq!(diff.zones.added.len(), 1);
-        assert_eq!(diff.zones.removed.len(), 0);
-        assert_eq!(diff.zones.modified.len(), 1);
+        assert_eq!(summary.total_zones_added(), 1);
+        assert_eq!(summary.total_zones_removed(), 0);
+        assert_eq!(summary.total_zones_modified(), 6);
 
-        let (_zone_id, added_zones) = diff.zones.added.iter().next().unwrap();
-        assert_eq!(added_zones.zones.len(), 1);
-        for zone in &added_zones.zones {
+        let (_zone_id, zones_on_a_modified_sled) =
+            daft_diff.blueprint_zones.modified.iter().next().unwrap();
+        let added_zones = &zones_on_a_modified_sled.zones.added;
+        assert_eq!(added_zones.len(), 1);
+        for (_, zone) in added_zones {
             assert_eq!(zone.kind(), ZoneKind::InternalNtp);
         }
 
-        let (_zone_id, modified_zones) =
-            diff.zones.modified.iter().next().unwrap();
-        assert_eq!(modified_zones.zones.len(), zones_using_zpool);
-        for modified_zone in &modified_zones.zones {
+        assert_eq!(
+            zones_on_a_modified_sled.zones.modified.len(),
+            zones_using_zpool
+        );
+        for (_, modified_zone) in &zones_on_a_modified_sled.zones.modified {
             assert_eq!(
-                modified_zone.zone.disposition,
+                *modified_zone.disposition.after,
                 BlueprintZoneDisposition::Expunged,
                 "Should have expunged this zone"
             );
