@@ -2464,9 +2464,8 @@ mod tests {
     #[tokio::test]
     async fn affinity_group_membership_idempotency() {
         // Setup
-        let logctx = dev::test_setup_log(
-            "affinity_group_membership_for_deleted_objects",
-        );
+        let logctx =
+            dev::test_setup_log("affinity_group_membership_idempotency");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -2507,14 +2506,24 @@ mod tests {
             .unwrap();
 
         // Add the instance to the group again
-        datastore
+        let err = datastore
             .affinity_group_member_add(
                 &opctx,
                 &authz_group,
                 external::AffinityGroupMember::Instance(instance.id()),
             )
             .await
-            .unwrap();
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                Error::ObjectAlreadyExists {
+                    type_name: ResourceType::AffinityGroupMember,
+                    ..
+                }
+            ),
+            "Error: {err:?}"
+        );
 
         // We should still only observe a single member in the group.
         //
@@ -2541,14 +2550,24 @@ mod tests {
             )
             .await
             .unwrap();
-        datastore
+        let err = datastore
             .affinity_group_member_delete(
                 &opctx,
                 &authz_group,
                 external::AffinityGroupMember::Instance(instance.id()),
             )
             .await
-            .unwrap();
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                Error::ObjectNotFound {
+                    type_name: ResourceType::AffinityGroupMember,
+                    ..
+                }
+            ),
+            "Error: {err:?}"
+        );
 
         let members = datastore
             .affinity_group_member_list(&opctx, &authz_group, &pagbyid)
@@ -2564,9 +2583,8 @@ mod tests {
     #[tokio::test]
     async fn anti_affinity_group_membership_idempotency() {
         // Setup
-        let logctx = dev::test_setup_log(
-            "anti_affinity_group_membership_for_deleted_objects",
-        );
+        let logctx =
+            dev::test_setup_log("anti_affinity_group_membership_idempotency");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -2607,14 +2625,24 @@ mod tests {
             .unwrap();
 
         // Add the instance to the group again
-        datastore
+        let err = datastore
             .anti_affinity_group_member_add(
                 &opctx,
                 &authz_group,
                 external::AntiAffinityGroupMember::Instance(instance.id()),
             )
             .await
-            .unwrap();
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                Error::ObjectAlreadyExists {
+                    type_name: ResourceType::AntiAffinityGroupMember,
+                    ..
+                }
+            ),
+            "Error: {err:?}"
+        );
 
         // We should still only observe a single member in the group.
         //
@@ -2641,14 +2669,24 @@ mod tests {
             )
             .await
             .unwrap();
-        datastore
+        let err = datastore
             .anti_affinity_group_member_delete(
                 &opctx,
                 &authz_group,
                 external::AntiAffinityGroupMember::Instance(instance.id()),
             )
             .await
-            .unwrap();
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                Error::ObjectNotFound {
+                    type_name: ResourceType::AntiAffinityGroupMember,
+                    ..
+                }
+            ),
+            "Error: {err:?}"
+        );
 
         let members = datastore
             .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
