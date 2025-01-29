@@ -272,9 +272,9 @@ mod test {
         conn: &async_bb8_diesel::Connection<crate::db::pool::DbConnection>,
     ) -> anyhow::Result<()> {
         let resource = model::SledResource::new_for_vmm(
-            PropolisUuid::new_v4().into_untyped_uuid(),
-            instance_id.into_untyped_uuid(),
-            sled_id.into_untyped_uuid(),
+            PropolisUuid::new_v4(),
+            instance_id,
+            sled_id,
             model::Resources::new(
                 0,
                 model::ByteCount::from(

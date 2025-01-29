@@ -3,8 +3,18 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::schema::sled_resource;
+use crate::typed_uuid::DbTypedUuid;
 use crate::{ByteCount, SledResourceKind, SqlU32};
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceKind;
+use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::SledKind;
+use omicron_uuid_kinds::SledUuid;
 use uuid::Uuid;
+
+type DbInstanceUuid = DbTypedUuid<InstanceKind>;
+type DbSledUuid = DbTypedUuid<SledKind>;
 
 #[derive(Clone, Selectable, Queryable, Insertable, Debug)]
 #[diesel(table_name = sled_resource)]
@@ -24,33 +34,31 @@ impl Resources {
     }
 }
 
-// TODO: MAKE THESE UUIDS STRONGLY TYPED
-
 /// Describes sled resource usage by services
 #[derive(Clone, Selectable, Queryable, Insertable, Debug)]
 #[diesel(table_name = sled_resource)]
 pub struct SledResource {
     pub id: Uuid,
-    pub sled_id: Uuid,
+    pub sled_id: DbSledUuid,
 
     #[diesel(embed)]
     pub resources: Resources,
 
     pub kind: SledResourceKind,
-    pub instance_id: Option<Uuid>,
+    pub instance_id: Option<DbInstanceUuid>,
 }
 
 impl SledResource {
     pub fn new_for_vmm(
-        id: Uuid,
-        instance_id: Uuid,
-        sled_id: Uuid,
+        id: PropolisUuid,
+        instance_id: InstanceUuid,
+        sled_id: SledUuid,
         resources: Resources,
     ) -> Self {
         Self {
-            id,
-            instance_id: Some(instance_id),
-            sled_id,
+            id: id.into_untyped_uuid(),
+            instance_id: Some(instance_id.into()),
+            sled_id: sled_id.into(),
             kind: SledResourceKind::Instance,
             resources,
         }

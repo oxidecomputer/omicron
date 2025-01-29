@@ -194,7 +194,7 @@ async fn sim_reserve_sled_resources(
     )
     .await?;
 
-    Ok(SledUuid::from_untyped_uuid(resource.sled_id))
+    Ok(resource.sled_id.into())
 }
 
 async fn sim_release_sled_resources(

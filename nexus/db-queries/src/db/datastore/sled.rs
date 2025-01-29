@@ -534,9 +534,9 @@ impl DataStore {
                     // Create a SledResource record, associate it with the target
                     // sled.
                     let resource = SledResource::new_for_vmm(
-                        propolis_id.into_untyped_uuid(),
-                        instance_id.into_untyped_uuid(),
-                        sled_target,
+                        propolis_id,
+                        instance_id,
+                        SledUuid::from_untyped_uuid(sled_target),
                         resources,
                     );
 
@@ -1364,7 +1364,7 @@ pub(in crate::db::datastore) mod test {
                 .await
                 .unwrap();
             assert_eq!(
-                resource.sled_id,
+                resource.sled_id.into_untyped_uuid(),
                 provisionable_sled.id(),
                 "resource is always allocated to the provisionable sled"
             );
@@ -1710,7 +1710,7 @@ pub(in crate::db::datastore) mod test {
             .await?;
 
         if let Some(sled_target) = instance.force_onto_sled {
-            assert_eq!(result.sled_id, sled_target.into_untyped_uuid());
+            assert_eq!(SledUuid::from(result.sled_id), sled_target);
         }
 
         Ok(result)
@@ -1803,7 +1803,7 @@ pub(in crate::db::datastore) mod test {
             .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
             .await
             .expect("Should have succeeded allocation");
-        assert_eq!(resource.sled_id, sleds[2].id());
+        assert_eq!(resource.sled_id.into_untyped_uuid(), sleds[2].id());
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1850,7 +1850,8 @@ pub(in crate::db::datastore) mod test {
             .await
             .expect("Should have succeeded allocation");
         assert!(
-            [sleds[0].id(), sleds[1].id()].contains(&resource.sled_id),
+            [sleds[0].id(), sleds[1].id()]
+                .contains(resource.sled_id.as_untyped_uuid()),
             "Should have been provisioned to one of the two viable sleds"
         );
 
@@ -1893,14 +1894,14 @@ pub(in crate::db::datastore) mod test {
             .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
             .await
             .expect("Should have placed instance");
-        assert_eq!(resource.sled_id, sleds[0].id());
+        assert_eq!(resource.sled_id.into_untyped_uuid(), sleds[0].id());
 
         let another_test_instance = Instance::new().group("affinity");
         let resource = another_test_instance
             .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
             .await
             .expect("Should have placed instance (again)");
-        assert_eq!(resource.sled_id, sleds[0].id());
+        assert_eq!(resource.sled_id.into_untyped_uuid(), sleds[0].id());
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2060,7 +2061,7 @@ pub(in crate::db::datastore) mod test {
             .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
             .await
             .expect("Should have made reservation");
-        assert_eq!(reservation.sled_id, sleds[1].id());
+        assert_eq!(reservation.sled_id.into_untyped_uuid(), sleds[1].id());
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2181,7 +2182,8 @@ pub(in crate::db::datastore) mod test {
             .await
             .expect("Should have succeeded allocation");
         assert!(
-            [sleds[0].id(), sleds[1].id()].contains(&resource.sled_id),
+            [sleds[0].id(), sleds[1].id()]
+                .contains(resource.sled_id.as_untyped_uuid()),
             "Should have been provisioned to one of the two viable sleds"
         );
 
@@ -2251,7 +2253,7 @@ pub(in crate::db::datastore) mod test {
             .await
             .expect("Should have succeeded allocation");
 
-        assert_eq!(resource.sled_id, sleds[2].id());
+        assert_eq!(resource.sled_id.into_untyped_uuid(), sleds[2].id());
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2319,7 +2321,7 @@ pub(in crate::db::datastore) mod test {
             .await
             .expect("Should have succeeded allocation");
 
-        assert_eq!(resource.sled_id, sleds[3].id());
+        assert_eq!(resource.sled_id.into_untyped_uuid(), sleds[3].id());
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2377,7 +2379,7 @@ pub(in crate::db::datastore) mod test {
             .await
             .expect("Should have succeeded allocation");
 
-        assert_eq!(resource.sled_id, sleds[1].id());
+        assert_eq!(resource.sled_id.into_untyped_uuid(), sleds[1].id());
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2432,7 +2434,7 @@ pub(in crate::db::datastore) mod test {
             .await
             .expect("Should have succeeded allocation");
 
-        assert_eq!(resource.sled_id, sleds[2].id());
+        assert_eq!(resource.sled_id.into_untyped_uuid(), sleds[2].id());
 
         db.terminate().await;
         logctx.cleanup_successful();

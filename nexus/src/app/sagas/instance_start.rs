@@ -171,7 +171,7 @@ async fn sis_alloc_server(
     )
     .await?;
 
-    Ok(SledUuid::from_untyped_uuid(resource.sled_id))
+    Ok(resource.sled_id.into())
 }
 
 async fn sis_alloc_server_undo(
