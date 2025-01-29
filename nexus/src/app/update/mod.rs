@@ -13,7 +13,6 @@ use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::{
     Error, SemverVersion, TufRepoInsertResponse, TufRepoInsertStatus,
 };
-use omicron_common::update::ArtifactId;
 use update_common::artifacts::ArtifactsWithPlan;
 
 mod common_sp_update;
@@ -112,18 +111,5 @@ impl super::Nexus {
             .map_err(HttpError::from)?;
 
         Ok(tuf_repo_description)
-    }
-
-    /// Downloads a file (currently not implemented).
-    pub(crate) async fn updates_download_artifact(
-        &self,
-        _opctx: &OpContext,
-        _artifact: ArtifactId,
-    ) -> Result<Vec<u8>, Error> {
-        // TODO: this is part of the TUF repo depot.
-        return Err(Error::internal_error(
-            "artifact download not implemented, \
-             will be part of TUF repo depot",
-        ));
     }
 }
