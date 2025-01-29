@@ -19,7 +19,7 @@ use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use omicron_common::api::external::Generation;
 use oximeter_db::Client as OximeterClient;
 use oximeter_db::OXIMETER_VERSION;
-use slog::info;
+use slog::{info, error};
 use slog::Logger;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -109,7 +109,7 @@ impl ServerContext {
         // We only want to handle one in flight request at a time. Reconfigurator execution will retry
         // again later anyway. We use a flume bounded channel with a size of 0 to act as a rendezvous channel.
         let (inner_tx, inner_rx) = flume::bounded(0);
-        tokio::spawn(long_running_ch_server_task(inner_rx));
+        tokio::spawn(long_running_ch_admin_server_task(inner_rx));
 
         Ok(Self {
             clickhouse_cli,
@@ -158,7 +158,7 @@ pub enum ClickhouseAdminServerRequest {
     },
 }
 
-async fn long_running_ch_server_task(
+async fn long_running_ch_admin_server_task(
     incoming: Receiver<ClickhouseAdminServerRequest>,
 ) {
     while let Ok(request) = incoming.recv_async().await {
@@ -168,23 +168,35 @@ async fn long_running_ch_server_task(
                 replica_settings,
                 response,
             } => {
+                // TODO: Remove clone
                 let result =
-                    generate_config_and_enable_svc(ctx, replica_settings);
-                response.send(result).expect("failed to send value from configuration generation to channel");
+                    generate_config_and_enable_svc(ctx.clone(), replica_settings);
+                if let Err(e) = response.send(result) {
+                    error!(
+                        &ctx.log,
+                        "failed to send value from configuration generation to channel: {e:?}"
+                    );
+                };
             }
             ClickhouseAdminServerRequest::DbInit {
                 ctx,
                 replicated,
                 response,
             } => {
-                let result = init_db(ctx, replicated).await;
-                response.send(result).expect("failed to send value from database initialization to channel");
+                let result = init_db(ctx.clone(), replicated).await;
+                if let Err(e) = response.send(result) {
+                    error!(
+                        &ctx.log,
+                        "failed to send value from database initialization to channel: {e:?}"
+                    );
+                };
             }
         }
     }
 }
 
 pub fn generate_config_and_enable_svc(
+    // TODO: Expand ctx into separate items
     ctx: Arc<ServerContext>,
     replica_settings: ServerConfigurableSettings,
 ) -> Result<ReplicaConfig, HttpError> {
@@ -222,6 +234,7 @@ pub fn generate_config_and_enable_svc(
 }
 
 pub async fn init_db(
+    // TODO: Expand ctx into separate items
     ctx: Arc<ServerContext>,
     replicated: bool,
 ) -> Result<(), HttpError> {
