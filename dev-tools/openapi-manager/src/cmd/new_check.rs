@@ -52,7 +52,8 @@ pub(crate) fn new_check_impl(
     let blessed = blessed_source.load(&apis)?;
     print_warnings(&blessed.warnings, &blessed.errors)?;
 
-    let resolved = Resolved::new(&apis, &blessed, &generated, &local_files);
+    let resolved =
+        Resolved::new(env, &apis, &blessed, &generated, &local_files);
     for note in resolved.notes() {
         println!("NOTE: {}", note);
     }
@@ -92,7 +93,6 @@ pub(crate) fn new_check_impl(
         }
     }
 
-    // XXX-dap where do we print out the validation errors from extra files?
     println!("Checked {} total versions across {} APIs", nversions, napis);
 
     if found_unfixable {

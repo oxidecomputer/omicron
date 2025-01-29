@@ -51,7 +51,8 @@ pub(crate) fn dump_impl(
 
     // Print result of resolving the differences.
     println!("Resolving specs");
-    let resolved = Resolved::new(&apis, &blessed, &generated, &local_files);
+    let resolved =
+        Resolved::new(env, &apis, &blessed, &generated, &local_files);
     for note in resolved.notes() {
         println!("NOTE: {}", note);
     }

@@ -7,9 +7,9 @@
 use crate::apis::ApiIdent;
 use crate::apis::ManagedApi;
 use crate::apis::ManagedApis;
-use crate::combined::DisplayableVec;
 use crate::compatibility::api_compatible;
 use crate::compatibility::OpenApiCompatibilityError;
+use crate::spec::Environment;
 use crate::spec_files_blessed::BlessedApiSpecFile;
 use crate::spec_files_blessed::BlessedFiles;
 use crate::spec_files_generated::GeneratedApiSpecFile;
@@ -17,10 +17,37 @@ use crate::spec_files_generated::GeneratedFiles;
 use crate::spec_files_generic::ApiSpecFileName;
 use crate::spec_files_local::LocalApiSpecFile;
 use crate::spec_files_local::LocalFiles;
+use crate::validation::validate_generated_openapi_document;
+use anyhow::anyhow;
+use anyhow::Context;
+use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use openapi_manager_types::SupportedVersion;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::fmt::Display;
 use thiserror::Error;
+
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub struct DisplayableVec<T>(pub Vec<T>);
+impl<T> Display for DisplayableVec<T>
+where
+    T: Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // slice::join would require the use of unstable Rust.
+        let mut iter = self.0.iter();
+        if let Some(item) = iter.next() {
+            write!(f, "{item}")?;
+        }
+
+        for item in iter {
+            write!(f, ", {item}")?;
+        }
+
+        Ok(())
+    }
+}
 
 /// A non-error note that's worth highlighting to the user
 // These are not technically errors, but it is useful to treat them the same
@@ -122,17 +149,28 @@ pub enum Problem {
     // was somehow checked by this tool.  Maybe this library should define
     // constants like API_NAME_LATEST that are used in the client specs?
     LocalVersionStale { spec_file_names: DisplayableVec<ApiSpecFileName> },
+
+    #[error(
+        "Generated spec for API {api_ident:?} version {version} is not valid"
+    )]
+    GeneratedValidationError {
+        api_ident: ApiIdent,
+        version: semver::Version,
+        #[source]
+        source: anyhow::Error,
+    },
 }
 
 impl Problem {
     pub fn is_fixable(&self) -> bool {
         match self {
-            Problem::LocalSpecFilesOrphaned { spec_file_names } => true,
-            Problem::BlessedVersionMissingLocal { spec_file_name } => false,
-            Problem::BlessedVersionExtraLocalSpec { spec_file_names } => true,
-            Problem::BlessedVersionBroken { compatibility_issues } => false,
+            Problem::LocalSpecFilesOrphaned { .. } => true,
+            Problem::BlessedVersionMissingLocal { .. } => false,
+            Problem::BlessedVersionExtraLocalSpec { .. } => true,
+            Problem::BlessedVersionBroken { .. } => false,
             Problem::LocalVersionMissingLocal => true,
-            Problem::LocalVersionStale { spec_file_names } => true,
+            Problem::LocalVersionStale { .. } => true,
+            Problem::GeneratedValidationError { .. } => false,
         }
     }
 }
@@ -150,6 +188,7 @@ pub struct Resolved {
 
 impl Resolved {
     pub fn new(
+        env: &Environment,
         apis: &ManagedApis,
         blessed: &BlessedFiles,
         generated: &GeneratedFiles,
@@ -207,7 +246,13 @@ impl Resolved {
                 let api_local = local.spec_files.get(&ident);
                 (
                     api.ident().clone(),
-                    resolve_api(api, api_blessed, api_generated, api_local),
+                    resolve_api(
+                        env,
+                        api,
+                        api_blessed,
+                        api_generated,
+                        api_local,
+                    ),
                 )
             })
             .collect();
@@ -276,6 +321,7 @@ fn resolve_orphaned_local_specs<'a>(
 }
 
 fn resolve_api(
+    env: &Environment,
     api: &ManagedApi,
     api_blessed: Option<&BTreeMap<semver::Version, Vec<BlessedApiSpecFile>>>,
     api_generated: &BTreeMap<semver::Version, Vec<GeneratedApiSpecFile>>,
@@ -304,14 +350,16 @@ fn resolve_api(
                 .and_then(|b| b.get(&version))
                 .map(|v| v.as_slice())
                 .unwrap_or(&[]);
-            let resolution =
-                resolve_api_version(api, &version, blessed, generated, local);
+            let resolution = resolve_api_version(
+                env, api, &version, blessed, generated, local,
+            );
             (version, resolution)
         })
         .collect()
 }
 
 fn resolve_api_version(
+    env: &Environment,
     api: &ManagedApi,
     version: &semver::Version,
     blessed: Option<&BlessedApiSpecFile>,
@@ -319,14 +367,15 @@ fn resolve_api_version(
     local: &[LocalApiSpecFile],
 ) -> Resolution {
     match blessed {
-        Some(blessed) => {
-            resolve_api_version_blessed(api, version, blessed, generated, local)
-        }
-        None => resolve_api_version_local(api, version, generated, local),
+        Some(blessed) => resolve_api_version_blessed(
+            env, api, version, blessed, generated, local,
+        ),
+        None => resolve_api_version_local(env, api, version, generated, local),
     }
 }
 
 fn resolve_api_version_blessed(
+    env: &Environment,
     api: &ManagedApi,
     version: &semver::Version,
     blessed: &BlessedApiSpecFile,
@@ -334,6 +383,9 @@ fn resolve_api_version_blessed(
     local: &[LocalApiSpecFile],
 ) -> Resolution {
     let mut problems = Vec::new();
+
+    // Validate the generated API document.
+    validate_generated(env, api, version, generated, &mut problems);
 
     // First off, the blessed spec must be a subset of the generated one.
     // If not, someone has made an incompatible change to the API
@@ -384,12 +436,16 @@ fn resolve_api_version_blessed(
 }
 
 fn resolve_api_version_local(
+    env: &Environment,
     api: &ManagedApi,
     version: &semver::Version,
     generated: &GeneratedApiSpecFile,
     local: &[LocalApiSpecFile],
 ) -> Resolution {
     let mut problems = Vec::new();
+
+    // Validate the generated API document.
+    validate_generated(env, api, version, generated, &mut problems);
 
     let (matching, non_matching): (Vec<_>, Vec<_>) = local
         .iter()
@@ -415,4 +471,117 @@ fn resolve_api_version_local(
     } else {
         Resolution::Problems(problems)
     }
+}
+
+fn validate_generated(
+    env: &Environment,
+    api: &ManagedApi,
+    version: &semver::Version,
+    generated: &GeneratedApiSpecFile,
+    problems: &mut Vec<Problem>,
+) {
+    match validate(env, api, version, generated) {
+        Err(source) => {
+            problems.push(Problem::GeneratedValidationError {
+                api_ident: api.ident().clone(),
+                version: version.clone(),
+                source,
+            });
+        }
+        Ok(extra_files) => {
+            // XXX-dap it would be nice if the data model accounted for the fact
+            // that these extra files exist (so that we could report that we
+            // checked them).
+            for (path, status) in extra_files {
+                match status {
+                    CheckStatus::Fresh => (),
+                    CheckStatus::Stale(check_stale) => {
+                        problems.push(Problem::GeneratedValidationError {
+                            api_ident: api.ident().clone(),
+                            version: version.clone(),
+                            source: anyhow!(
+                                "related file {:?}: {}",
+                                path,
+                                match check_stale {
+                                    CheckStale::New =>
+                                        "missing (this tool can create it)",
+                                    CheckStale::Modified { .. } =>
+                                        "stale (this tool can update it)",
+                                }
+                            ),
+                        });
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn validate(
+    env: &Environment,
+    api: &ManagedApi,
+    version: &semver::Version,
+    generated: &GeneratedApiSpecFile,
+) -> anyhow::Result<Vec<(Utf8PathBuf, CheckStatus)>> {
+    let contents = generated.contents();
+    // XXX-dap I think we might be parsing this twice unnecessarily now
+    let (openapi, validation_result) =
+        validate_generated_openapi_document(api, &contents)?;
+    let extra_files = validation_result
+        .extra_files
+        .into_iter()
+        .map(|(path, contents)| {
+            let full_path = env.workspace_root.join(&path);
+            let status = check_file(full_path, contents)?;
+            Ok((path, status))
+        })
+        .collect::<anyhow::Result<_>>()?;
+    Ok(extra_files)
+}
+
+/// Check a file against expected contents.
+// XXX-dap non-pub
+pub(crate) fn check_file(
+    full_path: Utf8PathBuf,
+    contents: Vec<u8>,
+) -> anyhow::Result<CheckStatus> {
+    let existing_contents =
+        read_opt(&full_path).context("failed to read contents on disk")?;
+
+    match existing_contents {
+        Some(existing_contents) if existing_contents == contents => {
+            Ok(CheckStatus::Fresh)
+        }
+        Some(existing_contents) => {
+            Ok(CheckStatus::Stale(CheckStale::Modified {
+                full_path,
+                actual: existing_contents,
+                expected: contents,
+            }))
+        }
+        None => Ok(CheckStatus::Stale(CheckStale::New)),
+    }
+}
+
+// XXX-dap non-pub
+pub(crate) fn read_opt(path: &Utf8Path) -> std::io::Result<Option<Vec<u8>>> {
+    match fs_err::read(path) {
+        Ok(contents) => Ok(Some(contents)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => return Err(err),
+    }
+}
+
+#[derive(Debug)]
+#[must_use]
+pub(crate) enum CheckStatus {
+    Fresh,
+    Stale(CheckStale),
+}
+
+#[derive(Debug)]
+#[must_use]
+pub(crate) enum CheckStale {
+    Modified { full_path: Utf8PathBuf, actual: Vec<u8>, expected: Vec<u8> },
+    New,
 }
