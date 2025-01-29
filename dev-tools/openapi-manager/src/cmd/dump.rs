@@ -5,7 +5,6 @@
 use crate::{
     apis::{ApiIdent, ManagedApis},
     cmd::output::{headers, OutputOpts, Styles},
-    combined::{ApiSpecFileWhich, CheckStale},
     environment::{BlessedSource, GeneratedSource},
     git::GitRevision,
     resolved::{Resolution, Resolved},
@@ -23,7 +22,7 @@ use semver::Version;
 use std::{collections::BTreeMap, ops::Deref, process::ExitCode};
 
 pub(crate) fn dump_impl(
-    environment: &Environment,
+    env: &Environment,
     blessed_source: &BlessedSource,
     generated_source: &GeneratedSource,
     output: &OutputOpts,
@@ -31,7 +30,7 @@ pub(crate) fn dump_impl(
     let apis = ManagedApis::all()?;
 
     // Print information about local files.
-    let local_files = environment.local_source.load(&apis)?;
+    let local_files = env.local_source.load(&apis)?;
     dump_structure(
         &local_files.spec_files,
         &local_files.errors,

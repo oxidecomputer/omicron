@@ -124,8 +124,21 @@ pub enum Problem {
     LocalVersionStale { spec_file_names: DisplayableVec<ApiSpecFileName> },
 }
 
-// enum of safeties?  and each thing can have a set of safeties that enable the
-// fix?
+impl Problem {
+    pub fn is_fixable(&self) -> bool {
+        match self {
+            Problem::LocalSpecFilesOrphaned { spec_file_names } => true,
+            Problem::BlessedVersionMissingLocal { spec_file_name } => false,
+            Problem::BlessedVersionExtraLocalSpec { spec_file_names } => true,
+            Problem::BlessedVersionBroken { compatibility_issues } => false,
+            Problem::LocalVersionMissingLocal => true,
+            Problem::LocalVersionStale { spec_file_names } => true,
+        }
+    }
+}
+
+// XXX-dap enum of safeties?  and each thing can have a set of safeties that
+// enable the fix?
 
 /// Resolve differences between blessed spec(s), the generated spec, and any
 /// local spec files for a given API

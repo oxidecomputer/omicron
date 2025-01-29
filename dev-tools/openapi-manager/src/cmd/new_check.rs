@@ -3,12 +3,14 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
+    apis::ManagedApis,
     cmd::output::{headers, OutputOpts, Styles},
-    combined::{ApiSpecFileWhich, CheckStale},
+    environment::{BlessedSource, GeneratedSource},
+    resolved::{Problem, Resolution, Resolved},
     spec::Environment,
     FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
 };
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use owo_colors::OwoColorize;
 use std::process::ExitCode;
 
@@ -31,74 +33,101 @@ impl NewCheckResult {
 
 pub(crate) fn new_check_impl(
     env: &Environment,
+    blessed_source: &BlessedSource,
+    generated_source: &GeneratedSource,
     output: &OutputOpts,
 ) -> Result<NewCheckResult> {
     let mut styles = Styles::default();
+    let mut found_problems = false;
+    let mut found_unfixable = false;
     if output.use_color(supports_color::Stream::Stderr) {
         styles.colorize();
     }
 
-    let (combined, warnings) =
-        crate::combined::CombinedApis::load(env.openapi_dir())?;
-    for w in warnings {
-        eprintln!("warning: {:#}", w);
+    let apis = ManagedApis::all()?;
+    let generated = generated_source.load(&apis)?;
+    print_warnings(&generated.warnings, &generated.errors)?;
+    let local_files = env.local_source.load(&apis)?;
+    print_warnings(&local_files.warnings, &local_files.errors)?;
+    let blessed = blessed_source.load(&apis)?;
+    print_warnings(&blessed.warnings, &blessed.errors)?;
+
+    let resolved = Resolved::new(&apis, &blessed, &generated, &local_files);
+    for note in resolved.notes() {
+        println!("NOTE: {}", note);
     }
-    let problems = combined.problems();
-    if !problems.is_empty() {
-        eprintln!("FOUND PROBLEMS: {}", problems.len());
-        for p in combined.problems() {
-            eprintln!("problem: {}", p);
-        }
-    } else {
-        eprintln!("no immediate problems found");
+    for problem in resolved.general_problems() {
+        println!("PROBLEM: {}", problem);
+        found_problems = true;
     }
 
-    let mut nstale = 0;
-    for api in combined.apis() {
-        let api_ident = api.api().ident();
+    println!("Checking OpenAPI documents...");
+    let mut napis = 0;
+    let mut nversions = 0;
+    for api in apis.iter_apis() {
+        napis += 1;
+        let ident = api.ident();
+        for version in api.iter_versions_semver() {
+            nversions += 1;
+            // unwrap(): there should be a resolution for every managed API
+            let resolution =
+                resolved.resolution_for_api_version(ident, version).unwrap();
+            let (summary, problems): (&str, &[Problem]) = match resolution {
+                Resolution::NoProblems => ("OK", &[]),
+                Resolution::Problems(problems) => {
+                    let fixable = problems.iter().all(|p| p.is_fixable());
+                    found_problems = true;
+                    found_unfixable = found_unfixable || (!fixable);
+                    (if fixable { "Stale" } else { "Error" }, &problems)
+                }
+            };
 
-        for api_version in api.versions() {
-            let check = api_version.check(env).with_context(|| {
-                format!(
-                    "checking API {} version {}",
-                    api_ident,
-                    api_version.semver()
-                )
-            })?;
-
-            // XXX-dap
-            print!("API {} version {}: ", api_ident, api_version.semver(),);
-
-            if check.total_errors() == 0 {
-                println!("{}", headers::FRESH.style(styles.success_header));
-                continue;
-            }
-
-            println!("{}", headers::STALE.style(styles.failure_header));
-            for (which, check_stale) in check.iter_errors() {
-                nstale += 1;
-                println!(
-                    "    {} {}",
-                    match which {
-                        ApiSpecFileWhich::Openapi => "openapi document",
-                        ApiSpecFileWhich::Extra(path) => path.as_str(),
-                    },
-                    match check_stale {
-                        CheckStale::New =>
-                            headers::NEW.style(styles.failure_header),
-                        CheckStale::Modified { .. } =>
-                            headers::MODIFIED.style(styles.failure_header),
-                    }
-                );
-            }
+            println!(
+                "{:5} {} ({}) v{}",
+                summary,
+                ident,
+                if api.is_versioned() { "versioned" } else { "lockstep" },
+                version
+            );
         }
     }
 
-    if !problems.is_empty() {
+    // XXX-dap where do we print out the validation errors from extra files?
+    println!("Checked {} total versions across {} APIs", nversions, napis);
+
+    if found_unfixable {
+        // XXX-dap wording
+        println!(
+            "Error: please fix one or more problems above and re-run the tool"
+        );
         Ok(NewCheckResult::Failures)
-    } else if nstale > 0 {
+    } else if found_problems {
+        println!("Stale: one or more versions needs an update");
         Ok(NewCheckResult::NeedsUpdate)
     } else {
+        println!("Success");
         Ok(NewCheckResult::Success)
     }
+}
+
+fn print_warnings(
+    warnings: &[anyhow::Error],
+    errors: &[anyhow::Error],
+) -> anyhow::Result<()> {
+    for w in warnings {
+        println!("    warn: {:#}", w);
+    }
+
+    for e in errors {
+        println!("    error: {:#}", e);
+    }
+
+    if !errors.is_empty() {
+        bail!(
+            "bailing out after error{} above",
+            if errors.len() != 1 { "s" } else { "" }
+        );
+    }
+
+    Ok(())
 }

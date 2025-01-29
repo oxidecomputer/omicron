@@ -137,10 +137,10 @@ pub struct DumpArgs {
 
 impl DumpArgs {
     fn exec(self, output: &OutputOpts) -> anyhow::Result<ExitCode> {
-        let environment = Environment::new(self.local.dir)?;
+        let env = Environment::new(self.local.dir)?;
         let blessed_source = BlessedSource::try_from(self.blessed)?;
         let generated_source = GeneratedSource::from(self.generated);
-        dump_impl(&environment, &blessed_source, &generated_source, output)?;
+        dump_impl(&env, &blessed_source, &generated_source, output)?;
         Ok(ExitCode::SUCCESS)
     }
 }
@@ -189,15 +189,21 @@ impl CheckArgs {
 
 #[derive(Debug, Args)]
 pub struct NewCheckArgs {
-    /// The directory to read generated APIs from.
-    #[clap(long)]
-    dir: Option<Utf8PathBuf>,
+    #[clap(flatten)]
+    local: LocalSourceArgs,
+    #[clap(flatten)]
+    blessed: BlessedSourceArgs,
+    #[clap(flatten)]
+    generated: GeneratedSourceArgs,
 }
 
 impl NewCheckArgs {
     fn exec(self, output: &OutputOpts) -> anyhow::Result<ExitCode> {
-        let env = Environment::new(self.dir)?;
-        Ok(new_check_impl(&env, output)?.to_exit_code())
+        let env = Environment::new(self.local.dir)?;
+        let blessed_source = BlessedSource::try_from(self.blessed)?;
+        let generated_source = GeneratedSource::from(self.generated);
+        Ok(new_check_impl(&env, &blessed_source, &generated_source, output)?
+            .to_exit_code())
     }
 }
 
