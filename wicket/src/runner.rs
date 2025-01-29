@@ -122,8 +122,9 @@ impl RunnerCore {
                 self.screen.resize(&mut self.state, width, height);
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
-            Event::Inventory { inventory, mgs_last_seen } => {
+            Event::Inventory { inventory, mgs_last_seen, dpd_last_seen } => {
                 self.state.service_status.reset_mgs(mgs_last_seen);
+                self.state.service_status.reset_dpd(dpd_last_seen);
                 self.state.service_status.reset_wicketd(Duration::ZERO);
                 self.state.inventory.update_inventory(inventory)?;
                 self.screen.draw(&self.state, &mut self.terminal)?;

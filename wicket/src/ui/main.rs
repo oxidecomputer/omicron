@@ -197,6 +197,7 @@ impl MainScreen {
         let location_spans = location_spans(&state.wicketd_location);
         let wicketd_spans = state.service_status.wicketd_liveness().to_spans();
         let mgs_spans = state.service_status.mgs_liveness().to_spans();
+        let dpd_spans = state.service_status.dpd_liveness().to_spans();
         let mut spans = vec![Span::styled("You are here: ", style::service())];
         spans.extend_from_slice(&location_spans);
         spans.push(Span::styled(" | ", style::divider()));
@@ -205,6 +206,9 @@ impl MainScreen {
         spans.push(Span::styled(" | ", style::divider()));
         spans.push(Span::styled("MGS: ", style::service()));
         spans.extend_from_slice(&mgs_spans);
+        spans.push(Span::styled(" | ", style::divider()));
+        spans.push(Span::styled("DPD: ", style::service()));
+        spans.extend_from_slice(&dpd_spans);
         let main = Paragraph::new(Line::from(spans));
         frame.render_widget(main, rect);
 

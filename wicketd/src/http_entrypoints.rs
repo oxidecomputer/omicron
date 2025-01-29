@@ -4,6 +4,8 @@
 
 //! HTTP entrypoint functions for wicketd
 
+use crate::dendrite::GetTransceiversError;
+use crate::dendrite::GetTransceiversResponse;
 use crate::helpers::sps_to_string;
 use crate::helpers::SpIdentifierDisplay;
 use crate::mgs::GetInventoryError as GetMgsInventoryError;
@@ -376,13 +378,31 @@ impl WicketdApi for WicketdApiImpl {
         };
 
         // Fetch the transceiver information from Dendrite.
-        let transceivers = Vec::new();
+        //
+        // TODO(ben) It's not great to fail if we get the inventory from MGS and
+        // fail to get the transceivers from `dpd`. Figure out how to decouple
+        // these.
+        let (transceivers, dpd_last_seen) =
+            match rqctx.context().dpd_handle.get_transceivers().await {
+                Ok(GetTransceiversResponse::Response {
+                    transceivers,
+                    dpd_last_seen,
+                }) => (transceivers, dpd_last_seen),
+                Ok(GetTransceiversResponse::Unavailable) => {
+                    return Err(HttpError::for_unavail(
+                        None,
+                        "Rack inventory not yet available".into(),
+                    ));
+                }
+                Err(GetTransceiversError::ShutdownInProgress) => todo!(),
+            };
 
         let inventory = RackV1Inventory { mgs_inventory, transceivers };
 
         Ok(HttpResponseOk(GetInventoryResponse::Response {
             inventory,
             mgs_last_seen,
+            dpd_last_seen,
         }))
     }
 

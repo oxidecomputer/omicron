@@ -24,6 +24,7 @@ use artifacts::{
 use bootstrap_addrs::BootstrapPeers;
 pub use config::Config;
 pub(crate) use context::ServerContext;
+use dendrite::DpdManager;
 use display_error_chain::DisplayErrorChain;
 use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer};
 pub use installinator_progress::{IprUpdateTracker, RunningUpdateState};
@@ -49,6 +50,7 @@ pub struct Args {
     pub address: SocketAddrV6,
     pub artifact_address: SocketAddrV6,
     pub mgs_address: SocketAddrV6,
+    pub dpd_address: SocketAddrV6,
     pub nexus_proxy_address: SocketAddrV6,
     pub baseboard: Option<Baseboard>,
     pub rack_subnet: Option<Ipv6Subnet<AZ_PREFIX>>,
@@ -145,6 +147,12 @@ impl Server {
             mgs_manager.run().await;
         });
 
+        let dpd_manager = DpdManager::new(&log, args.dpd_address);
+        let dpd_handle = dpd_manager.get_handle();
+        tokio::spawn(async move {
+            dpd_manager.run().await;
+        });
+
         let (ipr_artifact, ipr_update_tracker) =
             crate::installinator_progress::new(&log);
 
@@ -191,6 +199,7 @@ impl Server {
                     bind_address: args.address,
                     mgs_handle,
                     mgs_client,
+                    dpd_handle,
                     log: log.clone(),
                     local_switch_id: OnceLock::new(),
                     bootstrap_peers,

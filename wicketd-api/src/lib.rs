@@ -444,7 +444,6 @@ pub struct GetInventoryParams {
     /// Refresh the state of these SPs from MGS prior to returning (instead of
     /// returning cached data).
     pub force_refresh: Vec<SpIdentifier>,
-    // TODO(ben) maybe add same concept for transceivers
 }
 
 /// The response to a `get_inventory` call: the inventory known to wicketd, or a
@@ -452,8 +451,15 @@ pub struct GetInventoryParams {
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case", tag = "type", content = "data")]
 pub enum GetInventoryResponse {
-    // TODO(ben): Add `dpd_last_seen` here.
-    Response { inventory: RackV1Inventory, mgs_last_seen: Duration },
+    // TODO(ben): Want to report either one of these if we have it, even if we
+    // fail to reach the other. We should make each component of the
+    // `RackV1Inventory` an enum like this for the MGS-specific and
+    // `dpd`-specific data.
+    Response {
+        inventory: RackV1Inventory,
+        mgs_last_seen: Duration,
+        dpd_last_seen: Duration,
+    },
     Unavailable,
 }
 

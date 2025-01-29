@@ -117,6 +117,7 @@ Based on this, one way to have an end-to-end flow is with:
 
 - real wicketd
 - real MGS
+- real `dpd`
 - sp-sim, an in-memory service that simulates how the SP behaves
 
 Making this simpler is tracked in
@@ -147,6 +148,21 @@ The port number in `--address` is arbitrary.
 that sp-sim is missing support for it! Generally, sp-sim has features added to
 it on an as-needed basis.
 
+### Running stub `dpd`
+
+`dpd` is the main switch management daemon, part of the Dendrite repo. It
+provides the API for programming the switch ASIC's tables with addresses,
+routes, NAT rules, and so on. While one can run the real `dpd` on a Scrimlet,
+there is a "stub" version of the program that exposes the same API but does no
+actual work.
+
+This can be run by building `dpd` from the Dendrite repo, using the
+`tofino_stub` feature:
+
+```
+cargo run --bin dpd --features tofino_stub -- run
+```
+
 ### Using a real SP
 
 The easiest way is to change the mgs config to point to a running SP instead
@@ -167,7 +183,7 @@ location = { switch0 = ["sled", 1], switch1 = ["sled", 1] }
 Taking the port number mentioned above, run:
 
 ```
-cargo run -p wicketd -- run wicketd/examples/config.toml --address '[::1]:12226' --artifact-address '[::]:12227' --nexus-proxy-address '[::1]:12228' --mgs-address '[::1]:12225'
+cargo run -p wicketd -- run wicketd/examples/config.toml --address '[::1]:12226' --artifact-address '[::]:12227' --nexus-proxy-address '[::1]:12228' --mgs-address '[::1]:12225' --dpd-address '[::1]:12224'
 ```
 
 In this case, the port number in `--address` provides the interface between

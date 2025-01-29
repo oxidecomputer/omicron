@@ -2,12 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2022 Oxide Computer Company
+// Copyright 2025 Oxide Computer Company
 
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 
 use dropshot::test_util::ClientTestContext;
 use gateway_test_utils::setup::GatewayTestContext;
+use omicron_test_utils::dev::dendrite::DendriteInstance;
 
 pub struct WicketdTestContext {
     pub wicketd_addr: SocketAddrV6,
@@ -23,12 +24,13 @@ pub struct WicketdTestContext {
     pub artifact_client: installinator_client::Client,
     pub server: wicketd::Server,
     pub gateway: GatewayTestContext,
+    pub dendrite: DendriteInstance,
 }
 
 impl WicketdTestContext {
     pub async fn setup(gateway: GatewayTestContext) -> Self {
-        // Can't be `const` because `SocketAddrV6::new()` isn't const yet
-        let localhost_port_0 = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
+        const LOCALHOST_PORT_0: SocketAddrV6 =
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
 
         // Reuse the log from the gateway context.
         let log = &gateway.logctx.log;
@@ -36,15 +38,22 @@ impl WicketdTestContext {
         let mgs_address = assert_ipv6(
             gateway
                 .server
-                .dropshot_server_for_address(localhost_port_0)
+                .dropshot_server_for_address(LOCALHOST_PORT_0)
                 .unwrap()
                 .local_addr(),
         );
+        let dendrite = DendriteInstance::start(/* port = */ 0)
+            .await
+            .expect("error starting dpd");
+        let dpd_address =
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, dendrite.port, 0, 0);
+
         let args = wicketd::Args {
-            address: localhost_port_0,
-            artifact_address: localhost_port_0,
+            address: LOCALHOST_PORT_0,
+            artifact_address: LOCALHOST_PORT_0,
             mgs_address,
-            nexus_proxy_address: localhost_port_0,
+            dpd_address,
+            nexus_proxy_address: LOCALHOST_PORT_0,
             baseboard: None,
             rack_subnet: None,
         };
@@ -93,6 +102,7 @@ impl WicketdTestContext {
             artifact_client,
             server,
             gateway,
+            dendrite,
         }
     }
 
@@ -100,9 +110,10 @@ impl WicketdTestContext {
         &self.gateway.logctx.log
     }
 
-    pub async fn teardown(self) {
+    pub async fn teardown(mut self) {
         self.server.close().await.unwrap();
         self.gateway.teardown().await;
+        self.dendrite.cleanup().await.unwrap();
     }
 }
 

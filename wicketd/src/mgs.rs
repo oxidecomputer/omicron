@@ -14,7 +14,6 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Duration, Instant};
 use tokio_stream::StreamMap;
 use wicket_common::inventory::{MgsV1Inventory, SpIdentifier, SpInventory};
-//use wicketd_api::GetInventoryResponse;
 
 use self::inventory::{
     FetchedIgnitionState, FetchedSpData, IgnitionPresence,
@@ -46,8 +45,6 @@ enum MgsRequest {
     GetInventory {
         #[allow(dead_code)]
         etag: Option<String>,
-        // TODO(ben): This should return the MGS-specific inventory response,
-        // which right now is the SPs
         reply_tx:
             oneshot::Sender<Result<GetInventoryResponse, GetInventoryError>>,
         force_refresh: Vec<SpIdentifier>,
@@ -91,8 +88,6 @@ impl MgsHandle {
         }
     }
 
-    // TODO(ben): this needs to return just the SPs or a new
-    // `GetMgsInventoryResponse`. Same for above method.
     pub async fn get_inventory_refreshing_sps(
         &self,
         force_refresh: Vec<SpIdentifier>,
@@ -297,7 +292,6 @@ impl MgsManager {
         }
     }
 
-    // TODO(ben) Needs to handle just MGS-specific inventory
     fn handle_get_inventory_request(
         &mut self,
         ignition_handle: &IgnitionStateFetcher,

@@ -1115,6 +1115,27 @@ fn inventory_description(component: &Component) -> Text {
         }
     }
 
+    // If this is a switch, describe any transceivers.
+    if let Component::Switch { transceivers, .. } = component {
+        let mut label = vec![Span::styled("Transceivers: ", label_style)];
+        if transceivers.is_empty() {
+            label.push(Span::styled("None", warn_style));
+            spans.push(label.into());
+        } else {
+            spans.push(label.into());
+            for transceiver in transceivers {
+                spans.push(
+                    vec![
+                        bullet(),
+                        Span::styled(&transceiver.port, label_style),
+                        // TODO(ben): Moar state.
+                    ]
+                    .into(),
+                );
+            }
+        }
+    };
+
     Text::from(spans)
 }
 

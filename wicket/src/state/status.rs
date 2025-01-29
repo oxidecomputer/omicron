@@ -21,6 +21,7 @@ const LIVENESS_THRESHOLD: Duration = Duration::from_secs(30);
 pub struct ServiceStatus {
     wicketd_last_seen: Option<Duration>,
     mgs_last_seen: Option<Duration>,
+    dpd_last_seen: Option<Duration>,
 }
 
 impl ServiceStatus {
@@ -56,12 +57,20 @@ impl ServiceStatus {
         self.mgs_last_seen = Some(elapsed);
     }
 
+    pub fn reset_dpd(&mut self, elapsed: Duration) {
+        self.dpd_last_seen = Some(elapsed);
+    }
+
     pub fn mgs_liveness(&self) -> Liveness {
         Self::liveness(self.mgs_last_seen)
     }
 
     pub fn wicketd_liveness(&self) -> Liveness {
         Self::liveness(self.wicketd_last_seen)
+    }
+
+    pub fn dpd_liveness(&self) -> Liveness {
+        Self::liveness(self.dpd_last_seen)
     }
 
     fn liveness(elapsed: Option<Duration>) -> Liveness {

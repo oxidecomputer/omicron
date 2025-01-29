@@ -36,9 +36,11 @@ pub enum Event {
     Term(Cmd),
 
     /// An Inventory Update Event
-    ///
-    /// TODO(ben): Add `dpd_last_seen` here
-    Inventory { inventory: RackV1Inventory, mgs_last_seen: Duration },
+    Inventory {
+        inventory: RackV1Inventory,
+        mgs_last_seen: Duration,
+        dpd_last_seen: Duration,
+    },
 
     /// TUF repo artifacts unpacked by wicketd, and event reports
     ArtifactsAndEventReports {
