@@ -1303,36 +1303,39 @@ mod test {
         .expect("failed to plan");
 
         let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        let daft_diff = blueprint1.diff(&blueprint2);
+        let summary = BlueprintDiffSummary::new(&daft_diff);
         println!(
             "1 -> 2 (added additional internal DNS zones):\n{}",
             diff.display()
         );
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 2);
+        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.sleds_modified.len(), 2);
 
         // 2 sleds should each get 1 additional internal DNS zone.
         let mut total_new_zones = 0;
-        for sled_id in diff.sleds_modified {
-            assert!(!diff.zones.removed.contains_key(&sled_id));
-            assert!(!diff.zones.modified.contains_key(&sled_id));
-            if let Some(zones_added) = &diff.zones.added.get(&sled_id) {
-                let zones = &zones_added.zones;
-                match zones.len() {
-                    n @ 1 => {
-                        total_new_zones += n;
-                    }
-                    n => {
-                        panic!("unexpected number of zones added to {sled_id}: {n}")
-                    }
+        for sled_id in &summary.sleds_modified {
+            let zones_diff =
+                &summary.zones_on_modified_sled(&sled_id).unwrap().zones;
+            assert!(zones_diff.removed.is_empty());
+            assert!(zones_diff.modified.is_empty());
+            let zones_added = &zones_diff.added;
+            match zones_added.len() {
+                0 => {}
+                n @ 1 => {
+                    total_new_zones += n;
                 }
-                for zone in zones {
-                    assert_eq!(
-                        zone.kind(),
-                        ZoneKind::InternalDns,
-                        "unexpectedly added a non-internal-DNS zone: {zone:?}"
-                    );
+                n => {
+                    panic!("unexpected number of zones added to {sled_id}: {n}")
                 }
+            }
+            for (_, zone) in zones_added {
+                assert_eq!(
+                    zone.kind(),
+                    ZoneKind::InternalDns,
+                    "unexpectedly added a non-internal-DNS zone: {zone:?}"
+                );
             }
         }
         assert_eq!(total_new_zones, 2);
@@ -1689,21 +1692,22 @@ mod test {
         .expect("failed to plan");
 
         let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        let daft_diff = blueprint1.diff(&blueprint2);
+        let summary = BlueprintDiffSummary::new(&daft_diff);
         println!("1 -> 2 (some new disks, one expunged):\n{}", diff.display());
-        assert_eq!(diff.sleds_modified.len(), 1);
-        let sled_id = diff.sleds_modified.first().unwrap();
+        assert_eq!(summary.sleds_modified.len(), 1);
 
         // We should be adding a Crucible zone for each new in-service disk.
-        assert_eq!(
-            diff.zones.added.get(sled_id).unwrap().zones.len(),
-            NEW_IN_SERVICE_DISKS
-        );
-        assert!(!diff.zones.removed.contains_key(sled_id));
-        assert_eq!(diff.physical_disks.added.len(), 1);
-        assert_eq!(diff.physical_disks.removed.len(), 0);
-        assert_eq!(diff.datasets.added.len(), 1);
-        assert_eq!(diff.datasets.modified.len(), 0);
-        assert_eq!(diff.datasets.removed.len(), 0);
+        assert_eq!(summary.total_zones_added(), NEW_IN_SERVICE_DISKS);
+        assert_eq!(summary.total_zones_removed(), 0);
+        assert_eq!(summary.total_disks_added(), NEW_IN_SERVICE_DISKS);
+        assert_eq!(summary.total_disks_removed(), 0);
+
+        // 1 Zone, Crucible, Transient Crucible Zone, and Debug dataset created
+        // per disk.
+        assert_eq!(summary.total_datasets_added(), NEW_IN_SERVICE_DISKS * 4);
+        assert_eq!(summary.total_datasets_removed(), 0);
+        assert_eq!(summary.total_datasets_modified(), 0);
 
         // Test a no-op planning iteration.
         assert_planning_makes_no_changes(
