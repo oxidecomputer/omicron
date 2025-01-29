@@ -1,0 +1,226 @@
+// TODO: Move this all to blueprint_diff.rs
+
+use super::{BlueprintDiff, BlueprintZonesConfig, BlueprintZonesConfigDiff};
+use omicron_uuid_kinds::SledUuid;
+use std::collections::BTreeSet;
+
+// A wrapper type around a `daft` generated `BlueprintDiff that provides summary
+// data and direct access to the underlying diff.
+pub struct BlueprintDiffSummary<'a> {
+    pub diff: &'a BlueprintDiff<'a>,
+    pub sleds_added: BTreeSet<SledUuid>,
+    pub sleds_removed: BTreeSet<SledUuid>,
+    pub sleds_modified: BTreeSet<SledUuid>,
+    pub sleds_unchanged: BTreeSet<SledUuid>,
+}
+
+impl<'a> BlueprintDiffSummary<'a> {
+    pub fn new(diff: &'a BlueprintDiff<'a>) -> Self {
+        // We assume for now that sled_state additions represent sled additions.
+        // Once we collapse the 4 blueprint maps this will be unambiguously
+        // true.
+        let sleds_added: BTreeSet<SledUuid> =
+            diff.sled_state.added.keys().map(|k| **k).collect();
+
+        // We can't do the same for removals unfortunately. We prematurely
+        // prune decommissioned sleds, but there may still be zones, disks,
+        // or datasets that have not yet been removed. We must check for this.
+        //
+        // Removed sleds are the intersection of sleds removed in
+        // `blueprint_zones`, `blueprint_disks`, and `blueprint_datasets`
+        let zone_sleds_removed: BTreeSet<_> =
+            diff.blueprint_zones.removed.keys().map(|k| **k).collect();
+        let disk_sleds_removed: BTreeSet<_> =
+            diff.blueprint_disks.removed.keys().map(|k| **k).collect();
+        let dataset_sleds_removed: BTreeSet<_> =
+            diff.blueprint_datasets.removed.keys().map(|k| **k).collect();
+        let sleds_removed: BTreeSet<_> = zone_sleds_removed
+            .intersection(&disk_sleds_removed)
+            .cloned()
+            .collect();
+        let sleds_removed: BTreeSet<_> = sleds_removed
+            .intersection(&dataset_sleds_removed)
+            .cloned()
+            .collect();
+
+        // Modifieds sleds are the union of sleds modified in `sled_state`, `blueprint_zones`,
+        // `blueprint_disks`, and `blueprint_datasets`
+        let sleds_modified: BTreeSet<_> = diff
+            .sled_state
+            .modified
+            .keys()
+            .chain(diff.blueprint_zones.modified.keys())
+            .chain(diff.blueprint_disks.modified.keys())
+            .chain(diff.blueprint_datasets.modified.keys())
+            .map(|k| **k)
+            .collect();
+
+        // Sleds unchanged are all sleds that have not been added, removed, or
+        // modified. Equivalently, this is the intersection of all unchanged
+        // sets.
+        let zone_sleds_unchanged: BTreeSet<_> =
+            diff.blueprint_zones.unchanged.iter().map(|(id, _)| **id).collect();
+        let disk_sleds_unchanged: BTreeSet<_> =
+            diff.blueprint_disks.unchanged.iter().map(|(id, _)| **id).collect();
+        let dataset_sleds_unchanged: BTreeSet<_> = diff
+            .blueprint_datasets
+            .unchanged
+            .iter()
+            .map(|(id, _)| **id)
+            .collect();
+        let sleds_unchanged: BTreeSet<_> = zone_sleds_unchanged
+            .intersection(&disk_sleds_unchanged)
+            .cloned()
+            .collect();
+        let sleds_unchanged: BTreeSet<_> = sleds_unchanged
+            .intersection(&dataset_sleds_unchanged)
+            .cloned()
+            .collect();
+
+        BlueprintDiffSummary {
+            diff,
+            sleds_added,
+            sleds_removed,
+            sleds_modified,
+            sleds_unchanged,
+        }
+    }
+
+    ///  The number of zones added across all sleds
+    pub fn total_zones_added(&self) -> usize {
+        self.diff
+            .blueprint_zones
+            .added
+            .values()
+            .fold(0, |acc, c| acc + c.zones.len())
+            + self
+                .diff
+                .blueprint_zones
+                .modified
+                .values()
+                .fold(0, |acc, c| acc + c.zones.added.len())
+    }
+
+    ///  The number of zones removed across all sleds
+    pub fn total_zones_removed(&self) -> usize {
+        self.diff
+            .blueprint_zones
+            .removed
+            .values()
+            .fold(0, |acc, c| acc + c.zones.len())
+            + self
+                .diff
+                .blueprint_zones
+                .modified
+                .values()
+                .fold(0, |acc, c| acc + c.zones.removed.len())
+    }
+    ///  The number of zones modified across all sleds
+    pub fn total_zones_modified(&self) -> usize {
+        self.diff
+            .blueprint_zones
+            .modified
+            .values()
+            .fold(0, |acc, c| acc + c.zones.modified.len())
+    }
+
+    ///  The number of disks added across all sleds
+    pub fn total_disks_added(&self) -> usize {
+        self.diff
+            .blueprint_disks
+            .added
+            .values()
+            .fold(0, |acc, c| acc + c.disks.len())
+            + self
+                .diff
+                .blueprint_disks
+                .modified
+                .values()
+                .fold(0, |acc, c| acc + c.disks.added.len())
+    }
+
+    ///  The number of disks removed across all sleds
+    pub fn total_disks_removed(&self) -> usize {
+        self.diff
+            .blueprint_disks
+            .removed
+            .values()
+            .fold(0, |acc, c| acc + c.disks.len())
+            + self
+                .diff
+                .blueprint_disks
+                .modified
+                .values()
+                .fold(0, |acc, c| acc + c.disks.removed.len())
+    }
+    ///  The number of disks modified across all sleds
+    pub fn total_disks_modified(&self) -> usize {
+        self.diff
+            .blueprint_disks
+            .modified
+            .values()
+            .fold(0, |acc, c| acc + c.disks.modified.len())
+    }
+
+    ///  The number of datasets added across all sleds
+    pub fn total_datasets_added(&self) -> usize {
+        self.diff
+            .blueprint_datasets
+            .added
+            .values()
+            .fold(0, |acc, c| acc + c.datasets.len())
+            + self
+                .diff
+                .blueprint_datasets
+                .modified
+                .values()
+                .fold(0, |acc, c| acc + c.datasets.added.len())
+    }
+
+    ///  The number of datasets removed across all sleds
+    pub fn total_datasets_removed(&self) -> usize {
+        self.diff
+            .blueprint_datasets
+            .removed
+            .values()
+            .fold(0, |acc, c| acc + c.datasets.len())
+            + self
+                .diff
+                .blueprint_datasets
+                .modified
+                .values()
+                .fold(0, |acc, c| acc + c.datasets.removed.len())
+    }
+    ///  The number of datasets modified across all sleds
+    pub fn total_datasets_modified(&self) -> usize {
+        self.diff
+            .blueprint_datasets
+            .modified
+            .values()
+            .fold(0, |acc, c| acc + c.datasets.modified.len())
+    }
+
+    /// Return the `BlueprintZonesConfig` for a newly added sled
+    pub fn zones_on_added_sled(
+        &self,
+        sled_id: &SledUuid,
+    ) -> Option<&'a BlueprintZonesConfig> {
+        self.diff.blueprint_zones.added.get(sled_id).cloned()
+    }
+
+    /// Return the `BlueprintZonesConfig` for a removed sled
+    pub fn zones_on_removed_sled(
+        &self,
+        sled_id: &SledUuid,
+    ) -> Option<&'a BlueprintZonesConfig> {
+        self.diff.blueprint_zones.added.get(sled_id).cloned()
+    }
+
+    /// Return the `BlueprintZonesConfigDiff` for a modified sled
+    pub fn zones_on_modified_sled(
+        &self,
+        sled_id: &SledUuid,
+    ) -> Option<&'a BlueprintZonesConfigDiff> {
+        self.diff.blueprint_zones.modified.get(sled_id)
+    }
+}

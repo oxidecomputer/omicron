@@ -796,7 +796,7 @@ impl BpDiffDatasets {
 
 /// Summarizes the differences between two blueprints
 #[derive(Debug)]
-pub struct BlueprintDiff {
+pub struct BlueprintDiffOriginal {
     pub before_meta: DiffBeforeMetadata,
     pub after_meta: BlueprintMetadata,
     pub before_state: BTreeMap<SledUuid, SledState>,
@@ -812,7 +812,7 @@ pub struct BlueprintDiff {
     pub after_clickhouse_cluster_config: Option<ClickhouseClusterConfig>,
 }
 
-impl BlueprintDiff {
+impl BlueprintDiffOriginal {
     /// Build a diff with the provided contents, verifying that the provided
     /// data is valid.
     pub fn new(
@@ -920,7 +920,7 @@ impl BlueprintDiff {
             .map(|sled_id| *sled_id)
             .collect();
 
-        BlueprintDiff {
+        BlueprintDiffOriginal {
             before_meta,
             after_meta: after_blueprint.metadata(),
             before_state,
@@ -1366,13 +1366,13 @@ impl ClickhouseClusterConfigDiffTables {
 #[derive(Clone, Debug)]
 #[must_use = "this struct does nothing unless displayed"]
 pub struct BlueprintDiffDisplay<'diff> {
-    pub diff: &'diff BlueprintDiff,
+    pub diff: &'diff BlueprintDiffOriginal,
     // TODO: add colorization with a stylesheet
 }
 
 impl<'diff> BlueprintDiffDisplay<'diff> {
     #[inline]
-    fn new(diff: &'diff BlueprintDiff) -> Self {
+    fn new(diff: &'diff BlueprintDiffOriginal) -> Self {
         Self { diff }
     }
 

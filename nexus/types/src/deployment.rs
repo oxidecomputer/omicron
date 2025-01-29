@@ -52,6 +52,7 @@ use strum::EnumIter;
 use strum::IntoEnumIterator;
 
 mod blueprint_diff;
+mod blueprint_diff_summary;
 mod blueprint_display;
 mod clickhouse;
 pub mod execution;
@@ -61,6 +62,7 @@ mod planning_input;
 mod tri_map;
 mod zone_type;
 
+pub use blueprint_diff_summary::BlueprintDiffSummary;
 pub use clickhouse::ClickhouseClusterConfig;
 pub use network_resources::AddNetworkResourceError;
 pub use network_resources::OmicronZoneExternalFloatingAddr;
@@ -100,7 +102,7 @@ use blueprint_display::{
 };
 use id_map::{IdMap, IdMappable};
 
-pub use blueprint_diff::BlueprintDiff;
+pub use blueprint_diff::BlueprintDiffOriginal;
 
 /// Describes a complete set of software and configuration for the system
 // Blueprints are a fundamental part of how the system modifies itself.  Each
@@ -142,7 +144,9 @@ pub use blueprint_diff::BlueprintDiff;
 // include more of the system as we support more use cases.
 //
 // TODO: #[derive(Diff)]
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diff,
+)]
 pub struct Blueprint {
     /// unique identifier for this blueprint
     pub id: BlueprintUuid,
@@ -192,7 +196,7 @@ pub struct Blueprint {
     pub clickhouse_cluster_config: Option<ClickhouseClusterConfig>,
 
     /// when this blueprint was generated (for debugging)
-    //#[daft(ignore)]
+    #[daft(ignore)]
     pub time_created: chrono::DateTime<chrono::Utc>,
     /// identity of the component that generated the blueprint (for debugging)
     /// This would generally be the Uuid of a Nexus instance.
@@ -283,8 +287,11 @@ impl Blueprint {
     ///
     /// The argument provided is the "before" side, and `self` is the "after"
     /// side.
-    pub fn diff_since_blueprint(&self, before: &Blueprint) -> BlueprintDiff {
-        BlueprintDiff::new(
+    pub fn diff_since_blueprint(
+        &self,
+        before: &Blueprint,
+    ) -> BlueprintDiffOriginal {
+        BlueprintDiffOriginal::new(
             DiffBeforeMetadata::Blueprint(Box::new(before.metadata())),
             before.clickhouse_cluster_config.clone(),
             before.sled_state.clone(),

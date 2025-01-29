@@ -2061,6 +2061,7 @@ dependencies = [
  "daft-derive",
  "newtype-uuid",
  "oxnet",
+ "paste",
  "uuid",
 ]
 

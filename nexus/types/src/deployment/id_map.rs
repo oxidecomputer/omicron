@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use daft::BTreeMapDiff;
 use daft::Diffable;
-use daft::MapDiff;
 use derive_where::derive_where;
 use schemars::JsonSchema;
 use serde::de::Error as _;
@@ -240,7 +240,7 @@ impl<'de, T: IdMappable> Deserialize<'de> for IdMap<T> {
 }
 
 impl<'a, T: IdMappable + Debug + 'a> Diffable<'a> for IdMap<T> {
-    type Diff = MapDiff<'a, T::Id, T>;
+    type Diff = BTreeMapDiff<'a, T::Id, T>;
 
     fn diff(&'a self, other: &'a Self) -> Self::Diff {
         self.inner.diff(&other.inner)
