@@ -1174,19 +1174,23 @@ mod test {
         .expect("failed to plan");
 
         let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        let daft_diff = blueprint1.diff(&blueprint2);
+        let summary = BlueprintDiffSummary::new(&daft_diff);
         println!("1 -> 2 (added additional Nexus zones):\n{}", diff.display());
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 3);
+        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.sleds_modified.len(), 3);
 
         // All 3 sleds should get additional Nexus zones. We expect a total of
         // 11 new Nexus zones, which should be spread evenly across the three
         // sleds (two should get 4 and one should get 3).
         let mut total_new_nexus_zones = 0;
-        for sled_id in diff.sleds_modified {
-            assert!(!diff.zones.removed.contains_key(&sled_id));
-            assert!(!diff.zones.modified.contains_key(&sled_id));
-            let zones_added = &diff.zones.added.get(&sled_id).unwrap().zones;
+        for sled_id in &summary.sleds_modified {
+            assert!(!daft_diff.blueprint_zones.removed.contains_key(sled_id));
+            let zones_cfg_diff =
+                summary.zones_on_modified_sled(sled_id).unwrap();
+            assert!(zones_cfg_diff.zones.modified.is_empty());
+            let zones_added = &zones_cfg_diff.zones.added;
             match zones_added.len() {
                 n @ (3 | 4) => {
                     total_new_nexus_zones += n;
@@ -1195,7 +1199,7 @@ mod test {
                     panic!("unexpected number of zones added to {sled_id}: {n}")
                 }
             }
-            for zone in zones_added {
+            for (_, zone) in zones_added {
                 if zone.kind() != ZoneKind::Nexus {
                     panic!("unexpectedly added a non-Nexus zone: {zone:?}");
                 }
