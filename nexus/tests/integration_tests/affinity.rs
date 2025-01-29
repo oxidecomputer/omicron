@@ -53,7 +53,7 @@ struct ProjectScopedApiHelper<'a, T> {
     affinity_type: PhantomData<T>,
 }
 
-impl<'a, T: AffinityGroupish> ProjectScopedApiHelper<'a, T> {
+impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
     async fn create_stopped_instance(
         &self,
         instance_name: &str,
@@ -676,8 +676,7 @@ async fn test_group_crud<T: AffinityGroupish>(client: &ClientTestContext) {
 
     let project_api = api.use_project::<T>(PROJECT_NAME);
 
-    let instance =
-        project_api.create_stopped_instance(&format!("test-instance")).await;
+    let instance = project_api.create_stopped_instance("test-instance").await;
 
     // When we start, we observe no affinity groups
     let groups = project_api.groups_list().await;
@@ -789,8 +788,7 @@ async fn test_group_project_selector<T: AffinityGroupish>(
     // All requests omit the project query parameter
     let no_project_api = api.no_project::<T>();
 
-    let instance =
-        project_api.create_stopped_instance(&format!("test-instance")).await;
+    let instance = project_api.create_stopped_instance("test-instance").await;
 
     // We can only list groups within a project
     no_project_api.groups_list_expect_error(StatusCode::BAD_REQUEST).await;
