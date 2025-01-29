@@ -203,8 +203,9 @@ impl<'a> Redactor<'a> {
     /// concatenated with a string matching `value_regex`. An example:
     ///
     /// ```
+    /// # use omicron_test_utils::dev::test_cmds::Redactor;
     /// # let mut redactor = Redactor::default();
-    /// redactor.field("list ok:", "\d+");
+    /// redactor.field("list ok:", r"\d+");
     /// ```
     ///
     /// will replace `list ok:   1` with `list ok:   <LIST_OK_REDACTED>`.
@@ -246,6 +247,7 @@ impl<'a> Redactor<'a> {
     /// we can use:
     ///
     /// ```
+    /// # use omicron_test_utils::dev::test_cmds::Redactor;
     /// # let mut redactor = Redactor::default();
     /// redactor.section(&["section A:", "ringbuf:"]);
     /// ```
