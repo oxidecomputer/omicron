@@ -706,6 +706,9 @@ pub enum SledFilter {
 
     /// Sleds which should be sent VPC firewall rules.
     VpcFirewall,
+
+    /// Sleds which should have TUF repo artifacts replicated onto them.
+    TufArtifactReplication,
 }
 
 impl SledFilter {
@@ -761,6 +764,7 @@ impl SledPolicy {
                 SledFilter::ReservationCreate => true,
                 SledFilter::VpcRouting => true,
                 SledFilter::VpcFirewall => true,
+                SledFilter::TufArtifactReplication => true,
             },
             SledPolicy::InService {
                 provision_policy: SledProvisionPolicy::NonProvisionable,
@@ -774,6 +778,7 @@ impl SledPolicy {
                 SledFilter::ReservationCreate => false,
                 SledFilter::VpcRouting => true,
                 SledFilter::VpcFirewall => true,
+                SledFilter::TufArtifactReplication => true,
             },
             SledPolicy::Expunged => match filter {
                 SledFilter::All => true,
@@ -785,6 +790,7 @@ impl SledPolicy {
                 SledFilter::ReservationCreate => false,
                 SledFilter::VpcRouting => false,
                 SledFilter::VpcFirewall => false,
+                SledFilter::TufArtifactReplication => false,
             },
         }
     }
@@ -818,6 +824,7 @@ impl SledState {
                 SledFilter::ReservationCreate => true,
                 SledFilter::VpcRouting => true,
                 SledFilter::VpcFirewall => true,
+                SledFilter::TufArtifactReplication => true,
             },
             SledState::Decommissioned => match filter {
                 SledFilter::All => true,
@@ -829,6 +836,7 @@ impl SledState {
                 SledFilter::ReservationCreate => false,
                 SledFilter::VpcRouting => false,
                 SledFilter::VpcFirewall => false,
+                SledFilter::TufArtifactReplication => false,
             },
         }
     }

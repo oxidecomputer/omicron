@@ -72,6 +72,7 @@ impl DataStore {
                 dsl::time_modified.eq(now),
                 dsl::ip.eq(sled_update.ip),
                 dsl::port.eq(sled_update.port),
+                dsl::repo_depot_port.eq(sled_update.repo_depot_port),
                 dsl::rack_id.eq(sled_update.rack_id),
                 dsl::is_scrimlet.eq(sled_update.is_scrimlet()),
                 dsl::usable_hardware_threads
@@ -1491,9 +1492,11 @@ pub(in crate::db::datastore) mod test {
     pub(crate) fn test_new_sled_update() -> SledUpdate {
         let sled_id = Uuid::new_v4();
         let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
+        let repo_depot_port = 0;
         SledUpdate::new(
             sled_id,
             addr,
+            repo_depot_port,
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id(),

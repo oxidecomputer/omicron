@@ -81,6 +81,9 @@ pub struct Sled {
     /// This is specifically distinct from `rcgen`, which is incremented by
     /// child resources as part of `DatastoreCollectionConfig`.
     pub sled_agent_gen: Generation,
+
+    // ServiceAddress (Repo Depot API). Uses `ip`.
+    pub repo_depot_port: SqlU16,
 }
 
 impl Sled {
@@ -169,6 +172,7 @@ impl From<Sled> for params::SledAgentInfo {
         };
         Self {
             sa_address: sled.address(),
+            repo_depot_port: sled.repo_depot_port.into(),
             role,
             baseboard: Baseboard {
                 serial: sled.serial_number.clone(),
@@ -220,6 +224,9 @@ pub struct SledUpdate {
     pub ip: ipv6::Ipv6Addr,
     pub port: SqlU16,
 
+    // ServiceAddress (Repo Depot API). Uses `ip`.
+    pub repo_depot_port: SqlU16,
+
     // Generation number - owned and incremented by sled-agent.
     pub sled_agent_gen: Generation,
 }
@@ -228,6 +235,7 @@ impl SledUpdate {
     pub fn new(
         id: Uuid,
         addr: SocketAddrV6,
+        repo_depot_port: u16,
         baseboard: SledBaseboard,
         hardware: SledSystemHardware,
         rack_id: Uuid,
@@ -247,6 +255,7 @@ impl SledUpdate {
             reservoir_size: hardware.reservoir_size,
             ip: addr.ip().into(),
             port: addr.port().into(),
+            repo_depot_port: repo_depot_port.into(),
             sled_agent_gen,
         }
     }
@@ -282,6 +291,7 @@ impl SledUpdate {
             reservoir_size: self.reservoir_size,
             ip: self.ip,
             port: self.port,
+            repo_depot_port: self.repo_depot_port,
             last_used_address,
             sled_agent_gen: self.sled_agent_gen,
         }

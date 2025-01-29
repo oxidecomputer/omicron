@@ -51,11 +51,15 @@ Management Gateway Service (client: gateway-client)
 Wicketd Installinator (client: installinator-client)
     consumed by: installinator (omicron/installinator) via 1 path
 
+LLDP daemon (client: lldpd-client)
+    consumed by: omicron-nexus (omicron/nexus) via 1 path
+
 Maghemite MG Admin (client: mg-admin-client)
     consumed by: omicron-nexus (omicron/nexus) via 1 path
     consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
 
 Nexus Internal API (client: nexus-client)
+    consumed by: crucible-pantry (crucible/pantry) via 1 path
     consumed by: dpd (dendrite/dpd) via 1 path
     consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
     consumed by: oximeter-collector (omicron/oximeter/collector) via 1 path

@@ -40,6 +40,7 @@ use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::sync::mpsc;
+use update_common::artifacts::ArtifactsWithPlan;
 use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
@@ -63,6 +64,7 @@ mod instance;
 mod instance_network;
 mod internet_gateway;
 mod ip_pool;
+mod lldp;
 mod login;
 mod metrics;
 mod network_interface;
@@ -215,6 +217,10 @@ pub struct Nexus {
 
     /// List of demo sagas awaiting a request to complete them
     demo_sagas: Arc<std::sync::Mutex<sagas::demo::CompletingDemoSagas>>,
+
+    /// Sender for TUF repository artifacts temporarily stored in this zone to
+    /// be replicated out to sleds in the background
+    tuf_artifact_replication_tx: mpsc::Sender<ArtifactsWithPlan>,
 }
 
 impl Nexus {
@@ -295,6 +301,14 @@ impl Nexus {
             log.new(o!("component" => "SagaExecutor")),
             saga_create_tx,
         ));
+
+        // Create a channel for replicating repository artifacts. 16 is a
+        // dubious bound for the channel but it seems unlikely that an operator
+        // would want to upload more than one at a time, and at most have two
+        // or three on the system during an upgrade (we've sized the artifact
+        // datasets to fit at most 10 repositories for this reason).
+        let (tuf_artifact_replication_tx, tuf_artifact_replication_rx) =
+            mpsc::channel(16);
 
         let client_state = dpd_client::ClientState {
             tag: String::from("nexus"),
@@ -502,6 +516,7 @@ impl Nexus {
             demo_sagas: Arc::new(std::sync::Mutex::new(
                 CompletingDemoSagas::new(),
             )),
+            tuf_artifact_replication_tx,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -556,6 +571,7 @@ impl Nexus {
                         registry: sagas::ACTION_REGISTRY.clone(),
                         sagas_started_rx: saga_recovery_rx,
                     },
+                    tuf_artifact_replication_rx,
                 },
             );
 
@@ -996,6 +1012,14 @@ impl Nexus {
         dpd_clients(resolver, &self.log).await
     }
 
+    pub(crate) async fn lldpd_clients(
+        &self,
+        rack_id: Uuid,
+    ) -> Result<HashMap<SwitchLocation, lldpd_client::Client>, String> {
+        let resolver = self.resolver();
+        lldpd_clients(resolver, rack_id, &self.log).await
+    }
+
     pub(crate) async fn mg_clients(
         &self,
     ) -> Result<HashMap<SwitchLocation, mg_admin_client::Client>, String> {
@@ -1067,6 +1091,31 @@ pub(crate) async fn dpd_clients(
                 client_state,
             );
             (*location, dpd_client)
+        })
+        .collect();
+    Ok(clients)
+}
+
+// We currently ignore the rack_id argument here, as the shared
+// switch_zone_address_mappings function doesn't allow filtering on the rack ID.
+// Since we only have a single rack, this is OK for now.
+// TODO: https://github.com/oxidecomputer/omicron/issues/1276
+pub(crate) async fn lldpd_clients(
+    resolver: &internal_dns_resolver::Resolver,
+    _rack_id: Uuid,
+    log: &slog::Logger,
+) -> Result<HashMap<SwitchLocation, lldpd_client::Client>, String> {
+    let mappings = switch_zone_address_mappings(resolver, log).await?;
+    let log = log.new(o!( "component" => "LldpdClient"));
+    let port = lldpd_client::default_port();
+    let clients: HashMap<SwitchLocation, lldpd_client::Client> = mappings
+        .iter()
+        .map(|(location, addr)| {
+            let lldpd_client = lldpd_client::Client::new(
+                &format!("http://[{addr}]:{port}"),
+                log.clone(),
+            );
+            (*location, lldpd_client)
         })
         .collect();
     Ok(clients)
