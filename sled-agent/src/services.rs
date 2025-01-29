@@ -90,6 +90,7 @@ use omicron_common::backoff::{
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
+use omicron_uuid_kinds::OmicronZoneUuid;
 use once_cell::sync::OnceCell;
 use rand::prelude::SliceRandom;
 use sled_agent_types::{
@@ -286,6 +287,19 @@ pub enum Error {
 
     #[error("Error migrating old-format services ledger: {0:#}")]
     ServicesMigration(anyhow::Error),
+
+    #[error(
+        "Invalid filesystem_pool in new zone config: \
+         for zone {zone_id}, expected pool {expected_pool} but got {got_pool}"
+    )]
+    InvalidFilesystemPoolZoneConfig {
+        zone_id: OmicronZoneUuid,
+        expected_pool: ZpoolName,
+        got_pool: ZpoolName,
+    },
+
+    #[error("Unexpected zone config: zone {zone_id} is running on ramdisk ?!")]
+    ZoneIsRunningOnRamdisk { zone_id: OmicronZoneUuid },
 }
 
 impl Error {
@@ -300,7 +314,9 @@ impl Error {
 impl From<Error> for omicron_common::api::external::Error {
     fn from(err: Error) -> Self {
         match err {
-            Error::RequestedConfigConflicts(_) => {
+            Error::RequestedConfigConflicts(_)
+            | Error::InvalidFilesystemPoolZoneConfig { .. }
+            | Error::ZoneIsRunningOnRamdisk { .. } => {
                 omicron_common::api::external::Error::invalid_request(
                     &err.to_string(),
                 )
@@ -620,6 +636,7 @@ struct StartZonesResult {
 }
 
 // A running zone and the configuration which started it.
+#[derive(Debug)]
 struct OmicronZone {
     runtime: RunningZone,
     config: OmicronZoneConfigLocal,
@@ -3483,17 +3500,17 @@ impl ServiceManager {
     ) -> Result<(), Error> {
         // Do some data-normalization to ensure we can compare the "requested
         // set" vs the "existing set" as HashSets.
-        let old_zone_configs: HashSet<OmicronZoneConfig> = existing_zones
-            .values()
-            .map(|omicron_zone| omicron_zone.config.zone.clone())
-            .collect();
-        let requested_zones_set: HashSet<OmicronZoneConfig> =
-            new_request.zones.into_iter().collect();
+        let ReconciledNewZonesRequest {
+            zones_to_be_removed,
+            zones_to_be_added,
+        } = reconcile_running_zones_with_new_request(
+            existing_zones
+                .values_mut()
+                .map(|z| (&mut z.config.zone, z.runtime.root_zpool())),
+            new_request,
+            &self.inner.log,
+        )?;
 
-        let zones_to_be_removed =
-            old_zone_configs.difference(&requested_zones_set);
-        let zones_to_be_added =
-            requested_zones_set.difference(&old_zone_configs);
         // Destroy zones that should not be running
         for zone in zones_to_be_removed {
             self.zone_bundle_and_try_remove(existing_zones, &zone).await;
@@ -3515,7 +3532,7 @@ impl ServiceManager {
         let StartZonesResult { new_zones, errors } = self
             .start_omicron_zones(
                 mount_config,
-                zones_to_be_added,
+                zones_to_be_added.iter(),
                 time_is_synchronized,
                 &all_u2_pools,
                 fake_install_dir,
@@ -4675,6 +4692,149 @@ impl ServiceManager {
     }
 }
 
+#[derive(Debug)]
+struct ReconciledNewZonesRequest {
+    zones_to_be_removed: HashSet<OmicronZoneConfig>,
+    zones_to_be_added: HashSet<OmicronZoneConfig>,
+}
+
+fn reconcile_running_zones_with_new_request<'a>(
+    existing_zones_with_runtime_zpool: impl Iterator<
+        Item = (&'a mut OmicronZoneConfig, &'a ZpoolOrRamdisk),
+    >,
+    new_request: OmicronZonesConfig,
+    log: &Logger,
+) -> Result<ReconciledNewZonesRequest, Error> {
+    let mut existing_zones_by_id: BTreeMap<_, _> =
+        existing_zones_with_runtime_zpool
+            .map(|(zone, zpool)| (zone.id, (zone, zpool)))
+            .collect();
+    let mut zones_to_be_added = HashSet::new();
+    let mut zones_to_be_removed = HashSet::new();
+    let mut zones_to_update = Vec::new();
+
+    for zone in new_request.zones.into_iter() {
+        let Some((existing_zone, runtime_zpool)) =
+            existing_zones_by_id.remove(&zone.id)
+        else {
+            // This zone isn't in the existing set; add it.
+            zones_to_be_added.insert(zone);
+            continue;
+        };
+
+        // We're already running this zone. If the config hasn't changed, we
+        // have nothing to do.
+        if zone == *existing_zone {
+            continue;
+        }
+
+        // Special case for fixing #7229. We have an incoming request for a zone
+        // that we're already running except the config has changed; normally,
+        // we'd shut the zone down and restart it. However, if we get a new
+        // request that is:
+        //
+        // 1. setting `filesystem_pool`, and
+        // 2. the config for this zone is otherwise identical, and
+        // 3. the new `filesystem_pool` matches the pool on which the zone is
+        //    installed
+        //
+        // then we don't want to shut the zone down and restart it, because the
+        // config hasn't actually changed in any meaningful way; this is just
+        // reconfigurator correcting #7229.
+        if let Some(new_filesystem_pool) = &zone.filesystem_pool {
+            let differs_only_by_filesystem_pool = {
+                // Clone `existing_zone` and mutate its `filesystem_pool` to
+                // match the new request; if they now match, that's the only
+                // field that's different.
+                let mut existing = existing_zone.clone();
+                existing.filesystem_pool = Some(new_filesystem_pool.clone());
+                existing == zone
+            };
+
+            let runtime_zpool = match runtime_zpool {
+                ZpoolOrRamdisk::Zpool(zpool_name) => zpool_name,
+                ZpoolOrRamdisk::Ramdisk => {
+                    // The only zone we run on the ramdisk is the switch
+                    // zone, for which it isn't possible to get a zone
+                    // request, so it should be fine to put an
+                    // `unreachable!()` here. Out of caution for future
+                    // changes, we'll instead return an error that the
+                    // requested zone is on the ramdisk.
+                    error!(
+                        log,
+                        "fix-7229: unexpectedly received request with a \
+                         zone config for a zone running on ramdisk";
+                        "new_config" => ?zone,
+                        "existing_config" => ?existing_zone,
+                    );
+                    return Err(Error::ZoneIsRunningOnRamdisk {
+                        zone_id: zone.id,
+                    });
+                }
+            };
+
+            if differs_only_by_filesystem_pool {
+                if new_filesystem_pool == runtime_zpool {
+                    // Our #7229 special case: the new config is only filling in
+                    // the pool, and it does so correctly. Move on to the next
+                    // zone in the request without adding this zone to either of
+                    // our `zone_to_be_*` sets.
+                    info!(
+                        log,
+                        "fix-7229: accepted new zone config that changes only \
+                         filesystem_pool";
+                        "new_config" => ?zone,
+                    );
+
+                    // We should update this `existing_zone`, but delay doing so
+                    // until we've processed all zones (so if there are any
+                    // failures later, we don't return having partially-updated
+                    // the existing zones).
+                    zones_to_update.push((existing_zone, zone));
+                    continue;
+                } else {
+                    error!(
+                        log,
+                        "fix-7229: rejected new zone config that changes only \
+                         filesystem_pool (incorrect pool)";
+                        "new_config" => ?zone,
+                        "expected_pool" => %runtime_zpool,
+                    );
+                    return Err(Error::InvalidFilesystemPoolZoneConfig {
+                        zone_id: zone.id,
+                        expected_pool: runtime_zpool.clone(),
+                        got_pool: new_filesystem_pool.clone(),
+                    });
+                }
+            }
+        }
+
+        // End of #7229 special case: this zone is already running, but the new
+        // request has changed it in some way. We need to shut it down and
+        // restart it.
+        zones_to_be_removed.insert(existing_zone.clone());
+        zones_to_be_added.insert(zone);
+    }
+
+    // Any remaining entries in `existing_zones_by_id` should be shut down.
+    zones_to_be_removed
+        .extend(existing_zones_by_id.into_values().map(|(z, _)| z.clone()));
+
+    // All zones have been handled successfully; commit any changes to existing
+    // zones we found in our "fix 7229" special case above.
+    for (existing_zone, new_zone) in zones_to_update {
+        *existing_zone = new_zone;
+    }
+
+    info!(
+        log,
+        "ensure_all_omicron_zones: request reconciliation done";
+        "num_zones_to_be_removed" => zones_to_be_removed.len(),
+        "num_zones_to_be_added" => zones_to_be_added.len(),
+    );
+    Ok(ReconciledNewZonesRequest { zones_to_be_removed, zones_to_be_added })
+}
+
 #[cfg(all(test, target_os = "illumos"))]
 mod illumos_tests {
     use crate::metrics;
@@ -5618,6 +5778,8 @@ mod illumos_tests {
 
 #[cfg(test)]
 mod test {
+    use omicron_uuid_kinds::ZpoolUuid;
+
     use super::*;
 
     #[test]
@@ -5649,5 +5811,304 @@ mod test {
             "../schema/all-zones-requests.json",
             &serde_json::to_string_pretty(&schema).unwrap(),
         );
+    }
+
+    #[test]
+    fn test_fix_7229_zone_config_reconciliation() {
+        fn make_omicron_zone_config(
+            filesystem_pool: Option<&ZpoolName>,
+        ) -> OmicronZoneConfig {
+            OmicronZoneConfig {
+                id: OmicronZoneUuid::new_v4(),
+                filesystem_pool: filesystem_pool.cloned(),
+                zone_type: OmicronZoneType::Oximeter {
+                    address: "[::1]:0".parse().unwrap(),
+                },
+            }
+        }
+
+        let logctx =
+            omicron_test_utils::dev::test_setup_log("test_ensure_service");
+        let log = &logctx.log;
+
+        let some_zpools = (0..10)
+            .map(|_| ZpoolName::new_external(ZpoolUuid::new_v4()))
+            .collect::<Vec<_>>();
+
+        // Test 1: We have some zones; the new config makes no changes.
+        {
+            let mut existing = vec![
+                (
+                    make_omicron_zone_config(None),
+                    ZpoolOrRamdisk::Zpool(some_zpools[0].clone()),
+                ),
+                (
+                    make_omicron_zone_config(Some(&some_zpools[1])),
+                    ZpoolOrRamdisk::Zpool(some_zpools[1].clone()),
+                ),
+                (
+                    make_omicron_zone_config(Some(&some_zpools[2])),
+                    ZpoolOrRamdisk::Zpool(some_zpools[2].clone()),
+                ),
+            ];
+            let new_request = OmicronZonesConfig {
+                generation: Generation::new().next(),
+                zones: existing.iter().map(|(zone, _)| zone.clone()).collect(),
+            };
+            let reconciled = reconcile_running_zones_with_new_request(
+                existing.iter_mut().map(|(z, p)| (z, &*p)),
+                new_request.clone(),
+                log,
+            )
+            .expect("reconciled successfully");
+            assert_eq!(reconciled.zones_to_be_removed, HashSet::new());
+            assert_eq!(reconciled.zones_to_be_added, HashSet::new());
+            assert_eq!(
+                existing.iter().map(|(z, _)| z.clone()).collect::<Vec<_>>(),
+                new_request.zones,
+            );
+        }
+
+        // Test 2: We have some zones; the new config changes `filesystem_pool`
+        // to match our runtime pools (i.e., the #7229 fix).
+        {
+            let mut existing = vec![
+                (
+                    make_omicron_zone_config(None),
+                    ZpoolOrRamdisk::Zpool(some_zpools[0].clone()),
+                ),
+                (
+                    make_omicron_zone_config(None),
+                    ZpoolOrRamdisk::Zpool(some_zpools[1].clone()),
+                ),
+                (
+                    make_omicron_zone_config(None),
+                    ZpoolOrRamdisk::Zpool(some_zpools[2].clone()),
+                ),
+            ];
+            let new_request = OmicronZonesConfig {
+                generation: Generation::new().next(),
+                zones: existing
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (zone, _))| {
+                        let mut zone = zone.clone();
+                        zone.filesystem_pool = Some(some_zpools[i].clone());
+                        zone
+                    })
+                    .collect(),
+            };
+            let reconciled = reconcile_running_zones_with_new_request(
+                existing.iter_mut().map(|(z, p)| (z, &*p)),
+                new_request.clone(),
+                log,
+            )
+            .expect("reconciled successfully");
+            assert_eq!(reconciled.zones_to_be_removed, HashSet::new());
+            assert_eq!(reconciled.zones_to_be_added, HashSet::new());
+            assert_eq!(
+                existing.iter().map(|(z, _)| z.clone()).collect::<Vec<_>>(),
+                new_request.zones,
+            );
+        }
+
+        // Test 3: We have some zones; the new config changes `filesystem_pool`
+        // to match our runtime pools (i.e., the #7229 fix) but also changes
+        // something else in the config for the final zone; we should attempt to
+        // remove and re-add that final zone.
+        {
+            let mut existing = vec![
+                (
+                    make_omicron_zone_config(None),
+                    ZpoolOrRamdisk::Zpool(some_zpools[0].clone()),
+                ),
+                (
+                    make_omicron_zone_config(None),
+                    ZpoolOrRamdisk::Zpool(some_zpools[1].clone()),
+                ),
+                (
+                    make_omicron_zone_config(None),
+                    ZpoolOrRamdisk::Zpool(some_zpools[2].clone()),
+                ),
+            ];
+            let new_request = OmicronZonesConfig {
+                generation: Generation::new().next(),
+                zones: existing
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (zone, _))| {
+                        let mut zone = zone.clone();
+                        zone.filesystem_pool = Some(some_zpools[i].clone());
+                        if i == 2 {
+                            zone.zone_type = OmicronZoneType::Oximeter {
+                                address: "[::1]:10000".parse().unwrap(),
+                            };
+                        }
+                        zone
+                    })
+                    .collect(),
+            };
+            let reconciled = reconcile_running_zones_with_new_request(
+                existing.iter_mut().map(|(z, p)| (z, &*p)),
+                new_request.clone(),
+                log,
+            )
+            .expect("reconciled successfully");
+            assert_eq!(
+                reconciled.zones_to_be_removed,
+                existing
+                    .iter()
+                    .skip(2)
+                    .cloned()
+                    .map(|(z, _)| z)
+                    .collect::<HashSet<_>>()
+            );
+            assert_eq!(
+                reconciled.zones_to_be_added,
+                new_request
+                    .zones
+                    .iter()
+                    .skip(2)
+                    .cloned()
+                    .collect::<HashSet<_>>()
+            );
+            // The first two existing zones should have been updated to match
+            // the new request.
+            assert_eq!(
+                existing
+                    .iter()
+                    .take(2)
+                    .map(|(z, _)| z.clone())
+                    .collect::<Vec<_>>(),
+                &new_request.zones[..2],
+            );
+        }
+
+        // Test 4: We have some zones; the new config changes `filesystem_pool`
+        // to match our runtime pools (i.e., the #7229 fix), except the new pool
+        // on the final zone is incorrect. We should get an error back.
+        {
+            let mut existing = vec![
+                (
+                    make_omicron_zone_config(None),
+                    ZpoolOrRamdisk::Zpool(some_zpools[0].clone()),
+                ),
+                (
+                    make_omicron_zone_config(None),
+                    ZpoolOrRamdisk::Zpool(some_zpools[1].clone()),
+                ),
+                (
+                    make_omicron_zone_config(None),
+                    ZpoolOrRamdisk::Zpool(some_zpools[2].clone()),
+                ),
+            ];
+            let existing_orig =
+                existing.iter().map(|(z, _)| z.clone()).collect::<Vec<_>>();
+            let new_request = OmicronZonesConfig {
+                generation: Generation::new().next(),
+                zones: existing
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (zone, _))| {
+                        let mut zone = zone.clone();
+                        if i < 2 {
+                            zone.filesystem_pool = Some(some_zpools[i].clone());
+                        } else {
+                            zone.filesystem_pool = Some(some_zpools[4].clone());
+                        }
+                        zone
+                    })
+                    .collect(),
+            };
+            let err = reconcile_running_zones_with_new_request(
+                existing.iter_mut().map(|(z, p)| (z, &*p)),
+                new_request.clone(),
+                log,
+            )
+            .expect_err("should not have reconciled successfully");
+
+            match err {
+                Error::InvalidFilesystemPoolZoneConfig {
+                    zone_id,
+                    expected_pool,
+                    got_pool,
+                } => {
+                    assert_eq!(zone_id, existing[2].0.id);
+                    assert_eq!(expected_pool, some_zpools[2]);
+                    assert_eq!(got_pool, some_zpools[4]);
+                }
+                _ => panic!("unexpected error: {err}"),
+            }
+            // reconciliation failed, so the contents of our existing configs
+            // should not have changed (even though a couple of the changes
+            // were okay, we should either take all or none to maintain
+            // consistency with the generation-tagged OmicronZonesConfig)
+            assert_eq!(
+                existing.iter().map(|(z, _)| z.clone()).collect::<Vec<_>>(),
+                existing_orig,
+            );
+        }
+
+        // Test 5: We have some zones. The new config applies #7229 fix to the
+        // first zone, doesn't include the remaining zones, and adds some new
+        // zones. We should see "the remaining zones" removed, the "new zones"
+        // added, and the 7229-fixed zone not in either set.
+        {
+            let mut existing = vec![
+                (
+                    make_omicron_zone_config(None),
+                    ZpoolOrRamdisk::Zpool(some_zpools[0].clone()),
+                ),
+                (
+                    make_omicron_zone_config(None),
+                    ZpoolOrRamdisk::Zpool(some_zpools[1].clone()),
+                ),
+                (
+                    make_omicron_zone_config(None),
+                    ZpoolOrRamdisk::Zpool(some_zpools[2].clone()),
+                ),
+            ];
+            let new_request = OmicronZonesConfig {
+                generation: Generation::new().next(),
+                zones: vec![
+                    {
+                        let mut z = existing[0].0.clone();
+                        z.filesystem_pool = Some(some_zpools[0].clone());
+                        z
+                    },
+                    make_omicron_zone_config(None),
+                    make_omicron_zone_config(None),
+                ],
+            };
+            let reconciled = reconcile_running_zones_with_new_request(
+                existing.iter_mut().map(|(z, p)| (z, &*p)),
+                new_request.clone(),
+                log,
+            )
+            .expect("reconciled successfully");
+
+            assert_eq!(
+                reconciled.zones_to_be_removed,
+                existing
+                    .iter()
+                    .skip(1)
+                    .cloned()
+                    .map(|(z, _)| z)
+                    .collect::<HashSet<_>>()
+            );
+            assert_eq!(
+                reconciled.zones_to_be_added,
+                new_request
+                    .zones
+                    .iter()
+                    .skip(1)
+                    .cloned()
+                    .collect::<HashSet<_>>()
+            );
+            // Only the first existing zone is being kept; ensure it matches the
+            // new request.
+            assert_eq!(existing[0].0, new_request.zones[0]);
+        }
+        logctx.cleanup_successful();
     }
 }
