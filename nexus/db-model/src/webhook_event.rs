@@ -4,6 +4,7 @@
 
 use crate::schema::webhook_event;
 use crate::typed_uuid::DbTypedUuid;
+use crate::WebhookEventClass;
 use chrono::{DateTime, Utc};
 use omicron_uuid_kinds::WebhookEventKind;
 use serde::{Deserialize, Serialize};
@@ -34,7 +35,7 @@ pub struct WebhookEvent {
     pub time_dispatched: Option<DateTime<Utc>>,
 
     /// The class of this event.
-    pub event_class: String,
+    pub event_class: WebhookEventClass,
 
     /// The event's data payload.
     pub event: serde_json::Value,

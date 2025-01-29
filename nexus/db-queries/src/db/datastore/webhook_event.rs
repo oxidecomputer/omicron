@@ -12,6 +12,7 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::WebhookDelivery;
 use crate::db::model::WebhookEvent;
+use crate::db::model::WebhookEventClass;
 use crate::db::model::WebhookReceiver;
 use crate::db::pool::DbConnection;
 use crate::db::schema::webhook_delivery::dsl as delivery_dsl;
@@ -30,7 +31,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         id: WebhookEventUuid,
-        event_class: String,
+        event_class: WebhookEventClass,
         event: serde_json::Value,
     ) -> CreateResult<WebhookEvent> {
         let conn = self.pool_connection_authorized(&opctx).await?;
@@ -104,7 +105,7 @@ impl DataStore {
                     &opctx.log,
                     "found {} receivers subscribed to webhook event", rxs.len();
                     "event_id" => ?event.id,
-                    "event_class" => &event.event_class,
+                    "event_class" => %event.event_class,
                     "receivers" => ?rxs.len(),
                 );
 
@@ -116,7 +117,7 @@ impl DataStore {
                         &opctx.log,
                         "found receiver subscribed to event";
                         "event_id" => ?event.id,
-                        "event_class" => &event.event_class,
+                        "event_class" => %event.event_class,
                         "receiver" => ?rx.name(),
                         "receiver_id" => ?rx_id,
                         "glob" => ?sub.glob,
@@ -137,7 +138,7 @@ impl DataStore {
                                 &opctx.log,
                                 "cannot dispatch event to a receiver that has been deleted";
                                 "event_id" => ?event.id,
-                                "event_class" => &event.event_class,
+                                "event_class" => %event.event_class,
                                 "receiver" => ?rx.name(),
                                 "receiver_id" => ?rx_id,
                             );
@@ -187,7 +188,7 @@ impl DataStore {
                         log,
                         "dispatched webhook event to receiver";
                         "event_id" => ?event.id,
-                        "event_class" => &event.event_class,
+                        "event_class" => %event.event_class,
                         "receiver_id" => ?rx_id,
                     );
                     return Ok(delivery);
@@ -202,7 +203,7 @@ impl DataStore {
                         &log,
                         "webhook delivery UUID collision, retrying...";
                         "event_id" => ?event.id,
-                        "event_class" => &event.event_class,
+                        "event_class" => %event.event_class,
                         "receiver_id" => ?rx_id,
                     );
                 }
