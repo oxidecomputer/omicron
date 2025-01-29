@@ -2157,7 +2157,7 @@ table! {
 table! {
     webhook_rx_subscription (rx_id, event_class) {
         rx_id -> Uuid,
-        event_class -> Text,
+        event_class -> crate::WebhookEventClassEnum,
         glob -> Nullable<Text>,
         time_created -> Timestamptz,
     }
@@ -2188,7 +2188,7 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_dispatched -> Nullable<Timestamptz>,
-        event_class -> Text,
+        event_class -> crate::WebhookEventClassEnum,
         event -> Jsonb,
     }
 }

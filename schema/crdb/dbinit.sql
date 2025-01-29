@@ -3447,7 +3447,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_nvme_disk_firmware (
     -- the firmware version string for each NVMe slot (0 indexed), a NULL means the
     -- slot exists but is empty
     slot_firmware_versions STRING(8)[] CHECK (array_length(slot_firmware_versions, 1) BETWEEN 1 AND 7),
-    
+
     -- PK consisting of:
     -- - Which collection this was
     -- - The sled reporting the disk
@@ -4849,6 +4849,19 @@ ON omicron.public.webhook_rx_secret (
 ) WHERE
     time_deleted IS NULL;
 
+-- Webhook event classes.
+--
+-- When creating new event classes, be sure to add them here!
+CREATE TYPE IF NOT EXISTS omicron.public.webhook_event_class AS ENUM (
+    -- Test classes used to test globbing.
+    --
+    -- These are not publicly exposed.
+    'test.foo',
+    'test.foo.bar',
+    'test.baz.bar'
+    -- Add new event classes here!
+);
+
 -- The set of event class filters (either event class names or event class glob
 -- patterns) associated with a webhook receiver.
 --
@@ -4886,7 +4899,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_rx_subscription (
     -- `omicron.public.webhook_rx`)
     rx_id UUID NOT NULL,
     -- An event class to which the receiver is subscribed.
-    event_class STRING(512) NOT NULL,
+    event_class omicron.public.webhook_event_class NOT NULL,
     -- If this subscription is a concrete instantiation of a glob pattern, the
     -- value of the glob that created it (and, a foreign key into
     -- `webhook_rx_event_glob`). If the receiver is subscribed to this exact
@@ -4930,7 +4943,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_event (
     -- Set when dispatch entries have been created for this event.
     time_dispatched TIMESTAMPTZ,
     -- The class of event that this is.
-    event_class STRING(512) NOT NULL,
+    event_class omicron.public.webhook_event_class NOT NULL,
     -- Actual event data. The structure of this depends on the event class.
     event JSONB NOT NULL
 );

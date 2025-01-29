@@ -67,6 +67,7 @@ mod v2p_mapping;
 mod vmm_state;
 mod webhook_delivery;
 mod webhook_event;
+mod webhook_event_class;
 mod webhook_rx;
 // These actually represent subqueries, not real table.
 // However, they must be defined in the same crate as our tables
@@ -236,6 +237,7 @@ pub use vpc_router::*;
 pub use vpc_subnet::*;
 pub use webhook_delivery::*;
 pub use webhook_event::*;
+pub use webhook_event_class::*;
 pub use webhook_rx::*;
 pub use zpool::*;
 

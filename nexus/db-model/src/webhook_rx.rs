@@ -11,6 +11,7 @@ use crate::schema_versions;
 use crate::typed_uuid::DbTypedUuid;
 use crate::Generation;
 use crate::WebhookDelivery;
+use crate::WebhookEventClass;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use nexus_types::external_api::views;
@@ -150,7 +151,7 @@ impl WebhookRxSecret {
 #[diesel(table_name = webhook_rx_subscription)]
 pub struct WebhookRxSubscription {
     pub rx_id: DbTypedUuid<WebhookReceiverKind>,
-    pub event_class: String,
+    pub event_class: WebhookEventClass,
     pub glob: Option<String>,
     pub time_created: DateTime<Utc>,
 }
@@ -180,7 +181,7 @@ impl WebhookRxEventGlob {
 #[derive(Clone, Debug)]
 pub enum WebhookSubscriptionKind {
     Glob(WebhookGlob),
-    Exact(String),
+    Exact(WebhookEventClass),
 }
 
 impl WebhookSubscriptionKind {
@@ -195,13 +196,13 @@ impl WebhookSubscriptionKind {
             let regex = WebhookGlob::regex_from_glob(&value)?;
             Ok(Self::Glob(WebhookGlob { regex, glob: value }))
         } else {
-            Ok(Self::Exact(value))
+            Ok(Self::Exact(value.parse()?))
         }
     }
 
     fn into_event_class_string(self) -> String {
         match self {
-            Self::Exact(class) => class,
+            Self::Exact(class) => class.to_string(),
             Self::Glob(WebhookGlob { glob, .. }) => glob,
         }
     }
@@ -272,7 +273,10 @@ impl WebhookGlob {
 }
 
 impl WebhookRxSubscription {
-    pub fn exact(rx_id: WebhookReceiverUuid, event_class: String) -> Self {
+    pub fn exact(
+        rx_id: WebhookReceiverUuid,
+        event_class: WebhookEventClass,
+    ) -> Self {
         Self {
             rx_id: DbTypedUuid(rx_id),
             event_class,
@@ -281,7 +285,10 @@ impl WebhookRxSubscription {
         }
     }
 
-    pub fn for_glob(glob: &WebhookRxEventGlob, event_class: String) -> Self {
+    pub fn for_glob(
+        glob: &WebhookRxEventGlob,
+        event_class: WebhookEventClass,
+    ) -> Self {
         Self {
             rx_id: glob.rx_id,
             glob: Some(glob.glob.glob.clone()),
