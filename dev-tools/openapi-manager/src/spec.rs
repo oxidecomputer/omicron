@@ -2,11 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+// XXX-dap delete me
+
 use std::io::Write;
 
 use crate::apis::{ApiBoundary, Versions};
-use crate::combined::{check_file, read_opt, SpecCheckStatus};
-pub(crate) use crate::combined::{ApiSpecFileWhich, CheckStale};
+use crate::resolved::{check_file, read_opt};
+pub(crate) use crate::resolved::{CheckStale, CheckStatus};
 pub(crate) use crate::validation::DocumentSummary;
 use crate::validation::{ValidationContextImpl, ValidationResult};
 use anyhow::{Context, Result};
@@ -15,7 +17,6 @@ use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::{ApiDescription, ApiDescriptionBuildErrors, StubContext};
 use openapi_manager_types::ValidationContext;
 use openapiv3::OpenAPI;
-use crate::spec_files_blessed::BlessedFiles;
 
 /// All APIs managed by openapi-manager.
 // TODO The metadata here overlaps with metadata in api-manifest.toml.
@@ -431,4 +432,46 @@ fn overwrite_file(path: &Utf8Path, contents: &[u8]) -> Result<OverwriteStatus> {
         .with_context(|| format!("failed to write to `{}`", path))?;
 
     Ok(OverwriteStatus::Updated)
+}
+
+// XXX-dap move this to validation.rs and call that check.rs?
+// XXX-dap actually: it seems like we might want to put this into Resolution
+#[derive(Debug)]
+#[must_use]
+pub(crate) struct SpecCheckStatus {
+    pub(crate) summary: DocumentSummary,
+    pub(crate) openapi_doc: CheckStatus,
+    pub(crate) extra_files: Vec<(Utf8PathBuf, CheckStatus)>,
+}
+
+impl SpecCheckStatus {
+    pub(crate) fn total_errors(&self) -> usize {
+        self.iter_errors().count()
+    }
+
+    pub(crate) fn extra_files_len(&self) -> usize {
+        self.extra_files.len()
+    }
+
+    pub(crate) fn iter_errors(
+        &self,
+    ) -> impl Iterator<Item = (ApiSpecFileWhich<'_>, &CheckStale)> {
+        std::iter::once((ApiSpecFileWhich::Openapi, &self.openapi_doc))
+            .chain(self.extra_files.iter().map(|(file_name, status)| {
+                (ApiSpecFileWhich::Extra(file_name), status)
+            }))
+            .filter_map(|(spec_file, status)| {
+                if let CheckStatus::Stale(e) = status {
+                    Some((spec_file, e))
+                } else {
+                    None
+                }
+            })
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ApiSpecFileWhich<'a> {
+    Openapi,
+    Extra(&'a Utf8Path),
 }

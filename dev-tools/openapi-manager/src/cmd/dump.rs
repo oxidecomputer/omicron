@@ -4,28 +4,18 @@
 
 use crate::{
     apis::{ApiIdent, ManagedApis},
-    cmd::output::{headers, OutputOpts, Styles},
     environment::{BlessedSource, GeneratedSource},
-    git::GitRevision,
     resolved::{Resolution, Resolved},
     spec::Environment,
-    spec_files_blessed::BlessedFiles,
-    spec_files_generated::GeneratedFiles,
     spec_files_generic::ApiSpecFile,
-    spec_files_local::LocalFiles,
-    FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
 };
-use anyhow::{Context, Result};
-use camino::Utf8Path;
-use owo_colors::OwoColorize;
 use semver::Version;
-use std::{collections::BTreeMap, ops::Deref, process::ExitCode};
+use std::{collections::BTreeMap, ops::Deref};
 
 pub(crate) fn dump_impl(
     env: &Environment,
     blessed_source: &BlessedSource,
     generated_source: &GeneratedSource,
-    output: &OutputOpts,
 ) -> anyhow::Result<()> {
     let apis = ManagedApis::all()?;
 

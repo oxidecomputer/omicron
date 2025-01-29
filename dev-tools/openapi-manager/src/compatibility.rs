@@ -13,8 +13,8 @@ use thiserror::Error;
 pub struct OpenApiCompatibilityError {}
 
 pub fn api_compatible(
-    spec1: &OpenAPI,
-    spec2: &OpenAPI,
+    _spec1: &OpenAPI,
+    _spec2: &OpenAPI,
 ) -> anyhow::Result<Vec<OpenApiCompatibilityError>> {
     // XXX-dap
     Ok(Vec::new())

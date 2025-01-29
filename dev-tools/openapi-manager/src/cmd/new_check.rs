@@ -4,14 +4,13 @@
 
 use crate::{
     apis::ManagedApis,
-    cmd::output::{headers, OutputOpts, Styles},
+    cmd::output::{OutputOpts, Styles},
     environment::{BlessedSource, GeneratedSource},
     resolved::{Problem, Resolution, Resolved},
     spec::Environment,
     FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
 };
-use anyhow::{bail, Context, Result};
-use owo_colors::OwoColorize;
+use anyhow::{bail, Result};
 use std::process::ExitCode;
 
 #[derive(Clone, Copy, Debug)]
@@ -90,6 +89,10 @@ pub(crate) fn new_check_impl(
                 if api.is_versioned() { "versioned" } else { "lockstep" },
                 version
             );
+
+            for p in problems {
+                println!("problem: {}", p);
+            }
         }
     }
 

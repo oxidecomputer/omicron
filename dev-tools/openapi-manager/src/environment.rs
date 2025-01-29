@@ -11,7 +11,6 @@ use crate::spec_files_blessed::BlessedFiles;
 use crate::spec_files_generated::GeneratedFiles;
 use crate::spec_files_local::walk_local_directory;
 use crate::spec_files_local::LocalFiles;
-use anyhow::Context;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 

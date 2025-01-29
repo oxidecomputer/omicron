@@ -11,21 +11,18 @@
 //! This is meant to be invoked as `cargo xtask openapi`, but is a separate
 //! binary to avoid compiling a bunch of extra code when running `cargo xtask`.
 
-// XXX-dap new stuff
 mod apis;
 mod cmd;
-mod combined;
 mod compatibility;
 mod environment;
 mod git;
+mod resolved;
+mod spec;
 mod spec_files_blessed;
 mod spec_files_generated;
 mod spec_files_generic;
 mod spec_files_local;
-mod resolved;
 mod validation;
-
-mod spec;
 
 #[macro_use]
 extern crate newtype_derive;

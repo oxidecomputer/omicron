@@ -4,7 +4,6 @@
 
 use crate::apis::ApiBoundary;
 use crate::apis::ManagedApi;
-use anyhow::Context;
 use camino::Utf8PathBuf;
 use openapi_manager_types::ValidationBackend;
 use openapi_manager_types::ValidationContext;
@@ -12,11 +11,8 @@ use openapiv3::OpenAPI;
 
 pub fn validate_generated_openapi_document(
     api: &ManagedApi,
-    contents: &[u8],
-) -> anyhow::Result<(OpenAPI, ValidationResult)> {
-    let openapi_doc: OpenAPI = serde_json::from_slice(&contents)
-        .context("generated document is not valid OpenAPI")?;
-
+    openapi_doc: &OpenAPI,
+) -> anyhow::Result<ValidationResult> {
     // Check for lint errors.
     let errors = match api.boundary() {
         ApiBoundary::Internal => openapi_lint::validate(&openapi_doc),
@@ -46,10 +42,7 @@ pub fn validate_generated_openapi_document(
         ));
     }
 
-    Ok((
-        openapi_doc,
-        ValidationResult { extra_files: validation_context.files },
-    ))
+    Ok(ValidationResult { extra_files: validation_context.files })
 }
 
 #[derive(Debug)]

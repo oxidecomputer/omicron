@@ -13,7 +13,7 @@ use crate::{
         check::check_impl, dump::dump_impl, generate::generate_impl,
         list::list_impl, new_check::new_check_impl, output::OutputOpts,
     },
-    environment::{BlessedSource, GeneratedSource, LocalSource},
+    environment::{BlessedSource, GeneratedSource},
     git::GitRevision,
     spec::Environment,
 };
@@ -33,7 +33,7 @@ pub struct App {
 impl App {
     pub fn exec(self) -> Result<ExitCode> {
         match self.command {
-            Command::Dump(args) => args.exec(&self.output_opts),
+            Command::Dump(args) => args.exec(),
             Command::List(args) => args.exec(&self.output_opts),
             Command::Generate(args) => args.exec(&self.output_opts),
             Command::Check(args) => args.exec(&self.output_opts),
@@ -136,11 +136,11 @@ pub struct DumpArgs {
 }
 
 impl DumpArgs {
-    fn exec(self, output: &OutputOpts) -> anyhow::Result<ExitCode> {
+    fn exec(self) -> anyhow::Result<ExitCode> {
         let env = Environment::new(self.local.dir)?;
         let blessed_source = BlessedSource::try_from(self.blessed)?;
         let generated_source = GeneratedSource::from(self.generated);
-        dump_impl(&env, &blessed_source, &generated_source, output)?;
+        dump_impl(&env, &blessed_source, &generated_source)?;
         Ok(ExitCode::SUCCESS)
     }
 }

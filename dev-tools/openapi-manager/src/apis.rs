@@ -143,10 +143,6 @@ impl ManagedApi {
         self.versions.iter_versions_semvers()
     }
 
-    pub fn has_version(&self, version: &semver::Version) -> bool {
-        self.iter_versions_semver().any(|v| v == version)
-    }
-
     pub fn generate_openapi_doc(
         &self,
         version: &semver::Version,
@@ -241,10 +237,6 @@ impl ManagedApis {
     pub fn api(&self, ident: &ApiIdent) -> Option<&ManagedApi> {
         self.apis.get(ident)
     }
-
-    pub fn into_map(self) -> BTreeMap<ApiIdent, ManagedApi> {
-        self.apis
-    }
 }
 
 /// Newtype for API identifiers
@@ -337,7 +329,7 @@ impl Versions {
         &self,
     ) -> Option<impl Iterator<Item = &SupportedVersion> + '_> {
         match self {
-            Versions::Lockstep { version } => None,
+            Versions::Lockstep { .. } => None,
             Versions::Versioned { supported_versions } => {
                 Some(supported_versions.iter())
             }

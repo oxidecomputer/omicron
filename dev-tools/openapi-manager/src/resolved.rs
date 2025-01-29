@@ -22,7 +22,6 @@ use anyhow::anyhow;
 use anyhow::Context;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
-use openapi_manager_types::SupportedVersion;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt::Display;
@@ -305,7 +304,7 @@ fn resolve_orphaned_local_specs<'a>(
         BTreeSet<&'a semver::Version>,
     >,
     local: &'a LocalFiles,
-) -> impl Iterator<Item = (&'a ApiSpecFileName)> + 'a {
+) -> impl Iterator<Item = &'a ApiSpecFileName> + 'a {
     local.spec_files.iter().flat_map(|(ident, version_map)| {
         let set = supported_versions_by_api.get(ident);
         version_map
@@ -480,7 +479,7 @@ fn validate_generated(
     generated: &GeneratedApiSpecFile,
     problems: &mut Vec<Problem>,
 ) {
-    match validate(env, api, version, generated) {
+    match validate(env, api, generated) {
         Err(source) => {
             problems.push(Problem::GeneratedValidationError {
                 api_ident: api.ident().clone(),
@@ -520,13 +519,10 @@ fn validate_generated(
 fn validate(
     env: &Environment,
     api: &ManagedApi,
-    version: &semver::Version,
     generated: &GeneratedApiSpecFile,
 ) -> anyhow::Result<Vec<(Utf8PathBuf, CheckStatus)>> {
-    let contents = generated.contents();
-    // XXX-dap I think we might be parsing this twice unnecessarily now
-    let (openapi, validation_result) =
-        validate_generated_openapi_document(api, &contents)?;
+    let openapi = generated.openapi();
+    let validation_result = validate_generated_openapi_document(api, &openapi)?;
     let extra_files = validation_result
         .extra_files
         .into_iter()
