@@ -219,6 +219,14 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         redactor.extra_variable_length("cockroachdb_version", &crdb_version);
     }
 
+    // The `tuf_artifact_replication` task's output depends on how
+    // many sleds happened to register with Nexus before its first
+    // execution. These redactions work around the issue described in
+    // https://github.com/oxidecomputer/omicron/issues/7417.
+    redactor
+        .field("list ok:", r"\d+")
+        .section(&["task: \"tuf_artifact_replication\"", "request ringbuf:"]);
+
     for args in invocations {
         println!("running commands with args: {:?}", args);
         let p = postgres_url.to_string();

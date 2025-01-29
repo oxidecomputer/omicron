@@ -2,12 +2,18 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use chrono::DateTime;
+use chrono::Utc;
+use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::collections::VecDeque;
+use std::sync::Arc;
 use uuid::Uuid;
 
 /// The status of a `region_replacement` background task activation
@@ -232,6 +238,115 @@ impl SupportBundleCollectionReport {
             activated_in_db_ok: false,
         }
     }
+}
+
+/// The status of a `tuf_artifact_replication` background task activation
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct TufArtifactReplicationStatus {
+    pub last_run_counters: TufArtifactReplicationCounters,
+    pub lifetime_counters: TufArtifactReplicationCounters,
+    pub request_debug_ringbuf: Arc<VecDeque<TufArtifactReplicationRequest>>,
+    pub local_repos: usize,
+}
+
+impl TufArtifactReplicationStatus {
+    pub fn last_run_ok(&self) -> bool {
+        self.last_run_counters.list_err == 0
+            && self.last_run_counters.put_err == 0
+            && self.last_run_counters.copy_err == 0
+            && self.last_run_counters.delete_err == 0
+    }
+}
+
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    derive_more::AddAssign,
+)]
+pub struct TufArtifactReplicationCounters {
+    pub list_ok: usize,
+    pub list_err: usize,
+    pub put_ok: usize,
+    pub put_err: usize,
+    pub copy_ok: usize,
+    pub copy_err: usize,
+    pub delete_ok: usize,
+    pub delete_err: usize,
+}
+
+impl TufArtifactReplicationCounters {
+    pub fn inc(&mut self, request: &TufArtifactReplicationRequest) {
+        match (&request.operation, &request.error) {
+            (TufArtifactReplicationOperation::List, Some(_)) => {
+                self.list_err += 1
+            }
+            (TufArtifactReplicationOperation::List, None) => self.list_ok += 1,
+            (TufArtifactReplicationOperation::Put { .. }, Some(_)) => {
+                self.put_err += 1
+            }
+            (TufArtifactReplicationOperation::Put { .. }, None) => {
+                self.put_ok += 1
+            }
+            (TufArtifactReplicationOperation::Copy { .. }, Some(_)) => {
+                self.copy_err += 1
+            }
+            (TufArtifactReplicationOperation::Copy { .. }, None) => {
+                self.copy_ok += 1
+            }
+            (TufArtifactReplicationOperation::Delete { .. }, Some(_)) => {
+                self.delete_err += 1
+            }
+            (TufArtifactReplicationOperation::Delete { .. }, None) => {
+                self.delete_ok += 1
+            }
+        }
+    }
+
+    pub fn ok(&self) -> usize {
+        self.list_ok
+            .saturating_add(self.put_ok)
+            .saturating_add(self.copy_ok)
+            .saturating_add(self.delete_ok)
+    }
+
+    pub fn err(&self) -> usize {
+        self.list_err
+            .saturating_add(self.put_err)
+            .saturating_add(self.copy_err)
+            .saturating_add(self.delete_err)
+    }
+
+    pub fn sum(&self) -> usize {
+        self.ok().saturating_add(self.err())
+    }
+}
+
+#[derive(
+    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord,
+)]
+pub struct TufArtifactReplicationRequest {
+    pub time: DateTime<Utc>,
+    pub target_sled: SledUuid,
+    #[serde(flatten)]
+    pub operation: TufArtifactReplicationOperation,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(
+    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord,
+)]
+#[serde(tag = "operation", rename_all = "snake_case")]
+pub enum TufArtifactReplicationOperation {
+    List,
+    Put { hash: ArtifactHash },
+    Copy { hash: ArtifactHash, source_sled: SledUuid },
+    Delete { hash: ArtifactHash },
 }
 
 /// The status of an `blueprint_rendezvous` background task activation.

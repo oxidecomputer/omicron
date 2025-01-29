@@ -189,6 +189,7 @@ mod tests {
                 .sled_upsert(SledUpdate::new(
                     sled_id.into_untyped_uuid(),
                     "[::1]:0".parse().unwrap(),
+                    0,
                     SledBaseboard {
                         serial_number: format!("test-sn-{id}"),
                         part_number: "test-pn".to_string(),

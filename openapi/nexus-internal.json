@@ -5474,6 +5474,12 @@
               }
             ]
           },
+          "repo_depot_port": {
+            "description": "The port of the Repo Depot API endpoint, on the same IP as `sa_address`",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
           "reservoir_size": {
             "description": "Amount of RAM dedicated to the VMM reservoir\n\nMust be smaller than \"usable_physical_ram\"",
             "allOf": [
@@ -5513,6 +5519,7 @@
           "baseboard",
           "decommissioned",
           "generation",
+          "repo_depot_port",
           "reservoir_size",
           "role",
           "sa_address",
