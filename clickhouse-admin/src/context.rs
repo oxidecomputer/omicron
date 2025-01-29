@@ -121,79 +121,6 @@ impl ServerContext {
         })
     }
 
-    pub fn generate_config_and_enable_svc(
-        &self,
-        replica_settings: ServerConfigurableSettings,
-    ) -> Result<ReplicaConfig, HttpError> {
-        let mut current_generation = self.generation.lock().unwrap();
-        let incoming_generation = replica_settings.generation();
-
-        // If the incoming generation number is lower, then we have a problem.
-        // We should return an error instead of silently skipping the configuration
-        // file generation.
-        if let Some(current) = *current_generation {
-            if current > incoming_generation {
-                return Err(HttpError::for_client_error(
-                    Some(String::from("Conflict")),
-                    StatusCode::CONFLICT,
-                    format!(
-                        "current generation '{}' is greater than incoming generation '{}'",
-                        current,
-                        incoming_generation,
-                    )
-                ));
-            }
-        };
-
-        let output =
-            self.clickward().generate_server_config(replica_settings)?;
-
-        // We want to update the generation number only if the config file has been
-        // generated successfully.
-        *current_generation = Some(incoming_generation);
-
-        // Once we have generated the client we can safely enable the clickhouse_server service
-        let fmri = "svc:/oxide/clickhouse_server:default".to_string();
-        Svcadm::enable_service(fmri)?;
-
-        Ok(output)
-    }
-
-    pub async fn init_db(&self) -> Result<(), HttpError> {
-        let log = self.log();
-        // Initialize the database only if it was not previously initialized.
-        // TODO: Migrate schema to newer version without wiping data.
-        let client = self.oximeter_client();
-        let version = client.read_latest_version().await.map_err(|e| {
-            HttpError::for_internal_error(format!(
-                "can't read ClickHouse version: {e}",
-            ))
-        })?;
-        if version == 0 {
-            info!(
-                log,
-                "initializing replicated ClickHouse cluster to version {OXIMETER_VERSION}"
-            );
-            let replicated = true;
-            self.oximeter_client()
-                .initialize_db_with_version(replicated, OXIMETER_VERSION)
-                .await
-                .map_err(|e| {
-                    HttpError::for_internal_error(format!(
-                        "can't initialize replicated ClickHouse cluster \
-                         to version {OXIMETER_VERSION}: {e}",
-                    ))
-                })?;
-        } else {
-            info!(
-                log,
-                "skipping initialization of replicated ClickHouse cluster at version {version}"
-            );
-        }
-
-        Ok(())
-    }
-
     pub fn clickhouse_cli(&self) -> &ClickhouseCli {
         &self.clickhouse_cli
     }
@@ -238,15 +165,90 @@ async fn long_running_ch_server_task(
                 response,
             } => {
                 let result =
-                    ctx.generate_config_and_enable_svc(replica_settings);
+                    generate_config_and_enable_svc(ctx, replica_settings);
                 response.send(result).expect("failed to send value from configuration generation to channel");
             }
             ClickhouseAdminServerRequest::DbInit { ctx, response } => {
-                let result = ctx.init_db().await;
+                let replicated = true;
+                let result = init_db(ctx, replicated).await;
                 response.send(result).expect("failed to send value from database initialization to channel");
             }
         }
     }
+}
+
+pub fn generate_config_and_enable_svc(
+    ctx: Arc<ServerContext>,
+    replica_settings: ServerConfigurableSettings,
+) -> Result<ReplicaConfig, HttpError> {
+    let mut current_generation = ctx.generation.lock().unwrap();
+    let incoming_generation = replica_settings.generation();
+
+    // If the incoming generation number is lower, then we have a problem.
+    // We should return an error instead of silently skipping the configuration
+    // file generation.
+    if let Some(current) = *current_generation {
+        if current > incoming_generation {
+            return Err(HttpError::for_client_error(
+                Some(String::from("Conflict")),
+                StatusCode::CONFLICT,
+                format!(
+                    "current generation '{}' is greater than incoming generation '{}'",
+                    current,
+                    incoming_generation,
+                )
+            ));
+        }
+    };
+
+    let output = ctx.clickward().generate_server_config(replica_settings)?;
+
+    // We want to update the generation number only if the config file has been
+    // generated successfully.
+    *current_generation = Some(incoming_generation);
+
+    // Once we have generated the client we can safely enable the clickhouse_server service
+    let fmri = "svc:/oxide/clickhouse_server:default".to_string();
+    Svcadm::enable_service(fmri)?;
+
+    Ok(output)
+}
+
+pub async fn init_db(
+    ctx: Arc<ServerContext>,
+    replicated: bool,
+) -> Result<(), HttpError> {
+    let log = ctx.log();
+    // Initialize the database only if it was not previously initialized.
+    // TODO: Migrate schema to newer version without wiping data.
+    let client = ctx.oximeter_client();
+    let version = client.read_latest_version().await.map_err(|e| {
+        HttpError::for_internal_error(format!(
+            "can't read ClickHouse version: {e}",
+        ))
+    })?;
+    if version == 0 {
+        info!(
+            log,
+            "initializing replicated ClickHouse cluster to version {OXIMETER_VERSION}"
+        );
+        ctx.oximeter_client()
+            .initialize_db_with_version(replicated, OXIMETER_VERSION)
+            .await
+            .map_err(|e| {
+                HttpError::for_internal_error(format!(
+                    "can't initialize replicated ClickHouse cluster \
+                     to version {OXIMETER_VERSION}: {e}",
+                ))
+            })?;
+    } else {
+        info!(
+            log,
+            "skipping initialization of replicated ClickHouse cluster at version {version}"
+        );
+    }
+
+    Ok(())
 }
 
 pub struct SingleServerContext {
