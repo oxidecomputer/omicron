@@ -2966,17 +2966,19 @@ async fn cmd_db_region_replacement_request(
 ) -> Result<(), anyhow::Error> {
     let region = datastore.get_region(args.region_id).await?;
 
-    let request_id = if region.read_only() {
-        datastore
+    if region.read_only() {
+        let request_id = datastore
             .create_read_only_region_replacement_request(opctx, region.id())
-            .await?
-    } else {
-        datastore
-            .create_region_replacement_request_for_region(opctx, &region)
-            .await?
-    };
+            .await?;
 
-    println!("region replacement {request_id} created");
+        println!("region snapshot replacement {request_id} created");
+    } else {
+        let request_id = datastore
+            .create_region_replacement_request_for_region(opctx, &region)
+            .await?;
+
+        println!("region replacement {request_id} created");
+    }
 
     Ok(())
 }
