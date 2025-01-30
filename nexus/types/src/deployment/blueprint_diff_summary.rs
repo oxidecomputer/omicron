@@ -245,6 +245,35 @@ impl<'a> BlueprintDiffSummary<'a> {
         self.diff.blueprint_zones.modified.get(sled_id)
     }
 
+    /// Iterate over all added zones on a sled
+    pub fn added_zones(
+        &self,
+        sled_id: &SledUuid,
+    ) -> Option<(
+        Option<Generation>,
+        Option<Generation>,
+        Box<dyn Iterator<Item = &'a BlueprintZoneConfig> + 'a>,
+    )> {
+        // First check if the sled is added
+        if let Some(&zones_cfg) = self.diff.blueprint_zones.added.get(sled_id) {
+            return Some((
+                Some(zones_cfg.generation),
+                None,
+                Box::new(zones_cfg.zones.iter()),
+            ));
+        }
+
+        // Then check if the sled is modified and there are any added zones
+        self.diff.blueprint_zones.modified.get(sled_id).map(|zones_cfg_diff| {
+            (
+                Some(*zones_cfg_diff.generation.before),
+                Some(*zones_cfg_diff.generation.after),
+                Box::new(zones_cfg_diff.zones.added.values().map(|z| *z))
+                    as Box<dyn Iterator<Item = &BlueprintZoneConfig>>,
+            )
+        })
+    }
+
     /// Iterate over all removed zones on a sled
     pub fn removed_zones(
         &self,
@@ -271,6 +300,25 @@ impl<'a> BlueprintDiffSummary<'a> {
                 Some(*zones_cfg_diff.generation.after),
                 Box::new(zones_cfg_diff.zones.removed.values().map(|z| *z))
                     as Box<dyn Iterator<Item = &BlueprintZoneConfig>>,
+            )
+        })
+    }
+
+    /// Iterate over all modified zones on a sled
+    pub fn modified_zones(
+        &self,
+        sled_id: &SledUuid,
+    ) -> Option<(
+        Generation,
+        Generation,
+        impl Iterator<Item = &BlueprintZoneConfigDiff<'a>>,
+    )> {
+        // Then check if the sled is modified and there are any added zones
+        self.diff.blueprint_zones.modified.get(sled_id).map(|zones_cfg_diff| {
+            (
+                *zones_cfg_diff.generation.before,
+                *zones_cfg_diff.generation.after,
+                zones_cfg_diff.zones.modified.values(),
             )
         })
     }
