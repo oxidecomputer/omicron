@@ -51,11 +51,14 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         let replica_settings = body.into_inner();
         let clickward = ctx.clickward();
         let log = ctx.log();
+        // TODO: Clean up
+        let generation_tx = ctx.generation_tx.clone();
 
         let (response_tx, response_rx) = oneshot::channel();
         ctx.tx
             .send_async(ClickhouseAdminServerRequest::GenerateConfig {
                 ctx: ctx.clone(),
+                generation_tx,
                 clickward,
                 log,
                 replica_settings,
@@ -81,7 +84,10 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
     ) -> Result<HttpResponseOk<Generation>, HttpError> {
         let ctx = rqctx.context();
 
-        let gen = match ctx.generation() {
+        let generation_rx = ctx.generation_tx.subscribe();
+        let gen = match *generation_rx.borrow() {
+
+//        let gen = match ctx.generation() {
             Some(g) => g,
             None => {
                 return Err(HttpError::for_client_error(

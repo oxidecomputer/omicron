@@ -26,7 +26,7 @@ use std::io::{BufRead, BufReader};
 use std::net::SocketAddrV6;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 
 pub struct KeeperServerContext {
     clickward: Clickward,
@@ -80,6 +80,7 @@ pub struct ServerContext {
     log: Logger,
     pub generation: Mutex<Option<Generation>>,
     pub tx: Sender<ClickhouseAdminServerRequest>,
+    pub generation_tx: watch::Sender<Option<Generation>>,
 }
 
 impl ServerContext {
@@ -106,6 +107,8 @@ impl ServerContext {
         let gen = read_generation_from_file(config_path)?;
         let generation = Mutex::new(gen);
 
+        let (generation_tx, _rx) = watch::channel(gen);
+
         // We only want to handle one in flight request at a time. Reconfigurator execution will retry
         // again later anyway. We use a flume bounded channel with a size of 0 to act as a rendezvous channel.
         let (inner_tx, inner_rx) = flume::bounded(0);
@@ -118,6 +121,7 @@ impl ServerContext {
             log,
             generation,
             tx: inner_tx,
+            generation_tx, 
         })
     }
 
@@ -148,6 +152,7 @@ pub enum ClickhouseAdminServerRequest {
         // TODO: Remove ctx once the generation number is handled
         // via a watcher channel
         ctx: Arc<ServerContext>,
+        generation_tx: watch::Sender<Option<Generation>>,
         clickward: Clickward,
         log: Logger,
         replica_settings: ServerConfigurableSettings,
@@ -170,6 +175,7 @@ async fn long_running_ch_admin_server_task(
         match request {
             ClickhouseAdminServerRequest::GenerateConfig {
                 ctx,
+                generation_tx,
                 clickward,
                 log,
                 replica_settings,
@@ -177,6 +183,7 @@ async fn long_running_ch_admin_server_task(
             } => {
                 let result = generate_config_and_enable_svc(
                     ctx,
+                    generation_tx,
                     clickward,
                     replica_settings,
                 );
@@ -210,17 +217,22 @@ pub fn generate_config_and_enable_svc(
     // TODO: Expand ctx into separate items
     // TODO: Send the generation number via the watcher channel first before
     // removing ctx entirely
-    ctx: Arc<ServerContext>,
+    _ctx: Arc<ServerContext>,
+    generation_tx: watch::Sender<Option<Generation>>,
     clickward: Clickward,
     replica_settings: ServerConfigurableSettings,
 ) -> Result<ReplicaConfig, HttpError> {
-    let mut current_generation = ctx.generation.lock().unwrap();
+    //let mut current_generation = ctx.generation.lock().unwrap();
     let incoming_generation = replica_settings.generation();
+
+    let generation_rx = generation_tx.subscribe();
+    let current_generation = *generation_rx.borrow();
 
     // If the incoming generation number is lower, then we have a problem.
     // We should return an error instead of silently skipping the configuration
     // file generation.
-    if let Some(current) = *current_generation {
+    //if let Some(current) = *current_generation {
+    if let Some(current) = current_generation {
         if current > incoming_generation {
             return Err(HttpError::for_client_error(
                 Some(String::from("Conflict")),
@@ -238,7 +250,10 @@ pub fn generate_config_and_enable_svc(
 
     // We want to update the generation number only if the config file has been
     // generated successfully.
-    *current_generation = Some(incoming_generation);
+    //*current_generation = Some(incoming_generation);
+    generation_tx.send(Some(incoming_generation)).map_err(|e| HttpError::for_internal_error(format!(
+        "failure to send request: {e}"
+    )))?;
 
     // Once we have generated the client we can safely enable the clickhouse_server service
     let fmri = "svc:/oxide/clickhouse_server:default".to_string();
