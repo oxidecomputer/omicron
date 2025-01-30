@@ -149,9 +149,11 @@ macro_rules! api_versions {
             )*
 
             pub fn supported_versions() -> SupportedVersions {
-                SupportedVersions::new(vec![
+                let mut literal_versions = vec![
                     $( SupportedVersion::new(&[<VERSION_ $name>], $desc) ),*
-                ])
+                ];
+                literal_versions.reverse();
+                SupportedVersions::new(literal_versions)
             }
         }
     };
