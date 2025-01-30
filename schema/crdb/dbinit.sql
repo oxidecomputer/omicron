@@ -4799,6 +4799,63 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_record_per_volume_resource_usage on omicro
     region_snapshot_snapshot_id
 );
 
+CREATE TABLE IF NOT EXISTS audit_log (
+    id UUID NOT NULL,
+    timestamp TIMESTAMPTZ NOT NULL,
+    -- TODO: sizes on all strings
+    request_id STRING NOT NULL,
+    request_uri STRING NOT NULL,
+    operation_id STRING NOT NULL,
+    source_ip STRING NOT NULL,
+
+    actor_id UUID,
+    actor_silo_id UUID,
+    access_method STRING,
+
+    -- fields we can only fill in after the operation
+    resource_id UUID,
+    time_completed TIMESTAMPTZ,
+    http_status_code INT4,
+    error_code STRING,
+    error_message STRING,
+    -- this stuff avoids table scans when filtering and sorting by timestamp
+    -- sequential field must go after the random field
+    -- https://www.cockroachlabs.com/docs/v22.1/performance-best-practices-overview#use-multi-column-primary-keys
+    -- https://www.cockroachlabs.com/docs/v22.1/hash-sharded-indexes#create-a-table-with-a-hash-sharded-secondary-index
+    PRIMARY KEY (id, timestamp),
+    INDEX (timestamp) USING HASH,
+    INDEX (time_completed) USING HASH
+);
+
+-- View of audit log entries that have been "completed". This lets us treat that
+-- subset of rows as its own table in the data model code. Completing an entry
+-- means updating the entry after an operation is complete with the result of
+-- the operation. Because we do not intend to fail or roll back the operation
+-- if the completion write fails (while we do abort if the audit log entry
+-- initialization call fails), it is always possible (though rare) that there
+-- will be some incomplete entries remaining for operations that have in fact
+-- completed. We intend to complete those periodically with some kind of job
+-- and most likely mark them with a special third status that is neither success
+-- nor failure.
+CREATE VIEW audit_log_complete AS
+SELECT 
+    id,
+    timestamp,
+    request_id,
+    request_uri,
+    operation_id,
+    source_ip,
+    actor_id,
+    actor_silo_id,
+    access_method,
+    resource_id,
+    time_completed,
+    http_status_code,
+    error_code,
+    error_message
+FROM audit_log
+WHERE time_completed IS NOT NULL;
+
 /*
  * Keep this at the end of file so that the database does not contain a version
  * until it is fully populated.
@@ -4810,7 +4867,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '122.0.0', NULL)
+    (TRUE, NOW(), NOW(), '123.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

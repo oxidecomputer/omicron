@@ -47,6 +47,7 @@ use uuid::Uuid;
 // by resource.
 mod address_lot;
 mod allow_list;
+mod audit_log;
 pub(crate) mod background;
 mod bfd;
 mod bgp;

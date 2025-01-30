@@ -284,6 +284,7 @@ impl_dyn_authorized_resource_for_global!(authz::ConsoleSessionList);
 impl_dyn_authorized_resource_for_global!(authz::DeviceAuthRequestList);
 impl_dyn_authorized_resource_for_global!(authz::DnsConfig);
 impl_dyn_authorized_resource_for_global!(authz::IpPoolList);
+impl_dyn_authorized_resource_for_global!(authz::AuditLog);
 impl_dyn_authorized_resource_for_global!(authz::Inventory);
 
 impl DynAuthorizedResource for authz::SiloCertificateList {

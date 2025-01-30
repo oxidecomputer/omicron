@@ -151,6 +151,15 @@ impl Context {
         &self.schemes_tried
     }
 
+    /// If the user is authenticated, return the last scheme in the list of
+    /// schemes tried, which is the one that worked.
+    pub fn scheme_used(&self) -> Option<&SchemeName> {
+        match &self.kind {
+            Kind::Authenticated(..) => self.schemes_tried().last(),
+            Kind::Unauthenticated => None,
+        }
+    }
+
     /// Returns an unauthenticated context for use internally
     pub fn internal_unauthenticated() -> Context {
         Context { kind: Kind::Unauthenticated, schemes_tried: vec![] }
