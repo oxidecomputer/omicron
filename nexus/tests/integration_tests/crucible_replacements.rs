@@ -4,6 +4,9 @@
 
 //! Tests related to region and region snapshot replacement
 
+use async_bb8_diesel::AsyncRunQueryDsl;
+use diesel::ExpressionMethods;
+use diesel::QueryDsl;
 use dropshot::test_util::ClientTestContext;
 use nexus_client::types::LastResult;
 use nexus_db_model::PhysicalDiskPolicy;
@@ -11,6 +14,7 @@ use nexus_db_model::ReadOnlyTargetReplacement;
 use nexus_db_model::RegionReplacementState;
 use nexus_db_model::RegionSnapshotReplacementState;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::region_snapshot_replacement::*;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
@@ -86,6 +90,57 @@ where
         .await
         .expect("failed to list")
         .all_items
+}
+
+async fn replacements_left(datastore: &DataStore) -> i64 {
+    let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+    let region_replacement_left = {
+        use db::schema::region_replacement::dsl;
+
+        dsl::region_replacement
+            .filter(dsl::replacement_state.ne(RegionReplacementState::Complete))
+            .select(diesel::dsl::count_star())
+            .first_async::<i64>(&*conn)
+            .await
+            .unwrap()
+    };
+
+    let region_snapshot_replacement_left = {
+        use db::schema::region_snapshot_replacement::dsl;
+
+        dsl::region_snapshot_replacement
+            .filter(
+                dsl::replacement_state
+                    .ne(RegionSnapshotReplacementState::Complete),
+            )
+            .select(diesel::dsl::count_star())
+            .first_async::<i64>(&*conn)
+            .await
+            .unwrap()
+    };
+
+    region_replacement_left + region_snapshot_replacement_left
+}
+
+async fn wait_for_all_replacements(datastore: &Arc<DataStore>) {
+    wait_for_condition(
+        || {
+            let datastore = datastore.clone();
+
+            async move {
+                if replacements_left(&datastore).await == 0 {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            }
+        },
+        &std::time::Duration::from_millis(500),
+        &std::time::Duration::from_secs(60),
+    )
+    .await
+    .expect("all replacements finished");
 }
 
 /// Assert that the first part of region replacement does not create a freed
@@ -1825,6 +1880,7 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
     // Now, run all replacement tasks to completion
     let internal_client = &cptestctx.internal_client;
     run_replacement_tasks_to_completion(&internal_client).await;
+    wait_for_all_replacements(&datastore).await;
 
     // Validate all regions are on non-expunged physical disks
     assert!(datastore
@@ -1932,6 +1988,8 @@ async fn test_region_replacement_triple_sanity(
         // Now, run all replacement tasks to completion
         run_replacement_tasks_to_completion(&internal_client).await;
     }
+
+    wait_for_all_replacements(&datastore).await;
 
     let disk_allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -2083,6 +2141,8 @@ async fn test_region_replacement_triple_sanity_2(
     // Now, run all replacement tasks to completion
     run_replacement_tasks_to_completion(&internal_client).await;
 
+    wait_for_all_replacements(&datastore).await;
+
     let disk_allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
     let snapshot_allocated_regions =
@@ -2177,7 +2237,7 @@ async fn test_replacement_sanity_twice(cptestctx: &ControlPlaneTestContext) {
             .expect("found region snapshot")
             .unwrap();
 
-        let request_id = datastore
+        datastore
             .create_region_snapshot_replacement_request(
                 &opctx,
                 &region_snapshot,
@@ -2186,16 +2246,6 @@ async fn test_replacement_sanity_twice(cptestctx: &ControlPlaneTestContext) {
             .unwrap();
 
         run_replacement_tasks_to_completion(&internal_client).await;
-
-        let replacement = datastore
-            .get_region_snapshot_replacement_request_by_id(&opctx, request_id)
-            .await
-            .unwrap();
-
-        assert_eq!(
-            replacement.replacement_state,
-            RegionSnapshotReplacementState::Complete,
-        );
     }
 
     // Now, do it again, except this time specifying the read-only regions
@@ -2215,23 +2265,15 @@ async fn test_replacement_sanity_twice(cptestctx: &ControlPlaneTestContext) {
         let region =
             datastore.get_region(region.id()).await.expect("found region");
 
-        let request_id = datastore
+        datastore
             .create_read_only_region_replacement_request(&opctx, region.id())
             .await
             .unwrap();
 
         run_replacement_tasks_to_completion(&internal_client).await;
-
-        let replacement = datastore
-            .get_region_snapshot_replacement_request_by_id(&opctx, request_id)
-            .await
-            .unwrap();
-
-        assert_eq!(
-            replacement.replacement_state,
-            RegionSnapshotReplacementState::Complete,
-        );
     }
+
+    wait_for_all_replacements(&datastore).await;
 }
 
 /// Tests that expunging a sled with read-only regions will lead to them being
@@ -2304,7 +2346,7 @@ async fn test_read_only_replacement_sanity(
             .expect("found region snapshot")
             .unwrap();
 
-        let request_id = datastore
+        datastore
             .create_region_snapshot_replacement_request(
                 &opctx,
                 &region_snapshot,
@@ -2313,17 +2355,9 @@ async fn test_read_only_replacement_sanity(
             .unwrap();
 
         run_replacement_tasks_to_completion(&internal_client).await;
-
-        let replacement = datastore
-            .get_region_snapshot_replacement_request_by_id(&opctx, request_id)
-            .await
-            .unwrap();
-
-        assert_eq!(
-            replacement.replacement_state,
-            RegionSnapshotReplacementState::Complete,
-        );
     }
+
+    wait_for_all_replacements(&datastore).await;
 
     // Now expunge a sled with read-only regions on it.
 
@@ -2357,6 +2391,8 @@ async fn test_read_only_replacement_sanity(
         .unwrap();
 
     run_replacement_tasks_to_completion(&internal_client).await;
+
+    wait_for_all_replacements(&datastore).await;
 
     // Validate all regions are on non-expunged physical disks
     assert!(datastore
