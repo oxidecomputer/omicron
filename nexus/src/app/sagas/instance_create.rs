@@ -983,12 +983,9 @@ async fn sic_delete_instance_record(
         .instance_id(instance_id.into_untyped_uuid())
         .fetch()
         .await;
-
-    // Although, as mentioned in the comment above, we should not be doing the
-    // lookup by name here, we do want this operation to be idempotent.
-    //
-    // As such, if the instance has already been deleted, we should return with
-    // a no-op.
+    // This action must be idempotent, so that an unwinding saga doesn't get
+    // stuck if it executes twice. Therefore, if the instance has already been
+    // deleted, we should return with a no-op, rather than an error.
     let authz_instance = match result {
         Ok((.., authz_instance, _)) => authz_instance,
         Err(err) => match err {
