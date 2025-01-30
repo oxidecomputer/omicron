@@ -31,7 +31,6 @@ pub struct KeeperServerContext {
     clickward: Clickward,
     clickhouse_cli: ClickhouseCli,
     log: Logger,
-    //pub generation: Mutex<Option<Generation>>,
     pub generation_tx: watch::Sender<Option<Generation>>,
 }
 
@@ -52,8 +51,6 @@ impl KeeperServerContext {
         // If there is already a configuration file with a generation number we'll
         // use that. Otherwise, we set the generation number to None.
         let gen = read_generation_from_file(config_path)?;
-        //let generation = Mutex::new(gen);
-
         let (generation_tx, _rx) = watch::channel(gen);
 
         Ok(Self { clickward, clickhouse_cli, log, generation_tx })
@@ -81,7 +78,6 @@ pub struct ServerContext {
     clickward: Clickward,
     clickhouse_address: SocketAddrV6,
     log: Logger,
-    // pub generation: Mutex<Option<Generation>>,
     pub tx: Sender<ClickhouseAdminServerRequest>,
     pub generation_tx: watch::Sender<Option<Generation>>,
 }
@@ -108,8 +104,6 @@ impl ServerContext {
         // If there is already a configuration file with a generation number we'll
         // use that. Otherwise, we set the generation number to None.
         let gen = read_generation_from_file(config_path)?;
-        //let generation = Mutex::new(gen);
-
         let (generation_tx, _rx) = watch::channel(gen);
 
         // We only want to handle one in flight request at a time. Reconfigurator execution will retry
@@ -122,7 +116,6 @@ impl ServerContext {
             clickward,
             clickhouse_address,
             log,
-            //   generation,
             tx: inner_tx,
             generation_tx,
         })
@@ -258,8 +251,7 @@ pub async fn init_db(
     replicated: bool,
 ) -> Result<(), HttpError> {
     // We initialise the Oximeter client here instead of keeping it as part of the context as
-    // this client is not cloneable, copyable by design. Attempting to pass as a reference
-    // significantly complicates the code due to lifetime issues.
+    // this client is not cloneable, copyable by design.
     let client = OximeterClient::new(clickhouse_address.into(), &log);
 
     // Initialize the database only if it was not previously initialized.

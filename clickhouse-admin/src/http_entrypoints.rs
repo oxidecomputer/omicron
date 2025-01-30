@@ -160,7 +160,6 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
     ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError> {
         let ctx = rqctx.context();
         let keeper = body.into_inner();
-        //let mut current_generation = ctx.generation.lock().unwrap();
         let incoming_generation = keeper.generation();
         let generation_rx = ctx.generation_tx.subscribe();
         let current_generation = *generation_rx.borrow();
