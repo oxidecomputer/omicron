@@ -47,21 +47,7 @@ impl<'a> BlueprintDiffSummary<'a> {
             .cloned()
             .collect();
 
-        // Modifieds sleds are the union of sleds modified in `sled_state`, `blueprint_zones`,
-        // `blueprint_disks`, and `blueprint_datasets`
-        let sleds_modified: BTreeSet<_> = diff
-            .sled_state
-            .modified
-            .keys()
-            .chain(diff.blueprint_zones.modified.keys())
-            .chain(diff.blueprint_disks.modified.keys())
-            .chain(diff.blueprint_datasets.modified.keys())
-            .map(|k| **k)
-            .collect();
-
-        // Sleds unchanged are all sleds that have not been added, removed, or
-        // modified. Equivalently, this is the intersection of all unchanged
-        // sets.
+        // Sleds unchanged are the intersection of all unchanged sets.
         let zone_sleds_unchanged: BTreeSet<_> =
             diff.blueprint_zones.unchanged.iter().map(|(id, _)| **id).collect();
         let disk_sleds_unchanged: BTreeSet<_> =
@@ -80,6 +66,32 @@ impl<'a> BlueprintDiffSummary<'a> {
             .intersection(&dataset_sleds_unchanged)
             .cloned()
             .collect();
+
+        // Modifieds sleds are the union of sleds modified in `sled_state`,
+        // `blueprint_zones`, `blueprint_disks`, and `blueprint_datasets`.
+        //
+        // Because of backwards compatibility, disks and datasets get removed
+        // when expunged. Because of this we must also check for removed disks
+        // and datasets that are not in removed sleds.
+        let mut sleds_modified: BTreeSet<_> = diff
+            .sled_state
+            .modified
+            .keys()
+            .chain(diff.blueprint_zones.modified.keys())
+            .chain(diff.blueprint_disks.modified.keys())
+            .chain(diff.blueprint_datasets.modified.keys())
+            .map(|k| **k)
+            .collect();
+        for sled_id in diff
+            .blueprint_disks
+            .removed
+            .keys()
+            .chain(diff.blueprint_datasets.removed.keys())
+        {
+            if !sleds_removed.contains(*sled_id) {
+                sleds_modified.insert(**sled_id);
+            }
+        }
 
         BlueprintDiffSummary {
             diff,

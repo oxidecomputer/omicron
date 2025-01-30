@@ -803,6 +803,7 @@ mod test {
     use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintDatasetDisposition;
+    use nexus_types::deployment::BlueprintDiff;
     use nexus_types::deployment::BlueprintDiffOriginal;
     use nexus_types::deployment::BlueprintDiffSummary;
     use nexus_types::deployment::BlueprintZoneDisposition;
@@ -2184,6 +2185,8 @@ mod test {
         );
 
         let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        let daft_diff = blueprint1.diff(&blueprint2);
+        let summary = BlueprintDiffSummary::new(&daft_diff);
         println!(
             "1 -> 2 (added additional Nexus zones, take 2 sleds out of service):\n{}",
             diff.display()
@@ -2201,16 +2204,18 @@ mod test {
         // cleanup, and we aren't performing garbage collection on zones or
         // sleds at the moment.
 
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
+        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.sleds_modified.len(), 4);
+        assert_eq!(summary.sleds_unchanged.len(), 1);
 
-        assert_all_zones_expunged(&diff, expunged_sled_id, "expunged sled");
+        assert_all_zones_expunged(&summary, expunged_sled_id, "expunged sled");
 
         // Only 2 of the 3 remaining sleds (not the non-provisionable sled)
         // should get additional Nexus zones. We expect a total of 6 new Nexus
         // zones, which should be split evenly between the two sleds, while the
         // non-provisionable sled should be unchanged.
-        let mut remaining_modified_sleds = diff.sleds_modified.clone();
+        let mut remaining_modified_sleds = summary.sleds_modified.clone();
         remaining_modified_sleds.remove(&expunged_sled_id);
         remaining_modified_sleds.remove(&decommissioned_sled_id);
 
@@ -2220,10 +2225,11 @@ mod test {
             assert!(sled_id != nonprovisionable_sled_id);
             assert!(sled_id != expunged_sled_id);
             assert!(sled_id != decommissioned_sled_id);
-            assert!(!diff.zones.removed.contains_key(&sled_id));
-            assert!(!diff.zones.modified.contains_key(&sled_id));
-            let zones = &diff.zones.added.get(&sled_id).unwrap().zones;
-            for zone in zones {
+            let zones_on_modified_sled =
+                &summary.zones_on_modified_sled(&sled_id).unwrap().zones;
+            assert!(zones_on_modified_sled.removed.is_empty());
+            let zones = &zones_on_modified_sled.added;
+            for (_, zone) in zones {
                 if ZoneKind::Nexus != zone.kind() {
                     panic!("unexpectedly added a non-Nexus zone: {zone:?}");
                 };
@@ -2330,13 +2336,18 @@ mod test {
     }
 
     #[track_caller]
-    fn assert_all_zones_expunged(
-        diff: &BlueprintDiffOriginal,
+    fn assert_all_zones_expunged<'a>(
+        summary: &'a BlueprintDiffSummary<'a>,
         expunged_sled_id: SledUuid,
         desc: &str,
     ) {
         assert!(
-            !diff.zones.added.contains_key(&expunged_sled_id),
+            summary
+                .diff
+                .blueprint_zones
+                .added
+                .get(&expunged_sled_id)
+                .map_or(true, |zones| zones.zones.is_empty()),
             "for {desc}, no zones should have been added to blueprint"
         );
 
@@ -2346,26 +2357,31 @@ mod test {
         // process that isn't currently defined.
 
         assert!(
-            !diff.zones.removed.contains_key(&expunged_sled_id),
+            summary
+                .diff
+                .blueprint_zones
+                .removed
+                .get(&expunged_sled_id)
+                .map_or(true, |zones| zones.zones.is_empty()),
             "for {desc}, no zones should have been removed from blueprint"
         );
 
         // Run through all the common zones and ensure that all of them
         // have been marked expunged.
         let modified_zones =
-            diff.zones.modified.get(&expunged_sled_id).unwrap();
+            summary.zones_on_modified_sled(&expunged_sled_id).unwrap();
         assert_eq!(
-            modified_zones.generation_before.next(),
-            modified_zones.generation_after,
+            modified_zones.generation.before.next(),
+            *modified_zones.generation.after,
             "for {desc}, generation should have been bumped"
         );
 
-        for modified_zone in &modified_zones.zones {
+        for (_, modified_zone) in &modified_zones.zones.modified {
             assert_eq!(
-                modified_zone.zone.disposition,
+                *modified_zone.disposition.after,
                 BlueprintZoneDisposition::Expunged,
                 "for {desc}, zone {} should have been marked expunged",
-                modified_zone.zone.id
+                modified_zone.id.after
             );
         }
     }
