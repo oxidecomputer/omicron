@@ -24,6 +24,7 @@ use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::fmt::Debug;
 use std::fmt::Display;
 use thiserror::Error;
 
@@ -74,6 +75,16 @@ pub enum Note {
 pub enum Resolution {
     NoProblems,
     Problems(Vec<Problem>),
+}
+
+impl Resolution {
+    fn from_problems(problems: Vec<Problem>) -> Resolution {
+        if problems.is_empty() {
+            Resolution::NoProblems
+        } else {
+            Resolution::Problems(problems)
+        }
+    }
 }
 
 /// Describes a problem resolving the blessed spec(s), generated spec(s), and
@@ -132,14 +143,15 @@ pub enum Problem {
     LocalVersionMissingLocal,
 
     #[error(
-        "Spec generated from the current code is not compatible with this \
-         locally-added spec: {spec_file_names}.  This tool can update the \
-         local file(s) for you."
+        "Spec generated from the current code does not match this locally-\
+         added spec: {spec_file_names}.  This tool can update the local \
+         file(s) for you."
     )]
-    // Since the filename has its own hash in it, when the local file is stale,
-    // it's not that the file contents will be wrong, but rather that there will
-    // be one or more _incorrect_ files and the correct one will be missing.
-    // The fix will be to remove all the incorrect ones and add the correct one.
+    // For versioned APIs, since the filename has its own hash in it, when the
+    // local file is stale, it's not that the file contents will be wrong, but
+    // rather that there will be one or more _incorrect_ files and the correct
+    // one will be missing.  The fix will be to remove all the incorrect ones
+    // and add the correct one.
     // XXX-dap this is going to be really annoying in that when iterating on
     // local changes, you will have to update the clients to point at the new
     // hashes all the time.  We could stop putting the checksum into the
@@ -326,35 +338,138 @@ fn resolve_api(
     api_generated: &BTreeMap<semver::Version, Vec<GeneratedApiSpecFile>>,
     api_local: Option<&BTreeMap<semver::Version, Vec<LocalApiSpecFile>>>,
 ) -> BTreeMap<semver::Version, Resolution> {
-    api.iter_versions_semver()
-        .map(|version| {
-            let version = version.clone();
-            let blessed =
-                api_blessed.and_then(|b| b.get(&version)).map(|list| {
-                    // XXX-dap validate this and have the type reflect it; or
-                    // else fail gracefully here
-                    assert_eq!(list.len(), 1);
-                    list.iter().next().unwrap()
-                });
-            // XXX-dap validate this and have the type reflect it; or else
-            // fail gracefully here
-            let generated = api_generated
-                .get(&version)
-                .map(|list| {
-                    assert_eq!(list.len(), 1);
-                    list.iter().next().unwrap()
-                })
-                .unwrap();
-            let local = api_local
-                .and_then(|b| b.get(&version))
-                .map(|v| v.as_slice())
-                .unwrap_or(&[]);
-            let resolution = resolve_api_version(
-                env, api, &version, blessed, generated, local,
-            );
-            (version, resolution)
+    if api.is_lockstep() {
+        resolve_api_lockstep(env, api, api_generated, api_local)
+    } else {
+        api.iter_versions_semver()
+            .map(|version| {
+                let version = version.clone();
+                let blessed =
+                    api_blessed.and_then(|b| b.get(&version)).map(|list| {
+                        // XXX-dap validate this and have the type reflect it; or
+                        // else fail gracefully here
+                        assert_eq!(list.len(), 1);
+                        list.iter().next().unwrap()
+                    });
+                // XXX-dap validate this and have the type reflect it; or else
+                // fail gracefully here
+                let generated = api_generated
+                    .get(&version)
+                    .map(|list| {
+                        assert_eq!(list.len(), 1);
+                        list.iter().next().unwrap()
+                    })
+                    .unwrap();
+                let local = api_local
+                    .and_then(|b| b.get(&version))
+                    .map(|v| v.as_slice())
+                    .unwrap_or(&[]);
+                let resolution = resolve_api_version(
+                    env, api, &version, blessed, generated, local,
+                );
+                (version, resolution)
+            })
+            .collect()
+    }
+}
+
+#[derive(Debug, Error)]
+enum OnlyError {
+    #[error("list was unexpectedly empty")]
+    Empty,
+
+    #[error(
+        "unexpectedly found at least two elements in one-element list:
+         {0} {1}"
+    )]
+    // Store the debug representations directly here rather than the values
+    // so that `OnlyError: 'static` (so that it can be used as the cause of
+    // another error) even when `T` is not 'static.
+    Extra(String, String),
+}
+
+fn iter_only<T: Debug>(
+    mut iter: impl Iterator<Item = T>,
+) -> Result<T, OnlyError> {
+    let first = iter.next().ok_or(OnlyError::Empty)?;
+    match iter.next() {
+        None => Ok(first),
+        Some(second) => Err(OnlyError::Extra(
+            format!("{:?}", first),
+            format!("{:?}", second),
+        )),
+    }
+}
+
+fn resolve_api_lockstep(
+    env: &Environment,
+    api: &ManagedApi,
+    api_generated: &BTreeMap<semver::Version, Vec<GeneratedApiSpecFile>>,
+    api_local: Option<&BTreeMap<semver::Version, Vec<LocalApiSpecFile>>>,
+) -> BTreeMap<semver::Version, Resolution> {
+    assert!(api.is_lockstep());
+
+    // unwrap(): Lockstep APIs have exactly one version.
+    let version = iter_only(api.iter_versions_semver())
+        .with_context(|| {
+            format!("list of versions for lockstep API {}", api.ident())
         })
-        .collect()
+        .unwrap();
+
+    // unwrap(): We should always have generated an OpenAPI document for
+    // each supported version.
+    let generated_for_version = api_generated
+        .get(version)
+        .expect("at least one OpenAPI document for version of lockstep API");
+
+    // unwrap(): a given supported version only ever has one generated
+    // OpenAPI document.
+    let generated = iter_only(generated_for_version.iter())
+        .with_context(|| {
+            format!(
+                "list of generated OpenAPI documents for lockstep API {:?}",
+                api.ident(),
+            )
+        })
+        .unwrap();
+
+    // We may or may not have found a local OpenAPI document for this API.
+    let local = api_local
+        .and_then(|by_version| by_version.get(version))
+        .and_then(|list| match &list.as_slice() {
+            &[first] => Some(first),
+            &[] => None,
+            items => {
+                // Structurally, it's not possible to have more than one
+                // local file for a lockstep API because the file is named
+                // by the API itself.
+                panic!(
+                    "unexpectedly found more than one local OpenAPI \
+                     document for lockstep API {}: {:?}",
+                    api.ident(),
+                    items
+                );
+            }
+        });
+
+    let problem = match local {
+        Some(local_file) if local_file.contents() == generated.contents() => {
+            None
+        }
+        Some(stale) => Some(Problem::LocalVersionStale {
+            spec_file_names: DisplayableVec(vec![stale
+                .spec_file_name()
+                .clone()]),
+        }),
+        None => Some(Problem::LocalVersionMissingLocal),
+    };
+
+    let resolution = match problem {
+        Some(p) => Resolution::Problems(vec![p]),
+        None => Resolution::NoProblems,
+    };
+
+    BTreeMap::from([((version.clone(), resolution))])
 }
 
 fn resolve_api_version(
