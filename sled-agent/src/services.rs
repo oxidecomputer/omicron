@@ -55,7 +55,7 @@ use illumos_utils::running_zone::{
 use illumos_utils::smf_helper::SmfHelper;
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
-use illumos_utils::zpool::{PathInPool, ZpoolName};
+use illumos_utils::zpool::{PathInPool, ZpoolName, ZpoolOrRamdisk};
 use illumos_utils::{execute, PFEXEC};
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
@@ -533,20 +533,11 @@ impl illumos_utils::smf_helper::Service for SwitchService {
     }
 }
 
-/// Combines the generic `SwitchZoneConfig` with other locally-determined
-/// configuration
-///
-/// This is analogous to `OmicronZoneConfigLocal`, but for the switch zone.
-struct SwitchZoneConfigLocal {
-    zone: SwitchZoneConfig,
-    root: Utf8PathBuf,
-}
-
 /// Describes either an Omicron-managed zone or the switch zone, used for
 /// functions that operate on either one or the other
 enum ZoneArgs<'a> {
     Omicron(&'a OmicronZoneConfigLocal),
-    Switch(&'a SwitchZoneConfigLocal),
+    Switch(&'a SwitchZoneConfig),
 }
 
 impl<'a> ZoneArgs<'a> {
@@ -565,20 +556,7 @@ impl<'a> ZoneArgs<'a> {
     ) -> Box<dyn Iterator<Item = &'a SwitchService> + 'a> {
         match self {
             ZoneArgs::Omicron(_) => Box::new(std::iter::empty()),
-            ZoneArgs::Switch(request) => Box::new(request.zone.services.iter()),
-        }
-    }
-
-    /// Return the root filesystem path for this zone
-    pub fn root(&self) -> PathInPool {
-        match self {
-            ZoneArgs::Omicron(zone_config) => PathInPool {
-                pool: zone_config.zone.filesystem_pool.clone(),
-                path: zone_config.root.clone(),
-            },
-            ZoneArgs::Switch(zone_request) => {
-                PathInPool { pool: None, path: zone_request.root.clone() }
-            }
+            ZoneArgs::Switch(request) => Box::new(request.services.iter()),
         }
     }
 }
@@ -1444,6 +1422,7 @@ impl ServiceManager {
     async fn initialize_zone(
         &self,
         request: ZoneArgs<'_>,
+        zone_root_path: PathInPool,
         filesystems: &[zone::Fs],
         data_links: &[String],
         fake_install_dir: Option<&String>,
@@ -1527,7 +1506,7 @@ impl ServiceManager {
         let installed_zone = zone_builder
             .with_log(self.inner.log.clone())
             .with_underlay_vnic_allocator(&self.inner.underlay_vnic_allocator)
-            .with_zone_root_path(request.root())
+            .with_zone_root_path(zone_root_path)
             .with_zone_image_paths(zone_image_paths.as_slice())
             .with_zone_type(zone_type_str)
             .with_datasets(datasets.as_slice())
@@ -2455,10 +2434,7 @@ impl ServiceManager {
                     })?;
                 RunningZone::boot(installed_zone).await?
             }
-            ZoneArgs::Switch(SwitchZoneConfigLocal {
-                zone: SwitchZoneConfig { id, services, addresses },
-                ..
-            }) => {
+            ZoneArgs::Switch(SwitchZoneConfig { id, services, addresses }) => {
                 let info = self.inner.sled_info.get();
 
                 let gw_addr = match info {
@@ -3247,7 +3223,7 @@ impl ServiceManager {
         }
 
         // Ensure that this zone's storage is ready.
-        let root = self
+        let zone_root_path = self
             .validate_storage_and_pick_mountpoint(
                 mount_config,
                 &zone,
@@ -3255,12 +3231,15 @@ impl ServiceManager {
             )
             .await?;
 
-        let config =
-            OmicronZoneConfigLocal { zone: zone.clone(), root: root.path };
+        let config = OmicronZoneConfigLocal {
+            zone: zone.clone(),
+            root: zone_root_path.path.clone(),
+        };
 
         let runtime = self
             .initialize_zone(
                 ZoneArgs::Omicron(&config),
+                zone_root_path,
                 // filesystems=
                 &[],
                 // data_links=
@@ -3732,7 +3711,8 @@ impl ServiceManager {
         }
         let path = filesystem_pool
             .dataset_mountpoint(&mount_config.root, ZONE_DATASET);
-        Ok(PathInPool { pool: Some(filesystem_pool), path })
+        let pool = ZpoolOrRamdisk::Zpool(filesystem_pool);
+        Ok(PathInPool { pool, path })
     }
 
     pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {
@@ -4647,12 +4627,18 @@ impl ServiceManager {
         // we could not create the U.2 disks due to lack of encryption. To break
         // the cycle we put the switch zone root fs on the ramdisk.
         let root = Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
-        let zone_request =
-            SwitchZoneConfigLocal { root, zone: request.clone() };
-        let zone_args = ZoneArgs::Switch(&zone_request);
-        info!(self.inner.log, "Starting switch zone",);
+        let zone_root_path =
+            PathInPool { pool: ZpoolOrRamdisk::Ramdisk, path: root.clone() };
+        let zone_args = ZoneArgs::Switch(&request);
+        info!(self.inner.log, "Starting switch zone");
         let zone = self
-            .initialize_zone(zone_args, filesystems, data_links, None)
+            .initialize_zone(
+                zone_args,
+                zone_root_path,
+                filesystems,
+                data_links,
+                None,
+            )
             .await?;
         *sled_zone =
             SwitchZoneState::Running { request: request.clone(), zone };

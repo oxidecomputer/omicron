@@ -10,7 +10,7 @@ use crate::disk::{Disk, DiskError, RawDisk};
 use crate::error::Error;
 use camino::Utf8PathBuf;
 use cfg_if::cfg_if;
-use illumos_utils::zpool::{PathInPool, ZpoolName};
+use illumos_utils::zpool::{PathInPool, ZpoolName, ZpoolOrRamdisk};
 use key_manager::StorageKeyRequester;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::{
@@ -134,7 +134,7 @@ impl AllDisks {
             .map(|pool| {
                 let path =
                     pool.dataset_mountpoint(&self.mount_config.root, dataset);
-                PathInPool { pool: Some(pool), path }
+                PathInPool { pool: ZpoolOrRamdisk::Zpool(pool), path }
             })
             .collect()
     }
