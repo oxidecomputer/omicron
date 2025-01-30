@@ -65,6 +65,7 @@ impl super::Nexus {
         let sled = db::model::SledUpdate::new(
             id,
             info.sa_address,
+            info.repo_depot_port,
             db::model::SledBaseboard {
                 serial_number: info.baseboard.serial,
                 part_number: info.baseboard.part,

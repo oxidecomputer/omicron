@@ -136,7 +136,7 @@ pub(crate) async fn reconcile_debug_datasets(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::u32_to_id;
+    use crate::tests::usize_to_id;
     use crate::tests::ArbitraryDisposition;
     use crate::tests::DatasetPrep;
     use async_bb8_diesel::AsyncRunQueryDsl;
@@ -153,7 +153,7 @@ mod tests {
         opctx: &OpContext,
         datastore: &DataStore,
         blueprint_id: BlueprintUuid,
-        prep: &BTreeMap<u32, DatasetPrep>,
+        prep: &BTreeMap<usize, DatasetPrep>,
     ) -> (Vec<BlueprintDatasetConfig>, BTreeSet<DatasetUuid>) {
         let mut datasets = Vec::with_capacity(prep.len());
         let mut inventory = BTreeSet::new();
@@ -178,8 +178,8 @@ mod tests {
         for (&id, prep) in prep {
             let d = BlueprintDatasetConfig {
                 disposition: prep.disposition.into(),
-                id: u32_to_id(id),
-                pool: ZpoolName::new_external(u32_to_id(id)),
+                id: usize_to_id(id),
+                pool: ZpoolName::new_external(usize_to_id(id)),
                 kind: DatasetKind::Debug,
                 address: None,
                 quota: None,
@@ -230,11 +230,11 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         proptest!(ProptestConfig::with_cases(64),
-        |(prep in proptest::collection::btree_map(
-            any::<u32>(),
+        |(prep in proptest::collection::vec(
             any::<DatasetPrep>(),
             0..20,
         ))| {
+            let prep: BTreeMap<_, _> = prep.into_iter().enumerate().collect();
             let blueprint_id = BlueprintUuid::new_v4();
 
             let (result_stats, datastore_datasets) = runtime.block_on(async {
@@ -269,7 +269,7 @@ mod tests {
             let mut expected_stats = DebugDatasetsRendezvousStats::default();
 
             for (id, prep) in prep {
-                let id: DatasetUuid = u32_to_id(id);
+                let id: DatasetUuid = usize_to_id(id);
 
                 let in_db_before = prep.in_database;
                 let in_db_tombstoned = datastore_datasets

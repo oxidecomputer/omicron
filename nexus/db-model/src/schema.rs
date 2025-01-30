@@ -949,6 +949,7 @@ table! {
         sled_policy -> crate::sled_policy::SledPolicyEnum,
         sled_state -> crate::SledStateEnum,
         sled_agent_gen -> Int8,
+        repo_depot_port -> Int4,
     }
 }
 

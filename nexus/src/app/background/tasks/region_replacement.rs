@@ -304,7 +304,6 @@ mod test {
     use super::*;
     use crate::app::background::init::test::NoopStartSaga;
     use nexus_db_model::RegionReplacement;
-    use nexus_db_model::Volume;
     use nexus_test_utils_macros::nexus_test;
     use omicron_uuid_kinds::VolumeUuid;
     use sled_agent_client::CrucibleOpts;
@@ -337,16 +336,15 @@ mod test {
         let volume_id = VolumeUuid::new_v4();
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: Uuid::new_v4(),
                     block_size: 512,
                     sub_volumes: vec![],
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -385,12 +383,10 @@ mod test {
             read_only_parent: None,
         };
 
-        let volume_data =
-            serde_json::to_string(&volume_construction_request).unwrap();
-
-        let volume = Volume::new(volume_id, volume_data);
-
-        datastore.volume_create(volume).await.unwrap();
+        datastore
+            .volume_create(volume_id, volume_construction_request)
+            .await
+            .unwrap();
 
         // Activate the task - it should pick that up and try to run the region
         // replacement start saga

@@ -40,6 +40,7 @@ use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::sync::mpsc;
+use update_common::artifacts::ArtifactsWithPlan;
 use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
@@ -217,6 +218,10 @@ pub struct Nexus {
 
     /// List of demo sagas awaiting a request to complete them
     demo_sagas: Arc<std::sync::Mutex<sagas::demo::CompletingDemoSagas>>,
+
+    /// Sender for TUF repository artifacts temporarily stored in this zone to
+    /// be replicated out to sleds in the background
+    tuf_artifact_replication_tx: mpsc::Sender<ArtifactsWithPlan>,
 }
 
 impl Nexus {
@@ -297,6 +302,14 @@ impl Nexus {
             log.new(o!("component" => "SagaExecutor")),
             saga_create_tx,
         ));
+
+        // Create a channel for replicating repository artifacts. 16 is a
+        // dubious bound for the channel but it seems unlikely that an operator
+        // would want to upload more than one at a time, and at most have two
+        // or three on the system during an upgrade (we've sized the artifact
+        // datasets to fit at most 10 repositories for this reason).
+        let (tuf_artifact_replication_tx, tuf_artifact_replication_rx) =
+            mpsc::channel(16);
 
         let client_state = dpd_client::ClientState {
             tag: String::from("nexus"),
@@ -504,6 +517,7 @@ impl Nexus {
             demo_sagas: Arc::new(std::sync::Mutex::new(
                 CompletingDemoSagas::new(),
             )),
+            tuf_artifact_replication_tx,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -558,6 +572,7 @@ impl Nexus {
                         registry: sagas::ACTION_REGISTRY.clone(),
                         sagas_started_rx: saga_recovery_rx,
                     },
+                    tuf_artifact_replication_rx,
                 },
             );
 

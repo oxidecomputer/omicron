@@ -123,7 +123,7 @@ pub(crate) async fn record_new_crucible_datasets(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::u32_to_id;
+    use crate::tests::usize_to_id;
     use crate::tests::ArbitraryDisposition;
     use crate::tests::DatasetPrep;
     use async_bb8_diesel::AsyncRunQueryDsl;
@@ -149,7 +149,7 @@ mod tests {
     async fn proptest_do_prep(
         opctx: &OpContext,
         datastore: &DataStore,
-        prep: &BTreeMap<u32, DatasetPrep>,
+        prep: &BTreeMap<usize, DatasetPrep>,
     ) -> (Vec<BlueprintDatasetConfig>, BTreeSet<DatasetUuid>) {
         let mut datasets = Vec::with_capacity(prep.len());
         let mut inventory = BTreeSet::new();
@@ -178,10 +178,10 @@ mod tests {
         }
 
         for (&id, prep) in prep {
-            let dataset_id: DatasetUuid = u32_to_id(id);
-            let zpool_id: ZpoolUuid = u32_to_id(10000 + id);
-            let sled_id: SledUuid = u32_to_id(20000 + id);
-            let disk_id: PhysicalDiskUuid = u32_to_id(30000 + id);
+            let dataset_id: DatasetUuid = usize_to_id(id);
+            let zpool_id: ZpoolUuid = usize_to_id(10000 + id);
+            let sled_id: SledUuid = usize_to_id(20000 + id);
+            let disk_id: PhysicalDiskUuid = usize_to_id(30000 + id);
 
             // Ensure the sled and zpool this dataset claim to be on exist in
             // the DB.
@@ -189,6 +189,7 @@ mod tests {
                 .sled_upsert(SledUpdate::new(
                     sled_id.into_untyped_uuid(),
                     "[::1]:0".parse().unwrap(),
+                    0,
                     SledBaseboard {
                         serial_number: format!("test-sn-{id}"),
                         part_number: "test-pn".to_string(),
@@ -272,11 +273,11 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         proptest!(ProptestConfig::with_cases(32),
-        |(prep in proptest::collection::btree_map(
-            any::<u32>(),
+        |(prep in proptest::collection::vec(
             any::<DatasetPrep>(),
             0..20,
         ))| {
+            let prep: BTreeMap<_, _> = prep.into_iter().enumerate().collect();
             let (result_stats, datastore_datasets) = runtime.block_on(async {
                 let (blueprint_datasets, inventory_datasets) = proptest_do_prep(
                     opctx,
@@ -307,7 +308,7 @@ mod tests {
             let mut expected_stats = CrucibleDatasetsRendezvousStats::default();
 
             for (id, prep) in prep {
-                let id: DatasetUuid = u32_to_id(id);
+                let id: DatasetUuid = usize_to_id(id);
 
                 let in_db_before = prep.in_database;
                 let in_db_after = datastore_datasets.contains_key(&id);

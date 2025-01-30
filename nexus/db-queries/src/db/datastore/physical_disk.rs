@@ -344,10 +344,12 @@ mod test {
     async fn create_test_sled(db: &DataStore) -> Sled {
         let sled_id = Uuid::new_v4();
         let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
+        let repo_depot_port = 0;
         let rack_id = Uuid::new_v4();
         let sled_update = SledUpdate::new(
             sled_id,
             addr,
+            repo_depot_port,
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id,

@@ -5,9 +5,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use dropshot::{
-    FreeformBody, HttpError, HttpResponseCreated, HttpResponseDeleted,
-    HttpResponseOk, HttpResponseUpdatedNoContent, Path, Query, RequestContext,
-    ResultsPage, TypedBody,
+    HttpError, HttpResponseCreated, HttpResponseDeleted, HttpResponseOk,
+    HttpResponseUpdatedNoContent, Path, Query, RequestContext, ResultsPage,
+    TypedBody,
 };
 use nexus_types::{
     deployment::{
@@ -27,17 +27,13 @@ use nexus_types::{
         views::{BackgroundTask, DemoSaga, Ipv4NatEntryView, Saga},
     },
 };
-use omicron_common::{
-    api::{
-        external::{http_pagination::PaginatedById, Instance},
-        internal::nexus::{
-            DiskRuntimeState, DownstairsClientStopRequest,
-            DownstairsClientStopped, ProducerEndpoint,
-            ProducerRegistrationResponse, RepairFinishInfo, RepairProgress,
-            RepairStartInfo, SledVmmState,
-        },
+use omicron_common::api::{
+    external::{http_pagination::PaginatedById, Instance},
+    internal::nexus::{
+        DiskRuntimeState, DownstairsClientStopRequest, DownstairsClientStopped,
+        ProducerEndpoint, ProducerRegistrationResponse, RepairFinishInfo,
+        RepairProgress, RepairStartInfo, SledVmmState,
     },
-    update::ArtifactId,
 };
 use omicron_uuid_kinds::{
     DemoSagaUuid, DownstairsKind, PropolisUuid, SledUuid, TypedUuid,
@@ -207,16 +203,6 @@ pub trait NexusInternalApi {
         request_context: RequestContext<Self::Context>,
         oximeter_info: TypedBody<OximeterInfo>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    /// Endpoint used by Sled Agents to download cached artifacts.
-    #[endpoint {
-    method = GET,
-    path = "/artifacts/{kind}/{name}/{version}",
-    }]
-    async fn cpapi_artifact_download(
-        request_context: RequestContext<Self::Context>,
-        path_params: Path<ArtifactId>,
-    ) -> Result<HttpResponseOk<FreeformBody>, HttpError>;
 
     /// An Upstairs will notify this endpoint when a repair starts
     #[endpoint {

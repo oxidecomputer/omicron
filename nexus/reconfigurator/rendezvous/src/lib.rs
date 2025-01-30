@@ -85,8 +85,8 @@ mod tests {
         pub in_database: bool,
     }
 
-    pub fn u32_to_id<T: TypedUuidKind>(n: u32) -> TypedUuid<T> {
-        let untyped = Uuid::from_u128(u128::from(n));
+    pub fn usize_to_id<T: TypedUuidKind>(n: usize) -> TypedUuid<T> {
+        let untyped = Uuid::from_u128(n.try_into().unwrap());
         TypedUuid::from_untyped_uuid(untyped)
     }
 }

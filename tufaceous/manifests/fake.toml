@@ -23,7 +23,7 @@ version = "1.0.0"
 [artifact.host.source]
 kind = "composite-host"
 phase_1 = { kind = "fake", size = "512KiB" }
-phase_2 = { kind = "fake", size = "3MiB" }
+phase_2 = { kind = "fake", size = "1MiB" }
 
 [[artifact.trampoline]]
 name = "fake-trampoline"
@@ -31,7 +31,7 @@ version = "1.0.0"
 [artifact.trampoline.source]
 kind = "composite-host"
 phase_1 = { kind = "fake", size = "512KiB" }
-phase_2 = { kind = "fake", size = "3MiB" }
+phase_2 = { kind = "fake", size = "1MiB" }
 
 [[artifact.control_plane]]
 name = "fake-control-plane"
