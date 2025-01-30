@@ -76,8 +76,7 @@ impl KeeperServerContext {
 pub struct ServerContext {
     clickhouse_cli: ClickhouseCli,
     clickward: Clickward,
-
-    oximeter_client: OximeterClient,
+    clickhouse_address: SocketAddrV6,
     log: Logger,
     pub generation: Mutex<Option<Generation>>,
     pub tx: Sender<ClickhouseAdminServerRequest>,
@@ -93,10 +92,8 @@ impl ServerContext {
             ClickhouseCli::new(binary_path, listen_address, log);
 
         let ip = listen_address.ip();
-        let address = SocketAddrV6::new(*ip, CLICKHOUSE_TCP_PORT, 0, 0);
-        // TODO: Instead of creating OximeterClient here, pass along the `address` and create the client
-        // in self.oximeter_client. This client is not cloneable, copyable by design.
-        let oximeter_client = OximeterClient::new(address.into(), log);
+        let clickhouse_address =
+            SocketAddrV6::new(*ip, CLICKHOUSE_TCP_PORT, 0, 0);
         let clickward = Clickward::new();
         let log = log.new(slog::o!("component" => "ServerContext"));
 
@@ -117,7 +114,7 @@ impl ServerContext {
         Ok(Self {
             clickhouse_cli,
             clickward,
-            oximeter_client,
+            clickhouse_address,
             log,
             generation,
             tx: inner_tx,
@@ -132,8 +129,8 @@ impl ServerContext {
         self.clickward
     }
 
-    pub fn oximeter_client(&self) -> &OximeterClient {
-        &self.oximeter_client
+    pub fn clickhouse_address(&self) -> SocketAddrV6 {
+        self.clickhouse_address
     }
 
     pub fn log(&self) -> Logger {
@@ -159,10 +156,7 @@ pub enum ClickhouseAdminServerRequest {
     /// Initiliases the oximeter database on either a single node
     /// ClickHouse installation or a replicated cluster.
     DbInit {
-        // TODO: Create oximeter client in a different way
-        // meanwhile use ctx
-        // oximeter_client: OximeterClient,
-        ctx: Arc<ServerContext>,
+        clickhouse_address: SocketAddrV6,
         log: Logger,
         replicated: bool,
         response: oneshot::Sender<Result<(), HttpError>>,
@@ -181,9 +175,8 @@ async fn long_running_ch_admin_server_task(
                 replica_settings,
                 response,
             } => {
-                // TODO: Remove clone
                 let result = generate_config_and_enable_svc(
-                    ctx.clone(),
+                    ctx,
                     clickward,
                     replica_settings,
                 );
@@ -195,13 +188,13 @@ async fn long_running_ch_admin_server_task(
                 };
             }
             ClickhouseAdminServerRequest::DbInit {
-                // oximeter_client,
-                ctx,
+                clickhouse_address,
                 log,
                 replicated,
                 response,
             } => {
-                let result = init_db(ctx, log.clone(), replicated).await;
+                let result =
+                    init_db(clickhouse_address, log.clone(), replicated).await;
                 if let Err(e) = response.send(result) {
                     error!(
                         log,
@@ -255,15 +248,17 @@ pub fn generate_config_and_enable_svc(
 }
 
 pub async fn init_db(
-    // TODO: Create oximeter client in a different way
-    // meanwhile use ctx
-    ctx: Arc<ServerContext>,
+    clickhouse_address: SocketAddrV6,
     log: Logger,
     replicated: bool,
 ) -> Result<(), HttpError> {
+    // We initialise the Oximeter client here instead of keeping it as part of the context as
+    // this client is not cloneable, copyable by design. Attempting to pass as a reference
+    // significantly complicates the code due to lifetime issues.
+    let client = OximeterClient::new(clickhouse_address.into(), &log);
+
     // Initialize the database only if it was not previously initialized.
     // TODO: Migrate schema to newer version without wiping data.
-    let client = ctx.oximeter_client();
     let version = client.read_latest_version().await.map_err(|e| {
         HttpError::for_internal_error(format!(
             "can't read ClickHouse version: {e}",
@@ -274,15 +269,15 @@ pub async fn init_db(
             log,
             "initializing oximeter database to version {OXIMETER_VERSION}"
         );
-        ctx.oximeter_client()
+        client
             .initialize_db_with_version(replicated, OXIMETER_VERSION)
             .await
             .map_err(|e| {
-                HttpError::for_internal_error(format!(
-                    "can't initialize oximeter database \
+            HttpError::for_internal_error(format!(
+                "can't initialize oximeter database \
                      to version {OXIMETER_VERSION}: {e}",
-                ))
-            })?;
+            ))
+        })?;
     } else {
         info!(
             log,

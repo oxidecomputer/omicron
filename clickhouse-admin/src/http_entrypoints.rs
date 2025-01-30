@@ -122,13 +122,12 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let ctx = rqctx.context();
         let replicated = true;
-        // TODO: Create oximeter client in a different way
-        // let oximeter_client = ctx.oximeter_client();
         let log = ctx.log();
+        let clickhouse_address = ctx.clickhouse_address();
         let (response_tx, response_rx) = oneshot::channel();
         ctx.tx
             .send_async(ClickhouseAdminServerRequest::DbInit {
-                ctx: ctx.clone(),
+                clickhouse_address,
                 log,
                 replicated,
                 response: response_tx,
@@ -255,10 +254,11 @@ impl ClickhouseAdminSingleApi for ClickhouseAdminSingleImpl {
         let ctx = rqctx.context();
         let replicated = false;
         let log = ctx.log();
+        let clickhouse_address = ctx.clickhouse_address();
         let (response_tx, response_rx) = oneshot::channel();
         ctx.tx
             .send_async(ClickhouseAdminServerRequest::DbInit {
-                ctx: ctx.clone(),
+                clickhouse_address,
                 log,
                 replicated,
                 response: response_tx,
