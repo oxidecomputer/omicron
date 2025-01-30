@@ -11,7 +11,6 @@ use crate::app::{
 };
 use crate::external_api::params;
 use nexus_db_model::{ExternalIp, NetworkInterfaceKind};
-use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::queries::network_interface::InsertError as InsertNicError;
 use nexus_db_queries::{authn, authz, db};
