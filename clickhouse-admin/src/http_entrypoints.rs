@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::context::{
-    ClickhouseAdminServerRequest, KeeperServerContext, ServerContext,
+    GenerateConfigRequest, DbInitRequest, KeeperServerContext, ServerContext
 };
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::{
@@ -54,8 +54,8 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         let generation_tx = ctx.generation_tx();
 
         let (response_tx, response_rx) = oneshot::channel();
-        ctx.tx
-            .send_async(ClickhouseAdminServerRequest::GenerateConfig {
+        ctx.generate_config_tx
+            .send_async(GenerateConfigRequest::GenerateConfig {
                 generation_tx,
                 clickward,
                 log,
@@ -126,8 +126,8 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         let log = ctx.log();
         let clickhouse_address = ctx.clickhouse_address();
         let (response_tx, response_rx) = oneshot::channel();
-        ctx.tx
-            .send_async(ClickhouseAdminServerRequest::DbInit {
+        ctx.db_init_tx
+            .send_async(DbInitRequest::DbInit {
                 clickhouse_address,
                 log,
                 replicated,
@@ -263,8 +263,8 @@ impl ClickhouseAdminSingleApi for ClickhouseAdminSingleImpl {
         let log = ctx.log();
         let clickhouse_address = ctx.clickhouse_address();
         let (response_tx, response_rx) = oneshot::channel();
-        ctx.tx
-            .send_async(ClickhouseAdminServerRequest::DbInit {
+        ctx.db_init_tx
+            .send_async(DbInitRequest::DbInit {
                 clickhouse_address,
                 log,
                 replicated,

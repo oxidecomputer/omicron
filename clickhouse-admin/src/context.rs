@@ -78,8 +78,9 @@ pub struct ServerContext {
     clickward: Clickward,
     clickhouse_address: SocketAddrV6,
     log: Logger,
-    pub tx: Sender<ClickhouseAdminServerRequest>,
+    pub generate_config_tx: Sender<GenerateConfigRequest>,
     pub generation_tx: watch::Sender<Option<Generation>>,
+    pub db_init_tx: Sender<DbInitRequest>,
 }
 
 impl ServerContext {
@@ -107,17 +108,21 @@ impl ServerContext {
         let (generation_tx, _rx) = watch::channel(gen);
 
         // We only want to handle one in flight request at a time. Reconfigurator execution will retry
-        // again later anyway. We use a flume bounded channel with a size of 0 to act as a rendezvous channel.
-        let (inner_tx, inner_rx) = flume::bounded(0);
-        tokio::spawn(long_running_ch_admin_server_task(inner_rx));
+        // again later anyway. We use flume bounded channels with a size of 0 to act as a rendezvous channel.
+        let (generate_config_tx, generate_config_rx) = flume::bounded(0);
+        tokio::spawn(long_running_generate_config_task(generate_config_rx));
+
+        let (db_init_tx, db_init_rx) = flume::bounded(0);
+        tokio::spawn(long_running_db_init_task(db_init_rx));
 
         Ok(Self {
             clickhouse_cli,
             clickward,
             clickhouse_address,
             log,
-            tx: inner_tx,
+            generate_config_tx,
             generation_tx,
+            db_init_tx,
         })
     }
 
@@ -142,15 +147,7 @@ impl ServerContext {
     }
 }
 
-pub enum ClickhouseAdminServerRequest {
-    /// Generates configuration files for a replicated cluster
-    GenerateConfig {
-        generation_tx: watch::Sender<Option<Generation>>,
-        clickward: Clickward,
-        log: Logger,
-        replica_settings: ServerConfigurableSettings,
-        response: oneshot::Sender<Result<ReplicaConfig, HttpError>>,
-    },
+pub enum DbInitRequest {
     /// Initiliases the oximeter database on either a single node
     /// ClickHouse installation or a replicated cluster.
     DbInit {
@@ -161,12 +158,47 @@ pub enum ClickhouseAdminServerRequest {
     },
 }
 
-async fn long_running_ch_admin_server_task(
-    incoming: Receiver<ClickhouseAdminServerRequest>,
+async fn long_running_db_init_task(
+    incoming: Receiver<DbInitRequest>,
 ) {
     while let Ok(request) = incoming.recv_async().await {
         match request {
-            ClickhouseAdminServerRequest::GenerateConfig {
+            DbInitRequest::DbInit {
+                clickhouse_address,
+                log,
+                replicated,
+                response,
+            } => {
+                let result =
+                    init_db(clickhouse_address, log.clone(), replicated).await;
+                if let Err(e) = response.send(result) {
+                    error!(
+                        log,
+                        "failed to send value from database initialization to channel: {e:?}"
+                    );
+                };
+            }
+        }
+    }
+}
+
+pub enum GenerateConfigRequest {
+    /// Generates configuration files for a replicated cluster
+    GenerateConfig {
+        generation_tx: watch::Sender<Option<Generation>>,
+        clickward: Clickward,
+        log: Logger,
+        replica_settings: ServerConfigurableSettings,
+        response: oneshot::Sender<Result<ReplicaConfig, HttpError>>,
+    },
+}
+
+async fn long_running_generate_config_task(
+    incoming: Receiver<GenerateConfigRequest>,
+) {
+    while let Ok(request) = incoming.recv_async().await {
+        match request {
+            GenerateConfigRequest::GenerateConfig {
                 generation_tx,
                 clickward,
                 log,
@@ -182,21 +214,6 @@ async fn long_running_ch_admin_server_task(
                     error!(
                         &log,
                         "failed to send value from configuration generation to channel: {e:?}"
-                    );
-                };
-            }
-            ClickhouseAdminServerRequest::DbInit {
-                clickhouse_address,
-                log,
-                replicated,
-                response,
-            } => {
-                let result =
-                    init_db(clickhouse_address, log.clone(), replicated).await;
-                if let Err(e) = response.send(result) {
-                    error!(
-                        log,
-                        "failed to send value from database initialization to channel: {e:?}"
                     );
                 };
             }
