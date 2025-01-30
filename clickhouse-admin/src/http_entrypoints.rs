@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::context::{
-    GenerateConfigRequest, DbInitRequest, KeeperServerContext, ServerContext
+    DbInitRequest, GenerateConfigRequest, KeeperServerContext, ServerContext,
 };
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::{

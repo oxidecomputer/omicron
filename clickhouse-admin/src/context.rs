@@ -158,9 +158,7 @@ pub enum DbInitRequest {
     },
 }
 
-async fn long_running_db_init_task(
-    incoming: Receiver<DbInitRequest>,
-) {
+async fn long_running_db_init_task(incoming: Receiver<DbInitRequest>) {
     while let Ok(request) = incoming.recv_async().await {
         match request {
             DbInitRequest::DbInit {
