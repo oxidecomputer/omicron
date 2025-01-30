@@ -33,6 +33,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use slog::info;
 use slog::warn;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::iter;
@@ -628,6 +629,32 @@ impl ActiveSledEditor {
                     "current_filesystem_pool" => ?zone.filesystem_pool,
                     "new_filesystem_zpool" => %expected_filesystem_pool,
                 );
+
+                // If we're _correcting_ a filesystem_pool rather than just
+                // filling it in, we also need to expunge the dataset from the
+                // incorrect value.
+                if let Some(old_filesystem) = zone.filesystem_dataset() {
+                    let (pool, kind) = old_filesystem.into_parts();
+                    match self.datasets.expunge(&pool.id(), &kind) {
+                        Ok(()) => (),
+                        // We're trying to get rid of a potentially-orphaned
+                        // dataset; it not existing is okay but unexpected! Log
+                        // a warning but don't fail.
+                        Err(
+                            err
+                            @ DatasetsEditError::ExpungeNonexistentDataset {
+                                ..
+                            },
+                        ) => {
+                            warn!(
+                                log,
+                                "unexpected failure trying to expunge dataset";
+                                InlineErrorChain::new(&err),
+                            );
+                        }
+                    }
+                }
+
                 zones_to_edit
                     .insert(zone.id, expected_filesystem_pool.into_owned());
             }
