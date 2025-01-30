@@ -50,11 +50,10 @@ impl GeneratedFiles {
                 for supported_version in supported_versions {
                     let version = supported_version.semver();
                     let contents = api.generate_spec_bytes(version)?;
-                    let label = supported_version.label();
                     let file_name = ApiSpecFileName::for_versioned(
                         api,
                         version.clone(),
-                        label.to_owned(),
+                        &contents,
                     );
                     api_files.load_contents(file_name, contents);
                 }

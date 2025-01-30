@@ -60,13 +60,12 @@ impl ApiSpecFileName {
             anyhow!("versioned API document filename did not end in .json")
         })?;
 
-        let (version_str, label) =
-            middle.rsplit_once("-").ok_or_else(|| {
-                anyhow!(
-                    "extracting version and label from versioned API \
+        let (version_str, hash) = middle.rsplit_once("-").ok_or_else(|| {
+            anyhow!(
+                "extracting version and hash from versioned API \
                      document filename"
-                )
-            })?;
+            )
+        })?;
 
         let version: semver::Version =
             version_str.parse().with_context(|| {
@@ -94,7 +93,7 @@ impl ApiSpecFileName {
             ident: ident,
             kind: ApiSpecFileNameKind::Versioned {
                 version,
-                label: label.to_string(),
+                hash: hash.to_string(),
             },
         })
     }
@@ -129,11 +128,12 @@ impl ApiSpecFileName {
     pub fn for_versioned(
         api: &ManagedApi,
         version: semver::Version,
-        label: String,
+        contents: &[u8],
     ) -> ApiSpecFileName {
+        let hash = hash_contents(contents);
         ApiSpecFileName {
             ident: api.ident().clone(),
-            kind: ApiSpecFileNameKind::Versioned { version, label },
+            kind: ApiSpecFileNameKind::Versioned { version, hash },
         }
     }
 
@@ -157,10 +157,10 @@ impl ApiSpecFileName {
     fn basename(&self) -> String {
         match &self.kind {
             ApiSpecFileNameKind::Lockstep => format!("{}.json", self.ident),
-            ApiSpecFileNameKind::Versioned { version, label } => {
+            ApiSpecFileNameKind::Versioned { version, hash } => {
                 // XXX-dap the version number must not contain dashes
                 // XXX-dap actually I think that's fine now?
-                format!("{}-{}-{}.json", self.ident, version, label)
+                format!("{}-{}-{}.json", self.ident, version, hash)
             }
         }
     }
@@ -170,8 +170,8 @@ impl ApiSpecFileName {
 #[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
 enum ApiSpecFileNameKind {
     Lockstep,
-    // XXX-dap label -> hash, and it should be validated
-    Versioned { version: semver::Version, label: String },
+    // XXX-dap hash should be validated
+    Versioned { version: semver::Version, hash: String },
 }
 
 #[derive(Debug, Error)]
@@ -208,7 +208,7 @@ impl ApiSpecFile {
                 )
             })?;
 
-        if let ApiSpecFileNameKind::Versioned { version, label: _ } =
+        if let ApiSpecFileNameKind::Versioned { version, hash } =
             &spec_file_name.kind
         {
             if *version != parsed_version {
@@ -217,6 +217,17 @@ impl ApiSpecFile {
                      the one in the filename",
                     spec_file_name.path(),
                     parsed_version
+                );
+            }
+
+            let expected_hash = hash_contents(&contents_buf);
+            if expected_hash != *hash {
+                bail!(
+                    "file {:?}: computed hash {:?}, but file name has \
+                     different hash {:?}",
+                    spec_file_name.path(),
+                    expected_hash,
+                    hash
                 );
             }
         }
@@ -393,4 +404,12 @@ impl<'a> ApiSpecFilesBuilder<'a> {
             .collect::<BTreeMap<_, _>>();
         (map, errors, warnings)
     }
+}
+
+fn hash_contents(contents: &[u8]) -> String {
+    let hasher = crc::Crc::<u32>::new(&crc::CRC_32_CKSUM);
+    let computed_hash = hasher.checksum(contents);
+    // XXX-dap why does this differ from what cksum reports?
+    // eprintln!("dap: hashing: len = {}, first 4 = {} {} {} {}, result = {}", contents.len(), contents[0], contents[1], contents[2], contents[3], computed_hash);
+    hex::encode(computed_hash.to_be_bytes())
 }

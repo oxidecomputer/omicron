@@ -31,13 +31,21 @@ pub struct App {
 }
 
 impl App {
-    pub fn exec(self) -> Result<ExitCode> {
-        match self.command {
+    pub fn exec(self) -> ExitCode {
+        let result = match self.command {
             Command::Dump(args) => args.exec(),
             Command::List(args) => args.exec(&self.output_opts),
             Command::Generate(args) => args.exec(&self.output_opts),
             Command::Check(args) => args.exec(&self.output_opts),
             Command::NewCheck(args) => args.exec(&self.output_opts),
+        };
+
+        match result {
+            Ok(exit_code) => exit_code,
+            Err(error) => {
+                eprintln!("failure: {:#}", error);
+                ExitCode::FAILURE
+            }
         }
     }
 }

@@ -9,5 +9,5 @@ use openapi_manager::App;
 
 fn main() -> ExitCode {
     let app = App::parse();
-    app.exec().unwrap()
+    app.exec()
 }
