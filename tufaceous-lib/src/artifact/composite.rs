@@ -16,6 +16,9 @@ use anyhow::Result;
 use camino::Utf8Path;
 use flate2::write::GzEncoder;
 use flate2::Compression;
+use sha2::Digest;
+use sha2::Sha256;
+use std::collections::HashMap;
 use std::io::BufWriter;
 use std::io::Write;
 
@@ -33,6 +36,7 @@ pub struct CompositeEntry<'a> {
 
 pub struct CompositeControlPlaneArchiveBuilder<W: Write> {
     inner: CompositeTarballBuilder<W>,
+    hashes: HashMap<[u8; 32], String>,
 }
 
 impl<W: Write> CompositeControlPlaneArchiveBuilder<W> {
@@ -44,7 +48,7 @@ impl<W: Write> CompositeControlPlaneArchiveBuilder<W> {
         .context("error building oxide metadata")?;
         let inner =
             CompositeTarballBuilder::new(writer, metadata, mtime_source)?;
-        Ok(Self { inner })
+        Ok(Self { inner, hashes: HashMap::new() })
     }
 
     pub fn append_zone(
@@ -55,6 +59,14 @@ impl<W: Write> CompositeControlPlaneArchiveBuilder<W> {
         let name_path = Utf8Path::new(name);
         if name_path.file_name() != Some(name) {
             bail!("control plane zone filenames should not contain paths");
+        }
+        if let Some(duplicate) =
+            self.hashes.insert(Sha256::digest(&entry.data).into(), name.into())
+        {
+            bail!(
+                "duplicate zones are not allowed \
+                ({name} and {duplicate} have the same checksum)"
+            );
         }
         let path =
             Utf8Path::new(CONTROL_PLANE_ARCHIVE_ZONE_DIRECTORY).join(name_path);
