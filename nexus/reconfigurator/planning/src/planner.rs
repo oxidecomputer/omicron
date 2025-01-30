@@ -2467,13 +2467,15 @@ mod test {
         // (even though the sled itself is no longer present in the list of
         // commissioned sleds).
         let diff = blueprint3.diff_since_blueprint(&blueprint2);
+        let daft_diff = blueprint2.diff(&blueprint3);
+        let summary = BlueprintDiffSummary::new(&daft_diff);
         println!(
             "2 -> 3 (decommissioned {expunged_sled_id}):\n{}",
             diff.display()
         );
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 0);
+        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.sleds_modified.len(), 0);
         assert_eq!(
             diff.sleds_unchanged.len(),
             ExampleSystemBuilder::DEFAULT_N_SLEDS
@@ -2513,15 +2515,17 @@ mod test {
         .expect("succeeded in planner");
 
         let diff = blueprint4.diff_since_blueprint(&blueprint3);
+        let daft_diff = blueprint3.diff(&blueprint4);
+        let summary = BlueprintDiffSummary::new(&daft_diff);
         println!(
             "3 -> 4 (removed from input {expunged_sled_id}):\n{}",
             diff.display()
         );
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 0);
+        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.sleds_modified.len(), 0);
         assert_eq!(
-            diff.sleds_unchanged.len(),
+            summary.sleds_unchanged.len(),
             ExampleSystemBuilder::DEFAULT_N_SLEDS
         );
 
