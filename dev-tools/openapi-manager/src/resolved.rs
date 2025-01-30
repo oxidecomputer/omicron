@@ -77,16 +77,6 @@ pub enum Resolution {
     Problems(Vec<Problem>),
 }
 
-impl Resolution {
-    fn from_problems(problems: Vec<Problem>) -> Resolution {
-        if problems.is_empty() {
-            Resolution::NoProblems
-        } else {
-            Resolution::Problems(problems)
-        }
-    }
-}
-
 /// Describes a problem resolving the blessed spec(s), generated spec(s), and
 /// local spec files for a particular API
 #[derive(Debug, Error)]
@@ -561,23 +551,20 @@ fn resolve_api_version_local(
     // Validate the generated API document.
     validate_generated(env, api, version, generated, &mut problems);
 
-    let (matching, non_matching): (Vec<_>, Vec<_>) = local
-        .iter()
-        .partition(|local| local.contents() == generated.contents());
-
-    if matching.is_empty() {
+    if local.is_empty() {
         // XXX-dap it would be weird if there were _more_ than one matching one.
         problems.push(Problem::LocalVersionMissingLocal);
-    }
+    } else {
+        let (matching, non_matching): (Vec<_>, Vec<_>) = local
+            .iter()
+            .partition(|local| local.contents() == generated.contents());
 
-    if !non_matching.is_empty() {
-        let spec_file_names = DisplayableVec(
-            non_matching
-                .into_iter()
-                .map(|s| s.spec_file_name().clone())
-                .collect(),
-        );
-        problems.push(Problem::LocalVersionStale { spec_file_names });
+        if !non_matching.is_empty() {
+            let spec_file_names = DisplayableVec(
+                local.iter().map(|s| s.spec_file_name().clone()).collect(),
+            );
+            problems.push(Problem::LocalVersionStale { spec_file_names });
+        }
     }
 
     if problems.is_empty() {
