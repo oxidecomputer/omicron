@@ -51,13 +51,11 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         let replica_settings = body.into_inner();
         let clickward = ctx.clickward();
         let log = ctx.log();
-        // TODO: Clean up
-        let generation_tx = ctx.generation_tx.clone();
+        let generation_tx = ctx.generation_tx();
 
         let (response_tx, response_rx) = oneshot::channel();
         ctx.tx
             .send_async(ClickhouseAdminServerRequest::GenerateConfig {
-                ctx: ctx.clone(),
                 generation_tx,
                 clickward,
                 log,
@@ -83,11 +81,8 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Generation>, HttpError> {
         let ctx = rqctx.context();
-
         let generation_rx = ctx.generation_tx.subscribe();
         let gen = match *generation_rx.borrow() {
-
-//        let gen = match ctx.generation() {
             Some(g) => g,
             None => {
                 return Err(HttpError::for_client_error(
@@ -165,13 +160,15 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
     ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError> {
         let ctx = rqctx.context();
         let keeper = body.into_inner();
-        let mut current_generation = ctx.generation.lock().unwrap();
+        //let mut current_generation = ctx.generation.lock().unwrap();
         let incoming_generation = keeper.generation();
+        let generation_rx = ctx.generation_tx.subscribe();
+        let current_generation = *generation_rx.borrow();
 
         // If the incoming generation number is lower, then we have a problem.
         // We should return an error instead of silently skipping the configuration
         // file generation.
-        if let Some(current) = *current_generation {
+        if let Some(current) = current_generation {
             if current > incoming_generation {
                 return Err(HttpError::for_client_error(
                     Some(String::from("Conflict")),
@@ -189,7 +186,11 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
 
         // We want to update the generation number only if the config file has been
         // generated successfully.
-        *current_generation = Some(incoming_generation);
+        ctx.generation_tx.send(Some(incoming_generation)).map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failure to send request: {e}"
+            ))
+        })?;
 
         // Once we have generated the client we can safely enable the clickhouse_keeper service
         let fmri = "svc:/oxide/clickhouse_keeper:default".to_string();
@@ -202,7 +203,8 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Generation>, HttpError> {
         let ctx = rqctx.context();
-        let gen = match ctx.generation() {
+        let generation_rx = ctx.generation_tx.subscribe();
+        let gen = match *generation_rx.borrow() {
             Some(g) => g,
             None => {
                 return Err(HttpError::for_client_error(
