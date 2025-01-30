@@ -346,17 +346,33 @@ pub struct ControlPlaneZoneImages {
 
 impl ControlPlaneZoneImages {
     pub fn extract<R: io::Read>(reader: R) -> Result<Self> {
+        let mut zones = Vec::new();
+        Self::extract_into(reader, |name, reader| {
+            let mut buf = Vec::new();
+            io::copy(reader, &mut buf)?;
+            zones.push((name, buf.into()));
+            Ok(())
+        })?;
+        Ok(Self { zones })
+    }
+
+    pub fn extract_into<R, F>(reader: R, mut handler: F) -> Result<()>
+    where
+        R: io::Read,
+        F: FnMut(String, &mut dyn io::Read) -> Result<()>,
+    {
         let uncompressed =
             flate2::bufread::GzDecoder::new(BufReader::new(reader));
         let mut archive = tar::Archive::new(uncompressed);
 
         let mut oxide_json_found = false;
-        let mut zones = Vec::new();
+        let mut zone_found = false;
         for entry in archive
             .entries()
             .context("error building list of entries from archive")?
         {
-            let entry = entry.context("error reading entry from archive")?;
+            let mut entry =
+                entry.context("error reading entry from archive")?;
             let path = entry
                 .header()
                 .path()
@@ -382,9 +398,9 @@ impl ControlPlaneZoneImages {
                     .and_then(|s| s.to_str())
                     .map(|s| s.to_string())
                 {
-                    let data = read_entry(entry, &name)?;
-                    zones.push((name, data));
+                    handler(name, &mut entry)?;
                 }
+                zone_found = true;
             }
         }
 
@@ -395,14 +411,14 @@ impl ControlPlaneZoneImages {
         if !not_found.is_empty() {
             bail!("required files not found: {}", not_found.join(", "))
         }
-        if zones.is_empty() {
+        if !zone_found {
             bail!(
                 "no zone images found in `{}/`",
                 CONTROL_PLANE_ARCHIVE_ZONE_DIRECTORY
             );
         }
 
-        Ok(Self { zones })
+        Ok(())
     }
 }
 

@@ -224,7 +224,9 @@ impl ArtifactManifest {
     /// Checks that all expected artifacts are present, returning an error with
     /// details if any artifacts are missing.
     pub fn verify_all_present(&self) -> Result<()> {
-        let all_artifacts: BTreeSet<_> = KnownArtifactKind::iter().collect();
+        let all_artifacts: BTreeSet<_> = KnownArtifactKind::iter()
+            .filter(|k| !matches!(k, KnownArtifactKind::Zone))
+            .collect();
         let present_artifacts: BTreeSet<_> =
             self.artifacts.keys().copied().collect();
 
@@ -261,7 +263,8 @@ impl<'a> FakeDataAttributes<'a> {
             // non-Hubris artifacts: just make fake data
             KnownArtifactKind::Host
             | KnownArtifactKind::Trampoline
-            | KnownArtifactKind::ControlPlane => return make_filler_text(size),
+            | KnownArtifactKind::ControlPlane
+            | KnownArtifactKind::Zone => return make_filler_text(size),
 
             // hubris artifacts: build a fake archive (SimGimletSp and
             // SimGimletRot are used by sp-sim)

@@ -70,8 +70,10 @@ async fn test_updates() {
         .into_inner();
 
     // We should have an artifact for every known artifact kind...
-    let expected_kinds: BTreeSet<_> =
-        KnownArtifactKind::iter().map(ArtifactKind::from).collect();
+    let expected_kinds: BTreeSet<_> = KnownArtifactKind::iter()
+        .filter(|k| !matches!(k, KnownArtifactKind::Zone))
+        .map(ArtifactKind::from)
+        .collect();
 
     // ... and installable artifacts that replace the top level host,
     // trampoline, and RoT with their inner parts (phase1/phase2 for OS images
