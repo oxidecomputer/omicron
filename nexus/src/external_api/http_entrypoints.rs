@@ -13,6 +13,7 @@ use super::{
         Utilization, Vpc, VpcRouter, VpcSubnet,
     },
 };
+use crate::app::Unimpl;
 use crate::app::external_endpoints::authority_for_request;
 use crate::app::support_bundles::SupportBundleQueryType;
 use crate::context::ApiContext;
@@ -69,7 +70,9 @@ use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::AddressLot;
 use omicron_common::api::external::AddressLotBlock;
 use omicron_common::api::external::AddressLotCreateResponse;
+use omicron_common::api::external::AffinityGroupMember;
 use omicron_common::api::external::AggregateBgpMessageHistory;
+use omicron_common::api::external::AntiAffinityGroupMember;
 use omicron_common::api::external::BgpAnnounceSet;
 use omicron_common::api::external::BgpAnnouncement;
 use omicron_common::api::external::BgpConfig;
@@ -2498,6 +2501,358 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .instance_detach_disk(&opctx, &instance_lookup, disk)
                 .await?;
             Ok(HttpResponseAccepted(disk.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    // Affinity Groups
+
+    async fn affinity_group_list(
+        rqctx: RequestContext<ApiContext>,
+        _query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AffinityGroup>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            Err(nexus.unimplemented_todo(&opctx, Unimpl::Public).await.into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn affinity_group_view(
+        rqctx: RequestContext<ApiContext>,
+        _query_params: Query<params::OptionalProjectSelector>,
+        _path_params: Path<params::AffinityGroupPath>,
+    ) -> Result<HttpResponseOk<views::AffinityGroup>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            Err(nexus.unimplemented_todo(&opctx, Unimpl::Public).await.into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn affinity_group_member_list(
+        rqctx: RequestContext<ApiContext>,
+        _query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
+        _path_params: Path<params::AffinityGroupPath>,
+    ) -> Result<HttpResponseOk<ResultsPage<AffinityGroupMember>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            Err(nexus.unimplemented_todo(&opctx, Unimpl::Public).await.into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn affinity_group_member_instance_view(
+        rqctx: RequestContext<ApiContext>,
+        _query_params: Query<params::OptionalProjectSelector>,
+        _path_params: Path<params::AffinityInstanceGroupMemberPath>,
+    ) -> Result<HttpResponseOk<AffinityGroupMember>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            Err(nexus.unimplemented_todo(&opctx, Unimpl::Public).await.into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn affinity_group_member_instance_add(
+        rqctx: RequestContext<ApiContext>,
+        _query_params: Query<params::OptionalProjectSelector>,
+        _path_params: Path<params::AffinityInstanceGroupMemberPath>,
+    ) -> Result<HttpResponseCreated<AffinityGroupMember>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            Err(nexus.unimplemented_todo(&opctx, Unimpl::Public).await.into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn affinity_group_member_instance_delete(
+        rqctx: RequestContext<ApiContext>,
+        _query_params: Query<params::OptionalProjectSelector>,
+        _path_params: Path<params::AffinityInstanceGroupMemberPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            Err(nexus.unimplemented_todo(&opctx, Unimpl::Public).await.into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn affinity_group_create(
+        rqctx: RequestContext<ApiContext>,
+        _query_params: Query<params::ProjectSelector>,
+        _new_affinity_group_params: TypedBody<params::AffinityGroupCreate>,
+    ) -> Result<HttpResponseCreated<views::AffinityGroup>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            Err(nexus.unimplemented_todo(&opctx, Unimpl::Public).await.into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn affinity_group_update(
+        rqctx: RequestContext<ApiContext>,
+        _query_params: Query<params::OptionalProjectSelector>,
+        _path_params: Path<params::AffinityGroupPath>,
+        _updated_group: TypedBody<params::AffinityGroupUpdate>,
+    ) -> Result<HttpResponseOk<views::AffinityGroup>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            Err(nexus.unimplemented_todo(&opctx, Unimpl::Public).await.into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn affinity_group_delete(
+        rqctx: RequestContext<ApiContext>,
+        _query_params: Query<params::OptionalProjectSelector>,
+        _path_params: Path<params::AffinityGroupPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            Err(nexus.unimplemented_todo(&opctx, Unimpl::Public).await.into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn anti_affinity_group_list(
+        rqctx: RequestContext<ApiContext>,
+        _query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AntiAffinityGroup>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            Err(nexus.unimplemented_todo(&opctx, Unimpl::Public).await.into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn anti_affinity_group_view(
+        rqctx: RequestContext<ApiContext>,
+        _query_params: Query<params::OptionalProjectSelector>,
+        _path_params: Path<params::AntiAffinityGroupPath>,
+    ) -> Result<HttpResponseOk<views::AntiAffinityGroup>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            Err(nexus.unimplemented_todo(&opctx, Unimpl::Public).await.into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn anti_affinity_group_member_list(
+        rqctx: RequestContext<ApiContext>,
+        _query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
+        _path_params: Path<params::AntiAffinityGroupPath>,
+    ) -> Result<HttpResponseOk<ResultsPage<AntiAffinityGroupMember>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            Err(nexus.unimplemented_todo(&opctx, Unimpl::Public).await.into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn anti_affinity_group_member_instance_view(
+        rqctx: RequestContext<ApiContext>,
+        _query_params: Query<params::OptionalProjectSelector>,
+        _path_params: Path<params::AntiAffinityInstanceGroupMemberPath>,
+    ) -> Result<HttpResponseOk<AntiAffinityGroupMember>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            Err(nexus.unimplemented_todo(&opctx, Unimpl::Public).await.into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn anti_affinity_group_member_instance_add(
+        rqctx: RequestContext<ApiContext>,
+        _query_params: Query<params::OptionalProjectSelector>,
+        _path_params: Path<params::AntiAffinityInstanceGroupMemberPath>,
+    ) -> Result<HttpResponseCreated<AntiAffinityGroupMember>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            Err(nexus.unimplemented_todo(&opctx, Unimpl::Public).await.into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn anti_affinity_group_member_instance_delete(
+        rqctx: RequestContext<ApiContext>,
+        _query_params: Query<params::OptionalProjectSelector>,
+        _path_params: Path<params::AntiAffinityInstanceGroupMemberPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            Err(nexus.unimplemented_todo(&opctx, Unimpl::Public).await.into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn anti_affinity_group_create(
+        rqctx: RequestContext<ApiContext>,
+        _query_params: Query<params::ProjectSelector>,
+        _new_anti_affinity_group_params: TypedBody<
+            params::AntiAffinityGroupCreate,
+        >,
+    ) -> Result<HttpResponseCreated<views::AntiAffinityGroup>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            Err(nexus.unimplemented_todo(&opctx, Unimpl::Public).await.into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn anti_affinity_group_update(
+        rqctx: RequestContext<ApiContext>,
+        _query_params: Query<params::OptionalProjectSelector>,
+        _path_params: Path<params::AntiAffinityGroupPath>,
+        _updated_group: TypedBody<params::AntiAffinityGroupUpdate>,
+    ) -> Result<HttpResponseOk<views::AntiAffinityGroup>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            Err(nexus.unimplemented_todo(&opctx, Unimpl::Public).await.into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn anti_affinity_group_delete(
+        rqctx: RequestContext<ApiContext>,
+        _query_params: Query<params::OptionalProjectSelector>,
+        _path_params: Path<params::AntiAffinityGroupPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            Err(nexus.unimplemented_todo(&opctx, Unimpl::Public).await.into())
         };
         apictx
             .context

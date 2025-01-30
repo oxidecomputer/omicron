@@ -982,6 +982,10 @@ impl JsonSchema for Hostname {
 pub enum ResourceType {
     AddressLot,
     AddressLotBlock,
+    AffinityGroup,
+    AffinityGroupMember,
+    AntiAffinityGroup,
+    AntiAffinityGroupMember,
     AllowList,
     BackgroundTask,
     BgpConfig,
@@ -1310,6 +1314,56 @@ pub enum InstanceAutoRestartPolicy {
     /// best-effort attempt to restart it. The control plane may choose not to
     /// restart the instance to preserve the overall availability of the system.
     BestEffort,
+}
+
+// AFFINITY GROUPS
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AffinityPolicy {
+    /// If the affinity request cannot be satisfied, allow it anyway.
+    ///
+    /// This enables a "best-effort" attempt to satisfy the affinity policy.
+    Allow,
+
+    /// If the affinity request cannot be satisfied, fail explicitly.
+    Fail,
+}
+
+/// Describes the scope of affinity for the purposes of co-location.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureDomain {
+    /// Instances are considered co-located if they are on the same sled
+    Sled,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum AffinityGroupMember {
+    Instance(Uuid),
+}
+
+impl SimpleIdentity for AffinityGroupMember {
+    fn id(&self) -> Uuid {
+        match self {
+            AffinityGroupMember::Instance(id) => *id,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum AntiAffinityGroupMember {
+    Instance(Uuid),
+}
+
+impl SimpleIdentity for AntiAffinityGroupMember {
+    fn id(&self) -> Uuid {
+        match self {
+            AntiAffinityGroupMember::Instance(id) => *id,
+        }
+    }
 }
 
 // DISKS
