@@ -75,7 +75,7 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
         policy = EndpointTagPolicy::ExactlyOne,
         tags = {
             "affinity" = {
-                description = "Affinity groups give control over instance placement.",
+                description = "Affinity and anti-affinity groups give control over instance placement.",
                 external_docs = {
                     url = "http://docs.oxide.computer/api/affinity"
                 }

@@ -24558,7 +24558,7 @@
   "tags": [
     {
       "name": "affinity",
-      "description": "Affinity groups give control over instance placement.",
+      "description": "Affinity and anti-affinity groups give control over instance placement.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/affinity"
       }
