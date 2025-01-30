@@ -1,15 +1,20 @@
 // TODO: Move this all to blueprint_diff.rs
 
+use super::blueprint_display::BpTable;
 use super::{
     BlueprintDatasetsConfig, BlueprintDatasetsConfigDiff, BlueprintDiff,
     BlueprintPhysicalDisksConfig, BlueprintPhysicalDisksConfigDiff,
-    BlueprintZonesConfig, BlueprintZonesConfigDiff,
+    BlueprintZoneConfig, BlueprintZoneConfigDiff, BlueprintZonesConfig,
+    BlueprintZonesConfigDiff,
 };
+use daft::Leaf;
+use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeSet;
 
 // A wrapper type around a `daft` generated `BlueprintDiff that provides summary
 // data and direct access to the underlying diff.
+#[derive(Debug, Clone)]
 pub struct BlueprintDiffSummary<'a> {
     pub diff: &'a BlueprintDiff<'a>,
     pub sleds_added: BTreeSet<SledUuid>,
@@ -229,7 +234,7 @@ impl<'a> BlueprintDiffSummary<'a> {
         &self,
         sled_id: &SledUuid,
     ) -> Option<&'a BlueprintZonesConfig> {
-        self.diff.blueprint_zones.added.get(sled_id).cloned()
+        self.diff.blueprint_zones.removed.get(sled_id).cloned()
     }
 
     /// Return the `BlueprintZonesConfigDiff` for a modified sled
@@ -238,6 +243,35 @@ impl<'a> BlueprintDiffSummary<'a> {
         sled_id: &SledUuid,
     ) -> Option<&'a BlueprintZonesConfigDiff> {
         self.diff.blueprint_zones.modified.get(sled_id)
+    }
+
+    /// Iterate over all removed zones on a sled
+    pub fn removed_zones(
+        &self,
+        sled_id: &SledUuid,
+    ) -> Option<(
+        Option<Generation>,
+        Option<Generation>,
+        impl Iterator<Item = &'a BlueprintZoneConfig>,
+    )> {
+        // First check if the sled is removed
+        if let Some(&zones_cfg) = self.diff.blueprint_zones.removed.get(sled_id)
+        {
+            return Some((
+                Some(zones_cfg.generation),
+                None,
+                (&zones_cfg.zones).iter(),
+            ));
+        }
+
+        // Then check if the sled is modified and there are any removed zones
+        self.diff.blueprint_zones.modified.get(sled_id).map(|zones_cfg_diff| {
+            (
+                Some(*zones_cfg_diff.generation.before),
+                Some(*zones_cfg_diff.generation.after),
+                zones_cfg_diff.zones.removed.values(),
+            )
+        })
     }
 
     /// Return the `BlueprintDisksConfig` for a newly added sled
@@ -253,7 +287,7 @@ impl<'a> BlueprintDiffSummary<'a> {
         &self,
         sled_id: &SledUuid,
     ) -> Option<&'a BlueprintPhysicalDisksConfig> {
-        self.diff.blueprint_disks.added.get(sled_id).cloned()
+        self.diff.blueprint_disks.removed.get(sled_id).cloned()
     }
 
     /// Return the `BlueprintDisksConfigDiff` for a modified sled
@@ -277,7 +311,7 @@ impl<'a> BlueprintDiffSummary<'a> {
         &self,
         sled_id: &SledUuid,
     ) -> Option<&'a BlueprintDatasetsConfig> {
-        self.diff.blueprint_datasets.added.get(sled_id).cloned()
+        self.diff.blueprint_datasets.removed.get(sled_id).cloned()
     }
 
     /// Return the `BlueprintDatasetsConfigDiff` for a modified sled
@@ -286,5 +320,25 @@ impl<'a> BlueprintDiffSummary<'a> {
         sled_id: &SledUuid,
     ) -> Option<&'a BlueprintDatasetsConfigDiff> {
         self.diff.blueprint_datasets.modified.get(sled_id)
+    }
+}
+
+/// Wrapper to allow a [`BlueprintDiff`] to be displayed.
+///
+/// Returned by [`BlueprintDiff::display()`].
+#[derive(Clone, Debug)]
+#[must_use = "this struct does nothing unless displayed"]
+pub struct BlueprintDiffDisplay<'diff> {
+    pub diff: &'diff BlueprintDiffSummary<'diff>,
+}
+
+impl<'diff> BlueprintDiffDisplay<'diff> {
+    #[inline]
+    fn new(diff: &'diff BlueprintDiffSummary<'diff>) -> Self {
+        Self { diff }
+    }
+
+    fn to_zones_table(&self, sled_id: &SledUuid) -> Option<BpTable> {
+        todo!()
     }
 }

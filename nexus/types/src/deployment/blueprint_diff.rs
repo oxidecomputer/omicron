@@ -939,8 +939,8 @@ impl BlueprintDiffOriginal {
     }
 
     /// Return a struct that can be used to display the diff.
-    pub fn display(&self) -> BlueprintDiffDisplay<'_> {
-        BlueprintDiffDisplay::new(self)
+    pub fn display(&self) -> BlueprintDiffDisplayOriginal<'_> {
+        BlueprintDiffDisplayOriginal::new(self)
     }
 
     /// Returns whether the diff reflects any changes or if the blueprints are
@@ -1364,12 +1364,12 @@ impl ClickhouseClusterConfigDiffTables {
 /// Returned by [`BlueprintDiff::display()`].
 #[derive(Clone, Debug)]
 #[must_use = "this struct does nothing unless displayed"]
-pub struct BlueprintDiffDisplay<'diff> {
+pub struct BlueprintDiffDisplayOriginal<'diff> {
     pub diff: &'diff BlueprintDiffOriginal,
     // TODO: add colorization with a stylesheet
 }
 
-impl<'diff> BlueprintDiffDisplay<'diff> {
+impl<'diff> BlueprintDiffDisplayOriginal<'diff> {
     #[inline]
     fn new(diff: &'diff BlueprintDiffOriginal) -> Self {
         Self { diff }
@@ -1568,7 +1568,7 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
     }
 }
 
-impl fmt::Display for BlueprintDiffDisplay<'_> {
+impl fmt::Display for BlueprintDiffDisplayOriginal<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let diff = self.diff;
 
