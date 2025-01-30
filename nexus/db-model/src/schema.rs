@@ -2157,7 +2157,6 @@ table! {
         request_uri -> Text,
         operation_id -> Text,
         source_ip -> Text,
-        resource_type -> Text,
         actor_id -> Nullable<Uuid>,
         actor_silo_id -> Nullable<Uuid>,
         access_method -> Nullable<Text>,

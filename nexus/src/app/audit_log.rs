@@ -14,13 +14,6 @@ use uuid::Uuid;
 use crate::context::ApiContext;
 
 impl super::Nexus {
-    // Currently this pulls from CRDB only, but the idea is that we are
-    // only storing recent entries in CRDB and moving the data in batches
-    // to clickhouse in a job. In that case we would need to look at both
-    // clickhouse and CRDB. We could potentially skip the CRDB part if we're
-    // confident the range excludes CRDB data, but it's probably simpler to
-    // always check CRDB.
-
     pub(crate) async fn audit_log_list(
         &self,
         opctx: &OpContext,
@@ -56,7 +49,6 @@ impl super::Nexus {
 
     // set duration and result on an existing entry
     pub(crate) async fn audit_log_entry_complete(
-        /* id, duration, result */
         &self,
         opctx: &OpContext,
         entry: &AuditLogEntryInit,

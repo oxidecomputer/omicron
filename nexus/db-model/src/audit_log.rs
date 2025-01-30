@@ -20,7 +20,6 @@ pub struct AuditLogEntryInit {
     pub request_uri: String,
     pub operation_id: String,
     pub source_ip: String,
-    pub resource_type: String,
     // TODO: we probably want a dedicated enum for these columns and for that
     // we need a fancier set of columns. For example, we may want to initialize
     // the row with a _potential_ actor (probably a different field), like the
@@ -54,7 +53,6 @@ pub struct AuditLogEntry {
     pub request_uri: String,
     pub operation_id: String,
     pub source_ip: String,
-    pub resource_type: String,
     pub actor_id: Option<Uuid>,
     pub actor_silo_id: Option<Uuid>,
     pub access_method: Option<String>,
@@ -102,9 +100,6 @@ impl AuditLogEntryInit {
             actor_silo_id,
             source_ip,
             access_method,
-
-            // TODO: actually get all these values
-            resource_type: String::new(),
         }
     }
 }
@@ -138,7 +133,6 @@ impl From<AuditLogEntry> for views::AuditLogEntry {
             request_uri: entry.request_uri,
             operation_id: entry.operation_id,
             source_ip: entry.source_ip,
-            resource_type: entry.resource_type,
             resource_id: entry.resource_id,
             actor_id: entry.actor_id,
             actor_silo_id: entry.actor_silo_id,

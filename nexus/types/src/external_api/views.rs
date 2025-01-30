@@ -1045,8 +1045,6 @@ pub struct AuditLogEntry {
     pub operation_id: String,
     /// IP address that made the request
     pub source_ip: String,
-    /// Resource type
-    pub resource_type: String,
 
     /// User ID of the actor who performed the action
     pub actor_id: Option<Uuid>,

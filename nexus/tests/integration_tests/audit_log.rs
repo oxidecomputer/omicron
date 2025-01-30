@@ -71,7 +71,6 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     assert_eq!(e1.request_uri, "/v1/projects");
     assert_eq!(e1.operation_id, "project_create");
     assert_eq!(e1.source_ip, "127.0.0.1");
-    assert_eq!(e1.resource_type, "");
     // TODO: would be nice to test a request with a different method
     assert_eq!(e1.access_method, Some("spoof".to_string()));
     assert!(e1.timestamp >= t1 && e1.timestamp <= t2);
@@ -82,7 +81,6 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     assert_eq!(e2.request_uri, "/v1/projects");
     assert_eq!(e2.operation_id, "project_create");
     assert_eq!(e2.source_ip, "127.0.0.1");
-    assert_eq!(e2.resource_type, "");
     assert_eq!(e2.access_method, Some("spoof".to_string()));
     assert!(e2.timestamp >= t2 && e2.timestamp <= t3);
     assert!(e2.time_completed > e2.timestamp);

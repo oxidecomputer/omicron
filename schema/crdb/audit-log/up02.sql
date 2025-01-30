@@ -6,7 +6,6 @@ SELECT
     request_uri,
     operation_id,
     source_ip,
-    resource_type,
     actor_id,
     actor_silo_id,
     access_method,

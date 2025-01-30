@@ -4807,7 +4807,6 @@ CREATE TABLE IF NOT EXISTS audit_log (
     request_uri STRING NOT NULL,
     operation_id STRING NOT NULL,
     source_ip STRING NOT NULL,
-    resource_type STRING NOT NULL,
 
     actor_id UUID,
     actor_silo_id UUID,
@@ -4845,7 +4844,6 @@ SELECT
     request_uri,
     operation_id,
     source_ip,
-    resource_type,
     actor_id,
     actor_silo_id,
     access_method,
