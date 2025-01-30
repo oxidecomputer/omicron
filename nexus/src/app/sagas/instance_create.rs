@@ -977,17 +977,11 @@ async fn sic_delete_instance_record(
         &sagactx,
         &params.serialized_authn,
     );
-    let instance_name = sagactx
-        .lookup::<db::model::Instance>("instance_record")?
-        .name()
-        .clone()
-        .into();
 
-    // TODO-correctness TODO-security It's not correct to re-resolve the
-    // instance name now.  See oxidecomputer/omicron#1536.
+    let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
+
     let result = LookupPath::new(&opctx, &datastore)
-        .project_id(params.project_id)
-        .instance_name(&instance_name)
+        .instance_id(instance_id.into_untyped_uuid())
         .fetch()
         .await;
 
