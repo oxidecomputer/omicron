@@ -252,7 +252,7 @@ impl<'a> BlueprintDiffSummary<'a> {
     ) -> Option<(
         Option<Generation>,
         Option<Generation>,
-        impl Iterator<Item = &'a BlueprintZoneConfig>,
+        Box<dyn Iterator<Item = &'a BlueprintZoneConfig> + 'a>,
     )> {
         // First check if the sled is removed
         if let Some(&zones_cfg) = self.diff.blueprint_zones.removed.get(sled_id)
@@ -260,7 +260,7 @@ impl<'a> BlueprintDiffSummary<'a> {
             return Some((
                 Some(zones_cfg.generation),
                 None,
-                (&zones_cfg.zones).iter(),
+                Box::new(zones_cfg.zones.iter()),
             ));
         }
 
@@ -269,7 +269,8 @@ impl<'a> BlueprintDiffSummary<'a> {
             (
                 Some(*zones_cfg_diff.generation.before),
                 Some(*zones_cfg_diff.generation.after),
-                zones_cfg_diff.zones.removed.values(),
+                Box::new(zones_cfg_diff.zones.removed.values().map(|z| *z))
+                    as Box<dyn Iterator<Item = &BlueprintZoneConfig>>,
             )
         })
     }
