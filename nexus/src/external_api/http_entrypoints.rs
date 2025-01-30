@@ -13,9 +13,9 @@ use super::{
         Utilization, Vpc, VpcRouter, VpcSubnet,
     },
 };
-use crate::app::Unimpl;
 use crate::app::external_endpoints::authority_for_request;
 use crate::app::support_bundles::SupportBundleQueryType;
+use crate::app::Unimpl;
 use crate::context::ApiContext;
 use crate::external_api::shared;
 use dropshot::Body;
