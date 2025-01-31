@@ -1318,6 +1318,9 @@ pub enum InstanceAutoRestartPolicy {
 
 // AFFINITY GROUPS
 
+/// Affinity policy used to describe "what to do when a request cannot be satisfied"
+///
+/// Used for both Affinity and Anti-Affinity Groups
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AffinityPolicy {
@@ -1338,9 +1341,14 @@ pub enum FailureDomain {
     Sled,
 }
 
+/// A member of an Affinity Group
+///
+/// Membership in a group is not exclusive - members may belong to multiple
+/// affinity / anti-affinity groups.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum AffinityGroupMember {
+    /// An instance belonging to this group, identified by UUID.
     Instance(Uuid),
 }
 
@@ -1352,9 +1360,14 @@ impl SimpleIdentity for AffinityGroupMember {
     }
 }
 
+/// A member of an Anti-Affinity Group
+///
+/// Membership in a group is not exclusive - members may belong to multiple
+/// affinity / anti-affinity groups.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum AntiAffinityGroupMember {
+    /// An instance belonging to this group, identified by UUID.
     Instance(Uuid),
 }
 
