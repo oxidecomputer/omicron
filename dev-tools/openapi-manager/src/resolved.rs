@@ -170,9 +170,10 @@ pub enum Problem {
     },
 
     #[error(
-        "No local spec file was found for non-blessed version.  This is \
-         normal if you have just added this version number. This tool can \
-         generate the file for you."
+        "No local spec file was found for lockstep or non-blessed version.\
+         This is normal if you have just changed a lockstep API or added \
+         this version to a versioned API.  This tool can generate the file \
+         for you."
     )]
     LocalVersionMissingLocal,
 

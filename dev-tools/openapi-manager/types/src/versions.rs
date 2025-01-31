@@ -9,13 +9,13 @@ use std::collections::BTreeMap;
 
 #[derive(Debug)]
 pub struct SupportedVersion {
-    semver: &'static semver::Version,
+    semver: semver::Version,
     label: &'static str,
 }
 
 impl SupportedVersion {
     pub const fn new(
-        semver: &'static semver::Version,
+        semver: semver::Version,
         label: &'static str,
     ) -> SupportedVersion {
         SupportedVersion { semver, label }
@@ -88,8 +88,8 @@ impl SupportedVersions {
 ///
 /// ```
 /// api_versions!([
-///     (2, 0, 0, ADD_FOOBAR_OPERATION, "add-foobar-operation"),
-///     (1, 0, 0, INITIAL, "initial-version"),
+///     (2, ADD_FOOBAR_OPERATION),
+///     (1, INITIAL),
 /// ])
 /// ```
 ///
@@ -109,8 +109,8 @@ impl SupportedVersions {
 /// SupportedVersions` that, as the name suggests, returns a
 /// [`SupportedVersions`] that describes these two supported API versions.
 // Design constraints:
-// - For each new API version, we need a developer-chosen semver and a
-//   developer-chosen string label to be used as an identifier.
+// - For each new API version, we need a developer-chosen semver and label that
+//   can be used to construct an identifier.
 // - We want to produce:
 //   - a symbolic constant for each version that won't change if the developer
 //     needs to change the semver value for this API version
@@ -137,20 +137,48 @@ impl SupportedVersions {
 macro_rules! api_versions {
     ( [ $( (
         $major:literal,
-        $minor:literal,
-        $patch:literal,
-        $name:ident,
-        $desc:expr
+        $name:ident
     ) ),* $(,)? ] ) => {
         openapi_manager_types::paste! {
             $(
-                static [<VERSION_ $name>]: semver::Version =
+                const [<VERSION_ $name>]: semver::Version =
+                    semver::Version::new($major, 0, 0);
+            )*
+
+            pub fn supported_versions() -> SupportedVersions {
+                let mut literal_versions = vec![
+                    $( SupportedVersion::new([<VERSION_ $name>], stringify!($name)) ),*
+                ];
+                literal_versions.reverse();
+                SupportedVersions::new(literal_versions)
+            }
+        }
+    };
+}
+
+/// "picky" version of `api_versions` that lets you specify the minor and patch
+/// numbers, too
+///
+/// It is not yet clear why we'd ever need this.  Our approach to versioning is
+/// oriented around not having to care whether a change is a major bump or not
+/// so we can just always bump the major number.
+#[macro_export]
+macro_rules! api_versions_picky {
+    ( [ $( (
+        $major:literal,
+        $minor:literal,
+        $patch:literal,
+        $name:ident
+    ) ),* $(,)? ] ) => {
+        openapi_manager_types::paste! {
+            $(
+                const [<VERSION_ $name>]: semver::Version =
                     semver::Version::new($major, $minor, $patch);
             )*
 
             pub fn supported_versions() -> SupportedVersions {
                 let mut literal_versions = vec![
-                    $( SupportedVersion::new(&[<VERSION_ $name>], $desc) ),*
+                    $( SupportedVersion::new([<VERSION_ $name>], $desc) ),*
                 ];
                 literal_versions.reverse();
                 SupportedVersions::new(literal_versions)
