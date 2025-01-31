@@ -2248,6 +2248,8 @@ async fn test_replacement_sanity_twice(cptestctx: &ControlPlaneTestContext) {
         run_replacement_tasks_to_completion(&internal_client).await;
     }
 
+    wait_for_all_replacements(&datastore).await;
+
     // Now, do it again, except this time specifying the read-only regions
 
     let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
