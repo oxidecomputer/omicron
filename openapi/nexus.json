@@ -12205,8 +12205,10 @@
         ]
       },
       "AffinityGroupMember": {
+        "description": "A member of an Affinity Group\n\nMembership in a group is not exclusive - members may belong to multiple affinity / anti-affinity groups.",
         "oneOf": [
           {
+            "description": "An instance belonging to this group, identified by UUID.",
             "type": "object",
             "properties": {
               "type": {
@@ -12216,8 +12218,7 @@
                 ]
               },
               "value": {
-                "type": "string",
-                "format": "uuid"
+                "$ref": "#/components/schemas/TypedUuidForInstanceKind"
               }
             },
             "required": [
@@ -12288,6 +12289,7 @@
         }
       },
       "AffinityPolicy": {
+        "description": "Affinity policy used to describe \"what to do when a request cannot be satisfied\"\n\nUsed for both Affinity and Anti-Affinity Groups",
         "oneOf": [
           {
             "description": "If the affinity request cannot be satisfied, allow it anyway.\n\nThis enables a \"best-effort\" attempt to satisfy the affinity policy.",
@@ -12482,8 +12484,10 @@
         ]
       },
       "AntiAffinityGroupMember": {
+        "description": "A member of an Anti-Affinity Group\n\nMembership in a group is not exclusive - members may belong to multiple affinity / anti-affinity groups.",
         "oneOf": [
           {
+            "description": "An instance belonging to this group, identified by UUID.",
             "type": "object",
             "properties": {
               "type": {
@@ -12493,8 +12497,7 @@
                 ]
               },
               "value": {
-                "type": "string",
-                "format": "uuid"
+                "$ref": "#/components/schemas/TypedUuidForInstanceKind"
               }
             },
             "required": [
@@ -23050,6 +23053,10 @@
           }
         }
       },
+      "TypedUuidForInstanceKind": {
+        "type": "string",
+        "format": "uuid"
+      },
       "TypedUuidForSupportBundleKind": {
         "type": "string",
         "format": "uuid"
@@ -24558,7 +24565,7 @@
   "tags": [
     {
       "name": "affinity",
-      "description": "Affinity groups give control over instance placement.",
+      "description": "Affinity and anti-affinity groups give control over instance placement.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/affinity"
       }
