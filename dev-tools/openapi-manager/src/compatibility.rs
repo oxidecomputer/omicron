@@ -9,13 +9,16 @@ use thiserror::Error;
 
 // XXX-dap
 #[derive(Debug, Error)]
-#[error("XXX-dap")] // XXX-dap
+#[error("XXX-dap all changes are considered incompatible right now")]
 pub struct OpenApiCompatibilityError {}
 
 pub fn api_compatible(
-    _spec1: &OpenAPI,
-    _spec2: &OpenAPI,
+    spec1: &OpenAPI,
+    spec2: &OpenAPI,
 ) -> anyhow::Result<Vec<OpenApiCompatibilityError>> {
-    // XXX-dap
-    Ok(Vec::new())
+    if *spec1 != *spec2 {
+        Ok(vec![OpenApiCompatibilityError {}])
+    } else {
+        Ok(Vec::new())
+    }
 }
