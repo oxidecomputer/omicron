@@ -18,6 +18,7 @@ use crate::inventory::Collection;
 pub use crate::inventory::SourceNatConfig;
 pub use crate::inventory::ZpoolName;
 use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
+pub use blueprint_differ::BlueprintDiffer;
 use diffus::Diffus;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
@@ -34,7 +35,6 @@ use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::BlueprintUuid;
-use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -52,6 +52,7 @@ use strum::EnumIter;
 use strum::IntoEnumIterator;
 
 mod blueprint_diff;
+mod blueprint_differ;
 mod blueprint_display;
 mod clickhouse;
 pub mod diff_visitors;
@@ -103,6 +104,7 @@ use blueprint_display::{
 use id_map::{IdMap, IdMappable};
 
 pub use blueprint_diff::BlueprintDiff;
+pub use blueprint_diff::DiffValue;
 
 /// Describes a complete set of software and configuration for the system
 // Blueprints are a fundamental part of how the system modifies itself.  Each
@@ -285,28 +287,12 @@ impl Blueprint {
     ///
     /// The argument provided is the "before" side, and `self` is the "after"
     /// side.
-    pub fn diff_since_blueprint(&self, before: &Blueprint) -> BlueprintDiff {
-        BlueprintDiff::new(
-            DiffBeforeMetadata::Blueprint(Box::new(before.metadata())),
-            DiffBeforeClickhouseClusterConfig::from(before),
-            before.sled_state.clone(),
-            before
-                .blueprint_zones
-                .iter()
-                .map(|(sled_id, zones)| (*sled_id, zones.clone()))
-                .collect(),
-            before
-                .blueprint_disks
-                .iter()
-                .map(|(sled_id, disks)| (*sled_id, disks.clone()))
-                .collect(),
-            before
-                .blueprint_datasets
-                .iter()
-                .map(|(sled_id, datasets)| (*sled_id, datasets.clone()))
-                .collect(),
-            &self,
-        )
+    pub fn diff_since_blueprint<'e>(
+        &'e self,
+        before: &'e Blueprint,
+    ) -> BlueprintDiff<'e> {
+        let differ = BlueprintDiffer::new(before, self);
+        differ.diff()
     }
 
     /// Return a struct that can be displayed to present information about the
@@ -1154,40 +1140,6 @@ pub struct BlueprintTarget {
 pub struct BlueprintTargetSet {
     pub target_id: BlueprintUuid,
     pub enabled: bool,
-}
-
-/// Data about the "before" version within a [`BlueprintDiff`].
-#[derive(Clone, Debug)]
-pub enum DiffBeforeMetadata {
-    /// The diff was made from a collection.
-    Collection { id: CollectionUuid },
-    /// The diff was made from a blueprint.
-    Blueprint(Box<BlueprintMetadata>),
-}
-
-impl DiffBeforeMetadata {
-    pub fn display_id(&self) -> String {
-        match self {
-            DiffBeforeMetadata::Collection { id } => format!("collection {id}"),
-            DiffBeforeMetadata::Blueprint(b) => b.display_id(),
-        }
-    }
-}
-
-/// Data about the "before" version within a [`BlueprintDiff`]
-///
-/// We only track keepers in inventory collections.
-#[derive(Clone, Debug)]
-pub enum DiffBeforeClickhouseClusterConfig {
-    Blueprint(Option<ClickhouseClusterConfig>),
-}
-
-impl From<&Blueprint> for DiffBeforeClickhouseClusterConfig {
-    fn from(value: &Blueprint) -> Self {
-        DiffBeforeClickhouseClusterConfig::Blueprint(
-            value.clickhouse_cluster_config.clone(),
-        )
-    }
 }
 
 /// A unique identifier for a dataset within a collection.

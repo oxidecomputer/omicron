@@ -89,6 +89,12 @@ pub enum BpGeneration {
     Diff { before: Option<Generation>, after: Option<Generation> },
 }
 
+impl From<Generation> for BpGeneration {
+    fn from(value: Generation) -> Self {
+        BpGeneration::Value(value)
+    }
+}
+
 impl BpGeneration {
     // Used when there isn't a corresponding generation
     pub fn unknown() -> Self {
@@ -122,6 +128,7 @@ impl fmt::Display for BpGeneration {
     }
 }
 
+#[derive(Debug)]
 pub enum BpTableColumn {
     Value(String),
     Diff { before: String, after: String },
@@ -162,6 +169,7 @@ impl BpTableColumn {
 }
 
 /// A row in a [`BpTable`]
+#[derive(Debug)]
 pub struct BpTableRow {
     state: BpDiffState,
     columns: Vec<BpTableColumn>,
@@ -194,6 +202,7 @@ pub trait BpTableData {
 }
 
 /// A table specific to a sled resource, such as a zone or disk.
+#[derive(Debug)]
 pub struct BpTable {
     table_name: &'static str,
     column_names: &'static [&'static str],

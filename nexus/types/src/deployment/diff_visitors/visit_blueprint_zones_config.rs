@@ -4,6 +4,8 @@
 
 //! A visitor for `BlueprintZonesConfig`
 
+use crate::deployment::EditedBlueprintZonesConfig;
+
 use super::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
     BlueprintZonesConfig, BpVisitorContext, Change, EditedBlueprintZoneConfig,
@@ -20,6 +22,15 @@ pub trait VisitBlueprintZonesConfig<'e> {
         node: Edit<'e, BlueprintZonesConfig>,
     ) {
         visit_root(self, ctx, node);
+    }
+
+    /// An alternate top-level call for use by wrapper visitors
+    fn visit_zones_edit(
+        &mut self,
+        ctx: &mut BpVisitorContext,
+        node: &EditedBlueprintZonesConfig<'e>,
+    ) {
+        visit_zones_edit(self, ctx, node);
     }
 
     /// A change to `BlueprintZonesConfig::generation`
@@ -115,35 +126,40 @@ pub fn visit_root<'e, V>(
 ) where
     V: VisitBlueprintZonesConfig<'e> + ?Sized,
 {
-    if let Edit::Change { diff: bp_zones_config, .. } = node {
-        if let Edit::Change { diff, .. } = bp_zones_config.generation {
-            v.visit_generation_change(ctx, diff.into());
-        }
-        if let Edit::Change { diff, .. } = bp_zones_config.zones {
-            for (&zone_id, bp_zone_config_edit) in &diff {
-                ctx.zone_id = Some(*zone_id);
-                match bp_zone_config_edit {
-                    map::Edit::Copy(_) => {}
-                    map::Edit::Insert(bp_zone_config) => {
-                        v.visit_zones_insert(ctx, bp_zone_config);
-                    }
-                    map::Edit::Remove(bp_zone_config) => {
-                        v.visit_zones_remove(ctx, bp_zone_config);
-                    }
-                    map::Edit::Change {
-                        before,
-                        after,
-                        diff: edited_bp_zone_config,
-                        ..
-                    } => {
-                        v.visit_zone_change(ctx, Change::new(before, after));
-                        v.visit_zone_edit(ctx, edited_bp_zone_config);
-                    }
+    if let Edit::Change { diff, .. } = node {
+        v.visit_zones_edit(ctx, &diff);
+    }
+}
+
+pub fn visit_zones_edit<'e, V>(
+    v: &mut V,
+    ctx: &mut BpVisitorContext,
+    node: &EditedBlueprintZonesConfig<'e>,
+) where
+    V: VisitBlueprintZonesConfig<'e> + ?Sized,
+{
+    if let Edit::Change { diff, .. } = node.generation {
+        v.visit_generation_change(ctx, diff.into());
+    }
+    if let Edit::Change { diff, .. } = &node.zones {
+        for (&zone_id, bp_zone_config_edit) in diff {
+            ctx.zone_id = Some(*zone_id);
+            match bp_zone_config_edit {
+                map::Edit::Copy(_) => {}
+                map::Edit::Insert(bp_zone_config) => {
+                    v.visit_zones_insert(ctx, bp_zone_config);
+                }
+                map::Edit::Remove(bp_zone_config) => {
+                    v.visit_zones_remove(ctx, bp_zone_config);
+                }
+                map::Edit::Change { before, after, diff } => {
+                    v.visit_zone_change(ctx, Change::new(before, after));
+                    v.visit_zone_edit(ctx, &diff);
                 }
             }
-            // Reset the context
-            ctx.zone_id = None;
         }
+        // Reset the context
+        ctx.zone_id = None;
     }
 }
 

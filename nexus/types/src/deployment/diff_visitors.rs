@@ -6,6 +6,7 @@
 //!
 //! Modelled after [`syn::visit`](https://docs.rs/syn/1/syn/visit).
 
+pub mod visit_blueprint;
 pub mod visit_blueprint_datasets_config;
 pub mod visit_blueprint_physical_disks_config;
 pub mod visit_blueprint_zones_config;
@@ -14,19 +15,42 @@ use diffus::edit::enm;
 use omicron_uuid_kinds::{
     DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid, SledUuid,
 };
+use thiserror::Error;
 
 use super::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
     BlueprintZonesConfig, EditedBlueprintZoneConfig,
 };
 
+#[derive(Debug, Error)]
+pub enum BpVisitorError {
+    #[error(
+        "BlueprintZonesConfig inserted for sled {} with no sled_state",
+        sled_id
+    )]
+    MissingSledStateOnZonesInsert { sled_id: SledUuid },
+    #[error(
+        "BlueprintPhysicalDisksConfig inserted for sled {} with no sled_state",
+        sled_id
+    )]
+    MissingSledStateOnDisksInsert { sled_id: SledUuid },
+    #[error(
+        "BlueprintDatasetsConfig inserted for sled {} with no sled_state",
+        sled_id
+    )]
+    MissingSledStateOnDatasetsInsert { sled_id: SledUuid },
+}
+
 /// A context for blueprint related visitors
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct BpVisitorContext {
     pub sled_id: Option<SledUuid>,
     pub zone_id: Option<OmicronZoneUuid>,
     pub disk_id: Option<PhysicalDiskUuid>,
     pub dataset_id: Option<DatasetUuid>,
+    // Structural errors must be reported through the context, as we can't really
+    // return results from visitor methods.
+    pub errors: Vec<BpVisitorError>,
 }
 
 #[derive(Debug, Clone, Copy)]
