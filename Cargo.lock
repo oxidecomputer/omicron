@@ -1053,7 +1053,7 @@ checksum = "2d886547e41f740c616ae73108f6eb70afe6d940c7bc697cb30f13daec073037"
 dependencies = [
  "camino",
  "cargo-platform",
- "semver 1.0.25",
+ "semver 1.0.24",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -1664,12 +1664,13 @@ dependencies = [
 
 [[package]]
 name = "cookie_store"
-version = "0.21.0"
+version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4934e6b7e8419148b6ef56950d277af8561060b56afd59e2aadf98b59fce6baa"
+checksum = "2eac901828f88a5241ee0600950ab981148a18f2f756900ffba1b125ca6a3ef9"
 dependencies = [
  "cookie",
- "idna 0.5.0",
+ "document-features",
+ "idna",
  "log",
  "publicsuffix",
  "serde",
@@ -2571,6 +2572,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fea41bba32d969b513997752735605054bc0dfa92b4c56bf1189f2e174be7a10"
 
 [[package]]
+name = "document-features"
+version = "0.2.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb6969eaabd2421f8a2775cfd2471a2b634372b4a25d41e3bd647b79912850a0"
+dependencies = [
+ "litrs",
+]
+
+[[package]]
 name = "dof"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2694,7 +2704,7 @@ dependencies = [
  "rustls-pemfile 2.2.0",
  "schemars",
  "scopeguard",
- "semver 1.0.25",
+ "semver 1.0.24",
  "serde",
  "serde_json",
  "serde_path_to_error",
@@ -2738,7 +2748,7 @@ dependencies = [
  "heck 0.5.0",
  "proc-macro2",
  "quote",
- "semver 1.0.25",
+ "semver 1.0.24",
  "serde",
  "serde_tokenstream",
  "syn 2.0.96",
@@ -3665,7 +3675,7 @@ dependencies = [
  "once_cell",
  "pathdiff",
  "petgraph",
- "semver 1.0.25",
+ "semver 1.0.24",
  "serde",
  "serde_json",
  "smallvec 1.13.2",
@@ -3907,7 +3917,7 @@ dependencies = [
  "futures-channel",
  "futures-io",
  "futures-util",
- "idna 1.0.3",
+ "idna",
  "ipnet",
  "once_cell",
  "rand",
@@ -4175,9 +4185,9 @@ checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
 
 [[package]]
 name = "hyper"
-version = "1.6.0"
+version = "1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc2b571658e38e0c01b1fdca3bbbe93c00d3d71693ff2770043f8c29bc7d6f80"
+checksum = "256fb8d4bd6413123cc9d91832d78325c48ff41677595be797d90f42969beae0"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -4431,26 +4441,6 @@ name = "ident_case"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
-
-[[package]]
-name = "idna"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e14ddfc70884202db2244c223200c204c2bda1bc6e0998d11b5e024d657209e6"
-dependencies = [
- "unicode-bidi",
- "unicode-normalization",
-]
-
-[[package]]
-name = "idna"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "634d9b1461af396cad843f47fdba5597a4f9e6ddd4bfb6ff5d85028c25cb12f6"
-dependencies = [
- "unicode-bidi",
- "unicode-normalization",
-]
 
 [[package]]
 name = "idna"
@@ -4799,7 +4789,7 @@ dependencies = [
  "progenitor 0.9.1",
  "qorb",
  "reqwest",
- "semver 1.0.25",
+ "semver 1.0.24",
  "serde",
  "serde_json",
  "sled",
@@ -5303,6 +5293,12 @@ name = "litemap"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "643cb0b8d4fcc284004d5fd0d67ccf61dfffadb7f75e1e71bc420f4688a3a704"
+
+[[package]]
+name = "litrs"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4ce301924b7887e9d637144fdade93f9dfff9b60981d4ac161db09720d39aa5"
 
 [[package]]
 name = "live-tests-macros"
@@ -5836,7 +5832,7 @@ dependencies = [
  "rand",
  "ref-cast",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.24",
  "serde",
  "serde_json",
  "sled-agent-client",
@@ -5910,7 +5906,7 @@ dependencies = [
  "regex",
  "rustls 0.22.4",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.24",
  "serde",
  "serde_json",
  "serde_with",
@@ -6806,7 +6802,7 @@ dependencies = [
  "regress 0.9.1",
  "reqwest",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.24",
  "serde",
  "serde_human_bytes",
  "serde_json",
@@ -7094,7 +7090,7 @@ dependencies = [
  "rustls-pemfile 2.2.0",
  "samael",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.24",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -7214,7 +7210,7 @@ dependencies = [
  "rayon",
  "reqwest",
  "ring",
- "semver 1.0.25",
+ "semver 1.0.24",
  "serde",
  "shell-words",
  "sled-hardware",
@@ -7266,7 +7262,7 @@ dependencies = [
  "omicron-zone-package",
  "once_cell",
  "reqwest",
- "semver 1.0.25",
+ "semver 1.0.24",
  "serde",
  "sha2",
  "shell-words",
@@ -7362,7 +7358,7 @@ dependencies = [
  "repo-depot-client",
  "reqwest",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.24",
  "serde",
  "serde_human_bytes",
  "serde_json",
@@ -7511,7 +7507,7 @@ dependencies = [
  "hyper",
  "hyper-rustls 0.27.3",
  "hyper-util",
- "idna 1.0.3",
+ "idna",
  "indexmap 2.7.1",
  "indicatif",
  "inout",
@@ -7556,7 +7552,7 @@ dependencies = [
  "rustls-webpki 0.102.8",
  "schemars",
  "scopeguard",
- "semver 1.0.25",
+ "semver 1.0.24",
  "serde",
  "serde_json",
  "sha1",
@@ -7609,7 +7605,7 @@ dependencies = [
  "futures-util",
  "hex",
  "reqwest",
- "semver 1.0.25",
+ "semver 1.0.24",
  "serde",
  "serde_derive",
  "serde_json",
@@ -7679,7 +7675,7 @@ dependencies = [
  "owo-colors",
  "oximeter-api",
  "repo-depot-api",
- "semver 1.0.25",
+ "semver 1.0.24",
  "serde_json",
  "similar",
  "sled-agent-api",
@@ -7741,9 +7737,9 @@ checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.103"
+version = "0.9.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f9e8deee91df40a943c71b917e5874b951d32a802526c85721ce3b776c929d6"
+checksum = "45abf306cbf99debc8195b66b7346498d7b10c210de50418b5ccd7ceba08c741"
 dependencies = [
  "cc",
  "libc",
@@ -7944,7 +7940,7 @@ dependencies = [
  "rand",
  "reqwest",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.24",
  "serde",
  "serde_json",
  "slog",
@@ -8177,7 +8173,7 @@ dependencies = [
 [[package]]
 name = "oxnet"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/oxnet#7dacd265f1bcd0f8b47bd4805250c4f0812da206"
+source = "git+https://github.com/oxidecomputer/oxnet#49ee85dcd294901031c3395ee773363db1cdc289"
 dependencies = [
  "ipnetwork",
  "schemars",
@@ -8995,9 +8991,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.93"
+version = "1.0.92"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "60946a68e5f9d28b0dc1c21bb8a97ee7d018a8b322fa57838ba31cc878e22d99"
+checksum = "37d3544b3f2748c54e147655edb5025752e2303145b5aefb3c3ea2c78b973bb0"
 dependencies = [
  "unicode-ident",
 ]
@@ -9272,11 +9268,11 @@ checksum = "33cb294fe86a74cbcf50d4445b37da762029549ebeea341421c7c70370f86cac"
 
 [[package]]
 name = "publicsuffix"
-version = "2.2.3"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96a8c1bda5ae1af7f99a2962e49df150414a43d62404644d98dd5c3a93d07457"
+checksum = "6f42ea446cab60335f76979ec15e12619a2165b5ae2c12166bef27d283a9fadf"
 dependencies = [
- "idna 0.3.0",
+ "idna",
  "psl-types",
 ]
 
@@ -10081,7 +10077,7 @@ version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
 dependencies = [
- "semver 1.0.25",
+ "semver 1.0.24",
 ]
 
 [[package]]
@@ -10476,9 +10472,9 @@ checksum = "d4f410fedcf71af0345d7607d246e7ad15faaadd49d240ee3b24e5dc21a820ac"
 
 [[package]]
 name = "semver"
-version = "1.0.25"
+version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f79dfe2d285b0488816f30e700a7438c5a73d816b5b7d3ac72fbc48b0d185e03"
+checksum = "3cb6eb87a131f756572d7fb904f6e7b68633f09cca868c5df1c4b8d1a694bbba"
 dependencies = [
  "serde",
 ]
@@ -10545,9 +10541,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.138"
+version = "1.0.135"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d434192e7da787e94a6ea7e9670b26a036d0ca41e0b7efb2676dd32bae872949"
+checksum = "2b0d7ba2887406110130a978386c4e1befb98c674b4fba677954e4db976630d9"
 dependencies = [
  "itoa",
  "memchr",
@@ -12260,7 +12256,7 @@ dependencies = [
  "home",
  "once_cell",
  "regex",
- "semver 1.0.25",
+ "semver 1.0.24",
  "walkdir",
 ]
 
@@ -12558,7 +12554,7 @@ dependencies = [
  "quote",
  "regress 0.10.1",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.24",
  "serde",
  "serde_json",
  "syn 2.0.96",
@@ -12578,7 +12574,7 @@ dependencies = [
  "quote",
  "regress 0.10.1",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.24",
  "serde",
  "serde_json",
  "syn 2.0.96",
@@ -12595,7 +12591,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.24",
  "serde",
  "serde_json",
  "serde_tokenstream",
@@ -12612,7 +12608,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.24",
  "serde",
  "serde_json",
  "serde_tokenstream",
@@ -12649,9 +12645,9 @@ checksum = "5ab17db44d7388991a428b2ee655ce0c212e862eff1768a455c58f9aad6e7893"
 
 [[package]]
 name = "unicode-ident"
-version = "1.0.16"
+version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a210d160f08b701c8721ba1c726c11662f877ea6b7094007e1ca9a1041945034"
+checksum = "adb9e6ca4f869e1180728b7950e35922a7fc6397f7b641499e8f3ef06e50dc83"
 
 [[package]]
 name = "unicode-linebreak"
@@ -12819,7 +12815,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d157f1b96d14500ffdc1f10ba712e780825526c03d9a49b4d0324b0d9113ada"
 dependencies = [
  "form_urlencoded",
- "idna 1.0.3",
+ "idna",
  "percent-encoding",
 ]
 
@@ -12913,9 +12909,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.12.1"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3758f5e68192bb96cc8f9b7e2c2cfdabb435499a28499a42f8f984092adad4b"
+checksum = "744018581f9a3454a9e15beb8a33b017183f1e7c0cd170232a2d1453b23a51c4"
 dependencies = [
  "getrandom",
  "serde",
