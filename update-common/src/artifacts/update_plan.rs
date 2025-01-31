@@ -1277,7 +1277,9 @@ mod tests {
 
     use super::*;
     use bytes::Bytes;
+    use flate2::{write::GzEncoder, Compression};
     use futures::StreamExt;
+    use omicron_brand_metadata::{ArchiveType, LayerInfo, Metadata};
     use omicron_test_utils::dev::test_setup_log;
     use rand::{distributions::Standard, thread_rng, Rng};
     use sha2::{Digest, Sha256};
@@ -2489,17 +2491,30 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_split_control_plane() {
         const VERSION_0: SemverVersion = SemverVersion::new(0, 0, 0);
-        const ZONES: &[(&str, &[u8])] =
-            &[("first", b"the first zone"), ("second", b"the second zone")];
 
         let logctx = test_setup_log("test_split_control_plane");
+
+        let mut zones = Vec::new();
+        for name in ["first", "second"] {
+            let mut tar = tar::Builder::new(GzEncoder::new(
+                Vec::new(),
+                Compression::fast(),
+            ));
+            let metadata = Metadata::new(ArchiveType::Layer(LayerInfo {
+                pkg: name.to_owned(),
+                version: VERSION_0.0.clone(),
+            }));
+            metadata.append_to_tar(&mut tar, 0).unwrap();
+            let data = tar.into_inner().unwrap().finish().unwrap();
+            zones.push((name, data));
+        }
 
         let mut cp_builder = CompositeControlPlaneArchiveBuilder::new(
             Vec::new(),
             MtimeSource::Now,
         )
         .unwrap();
-        for (name, data) in ZONES {
+        for (name, data) in &zones {
             cp_builder
                 .append_zone(
                     name,
@@ -2531,7 +2546,7 @@ mod tests {
         // of the zone contents.
         for (id, vec) in &plan_builder.by_id {
             let content =
-                ZONES.iter().find(|(name, _)| *name == id.name).unwrap().1;
+                &zones.iter().find(|(name, _)| *name == id.name).unwrap().1;
             let expected_hash = ArtifactHash(Sha256::digest(content).into());
             assert_eq!(id.version, VERSION_0);
             assert_eq!(id.kind, KnownArtifactKind::Zone.into());
