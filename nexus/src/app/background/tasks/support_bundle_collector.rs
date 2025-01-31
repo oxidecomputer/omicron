@@ -12,6 +12,7 @@ use camino_tempfile::tempfile_in;
 use camino_tempfile::Utf8TempDir;
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::StreamExt;
 use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
 use nexus_db_queries::authz;
@@ -34,6 +35,7 @@ use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use std::future::Future;
 use std::io::Write;
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
@@ -599,24 +601,56 @@ impl BundleCollection<'_> {
                     continue;
                 };
 
-                write_command_result_or_error(
-                    &sled_path,
-                    "dladm",
-                    sled_client.support_dladm_info().await,
-                )
-                .await?;
-                write_command_result_or_error(
-                    &sled_path,
-                    "ipadm",
-                    sled_client.support_ipadm_info().await,
-                )
-                .await?;
-                write_command_result_or_error(
-                    &sled_path,
-                    "zoneadm",
-                    sled_client.support_zoneadm_info().await,
-                )
-                .await?;
+                // NB: As new sled-diagnostic commands are added they should
+                // be added to this array so that their output can be saved
+                // within the support bundle.
+                let mut diag_cmds = futures::stream::iter([
+                    save_diag_cmd_output_or_error(
+                        &sled_path,
+                        "zoneadm",
+                        sled_client.support_zoneadm_info(),
+                    )
+                    .boxed(),
+                    save_diag_cmd_output_or_error(
+                        &sled_path,
+                        "dladm",
+                        sled_client.support_dladm_info(),
+                    )
+                    .boxed(),
+                    save_diag_cmd_output_or_error(
+                        &sled_path,
+                        "ipadm",
+                        sled_client.support_ipadm_info(),
+                    )
+                    .boxed(),
+                    save_diag_cmd_output_or_error(
+                        &sled_path,
+                        "pargs",
+                        sled_client.support_pargs_info(),
+                    )
+                    .boxed(),
+                    save_diag_cmd_output_or_error(
+                        &sled_path,
+                        "pfiles",
+                        sled_client.support_pfiles_info(),
+                    )
+                    .boxed(),
+                    save_diag_cmd_output_or_error(
+                        &sled_path,
+                        "pstack",
+                        sled_client.support_pstack_info(),
+                    )
+                    .boxed(),
+                ])
+                // Currently we execute up to 10 commands concurrently which
+                // might be doing their own concurrent work, for example
+                // collectiong `pstack` output of every Oxide process that is
+                // found on a sled.
+                .buffer_unordered(10);
+
+                while let Some(result) = diag_cmds.next().await {
+                    result?;
+                }
             }
         }
 
@@ -728,14 +762,21 @@ async fn sha2_hash(file: &mut tokio::fs::File) -> anyhow::Result<ArtifactHash> {
     Ok(ArtifactHash(digest.as_slice().try_into()?))
 }
 
-async fn write_command_result_or_error<D: std::fmt::Debug>(
+/// Run a `sled-dianostics` future and save it's output to a corresponding file.
+async fn save_diag_cmd_output_or_error<F, D: std::fmt::Debug>(
     path: &Utf8Path,
     command: &str,
-    result: Result<
-        sled_agent_client::ResponseValue<D>,
-        sled_agent_client::Error<sled_agent_client::types::Error>,
-    >,
-) -> anyhow::Result<()> {
+    future: F,
+) -> anyhow::Result<()>
+where
+    F: Future<
+            Output = Result<
+                sled_agent_client::ResponseValue<D>,
+                sled_agent_client::Error<sled_agent_client::types::Error>,
+            >,
+        > + Send,
+{
+    let result = future.await;
     match result {
         Ok(result) => {
             let output = result.into_inner();
