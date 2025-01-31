@@ -12218,8 +12218,7 @@
                 ]
               },
               "value": {
-                "type": "string",
-                "format": "uuid"
+                "$ref": "#/components/schemas/TypedUuidForInstanceKind"
               }
             },
             "required": [
@@ -12498,8 +12497,7 @@
                 ]
               },
               "value": {
-                "type": "string",
-                "format": "uuid"
+                "$ref": "#/components/schemas/TypedUuidForInstanceKind"
               }
             },
             "required": [
@@ -23054,6 +23052,10 @@
             "format": "int32"
           }
         }
+      },
+      "TypedUuidForInstanceKind": {
+        "type": "string",
+        "format": "uuid"
       },
       "TypedUuidForSupportBundleKind": {
         "type": "string",

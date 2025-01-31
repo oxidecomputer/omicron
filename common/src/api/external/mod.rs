@@ -23,6 +23,8 @@ use dropshot::HttpError;
 pub use dropshot::PaginationOrder;
 pub use error::*;
 use futures::stream::BoxStream;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use parse_display::Display;
@@ -1349,13 +1351,13 @@ pub enum FailureDomain {
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum AffinityGroupMember {
     /// An instance belonging to this group, identified by UUID.
-    Instance(Uuid),
+    Instance(InstanceUuid),
 }
 
 impl SimpleIdentity for AffinityGroupMember {
     fn id(&self) -> Uuid {
         match self {
-            AffinityGroupMember::Instance(id) => *id,
+            AffinityGroupMember::Instance(id) => *id.as_untyped_uuid(),
         }
     }
 }
@@ -1368,13 +1370,13 @@ impl SimpleIdentity for AffinityGroupMember {
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum AntiAffinityGroupMember {
     /// An instance belonging to this group, identified by UUID.
-    Instance(Uuid),
+    Instance(InstanceUuid),
 }
 
 impl SimpleIdentity for AntiAffinityGroupMember {
     fn id(&self) -> Uuid {
         match self {
-            AntiAffinityGroupMember::Instance(id) => *id,
+            AntiAffinityGroupMember::Instance(id) => *id.as_untyped_uuid(),
         }
     }
 }
