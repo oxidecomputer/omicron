@@ -73,12 +73,9 @@ impl ExtractedArtifactDataHandle {
     ///
     /// This can fail due to I/O errors outside our control (e.g., something
     /// removed the contents of our temporary directory).
-    pub async fn file(&self) -> anyhow::Result<tokio::fs::File> {
+    pub async fn file(&self) -> std::io::Result<tokio::fs::File> {
         let path = path_for_artifact(&self.tempdir, &self.hash_id);
-
-        tokio::fs::File::open(&path)
-            .await
-            .with_context(|| format!("failed to open {path}"))
+        fs_err::tokio::File::open(&path).await.map(|file| file.into_parts().0)
     }
 
     /// Async stream to read the contents of this artifact on demand.

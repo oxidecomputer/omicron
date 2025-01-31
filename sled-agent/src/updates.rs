@@ -6,42 +6,28 @@
 
 use bootstrap_agent_api::Component;
 use camino::{Utf8Path, Utf8PathBuf};
-use omicron_common::api::internal::nexus::UpdateArtifactId;
+use omicron_brand_metadata::Metadata;
+use omicron_common::api::external::SemverVersion;
 use serde::{Deserialize, Serialize};
-use std::io::Read;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("I/O Error: {message}: {err}")]
+    #[error("I/O Error: while accessing {path}: {err}")]
     Io {
-        message: String,
+        path: Utf8PathBuf,
         #[source]
         err: std::io::Error,
     },
 
-    #[error("Utf-8 error converting path: {0}")]
-    FromPathBuf(#[from] camino::FromPathBufError),
-
-    #[error(
-        "sled-agent only supports applying zones, found artifact ID {}/{} with kind {}",
-        .0.name, .0.version, .0.kind
-    )]
-    UnsupportedKind(UpdateArtifactId),
-
-    #[error("Version not found in artifact {}", 0)]
-    VersionNotFound(Utf8PathBuf),
-
-    #[error("Cannot parse json: {0}")]
-    Json(#[from] serde_json::Error),
-
-    #[error("Malformed version in artifact {path}: {why}")]
-    VersionMalformed { path: Utf8PathBuf, why: String },
+    #[error("failed to read zone version from {path}: {err}")]
+    ZoneVersion {
+        path: Utf8PathBuf,
+        #[source]
+        err: std::io::Error,
+    },
 
     #[error("Cannot parse semver in {path}: {err}")]
     Semver { path: Utf8PathBuf, err: semver::Error },
-
-    #[error("Failed request to Nexus: {0}")]
-    Response(nexus_client::Error<nexus_client::types::Error>),
 }
 
 fn default_zone_artifact_path() -> Utf8PathBuf {
@@ -61,16 +47,8 @@ impl Default for ConfigUpdates {
     }
 }
 
-// Helper functions for returning errors
-fn version_malformed_err(path: &Utf8Path, key: &str) -> Error {
-    Error::VersionMalformed {
-        path: path.to_path_buf(),
-        why: format!("Missing '{key}'"),
-    }
-}
-
 fn io_err(path: &Utf8Path, err: std::io::Error) -> Error {
-    Error::Io { message: format!("Cannot access {path}"), err }
+    Error::Io { path: path.into(), err }
 }
 
 pub struct UpdateManager {
@@ -87,46 +65,19 @@ impl UpdateManager {
         &self,
         path: &Utf8Path,
     ) -> Result<Component, Error> {
-        // Decode the zone image
         let file =
             std::fs::File::open(path).map_err(|err| io_err(path, err))?;
         let gzr = flate2::read::GzDecoder::new(file);
         let mut component_reader = tar::Archive::new(gzr);
-        let entries =
-            component_reader.entries().map_err(|err| io_err(path, err))?;
-
-        // Look for the JSON file which contains the package information
-        for entry in entries {
-            let mut entry = entry.map_err(|err| io_err(path, err))?;
-            let entry_path = entry.path().map_err(|err| io_err(path, err))?;
-            if entry_path == Utf8Path::new("oxide.json") {
-                let mut contents = String::new();
-                entry
-                    .read_to_string(&mut contents)
-                    .map_err(|err| io_err(path, err))?;
-                let json: serde_json::Value =
-                    serde_json::from_str(contents.as_str())?;
-
-                // Parse keys from the JSON file
-                let serde_json::Value::String(pkg) = &json["pkg"] else {
-                    return Err(version_malformed_err(path, "pkg"));
-                };
-                let serde_json::Value::String(version) = &json["version"]
-                else {
-                    return Err(version_malformed_err(path, "version"));
-                };
-
-                // Extract the name and semver version
-                let name = pkg.to_string();
-                let version = omicron_common::api::external::SemverVersion(
-                    semver::Version::parse(version).map_err(|err| {
-                        Error::Semver { path: path.to_path_buf(), err }
-                    })?,
-                );
-                return Ok(crate::updates::Component { name, version });
-            }
-        }
-        Err(Error::VersionNotFound(path.to_path_buf()))
+        let metadata = Metadata::read_from_tar(&mut component_reader)
+            .map_err(|err| Error::ZoneVersion { path: path.into(), err })?;
+        let info = metadata
+            .layer_info()
+            .map_err(|err| Error::ZoneVersion { path: path.into(), err })?;
+        Ok(Component {
+            name: info.pkg.clone(),
+            version: SemverVersion(info.version.clone()),
+        })
     }
 
     pub async fn components_get(&self) -> Result<Vec<Component>, Error> {

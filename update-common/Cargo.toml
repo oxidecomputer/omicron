@@ -28,6 +28,10 @@ tokio-util.workspace = true
 tough.workspace = true
 tufaceous-lib.workspace = true
 omicron-workspace-hack.workspace = true
+omicron-brand-metadata.workspace = true
+tar.workspace = true
+flate2.workspace = true
+fs-err = { workspace = true, features = ["tokio"] }
 
 [dev-dependencies]
 clap.workspace = true

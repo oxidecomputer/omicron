@@ -305,7 +305,10 @@ pub enum KnownArtifactKind {
     GimletRotBootloader,
     Host,
     Trampoline,
+    /// Composite artifact of all control plane zones
     ControlPlane,
+    /// Individual control plane zone
+    Zone,
 
     // PSC Artifacts
     PscSp,

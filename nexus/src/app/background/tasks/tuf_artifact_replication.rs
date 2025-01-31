@@ -126,7 +126,7 @@ enum ArtifactHandle {
 }
 
 impl ArtifactHandle {
-    async fn file(&self) -> anyhow::Result<tokio::fs::File> {
+    async fn file(&self) -> std::io::Result<tokio::fs::File> {
         match self {
             ArtifactHandle::Extracted(handle) => handle.file().await,
             #[cfg(test)]

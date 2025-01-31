@@ -7,8 +7,6 @@ use super::HOST_PHASE_1_FILE_NAME;
 use super::HOST_PHASE_2_FILE_NAME;
 use super::ROT_ARCHIVE_A_FILE_NAME;
 use super::ROT_ARCHIVE_B_FILE_NAME;
-use crate::oxide_metadata;
-use crate::oxide_metadata::Metadata;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
@@ -16,6 +14,10 @@ use anyhow::Result;
 use camino::Utf8Path;
 use flate2::write::GzEncoder;
 use flate2::Compression;
+use omicron_brand_metadata::{ArchiveType, Metadata};
+use sha2::Digest;
+use sha2::Sha256;
+use std::collections::HashMap;
 use std::io::BufWriter;
 use std::io::Write;
 
@@ -33,18 +35,15 @@ pub struct CompositeEntry<'a> {
 
 pub struct CompositeControlPlaneArchiveBuilder<W: Write> {
     inner: CompositeTarballBuilder<W>,
+    hashes: HashMap<[u8; 32], String>,
 }
 
 impl<W: Write> CompositeControlPlaneArchiveBuilder<W> {
     pub fn new(writer: W, mtime_source: MtimeSource) -> Result<Self> {
-        let metadata = oxide_metadata::MetadataBuilder::new(
-            oxide_metadata::ArchiveType::ControlPlane,
-        )
-        .build()
-        .context("error building oxide metadata")?;
+        let metadata = Metadata::new(ArchiveType::ControlPlane);
         let inner =
             CompositeTarballBuilder::new(writer, metadata, mtime_source)?;
-        Ok(Self { inner })
+        Ok(Self { inner, hashes: HashMap::new() })
     }
 
     pub fn append_zone(
@@ -55,6 +54,14 @@ impl<W: Write> CompositeControlPlaneArchiveBuilder<W> {
         let name_path = Utf8Path::new(name);
         if name_path.file_name() != Some(name) {
             bail!("control plane zone filenames should not contain paths");
+        }
+        if let Some(duplicate) =
+            self.hashes.insert(Sha256::digest(&entry.data).into(), name.into())
+        {
+            bail!(
+                "duplicate zones are not allowed \
+                ({name} and {duplicate} have the same checksum)"
+            );
         }
         let path =
             Utf8Path::new(CONTROL_PLANE_ARCHIVE_ZONE_DIRECTORY).join(name_path);
@@ -72,11 +79,7 @@ pub struct CompositeRotArchiveBuilder<W: Write> {
 
 impl<W: Write> CompositeRotArchiveBuilder<W> {
     pub fn new(writer: W, mtime_source: MtimeSource) -> Result<Self> {
-        let metadata = oxide_metadata::MetadataBuilder::new(
-            oxide_metadata::ArchiveType::Rot,
-        )
-        .build()
-        .context("error building oxide metadata")?;
+        let metadata = Metadata::new(ArchiveType::Rot);
         let inner =
             CompositeTarballBuilder::new(writer, metadata, mtime_source)?;
         Ok(Self { inner })
@@ -107,11 +110,7 @@ pub struct CompositeHostArchiveBuilder<W: Write> {
 
 impl<W: Write> CompositeHostArchiveBuilder<W> {
     pub fn new(writer: W, mtime_source: MtimeSource) -> Result<Self> {
-        let metadata = oxide_metadata::MetadataBuilder::new(
-            oxide_metadata::ArchiveType::Os,
-        )
-        .build()
-        .context("error building oxide metadata")?;
+        let metadata = Metadata::new(ArchiveType::Os);
         let inner =
             CompositeTarballBuilder::new(writer, metadata, mtime_source)?;
         Ok(Self { inner })
@@ -144,7 +143,7 @@ impl<W: Write> CompositeTarballBuilder<W> {
             BufWriter::new(writer),
             Compression::fast(),
         ));
-        metadata.append_to_tar(&mut builder, mtime_source)?;
+        metadata.append_to_tar(&mut builder, mtime_source.into_mtime())?;
         Ok(Self { builder })
     }
 
