@@ -2924,9 +2924,9 @@ impl ServiceManager {
 
                             if asic == &DendriteAsic::SoftNpuZone {
                                 tfport_config = tfport_config.add_property(
-                                    "sync_only",
+                                    "flags",
                                     "astring",
-                                    true.to_string(),
+                                    "--sync-only",
                                 );
                             }
 
