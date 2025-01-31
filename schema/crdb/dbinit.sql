@@ -245,10 +245,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_resource (
     kind omicron.public.sled_resource_kind NOT NULL,
 
     -- The UUID of an instance, if this resource belongs to an instance.
+    --
+    -- This should eventually become NOT NULL for all instances, but is
+    -- still nullable for backwards compatibility purposes. Specifically,
+    -- the "instance start" saga can create rows in this table before creating
+    -- rows for "omicron.public.vmm", which we would use for back-filling.
+    -- If we tried to backfill + make this column non-nullable while that saga
+    -- was mid-execution, we would still have some rows in this table with nullable
+    -- values that would be more complex to fix.
     instance_id UUID
-
-    -- TODO Add constraint that if kind is instance, instance_id is not NULL?
-    -- Or will that break backwards compatibility?
 );
 
 -- Allow looking up all resources which reside on a sled
