@@ -409,7 +409,7 @@ impl DataStore {
         use db::schema::affinity_group_instance_membership::dsl;
         dsl::affinity_group_instance_membership
             .filter(dsl::group_id.eq(authz_affinity_group.id()))
-            .filter(dsl::instance_id.eq(instance_id))
+            .filter(dsl::instance_id.eq(instance_id.into_untyped_uuid()))
             .select(AffinityGroupInstanceMembership::as_select())
             .get_result_async(&*conn)
             .await
@@ -419,7 +419,7 @@ impl DataStore {
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::AffinityGroupMember,
-                        LookupType::by_id(instance_id),
+                        LookupType::by_id(instance_id.into_untyped_uuid()),
                     ),
                 )
             })
@@ -441,7 +441,7 @@ impl DataStore {
         use db::schema::anti_affinity_group_instance_membership::dsl;
         dsl::anti_affinity_group_instance_membership
             .filter(dsl::group_id.eq(authz_anti_affinity_group.id()))
-            .filter(dsl::instance_id.eq(instance_id))
+            .filter(dsl::instance_id.eq(instance_id.into_untyped_uuid()))
             .select(AntiAffinityGroupInstanceMembership::as_select())
             .get_result_async(&*conn)
             .await
@@ -451,7 +451,7 @@ impl DataStore {
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::AntiAffinityGroupMember,
-                        LookupType::by_id(instance_id),
+                        LookupType::by_id(instance_id.into_untyped_uuid()),
                     ),
                 )
             })
@@ -508,7 +508,7 @@ impl DataStore {
                     // issues, so we do the lookup manually.
                     let instance_state = instance_dsl::instance
                         .filter(instance_dsl::time_deleted.is_null())
-                        .filter(instance_dsl::id.eq(instance_id))
+                        .filter(instance_dsl::id.eq(instance_id.into_untyped_uuid()))
                         .select(instance_dsl::state)
                         .first_async(&conn)
                         .await
@@ -518,7 +518,7 @@ impl DataStore {
                                     e,
                                     ErrorHandler::NotFoundByLookup(
                                         ResourceType::Instance,
-                                        LookupType::ById(instance_id)
+                                        LookupType::ById(instance_id.into_untyped_uuid())
                                     ),
                                 )
                             })
@@ -543,7 +543,7 @@ impl DataStore {
                     diesel::insert_into(membership_dsl::affinity_group_instance_membership)
                         .values(AffinityGroupInstanceMembership::new(
                             AffinityGroupUuid::from_untyped_uuid(authz_affinity_group.id()),
-                            InstanceUuid::from_untyped_uuid(instance_id),
+                            instance_id,
                         ))
                         .execute_async(&conn)
                         .await
@@ -616,7 +616,7 @@ impl DataStore {
                     // Check that the instance exists, and has no VMM
                     let instance_state = instance_dsl::instance
                         .filter(instance_dsl::time_deleted.is_null())
-                        .filter(instance_dsl::id.eq(instance_id))
+                        .filter(instance_dsl::id.eq(instance_id.into_untyped_uuid()))
                         .select(instance_dsl::state)
                         .first_async(&conn)
                         .await
@@ -626,7 +626,7 @@ impl DataStore {
                                     e,
                                     ErrorHandler::NotFoundByLookup(
                                         ResourceType::Instance,
-                                        LookupType::ById(instance_id)
+                                        LookupType::ById(instance_id.into_untyped_uuid())
                                     ),
                                 )
                             })
@@ -651,7 +651,7 @@ impl DataStore {
                     diesel::insert_into(membership_dsl::anti_affinity_group_instance_membership)
                         .values(AntiAffinityGroupInstanceMembership::new(
                             AntiAffinityGroupUuid::from_untyped_uuid(authz_anti_affinity_group.id()),
-                            InstanceUuid::from_untyped_uuid(instance_id),
+                            instance_id,
                         ))
                         .execute_async(&conn)
                         .await
@@ -752,7 +752,7 @@ impl DataStore {
                     // Check that the instance exists
                     instance_dsl::instance
                         .filter(instance_dsl::time_deleted.is_null())
-                        .filter(instance_dsl::id.eq(instance_id))
+                        .filter(instance_dsl::id.eq(instance_id.into_untyped_uuid()))
                         .select(instance_dsl::id)
                         .first_async::<uuid::Uuid>(&conn)
                         .await
@@ -762,7 +762,7 @@ impl DataStore {
                                     e,
                                     ErrorHandler::NotFoundByLookup(
                                         ResourceType::Instance,
-                                        LookupType::ById(instance_id)
+                                        LookupType::ById(instance_id.into_untyped_uuid())
                                     ),
                                 )
                             })
@@ -770,7 +770,7 @@ impl DataStore {
 
                     let rows = diesel::delete(membership_dsl::affinity_group_instance_membership)
                         .filter(membership_dsl::group_id.eq(authz_affinity_group.id()))
-                        .filter(membership_dsl::instance_id.eq(instance_id))
+                        .filter(membership_dsl::instance_id.eq(instance_id.into_untyped_uuid()))
                         .execute_async(&conn)
                         .await
                         .map_err(|e| {
@@ -779,7 +779,7 @@ impl DataStore {
                             })
                         })?;
                     if rows == 0 {
-                        return Err(err.bail(LookupType::ById(instance_id).into_not_found(
+                        return Err(err.bail(LookupType::ById(instance_id.into_untyped_uuid()).into_not_found(
                             ResourceType::AffinityGroupMember,
                         )));
                     }
@@ -841,7 +841,7 @@ impl DataStore {
                     // Check that the instance exists
                     instance_dsl::instance
                         .filter(instance_dsl::time_deleted.is_null())
-                        .filter(instance_dsl::id.eq(instance_id))
+                        .filter(instance_dsl::id.eq(instance_id.into_untyped_uuid()))
                         .select(instance_dsl::id)
                         .first_async::<uuid::Uuid>(&conn)
                         .await
@@ -851,7 +851,7 @@ impl DataStore {
                                     e,
                                     ErrorHandler::NotFoundByLookup(
                                         ResourceType::Instance,
-                                        LookupType::ById(instance_id)
+                                        LookupType::ById(instance_id.into_untyped_uuid())
                                     ),
                                 )
                             })
@@ -859,7 +859,7 @@ impl DataStore {
 
                     let rows = diesel::delete(membership_dsl::anti_affinity_group_instance_membership)
                         .filter(membership_dsl::group_id.eq(authz_anti_affinity_group.id()))
-                        .filter(membership_dsl::instance_id.eq(instance_id))
+                        .filter(membership_dsl::instance_id.eq(instance_id.into_untyped_uuid()))
                         .execute_async(&conn)
                         .await
                         .map_err(|e| {
@@ -868,7 +868,7 @@ impl DataStore {
                             })
                         })?;
                     if rows == 0 {
-                        return Err(err.bail(LookupType::ById(instance_id).into_not_found(
+                        return Err(err.bail(LookupType::ById(instance_id.into_untyped_uuid()).into_not_found(
                             ResourceType::AntiAffinityGroupMember,
                         )));
                     }
@@ -1487,7 +1487,9 @@ mod tests {
             .affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(instance.id()),
+                external::AffinityGroupMember::Instance(
+                    InstanceUuid::from_untyped_uuid(instance.id()),
+                ),
             )
             .await
             .unwrap();
@@ -1499,7 +1501,9 @@ mod tests {
             .unwrap();
         assert_eq!(members.len(), 1);
         assert_eq!(
-            external::AffinityGroupMember::Instance(instance.id()),
+            external::AffinityGroupMember::Instance(
+                InstanceUuid::from_untyped_uuid(instance.id())
+            ),
             members[0].clone().into()
         );
 
@@ -1508,7 +1512,9 @@ mod tests {
             .affinity_group_member_delete(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(instance.id()),
+                external::AffinityGroupMember::Instance(
+                    InstanceUuid::from_untyped_uuid(instance.id()),
+                ),
             )
             .await
             .unwrap();
@@ -1577,7 +1583,9 @@ mod tests {
             .anti_affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(instance.id()),
+                external::AntiAffinityGroupMember::Instance(
+                    InstanceUuid::from_untyped_uuid(instance.id()),
+                ),
             )
             .await
             .unwrap();
@@ -1589,7 +1597,9 @@ mod tests {
             .unwrap();
         assert_eq!(members.len(), 1);
         assert_eq!(
-            external::AntiAffinityGroupMember::Instance(instance.id()),
+            external::AntiAffinityGroupMember::Instance(
+                InstanceUuid::from_untyped_uuid(instance.id())
+            ),
             members[0].clone().into()
         );
 
@@ -1598,7 +1608,9 @@ mod tests {
             .anti_affinity_group_member_delete(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(instance.id()),
+                external::AntiAffinityGroupMember::Instance(
+                    InstanceUuid::from_untyped_uuid(instance.id()),
+                ),
             )
             .await
             .unwrap();
@@ -1668,7 +1680,9 @@ mod tests {
             .affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(instance.id()),
+                external::AffinityGroupMember::Instance(
+                    InstanceUuid::from_untyped_uuid(instance.id()),
+                ),
             )
             .await
             .expect_err(
@@ -1688,7 +1702,9 @@ mod tests {
             .affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(instance.id()),
+                external::AffinityGroupMember::Instance(
+                    InstanceUuid::from_untyped_uuid(instance.id()),
+                ),
             )
             .await
             .unwrap();
@@ -1703,7 +1719,9 @@ mod tests {
             .unwrap();
         assert_eq!(members.len(), 1);
         assert_eq!(
-            external::AffinityGroupMember::Instance(instance.id()),
+            external::AffinityGroupMember::Instance(
+                InstanceUuid::from_untyped_uuid(instance.id())
+            ),
             members[0].clone().into()
         );
 
@@ -1713,7 +1731,9 @@ mod tests {
             .affinity_group_member_delete(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(instance.id()),
+                external::AffinityGroupMember::Instance(
+                    InstanceUuid::from_untyped_uuid(instance.id()),
+                ),
             )
             .await
             .unwrap();
@@ -1783,7 +1803,7 @@ mod tests {
             .anti_affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(instance.id()),
+                external::AntiAffinityGroupMember::Instance(InstanceUuid::from_untyped_uuid(instance.id())),
             )
             .await
             .expect_err(
@@ -1803,7 +1823,9 @@ mod tests {
             .anti_affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(instance.id()),
+                external::AntiAffinityGroupMember::Instance(
+                    InstanceUuid::from_untyped_uuid(instance.id()),
+                ),
             )
             .await
             .unwrap();
@@ -1818,7 +1840,9 @@ mod tests {
             .unwrap();
         assert_eq!(members.len(), 1);
         assert_eq!(
-            external::AntiAffinityGroupMember::Instance(instance.id()),
+            external::AntiAffinityGroupMember::Instance(
+                InstanceUuid::from_untyped_uuid(instance.id())
+            ),
             members[0].clone().into()
         );
 
@@ -1828,7 +1852,9 @@ mod tests {
             .anti_affinity_group_member_delete(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(instance.id()),
+                external::AntiAffinityGroupMember::Instance(
+                    InstanceUuid::from_untyped_uuid(instance.id()),
+                ),
             )
             .await
             .unwrap();
@@ -1894,7 +1920,9 @@ mod tests {
             .affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(instance.id()),
+                external::AffinityGroupMember::Instance(
+                    InstanceUuid::from_untyped_uuid(instance.id()),
+                ),
             )
             .await
             .unwrap();
@@ -1966,7 +1994,9 @@ mod tests {
             .anti_affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(instance.id()),
+                external::AntiAffinityGroupMember::Instance(
+                    InstanceUuid::from_untyped_uuid(instance.id()),
+                ),
             )
             .await
             .unwrap();
@@ -2041,7 +2071,9 @@ mod tests {
             .affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(instance.id()),
+                external::AffinityGroupMember::Instance(
+                    InstanceUuid::from_untyped_uuid(instance.id()),
+                ),
             )
             .await
             .unwrap();
@@ -2121,7 +2153,9 @@ mod tests {
             .anti_affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(instance.id()),
+                external::AntiAffinityGroupMember::Instance(
+                    InstanceUuid::from_untyped_uuid(instance.id()),
+                ),
             )
             .await
             .unwrap();
@@ -2227,7 +2261,9 @@ mod tests {
                 .affinity_group_member_add(
                     &opctx,
                     &authz_group,
-                    external::AffinityGroupMember::Instance(instance.id()),
+                    external::AffinityGroupMember::Instance(
+                        InstanceUuid::from_untyped_uuid(instance.id()),
+                    ),
                 )
                 .await
                 .expect_err("Should have failed");
@@ -2259,7 +2295,9 @@ mod tests {
                 .affinity_group_member_delete(
                     &opctx,
                     &authz_group,
-                    external::AffinityGroupMember::Instance(instance.id()),
+                    external::AffinityGroupMember::Instance(
+                        InstanceUuid::from_untyped_uuid(instance.id()),
+                    ),
                 )
                 .await
                 .expect_err("Should have failed");
@@ -2383,7 +2421,9 @@ mod tests {
                 .anti_affinity_group_member_add(
                     &opctx,
                     &authz_group,
-                    external::AntiAffinityGroupMember::Instance(instance.id()),
+                    external::AntiAffinityGroupMember::Instance(
+                        InstanceUuid::from_untyped_uuid(instance.id()),
+                    ),
                 )
                 .await
                 .expect_err("Should have failed");
@@ -2415,7 +2455,9 @@ mod tests {
                 .anti_affinity_group_member_delete(
                     &opctx,
                     &authz_group,
-                    external::AntiAffinityGroupMember::Instance(instance.id()),
+                    external::AntiAffinityGroupMember::Instance(
+                        InstanceUuid::from_untyped_uuid(instance.id()),
+                    ),
                 )
                 .await
                 .expect_err("Should have failed");
@@ -2500,7 +2542,9 @@ mod tests {
             .affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(instance.id()),
+                external::AffinityGroupMember::Instance(
+                    InstanceUuid::from_untyped_uuid(instance.id()),
+                ),
             )
             .await
             .unwrap();
@@ -2510,7 +2554,9 @@ mod tests {
             .affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(instance.id()),
+                external::AffinityGroupMember::Instance(
+                    InstanceUuid::from_untyped_uuid(instance.id()),
+                ),
             )
             .await
             .unwrap_err();
@@ -2546,7 +2592,9 @@ mod tests {
             .affinity_group_member_delete(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(instance.id()),
+                external::AffinityGroupMember::Instance(
+                    InstanceUuid::from_untyped_uuid(instance.id()),
+                ),
             )
             .await
             .unwrap();
@@ -2554,7 +2602,9 @@ mod tests {
             .affinity_group_member_delete(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(instance.id()),
+                external::AffinityGroupMember::Instance(
+                    InstanceUuid::from_untyped_uuid(instance.id()),
+                ),
             )
             .await
             .unwrap_err();
@@ -2619,7 +2669,9 @@ mod tests {
             .anti_affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(instance.id()),
+                external::AntiAffinityGroupMember::Instance(
+                    InstanceUuid::from_untyped_uuid(instance.id()),
+                ),
             )
             .await
             .unwrap();
@@ -2629,7 +2681,9 @@ mod tests {
             .anti_affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(instance.id()),
+                external::AntiAffinityGroupMember::Instance(
+                    InstanceUuid::from_untyped_uuid(instance.id()),
+                ),
             )
             .await
             .unwrap_err();
@@ -2665,7 +2719,9 @@ mod tests {
             .anti_affinity_group_member_delete(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(instance.id()),
+                external::AntiAffinityGroupMember::Instance(
+                    InstanceUuid::from_untyped_uuid(instance.id()),
+                ),
             )
             .await
             .unwrap();
@@ -2673,7 +2729,9 @@ mod tests {
             .anti_affinity_group_member_delete(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(instance.id()),
+                external::AntiAffinityGroupMember::Instance(
+                    InstanceUuid::from_untyped_uuid(instance.id()),
+                ),
             )
             .await
             .unwrap_err();

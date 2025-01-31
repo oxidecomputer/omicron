@@ -23,7 +23,6 @@ use omicron_uuid_kinds::AffinityGroupKind;
 use omicron_uuid_kinds::AffinityGroupUuid;
 use omicron_uuid_kinds::AntiAffinityGroupKind;
 use omicron_uuid_kinds::AntiAffinityGroupUuid;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceKind;
 use omicron_uuid_kinds::InstanceUuid;
 use uuid::Uuid;
@@ -231,7 +230,7 @@ impl AffinityGroupInstanceMembership {
 
 impl From<AffinityGroupInstanceMembership> for external::AffinityGroupMember {
     fn from(member: AffinityGroupInstanceMembership) -> Self {
-        Self::Instance(member.instance_id.into_untyped_uuid())
+        Self::Instance(member.instance_id.into())
     }
 }
 
@@ -255,6 +254,6 @@ impl From<AntiAffinityGroupInstanceMembership>
     for external::AntiAffinityGroupMember
 {
     fn from(member: AntiAffinityGroupInstanceMembership) -> Self {
-        Self::Instance(member.instance_id.into_untyped_uuid())
+        Self::Instance(member.instance_id.into())
     }
 }
