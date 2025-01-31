@@ -9,6 +9,7 @@ use crate::schema::{
 };
 use crate::schema_versions;
 use crate::typed_uuid::DbTypedUuid;
+use crate::EventClassParseError;
 use crate::Generation;
 use crate::WebhookDelivery;
 use crate::WebhookEventClass;
@@ -192,12 +193,16 @@ impl WebhookSubscriptionKind {
                 "must not be empty",
             ));
         }
+
         if value.contains('*') {
             let regex = WebhookGlob::regex_from_glob(&value)?;
-            Ok(Self::Glob(WebhookGlob { regex, glob: value }))
-        } else {
-            Ok(Self::Exact(value.parse()?))
+            return Ok(Self::Glob(WebhookGlob { regex, glob: value }));
         }
+
+        let class = value.parse().map_err(|e: EventClassParseError| {
+            Error::invalid_value("event_class", e.to_string())
+        })?;
+        Ok(Self::Exact(class))
     }
 
     fn into_event_class_string(self) -> String {
