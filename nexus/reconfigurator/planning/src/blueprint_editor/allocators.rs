@@ -23,9 +23,6 @@ pub use self::internal_dns::InternalDnsInputError;
 pub(crate) use self::external_networking::ExternalNetworkingChoice;
 pub(crate) use self::external_networking::ExternalSnatNetworkingChoice;
 
-#[cfg(test)]
-pub(crate) use self::external_networking::ExternalIpAllocator;
-
 use self::external_networking::ExternalNetworkingAllocator;
 use self::internal_dns::InternalDnsSubnetAllocator;
 
