@@ -746,7 +746,16 @@ impl Client {
                 self.wipe_single_node_db().await?;
                 self.init_single_node_db().await?;
             } else {
-                self.wipe_replicated_db().await?;
+                // It's important to only wipe the node we are initialising.
+                // When adding a new node to an existing cluster, ClickHouse
+                // does not automatically copy the schema. This means we need
+                // to initialise the database on that node as well, while the
+                // other nodes already have the database and schema initialised
+                // and tables populated with data.
+                // If we were to wipe the database from the entire cluster,
+                // every time we add a new node we'd delete all data and
+                // restart the DB initialisation process for every single node.
+                self.wipe_single_node_db().await?;
                 self.init_replicated_db().await?;
             }
         } else if version > expected_version {
