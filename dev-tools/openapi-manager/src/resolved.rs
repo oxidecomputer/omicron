@@ -141,7 +141,7 @@ pub enum Problem {
          missing a local spec file.  This is unusual.  If you intended to \
          remove this version, you must also update the list of supported \
          versions in Rust.  If you didn't, restore the file from git: \
-         {spec_file_name:?}"
+         {spec_file_name}"
     )]
     BlessedVersionMissingLocal { spec_file_name: ApiSpecFileName },
 
@@ -169,9 +169,9 @@ pub enum Problem {
     },
 
     #[error(
-        "No local spec file was found and this is not a blessed version, \
-         either.  This is normal if you have just added this version number. \
-         This tool can generate the file for you."
+        "No local spec file was found for non-blessed version.  This is \
+         normal if you have just added this version number. This tool can \
+         generate the file for you."
     )]
     LocalVersionMissingLocal,
 
@@ -318,15 +318,17 @@ impl<'a> Display for Fix<'a> {
                 // XXX-dap add diff
                 writeln!(
                     f,
-                    "fix: rewrite lockstep file {}",
+                    "fix: rewrite lockstep file {} from generated",
                     generated.spec_file_name().path()
                 )?;
             }
             Fix::FixVersionedFiles { old, generated } => {
-                writeln!(f, "fix: remove old files: {old}")?;
+                if !old.0.is_empty() {
+                    writeln!(f, "fix: remove old files: {old}")?;
+                }
                 writeln!(
                     f,
-                    "fix: write new file: {}",
+                    "fix: write new file {} from generated",
                     generated.spec_file_name().path()
                 )?;
             }
@@ -336,14 +338,14 @@ impl<'a> Display for Fix<'a> {
                     CheckStale::Modified { .. } => "rewrite",
                     CheckStale::New { .. } => "write new",
                 };
-                writeln!(f, "fix: {label} file: {path}")?;
+                writeln!(f, "fix: {label} file {path} from generated")?;
             }
         })
     }
 }
 
 impl<'a> Fix<'a> {
-    fn execute(&self, env: &Environment) -> anyhow::Result<()> {
+    pub fn execute(&self, env: &Environment) -> anyhow::Result<()> {
         let root = env.openapi_dir();
         match self {
             Fix::DeleteFiles { files } => {

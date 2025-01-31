@@ -93,6 +93,11 @@ pub(crate) fn new_check_impl(
 
             for p in problems {
                 println!("problem: {}", p);
+                if let Some(fixes) = p.fix(&resolution)? {
+                    for f in fixes {
+                        println!("{}", f);
+                    }
+                }
             }
         }
     }
@@ -114,7 +119,8 @@ pub(crate) fn new_check_impl(
     }
 }
 
-fn print_warnings(
+// XXX-dap put somewhere where it can be re-used
+pub fn print_warnings(
     warnings: &[anyhow::Error],
     errors: &[anyhow::Error],
 ) -> anyhow::Result<()> {

@@ -169,16 +169,21 @@ impl ListArgs {
 
 #[derive(Debug, Args)]
 pub struct GenerateArgs {
-    /// The directory to write generated APIs to (default: workspace
-    /// root/openapi)
-    #[clap(long)]
-    dir: Option<Utf8PathBuf>,
+    #[clap(flatten)]
+    local: LocalSourceArgs,
+    #[clap(flatten)]
+    blessed: BlessedSourceArgs,
+    #[clap(flatten)]
+    generated: GeneratedSourceArgs,
 }
 
 impl GenerateArgs {
     fn exec(self, output: &OutputOpts) -> anyhow::Result<ExitCode> {
-        let dir = Environment::new(self.dir)?;
-        Ok(generate_impl(&dir, output)?.to_exit_code())
+        let env = Environment::new(self.local.dir)?;
+        let blessed_source = BlessedSource::try_from(self.blessed)?;
+        let generated_source = GeneratedSource::from(self.generated);
+        Ok(generate_impl(&env, &blessed_source, &generated_source, output)?
+            .to_exit_code())
     }
 }
 

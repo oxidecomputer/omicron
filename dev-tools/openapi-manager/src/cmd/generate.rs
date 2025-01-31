@@ -2,20 +2,19 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{io::Write, process::ExitCode};
-
-use anyhow::Result;
-use indent_write::io::IndentWriter;
-use owo_colors::OwoColorize;
-
 use crate::{
-    cmd::output::{
-        display_api_spec, display_error, display_summary, headers::*, plural,
-        OutputOpts, Styles,
+    apis::ManagedApis,
+    cmd::{
+        new_check::print_warnings,
+        output::{OutputOpts, Styles},
     },
-    spec::{all_apis, Environment},
+    environment::{BlessedSource, GeneratedSource},
+    resolved::Resolved,
+    spec::Environment,
     FAILURE_EXIT_CODE,
 };
+use anyhow::Result;
+use std::process::ExitCode;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum GenerateResult {
@@ -32,99 +31,127 @@ impl GenerateResult {
     }
 }
 
+// XXX-dap this is mostly copy/paste from new_check_impl
 pub(crate) fn generate_impl(
     env: &Environment,
+    blessed_source: &BlessedSource,
+    generated_source: &GeneratedSource,
     output: &OutputOpts,
 ) -> Result<GenerateResult> {
     let mut styles = Styles::default();
+    let mut found_problems = false;
+    let mut found_unfixable = false;
     if output.use_color(supports_color::Stream::Stderr) {
         styles.colorize();
     }
 
-    let all_apis = all_apis();
-    let total = all_apis.len();
-    let count_width = total.to_string().len();
-    let continued_indent = continued_indent(count_width);
+    let apis = ManagedApis::all()?;
+    let generated = generated_source.load(&apis)?;
+    print_warnings(&generated.warnings, &generated.errors)?;
+    let local_files = env.local_source.load(&apis)?;
+    print_warnings(&local_files.warnings, &local_files.errors)?;
+    let blessed = blessed_source.load(&apis)?;
+    print_warnings(&blessed.warnings, &blessed.errors)?;
 
-    eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);
-
-    eprintln!(
-        "{:>HEADER_WIDTH$} {} OpenAPI {}...",
-        GENERATING.style(styles.success_header),
-        total.style(styles.bold),
-        plural::documents(total),
-    );
-    let mut num_updated = 0;
-    let mut num_unchanged = 0;
-    let mut num_failed = 0;
-
-    for (ix, spec) in all_apis.iter().enumerate() {
-        let count = ix + 1;
-
-        match spec.overwrite(env) {
-            Ok(status) => {
-                let updated_count = status.updated_count();
-
-                if updated_count > 0 {
-                    eprintln!(
-                        "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}: {} ({} {} updated)",
-                        UPDATED.style(styles.success_header),
-                        display_api_spec(spec, &styles),
-                        display_summary(&status.summary, &styles),
-                        updated_count.style(styles.bold),
-                        plural::files(updated_count),
-                    );
-                    num_updated += 1;
-                } else {
-                    eprintln!(
-                        "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}: {}",
-                        UNCHANGED.style(styles.unchanged_header),
-                        display_api_spec(spec, &styles),
-                        display_summary(&status.summary, &styles),
-                    );
-                    num_unchanged += 1;
-                }
-            }
-            Err(err) => {
-                eprintln!(
-                    "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}",
-                    FAILURE.style(styles.failure_header),
-                    display_api_spec(spec, &styles),
-                );
-                let display = display_error(&err, styles.failure);
-                write!(
-                    IndentWriter::new(&continued_indent, std::io::stderr()),
-                    "{}",
-                    display,
-                )?;
-
-                num_failed += 1;
-            }
-        };
+    let resolved =
+        Resolved::new(env, &apis, &blessed, &generated, &local_files);
+    for note in resolved.notes() {
+        println!("NOTE: {}", note);
+    }
+    for problem in resolved.general_problems() {
+        println!("PROBLEM: {}", problem);
+        found_problems = true;
     }
 
-    eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);
+    println!("Checking OpenAPI documents...");
+    let mut napis = 0;
+    let mut nversions = 0;
+    for api in apis.iter_apis() {
+        napis += 1;
+        let ident = api.ident();
+        for version in api.iter_versions_semver() {
+            nversions += 1;
+            // unwrap(): there should be a resolution for every managed API
+            let resolution =
+                resolved.resolution_for_api_version(ident, version).unwrap();
+            let problems: Vec<_> = resolution.problems().collect();
+            let summary = if problems.len() == 0 {
+                "OK"
+            } else if problems.iter().all(|p| p.is_fixable()) {
+                found_problems = true;
+                "STALE"
+            } else {
+                found_unfixable = true;
+                "ERROR"
+            };
 
-    let status_header = if num_failed > 0 {
-        FAILURE.style(styles.failure_header)
-    } else {
-        SUCCESS.style(styles.success_header)
-    };
+            println!(
+                "{:5} {} ({}) v{}",
+                summary,
+                ident,
+                if api.is_versioned() { "versioned" } else { "lockstep" },
+                version
+            );
 
-    eprintln!(
-        "{:>HEADER_WIDTH$} {} {} generated: \
-         {} updated, {} unchanged, {} failed",
-        status_header,
-        total.style(styles.bold),
-        plural::documents(total),
-        num_updated.style(styles.bold),
-        num_unchanged.style(styles.bold),
-        num_failed.style(styles.bold),
-    );
+            for p in problems {
+                println!("problem: {}", p);
+                if let Some(fixes) = p.fix(&resolution)? {
+                    for f in fixes {
+                        println!("{}", f);
+                    }
+                }
+            }
+        }
+    }
 
-    if num_failed > 0 {
+    println!("Checked {} total versions across {} APIs", nversions, napis);
+
+    if found_unfixable {
+        // XXX-dap wording
+        println!(
+            "Error: found unfixable errors above.  Please fix those first."
+        );
+        return Ok(GenerateResult::Failures);
+    }
+
+    // XXX-dap this is where we could confirm
+    let mut nproblems = 0;
+    let mut nerrors = 0;
+    let mut nfixed = 0;
+    for api in apis.iter_apis() {
+        let ident = api.ident();
+        for version in api.iter_versions_semver() {
+            println!("API {} version {}", ident, version);
+            // unwrap(): there should be a resolution for every managed API
+            let resolution =
+                resolved.resolution_for_api_version(ident, version).unwrap();
+            for p in resolution.problems() {
+                nproblems += 1;
+
+                if let Some(fixes) = p.fix(&resolution)? {
+                    for f in fixes {
+                        eprint!("{f}");
+                        if let Err(error) = f.execute(env) {
+                            eprintln!("fix failed: {error:#}");
+                            nerrors += 1;
+                        } else {
+                            nfixed += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    println!("problems found: {}", nproblems);
+    println!("fixes required: {}", nerrors + nfixed);
+    println!("fixes applied:  {}", nfixed);
+    println!("fixes failed:   {}", nerrors);
+    if nerrors > 0 {
+        println!("FAILED");
         Ok(GenerateResult::Failures)
     } else {
+        println!("Success");
         Ok(GenerateResult::Success)
     }
 }
