@@ -95,8 +95,9 @@ impl ClickhouseCli {
     pub fn new(
         binary_path: Utf8PathBuf,
         listen_address: SocketAddrV6,
-        log: Logger,
+        log: &Logger,
     ) -> Self {
+        let log = log.new(slog::o!("component" => "ClickhouseCli"));
         Self { binary_path, listen_address, log }
     }
 

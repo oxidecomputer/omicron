@@ -74,6 +74,30 @@
         }
       }
     },
+    "/generation": {
+      "get": {
+        "summary": "Retrieve the generation number of a configuration",
+        "operationId": "generation",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Generation"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/init": {
       "put": {
         "summary": "Idempotently initialize a replicated ClickHouse cluster database.",
@@ -460,6 +484,14 @@
             "type": "string",
             "format": "Utf8PathBuf"
           },
+          "generation": {
+            "description": "A unique identifier for the configuration generation.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
           "http_port": {
             "description": "Port for HTTP connections",
             "type": "integer",
@@ -518,6 +550,7 @@
         },
         "required": [
           "data_path",
+          "generation",
           "http_port",
           "interserver_http_port",
           "keepers",

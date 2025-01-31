@@ -2,7 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::context::{KeeperServerContext, ServerContext};
+use crate::context::{
+    DbInitRequest, GenerateConfigRequest, KeeperServerContext, ServerContext,
+};
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::{
     ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
@@ -14,10 +16,11 @@ use dropshot::{
     ApiDescription, HttpError, HttpResponseCreated, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
 };
+use http::StatusCode;
 use illumos_utils::svcadm::Svcadm;
-use oximeter_db::OXIMETER_VERSION;
-use slog::info;
+use omicron_common::api::external::Generation;
 use std::sync::Arc;
+use tokio::sync::oneshot;
 
 pub fn clickhouse_admin_server_api() -> ApiDescription<Arc<ServerContext>> {
     clickhouse_admin_server_api_mod::api_description::<ClickhouseAdminServerImpl>()
@@ -45,15 +48,51 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         body: TypedBody<ServerConfigurableSettings>,
     ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError> {
         let ctx = rqctx.context();
-        let replica_server = body.into_inner();
-        let output =
-            ctx.clickward().generate_server_config(replica_server.settings)?;
+        let replica_settings = body.into_inner();
+        let clickward = ctx.clickward();
+        let log = ctx.log();
+        let generation_tx = ctx.generation_tx();
 
-        // Once we have generated the client we can safely enable the clickhouse_server service
-        let fmri = "svc:/oxide/clickhouse_server:default".to_string();
-        Svcadm::enable_service(fmri)?;
+        let (response_tx, response_rx) = oneshot::channel();
+        ctx.generate_config_tx
+            .send_async(GenerateConfigRequest::GenerateConfig {
+                generation_tx,
+                clickward,
+                log,
+                replica_settings,
+                response: response_tx,
+            })
+            .await
+            .map_err(|e| {
+                HttpError::for_internal_error(format!(
+                    "failure to send request: {e}"
+                ))
+            })?;
+        let result = response_rx.await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failure to receive response: {e}"
+            ))
+        })??;
 
-        Ok(HttpResponseCreated(output))
+        Ok(HttpResponseCreated(result))
+    }
+
+    async fn generation(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Generation>, HttpError> {
+        let ctx = rqctx.context();
+        let generation_rx = ctx.generation_tx.subscribe();
+        let gen = match *generation_rx.borrow() {
+            Some(g) => g,
+            None => {
+                return Err(HttpError::for_client_error(
+                    Some(String::from("ObjectNotFound")),
+                    StatusCode::NOT_FOUND,
+                    "no generation number found".to_string(),
+                ))
+            }
+        };
+        Ok(HttpResponseOk(gen))
     }
 
     async fn distributed_ddl_queue(
@@ -83,42 +122,28 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let ctx = rqctx.context();
+        let replicated = true;
         let log = ctx.log();
-
-        // Database initialization is idempotent, but not concurrency-safe.
-        // Use a mutex to serialize requests.
-        let lock = ctx.initialization_lock();
-        let _guard = lock.lock().await;
-
-        // Initialize the database only if it was not previously initialized.
-        // TODO: Migrate schema to newer version without wiping data.
-        let client = ctx.oximeter_client();
-        let version = client.read_latest_version().await.map_err(|e| {
+        let clickhouse_address = ctx.clickhouse_address();
+        let (response_tx, response_rx) = oneshot::channel();
+        ctx.db_init_tx
+            .send_async(DbInitRequest::DbInit {
+                clickhouse_address,
+                log,
+                replicated,
+                response: response_tx,
+            })
+            .await
+            .map_err(|e| {
+                HttpError::for_internal_error(format!(
+                    "failure to send request: {e}"
+                ))
+            })?;
+        response_rx.await.map_err(|e| {
             HttpError::for_internal_error(format!(
-                "can't read ClickHouse version: {e}",
+                "failure to receive response: {e}"
             ))
-        })?;
-        if version == 0 {
-            info!(
-                log,
-                "initializing replicated ClickHouse cluster to version {OXIMETER_VERSION}"
-            );
-            let replicated = true;
-            ctx.oximeter_client()
-                .initialize_db_with_version(replicated, OXIMETER_VERSION)
-                .await
-                .map_err(|e| {
-                    HttpError::for_internal_error(format!(
-                        "can't initialize replicated ClickHouse cluster \
-                         to version {OXIMETER_VERSION}: {e}",
-                    ))
-                })?;
-        } else {
-            info!(
-                log,
-                "skipping initialization of replicated ClickHouse cluster at version {version}"
-            );
-        }
+        })??;
 
         Ok(HttpResponseUpdatedNoContent())
     }
@@ -135,13 +160,60 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
     ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError> {
         let ctx = rqctx.context();
         let keeper = body.into_inner();
-        let output = ctx.clickward().generate_keeper_config(keeper.settings)?;
+        let incoming_generation = keeper.generation();
+        let generation_rx = ctx.generation_tx.subscribe();
+        let current_generation = *generation_rx.borrow();
+
+        // If the incoming generation number is lower, then we have a problem.
+        // We should return an error instead of silently skipping the configuration
+        // file generation.
+        if let Some(current) = current_generation {
+            if current > incoming_generation {
+                return Err(HttpError::for_client_error(
+                    Some(String::from("Conflict")),
+                    StatusCode::CONFLICT,
+                    format!(
+                        "current generation '{}' is greater than incoming generation '{}'",
+                        current,
+                        incoming_generation,
+                    )
+                ));
+            }
+        };
+
+        let output = ctx.clickward().generate_keeper_config(keeper)?;
+
+        // We want to update the generation number only if the config file has been
+        // generated successfully.
+        ctx.generation_tx.send(Some(incoming_generation)).map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failure to send request: {e}"
+            ))
+        })?;
 
         // Once we have generated the client we can safely enable the clickhouse_keeper service
         let fmri = "svc:/oxide/clickhouse_keeper:default".to_string();
         Svcadm::enable_service(fmri)?;
 
         Ok(HttpResponseCreated(output))
+    }
+
+    async fn generation(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Generation>, HttpError> {
+        let ctx = rqctx.context();
+        let generation_rx = ctx.generation_tx.subscribe();
+        let gen = match *generation_rx.borrow() {
+            Some(g) => g,
+            None => {
+                return Err(HttpError::for_client_error(
+                    Some(String::from("ObjectNotFound")),
+                    StatusCode::NOT_FOUND,
+                    "no generation number found".to_string(),
+                ))
+            }
+        };
+        Ok(HttpResponseOk(gen))
     }
 
     async fn lgif(
@@ -187,41 +259,28 @@ impl ClickhouseAdminSingleApi for ClickhouseAdminSingleImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let ctx = rqctx.context();
+        let replicated = false;
         let log = ctx.log();
-
-        // Database initialization is idempotent, but not concurrency-safe.
-        // Use a mutex to serialize requests.
-        let lock = ctx.initialization_lock();
-        let _guard = lock.lock().await;
-
-        // Initialize the database only if it was not previously initialized.
-        // TODO: Migrate schema to newer version without wiping data.
-        let client = ctx.oximeter_client();
-        let version = client.read_latest_version().await.map_err(|e| {
+        let clickhouse_address = ctx.clickhouse_address();
+        let (response_tx, response_rx) = oneshot::channel();
+        ctx.db_init_tx
+            .send_async(DbInitRequest::DbInit {
+                clickhouse_address,
+                log,
+                replicated,
+                response: response_tx,
+            })
+            .await
+            .map_err(|e| {
+                HttpError::for_internal_error(format!(
+                    "failure to send request: {e}"
+                ))
+            })?;
+        response_rx.await.map_err(|e| {
             HttpError::for_internal_error(format!(
-                "can't read ClickHouse version: {e}",
+                "failure to receive response: {e}"
             ))
-        })?;
-        if version == 0 {
-            info!(
-                log,
-                "initializing single-node ClickHouse to version {OXIMETER_VERSION}"
-            );
-            ctx.oximeter_client()
-                .initialize_db_with_version(false, OXIMETER_VERSION)
-                .await
-                .map_err(|e| {
-                    HttpError::for_internal_error(format!(
-                        "can't initialize single-node ClickHouse \
-                         to version {OXIMETER_VERSION}: {e}",
-                    ))
-                })?;
-        } else {
-            info!(
-                log,
-                "skipping initialization of single-node ClickHouse at version {version}"
-            );
-        }
+        })??;
 
         Ok(HttpResponseUpdatedNoContent())
     }

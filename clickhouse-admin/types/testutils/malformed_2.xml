@@ -1,0 +1,11 @@
+<!-- generation:bob -->
+<clickhouse>
+
+    <logger>
+        <level>trace</level>
+        <log>./log/clickhouse-keeper.log</log>
+        <errorlog>./log/clickhouse-keeper.err.log</errorlog>
+        <size>100M</size>
+        <count>1</count>
+    </logger>
+</clickhouse>

@@ -50,7 +50,7 @@ async fn test_lgif_parsing() -> anyhow::Result<()> {
             0,
             0,
         ),
-        log(),
+        &log(),
     );
 
     let lgif = clickhouse_cli.lgif().await.unwrap();
@@ -71,7 +71,7 @@ async fn test_raft_config_parsing() -> anyhow::Result<()> {
             0,
             0,
         ),
-        log(),
+        &log(),
     );
 
     let raft_config = clickhouse_cli.raft_config().await.unwrap();
@@ -107,7 +107,7 @@ async fn test_keeper_conf_parsing() -> anyhow::Result<()> {
             0,
             0,
         ),
-        log(),
+        &log(),
     );
 
     let conf = clickhouse_cli.keeper_conf().await.unwrap();
@@ -127,7 +127,7 @@ async fn test_keeper_cluster_membership() -> anyhow::Result<()> {
             0,
             0,
         ),
-        log(),
+        &log(),
     );
 
     let keeper_cluster_membership =

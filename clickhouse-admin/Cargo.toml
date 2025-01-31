@@ -12,6 +12,7 @@ clap.workspace = true
 clickhouse-admin-api.workspace = true
 clickhouse-admin-types.workspace = true
 dropshot.workspace = true
+flume = {workspace = true, features = ["async"]}
 http.workspace = true
 illumos-utils.workspace = true
 omicron-common.workspace = true
