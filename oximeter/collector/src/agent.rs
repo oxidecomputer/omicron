@@ -747,10 +747,10 @@ mod tests {
         assert!(count != 0);
         let server_count = collection_count.load(Ordering::SeqCst);
         assert!(
-            count == server_count || count - 1 == server_count,
+            count == server_count || count + 1 == server_count,
             "number of collections reported by the collection \
-            task differs from the number reported by the empty \
-            producer server itself"
+            task ({count}) differs from the number reported by the empty \
+            producer server itself ({server_count})"
         );
         assert!(stats.failed_collections.is_empty());
         logctx.cleanup_successful();
@@ -901,10 +901,10 @@ mod tests {
         // server.
         let server_count = collection_count.load(Ordering::SeqCst);
         assert!(
-            count == server_count || count - 1 == server_count,
+            count == server_count || count + 1 == server_count,
             "number of collections reported by the collection \
-            task differs from the number reported by the always-ded \
-            producer server itself"
+            task ({count}) differs from the number reported by the always-ded \
+            producer server itself ({server_count})"
         );
         assert_eq!(stats.failed_collections.len(), 1);
         logctx.cleanup_successful();
