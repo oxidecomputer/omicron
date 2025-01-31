@@ -149,6 +149,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use nexus_db_model::VmmState;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::VolumeUuid;
 use propolis_client::types::ReplaceResult;
 use serde::Deserialize;
 use serde::Serialize;
@@ -319,7 +320,7 @@ async fn srrd_drive_region_replacement_check(
 
     let volume_deleted = osagactx
         .datastore()
-        .volume_deleted(params.request.volume_id)
+        .volume_deleted(params.request.volume_id())
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -328,7 +329,7 @@ async fn srrd_drive_region_replacement_check(
             log,
             "volume was soft or hard deleted!";
             "region replacement id" => %params.request.id,
-            "volume id" => %params.request.volume_id,
+            "volume id" => %params.request.volume_id(),
         );
 
         return Ok(DriveCheck::Done);
@@ -813,7 +814,7 @@ enum DriveAction {
 
     /// If there is no active Propolis that is running the Volume, attach the
     /// associated Volume to a Pantry.
-    Pantry { step: db::model::RegionReplacementStep, volume_id: Uuid },
+    Pantry { step: db::model::RegionReplacementStep, volume_id: VolumeUuid },
 
     /// If the Volume is currently running in a Propolis server, then send the
     /// volume replacement request there.
@@ -1229,7 +1230,7 @@ async fn srrd_drive_region_replacement_execute(
 
             let disk_new_volume_vcr = match osagactx
                 .datastore()
-                .volume_get(disk.volume_id)
+                .volume_get(disk.volume_id())
                 .await
                 .map_err(ActionError::action_failed)?
             {
@@ -1280,7 +1281,7 @@ async fn execute_pantry_drive_action(
     datastore: &db::DataStore,
     request_id: Uuid,
     pantry_address: SocketAddrV6,
-    volume_id: Uuid,
+    volume_id: VolumeUuid,
     job_id: Uuid,
 ) -> Result<(), ActionError> {
     // Importantly, _do not use `call_pantry_attach_for_disk`_! That call uses
@@ -1493,7 +1494,7 @@ async fn execute_propolis_drive_action(
         "sending replacement request for disk volume to propolis {step_vmm_id}";
         "region replacement id" => %request_id,
         "disk id" => ?disk.id(),
-        "volume id" => ?disk.volume_id,
+        "volume id" => ?disk.volume_id(),
     );
 
     // Start (or poll) the replacement
@@ -1523,7 +1524,7 @@ async fn execute_propolis_drive_action(
         "saw replace result {replace_result:?}";
         "region replacement id" => %request_id,
         "disk id" => ?disk.id(),
-        "volume id" => ?disk.volume_id,
+        "volume id" => ?disk.volume_id(),
     );
 
     let replacement_done = match &replace_result {

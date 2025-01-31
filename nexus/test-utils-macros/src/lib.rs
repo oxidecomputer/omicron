@@ -3,33 +3,42 @@ use quote::quote;
 use std::collections::HashSet as Set;
 use syn::parse::{Parse, ParseStream, Result};
 use syn::punctuated::Punctuated;
+use syn::spanned::Spanned;
 use syn::{parse_macro_input, ItemFn, Token};
 
 #[derive(Debug, PartialEq, Eq, Hash)]
-pub(crate) struct NameValue {
-    name: syn::Path,
-    _eq_token: syn::token::Eq,
-    value: syn::Path,
+pub(crate) enum NexusTestArg {
+    ServerUnderTest(syn::Path),
+    ExtraSledAgents(u16),
 }
 
-impl syn::parse::Parse for NameValue {
+impl syn::parse::Parse for NexusTestArg {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        Ok(Self {
-            name: input.parse()?,
-            _eq_token: input.parse()?,
-            value: input.parse()?,
-        })
+        let name: syn::Path = input.parse()?;
+        let _eq_token: syn::token::Eq = input.parse()?;
+
+        if name.is_ident("server") {
+            let path: syn::Path = input.parse()?;
+            return Ok(Self::ServerUnderTest(path));
+        }
+
+        if name.is_ident("extra_sled_agents") {
+            let value: syn::LitInt = input.parse()?;
+            let value = value.base10_parse::<u16>()?;
+            return Ok(Self::ExtraSledAgents(value));
+        }
+
+        Err(syn::Error::new(name.span(), "unrecognized argument to nexus_test"))
     }
 }
 
-struct Args {
-    vars: Set<NameValue>,
-}
+struct NexusTestArgs(Set<NexusTestArg>);
 
-impl Parse for Args {
+impl Parse for NexusTestArgs {
     fn parse(input: ParseStream) -> Result<Self> {
-        let vars = Punctuated::<NameValue, Token![,]>::parse_terminated(input)?;
-        Ok(Args { vars: vars.into_iter().collect() })
+        let vars =
+            Punctuated::<NexusTestArg, Token![,]>::parse_terminated(input)?;
+        Ok(NexusTestArgs(vars.into_iter().collect()))
     }
 }
 
@@ -73,15 +82,28 @@ pub fn nexus_test(attrs: TokenStream, input: TokenStream) -> TokenStream {
     //
     // This mechanism allows Nexus unit test to be tested using the `nexus_test`
     // macro without a circular dependency on nexus-test-utils.
-    let attrs = parse_macro_input!(attrs as Args);
-    let which_nexus = attrs
-        .vars
-        .iter()
-        .find(|nv| nv.name.is_ident("server"))
-        .map(|nv| nv.value.clone())
-        .unwrap_or_else(|| {
-            syn::parse_str::<syn::Path>("::omicron_nexus::Server").unwrap()
-        });
+    //
+    // As well, a caller can request that extra sled agents be built using
+    //
+    // #[nexus_test(extra_sled_agents = N)]
+
+    let nexus_test_args = parse_macro_input!(attrs as NexusTestArgs);
+
+    let mut which_nexus =
+        syn::parse_str::<syn::Path>("::omicron_nexus::Server").unwrap();
+    let mut extra_sled_agents: u16 = 0;
+
+    for arg in nexus_test_args.0 {
+        match arg {
+            NexusTestArg::ServerUnderTest(server) => {
+                which_nexus = server;
+            }
+
+            NexusTestArg::ExtraSledAgents(value) => {
+                extra_sled_agents = value;
+            }
+        }
+    }
 
     // Verify we're returning an empty tuple
     correct_signature &= match input_func.sig.output {
@@ -104,7 +126,10 @@ pub fn nexus_test(attrs: TokenStream, input: TokenStream) -> TokenStream {
         {
             #input_func
 
-            let ctx = ::nexus_test_utils::test_setup::<#which_nexus>(#func_ident_string).await;
+            let ctx = ::nexus_test_utils::test_setup::<#which_nexus>(
+                #func_ident_string,
+                #extra_sled_agents,
+            ).await;
             #func_ident(&ctx).await;
             ctx.teardown().await;
         }

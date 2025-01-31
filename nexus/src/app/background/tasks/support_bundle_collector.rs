@@ -19,6 +19,8 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::SledFilter;
 use nexus_types::identity::Asset;
+use nexus_types::internal_api::background::SupportBundleCleanupReport;
+use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
@@ -30,8 +32,6 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use serde::Deserialize;
-use serde::Serialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::io::Write;
@@ -59,19 +59,6 @@ fn authz_support_bundle_from_id(id: SupportBundleUuid) -> authz::SupportBundle {
 struct BundleRequest {
     // If "false": Skip collecting host-specific info from each sled.
     skip_sled_info: bool,
-}
-
-// Describes what happened while attempting to clean up Support Bundles.
-#[derive(Debug, Default, Deserialize, Serialize, Eq, PartialEq)]
-pub struct CleanupReport {
-    // Responses from Sled Agents
-    pub sled_bundles_deleted_ok: usize,
-    pub sled_bundles_deleted_not_found: usize,
-    pub sled_bundles_delete_failed: usize,
-
-    // Results from updating our database records
-    pub db_destroying_bundles_removed: usize,
-    pub db_failing_bundles_updated: usize,
 }
 
 // Result of asking a sled agent to clean up a bundle
@@ -244,7 +231,7 @@ impl SupportBundleCollector {
     async fn cleanup_destroyed_bundles(
         &self,
         opctx: &OpContext,
-    ) -> anyhow::Result<CleanupReport> {
+    ) -> anyhow::Result<SupportBundleCleanupReport> {
         let pagparams = DataPageParams::max_page();
         let result = self
             .datastore
@@ -271,7 +258,7 @@ impl SupportBundleCollector {
             }
         };
 
-        let mut report = CleanupReport::default();
+        let mut report = SupportBundleCleanupReport::default();
 
         // NOTE: This could be concurrent, but the priority for that also seems low
         for bundle in bundles_to_destroy {
@@ -344,7 +331,7 @@ impl SupportBundleCollector {
         &self,
         opctx: &OpContext,
         request: &BundleRequest,
-    ) -> anyhow::Result<Option<CollectionReport>> {
+    ) -> anyhow::Result<Option<SupportBundleCollectionReport>> {
         let pagparams = DataPageParams::max_page();
         let result = self
             .datastore
@@ -438,7 +425,7 @@ impl BundleCollection<'_> {
     // Collect the bundle within Nexus, and store it on a target sled.
     async fn collect_bundle_and_store_on_sled(
         &self,
-    ) -> anyhow::Result<CollectionReport> {
+    ) -> anyhow::Result<SupportBundleCollectionReport> {
         // Create a temporary directory where we'll store the support bundle
         // as it's being collected.
         let dir = tempdir_in(TEMPDIR)?;
@@ -543,8 +530,8 @@ impl BundleCollection<'_> {
     // - "bundle" is metadata about the bundle being collected.
     //
     // If a partial bundle can be collected, it should be returned as
-    // an Ok(CollectionReport). Any failures from this function will prevent
-    // the support bundle from being collected altogether.
+    // an Ok(SupportBundleCollectionReport). Any failures from this function
+    // will prevent the support bundle from being collected altogether.
     //
     // NOTE: The background task infrastructure will periodically check to see
     // if the bundle has been cancelled by a user while it is being collected.
@@ -555,11 +542,12 @@ impl BundleCollection<'_> {
     async fn collect_bundle_as_file(
         &self,
         dir: &Utf8TempDir,
-    ) -> anyhow::Result<CollectionReport> {
+    ) -> anyhow::Result<SupportBundleCollectionReport> {
         let log = &self.log;
 
         info!(&log, "Collecting bundle as local file");
-        let mut report = CollectionReport::new(self.bundle.id.into());
+        let mut report =
+            SupportBundleCollectionReport::new(self.bundle.id.into());
 
         tokio::fs::write(
             dir.path().join("bundle_id.txt"),
@@ -740,30 +728,6 @@ async fn sha2_hash(file: &mut tokio::fs::File) -> anyhow::Result<ArtifactHash> {
     Ok(ArtifactHash(digest.as_slice().try_into()?))
 }
 
-// Identifies what we could or could not store within this support bundle.
-//
-// This struct will get emitted as part of the background task infrastructure.
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct CollectionReport {
-    pub bundle: SupportBundleUuid,
-
-    // True iff we could list in-service sleds
-    pub listed_in_service_sleds: bool,
-
-    // True iff the bundle was successfully made 'active' in the database.
-    pub activated_in_db_ok: bool,
-}
-
-impl CollectionReport {
-    fn new(bundle: SupportBundleUuid) -> Self {
-        Self {
-            bundle,
-            listed_in_service_sleds: false,
-            activated_in_db_ok: false,
-        }
-    }
-}
-
 async fn write_command_result_or_error<D: std::fmt::Debug>(
     path: &Utf8Path,
     command: &str,
@@ -797,9 +761,9 @@ mod test {
     use super::*;
 
     use camino_tempfile::tempdir;
-    use nexus_db_model::Dataset;
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
+    use nexus_db_model::RendezvousDebugDataset;
     use nexus_db_model::Zpool;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
@@ -810,7 +774,9 @@ mod test {
     use omicron_common::disk::DatasetsConfig;
     use omicron_common::disk::SharedDatasetConfig;
     use omicron_common::zpool_name::ZpoolName;
-    use omicron_uuid_kinds::{DatasetUuid, PhysicalDiskUuid, SledUuid};
+    use omicron_uuid_kinds::{
+        BlueprintUuid, DatasetUuid, PhysicalDiskUuid, SledUuid,
+    };
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -858,7 +824,7 @@ mod test {
             .await
             .expect("Cleanup should succeed with no work to do");
 
-        assert_eq!(report, CleanupReport::default());
+        assert_eq!(report, SupportBundleCleanupReport::default());
     }
 
     // If there are no bundles in need of collection, the collection task should
@@ -887,6 +853,7 @@ mod test {
         opctx: &OpContext,
         id: PhysicalDiskUuid,
         sled_id: SledUuid,
+        blueprint_id: BlueprintUuid,
     ) -> (ZpoolUuid, DatasetUuid) {
         let zpool = datastore
             .zpool_insert(
@@ -895,17 +862,21 @@ mod test {
             )
             .await
             .unwrap();
+        let zpool_id = ZpoolUuid::from_untyped_uuid(zpool.id());
 
         let dataset = datastore
-            .dataset_upsert(Dataset::new(
-                DatasetUuid::new_v4(),
-                zpool.id(),
-                None,
-                DatasetKind::Debug,
-            ))
+            .debug_dataset_insert_if_not_exists(
+                opctx,
+                RendezvousDebugDataset::new(
+                    DatasetUuid::new_v4(),
+                    zpool_id,
+                    blueprint_id,
+                ),
+            )
             .await
-            .unwrap();
-        (ZpoolUuid::from_untyped_uuid(zpool.id()), dataset.id())
+            .unwrap()
+            .expect("inserted new dataset");
+        (zpool_id, dataset.id())
     }
 
     async fn make_disk_in_db(
@@ -950,12 +921,20 @@ mod test {
 
             let mut disks = vec![];
 
+            // The fake disks/datasets we create aren't really part of the test
+            // blueprint, but that's fine for our purposes.
+            let blueprint_id = cptestctx.initial_blueprint_id;
+
             for i in 0..count {
                 // Create the (disk, zpool, dataset) tuple in Nexus
                 let disk_id =
                     make_disk_in_db(datastore, opctx, i, sled_id).await;
                 let (zpool_id, dataset_id) = add_zpool_and_debug_dataset(
-                    &datastore, &opctx, disk_id, sled_id,
+                    &datastore,
+                    &opctx,
+                    disk_id,
+                    sled_id,
+                    blueprint_id,
                 )
                 .await;
 
@@ -963,7 +942,7 @@ mod test {
                 //
                 // (We could do this via HTTP request, but it's in the test process,
                 // so we can just directly call the method on the sled agent)
-                cptestctx.sled_agent.sled_agent.create_zpool(
+                cptestctx.first_sled_agent().create_zpool(
                     zpool_id,
                     disk_id,
                     1 << 40,
@@ -993,8 +972,7 @@ mod test {
                 DatasetsConfig { generation: Generation::new(), datasets };
 
             let res = cptestctx
-                .sled_agent
-                .sled_agent
+                .first_sled_agent()
                 .datasets_ensure(dataset_config)
                 .unwrap();
             assert!(!res.has_error());
@@ -1176,7 +1154,7 @@ mod test {
             .expect("Cleanup should succeed with no work to do");
         assert_eq!(
             report,
-            CleanupReport {
+            SupportBundleCleanupReport {
                 // Nothing was provisioned on the sled, since we hadn't started
                 // collection yet.
                 sled_bundles_deleted_not_found: 1,
@@ -1241,7 +1219,7 @@ mod test {
             .expect("Cleanup should succeed with no work to do");
         assert_eq!(
             report,
-            CleanupReport {
+            SupportBundleCleanupReport {
                 // Nothing was provisioned on the sled, since we hadn't started
                 // collection yet.
                 sled_bundles_deleted_ok: 1,
@@ -1298,7 +1276,7 @@ mod test {
             .expect("Cleanup should delete failing bundle");
         assert_eq!(
             report,
-            CleanupReport {
+            SupportBundleCleanupReport {
                 // Nothing was provisioned on the sled, since we hadn't started
                 // collection yet.
                 sled_bundles_deleted_not_found: 1,
@@ -1366,7 +1344,7 @@ mod test {
             .expect("Cleanup should delete failing bundle");
         assert_eq!(
             report,
-            CleanupReport {
+            SupportBundleCleanupReport {
                 // The bundle was provisioned on the sled, so we should have
                 // successfully removed it when we later talk to the sled.
                 //
@@ -1448,7 +1426,7 @@ mod test {
             .expect("Cleanup should delete failing bundle");
         assert_eq!(
             report,
-            CleanupReport {
+            SupportBundleCleanupReport {
                 // The database state was "failing", and now it's updated.
                 //
                 // Note that it isn't immediately deleted, so the end-user

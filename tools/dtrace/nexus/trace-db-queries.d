@@ -26,7 +26,9 @@ diesel_db$target:::query-done
 {
     this->latency = (timestamp - ts[this->conn_id]) / 1000;
     printf(
-        "conn_id: %s, latency: %lu us, query: '%s'\n",
+        "%Y.%06d - conn_id: %s, latency: %lu us, query: '%s'\n",
+        walltimestamp,
+        (walltimestamp % 1000000000) / 1000,
         this->conn_id,
         this->latency,
         query[this->conn_id]

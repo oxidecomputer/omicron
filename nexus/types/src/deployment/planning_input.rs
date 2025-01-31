@@ -24,7 +24,6 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::SourceNatConfigError;
-use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::policy::SINGLE_NODE_CLICKHOUSE_REDUNDANCY;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -615,7 +614,7 @@ pub struct SledResources {
     /// storage)
     // NOTE: I'd really like to make this private, to make it harder to
     // accidentally pick a zpool that is not in-service.
-    pub zpools: BTreeMap<ZpoolUuid, (SledDisk, Vec<DatasetConfig>)>,
+    pub zpools: BTreeMap<ZpoolUuid, SledDisk>,
 
     /// the IPv6 subnet of this sled on the underlay network
     ///
@@ -627,7 +626,7 @@ pub struct SledResources {
 impl SledResources {
     /// Returns if the zpool is provisionable (known, in-service, and active).
     pub fn zpool_is_provisionable(&self, zpool: &ZpoolUuid) -> bool {
-        let Some((disk, _datasets)) = self.zpools.get(zpool) else {
+        let Some(disk) = self.zpools.get(zpool) else {
             return false;
         };
         disk.provisionable()
@@ -638,7 +637,7 @@ impl SledResources {
         &self,
         filter: ZpoolFilter,
     ) -> impl Iterator<Item = &ZpoolUuid> + '_ {
-        self.zpools.iter().filter_map(move |(zpool, (disk, _datasets))| {
+        self.zpools.iter().filter_map(move |(zpool, disk)| {
             filter
                 .matches_policy_and_state(disk.policy, disk.state)
                 .then_some(zpool)
@@ -649,21 +648,10 @@ impl SledResources {
         &self,
         filter: DiskFilter,
     ) -> impl Iterator<Item = (&ZpoolUuid, &SledDisk)> + '_ {
-        self.zpools.iter().filter_map(move |(zpool, (disk, _datasets))| {
+        self.zpools.iter().filter_map(move |(zpool, disk)| {
             filter
                 .matches_policy_and_state(disk.policy, disk.state)
                 .then_some((zpool, disk))
-        })
-    }
-
-    pub fn all_datasets(
-        &self,
-        filter: ZpoolFilter,
-    ) -> impl Iterator<Item = (&ZpoolUuid, &[DatasetConfig])> + '_ {
-        self.zpools.iter().filter_map(move |(zpool, (disk, datasets))| {
-            filter
-                .matches_policy_and_state(disk.policy, disk.state)
-                .then_some((zpool, datasets.as_slice()))
         })
     }
 }
@@ -718,6 +706,9 @@ pub enum SledFilter {
 
     /// Sleds which should be sent VPC firewall rules.
     VpcFirewall,
+
+    /// Sleds which should have TUF repo artifacts replicated onto them.
+    TufArtifactReplication,
 }
 
 impl SledFilter {
@@ -773,6 +764,7 @@ impl SledPolicy {
                 SledFilter::ReservationCreate => true,
                 SledFilter::VpcRouting => true,
                 SledFilter::VpcFirewall => true,
+                SledFilter::TufArtifactReplication => true,
             },
             SledPolicy::InService {
                 provision_policy: SledProvisionPolicy::NonProvisionable,
@@ -786,6 +778,7 @@ impl SledPolicy {
                 SledFilter::ReservationCreate => false,
                 SledFilter::VpcRouting => true,
                 SledFilter::VpcFirewall => true,
+                SledFilter::TufArtifactReplication => true,
             },
             SledPolicy::Expunged => match filter {
                 SledFilter::All => true,
@@ -797,6 +790,7 @@ impl SledPolicy {
                 SledFilter::ReservationCreate => false,
                 SledFilter::VpcRouting => false,
                 SledFilter::VpcFirewall => false,
+                SledFilter::TufArtifactReplication => false,
             },
         }
     }
@@ -830,6 +824,7 @@ impl SledState {
                 SledFilter::ReservationCreate => true,
                 SledFilter::VpcRouting => true,
                 SledFilter::VpcFirewall => true,
+                SledFilter::TufArtifactReplication => true,
             },
             SledState::Decommissioned => match filter {
                 SledFilter::All => true,
@@ -841,6 +836,7 @@ impl SledState {
                 SledFilter::ReservationCreate => false,
                 SledFilter::VpcRouting => false,
                 SledFilter::VpcFirewall => false,
+                SledFilter::TufArtifactReplication => false,
             },
         }
     }

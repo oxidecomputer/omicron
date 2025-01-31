@@ -31,6 +31,7 @@ use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::VolumeUuid;
 use slog::Logger;
 use std::collections::HashSet;
 use std::net::SocketAddr;
@@ -98,7 +99,7 @@ async fn test_region_replacement_does_not_create_freed_region(
 
     // Create four zpools, each with one dataset. This is required for region
     // and region snapshot replacement to have somewhere to move the data.
-    let sled_id = cptestctx.first_sled();
+    let sled_id = cptestctx.first_sled_id();
     let disk_test = DiskTestBuilder::new(&cptestctx)
         .on_specific_sled(sled_id)
         .with_zpool_count(4)
@@ -123,7 +124,7 @@ async fn test_region_replacement_does_not_create_freed_region(
     // Next, expunge a physical disk that contains a region
 
     let disk_allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
     let (dataset, _) = &disk_allocated_regions[0];
     let zpool = disk_test
         .zpools()
@@ -182,12 +183,12 @@ mod region_replacement {
         pub async fn new(cptestctx: &'a ControlPlaneTestContext) -> Self {
             let nexus = &cptestctx.server.server_context().nexus;
 
-            // Create four zpools, each with one dataset. This is required for
-            // region and region snapshot replacement to have somewhere to move
-            // the data.
+            // Create one zpool per sled, each with one dataset. This is
+            // required for region and region snapshot replacement to have
+            // somewhere to move the data.
             let disk_test = DiskTestBuilder::new(&cptestctx)
-                .on_specific_sled(cptestctx.first_sled())
-                .with_zpool_count(4)
+                .on_all_sleds()
+                .with_zpool_count(1)
                 .build()
                 .await;
 
@@ -217,7 +218,7 @@ mod region_replacement {
             assert_eq!(db_disk.id(), disk.identity.id);
 
             let disk_allocated_regions = datastore
-                .get_allocated_regions(db_disk.volume_id)
+                .get_allocated_regions(db_disk.volume_id())
                 .await
                 .unwrap();
             let (_, region) = &disk_allocated_regions[0];
@@ -465,7 +466,7 @@ mod region_replacement {
             cptestctx: &'a ControlPlaneTestContext,
         ) {
             let pantry = cptestctx
-                .sled_agent
+                .first_sim_server()
                 .pantry_server
                 .as_ref()
                 .unwrap()
@@ -510,7 +511,7 @@ mod region_replacement {
 
 /// Assert that a region replacement request in state "Requested" can have its
 /// volume deleted and still transition to Complete
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_delete_volume_region_replacement_state_requested(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -527,7 +528,7 @@ async fn test_delete_volume_region_replacement_state_requested(
 
 /// Assert that a region replacement request in state "Running" can have its
 /// volume deleted and still transition to Complete
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_delete_volume_region_replacement_state_running(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -548,7 +549,7 @@ async fn test_delete_volume_region_replacement_state_running(
 /// Assert that a region replacement request in state "Running" that has
 /// additionally had its volume attached to a Pantry can have its volume deleted
 /// and still transition to Complete
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_delete_volume_region_replacement_state_running_on_pantry(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -571,7 +572,7 @@ async fn test_delete_volume_region_replacement_state_running_on_pantry(
 
 /// Assert that a region replacement request in state "ReplacementDone" can have
 /// its volume deleted and still transition to Complete
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_delete_volume_region_replacement_state_replacement_done(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -600,7 +601,7 @@ async fn test_delete_volume_region_replacement_state_replacement_done(
 }
 
 /// Assert that the problem experienced in issue 6353 is fixed
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_racing_replacements_for_soft_deleted_disk_volume(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -609,12 +610,12 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    // Create four zpools, each with one dataset. This is required for region
-    // and region snapshot replacement to have somewhere to move the data.
-    let sled_id = cptestctx.first_sled();
+    // Create one zpool per sled, each with one dataset. This is required for
+    // region and region snapshot replacement to have somewhere to move the
+    // data.
     let mut disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(sled_id)
-        .with_zpool_count(4)
+        .on_all_sleds()
+        .with_zpool_count(1)
         .build()
         .await;
 
@@ -652,7 +653,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     // means it'll have the region too)
 
     let disk_allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
     let (dataset, region) = &disk_allocated_regions[0];
     let zpool = disk_test
         .zpools()
@@ -714,7 +715,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
                 .unwrap();
 
             let snapshot_allocated_datasets_and_regions = datastore
-                .get_allocated_regions(db_snapshot.destination_volume_id)
+                .get_allocated_regions(db_snapshot.destination_volume_id())
                 .await
                 .unwrap();
 
@@ -865,7 +866,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     // volume for later deletion, but has not actually deleted that temporary
     // volume yet, so the count will not have gone to 0.
 
-    let volume = datastore.volume_get(db_disk.volume_id).await.unwrap();
+    let volume = datastore.volume_get(db_disk.volume_id()).await.unwrap();
     assert!(volume.is_some());
     assert!(volume.unwrap().time_deleted.is_some());
 
@@ -913,7 +914,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
 
     // Assert that the disk's volume is still only soft-deleted, because the two
     // other associated region snapshots still exist.
-    let volume = datastore.volume_get(db_disk.volume_id).await.unwrap();
+    let volume = datastore.volume_get(db_disk.volume_id()).await.unwrap();
     assert!(volume.is_some());
 
     // Check on the old region id - it should not be deleted
@@ -1103,7 +1104,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     wait_for_condition(
         || {
             let datastore = datastore.clone();
-            let volume_id = db_disk.volume_id;
+            let volume_id = db_disk.volume_id();
 
             async move {
                 let volume = datastore.volume_get(volume_id).await.unwrap();
@@ -1158,12 +1159,12 @@ mod region_snapshot_replacement {
         pub async fn new(cptestctx: &'a ControlPlaneTestContext) -> Self {
             let nexus = &cptestctx.server.server_context().nexus;
 
-            // Create four zpools, each with one dataset. This is required for
-            // region and region snapshot replacement to have somewhere to move
-            // the data.
+            // Create one zpool per sled, each with one dataset. This is
+            // required for region and region snapshot replacement to have
+            // somewhere to move the data.
             let disk_test = DiskTestBuilder::new(&cptestctx)
-                .on_specific_sled(cptestctx.first_sled())
-                .with_zpool_count(4)
+                .on_all_sleds()
+                .with_zpool_count(1)
                 .build()
                 .await;
 
@@ -1206,7 +1207,7 @@ mod region_snapshot_replacement {
             assert_eq!(db_disk.id(), disk.identity.id);
 
             let disk_allocated_regions = datastore
-                .get_allocated_regions(db_disk.volume_id)
+                .get_allocated_regions(db_disk.volume_id())
                 .await
                 .unwrap();
             let (_, region) = &disk_allocated_regions[0];
@@ -1261,7 +1262,7 @@ mod region_snapshot_replacement {
 
             // Validate that they are snapshot and disk from snapshot
 
-            let volumes_set: HashSet<Uuid> =
+            let volumes_set: HashSet<VolumeUuid> =
                 volumes.into_iter().map(|v| v.id()).collect();
 
             let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
@@ -1277,8 +1278,8 @@ mod region_snapshot_replacement {
                     .await
                     .unwrap();
 
-            assert!(volumes_set.contains(&db_snapshot.volume_id));
-            assert!(volumes_set.contains(&db_disk_from_snapshot.volume_id));
+            assert!(volumes_set.contains(&db_snapshot.volume_id()));
+            assert!(volumes_set.contains(&db_disk_from_snapshot.volume_id()));
 
             DeletedVolumeTest {
                 log: cptestctx.logctx.log.new(o!()),
@@ -1541,7 +1542,7 @@ mod region_snapshot_replacement {
                 .create_region_snapshot_replacement_step(
                     &self.opctx(),
                     self.replacement_request_id,
-                    db_disk_from_snapshot.volume_id,
+                    db_disk_from_snapshot.volume_id(),
                 )
                 .await
                 .unwrap();
@@ -1559,7 +1560,7 @@ mod region_snapshot_replacement {
 
 /// Assert that a region snapshot replacement request in state "Requested" can
 /// have its snapshot deleted and still transition to Complete
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_delete_volume_region_snapshot_replacement_state_requested(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -1586,7 +1587,7 @@ async fn test_delete_volume_region_snapshot_replacement_state_requested(
 /// Assert that a region snapshot replacement request in state "Requested" can
 /// have its snapshot deleted, and the snapshot's source disk can be deleted,
 /// and the request will still transition to Complete
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_delete_volume_region_snapshot_replacement_state_requested_2(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -1616,7 +1617,7 @@ async fn test_delete_volume_region_snapshot_replacement_state_requested_2(
 /// Assert that a region snapshot replacement request in state "Requested" can
 /// have everything be deleted, and the request will still transition to
 /// Complete
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_delete_volume_region_snapshot_replacement_state_requested_3(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -1643,7 +1644,7 @@ async fn test_delete_volume_region_snapshot_replacement_state_requested_3(
 /// Assert that a region snapshot replacement request in state "ReplacementDone"
 /// can have its snapshot deleted, and the request will still transition to
 /// Complete
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_delete_volume_region_snapshot_replacement_state_replacement_done(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -1674,7 +1675,7 @@ async fn test_delete_volume_region_snapshot_replacement_state_replacement_done(
 /// Assert that a region snapshot replacement request in state "Running"
 /// can have its snapshot deleted, and the request will still transition to
 /// Complete
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_delete_volume_region_snapshot_replacement_state_running(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -1706,7 +1707,7 @@ async fn test_delete_volume_region_snapshot_replacement_state_running(
 
 /// Assert that a region snapshot replacement step can have its associated
 /// volume deleted and still transition to VolumeDeleted
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_delete_volume_region_snapshot_replacement_step(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -1740,20 +1741,19 @@ async fn test_delete_volume_region_snapshot_replacement_step(
 }
 
 /// Tests that replacement can occur until completion
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    // Create four zpools, each with one dataset. This is required for region
-    // and region snapshot replacement to have somewhere to move the data.
-    let sled_id = cptestctx.first_sled();
-
+    // Create one zpool per sled, each with one dataset. This is required for
+    // region and region snapshot replacement to have somewhere to move the
+    // data.
     let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(sled_id)
-        .with_zpool_count(4)
+        .on_all_sleds()
+        .with_zpool_count(1)
         .build()
         .await;
 
@@ -1783,7 +1783,7 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
     // Next, expunge a physical disk that contains a region
 
     let disk_allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
     let (dataset, _) = &disk_allocated_regions[0];
 
     let zpool = disk_test
@@ -1810,7 +1810,7 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
     // for this test
 
     cptestctx
-        .sled_agent
+        .first_sim_server()
         .pantry_server
         .as_ref()
         .unwrap()
@@ -1823,7 +1823,7 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
 }
 
 /// Tests that multiple replacements can occur until completion
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 5)]
 async fn test_region_replacement_triple_sanity(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -1832,14 +1832,12 @@ async fn test_region_replacement_triple_sanity(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    // Create five zpools, each with one dataset. This is required for region
-    // and region snapshot replacement to have somewhere to move the data, and
-    // for this test we're doing two expungements.
-    let sled_id = cptestctx.first_sled();
-
+    // Create one zpool, each with one dataset, on each of the 6 sleds. This is
+    // required for region and region snapshot replacement to have somewhere to
+    // move the data, and for this test we're doing two expungements.
     let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(sled_id)
-        .with_zpool_count(6)
+        .on_all_sleds()
+        .with_zpool_count(1)
         .build()
         .await;
 
@@ -1847,7 +1845,7 @@ async fn test_region_replacement_triple_sanity(
     // for this test
 
     cptestctx
-        .sled_agent
+        .first_sim_server()
         .pantry_server
         .as_ref()
         .unwrap()
@@ -1884,9 +1882,9 @@ async fn test_region_replacement_triple_sanity(
     let internal_client = &cptestctx.internal_client;
 
     let disk_allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
     let snapshot_allocated_regions =
-        datastore.get_allocated_regions(db_snapshot.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_snapshot.volume_id()).await.unwrap();
 
     assert_eq!(disk_allocated_regions.len(), 3);
     assert_eq!(snapshot_allocated_regions.len(), 0);
@@ -1919,9 +1917,9 @@ async fn test_region_replacement_triple_sanity(
     }
 
     let disk_allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
     let snapshot_allocated_regions =
-        datastore.get_allocated_regions(db_snapshot.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_snapshot.volume_id()).await.unwrap();
 
     assert_eq!(disk_allocated_regions.len(), 3);
     assert!(disk_allocated_regions.iter().all(|(_, r)| !r.read_only()));
@@ -1934,7 +1932,7 @@ async fn test_region_replacement_triple_sanity(
 /// Tests that multiple replacements can occur until completion, after expunging
 /// two physical disks before any replacements occur (aka we can lose two
 /// physical disks and still recover)
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 5)]
 async fn test_region_replacement_triple_sanity_2(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -1943,14 +1941,12 @@ async fn test_region_replacement_triple_sanity_2(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    // Create five zpools, each with one dataset. This is required for region
-    // and region snapshot replacement to have somewhere to move the data, and
-    // for this test we're doing two expungements.
-    let sled_id = cptestctx.first_sled();
-
+    // Create one zpool, each with one dataset, on each of the 6 sleds. This is
+    // required for region and region snapshot replacement to have somewhere to
+    // move the data, and for this test we're doing two expungements.
     let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(sled_id)
-        .with_zpool_count(6)
+        .on_all_sleds()
+        .with_zpool_count(1)
         .build()
         .await;
 
@@ -1958,7 +1954,7 @@ async fn test_region_replacement_triple_sanity_2(
     // for this test
 
     cptestctx
-        .sled_agent
+        .first_sim_server()
         .pantry_server
         .as_ref()
         .unwrap()
@@ -1995,9 +1991,9 @@ async fn test_region_replacement_triple_sanity_2(
     let internal_client = &cptestctx.internal_client;
 
     let disk_allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
     let snapshot_allocated_regions =
-        datastore.get_allocated_regions(db_snapshot.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_snapshot.volume_id()).await.unwrap();
 
     assert_eq!(disk_allocated_regions.len(), 3);
     assert_eq!(snapshot_allocated_regions.len(), 0);
@@ -2059,9 +2055,9 @@ async fn test_region_replacement_triple_sanity_2(
     run_replacement_tasks_to_completion(&internal_client).await;
 
     let disk_allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
     let snapshot_allocated_regions =
-        datastore.get_allocated_regions(db_snapshot.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_snapshot.volume_id()).await.unwrap();
 
     assert_eq!(disk_allocated_regions.len(), 3);
     assert!(disk_allocated_regions.iter().all(|(_, r)| !r.read_only()));

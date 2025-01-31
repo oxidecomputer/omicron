@@ -907,6 +907,7 @@ table! {
         sled_policy -> crate::sled_policy::SledPolicyEnum,
         sled_state -> crate::SledStateEnum,
         sled_agent_gen -> Int8,
+        repo_depot_port -> Int4,
     }
 }
 
@@ -1035,7 +1036,7 @@ allow_tables_to_appear_in_same_query! {
 }
 
 table! {
-    dataset (id) {
+    crucible_dataset (id) {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
@@ -1044,20 +1045,14 @@ table! {
 
         pool_id -> Uuid,
 
-        ip -> Nullable<Inet>,
-        port -> Nullable<Int4>,
+        ip -> Inet,
+        port -> Int4,
 
-        kind -> crate::DatasetKindEnum,
-        size_used -> Nullable<Int8>,
-        zone_name -> Nullable<Text>,
-
-        quota -> Nullable<Int8>,
-        reservation -> Nullable<Int8>,
-        compression -> Nullable<Text>,
+        size_used -> Int8,
     }
 }
 
-allow_tables_to_appear_in_same_query!(zpool, dataset);
+allow_tables_to_appear_in_same_query!(zpool, crucible_dataset);
 
 table! {
     rendezvous_debug_dataset (id) {
@@ -2032,7 +2027,8 @@ allow_tables_to_appear_in_same_query!(hw_baseboard_id, inv_sled_agent,);
 allow_tables_to_appear_in_same_query!(
     bp_omicron_zone,
     bp_target,
-    dataset,
+    rendezvous_debug_dataset,
+    crucible_dataset,
     disk,
     image,
     project_image,

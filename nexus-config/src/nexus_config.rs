@@ -417,6 +417,8 @@ pub struct BackgroundTaskConfig {
     /// configuration for region snapshot replacement finisher task
     pub region_snapshot_replacement_finish:
         RegionSnapshotReplacementFinishConfig,
+    /// configuration for TUF artifact replication task
+    pub tuf_artifact_replication: TufArtifactReplicationConfig,
 }
 
 #[serde_as]
@@ -581,6 +583,12 @@ pub struct BlueprintTasksConfig {
     pub period_secs_execute: Duration,
 
     /// period (in seconds) for periodic activations of the background task that
+    /// reconciles the latest blueprint and latest inventory collection into
+    /// Rencofigurator rendezvous tables
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs_rendezvous: Duration,
+
+    /// period (in seconds) for periodic activations of the background task that
     /// collects the node IDs of CockroachDB zones
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs_collect_crdb_node_ids: Duration,
@@ -714,6 +722,17 @@ pub struct RegionSnapshotReplacementFinishConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TufArtifactReplicationConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+    /// The number of sleds that artifacts must be present on before a local
+    /// copy of a repo's artifacts is dropped.
+    pub min_sled_replication: usize,
 }
 
 /// Configuration for a nexus server
@@ -918,10 +937,10 @@ mod test {
             external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
-            request_body_max_bytes = 1024
+            default_request_body_max_bytes = 1024
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
-            request_body_max_bytes = 1024
+            default_request_body_max_bytes = 1024
             [deployment.internal_dns]
             type = "from_subnet"
             subnet.net = "::/56"
@@ -953,6 +972,7 @@ mod test {
             phantom_disks.period_secs = 30
             blueprints.period_secs_load = 10
             blueprints.period_secs_execute = 60
+            blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
             sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
@@ -971,6 +991,8 @@ mod test {
             region_snapshot_replacement_garbage_collection.period_secs = 30
             region_snapshot_replacement_step.period_secs = 30
             region_snapshot_replacement_finish.period_secs = 30
+            tuf_artifact_replication.period_secs = 300
+            tuf_artifact_replication.min_sled_replication = 3
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1108,6 +1130,7 @@ mod test {
                             period_secs_execute: Duration::from_secs(60),
                             period_secs_collect_crdb_node_ids:
                                 Duration::from_secs(180),
+                            period_secs_rendezvous: Duration::from_secs(300),
                         },
                         sync_service_zone_nat: SyncServiceZoneNatConfig {
                             period_secs: Duration::from_secs(30)
@@ -1166,6 +1189,11 @@ mod test {
                             RegionSnapshotReplacementFinishConfig {
                                 period_secs: Duration::from_secs(30),
                             },
+                        tuf_artifact_replication:
+                            TufArtifactReplicationConfig {
+                                period_secs: Duration::from_secs(300),
+                                min_sled_replication: 3,
+                            },
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -1198,10 +1226,10 @@ mod test {
             external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
-            request_body_max_bytes = 1024
+            default_request_body_max_bytes = 1024
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
-            request_body_max_bytes = 1024
+            default_request_body_max_bytes = 1024
             [deployment.internal_dns]
             type = "from_subnet"
             subnet.net = "::/56"
@@ -1231,6 +1259,7 @@ mod test {
             phantom_disks.period_secs = 30
             blueprints.period_secs_load = 10
             blueprints.period_secs_execute = 60
+            blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
             sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
@@ -1248,6 +1277,8 @@ mod test {
             region_snapshot_replacement_garbage_collection.period_secs = 30
             region_snapshot_replacement_step.period_secs = 30
             region_snapshot_replacement_finish.period_secs = 30
+            tuf_artifact_replication.period_secs = 300
+            tuf_artifact_replication.min_sled_replication = 3
             [default_region_allocation_strategy]
             type = "random"
             "##,
@@ -1285,10 +1316,10 @@ mod test {
             external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
-            request_body_max_bytes = 1024
+            default_request_body_max_bytes = 1024
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
-            request_body_max_bytes = 1024
+            default_request_body_max_bytes = 1024
             [deployment.internal_dns]
             type = "from_subnet"
             subnet.net = "::/56"
@@ -1342,10 +1373,10 @@ mod test {
             external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
-            request_body_max_bytes = 1024
+            default_request_body_max_bytes = 1024
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
-            request_body_max_bytes = 1024
+            default_request_body_max_bytes = 1024
             [deployment.internal_dns]
             type = "from_subnet"
             subnet.net = "::/56"

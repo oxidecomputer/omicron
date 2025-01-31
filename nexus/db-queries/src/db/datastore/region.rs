@@ -14,7 +14,7 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::lookup::LookupPath;
 use crate::db::model::to_db_typed_uuid;
-use crate::db::model::Dataset;
+use crate::db::model::CrucibleDataset;
 use crate::db::model::PhysicalDiskPolicy;
 use crate::db::model::Region;
 use crate::db::model::SqlU16;
@@ -35,17 +35,18 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::VolumeUuid;
 use slog::Logger;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 pub enum RegionAllocationFor {
     /// Allocate region(s) for a disk volume
-    DiskVolume { volume_id: Uuid },
+    DiskVolume { volume_id: VolumeUuid },
 
     /// Allocate region(s) for a snapshot volume, which may have read-only
     /// targets.
-    SnapshotVolume { volume_id: Uuid, snapshot_id: Uuid },
+    SnapshotVolume { volume_id: VolumeUuid, snapshot_id: Uuid },
 }
 
 /// Describe the region(s) to be allocated
@@ -64,17 +65,17 @@ pub enum RegionAllocationParameters<'a> {
 
 impl DataStore {
     pub(super) fn get_allocated_regions_query(
-        volume_id: Uuid,
-    ) -> impl RunnableQuery<(Dataset, Region)> {
-        use db::schema::dataset::dsl as dataset_dsl;
+        volume_id: VolumeUuid,
+    ) -> impl RunnableQuery<(CrucibleDataset, Region)> {
+        use db::schema::crucible_dataset::dsl as dataset_dsl;
         use db::schema::region::dsl as region_dsl;
         region_dsl::region
-            .filter(region_dsl::volume_id.eq(volume_id))
+            .filter(region_dsl::volume_id.eq(to_db_typed_uuid(volume_id)))
             .inner_join(
-                dataset_dsl::dataset
+                dataset_dsl::crucible_dataset
                     .on(region_dsl::dataset_id.eq(dataset_dsl::id)),
             )
-            .select((Dataset::as_select(), Region::as_select()))
+            .select((CrucibleDataset::as_select(), Region::as_select()))
     }
 
     /// Gets allocated regions for a disk, and the datasets to which those
@@ -84,10 +85,10 @@ impl DataStore {
     /// may be used in a context where the disk is being deleted.
     pub async fn get_allocated_regions(
         &self,
-        volume_id: Uuid,
-    ) -> Result<Vec<(Dataset, Region)>, Error> {
+        volume_id: VolumeUuid,
+    ) -> Result<Vec<(CrucibleDataset, Region)>, Error> {
         Self::get_allocated_regions_query(volume_id)
-            .get_results_async::<(Dataset, Region)>(
+            .get_results_async::<(CrucibleDataset, Region)>(
                 &*self.pool_connection_unauthorized().await?,
             )
             .await
@@ -182,11 +183,11 @@ impl DataStore {
     pub async fn disk_region_allocate(
         &self,
         opctx: &OpContext,
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
         disk_source: &params::DiskSource,
         size: external::ByteCount,
         allocation_strategy: &RegionAllocationStrategy,
-    ) -> Result<Vec<(Dataset, Region)>, Error> {
+    ) -> Result<Vec<(CrucibleDataset, Region)>, Error> {
         self.arbitrary_region_allocate(
             opctx,
             RegionAllocationFor::DiskVolume { volume_id },
@@ -221,7 +222,7 @@ impl DataStore {
         region_parameters: RegionAllocationParameters<'_>,
         allocation_strategy: &RegionAllocationStrategy,
         num_regions_required: usize,
-    ) -> Result<Vec<(Dataset, Region)>, Error> {
+    ) -> Result<Vec<(CrucibleDataset, Region)>, Error> {
         let (volume_id, maybe_snapshot_id) = match region_for {
             RegionAllocationFor::DiskVolume { volume_id } => (volume_id, None),
 
@@ -272,7 +273,7 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(&opctx).await?;
 
-        let dataset_and_regions: Vec<(Dataset, Region)> =
+        let dataset_and_regions: Vec<(CrucibleDataset, Region)> =
             query.get_results_async(&*conn).await.map_err(|e| {
                 crate::db::queries::region_allocation::from_diesel(e)
             })?;
@@ -312,7 +313,7 @@ impl DataStore {
                 let err = err.clone();
                 let region_ids = region_ids.clone();
                 async move {
-                    use db::schema::dataset::dsl as dataset_dsl;
+                    use db::schema::crucible_dataset::dsl as dataset_dsl;
                     use db::schema::region::dsl as region_dsl;
 
                     // Remove the regions, collecting datasets they're from.
@@ -354,7 +355,7 @@ impl DataStore {
                             0
                         };
 
-                        diesel::update(dataset_dsl::dataset)
+                        diesel::update(dataset_dsl::crucible_dataset)
                             .filter(dataset_dsl::id.eq(dataset))
                             .set(
                                 dataset_dsl::size_used
@@ -427,14 +428,14 @@ impl DataStore {
     ) -> LookupResult<Vec<Region>> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::crucible_dataset::dsl as dataset_dsl;
         use db::schema::physical_disk::dsl as physical_disk_dsl;
         use db::schema::region::dsl as region_dsl;
         use db::schema::zpool::dsl as zpool_dsl;
 
         region_dsl::region
             .filter(region_dsl::dataset_id.eq_any(
-                dataset_dsl::dataset
+                dataset_dsl::crucible_dataset
                     .filter(dataset_dsl::time_deleted.is_null())
                     .filter(dataset_dsl::pool_id.eq_any(
                         zpool_dsl::zpool
@@ -506,15 +507,8 @@ impl DataStore {
             return Ok(None);
         };
 
-        let dataset = self.dataset_get(region.dataset_id()).await?;
-
-        let Some(address) = dataset.address() else {
-            return Err(Error::internal_error(
-                "Dataset for Crucible region does know IP address",
-            ));
-        };
-
-        Ok(Some(SocketAddrV6::new(*address.ip(), port, 0, 0)))
+        let dataset = self.crucible_dataset_get(region.dataset_id()).await?;
+        Ok(Some(dataset.address_with_port(port)))
     }
 
     pub async fn regions_missing_ports(
@@ -551,18 +545,18 @@ impl DataStore {
     pub async fn find_non_expunged_regions(
         &self,
         opctx: &OpContext,
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
     ) -> LookupResult<Vec<Region>> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::crucible_dataset::dsl as dataset_dsl;
         use db::schema::physical_disk::dsl as physical_disk_dsl;
         use db::schema::region::dsl as region_dsl;
         use db::schema::zpool::dsl as zpool_dsl;
 
         region_dsl::region
             .filter(region_dsl::dataset_id.eq_any(
-                dataset_dsl::dataset
+                dataset_dsl::crucible_dataset
                     .filter(dataset_dsl::time_deleted.is_null())
                     .filter(dataset_dsl::pool_id.eq_any(
                         zpool_dsl::zpool
@@ -576,7 +570,7 @@ impl DataStore {
                     ))
                     .select(dataset_dsl::id)
             ))
-            .filter(region_dsl::volume_id.eq(volume_id))
+            .filter(region_dsl::volume_id.eq(to_db_typed_uuid(volume_id)))
             .select(Region::as_select())
             .load_async(&*conn)
             .await

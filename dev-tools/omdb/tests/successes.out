@@ -73,9 +73,9 @@ EXECUTING COMMAND: omdb ["db", "sleds"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
- SERIAL        IP           ROLE      POLICY             STATE   ID                                   
- sim-039be560  [::1]:REDACTED_PORT  scrimlet  not provisionable  active  ..........<REDACTED_UUID>........... 
- sim-b6d65341  [::1]:REDACTED_PORT  scrimlet  in service         active  ..........<REDACTED_UUID>........... 
+ SERIAL        IP           ROLE      POLICY      STATE   ID                                   
+ sim-039be560  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ sim-b6d65341  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -87,6 +87,7 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
  SERIAL        IP           ROLE      POLICY      STATE   ID                                   
+ sim-039be560  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
  sim-b6d65341  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
 ---------------------------------------------
 stderr:
@@ -261,6 +262,11 @@ task: "blueprint_loader"
     Loads the current target blueprint from the DB
 
 
+task: "blueprint_rendezvous"
+    reconciles blueprints and inventory collection, updating Reconfigurator-
+    owned rendezvous tables that other subsystems consume
+
+
 task: "crdb_node_id_collector"
     Collects node IDs of running CockroachDB zones
 
@@ -388,6 +394,10 @@ task: "switch_port_config_manager"
     manages switch port settings for rack switches
 
 
+task: "tuf_artifact_replication"
+    replicate update repo artifacts across sleds
+
+
 task: "v2p_manager"
     manages opte v2p mappings for vpc networking
 
@@ -497,6 +507,13 @@ task: "bfd_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+
+task: "blueprint_rendezvous"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: no blueprint
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
@@ -702,7 +719,12 @@ task: "support_bundle_collector"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "support_bundle_collector" (don't know how to interpret details: Object {"cleanup_err": Null, "cleanup_report": Object {"db_destroying_bundles_removed": Number(0), "db_failing_bundles_updated": Number(0), "sled_bundles_delete_failed": Number(0), "sled_bundles_deleted_not_found": Number(0), "sled_bundles_deleted_ok": Number(0)}, "collection_err": Null, "collection_report": Null})
+    Support Bundle Cleanup Report:
+      Bundles deleted from sleds: 0
+      Bundles not found on sleds: 0
+      Bundles delete failed on sleds: 0
+      Bundles deleted from database: 0
+      Bundles marked failed in database: 0
 
 task: "switch_port_config_manager"
   configured period: every <REDACTED_DURATION>s
@@ -710,6 +732,33 @@ task: "switch_port_config_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
+
+task: "tuf_artifact_replication"
+  configured period: every <REDACTED_DURATION>h
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    request ringbuf:
+      <REDACTED_SECTION>
+    last run:
+      list ok:      <LIST_OK_REDACTED>
+      list err:     0
+      put ok:       0
+      put err:      0
+      copy ok:      0
+      copy err:     0
+      delete ok:    0
+      delete err:   0
+    lifetime:
+      list ok:      <LIST_OK_REDACTED>
+      list err:     0
+      put ok:       0
+      put err:      0
+      copy ok:      0
+      copy err:     0
+      delete ok:    0
+      delete err:   0
+    local repos: 0
 
 task: "v2p_manager"
   configured period: every <REDACTED_DURATION>s
@@ -950,6 +999,13 @@ task: "bfd_manager"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
+task: "blueprint_rendezvous"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: no blueprint
+
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
   currently executing: no
@@ -1154,7 +1210,12 @@ task: "support_bundle_collector"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "support_bundle_collector" (don't know how to interpret details: Object {"cleanup_err": Null, "cleanup_report": Object {"db_destroying_bundles_removed": Number(0), "db_failing_bundles_updated": Number(0), "sled_bundles_delete_failed": Number(0), "sled_bundles_deleted_not_found": Number(0), "sled_bundles_deleted_ok": Number(0)}, "collection_err": Null, "collection_report": Null})
+    Support Bundle Cleanup Report:
+      Bundles deleted from sleds: 0
+      Bundles not found on sleds: 0
+      Bundles delete failed on sleds: 0
+      Bundles deleted from database: 0
+      Bundles marked failed in database: 0
 
 task: "switch_port_config_manager"
   configured period: every <REDACTED_DURATION>s
@@ -1162,6 +1223,33 @@ task: "switch_port_config_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
+
+task: "tuf_artifact_replication"
+  configured period: every <REDACTED_DURATION>h
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    request ringbuf:
+      <REDACTED_SECTION>
+    last run:
+      list ok:      <LIST_OK_REDACTED>
+      list err:     0
+      put ok:       0
+      put err:      0
+      copy ok:      0
+      copy err:     0
+      delete ok:    0
+      delete err:   0
+    lifetime:
+      list ok:      <LIST_OK_REDACTED>
+      list err:     0
+      put ok:       0
+      put err:      0
+      copy ok:      0
+      copy err:     0
+      delete ok:    0
+      delete err:   0
+    local repos: 0
 
 task: "v2p_manager"
   configured period: every <REDACTED_DURATION>s

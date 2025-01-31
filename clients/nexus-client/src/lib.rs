@@ -61,6 +61,7 @@ progenitor::generate_api!(
         TypedUuidForUpstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsKind>,
         TypedUuidForUpstairsRepairKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsRepairKind>,
         TypedUuidForUpstairsSessionKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsSessionKind>,
+        TypedUuidForVolumeKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::VolumeKind>,
         TypedUuidForZpoolKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::ZpoolKind>,
     },
     patch = {
@@ -242,16 +243,6 @@ impl From<&omicron_common::api::internal::nexus::ProducerEndpoint>
             kind: s.kind.into(),
             interval: s.interval.into(),
         }
-    }
-}
-
-impl From<omicron_common::api::external::SemverVersion>
-    for types::SemverVersion
-{
-    fn from(s: omicron_common::api::external::SemverVersion) -> Self {
-        s.to_string().parse().expect(
-            "semver should generate output that matches validation regex",
-        )
     }
 }
 

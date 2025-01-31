@@ -20,6 +20,7 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::views::SledInstance;
 use nexus_types::external_api::views::{PhysicalDisk, Sled};
 use omicron_sled_agent::sim;
+use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -29,7 +30,10 @@ use uuid::Uuid;
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
-async fn sleds_list(client: &ClientTestContext, sleds_url: &str) -> Vec<Sled> {
+pub(crate) async fn sleds_list(
+    client: &ClientTestContext,
+    sleds_url: &str,
+) -> Vec<Sled> {
     objects_list_page_authz::<Sled>(client, sleds_url).await.items
 }
 
@@ -47,7 +51,7 @@ async fn sled_instance_list(
     objects_list_page_authz::<SledInstance>(client, url).await.items
 }
 
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 1)]
 async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
@@ -58,7 +62,7 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
     // Now start a few more sled agents.
     let nsleds = 3;
     let mut sas = Vec::with_capacity(nsleds);
-    for _ in 0..nsleds {
+    for i in 0..nsleds {
         let sa_id = SledUuid::new_v4();
         let log =
             cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
@@ -69,8 +73,12 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
                 log,
                 addr,
                 sa_id,
+                // Index starts at 2: the `nexus_test` macro already created two
+                // sled agents as part of the ControlPlaneTestContext setup.
+                2 + i as u16,
                 &update_directory,
                 sim::SimMode::Explicit,
+                &cptestctx.first_sled_agent().simulated_upstairs,
             )
             .await
             .unwrap(),
@@ -93,7 +101,7 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
     }
 }
 
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 1)]
 async fn test_physical_disk_create_list_delete(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -152,20 +160,24 @@ async fn test_physical_disk_create_list_delete(
     assert_eq!(list, disks_initial, "{:#?}", list,);
 }
 
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 1)]
 async fn test_sled_instance_list(cptestctx: &ControlPlaneTestContext) {
     let external_client = &cptestctx.external_client;
 
     // Verify that there are two sleds to begin with.
     let sleds_url = "/v1/system/hardware/sleds";
-    assert_eq!(sleds_list(&external_client, &sleds_url).await.len(), 2);
+    let sleds = sleds_list(&external_client, &sleds_url).await;
+    assert_eq!(sleds.len(), 2);
 
-    // Verify that there are no instances.
-    let instances_url =
-        format!("/v1/system/hardware/sleds/{SLED_AGENT_UUID}/instances");
-    assert!(sled_instance_list(&external_client, &instances_url)
-        .await
-        .is_empty());
+    // Verify that there are no instances on the sleds.
+    for sled in &sleds {
+        let sled_id = sled.identity.id;
+        let instances_url =
+            format!("/v1/system/hardware/sleds/{sled_id}/instances");
+        assert!(sled_instance_list(&external_client, &instances_url)
+            .await
+            .is_empty());
+    }
 
     // Create an IP pool and project that we'll use for testing.
     create_default_ip_pool(&external_client).await;
@@ -174,11 +186,40 @@ async fn test_sled_instance_list(cptestctx: &ControlPlaneTestContext) {
         create_instance(&external_client, "test-project", "test-instance")
             .await;
 
-    let sled_instances =
-        sled_instance_list(&external_client, &instances_url).await;
+    // Ensure 1 instance was created on a sled
+    let sled_instances = wait_for_condition(
+        || {
+            let sleds = sleds.clone();
 
-    // Ensure 1 instance was created on the sled
-    assert_eq!(sled_instances.len(), 1);
+            async move {
+                let mut total_instances = vec![];
+
+                for sled in &sleds {
+                    let sled_id = sled.identity.id;
+
+                    let instances_url = format!(
+                        "/v1/system/hardware/sleds/{sled_id}/instances"
+                    );
+
+                    let mut sled_instances =
+                        sled_instance_list(&external_client, &instances_url)
+                            .await;
+
+                    total_instances.append(&mut sled_instances);
+                }
+
+                if total_instances.len() == 1 {
+                    Ok(total_instances)
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            }
+        },
+        &std::time::Duration::from_millis(500),
+        &std::time::Duration::from_secs(60),
+    )
+    .await
+    .expect("one sled instance");
 
     assert_eq!(project.identity.name, sled_instances[0].project_name);
     assert_eq!(instance.identity.name, sled_instances[0].name);

@@ -108,7 +108,7 @@ use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
 use omicron_common::{
     api::external, progenitor_operation_retry::ProgenitorOperationRetry,
 };
-use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid};
+use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid, VolumeUuid};
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use serde::Deserialize;
 use serde::Serialize;
@@ -392,7 +392,7 @@ async fn ssc_take_volume_lock(
 
     osagactx
         .datastore()
-        .volume_repair_lock(&opctx, disk.volume_id, lock_id)
+        .volume_repair_lock(&opctx, disk.volume_id(), lock_id)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -418,7 +418,7 @@ async fn ssc_take_volume_lock_undo(
 
     osagactx
         .datastore()
-        .volume_repair_unlock(&opctx, disk.volume_id, lock_id)
+        .volume_repair_unlock(&opctx, disk.volume_id(), lock_id)
         .await?;
 
     Ok(())
@@ -426,11 +426,11 @@ async fn ssc_take_volume_lock_undo(
 
 async fn ssc_alloc_regions(
     sagactx: NexusActionContext,
-) -> Result<Vec<(db::model::Dataset, db::model::Region)>, ActionError> {
+) -> Result<Vec<(db::model::CrucibleDataset, db::model::Region)>, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let destination_volume_id =
-        sagactx.lookup::<Uuid>("destination_volume_id")?;
+        sagactx.lookup::<VolumeUuid>("destination_volume_id")?;
 
     // Ensure the destination volume is backed by appropriate regions.
     //
@@ -483,7 +483,7 @@ async fn ssc_alloc_regions_undo(
     let log = osagactx.log();
 
     let region_ids = sagactx
-        .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+        .lookup::<Vec<(db::model::CrucibleDataset, db::model::Region)>>(
             "datasets_and_regions",
         )?
         .into_iter()
@@ -496,19 +496,20 @@ async fn ssc_alloc_regions_undo(
 
 async fn ssc_regions_ensure(
     sagactx: NexusActionContext,
-) -> Result<String, ActionError> {
+) -> Result<VolumeConstructionRequest, ActionError> {
     let osagactx = sagactx.user_data();
     let log = osagactx.log();
     let destination_volume_id =
-        sagactx.lookup::<Uuid>("destination_volume_id")?;
+        sagactx.lookup::<VolumeUuid>("destination_volume_id")?;
 
     let datasets_and_regions = osagactx
         .nexus()
         .ensure_all_datasets_and_regions(
             &log,
-            sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
-                "datasets_and_regions",
-            )?,
+            sagactx
+                .lookup::<Vec<(db::model::CrucibleDataset, db::model::Region)>>(
+                    "datasets_and_regions",
+                )?,
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -520,7 +521,7 @@ async fn ssc_regions_ensure(
     // Create volume construction request
     let mut rng = StdRng::from_entropy();
     let volume_construction_request = VolumeConstructionRequest::Volume {
-        id: destination_volume_id,
+        id: *destination_volume_id.as_untyped_uuid(),
         block_size,
         sub_volumes: vec![VolumeConstructionRequest::Region {
             block_size,
@@ -528,23 +529,15 @@ async fn ssc_regions_ensure(
             extent_count,
             gen: 1,
             opts: CrucibleOpts {
-                id: destination_volume_id,
+                id: *destination_volume_id.as_untyped_uuid(),
                 target: datasets_and_regions
                     .iter()
                     .map(|(dataset, region)| {
-                        dataset
-                            .address_with_port(region.port_number)
-                            .ok_or_else(|| {
-                                ActionError::action_failed(
-                                    Error::internal_error(&format!(
-                                        "missing IP address for dataset {}",
-                                        dataset.id(),
-                                    )),
-                                )
-                            })
-                            .map(SocketAddr::V6)
+                        SocketAddr::V6(
+                            dataset.address_with_port(region.port_number),
+                        )
                     })
-                    .collect::<Result<Vec<_>, ActionError>>()?,
+                    .collect::<Vec<_>>(),
 
                 lossy: false,
                 flush_timeout: None,
@@ -580,12 +573,7 @@ async fn ssc_regions_ensure(
         read_only_parent: None,
     };
 
-    let volume_data = serde_json::to_string(&volume_construction_request)
-        .map_err(|e| {
-            ActionError::action_failed(Error::internal_error(&e.to_string()))
-        })?;
-
-    Ok(volume_data)
+    Ok(volume_construction_request)
 }
 
 async fn ssc_regions_ensure_undo(
@@ -598,9 +586,10 @@ async fn ssc_regions_ensure_undo(
         .nexus()
         .delete_crucible_regions(
             log,
-            sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
-                "datasets_and_regions",
-            )?,
+            sagactx
+                .lookup::<Vec<(db::model::CrucibleDataset, db::model::Region)>>(
+                    "datasets_and_regions",
+                )?,
         )
         .await?;
     info!(log, "ssc_regions_ensure_undo: Deleted crucible regions");
@@ -613,16 +602,14 @@ async fn ssc_create_destination_volume_record(
     let osagactx = sagactx.user_data();
 
     let destination_volume_id =
-        sagactx.lookup::<Uuid>("destination_volume_id")?;
+        sagactx.lookup::<VolumeUuid>("destination_volume_id")?;
 
-    let destination_volume_data = sagactx.lookup::<String>("regions_ensure")?;
-
-    let volume =
-        db::model::Volume::new(destination_volume_id, destination_volume_data);
+    let destination_volume_data =
+        sagactx.lookup::<VolumeConstructionRequest>("regions_ensure")?;
 
     osagactx
         .datastore()
-        .volume_create(volume)
+        .volume_create(destination_volume_id, destination_volume_data)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -636,7 +623,7 @@ async fn ssc_create_destination_volume_record_undo(
     let osagactx = sagactx.user_data();
 
     let destination_volume_id =
-        sagactx.lookup::<Uuid>("destination_volume_id")?;
+        sagactx.lookup::<VolumeUuid>("destination_volume_id")?;
 
     // This saga contains what is necessary to clean up the destination volume
     // resources. It's safe here to perform a volume hard delete without
@@ -644,7 +631,7 @@ async fn ssc_create_destination_volume_record_undo(
     // guaranteed to never have read only resources that require that
     // accounting.
 
-    info!(log, "hard deleting volume {}", destination_volume_id,);
+    info!(log, "hard deleting volume {}", destination_volume_id);
 
     osagactx.datastore().volume_hard_delete(destination_volume_id).await?;
 
@@ -667,9 +654,9 @@ async fn ssc_create_snapshot_record(
     // We admittedly reference the volume(s) before they have been allocated,
     // but this should be acceptable because the snapshot remains in a
     // "Creating" state until the saga has completed.
-    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
+    let volume_id = sagactx.lookup::<VolumeUuid>("volume_id")?;
     let destination_volume_id =
-        sagactx.lookup::<Uuid>("destination_volume_id")?;
+        sagactx.lookup::<VolumeUuid>("destination_volume_id")?;
 
     info!(log, "grabbing disk by name {}", params.create_params.disk);
 
@@ -689,8 +676,8 @@ async fn ssc_create_snapshot_record(
 
         project_id: params.project_id,
         disk_id: disk.id(),
-        volume_id,
-        destination_volume_id,
+        volume_id: volume_id.into(),
+        destination_volume_id: destination_volume_id.into(),
 
         gen: db::model::Generation::new(),
         state: db::model::SnapshotState::Creating,
@@ -914,7 +901,7 @@ async fn ssc_send_snapshot_request_to_sled_agent_undo(
         .fetch()
         .await?;
     let datasets_and_regions =
-        osagactx.datastore().get_allocated_regions(disk.volume_id).await?;
+        osagactx.datastore().get_allocated_regions(disk.volume_id()).await?;
 
     // ... and instruct each of those regions to delete the snapshot.
     for (dataset, region) in datasets_and_regions {
@@ -1262,7 +1249,7 @@ async fn ssc_call_pantry_snapshot_for_disk_undo(
         .fetch()
         .await?;
     let datasets_and_regions =
-        osagactx.datastore().get_allocated_regions(disk.volume_id).await?;
+        osagactx.datastore().get_allocated_regions(disk.volume_id()).await?;
 
     // ... and instruct each of those regions to delete the snapshot.
     for (dataset, region) in datasets_and_regions {
@@ -1408,18 +1395,14 @@ async fn ssc_start_running_snapshot(
     // region information to the new running snapshot information.
     let datasets_and_regions = osagactx
         .datastore()
-        .get_allocated_regions(disk.volume_id)
+        .get_allocated_regions(disk.volume_id())
         .await
         .map_err(ActionError::action_failed)?;
 
     let mut map: ReplaceSocketsMap = BTreeMap::new();
 
     for (dataset, region) in datasets_and_regions {
-        let Some(dataset_addr) = dataset.address() else {
-            return Err(ActionError::action_failed(Error::internal_error(
-                &format!("Missing IP address for dataset {}", dataset.id(),),
-            )));
-        };
+        let dataset_addr = dataset.address();
 
         // Start the snapshot running
         let (crucible_region, _, crucible_running_snapshot) = osagactx
@@ -1499,7 +1482,7 @@ async fn ssc_start_running_snapshot_undo(
         .await?;
 
     let datasets_and_regions =
-        osagactx.datastore().get_allocated_regions(disk.volume_id).await?;
+        osagactx.datastore().get_allocated_regions(disk.volume_id()).await?;
 
     // ... and instruct each of those regions to delete the running snapshot.
     for (dataset, region) in datasets_and_regions {
@@ -1528,7 +1511,7 @@ async fn ssc_create_volume_record(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
-    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
+    let volume_id = sagactx.lookup::<VolumeUuid>("volume_id")?;
 
     // For a snapshot, copy the volume construction request at the time the
     // snapshot was taken.
@@ -1546,7 +1529,7 @@ async fn ssc_create_volume_record(
     let disk_volume = osagactx
         .datastore()
         .volume_checkout(
-            disk.volume_id,
+            disk.volume_id(),
             db::datastore::VolumeCheckoutReason::CopyAndModify,
         )
         .await
@@ -1577,20 +1560,17 @@ async fn ssc_create_volume_record(
             ActionError::action_failed(Error::internal_error(&e.to_string()))
         })?;
 
-    // Create the volume record for this snapshot
-    let volume_data: String = serde_json::to_string(
-        &snapshot_volume_construction_request,
-    )
-    .map_err(|e| {
-        ActionError::action_failed(Error::internal_error(&e.to_string()))
-    })?;
-    info!(log, "snapshot volume construction request {}", volume_data);
-    let volume = db::model::Volume::new(volume_id, volume_data);
-
     // Insert volume record into the DB
+
+    info!(
+        log,
+        "snapshot volume construction request {:?}",
+        snapshot_volume_construction_request
+    );
+
     osagactx
         .datastore()
-        .volume_create(volume)
+        .volume_create(volume_id, snapshot_volume_construction_request)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -1604,7 +1584,7 @@ async fn ssc_create_volume_record_undo(
 ) -> Result<(), anyhow::Error> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
-    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
+    let volume_id = sagactx.lookup::<VolumeUuid>("volume_id")?;
 
     // `volume_create` will increase the resource count for read only resources
     // in a volume, which there are guaranteed to be for snapshot volumes.
@@ -1678,7 +1658,7 @@ async fn ssc_release_volume_lock(
 
     osagactx
         .datastore()
-        .volume_repair_unlock(&opctx, disk.volume_id, lock_id)
+        .volume_repair_unlock(&opctx, disk.volume_id(), lock_id)
         .await
         .map_err(ActionError::action_failed)?;
 

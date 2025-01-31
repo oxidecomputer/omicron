@@ -1246,7 +1246,7 @@ mod test {
     //
     // - If we subsequently create a new Silo, the new Silo's DNS record
     //   reflects the Nexus zone that was added.
-    #[nexus_test]
+    #[nexus_test(extra_sled_agents = 1)]
     async fn test_silos_external_dns_end_to_end(
         cptestctx: &ControlPlaneTestContext,
     ) {
@@ -1328,8 +1328,6 @@ mod test {
             .unwrap();
         let zpool_rows =
             datastore.zpool_list_all_external_batched(&opctx).await.unwrap();
-        let dataset_rows =
-            datastore.dataset_list_all_batched(&opctx, None).await.unwrap();
         let ip_pool_range_rows = {
             let (authz_service_ip_pool, _) =
                 datastore.ip_pools_service_lookup(&opctx).await.unwrap();
@@ -1342,7 +1340,6 @@ mod test {
             let mut builder = PlanningInputFromDb {
                 sled_rows: &sled_rows,
                 zpool_rows: &zpool_rows,
-                dataset_rows: &dataset_rows,
                 ip_pool_range_rows: &ip_pool_range_rows,
                 internal_dns_version: dns_initial_internal.generation.into(),
                 external_dns_version: dns_latest_external.generation.into(),

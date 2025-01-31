@@ -50,11 +50,11 @@ external_dns_servers = ["1.1.1.1", "9.9.9.9"]
 # available port) because the test suite will be running many servers
 # concurrently.
 bind_address = "127.0.0.1:0"
-request_body_max_bytes = 8388608
+default_request_body_max_bytes = 1048576
 
 [deployment.dropshot_internal]
 bind_address = "127.0.0.1:0"
-request_body_max_bytes = 8388608
+default_request_body_max_bytes = 1048576
 
 #
 # NOTE: for the test suite, the internal DNS address will be replaced with one
@@ -112,6 +112,7 @@ decommissioned_disk_cleaner.period_secs = 60
 decommissioned_disk_cleaner.disable = true
 blueprints.period_secs_load = 100
 blueprints.period_secs_execute = 600
+blueprints.period_secs_rendezvous = 600
 blueprints.period_secs_collect_crdb_node_ids = 600
 sync_service_zone_nat.period_secs = 30
 switch_port_settings_manager.period_secs = 30
@@ -154,6 +155,12 @@ region_snapshot_replacement_start.period_secs = 60
 region_snapshot_replacement_garbage_collection.period_secs = 60
 region_snapshot_replacement_step.period_secs = 60
 region_snapshot_replacement_finish.period_secs = 60
+# The default activation period for this task is 60s, but we want to activate it
+# manually to test the result of each activation, so set the activation period
+# to something we'll never see in a test run.
+tuf_artifact_replication.period_secs = 3600
+# Update integration tests are started with 4 sled agents.
+tuf_artifact_replication.min_sled_replication = 3
 
 [default_region_allocation_strategy]
 # we only have one sled in the test environment, so we need to use the

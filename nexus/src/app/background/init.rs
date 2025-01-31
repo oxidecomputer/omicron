@@ -92,6 +92,7 @@ use super::tasks::abandoned_vmm_reaper;
 use super::tasks::bfd;
 use super::tasks::blueprint_execution;
 use super::tasks::blueprint_load;
+use super::tasks::blueprint_rendezvous;
 use super::tasks::crdb_node_id_collector;
 use super::tasks::decommissioned_disk_cleaner;
 use super::tasks::dns_config;
@@ -118,6 +119,7 @@ use super::tasks::service_firewall_rules;
 use super::tasks::support_bundle_collector;
 use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
+use super::tasks::tuf_artifact_replication;
 use super::tasks::v2p_mappings::V2PManager;
 use super::tasks::vpc_routes;
 use super::Activator;
@@ -134,7 +136,9 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use tokio::sync::watch;
+use update_common::artifacts::ArtifactsWithPlan;
 use uuid::Uuid;
 
 /// Interface for activating various background tasks and read data that they
@@ -156,6 +160,7 @@ pub struct BackgroundTasks {
     pub task_phantom_disks: Activator,
     pub task_blueprint_loader: Activator,
     pub task_blueprint_executor: Activator,
+    pub task_blueprint_rendezvous: Activator,
     pub task_crdb_node_id_collector: Activator,
     pub task_service_zone_nat_tracker: Activator,
     pub task_switch_port_settings_manager: Activator,
@@ -174,6 +179,7 @@ pub struct BackgroundTasks {
     pub task_region_snapshot_replacement_garbage_collection: Activator,
     pub task_region_snapshot_replacement_step: Activator,
     pub task_region_snapshot_replacement_finish: Activator,
+    pub task_tuf_artifact_replication: Activator,
 
     // Handles to activate background tasks that do not get used by Nexus
     // at-large.  These background tasks are implementation details as far as
@@ -243,6 +249,7 @@ impl BackgroundTasksInitializer {
             task_phantom_disks: Activator::new(),
             task_blueprint_loader: Activator::new(),
             task_blueprint_executor: Activator::new(),
+            task_blueprint_rendezvous: Activator::new(),
             task_crdb_node_id_collector: Activator::new(),
             task_service_zone_nat_tracker: Activator::new(),
             task_switch_port_settings_manager: Activator::new(),
@@ -262,6 +269,7 @@ impl BackgroundTasksInitializer {
             ),
             task_region_snapshot_replacement_step: Activator::new(),
             task_region_snapshot_replacement_finish: Activator::new(),
+            task_tuf_artifact_replication: Activator::new(),
 
             task_internal_dns_propagation: Activator::new(),
             task_external_dns_propagation: Activator::new(),
@@ -311,6 +319,7 @@ impl BackgroundTasksInitializer {
             task_phantom_disks,
             task_blueprint_loader,
             task_blueprint_executor,
+            task_blueprint_rendezvous,
             task_crdb_node_id_collector,
             task_service_zone_nat_tracker,
             task_switch_port_settings_manager,
@@ -329,6 +338,7 @@ impl BackgroundTasksInitializer {
             task_region_snapshot_replacement_garbage_collection,
             task_region_snapshot_replacement_step,
             task_region_snapshot_replacement_finish,
+            task_tuf_artifact_replication,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -491,19 +501,15 @@ impl BackgroundTasksInitializer {
             period: config.blueprints.period_secs_collect_crdb_node_ids,
             task_impl: Box::new(crdb_node_id_collector),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![Box::new(rx_blueprint)],
+            watchers: vec![Box::new(rx_blueprint.clone())],
             activator: task_crdb_node_id_collector,
         });
 
         // Background task: inventory collector
         //
-        // This currently depends on the "output" of the blueprint executor in
+        // This depends on the "output" of the blueprint executor in
         // order to automatically trigger inventory collection whenever the
-        // blueprint executor runs.  In the limit, this could become a problem
-        // because the blueprint executor might also depend indirectly on the
-        // inventory collector.  In that case, we could expose `Activator`s to
-        // one or both of these tasks to directly activate the other precisely
-        // when needed.  But for now, this works.
+        // blueprint executor runs.
         let inventory_watcher = {
             let collector = inventory_collection::InventoryCollector::new(
                 datastore.clone(),
@@ -563,8 +569,26 @@ impl BackgroundTasksInitializer {
                 ),
             ),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![Box::new(inventory_watcher)],
+            watchers: vec![Box::new(inventory_watcher.clone())],
             activator: task_physical_disk_adoption,
+        });
+
+        driver.register(TaskDefinition {
+            name: "blueprint_rendezvous",
+            description:
+                "reconciles blueprints and inventory collection, updating \
+                 Reconfigurator-owned rendezvous tables that other subsystems \
+                 consume",
+            period: config.blueprints.period_secs_rendezvous,
+            task_impl: Box::new(
+                blueprint_rendezvous::BlueprintRendezvous::new(
+                    datastore.clone(),
+                    rx_blueprint.clone(),
+                ),
+            ),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![Box::new(inventory_watcher.clone())],
+            activator: task_blueprint_rendezvous,
         });
 
         driver.register(TaskDefinition {
@@ -850,11 +874,28 @@ impl BackgroundTasksInitializer {
                 done",
             period: config.region_snapshot_replacement_finish.period_secs,
             task_impl: Box::new(RegionSnapshotReplacementFinishDetector::new(
-                datastore, sagas,
+                datastore.clone(),
+                sagas,
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_region_snapshot_replacement_finish,
+        });
+
+        driver.register(TaskDefinition {
+            name: "tuf_artifact_replication",
+            description: "replicate update repo artifacts across sleds",
+            period: config.tuf_artifact_replication.period_secs,
+            task_impl: Box::new(
+                tuf_artifact_replication::ArtifactReplication::new(
+                    datastore.clone(),
+                    args.tuf_artifact_replication_rx,
+                    config.tuf_artifact_replication.min_sled_replication,
+                ),
+            ),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_tuf_artifact_replication,
         });
 
         driver
@@ -881,6 +922,8 @@ pub struct BackgroundTasksData {
     pub producer_registry: ProducerRegistry,
     /// Helpers for saga recovery
     pub saga_recovery: saga_recovery::SagaRecoveryHelpers<Arc<Nexus>>,
+    /// Channel for TUF repository artifacts to be replicated out to sleds
+    pub tuf_artifact_replication_rx: mpsc::Receiver<ArtifactsWithPlan>,
 }
 
 /// Starts the three DNS-propagation-related background tasks for either
@@ -1123,7 +1166,7 @@ pub mod test {
             },
             &dropshot::ConfigDropshot {
                 bind_address: "[::1]:0".parse().unwrap(),
-                request_body_max_bytes: 8 * 1024,
+                default_request_body_max_bytes: 8 * 1024,
                 default_handler_task_mode: HandlerTaskMode::Detached,
                 log_headers: vec![],
             },

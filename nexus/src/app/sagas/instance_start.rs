@@ -1027,7 +1027,7 @@ mod test {
         // ensure-running node to attempt to change the instance's state, but
         // forces this operation to fail and produce whatever side effects
         // result from that failure.
-        let sled_agent = &cptestctx.sled_agent.sled_agent;
+        let sled_agent = cptestctx.first_sled_agent();
         sled_agent
             .set_instance_ensure_state_error(Some(Error::internal_error(
                 "injected by test_ensure_running_unwind",

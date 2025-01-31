@@ -54,13 +54,7 @@ external_dns_servers = ["1.1.1.1", "9.9.9.9"]
 # This config file uses 12222 to avoid colliding with the usual 12220 that's
 # used by `omicron-dev run-all`
 bind_address = "127.0.0.1:12222"
-# Allow large request bodies to support uploading TUF archives. The number here
-# is picked based on the typical size for tuf-mupdate.zip as of 2024-01
-# (~1.5GiB) and multiplying it by 2.
-#
-# This should be brought back down to a more reasonable value once per-endpoint
-# request body limits are implemented.
-request_body_max_bytes = 3221225472
+default_request_body_max_bytes = 1048576
 # To have Nexus's external HTTP endpoint use TLS, uncomment the line below.  You
 # will also need to provide an initial TLS certificate during rack
 # initialization.  If you're using this config file, you're probably running a
@@ -73,7 +67,7 @@ request_body_max_bytes = 3221225472
 # This config file uses 12223 to avoid colliding with the usual 12221 that's
 # used by `omicron-dev run-all`
 bind_address = "[::1]:12223"
-request_body_max_bytes = 1048576
+default_request_body_max_bytes = 1048576
 
 #[deployment.internal_dns]
 ## These values are overridden at the bottom of this file.
@@ -126,6 +120,7 @@ support_bundle_collector.period_secs = 30
 decommissioned_disk_cleaner.period_secs = 60
 blueprints.period_secs_load = 10
 blueprints.period_secs_execute = 60
+blueprints.period_secs_rendezvous = 300
 blueprints.period_secs_collect_crdb_node_ids = 180
 sync_service_zone_nat.period_secs = 30
 switch_port_settings_manager.period_secs = 30
@@ -146,6 +141,8 @@ region_snapshot_replacement_start.period_secs = 30
 region_snapshot_replacement_garbage_collection.period_secs = 30
 region_snapshot_replacement_step.period_secs = 30
 region_snapshot_replacement_finish.period_secs = 30
+tuf_artifact_replication.period_secs = 300
+tuf_artifact_replication.min_sled_replication = 1
 
 [default_region_allocation_strategy]
 # allocate region on 3 random distinct zpools, on 3 random distinct sleds.

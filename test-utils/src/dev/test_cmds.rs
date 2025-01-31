@@ -130,18 +130,32 @@ pub struct Redactor<'a> {
     basic: bool,
     uuids: bool,
     extra: Vec<(&'a str, String)>,
+    extra_regex: Vec<(regex::Regex, String)>,
+    sections: Vec<&'a [&'a str]>,
 }
 
 impl Default for Redactor<'_> {
     fn default() -> Self {
-        Self { basic: true, uuids: true, extra: Vec::new() }
+        Self {
+            basic: true,
+            uuids: true,
+            extra: Vec::new(),
+            extra_regex: Vec::new(),
+            sections: Vec::new(),
+        }
     }
 }
 
 impl<'a> Redactor<'a> {
     /// Create a new redactor that does not do any redactions.
     pub fn noop() -> Self {
-        Self { basic: false, uuids: false, extra: Vec::new() }
+        Self {
+            basic: false,
+            uuids: false,
+            extra: Vec::new(),
+            extra_regex: Vec::new(),
+            sections: Vec::new(),
+        }
     }
 
     pub fn basic(&mut self, basic: bool) -> &mut Self {
@@ -180,6 +194,72 @@ impl<'a> Redactor<'a> {
         self
     }
 
+    /// Redact the value of a named field with a known value shape.
+    ///
+    /// This can be used for redacting a common value (such as a small integer)
+    /// that changes from run to run but otherwise doesn't have any context
+    /// that helps it be redacted using other methods. The value will only
+    /// be redacted if it matches `name` concatenated with one or more spaces
+    /// concatenated with a string matching `value_regex`. An example:
+    ///
+    /// ```
+    /// # use omicron_test_utils::dev::test_cmds::Redactor;
+    /// # let mut redactor = Redactor::default();
+    /// redactor.field("list ok:", r"\d+");
+    /// ```
+    ///
+    /// will replace `list ok:   1` with `list ok:   <LIST_OK_REDACTED>`.
+    pub fn field(&mut self, name: &str, value_regex: &str) -> &mut Self {
+        let re = regex::Regex::new(&format!(
+            r"\b(?<prefix>{} +){}\b",
+            regex::escape(name),
+            value_regex
+        ))
+        .unwrap();
+        let replacement = format!(
+            "$prefix<{}_REDACTED>",
+            name.replace(|c: char| c.is_ascii_punctuation(), "")
+                .replace(" ", "_")
+                .to_uppercase()
+        );
+        self.extra_regex.push((re, replacement));
+        self
+    }
+
+    /// Redact an entire indented section.
+    ///
+    /// This can be used if the shape of a section might change from run to run.
+    ///
+    /// `headings` is the path of heading names indicating the section to
+    /// redact. For example, to redact only the first "ringbuf:" section from
+    /// this output:
+    ///
+    /// ```ignore
+    /// section A:
+    ///   nested:
+    ///     ringbuf:
+    ///       this should be redacted
+    /// section B:
+    ///   ringbuf:
+    ///     this should not be redacted
+    /// ```
+    ///
+    /// we can use:
+    ///
+    /// ```
+    /// # use omicron_test_utils::dev::test_cmds::Redactor;
+    /// # let mut redactor = Redactor::default();
+    /// redactor.section(&["section A:", "ringbuf:"]);
+    /// ```
+    ///
+    /// Note that not all section headings need to be listed in `headings` in
+    /// order for the section to be redacted.
+    pub fn section(&mut self, headings: &'a [&'a str]) -> &mut Self {
+        assert!(!headings.is_empty(), "headings should not be empty");
+        self.sections.push(headings);
+        self
+    }
+
     pub fn do_redact(&self, input: &str) -> String {
         // Perform extra redactions at the beginning, not the end. This is because
         // some of the built-in redactions in redact_variable might match a
@@ -188,6 +268,12 @@ impl<'a> Redactor<'a> {
         let mut s = input.to_owned();
         for (name, replacement) in &self.extra {
             s = s.replace(name, replacement);
+        }
+        for (regex, replacement) in &self.extra_regex {
+            s = regex.replace_all(&s, replacement).into_owned();
+        }
+        for headings in &self.sections {
+            s = redact_section(&s, headings);
         }
 
         if self.basic {
@@ -298,6 +384,39 @@ fn redact_uuids(input: &str) -> String {
         .to_string()
 }
 
+fn redact_section(input: &str, headings: &[&str]) -> String {
+    let mut output = String::new();
+    let mut indent_stack = Vec::new();
+    let mut print_redacted = false;
+    for line in input.split_inclusive('\n') {
+        let indent = line.len() - line.trim_start().len();
+        if !line.trim().is_empty() {
+            while let Some(last) = indent_stack.pop() {
+                if indent > last {
+                    indent_stack.push(last);
+                    break;
+                }
+            }
+        }
+        if indent_stack.len() == headings.len() {
+            if print_redacted {
+                print_redacted = false;
+                output.push_str(&line[..indent]);
+                output.push_str("<REDACTED_SECTION>\n");
+            }
+            continue;
+        }
+        output.push_str(line);
+        if line[indent..].trim_end() == headings[indent_stack.len()] {
+            indent_stack.push(indent);
+            if indent_stack.len() == headings.len() {
+                print_redacted = true;
+            }
+        }
+    }
+    output
+}
+
 fn fill_redaction_text(name: &str, text_to_redact_len: usize) -> String {
     // The overall plan is to generate a string of the form
     // ---<REDACTED_NAME>---, depending on the length of the text to
@@ -377,5 +496,36 @@ mod tests {
                 time
             );
         }
+    }
+
+    #[test]
+    fn test_redact_section() {
+        const INPUT: &str = "\
+section A:
+  nested:
+    ringbuf:
+      this should be redacted
+      a second line to be redacted
+
+      a line followed by an empty line
+section B:
+  ringbuf:
+    this should not be redacted
+
+    a line followed by an empty line";
+        const OUTPUT: &str = "\
+section A:
+  nested:
+    ringbuf:
+      <REDACTED_SECTION>
+section B:
+  ringbuf:
+    this should not be redacted
+
+    a line followed by an empty line";
+
+        let mut redactor = Redactor::default();
+        redactor.section(&["section A:", "ringbuf:"]);
+        assert_eq!(redactor.do_redact(INPUT), OUTPUT);
     }
 }

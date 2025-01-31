@@ -136,7 +136,7 @@ mod test {
     use httptest::responders::json_encoded;
     use httptest::responders::status_code;
     use httptest::Expectation;
-    use nexus_db_model::Dataset;
+    use nexus_db_model::CrucibleDataset;
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::PhysicalDiskPolicy;
@@ -156,7 +156,6 @@ mod test {
     use nexus_types::identity::Asset;
     use omicron_common::api::external::DataPageParams;
     use omicron_common::api::external::Generation;
-    use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::DiskIdentity;
     use omicron_common::disk::DiskManagementError;
     use omicron_common::disk::DiskManagementStatus;
@@ -167,6 +166,7 @@ mod test {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
+    use omicron_uuid_kinds::VolumeUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::BTreeMap;
     use std::net::SocketAddr;
@@ -439,16 +439,15 @@ mod test {
             .unwrap();
 
         let dataset = datastore
-            .dataset_upsert(Dataset::new(
+            .crucible_dataset_upsert(CrucibleDataset::new(
                 DatasetUuid::new_v4(),
                 zpool.id(),
-                Some(std::net::SocketAddrV6::new(
+                std::net::SocketAddrV6::new(
                     std::net::Ipv6Addr::LOCALHOST,
                     0,
                     0,
                     0,
-                )),
-                DatasetKind::Crucible,
+                ),
             ))
             .await
             .unwrap();
@@ -456,7 +455,7 @@ mod test {
         // There isn't a great API to insert regions (we normally allocate!)
         // so insert the record manually here.
         let region = {
-            let volume_id = Uuid::new_v4();
+            let volume_id = VolumeUuid::new_v4();
             Region::new(
                 dataset.id(),
                 volume_id,
@@ -497,11 +496,14 @@ mod test {
             .unwrap()
     }
 
-    async fn get_datasets(datastore: &DataStore, id: ZpoolUuid) -> Vec<Uuid> {
+    async fn get_crucible_datasets(
+        datastore: &DataStore,
+        id: ZpoolUuid,
+    ) -> Vec<Uuid> {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-        use db::schema::dataset::dsl;
-        dsl::dataset
+        use db::schema::crucible_dataset::dsl;
+        dsl::crucible_dataset
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::pool_id.eq(id.into_untyped_uuid()))
             .select(dsl::id)
@@ -616,7 +618,7 @@ mod test {
         // for how these get eventually cleared up.
         let pools = get_pools(&datastore, disk_to_decommission).await;
         assert_eq!(pools.len(), 1);
-        let datasets = get_datasets(&datastore, pools[0]).await;
+        let datasets = get_crucible_datasets(&datastore, pools[0]).await;
         assert_eq!(datasets.len(), 1);
         let regions = get_regions(&datastore, datasets[0]).await;
         assert_eq!(regions.len(), 1);
@@ -624,7 +626,7 @@ mod test {
         // Similarly, the "other disk" should still exist.
         let pools = get_pools(&datastore, other_disk).await;
         assert_eq!(pools.len(), 1);
-        let datasets = get_datasets(&datastore, pools[0]).await;
+        let datasets = get_crucible_datasets(&datastore, pools[0]).await;
         assert_eq!(datasets.len(), 1);
         let regions = get_regions(&datastore, datasets[0]).await;
         assert_eq!(regions.len(), 1);
