@@ -9,7 +9,7 @@ use crate::{
         output::{OutputOpts, Styles},
     },
     environment::{BlessedSource, GeneratedSource},
-    resolved::Resolved,
+    resolved::{Resolution, Resolved},
     spec::Environment,
     FAILURE_EXIT_CODE,
 };
@@ -57,8 +57,18 @@ pub(crate) fn generate_impl(
     for note in resolved.notes() {
         println!("NOTE: {}", note);
     }
-    for problem in resolved.general_problems() {
-        println!("PROBLEM: {}", problem);
+    for p in resolved.general_problems() {
+        println!("PROBLEM: {}", p);
+        if !p.is_fixable() {
+            found_unfixable = true;
+        }
+        // XXX-dap this is temporary -- see the comment on enum Problem
+        let fake_resolution = Resolution::new_blessed(Vec::new());
+        if let Some(fixes) = p.fix(&fake_resolution)? {
+            for f in fixes {
+                println!("{}", f);
+            }
+        }
     }
 
     println!("Checking OpenAPI documents...");
@@ -115,6 +125,23 @@ pub(crate) fn generate_impl(
     let mut nproblems = 0;
     let mut nerrors = 0;
     let mut nfixed = 0;
+    for p in resolved.general_problems() {
+        nproblems += 1;
+        // XXX-dap this is temporary -- see the comment on enum Problem
+        let fake_resolution = Resolution::new_blessed(Vec::new());
+        if let Some(fixes) = p.fix(&fake_resolution)? {
+            for f in fixes {
+                eprint!("{f}");
+                if let Err(error) = f.execute(env) {
+                    eprintln!("fix failed: {error:#}");
+                    nerrors += 1;
+                } else {
+                    nfixed += 1;
+                }
+            }
+        }
+    }
+
     for api in apis.iter_apis() {
         let ident = api.ident();
         for version in api.iter_versions_semver() {

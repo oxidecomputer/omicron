@@ -6,7 +6,7 @@ use crate::{
     apis::ManagedApis,
     cmd::output::{OutputOpts, Styles},
     environment::{BlessedSource, GeneratedSource},
-    resolved::Resolved,
+    resolved::{Resolution, Resolved},
     spec::Environment,
     FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
 };
@@ -56,9 +56,19 @@ pub(crate) fn check_impl(
     for note in resolved.notes() {
         println!("NOTE: {}", note);
     }
-    for problem in resolved.general_problems() {
-        println!("PROBLEM: {}", problem);
+    for p in resolved.general_problems() {
+        println!("PROBLEM: {}", p);
         found_problems = true;
+        if !p.is_fixable() {
+            found_unfixable = true;
+        }
+        // XXX-dap this is temporary -- see the comment on enum Problem
+        let fake_resolution = Resolution::new_blessed(Vec::new());
+        if let Some(fixes) = p.fix(&fake_resolution)? {
+            for f in fixes {
+                println!("{}", f);
+            }
+        }
     }
 
     println!("Checking OpenAPI documents...");
