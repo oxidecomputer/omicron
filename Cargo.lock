@@ -1053,7 +1053,7 @@ checksum = "2d886547e41f740c616ae73108f6eb70afe6d940c7bc697cb30f13daec073037"
 dependencies = [
  "camino",
  "cargo-platform",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -2547,7 +2547,7 @@ dependencies = [
  "omicron-workspace-hack",
  "openapi-manager-types",
  "schemars",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
 ]
 
@@ -2679,8 +2679,6 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.15.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b84e9c34a06ac21fefe60cf9e5cc321eac9f3d3e2d693e030da3709cf4275479"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2706,7 +2704,7 @@ dependencies = [
  "rustls-pemfile 2.2.0",
  "schemars",
  "scopeguard",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "serde_path_to_error",
@@ -2744,13 +2742,11 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.15.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e4c7e4e96bfedd670ecbaffc1848ab28dd5892b214003517d9667e7a5b465ce"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
  "quote",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_tokenstream",
  "syn 2.0.96",
@@ -3677,7 +3673,7 @@ dependencies = [
  "once_cell",
  "pathdiff",
  "petgraph",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "smallvec 1.13.2",
@@ -4791,7 +4787,7 @@ dependencies = [
  "progenitor 0.9.1",
  "qorb",
  "reqwest",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "sled",
@@ -5834,7 +5830,7 @@ dependencies = [
  "rand",
  "ref-cast",
  "schemars",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "sled-agent-client",
@@ -5908,7 +5904,7 @@ dependencies = [
  "regex",
  "rustls 0.22.4",
  "schemars",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "serde_with",
@@ -6804,7 +6800,7 @@ dependencies = [
  "regress 0.9.1",
  "reqwest",
  "schemars",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_human_bytes",
  "serde_json",
@@ -7092,7 +7088,7 @@ dependencies = [
  "rustls-pemfile 2.2.0",
  "samael",
  "schemars",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -7212,7 +7208,7 @@ dependencies = [
  "rayon",
  "reqwest",
  "ring",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "shell-words",
  "sled-hardware",
@@ -7264,7 +7260,7 @@ dependencies = [
  "omicron-zone-package",
  "once_cell",
  "reqwest",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "sha2",
  "shell-words",
@@ -7360,7 +7356,7 @@ dependencies = [
  "repo-depot-client",
  "reqwest",
  "schemars",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_human_bytes",
  "serde_json",
@@ -7554,7 +7550,7 @@ dependencies = [
  "rustls-webpki 0.102.8",
  "schemars",
  "scopeguard",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "sha1",
@@ -7607,7 +7603,7 @@ dependencies = [
  "futures-util",
  "hex",
  "reqwest",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_derive",
  "serde_json",
@@ -7682,7 +7678,7 @@ dependencies = [
  "owo-colors",
  "oximeter-api",
  "repo-depot-api",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde_json",
  "similar",
  "sled-agent-api",
@@ -7699,7 +7695,7 @@ dependencies = [
  "camino",
  "omicron-workspace-hack",
  "paste",
- "semver 1.0.24",
+ "semver 1.0.25",
 ]
 
 [[package]]
@@ -7950,7 +7946,7 @@ dependencies = [
  "rand",
  "reqwest",
  "schemars",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "slog",
@@ -10087,7 +10083,7 @@ version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
 dependencies = [
- "semver 1.0.24",
+ "semver 1.0.25",
 ]
 
 [[package]]
@@ -10482,9 +10478,9 @@ checksum = "d4f410fedcf71af0345d7607d246e7ad15faaadd49d240ee3b24e5dc21a820ac"
 
 [[package]]
 name = "semver"
-version = "1.0.24"
+version = "1.0.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cb6eb87a131f756572d7fb904f6e7b68633f09cca868c5df1c4b8d1a694bbba"
+checksum = "f79dfe2d285b0488816f30e700a7438c5a73d816b5b7d3ac72fbc48b0d185e03"
 dependencies = [
  "serde",
 ]
@@ -10551,9 +10547,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.135"
+version = "1.0.138"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b0d7ba2887406110130a978386c4e1befb98c674b4fba677954e4db976630d9"
+checksum = "d434192e7da787e94a6ea7e9670b26a036d0ca41e0b7efb2676dd32bae872949"
 dependencies = [
  "itoa",
  "memchr",
@@ -12266,7 +12262,7 @@ dependencies = [
  "home",
  "once_cell",
  "regex",
- "semver 1.0.24",
+ "semver 1.0.25",
  "walkdir",
 ]
 
@@ -12564,7 +12560,7 @@ dependencies = [
  "quote",
  "regress 0.10.1",
  "schemars",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "syn 2.0.96",
@@ -12584,7 +12580,7 @@ dependencies = [
  "quote",
  "regress 0.10.1",
  "schemars",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "syn 2.0.96",
@@ -12601,7 +12597,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "schemars",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "serde_tokenstream",
@@ -12618,7 +12614,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "schemars",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "serde_tokenstream",
@@ -12919,9 +12915,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.12.0"
+version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "744018581f9a3454a9e15beb8a33b017183f1e7c0cd170232a2d1453b23a51c4"
+checksum = "b3758f5e68192bb96cc8f9b7e2c2cfdabb435499a28499a42f8f984092adad4b"
 dependencies = [
  "getrandom",
  "serde",
