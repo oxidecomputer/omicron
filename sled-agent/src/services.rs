@@ -4822,6 +4822,7 @@ fn reconcile_running_zones_with_new_request<'a>(
 
     // All zones have been handled successfully; commit any changes to existing
     // zones we found in our "fix 7229" special case above.
+    let num_zones_updated = zones_to_update.len();
     for (existing_zone, new_zone) in zones_to_update {
         *existing_zone = new_zone;
     }
@@ -4831,6 +4832,7 @@ fn reconcile_running_zones_with_new_request<'a>(
         "ensure_all_omicron_zones: request reconciliation done";
         "num_zones_to_be_removed" => zones_to_be_removed.len(),
         "num_zones_to_be_added" => zones_to_be_added.len(),
+        "num_zones_updated" => num_zones_updated,
     );
     Ok(ReconciledNewZonesRequest { zones_to_be_removed, zones_to_be_added })
 }
