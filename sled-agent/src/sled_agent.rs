@@ -279,6 +279,10 @@ impl From<Error> for dropshot::HttpError {
                 }
                 _ => HttpError::for_internal_error(err.to_string()),
             },
+            Error::Services(err) => {
+                let err = omicron_common::api::external::Error::from(err);
+                err.into()
+            }
             e => HttpError::for_internal_error(e.to_string()),
         }
     }

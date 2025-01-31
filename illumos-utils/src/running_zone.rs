@@ -338,6 +338,7 @@ mod zenter {
 }
 
 /// Represents a running zone.
+#[derive(Debug)]
 pub struct RunningZone {
     // The `zoneid_t` for the zone, while it's running, or `None` if not.
     id: Option<i32>,
@@ -911,6 +912,7 @@ pub enum InstallZoneError {
     IncompleteBuilder,
 }
 
+#[derive(Debug)]
 pub struct InstalledZone {
     log: Logger,
 
