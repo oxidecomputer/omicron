@@ -96,7 +96,7 @@ impl DataStore {
                 // Find receivers subscribed to this event's class.
                 let rxs = self
                     .webhook_rx_list_subscribed_to_event_on_conn(
-                        &event.event_class,
+                        event.event_class,
                         &conn,
                     )
                     .await?;

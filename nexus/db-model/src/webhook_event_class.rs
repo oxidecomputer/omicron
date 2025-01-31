@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
-use serde::Deserialize;
-use serde::Serialize;
+use serde::de::{self, Deserialize, Deserializer};
+use serde::ser::{Serialize, Serializer};
 use std::fmt;
 
 impl_enum_type!(
@@ -19,8 +19,6 @@ impl_enum_type!(
         PartialEq,
         AsExpression,
         FromSqlRow,
-        Serialize,
-        Deserialize,
         strum::VariantArray,
     )]
     #[diesel(sql_type = WebhookEventClassEnum)]
@@ -28,7 +26,9 @@ impl_enum_type!(
 
     TestFoo => b"test.foo"
     TestFooBar => b"test.foo.bar"
-    TestBazBar => b"test.baz.bar"
+    TestFooBaz => b"test.foo.baz"
+    TestQuuxBar => b"test.quux.bar"
+    TestQuuxBarBaz => b"test.quux.bar.baz"
 );
 
 impl WebhookEventClass {
@@ -39,7 +39,9 @@ impl WebhookEventClass {
         match self {
             Self::TestFoo => "test.foo",
             Self::TestFooBar => "test.foo.bar",
-            Self::TestBazBar => "test.baz.bar",
+            Self::TestFooBaz => "test.foo.baz",
+            Self::TestQuuxBar => "test.quux.bar",
+            Self::TestQuuxBarBaz => "test.quux.bar.baz",
         }
     }
 
@@ -51,6 +53,26 @@ impl WebhookEventClass {
 impl fmt::Display for WebhookEventClass {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.as_str())
+    }
+}
+
+impl Serialize for WebhookEventClass {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for WebhookEventClass {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        <&'de str>::deserialize(deserializer)?
+            .parse::<WebhookEventClass>()
+            .map_err(de::Error::custom)
     }
 }
 

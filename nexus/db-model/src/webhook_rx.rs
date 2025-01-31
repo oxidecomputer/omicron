@@ -27,6 +27,7 @@ use uuid::Uuid;
 
 /// The full configuration of a webhook receiver, including the
 /// [`WebhookReceiver`] itself and its subscriptions and secrets.
+#[derive(Clone, Debug)]
 pub struct WebhookReceiverConfig {
     pub rx: WebhookReceiver,
     pub secrets: Vec<WebhookRxSecret>,
@@ -310,10 +311,10 @@ mod test {
     #[test]
     fn test_event_class_glob_to_regex() {
         const CASES: &[(&str, &str)] = &[
-            ("foo.bar", "^foo.bar$"),
-            ("foo.*.bar", "^foo\\.[^\\.]*\\.bar$"),
-            ("foo.*", "^foo\\.[^\\.]*$"),
-            ("*.foo", "^[^\\.]*\\.foo$"),
+            ("foo.bar", "^foo\\.bar$"),
+            ("foo.*.bar", "^foo\\.[^\\.]+\\.bar$"),
+            ("foo.*", "^foo\\.[^\\.]+$"),
+            ("*.foo", "^[^\\.]+\\.foo$"),
             ("foo.**.bar", "^foo\\..+\\.bar$"),
             ("foo.**", "^foo\\..+$"),
             ("foo_bar.baz", "^foo_bar\\.baz$"),

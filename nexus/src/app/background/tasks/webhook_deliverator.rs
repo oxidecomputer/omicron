@@ -9,7 +9,8 @@ use http::HeaderValue;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::webhook_delivery::DeliveryAttemptState;
 use nexus_db_queries::db::model::{
-    SqlU8, WebhookDeliveryAttempt, WebhookDeliveryResult, WebhookReceiver,
+    SqlU8, WebhookDeliveryAttempt, WebhookDeliveryResult, WebhookEventClass,
+    WebhookReceiver,
 };
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
@@ -208,7 +209,6 @@ impl WebhookDeliverator {
         for (delivery, event_class) in deliveries {
             let attempt = (*delivery.attempts) + 1;
             let delivery_id = WebhookDeliveryUuid::from(delivery.id);
-            let event_class = &event_class;
             match self
                 .datastore
                 .webhook_delivery_start_attempt(
@@ -223,7 +223,7 @@ impl WebhookDeliverator {
                     slog::trace!(&opctx.log,
                         "webhook event delivery attempt started";
                         "event_id" => %delivery.event_id,
-                        "event_class" => event_class,
+                        "event_class" => %event_class,
                         "delivery_id" => %delivery_id,
                         "attempt" => attempt,
                     );
@@ -233,7 +233,7 @@ impl WebhookDeliverator {
                         &opctx.log,
                         "delivery of this webhook event was already completed at {time:?}";
                         "event_id" => %delivery.event_id,
-                        "event_class" => event_class,
+                        "event_class" => %event_class,
                         "delivery_id" => %delivery_id,
                         "time_completed" => ?time,
                     );
@@ -245,7 +245,7 @@ impl WebhookDeliverator {
                         &opctx.log,
                         "delivery of this webhook event is in progress by another Nexus";
                         "event_id" => %delivery.event_id,
-                        "event_class" => event_class,
+                        "event_class" => %event_class,
                         "delivery_id" => %delivery_id,
                         "nexus_id" => %nexus_id,
                         "time_started" => ?started,
@@ -258,7 +258,7 @@ impl WebhookDeliverator {
                         &opctx.log,
                         "unexpected database error error starting webhook delivery attempt";
                         "event_id" => %delivery.event_id,
-                        "event_class" => event_class,
+                        "event_class" => %event_class,
                         "delivery_id" => %delivery_id,
                         "error" => %error,
                     );
@@ -273,7 +273,7 @@ impl WebhookDeliverator {
             let time_attempted = Utc::now();
             let sent_at = time_attempted.to_rfc3339();
             let payload = Payload {
-                event_class: event_class.as_ref(),
+                event_class,
                 event_id: delivery.event_id.into(),
                 data: &delivery.payload,
                 delivery: DeliveryMetadata {
@@ -289,7 +289,7 @@ impl WebhookDeliverator {
                 .header(HDR_RX_ID, hdr_rx_id.clone())
                 .header(HDR_DELIVERY_ID, delivery_id.to_string())
                 .header(HDR_EVENT_ID, delivery.event_id.to_string())
-                .header(HDR_EVENT_CLASS, event_class)
+                .header(HDR_EVENT_CLASS, event_class.to_string())
                 .json(&payload)
                 // Per [RFD 538 § 4.3.2][1], a 30-second timeout is applied to
                 // each webhook delivery request.
@@ -306,7 +306,7 @@ impl WebhookDeliverator {
                         &opctx.log,
                         "{MSG}";
                         "event_id" => %delivery.event_id,
-                        "event_class" => event_class,
+                        "event_class" => %event_class,
                         "delivery_id" => %delivery_id,
                         "error" => %e,
                         "payload" => ?payload,
@@ -330,7 +330,7 @@ impl WebhookDeliverator {
                         &opctx.log,
                         "{MSG}";
                         "event_id" => %delivery.event_id,
-                        "event_class" => event_class,
+                        "event_class" => %event_class,
                         "delivery_id" => %delivery_id,
                         "error" => %e,
                     );
@@ -345,7 +345,7 @@ impl WebhookDeliverator {
                             &opctx.log,
                             "webhook receiver endpoint returned an HTTP error";
                             "event_id" => %delivery.event_id,
-                            "event_class" => event_class,
+                            "event_class" => %event_class,
                             "delivery_id" => %delivery_id,
                             "response_status" => ?status,
                             "response_duration" => ?duration,
@@ -365,7 +365,7 @@ impl WebhookDeliverator {
                             &opctx.log,
                             "webhook delivery request failed";
                             "event_id" => %delivery.event_id,
-                            "event_class" => event_class,
+                            "event_class" => %event_class,
                             "delivery_id" => %delivery_id,
                             "error" => %e,
                         );
@@ -378,7 +378,7 @@ impl WebhookDeliverator {
                         &opctx.log,
                         "webhook event delivered successfully";
                         "event_id" => %delivery.event_id,
-                        "event_class" => event_class,
+                        "event_class" => %event_class,
                         "delivery_id" => %delivery_id,
                         "response_status" => ?status,
                         "response_duration" => ?duration,
@@ -420,7 +420,7 @@ impl WebhookDeliverator {
                         &opctx.log,
                         "{MSG}";
                         "event_id" => %delivery.event_id,
-                        "event_class" => event_class,
+                        "event_class" => %event_class,
                         "delivery_id" => %delivery_id,
                         "error" => %e,
                     );
@@ -450,7 +450,7 @@ const HDR_SIG: HeaderName = HeaderName::from_static("x-oxide-signature");
 
 #[derive(serde::Serialize, Debug)]
 struct Payload<'a> {
-    event_class: &'a str,
+    event_class: WebhookEventClass,
     event_id: WebhookEventUuid,
     data: &'a serde_json::Value,
     delivery: DeliveryMetadata<'a>,
